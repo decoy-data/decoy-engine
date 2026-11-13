@@ -37,6 +37,7 @@ MINIMAL: dict[str, dict[str, Any]] = {
     "constant": {"value": "US"},
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"codeset": "icd10"},
+    "inherit": {"via": "r", "column": "id"},
 }
 
 
@@ -626,6 +627,8 @@ def test_the_registered_inputs_are_exactly_these() -> None:
         "windowed_date.anchor_via": ("column", None, "inline"),
         "group_key.group_by": ("column", None, "inline"),
         "formula.references": ("column_list", None, "post_fill"),
+        "inherit.via": ("column", None, "inline"),
+        "inherit.column": ("column_via_reference", "via", "inline"),
     }
 
 
@@ -963,3 +966,48 @@ def test_a_by_key_is_never_echoed() -> None:
 def test_unique_with_condition_on_is_a_conflict() -> None:
     col = _conditional(unique=True)
     assert (UNIQUE_CONFLICT, ("condition_on",)) in _spots(col)
+
+
+# GEN-INHERIT E1 AT-2: `inherit` -----------------------------------------------------------------
+
+UNIQUE_UNSUPPORTED = str(reasons.config.GENERATE_UNIQUE_UNSUPPORTED)
+
+
+def _fk() -> dict[str, Any]:
+    return {"name": "r", "type": "reference", "reference_table": "p", "reference_column": "id"}
+
+
+def _inherit(**extra: Any) -> dict[str, Any]:
+    return {"name": "c", "type": "inherit", "via": "r", "column": "id", **extra}
+
+
+def test_inherit_takes_via_and_column() -> None:
+    spec = GENERATE_OPTIONS["inherit"]
+    assert set(spec.keys) == {"via", "column"}
+    assert spec.required == ("via", "column")
+    PipelineConfig.model_validate(_config(_fk(), _inherit(null_probability=0.2)))
+
+
+@pytest.mark.parametrize("key", ["via", "column"])
+def test_inherit_needs_via_and_column(key: str) -> None:
+    col = _inherit()
+    del col[key]
+    assert [(e["type"], tuple(e["loc"])) for e in _errors(_fk(), col)] == [
+        (MISSING, ("tables", 0, "generate_columns", 1, key))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extra", "code", "where"),
+    [
+        ({"via": 3}, TYPE, ("via",)),
+        ({"column": ["id"]}, TYPE, ("column",)),
+        ({"output_type": "int"}, UNKNOWN_KEY, ("output_type",)),
+        ({"weights": [1]}, UNKNOWN_KEY, ("weights",)),
+        ({"unique": True}, UNIQUE_UNSUPPORTED, ("unique",)),
+    ],
+)
+def test_an_inherit_option_refusal_names_its_key(
+    extra: dict[str, Any], code: str, where: tuple[str, ...]
+) -> None:
+    assert [_spot(e) for e in _errors(_fk(), _inherit(**extra))] == [(code, where)]
