@@ -10,8 +10,9 @@ column is finalized, delegating to the existing
 derivation the inline path uses -- no SEED_PROTOCOL_VERSION change).
 
 Extracted from ``synthesize.py`` to keep that orchestration module under the
-~600-LOC cap (best-practices section 4.1); imported lazily so configs without
-any reference-bearing formula column never pay the pandas import.
+~600-LOC cap (best-practices section 4.1). ``synthesize`` calls it for every
+table; a table without a reference-bearing formula column returns before the
+pandas import, so such configs never pay it.
 """
 
 from __future__ import annotations

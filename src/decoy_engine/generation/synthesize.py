@@ -203,20 +203,11 @@ def _generate_tables_from_config(
                     statistical_specs=statistical_specs,
                     on_warning=on_warning,
                 )
-        # Cross-column formula post-pass: a `formula` column carrying
-        # `references` was filled with None placeholders by `_formula`
-        # above (the per-column loop cannot read siblings that may not
-        # exist yet). Now that every sibling column is finalized in
-        # `data`, `fill_referenced_formula_columns` overwrites them in
-        # declared order from the finished values. Lazy import (mirrors
-        # the fidelity-gate dispatch) so configs without reference-bearing
-        # formulas never pay pandas.
-        if any(c.get("type") == "formula" and (c.get("references") or []) for c in gcols):
-            from decoy_engine.generation._referenced_formula import (
-                fill_referenced_formula_columns,
-            )
+        # A `formula` with `references` holds None placeholders until every sibling is final. The
+        # post-pass returns before it imports pandas when the table has no such column.
+        from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
-            fill_referenced_formula_columns(gcols, data, seed, derive_key, table_name=name)
+        fill_referenced_formula_columns(gcols, data, seed, derive_key, table_name=name)
         tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
         warn_on_table_fidelity(
             config,
