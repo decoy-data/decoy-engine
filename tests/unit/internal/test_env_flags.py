@@ -103,7 +103,7 @@ def test_the_error_and_its_reason_are_public() -> None:
     assert "EnvFlagError" in errors.__all__
     spec = reasons.get("config", "env_flag_invalid")
     assert spec.identity == ("config", "env_flag_invalid")
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.27.0"
 
 
 def test_the_decoder_never_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
