@@ -1315,7 +1315,7 @@ reason = "pyarrow and pandas readers over `io.BytesIO` of data fetched from S3/G
 
 [[entry]]
 module = "decoy_engine/profile/_fixed_width_reader.py"
-function = "_parse_records"
+function = "iter_fixed_width_records"
 sink = "open"
 ordinal = 0
 disposition = "read"
