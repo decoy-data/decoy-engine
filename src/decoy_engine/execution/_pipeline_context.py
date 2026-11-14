@@ -451,6 +451,18 @@ def build_run_context(
     )
 
 
+def load_post_scan_detectors(config: Mapping[str, Any], file_access: Any) -> Any:
+    """The run's post-scan models, loaded strictly: one that cannot run refuses before any read."""
+    from decoy_engine.verification.postmask._model_findings import post_scan_detectors
+
+    return post_scan_detectors(config, file_access=file_access)
+
+
+def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> PipelineRunContext:
+    """`ctx` carrying the detector set loaded at run start, for the post-scan to use."""
+    return replace(ctx, post_scan_detectors=detectors)
+
+
 def with_quarantine_path(
     ctx: PipelineRunContext, path: str | None, base_dir: str | Path | None = None
 ) -> PipelineRunContext:
