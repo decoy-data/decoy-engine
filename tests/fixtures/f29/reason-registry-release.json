@@ -1,7 +1,7 @@
 {
   "format_version": 2,
-  "registry_version": "1.27.0",
-  "baseline_ceiling": "1.27.0",
+  "registry_version": "1.28.0",
+  "baseline_ceiling": "1.28.0",
   "identities": [
     {
       "namespace": "config",
@@ -2143,6 +2143,23 @@
         "since": "39fe4a40977d0585fd5704359e3685b0ada5cf5ee061e5d97385601d120cd0ec",
         "summary": "b3592f5ccb1ffae09a2743b6e199df482734cd97edb51e443a6a0b40fca1a4a7",
         "symbol": "e107fc4f053c74386db5fe5d17fa6af0a8cef5628f354cb26c4100ec0d314885"
+      }
+    },
+    {
+      "namespace": "config",
+      "code": "target_shared_destination",
+      "fields": {
+        "code": "3ac7e720f33ee594ec0c942da7ee812fecd01bb9f0b878e0cfd14dd5a1ecb243",
+        "context": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "deprecated_in": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "kind": "3045b5c998d76c75f480b2e91388b6adef07205004129c0b8dffee745b4aa77e",
+        "namespace": "48882ab48bfdf3bef2fe65e3304e91ccfd8f74e357c183367ad6fe903fe0e697",
+        "owner": "cfa4329807b8b4c6c9cbbb95d4e92725e4138c920e1849261d56108df9bd9a87",
+        "replaced_by": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "rules": "62222d935dc175380a3a7465bb50fd4667b3e59a03f7082bbd40897fc3fb5731",
+        "since": "3dc82f48d90e31f2da3fcd7fc6f975a6f6d14016a4ad29f5b7e09d9c7b7cceca",
+        "summary": "30795d46a3c570bb5e30bf4b0d25a9a3ff4f046a59a6d1cc02f98e0c711740ab",
+        "symbol": "8804e02e5b3ffe9a4165edc2c2b42f61372218400321de0dcdc4b969ae050c28"
       }
     },
     {
@@ -19497,6 +19514,7 @@
     "1.24.0": 2,
     "1.25.0": 25,
     "1.26.0": 31,
-    "1.27.0": 11
+    "1.27.0": 11,
+    "1.28.0": 1
   }
 }
