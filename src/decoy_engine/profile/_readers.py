@@ -48,6 +48,7 @@ from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
 )
+from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 
@@ -254,6 +255,9 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
+        return self._iter_batches(check_batch_rows(batch_rows), columns)
+
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
@@ -285,6 +289,7 @@ class LazySource:
         default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
         `buffer_size` and `use_threads` default to pyarrow's own defaults. `columns` narrows the
         batches; the schema and facts stay the whole file's."""
+        batch_rows = check_batch_rows(batch_rows)
         options: dict[str, Any] = {}
         if pre_buffer is not None:
             options["pre_buffer"] = pre_buffer

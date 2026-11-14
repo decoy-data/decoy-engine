@@ -23,8 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine._execution_error import lazy_source_changed
-from decoy_engine.config._fixed_width import FixedWidthLayout
+from decoy_engine.config import FixedWidthLayout
 from decoy_engine.profile._fixed_width_reader import (
     RecordFailure,
     _collect_records,
@@ -33,6 +32,7 @@ from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     iter_fixed_width_records,
 )
+from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_rows
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
 if TYPE_CHECKING:
@@ -46,7 +46,6 @@ _ARROW_TYPES: dict[str, pa.DataType] = {
     "float": pa.float64(),
 }
 
-_Identity = tuple[int, int, int, int]
 _TO_TABLE_ROWS = 65_536
 
 
@@ -109,7 +108,7 @@ class OpenedFixedWidthBatches(OpenedLazyBatches):
 
 
 @dataclass(frozen=True)
-class FixedWidthLazySource(LazySource):
+class FixedWidthLazySource(LazyFileIdentity, LazySource):
     """A batch-readable handle onto one on-disk fixed-width file, declared by `layout`."""
 
     layout: FixedWidthLayout = field(kw_only=True, hash=False)
@@ -131,33 +130,17 @@ class FixedWidthLazySource(LazySource):
         layout = _resolve_layout(descriptor["layout"], path=str(path))
         return cls(path, access=file_access, field_key=field_key, layout=layout, table=table)
 
-    def _identity(self) -> _Identity:
-        with self._handle() as handle:
-            st = handle.stat()
-        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-
     @property
     def schema(self) -> pa.Schema:
         return pa.schema([(c.name, _ARROW_TYPES[c.type]) for c in self.layout.columns])
 
-    def footer_facts(self) -> FooterFacts:
-        """Schema, exact row count and zero null counts. The snapshot is reused while a single
-        stat says the file is the one it describes; otherwise one counting pass refreshes it."""
-        if "facts" in self._seen and self._identity() == self._seen["identity"]:
-            facts: FooterFacts = self._seen["facts"]
-            return facts
-        return self._count_pass()
-
-    def _count_pass(self) -> FooterFacts:
-        before = self._identity()
+    def _measure(self) -> FooterFacts:
+        """One framing pass: no casts, one record in memory at a time."""
         with self._handle() as handle:
             count = count_fixed_width_records(handle, self.layout)
-        if self._identity() != before:
-            raise lazy_source_changed(self.table, "the file changed while its facts were read")
-        schema = self.schema
-        facts = FooterFacts(
+        return FooterFacts(
             num_rows=count,
-            schema=schema,
+            schema=self.schema,
             # A framing pass cannot see a float "nan", which reads as null: unknown, not zero.
             null_counts=tuple(
                 (c.name, None if c.type == "float" else 0) for c in self.layout.columns
@@ -165,9 +148,6 @@ class FixedWidthLazySource(LazySource):
             row_groups=0,
             max_row_group_rows=0,
         )
-        self._seen["facts"] = facts
-        self._seen["identity"] = before
-        return facts
 
     @property
     def num_rows(self) -> int:
@@ -178,8 +158,7 @@ class FixedWidthLazySource(LazySource):
 
     def _projection(self, batch_rows: int, columns: Sequence[str] | None) -> pa.Schema:
         """The batch schema, checked before any generator exists so a bad call fails at the call."""
-        if batch_rows < 1:
-            raise ValueError(f"batch_rows must be >= 1, got {batch_rows}")
+        check_batch_rows(batch_rows)
         full = self.schema
         if columns is None:
             return full
@@ -231,14 +210,7 @@ class FixedWidthLazySource(LazySource):
         exhausted. The Parquet buffering arguments do not apply and are ignored."""
         del pre_buffer, buffer_size, use_threads
         schema = self._projection(batch_rows, columns)
-        if "facts" in self._seen and self._identity() != self._seen["identity"]:
-            raise lazy_source_changed(self.table, "the file changed since its facts were read")
-        facts: FooterFacts = self._seen["facts"] if "facts" in self._seen else self.footer_facts()
-        identity: _Identity = self._seen["identity"]
-
-        def verify() -> None:
-            if self._identity() != identity:
-                raise lazy_source_changed(self.table, "the file changed while it was read")
+        facts, verify = self._open_facts()
 
         return OpenedFixedWidthBatches(facts, self._stream(schema, batch_rows, verify))
 
