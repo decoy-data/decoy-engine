@@ -21,7 +21,9 @@ def cfg(tables: list[dict[str, Any]], seed: int = 4242) -> dict[str, Any]:
         "global_settings": {"seed": seed},
         "sources": {},
         "tables": tables,
-        "targets": {t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables},
+        "targets": {
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"} for t in tables
+        },
     }
 
 

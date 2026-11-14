@@ -18,13 +18,14 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.execution import ExecutionError, PandasExecutionAdapter
-from decoy_engine.plan import compile_plan
+from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import build_namespace_registry
 
 _VERSION = "0.1.0"
+VAULT_SCOPE = b"fake-vault-scope-0123456789abcde"
 
 
 class FakeVault:
@@ -33,7 +34,15 @@ class FakeVault:
     Identity is the ``(namespace, plaintext)`` pair, so the same plaintext under
     two namespaces is two distinct entries with two distinct tokens."""
 
-    def __init__(self, preloaded: dict[tuple[str, str], str] | None = None) -> None:
+    def __init__(
+        self,
+        preloaded: dict[tuple[str, str], str] | None = None,
+        *,
+        scope: bytes = VAULT_SCOPE,
+    ) -> None:
+        # The vault's own derivation scope (B-6 D2): minted once per vault, so two vaults
+        # tokenize the same plaintext apart.
+        self.derivation_scope = scope
         self.map: dict[tuple[str, str], str] = dict(preloaded or {})
         self.puts: list[tuple[str, str, str]] = []
         self.lookups: list[tuple[str, str]] = []
@@ -168,12 +177,11 @@ def test_fails_closed_without_a_vault() -> None:
 
 def test_fails_closed_without_a_namespace() -> None:
     df = pd.DataFrame({"pan": ["x"]})
-    with pytest.raises(ExecutionError) as exc:
+    # Plan compile refuses it before the handler runs; the handler guard stays as a backstop.
+    with pytest.raises(PlanCompileError) as exc:
         _run(df, namespace=None, vault=FakeVault())
-    assert (
-        "tokenize_requires_namespace" in str(exc.value)
-        or getattr(exc.value, "code", "") == "tokenize_requires_namespace"
-    )
+    assert exc.value.code == "tokenize_requires_namespace"
+    assert exc.value.path == "tables.t.columns.pan.namespace"
 
 
 # --- HIGH-1: V0 canonicalization guard (string/object dtype only) ----------
