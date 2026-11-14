@@ -18,8 +18,9 @@ and a bounded sample -- so each can come from cheap metadata plus a
 `<= sample_rows` read instead of a full-frame load.
 
 Row-count honesty: Parquet gives an exact count in O(1) (footer `num_rows`);
-fixed_width gives an exact count from one pass of its record parser. CSV has no footer and newline-counting
-is O(bytes) I/O, so its count is an explicit byte-size *estimate*
+fixed_width gives an exact count from one framing pass of its record parser
+(O(bytes), no casts). CSV has no footer and newline-counting is O(bytes) I/O,
+so its count is an explicit byte-size *estimate*
 (`RowCount.exact=False`); downstream admission (SC7b) keys off that flag rather
 than trusting a CSV number it cannot cheaply verify.
 
@@ -64,9 +65,9 @@ BOUNDED_FALLBACK_ROWS = 10_000
 class RowCount:
     """A table's total row count plus whether that count is exact.
 
-    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a parser
-    pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate. The flag rides onto `TableProfile.row_count_exact`
-    so route admission knows whether it is trusting a footer count or an
+    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing
+    pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate.
+    The flag rides onto `TableProfile.row_count_exact` so route admission knows whether it is trusting a footer count or an
     estimate.
     """
 
@@ -406,7 +407,7 @@ class ParquetFileSource(_PolicyBound):
 class FixedWidthFileSource(_PolicyBound):
     """`ProfileSource` for a local fixed-width file.
 
-    Row count is exact and costs one pass of the shared record parser (blank
+    Row count is exact and costs one framing pass of the shared record parser (no casts; blank
     lines skipped, a missing final newline fine). The bounded sample reads only
     the first `sample_rows` records.
     """
