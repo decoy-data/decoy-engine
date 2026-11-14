@@ -28,9 +28,9 @@ class TestCompilePlanHappyPath:
 
         plan_version bumped 1 -> 2 for the DPS Scope B pinned
         `GenerationPlan` payload (guide section 4.7), then 2 -> 3 for the F06 pinned
-        `declared_casting` payload."""
+        `declared_casting` payload, then 3 -> 4 for the pinned `generation.lookups` list."""
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-        assert plan.plan_version == 3
+        assert plan.plan_version == 4
         assert plan.seed_protocol_version == 7
         assert plan.engine_version == "0.1.0"
 
@@ -106,6 +106,17 @@ class TestCompilePlanHappyPath:
 
 
 class TestCompileDeterminism:
+    def test_scan_baseline_does_not_move_the_config_hash(
+        self, simple_config: dict, simple_profile: Profile
+    ) -> None:
+        with_pointer = {
+            **simple_config,
+            "scan_baseline": {"path": "x.json", "schema": "scan-set/v1"},
+        }
+        p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        p2 = compile_plan(with_pointer, simple_profile, decoy_engine_version="0.1.0")
+        assert p1.pipeline_config_hash == p2.pipeline_config_hash
+
     def test_two_compiles_equal(self, simple_config: dict, simple_profile: Profile) -> None:
         p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         p2 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
@@ -145,7 +156,7 @@ class TestYamlRoundTrip:
     ) -> None:
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         y = plan_to_yaml(plan)
-        assert "plan_version: 3" in y
+        assert "plan_version: 4" in y
         assert "seed_protocol_version: 7" in y
 
     def test_yaml_emits_seed_protocol_version_seven(
