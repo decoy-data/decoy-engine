@@ -27,9 +27,11 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine.config import (
     NAMESPACE_PLACEHOLDER_PREFIX,
+    PipelineConfig,
     PipelineConfigError,
     parse_pipeline_config,
     relationship_shape_error,
+    target_identity,
 )
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
@@ -133,7 +135,7 @@ def starter_config(
     }
     if baseline_path is not None:
         config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
-    _check(config)
+    _refuse_shared_destinations(_check(config))
     return StarterConfig(
         config=config,
         notes=MappingProxyType(notes),
@@ -263,14 +265,6 @@ def _allocate_targets(scan: ScanSet, given: Mapping[str, Any]) -> dict[str, Any]
         else:
             shared = table.descriptor["type"] == "file" and readers[table.descriptor["path"]] > 1
             out[name] = _default_target(table, used_dirs, shared)
-    seen: dict[str, str] = {}
-    for table in scan.tables:
-        path = out[table.name].get("path")
-        if not isinstance(path, str):
-            continue
-        if path in seen:
-            raise ValueError(f"tables {seen[path]!r} and {table.name!r} share one target path")
-        seen[path] = table.name
     return out
 
 
@@ -304,7 +298,17 @@ def _problems_of(raw: dict[str, Any]) -> tuple[ConfigProblem, ...] | None:
     return None
 
 
-def _check(config: dict[str, Any]) -> None:
+def _refuse_shared_destinations(validated: PipelineConfig) -> None:
+    """Refuse two tables writing one destination, judged on the validated targets."""
+    seen: dict[tuple[str, ...], str] = {}
+    for name, target in validated.targets.items():
+        identity = target_identity(target)
+        if identity in seen:
+            raise ValueError(f"tables {seen[identity]!r} and {name!r} share one target destination")
+        seen[identity] = name
+
+
+def _check(config: dict[str, Any]) -> PipelineConfig:
     """Validate the config; a placeholder must be the only thing that fails it.
 
     A failure here is a builder bug, so the error names codes and locations, never values.
@@ -320,11 +324,12 @@ def _check(config: dict[str, Any]) -> None:
     failed = _problems_of(swapped)
     if failed is not None:
         raise PipelineConfigError.from_problems(failed, prefix="starter config failed validation")
+    validated = parse_pipeline_config(swapped)
     if not placeholders:
-        return
+        return validated
     problems = _problems_of(config)
     if problems is None:
         raise PipelineConfigError("starter config accepted a placeholder namespace")
     if problems and all(p.code == expected for p in problems):
-        return
+        return validated
     raise PipelineConfigError.from_problems(problems, prefix="starter config failed validation")
