@@ -43,10 +43,8 @@ from decoy_engine.fileaccess._output import (
     _close,
     create_private_at,
     create_private_child_at,
-    discard_stage_at,
     make_parent_dir_at,
     make_stage_dir_at,
-    publish_exclusive_durable,
 )
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
@@ -293,34 +291,11 @@ def _probe_dir(path: str) -> os.stat_result:
 
 
 def _sync_up(directory: Path, strict_levels: int) -> None:
-    """fsync `directory` and each directory above it, deepest first, up to and including the mount
-    root: the walk stops below the first ancestor on another device (F22 5.0). The first
-    `strict_levels` (the leaf's parent, every directory this attempt made, the parent of the
-    topmost one) must open; above them an unreadable directory ends the walk only when another
-    uid owns it, because a same-uid one may be an earlier attempt's (named limit L1u)."""
-    current = os.path.realpath(directory)
-    device = -1
-    level = 0
-    while True:
-        st = _probe_dir(current)
-        if device == -1:
-            device = st.st_dev
-        elif st.st_dev != device:
-            return
-        try:
-            fd = _open_dir(Path(current))
-        except PermissionError:
-            if level < strict_levels or st.st_uid == os.geteuid():
-                raise
-            return
-        try:
-            _call(os.fsync, fd)
-        finally:
-            _close(fd)
-        above = os.path.dirname(current)
-        if above == current:
-            return
-        current, level = above, level + 1
+    """The ambient durable walk (`_durable._walk_up`) over the physical chain: links in the caller
+    path are resolved first, and each directory is probed and opened by path here."""
+    _durable._walk_up(
+        os.path.realpath(directory), strict_levels, _probe_dir, lambda path: _open_dir(Path(path))
+    )
 
 
 class LocalOutputTxn(_LocalStageDir):
@@ -433,7 +408,7 @@ class LocalOutputTxn(_LocalStageDir):
 
     def _unlink_stage(self) -> None:
         if self._staged_file is not None and self._parent_fd >= 0:
-            discard_stage_at(self._parent_fd, self._staged_file.name)
+            _durable.discard_stage_at(self._parent_fd, self._staged_file.name)
 
     def _publish_durable(self) -> None:
         """Publish through the shared durable helper; only the path-shaped step 1 is ambient."""
@@ -442,7 +417,7 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("nothing was staged")
         self._finished = True
         try:
-            publish_exclusive_durable(self._parent_fd, staged.name, self._target.name)
+            _durable.publish_exclusive_durable(self._parent_fd, staged.name, self._target.name)
         finally:
             self._close_parent()
 
