@@ -477,3 +477,22 @@ Mutations on `2ee62277`, each edited back by hand:
   8 failed (NER venv).
 - `load_post_scan_detectors` returns `None`: `test_scanml_m4_run.py` plus
   `test_scanml_m5_route_guard.py` 8 failed (NER venv).
+
+Checks on `2ee62277` (the commits after it change only this record and the fragment is unchanged):
+
+- ruff check, ruff format, mypy on the thirteen `src` files M4 changes: pass.
+- Against the merge base `dac26109`: `registry_renumber.py --check`, `ratchet_check.py`,
+  `check_fragment.py` all exit 0. Against current `origin/main` (`f34b398e`) `check_fragment.py`
+  exits 0, `registry_renumber.py --check` reports `main-not-merged` (exit 2) and `ratchet_check.py`
+  exits 1 on four baselines main grew after `dac26109`: the branch does not contain main yet.
+- `GATES_WORKERS=2 scripts/dev/gates.sh --baseline --steps sentry,layers,licenses,tests <selection>`
+  (the M4 and M5 acceptance files, `tests/unit/detection_verification`, the two bookkeeping tests,
+  `tests/sentry`, the compat corpus, registry, public-API and tripwire tests, and every test that
+  names `_pipeline_context` or `PipelineRunContext`) against `origin/main` `f34b398e`, rc 0: sentry
+  5333 passed, 3 failed, 31 errors (main 5578, 3, 31); layers 15; licenses 63; tests 6246 passed,
+  2 failed, 31 errors, 46 skipped (main 6503, 2, 31, 32). The same 34 failing ids on both, no
+  branch-only id, no main failure passing. Main's higher counts are tests it gained after
+  `dac26109`.
+- `DECOY_REQUIRE_NER=1 pytest -m ner -n 2` in the NER venv: 53 passed, 10 skipped (import skips
+  only); no NER test skipped.
+- `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped (pre-GA capture).
