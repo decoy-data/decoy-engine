@@ -67,8 +67,8 @@ class RowCount:
 
     `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing
     pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate.
-    The flag rides onto `TableProfile.row_count_exact` so route admission knows whether it is trusting a footer count or an
-    estimate.
+    The flag rides onto `TableProfile.row_count_exact` so route admission knows
+    whether it is trusting a footer count or an estimate.
     """
 
     value: int
