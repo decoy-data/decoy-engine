@@ -21,6 +21,8 @@ is the schema only.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
+from pathlib import PurePath
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -129,17 +131,37 @@ TargetDescriptor = Annotated[
 ]
 
 
-def target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ...]:
+def _target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ...]:
     """The one definition of "same destination" for a validated output target.
 
-    File targets compare by normalized path, so `out/a.csv` and `out/./a.csv` are one
-    destination; S3 compares by endpoint, bucket and key, GCS by bucket and object. Filesystem aliasing
-    (symlinks, case-insensitive volumes) is the writer's concern, not this function's.
+    S3 compares by endpoint, bucket and key, GCS by bucket and object. A file path with no `..`
+    component is normalized so `out/a.csv` and `out/./a.csv` are one destination. A path with `..`
+    keeps its text because the OS resolves `..` after a symlink from the link target, so
+    normalizing could merge two files. Filesystem aliasing is the writer's concern.
     """
     if isinstance(target, FileTarget):
+        if os.pardir in PurePath(target.path).parts:
+            return ("file", target.path)
         return ("file", os.path.normpath(target.path))
     if isinstance(target, S3Target):
         # The endpoint names the store (AWS, MinIO, R2...); "" is the AWS default.
         endpoint = (target.endpoint_url or "").rstrip("/").lower()
         return ("s3", endpoint, target.bucket, target.key)
-    return ("gcs", target.bucket, target.object)
+    if isinstance(target, GCSTarget):
+        return ("gcs", target.bucket, target.object)
+    raise TypeError("unsupported target type has no destination identity")
+
+
+def duplicate_target_groups(
+    targets: Mapping[str, FileTarget | S3Target | GCSTarget], active_names: Iterable[str]
+) -> list[list[str]]:
+    """Table names that share one destination, each group of 2+ in mapping order.
+
+    Only keys in `active_names` take part: the writers skip a target whose key names no table.
+    """
+    active = set(active_names)
+    by_identity: dict[tuple[str, ...], list[str]] = {}
+    for name, target in targets.items():
+        if name in active:
+            by_identity.setdefault(_target_identity(target), []).append(name)
+    return [names for names in by_identity.values() if len(names) > 1]
