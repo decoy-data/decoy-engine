@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CONFIG_VALUE_NOT_JSON",
@@ -98,7 +97,7 @@ _d = _catalog.plan("PlanCompileError")
 CONFIG_VALUE_NOT_JSON = _d(
     "config_value_not_json",
     "A config value has a type JSON cannot hold; quote it as a string.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 GENERATE_CATEGORIES_MIXED = _d(
     "generate_categories_mixed",
