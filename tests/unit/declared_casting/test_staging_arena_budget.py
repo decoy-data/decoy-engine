@@ -91,6 +91,7 @@ def _job(
         cast_run=_IdentityCast(set(sources)),
         sink=ParquetTransactionalSink(out / "result") if sink else None,
         temp_disk_budget_bytes=budget,
+        config={},
         **extra,
     )
 

@@ -225,7 +225,13 @@ def test_the_four_stage_a_consumers_return_the_identical_config_verdict(
     except PlanCompileError as exc:
         # The plan compiler refuses a missing/empty category list itself, before the
         # three downstream consumers can run; the veto verdict is the only one left.
-        assert exc.code == "categorical_categories_missing" and case in _COMPILE_REJECTS
+        by_case = {
+            "no_namespace": "categorical_requires_namespace",
+            "weights_nan": "config_value_not_json",
+            "weights_inf": "config_value_not_json",
+        }
+        assert exc.code == by_case.get(case, "categorical_categories_missing")
+        assert case in _COMPILE_REJECTS | by_case.keys()
         assert veto is False
         return
     static = _dispatch._static_route_decision(
@@ -698,3 +704,53 @@ def test_the_column_lookup_matches_both_the_table_and_the_column_name() -> None:
     assert positional_config_for_column(config, "b", "x") is None  # same name, other table
     assert positional_config_for_column(config, "b", "z") is not None
     assert positional_config_for_column(config, "nope", "x") is None
+
+
+# DUP-DEFECTS A15 (AT-E3-2): a parquet `large_string` source runs chunked under `when:`.
+@pytest.mark.parametrize("entry", ["run_mask_chunked", "run_mask_pipeline_chunked"])
+def test_e3_large_string_when_runs_chunked_and_equals_the_string_source(
+    entry: str, tmp_path: Any
+) -> None:
+    from decoy_engine import run_mask_chunked as _mc
+    from decoy_engine import run_mask_pipeline_chunked as _mpc
+    from tests.native.test_chunked_entry_values_schema import _full_frame
+
+    run = _mc if entry == "run_mask_chunked" else _mpc
+    when = {"when": "keep == 'A'"}
+    cfg = make_config([{**_nd(), **when}, passthrough("keep")])
+
+    def _src(typ: pa.DataType) -> pa.Table:
+        return pa.table(
+            {
+                "c": pa.array(["a", "b", "a", "c", "b", "a"], pa.string()).cast(typ),
+                "keep": pa.array(["A", "B", "A", "B", "A", "B"], pa.string()).cast(typ),
+            }
+        )
+
+    def go(typ: pa.DataType) -> list[pa.Table]:
+        table = _src(typ)
+        return list(
+            run(
+                cfg,
+                split(table, 2),
+                table=TABLE,
+                engine_version=ENGINE_VERSION,
+                key_provider=key_provider(),
+                **chunked_entry_kwargs(run, cfg, TABLE),
+            )
+        )
+
+    got, want = go(pa.large_string()), go(pa.string())
+    assert column_values(got, "c") == column_values(want, "c")
+    assert column_values(got, "keep") == column_values(want, "keep")
+    whole = _full_frame(cfg, pa.concat_tables(split(_src(pa.string()), 2)), tmp_path)
+    merged = pa.concat_tables(got)
+    # Pre-existing: run_mask_chunked passes `keep` through as large_string, while the pipeline
+    # entry and the whole-frame route write string. Only `c` is this slice's concern.
+    assert {o.schema.field("c").type for o in got} == {pa.string()}
+    assert {o.schema.field("keep").type for o in got} == {
+        pa.large_string() if entry == "run_mask_chunked" else pa.string()
+    }
+    assert whole.schema.field("c").type == whole.schema.field("keep").type == pa.string()
+    for name in ("c", "keep"):
+        assert merged.column(name).to_pylist() == whole.column(name).to_pylist()

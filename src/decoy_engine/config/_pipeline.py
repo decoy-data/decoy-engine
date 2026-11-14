@@ -51,10 +51,11 @@ from decoy_engine.config._namespaces import NamespaceConfig
 from decoy_engine.config._post_scan import PostScanConfig
 from decoy_engine.config._pre_scan import PreScanConfig
 from decoy_engine.config._relationships import RelationshipConfig
+from decoy_engine.config._scan_baseline import ScanBaselineConfig
 from decoy_engine.config._sources import FileSource, SourceDescriptor
 from decoy_engine.config._subset import SubsetConfig
 from decoy_engine.config._tables import TableConfig
-from decoy_engine.config._targets import FileTarget, TargetDescriptor
+from decoy_engine.config._targets import FileTarget, TargetDescriptor, duplicate_target_groups
 from decoy_engine.config._validators import QuarantineConfig, ValidatorEntry
 from decoy_engine.contracts.declared_casting import ProtectedQuarantineConfig
 from decoy_engine.errors import ConfigRuleError
@@ -147,6 +148,9 @@ class PipelineConfig(BaseModel):
     # How the run's outputs become visible. Equal to the default it stays out of dumps and
     # hashes, so a legacy config is unchanged.
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
+    # SCAN-MULTI: the scan record this pipeline was built from. Read only by `decoy scan
+    # --compare`; no run reads it. Unset stays out of dumps (legacy hashes are unchanged).
+    scan_baseline: ScanBaselineConfig | None = None
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema: Any, handler: Any) -> Any:
@@ -161,6 +165,8 @@ class PipelineConfig(BaseModel):
             data.pop("name", None)
         if data.get("protected_quarantine") is None:
             data.pop("protected_quarantine", None)
+        if data.get("scan_baseline") is None:
+            data.pop("scan_baseline", None)
         # By value, not by what was written: a pre_scan equal to the default is the legacy shape.
         if self.pre_scan == PreScanConfig():
             data.pop("pre_scan", None)
@@ -360,6 +366,21 @@ class PipelineConfig(BaseModel):
         if problems:
             raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
         return self
+
+    @model_validator(mode="after")
+    def _targets_distinct(self) -> PipelineConfig:
+        """Two declared tables cannot write to one destination; the second write would replace the first."""
+        groups = duplicate_target_groups(self.targets, [t.name for t in self.tables])
+        if not groups:
+            return self
+        code = str(reasons.config.TARGET_SHARED_DESTINATION)
+        clashing = {name for group in groups for name in group}
+        problems: list[tuple[tuple[str | int, ...], str]] = [
+            (("targets", name, target.destination_field), code)
+            for name, target in self.targets.items()
+            if name in clashing
+        ]
+        raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
 
     @model_validator(mode="after")
     def _subset_stage_constraints(self) -> PipelineConfig:

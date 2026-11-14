@@ -67,12 +67,12 @@ def _sanitize_names(event: Any, optional: tuple[str, ...]) -> None:
 
 def _safe_error_names() -> frozenset[str]:
     from decoy_engine import errors
-    from decoy_engine.reason_adapter import registered_families
+    from decoy_engine.reason_adapter import registered_family_names
 
     names = {
         n for n, v in vars(builtins).items() if isinstance(v, type) and issubclass(v, BaseException)
     }
-    names |= {c.__name__ for c in registered_families()}
+    names |= registered_family_names()
     names |= {
         n for n, v in vars(errors).items() if isinstance(v, type) and issubclass(v, BaseException)
     }
@@ -103,6 +103,8 @@ def _safe_registered_code(code: str | None) -> str | None:
         return None
     return code if reasons.is_registered(code) else str(reasons.decoy.UNREGISTERED_REASON)
 
+
+safe_registered_code = _safe_registered_code
 
 # ---------------------------------------------------------------------------
 # Typed groups

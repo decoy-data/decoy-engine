@@ -21,6 +21,7 @@ itself stays a leaf (it imports none of them).
 from __future__ import annotations
 
 import errno
+import sys
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -38,13 +39,17 @@ _PUBLICATION_OPERATIONS = frozenset(
 _INTERRUPTS = (KeyboardInterrupt, SystemExit, GeneratorExit)
 
 # (module, class, namespace of its ``.code``) for every engine family that carries a code.
+# Each module is the class's DEFINING module (``cls.__module__``), never a re-export: a live
+# exception guarantees only its defining module is imported, and `_loaded_families` reads
+# ``sys.modules`` without importing. A guard test enforces this for both tables.
 _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.errors", "PipelineValidationError", "config"),
     ("decoy_engine.errors", "ValidationError", "config"),
     ("decoy_engine.relationships._namespace", "NamespaceConfigError", "config"),
     ("decoy_engine.subset._errors", "SubsetConfigError", "config"),
+    ("decoy_engine._canonical._json", "CanonicalJsonError", "config"),
     ("decoy_engine.plan._errors", "PlanCompileError", "plan"),
-    ("decoy_engine.contracts.declared_casting", "DeclaredCastContractError", "plan"),
+    ("decoy_engine.contracts._declared_base", "DeclaredCastContractError", "plan"),
     ("decoy_engine.execution._errors", "DeclaredCastRouteError", "route"),
     ("decoy_engine.execution._errors", "DeclaredCastValueError", "runtime"),
     ("decoy_engine.execution._errors", "QuarantineError", "runtime"),
@@ -65,6 +70,7 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.errors", "FpeChecksumError", "runtime"),
     ("decoy_engine.errors", "MaskKeyDerivationError", "runtime"),
     ("decoy_engine.errors", "MaskKeyRequiredError", "runtime"),
+    ("decoy_engine.errors", "EnvFlagError", "config"),
     ("decoy_engine.errors", "PKDuplicatesError", "runtime"),
     ("decoy_engine.keyprovider", "MaskSecretError", "runtime"),
     ("decoy_engine.vault", "VaultError", "runtime"),
@@ -74,7 +80,7 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.execution.native._companion_status", "NativeCompanionCheckError", "runtime"),
     ("decoy_engine.execution.native._crypto_ext", "CryptoExtensionUnavailableError", "runtime"),
     ("decoy_engine.execution.native._crypto_ext", "FpeConfigError", "runtime"),
-    ("decoy_engine.execution.native._draw_site_providers", "DrawSiteProtocolError", "runtime"),
+    ("decoy_engine.execution.native.protocol.providers_base", "DrawSiteProtocolError", "runtime"),
     ("decoy_engine.execution.native._pool_quality", "PoolQualityError", "runtime"),
     ("decoy_engine.io.bounded_reader", "BoundedReadError", "runtime"),
     ("decoy_engine.fileaccess._protected_dir", "ProtectedDirAclFailed", "runtime"),
@@ -92,11 +98,13 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.quality.dp_budget", "DpBudgetError", "quality"),
     ("decoy_engine.quality.dp_provenance", "ProvenanceError", "quality"),
     ("decoy_engine.quality.snapshot", "DistributionSnapshotError", "quality"),
+    ("decoy_engine.verification.postmask._blocked", "PostScanBlockedError", "post_scan"),
     ("decoy_engine.connectors.postgres_snapshot", "PostgresSnapshotError", "connector"),
     ("decoy_engine.execution.physical._shadow_diff_codes", "ShadowDifference", "physical"),
 )
 # Engine exceptions that carry no code but have one fixed meaning: (module, class, reason).
 _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
+    ("builtins", "MemoryError", reasons.decoy.PROCESS_OUT_OF_MEMORY),
     ("decoy_engine.errors", "EmptyParentPoolError", reasons.config.FK_EMPTY_PARENT_POOL),
     ("decoy_engine.errors", "UnknownFKColumnError", reasons.config.FK_UNKNOWN_COLUMN),
     ("decoy_engine.errors", "ConfigError", reasons.config.UNTAGGED),
@@ -109,6 +117,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.sdk", "PermanentError", reasons.decoy.CONNECTOR_PERMANENT_FAILURE),
     ("decoy_engine.fileaccess._types", "FileAccessDenied", reasons.decoy.FILE_ACCESS_DENIED),
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
+    (
+        "decoy_engine.verification.postmask._route_guard",
+        "PostScanRouteError",
+        reasons.route.POST_SCAN_MODELS_UNSUPPORTED,
+    ),
 )
 
 
@@ -124,6 +137,42 @@ def _families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
     for module, name, reason in _FIXED:
         fixed[getattr(importlib.import_module(module), name)] = reason
     return coded, fixed
+
+
+def _loaded_families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
+    """The same tables, limited to modules this process has already imported.
+
+    An exception instance's class lives in a module that is already imported, so a classifier
+    never needs to import one. Importing here ran the whole `quality.dp` stack (opendp, scikit-learn,
+    scipy's OpenBLAS) at failure time, which is when a memory-capped child has no address space left
+    to initialise it and spins instead of reporting the failure.
+    """
+    coded: dict[type, str] = {}
+    for module, name, namespace in _CODED:
+        cls = getattr(sys.modules.get(module), name, None)
+        if cls is not None:
+            coded[cls] = namespace
+    fixed: dict[type, ReasonCode] = {}
+    for module, name, reason in _FIXED:
+        cls = getattr(sys.modules.get(module), name, None)
+        if cls is not None:
+            fixed[cls] = reason
+    return coded, fixed
+
+
+def registered_family_names() -> frozenset[str]:
+    """The class name of every trusted family, read from the tables without importing any module."""
+    return frozenset(name for _module, name, _ in (*_CODED, *_FIXED))
+
+
+def loaded_families() -> frozenset[type]:
+    """The trusted families whose module this process has already imported.
+
+    Enough for `isinstance` on a live exception, whose class is always in an imported module,
+    and safe on a failure path because it imports nothing.
+    """
+    coded, fixed = _loaded_families()
+    return frozenset(coded) | frozenset(fixed)
 
 
 def registered_families() -> frozenset[type]:
@@ -188,7 +237,7 @@ def _classify(exc: BaseException, phase: Phase, context: ReasonContext | None) -
     )
     if publishing and _capacity_evidence(exc):
         return _record(reasons.decoy.STORAGE_CAPACITY_EXHAUSTED, phase, context)
-    coded, fixed = _families()
+    coded, fixed = _loaded_families()
     namespace = _first_in_mro(exc, coded)
     if namespace is not None:
         code = _read_code(exc)
@@ -226,6 +275,17 @@ def _count_of(report: Any, name: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
+def report_unavailable(report: Any) -> bool:
+    """Whether a verification report says its check could not complete: the whole pass failed
+    (``pass_failed_with`` set; its text is never read) or a per-check error was counted."""
+    failed_with = (
+        report.get("pass_failed_with")
+        if isinstance(report, Mapping)
+        else getattr(report, "pass_failed_with", None)
+    )
+    return failed_with is not None or _count_of(report, "error_count") > 0
+
+
 def reasons_from_report(report: Any, *, enforcing: bool = False) -> tuple[ReasonRecord, ...]:
     """The reasons a verification report supports, without serializing the report.
 
@@ -235,15 +295,10 @@ def reasons_from_report(report: Any, *, enforcing: bool = False) -> tuple[Reason
     findings and is listed first; findings are ``findings_reported`` when the check only reports,
     and ``verification_failed`` when ``enforcing`` made the negative verdict binding.
     A clean report yields no reasons. Accepts the `PostMaskReport` object or its dict form."""
-    failed_with = (
-        report.get("pass_failed_with")
-        if isinstance(report, Mapping)
-        else getattr(report, "pass_failed_with", None)
-    )
     errors = _count_of(report, "error_count")
     findings = _count_of(report, "fail_count")
     out: list[ReasonRecord] = []
-    if failed_with is not None or errors > 0:
+    if report_unavailable(report):
         out.append(
             ReasonRecord.for_reason(
                 reasons.decoy.VERIFICATION_UNAVAILABLE,
