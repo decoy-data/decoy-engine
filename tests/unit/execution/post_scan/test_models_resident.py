@@ -59,15 +59,15 @@ def _failing_suite(table: str, column: str) -> Any:
 # ----- the registry: one new code, one retired ------------------------------------------------
 
 
-def test_the_models_resident_code_is_registered_and_unreleased() -> None:
+def test_the_models_resident_code_is_registered_and_released_in_1_27() -> None:
     spec = reasons.find("route", "post_scan_models_resident")
     assert spec is not None
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.27.0"
 
 
 def test_the_integrity_requested_code_is_retired_in_favour_of_it() -> None:
     spec = reasons.get_reason("route", "post_scan_integrity_requested")
-    assert spec.deprecated_in == reasons.UNRELEASED
+    assert spec.deprecated_in == "1.27.0"
     assert spec.replaced_by == ("route", "post_scan_models_resident")
 
 

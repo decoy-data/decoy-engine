@@ -110,7 +110,7 @@ def test_scan_baseline_refuses_other_shapes(bad: object) -> None:
 def test_the_placeholder_identity_is_registered() -> None:
     spec = reasons.REASONS[("config", "namespace_placeholder_unset")]
     assert str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET) == "namespace_placeholder_unset"
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.27.0"
 
 
 @pytest.mark.parametrize("n", [1, 2, 17])
