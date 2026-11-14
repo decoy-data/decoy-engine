@@ -467,7 +467,8 @@ def test_run_pipeline_auto_chunk_lane_runs_model_post_scan_configs_as_on_main(
 
     got = run(NER_FAIL["post_scan"])
     assert calls == ["t"]
-    want = run({"integrity": True})
+    # Baseline: the same model ask under `warn`, so it is resident too (regex-only streams now).
+    want = run({"integrity": True, "detectors": ["regex", "ner"]})
     # The legacy lane is always resident; the dispatcher lane is resident for the post-scan.
     reason = {"dispatcher": "post_scan_integrity", "oracle": "legacy_lane"}[lane]
     assert got.quality_metrics["auto_chunk"]["output"] == {"mode": "resident", "reason": reason}
