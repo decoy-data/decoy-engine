@@ -141,7 +141,7 @@ def fk_job(
                 }
             ],
             "targets": {
-                n: {"type": "file", "format": "parquet", "path": "/dev/null"} for n in tables
+                n: {"type": "file", "format": "parquet", "path": f"/dev/null.{n}"} for n in tables
             },
         }
     ).model_dump()
