@@ -1147,10 +1147,12 @@ rules replace the matching text above where they differ.
   builder input error naming both tables. Builder input errors raise
   `ValueError` with names only.
 - Destination identity (Codex r2). Add `target_identity(target) -> tuple[str,
-  ...]` to `config/_targets.py`, the one definition of "same destination":
-  file `("file", os.path.normpath(path))`, S3 `("s3", bucket, key)`, GCS
-  `("gcs", bucket, object)`; an unknown type raises. `_allocate_targets`
-  compares identities, not `path`. Filesystem aliasing (symlinks,
+  ...]` to `config/_targets.py`, the one definition of "same destination". It
+  takes the validated target models only (`FileTarget | S3Target | GCSTarget`),
+  so an unknown type cannot reach it: file `("file", os.path.normpath(path))`,
+  S3 `("s3", bucket, key)`, GCS `("gcs", bucket, object)`. The builder refuses
+  shared destinations after validation, on the validated config's targets,
+  comparing identities, not `path`. Filesystem aliasing (symlinks,
   case-insensitive volumes) is the writer's concern at run time, not the
   builder's. Added tests: T3-target-unique-cloud (two equal S3 targets, two
   equal GCS targets, and `out/a.csv` vs `out/./a.csv` each refuse), mutation

@@ -20,6 +20,7 @@ is the schema only.
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -126,3 +127,17 @@ TargetDescriptor = Annotated[
     FileTarget | S3Target | GCSTarget,
     Field(discriminator="type"),
 ]
+
+
+def target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ...]:
+    """The one definition of "same destination" for a validated output target.
+
+    File targets compare by normalized path, so `out/a.csv` and `out/./a.csv` are one
+    destination; cloud targets compare by bucket and key or object. Filesystem aliasing
+    (symlinks, case-insensitive volumes) is the writer's concern, not this function's.
+    """
+    if isinstance(target, FileTarget):
+        return ("file", os.path.normpath(target.path))
+    if isinstance(target, S3Target):
+        return ("s3", target.bucket, target.key)
+    return ("gcs", target.bucket, target.object)

@@ -396,8 +396,35 @@ def test_an_explicit_target_equal_to_another_default_is_refused(
     sources: dict[str, dict[str, Any]], tmp_path: Path
 ) -> None:
     clash = {"type": "file", "format": "csv", "path": str(tmp_path / "orders.masked.csv")}
-    with pytest.raises(ValueError, match="share one target path"):
+    with pytest.raises(ValueError, match="share one target destination"):
         _build(sources, targets={"customers": clash})
+
+
+_S3 = {"type": "s3", "format": "csv", "bucket": "b", "key": "out/a.csv"}
+_GCS = {"type": "gcs", "format": "csv", "bucket": "b", "object": "out/a.csv"}
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (_S3, dict(_S3, region="eu-west-1")),
+        (_GCS, dict(_GCS, credentials_ref="other")),
+        (
+            {"type": "file", "format": "csv", "path": "out/a.csv"},
+            {"type": "file", "format": "csv", "path": "out/./a.csv"},
+        ),
+    ],
+)
+def test_target_unique_cloud_equal_destinations_are_refused(
+    sources: dict[str, dict[str, Any]], first: dict[str, Any], second: dict[str, Any]
+) -> None:
+    with pytest.raises(ValueError, match="customers.*orders"):
+        _build(sources, targets={"customers": first, "orders": second})
+
+
+def test_target_unique_cloud_different_keys_pass(sources: dict[str, dict[str, Any]]) -> None:
+    result = _build(sources, targets={"customers": _S3, "orders": dict(_S3, key="out/b.csv")})
+    assert result.config["targets"]["orders"]["key"] == "out/b.csv"
 
 
 @pytest.mark.parametrize("empty", [{}, None, "", []])

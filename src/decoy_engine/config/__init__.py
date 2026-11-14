@@ -106,6 +106,7 @@ from decoy_engine.config._targets import (
     GCSTarget,
     S3Target,
     TargetDescriptor,
+    target_identity,
 )
 from decoy_engine.config._transforms import (
     DedupeOp,
@@ -180,5 +181,6 @@ __all__ = [
     "refuse_namespace_placeholder",
     "refuse_unlisted_generate_families",
     "relationship_shape_error",
+    "target_identity",
     "value_key",
 ]
