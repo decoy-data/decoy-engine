@@ -19,8 +19,9 @@ import stat
 import time
 from collections.abc import Callable, Iterator
 
-from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX
+from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
 from decoy_engine.fileaccess._output import (
+    _CREATOR_KEY,
     _DIR_FLAGS,
     _call,
     _close,
@@ -82,6 +83,56 @@ def _sync_fds(chain_fds: list[int]) -> None:
     """fsync held directories in the order given (deepest first)."""
     for dir_fd in chain_fds:
         _call(os.fsync, dir_fd)
+
+
+def _sync_rooted_chain(open_parent: Callable[..., int], leaf: str) -> None:
+    """fsync a bound leaf, then its parent and every directory above it up to the root, all held
+    from one open of the chain (strict policy)."""
+    chain: list[int] = []
+    try:
+        chain.append(open_parent(create=False, chain=chain))
+        _sync_leaf_at(chain[-1], leaf)
+        _sync_fds(chain[::-1])
+    finally:
+        for fd in chain:
+            _close(fd)
+
+
+def _walk_up(
+    start: str,
+    strict_levels: int,
+    probe: Callable[[str], os.stat_result],
+    open_dir: Callable[[str], int],
+) -> None:
+    """fsync `start` and each directory above it, deepest first, up to and including the mount
+    root: the walk stops below the first ancestor on another device (F22 5.0). The first
+    `strict_levels` (the leaf's parent, every directory this attempt made, the parent of the
+    topmost one) must open; above them an unreadable directory ends the walk only when another
+    uid owns it, because a same-uid one may be an earlier attempt's (named limit L1u). The
+    ambient policy passes its own path `probe` and `open_dir`, so every path call stays there."""
+    current = start
+    device = -1
+    level = 0
+    while True:
+        st = probe(current)
+        if device == -1:
+            device = st.st_dev
+        elif st.st_dev != device:
+            return
+        try:
+            fd = open_dir(current)
+        except PermissionError:
+            if level < strict_levels or st.st_uid == os.geteuid():
+                raise
+            return
+        try:
+            _call(os.fsync, fd)
+        finally:
+            _close(fd)
+        above = os.path.dirname(current)
+        if above == current:
+            return
+        current, level = above, level + 1
 
 
 def _sync_bound(sync: Callable[[], None]) -> None:
@@ -196,3 +247,45 @@ def _read_upto(member_fd: int, size: int) -> bytes:
         parts.append(chunk)
         got += len(chunk)
     return b"".join(parts)
+
+
+# A directory fsync failing with one of these means the filesystem cannot sync a directory, not
+# that the entry is lost (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal.
+_DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
+
+
+def discard_stage_at(dir_fd: int, name: str) -> None:
+    """Remove the stage name beneath `dir_fd`; a name already gone or unremovable is left."""
+    validate_component(name, _CREATOR_KEY)
+    try:
+        os.unlink(name, dir_fd=dir_fd)
+    except OSError:
+        pass
+
+
+def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
+    """The one durable exclusive publish: `link(2)` the fsynced stage to `leaf` (the
+    compare-and-set), fsync the directory (the commit point), then drop the stage name.
+
+    Raises `FileExistsError` for an existing leaf and an errno-only `OSError` for any other
+    failure. Removal of the stage is attempted on every path (a failed removal is swallowed and leaves
+    only the encrypted 0600 stage); a leaf that was linked is never removed, so a directory
+    fsync failure reports an error with the vault kept."""
+    validate_component(stage_name, _CREATOR_KEY)
+    validate_component(leaf, _CREATOR_KEY)
+    code = 0
+    try:
+        os.link(stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    if not code:
+        try:
+            os.fsync(parent_fd)
+        except OSError as exc:
+            if exc.errno not in _DIR_FSYNC_UNSUPPORTED:
+                code = exc.errno or errno.EIO
+    discard_stage_at(parent_fd, stage_name)
+    if code == errno.EEXIST:
+        raise FileExistsError(errno.EEXIST, "output exists")
+    if code:
+        raise OSError(code, os.strerror(code))

@@ -237,48 +237,6 @@ def _sync(dir_fd: int) -> None:
         pass
 
 
-# A directory fsync failing with one of these means the filesystem cannot sync a directory, not
-# that the entry is lost (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal.
-_DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
-
-
-def discard_stage_at(dir_fd: int, name: str) -> None:
-    """Remove the stage name beneath `dir_fd`; a name already gone or unremovable is left."""
-    validate_component(name, _CREATOR_KEY)
-    try:
-        os.unlink(name, dir_fd=dir_fd)
-    except OSError:
-        pass
-
-
-def publish_exclusive_durable(parent_fd: int, stage_name: str, leaf: str) -> None:
-    """The one durable exclusive publish: `link(2)` the fsynced stage to `leaf` (the
-    compare-and-set), fsync the directory (the commit point), then drop the stage name.
-
-    Raises `FileExistsError` for an existing leaf and an errno-only `OSError` for any other
-    failure. Removal of the stage is attempted on every path (a failed removal is swallowed and leaves
-    only the encrypted 0600 stage); a leaf that was linked is never removed, so a directory
-    fsync failure reports an error with the vault kept."""
-    validate_component(stage_name, _CREATOR_KEY)
-    validate_component(leaf, _CREATOR_KEY)
-    code = 0
-    try:
-        os.link(stage_name, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
-    except OSError as exc:
-        code = exc.errno or errno.EIO
-    if not code:
-        try:
-            os.fsync(parent_fd)
-        except OSError as exc:
-            if exc.errno not in _DIR_FSYNC_UNSUPPORTED:
-                code = exc.errno or errno.EIO
-    discard_stage_at(parent_fd, stage_name)
-    if code == errno.EEXIST:
-        raise FileExistsError(errno.EEXIST, "output exists")
-    if code:
-        raise OSError(code, os.strerror(code))
-
-
 def _rmtree_fd(dir_fd: int) -> None:
     """Remove everything beneath `dir_fd` without following any link."""
     for entry in list(os.scandir(dir_fd)):
@@ -463,7 +421,7 @@ class RootedOutputTxn(_StageDir):
         if state.kind == "file" and self._publish_mode == "exclusive":
             if self._durable:
                 try:
-                    publish_exclusive_durable(parent, state.stage_name, self._leaf)
+                    _durable.publish_exclusive_durable(parent, state.stage_name, self._leaf)
                 except OSError:
                     _discard(state)  # the stage only; a linked leaf is never removed
                     raise
@@ -614,14 +572,7 @@ class RootedOutputDir:
     def sync_chain(self) -> None:
         from decoy_engine.fileaccess import _durable
 
-        chain: list[int] = []
-        try:
-            chain.append(self._open_parent(create=False, chain=chain))
-            _durable._sync_leaf_at(chain[-1], self._leaf)
-            _durable._sync_fds(chain[::-1])
-        finally:
-            for fd in chain:
-                _close(fd)
+        _durable._sync_rooted_chain(self._open_parent, self._leaf)
 
     def is_empty_or_absent(self) -> bool:
         failed = False
@@ -653,6 +604,4 @@ __all__ = [
     "STAGE_SUFFIX",
     "RootedOutputDir",
     "RootedOutputTxn",
-    "discard_stage_at",
-    "publish_exclusive_durable",
 ]
