@@ -84,9 +84,6 @@ def is_valid_pipeline_name(value: object) -> bool:
     return value.split(".", 1)[0].upper() not in _WINDOWS_DEVICES
 
 
-_DESTINATION_FIELD = {"file": "path", "s3": "key", "gcs": "object"}
-
-
 class PipelineConfig(BaseModel):
     """Strict, validated pipeline configuration.
 
@@ -379,7 +376,7 @@ class PipelineConfig(BaseModel):
         code = str(reasons.config.TARGET_SHARED_DESTINATION)
         clashing = {name for group in groups for name in group}
         problems: list[tuple[tuple[str | int, ...], str]] = [
-            (("targets", name, _DESTINATION_FIELD[target.type]), code)
+            (("targets", name, target.destination_field), code)
             for name, target in self.targets.items()
             if name in clashing
         ]

@@ -173,6 +173,11 @@ def test_e12_a_parent_segment_keeps_its_text(tmp_path: Any) -> None:
     )
 
 
+def test_e12b_the_same_parent_segment_text_twice_is_still_refused() -> None:
+    exc = _refusal(_config({"a": _file("../x.csv"), "b": _file("../x.csv")}))
+    assert _locs(exc) == [("targets", "a", "path"), ("targets", "b", "path")]
+
+
 def test_e13_only_targets_naming_a_declared_table_take_part() -> None:
     PipelineConfig.model_validate(
         _config({"a": _file("x"), "u1": _file("y"), "u2": _file("y")}, names=["a"])
