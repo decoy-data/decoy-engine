@@ -1,6 +1,6 @@
 # The exact modules a sink call may live in without a registry entry (plan D9). Being inside
-# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` (whose
-# ambient opens each carry their own registry entry), is judged call by call.
+# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` and
+# `_local_chain.py` (whose ambient opens each carry their own registry entry), is judged call by call.
 
 # Rule 1: adapters hand a third-party library only a capability's descriptor or library path.
 adapter_modules = [

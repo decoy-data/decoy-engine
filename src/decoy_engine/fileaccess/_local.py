@@ -4,14 +4,15 @@ Paths are plain paths relative to the CWD, symlinks are followed, `display` is t
 every open is lazy so a missing file fails inside the library call with the same text it
 always had. Output transactions use ordinary path calls (a stage directory in the target's
 parent, one `os.replace`), which is exactly what the sinks did before the policy existed.
-This module is the one place ambient opens of caller or config paths are allowed.
+This module (with its output-chain openers in `_local_chain.py`) is the one place ambient
+opens of caller or config paths are allowed.
 
 On POSIX, directories on an output chain come from the creators in `_output.py` (F22 5.0
-rule 1): the deepest existing ancestor is opened by path, links followed as before, and each
-missing component is made under it by `make_parent_dir_at`; stage directories come from
-`make_stage_dir_at`. A `DIRECTORY_PUBLISH_LABELS` publish (F22 5.1) fsyncs the stage tree, renames,
-then fsyncs the parent and each directory above it up to the mount boundary (5.0 rule D). The
-win32 arm keeps the plain path calls.
+rule 1, through `_local_chain.py`): the deepest existing ancestor is opened by path, links
+followed as before, and each missing component is made under it by `make_parent_dir_at`; stage
+directories come from `make_stage_dir_at`. A `DIRECTORY_PUBLISH_LABELS` publish (F22 5.1)
+fsyncs the stage tree, renames, then fsyncs the parent and each directory above it up to the
+mount boundary (5.0 rule D). The win32 arm keeps the plain path calls.
 """
 
 from __future__ import annotations
@@ -32,6 +33,11 @@ from typing import BinaryIO, Literal, TextIO
 from decoy_engine.fileaccess import _durable
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
+from decoy_engine.fileaccess._local_chain import (
+    _ensure_dirs,
+    _make_stage_dir,
+    _open_dir,
+)
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
     DIRECTORY_PUBLISH_LABELS,
@@ -43,7 +49,6 @@ from decoy_engine.fileaccess._output import (
     _close,
     create_private_at,
     create_private_child_at,
-    make_parent_dir_at,
     make_stage_dir_at,
 )
 from decoy_engine.fileaccess._types import (
@@ -229,58 +234,6 @@ def _sync_dir(directory: Path) -> None:
             os.close(fd)
         except OSError:
             pass
-
-
-def _open_dir(directory: Path) -> int:
-    """Open an existing directory by path, following links as the ambient policy always has.
-    A failure keeps only its errno: the stock text names the path."""
-    return _call(os.open, directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-
-
-def _open_dir_creating(directory: Path, created: list[str] | None = None) -> int:
-    """Open `directory`, making each missing component under the open descriptor of the one
-    above it; the replacement for `mkdir(parents=True, exist_ok=True)` (F22 5.0 rule 1). Nothing
-    is created unless the deepest existing ancestor opened. `created` receives the components
-    that were missing, which the durable walk must sync strictly."""
-    missing: list[str] = []
-    current = directory
-    while True:
-        try:
-            fd = _open_dir(current)
-            break
-        except FileNotFoundError:
-            if current.parent == current:
-                raise
-            missing.append(current.name)
-            current = current.parent
-    try:
-        for name in reversed(missing):
-            child = make_parent_dir_at(fd, name)
-            _close(fd)
-            fd = child
-    except BaseException:
-        _close(fd)
-        raise
-    if created is not None:
-        created.extend(missing)
-    return fd
-
-
-def _ensure_dirs(directory: Path) -> None:
-    _close(_open_dir_creating(directory))
-
-
-def _make_stage_dir(
-    parent: Path, prefix: str, *, create_parents: bool, created: list[str] | None = None
-) -> Path:
-    """A new private stage directory beside the target, made by `make_stage_dir_at`."""
-    parent_fd = _open_dir_creating(parent, created) if create_parents else _open_dir(parent)
-    name = f"{prefix}{secrets.token_hex(6)}"
-    try:
-        _close(make_stage_dir_at(parent_fd, name))
-    finally:
-        _close(parent_fd)
-    return parent / name
 
 
 def _probe_dir(path: str) -> os.stat_result:

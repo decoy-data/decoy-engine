@@ -1098,7 +1098,7 @@ owner = "cam"
 reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
+module = "decoy_engine/fileaccess/_local_chain.py"
 function = "_open_dir"
 sink = "os.open"
 ordinal = 0
