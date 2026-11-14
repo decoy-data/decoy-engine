@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import PurePath
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -44,6 +44,8 @@ class FileTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["file"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "path"
     format: Literal["csv", "parquet", "fixed_width"]
     path: str
     layout: FixedWidthLayout | None = Field(
@@ -80,6 +82,8 @@ class S3Target(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["s3"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "key"
     format: Literal["csv", "parquet"]
     bucket: str = Field(..., min_length=1, max_length=255)
     key: str = Field(..., min_length=1)
@@ -112,6 +116,8 @@ class GCSTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["gcs"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "object"
     format: Literal["csv", "parquet"]
     bucket: str = Field(..., min_length=1, max_length=255)
     object: str = Field(..., min_length=1)
