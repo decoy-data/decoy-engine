@@ -51,7 +51,7 @@ from __future__ import annotations
 import os
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import Any, BinaryIO, NoReturn
 
 import pandas as pd
 from pydantic import ValidationError as PydanticValidationError
@@ -226,71 +226,105 @@ class RecordFailure:
     message: str
 
 
+def _decode_line(raw_bytes: bytes) -> str | None:
+    """The line without its terminator, or None when it is not UTF-8.
+
+    Its own frame, so the `UnicodeDecodeError` (which holds the raw bytes) is
+    gone before the generator yields a failure.
+    """
+    try:
+        return raw_bytes.decode("utf-8").rstrip("\r\n")
+    except UnicodeDecodeError:
+        return None
+
+
+def _frame_failure(line: str, spec: FixedWidthLayout, rendered: str, line_no: int) -> str | None:
+    """The message for a line that is too long or too short for the layout, else None."""
+    required_width = spec.record_width
+    if spec.exact_record_width and len(line) > required_width:
+        return (
+            f"{_OVERLONG_PREFIX}{rendered}: line {line_no}: record is {len(line)} chars, "
+            f"longer than the layout's exact {required_width} chars (framing error)"
+        )
+    if len(line) < required_width:
+        return (
+            f"{rendered}: line {line_no}: record is {len(line)} chars, "
+            f"shorter than the layout's required {required_width} chars (row-width mismatch)"
+        )
+    return None
+
+
+def _parse_line(
+    line: str, spec: FixedWidthLayout, path: str, line_no: int
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Slice and cast one framed line: `(row, None)` or `(None, message)`.
+
+    The column locals live here, not in the generator, so none outlives a
+    failure yield.
+    """
+    row: dict[str, Any] = {}
+    for column in spec.columns:
+        raw_value = line[column.start : column.start + column.width]
+        stripped = _strip_pad(raw_value, column)
+        value, cast_failure = _cast_value(stripped, raw_value, column, path=path, line_no=line_no)
+        if cast_failure is not None:
+            return None, cast_failure
+        row[column.name] = value
+    return row, None
+
+
 def iter_fixed_width_records(
-    handle: FileHandle, spec: FixedWidthLayout
+    handle: FileHandle, spec: FixedWidthLayout, *, cast: bool = True
 ) -> Generator[dict[str, Any] | RecordFailure, None, None]:
     """Yield one dict per non-blank record, or one `RecordFailure` and stop.
 
-    The one fixed-width parser and the one place the file is opened. It never
-    raises for bad data, so no exception is created in a frame that holds file
-    content; line locals are deleted before a failure is yielded and the record
-    local before the next read.
+    The one fixed-width parser and the one place the file is opened. The open
+    happens here, eagerly, so a missing path or a directory raises at the call;
+    the generator closes the file. It never raises for bad data, so no exception
+    is created in a frame that holds file content. `cast=False` is the framing
+    pass for counting: decode, blank, short and overlong checks, no casts, and
+    each record is an empty dict.
     """
-    required_width = spec.record_width
-    line_no = 0
-    path = handle.display
-    rendered = _render_path(path)
     # Binary, one physical line per read: a text-mode reader decodes ahead in
     # ~8 KB chunks, so a capped read could fail on bytes past the cap and a
     # decode error could not name its real line.
-    with handle.open_binary(open) as fh:
+    fh = handle.open_binary(open)
+    records = _records(fh, handle.display, spec, cast)
+    next(records)  # prime: an unstarted generator would skip its `finally` on close()
+    return records  # type: ignore[return-value]  # only the priming yield is None
+
+
+def _records(
+    fh: BinaryIO, path: str, spec: FixedWidthLayout, cast: bool
+) -> Generator[dict[str, Any] | RecordFailure | None, None, None]:
+    rendered = _render_path(path)
+    line_no = 0
+    try:
+        yield None
         while True:
             raw_bytes = fh.readline()
             if raw_bytes == b"":
                 return  # EOF
             line_no += 1
-            try:
-                raw_line = raw_bytes.decode("utf-8")
-            except UnicodeDecodeError:
-                del raw_bytes
+            line = _decode_line(raw_bytes)
+            del raw_bytes
+            if line is None:
                 yield RecordFailure(f"{rendered}: line {line_no}: not valid UTF-8 text")
                 return
-            line = raw_line.rstrip("\r\n")
-            del raw_bytes, raw_line
             if line == "":
                 continue
-            if spec.exact_record_width and len(line) > required_width:
-                message = (
-                    f"{_OVERLONG_PREFIX}{rendered}: line {line_no}: record is {len(line)} chars, "
-                    f"longer than the layout's exact {required_width} chars (framing error)"
-                )
-                del line
-                yield RecordFailure(message)
-                return
-            if len(line) < required_width:
-                message = (
-                    f"{rendered}: line {line_no}: record is {len(line)} chars, "
-                    f"shorter than the layout's required {required_width} chars "
-                    "(row-width mismatch)"
-                )
-                del line
-                yield RecordFailure(message)
-                return
-            row: dict[str, Any] = {}
-            for column in spec.columns:
-                raw_value = line[column.start : column.start + column.width]
-                stripped = _strip_pad(raw_value, column)
-                value, cast_failure = _cast_value(
-                    stripped, raw_value, column, path=path, line_no=line_no
-                )
-                if cast_failure is not None:
-                    del line, raw_value, stripped, value, row
-                    yield RecordFailure(cast_failure)
-                    return
-                row[column.name] = value
+            message = _frame_failure(line, spec, rendered, line_no)
+            row: dict[str, Any] | None = {}
+            if message is None and cast:
+                row, message = _parse_line(line, spec, path, line_no)
             del line
+            if message is not None:
+                yield RecordFailure(message)
+                return
             yield row
             del row
+    finally:
+        fh.close()
 
 
 def _collect_records(
@@ -304,7 +338,6 @@ def _collect_records(
     records: list[dict[str, Any]] = []
     parser = iter_fixed_width_records(handle, spec)
     try:
-        # Zero reads nothing, as the capped read always did (the open is lazy).
         while max_records is None or len(records) < max_records:
             item = next(parser, None)
             if item is None:
@@ -347,11 +380,14 @@ def read_fixed_width_handle(
 
 
 def count_fixed_width_records(handle: FileHandle, layout: FixedWidthLayout | dict[str, Any]) -> int:
-    """Number of non-blank records, from one pass of the shared parser.
+    """Number of non-blank records, from one framing pass of the shared parser.
 
-    Blank lines are skipped and a missing final newline is fine. A bad record
-    raises the same value-free parse error a full read would.
+    Blank lines are skipped and a missing final newline is fine. Casts are not
+    run, so a bad value does not fail the count; a bad frame (not UTF-8, short,
+    overlong) raises the same value-free parse error a full read would.
     """
+    # A missing or unreadable file is reported before the layout is validated.
+    handle.stat()
     spec = _resolve_layout(layout, path=handle.display)
     count, failure = _count_records(handle, spec)
     if failure is not None:
@@ -361,13 +397,12 @@ def count_fixed_width_records(handle: FileHandle, layout: FixedWidthLayout | dic
 
 def _count_records(handle: FileHandle, spec: FixedWidthLayout) -> tuple[int | None, str | None]:
     count = 0
-    parser = iter_fixed_width_records(handle, spec)
+    parser = iter_fixed_width_records(handle, spec, cast=False)
     try:
         for item in parser:
             if isinstance(item, RecordFailure):
                 return None, item.message
             count += 1
-            del item
     finally:
         parser.close()
     return count, None

@@ -57,7 +57,7 @@ Two deliberate, documented simplifications versus a real `decoy run`:
    refuse (a fan-in impossibility).
 2. Row counts for the capacity floor itself (not the routing size signal)
    trust ONLY an exact per-table count (`TableProfile.row_count_exact`):
-   Parquet/fixed_width footer counts, never a CSV byte-size estimate. A
+   Parquet footer or fixed_width framing-pass counts, never a CSV byte-size estimate. A
    parent table priced only by estimate makes the whole verdict `UNKNOWN`
    (R6) -- this checker refuses to price a capacity verdict on a guess.
 
@@ -309,8 +309,8 @@ def estimate_job_capacity(
             return floor_estimate
 
     job_seed = _normalize_job_seed_int(config)
-    # Bounded residency (the default): cheap row-count metadata plus a
-    # <=10k-row sample per source, never a full-frame read -- the SAME call
+    # Bounded residency (the default): row counts (a footer, or a framing pass for
+    # fixed_width) plus a <=10k-row sample per source, never a full-frame read -- the SAME call
     # `run_pipeline` makes before it decides a route (`_pipeline.py`), reused
     # here rather than re-derived so the relationship graph and per-table
     # row counts this function prices are the identical numbers the real run
