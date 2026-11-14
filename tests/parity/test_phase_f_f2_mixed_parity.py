@@ -9,6 +9,7 @@ backend from the lane's own per-column evidence, so a label alone cannot pass.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -235,12 +236,12 @@ def test_two_independent_mask_tables_each_run_on_the_chunked_lane(tmp_path: Path
 def test_generation_runs_once_and_each_mask_table_gets_one_lane_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
     from decoy_engine.generation import synthesize
 
     lane_tables: list[str] = []
     generated: list[int] = []
-    real_lane, real_generate = _chunked_entry.run_mask_chunked, synthesize.generate_tables
+    real_lane, real_generate = _native_core.mask_chunked, synthesize.generate_tables
 
     def lane(*args: Any, **kwargs: Any) -> Any:
         lane_tables.append(kwargs["table"])
@@ -250,7 +251,7 @@ def test_generation_runs_once_and_each_mask_table_gets_one_lane_run(
         generated.append(1)
         return real_generate(*args, **kwargs)
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", lane)
+    monkeypatch.setattr(_native_core, "mask_chunked", lane)
     monkeypatch.setattr(synthesize, "generate_tables", generate)
     child = child_table(pa.array(STRING_KEYS, pa.string()))
     got = run(mixed_config(tmp_path, child), {CHILD: child})
@@ -267,7 +268,13 @@ def test_streamed_warn_policy_still_emits_one_edge_warning(tmp_path: Path) -> No
     sink = RecordingSink()
     got = run(config, {CHILD: child}, sink=sink)
     assert [w.code for w in got.warnings].count("orphan_fk") == 1
-    assert warning_signature(got) == warning_signature(want)
+    # A foreign sink also draws the gate's own deferral warning (plan AT-28); the route's edge
+    # warnings are compared without it, in order.
+    assert [w.code for w in got.warnings].count("post_scan_output_unreadable") == 1
+    route_warnings = [w for w in got.warnings if w.code != "post_scan_output_unreadable"]
+    assert warning_signature(replace(got, warnings=tuple(route_warnings))) == warning_signature(
+        want
+    )
     assert_outputs_identical(sink.published or {}, want.outputs)
 
 

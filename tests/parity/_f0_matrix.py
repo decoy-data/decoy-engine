@@ -98,8 +98,8 @@ MATRIX: tuple[MatrixRow, ...] = (
         SUPPORTED,
         ("formula",),
         ("formula",),
-        "Inline path: per-row py/faker seeds from the GLOBAL i; a failed row is a silent None "
-        "(pinned: `empty` and `bad` columns come out as Arrow null).",
+        "Inline path: per-row py/faker seeds from the GLOBAL i; a failed row fails the run "
+        "(pinned: the `empty` column comes out as Arrow null).",
     ),
     MatrixRow(
         "formula wall-clock helpers (today, days_from_now, ...)",
@@ -165,6 +165,15 @@ MATRIX: tuple[MatrixRow, ...] = (
         ("constant", "distribution"),
         "GEN-TYPES E1: constant draws nothing; distribution is one default_rng(base_int('dist')) "
         "Generator per column, prefix-stable across batches. Recorded under numpy 2.2.6.",
+    ),
+    MatrixRow(
+        "lookup",
+        DEFERRED,
+        (),
+        ("lookup",),
+        "GEN-TYPES E3: one random.Random(base_int('py')).choices over a list pinned in the plan; "
+        "resident only (the streamed route declines it), so no F0 fixture pins it. Value equality "
+        "is covered by tests/unit/generation/kinds/test_gen_types_e3_lookup.py.",
     ),
     MatrixRow(
         "conditional-sampling",
