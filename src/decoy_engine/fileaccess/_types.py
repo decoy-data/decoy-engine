@@ -31,6 +31,7 @@ class FileRole(str, enum.Enum):
     REFERENCE = "reference"
     CORPUS = "corpus"
     SNAPSHOT = "snapshot"
+    LOOKUP = "lookup"
     SECRET = "secret"  # noqa: S105 - a role name, not a credential
     VAULT = "vault"
     CONFIG = "config"
@@ -54,7 +55,6 @@ StageLabel = Literal[
     "hold",
     "subset",
     "vault",
-    "vault_direct",
     "pack",
 ]
 
