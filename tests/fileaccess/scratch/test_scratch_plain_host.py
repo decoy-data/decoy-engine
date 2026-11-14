@@ -103,6 +103,7 @@ def _run(lane: str, tmp_path: Path, scratch: Path, monkeypatch: pytest.MonkeyPat
         "key_provider": THROWAWAY_KEY_PROVIDER,
         "temp_dir": scratch,
         "batch_rows": 1,  # one row per batch: every pass spools to scratch
+        "config": {},
     }
     if lane == "batch":
         return _digest(run_fk_out_of_core(plan, sources, **common).outputs)
