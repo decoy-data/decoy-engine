@@ -17,7 +17,7 @@ import pytest
 from decoy_engine import read_fixed_width, reasons
 from decoy_engine.errors import FixedWidthParseError
 from decoy_engine.execution import ExecutionError
-from decoy_engine.profile import _lazy_fixed_width
+from decoy_engine.profile import _fixed_width_reader, _lazy_fixed_width
 from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import LazySource
 from tests.unit.test_v2_fixed_width_source import _SENTINEL, _assert_sentinel_unreachable
@@ -63,7 +63,9 @@ class Spy:
                 self.yielded += 1
                 yield item
 
+        # The batch path opens through this module, the count pass through the reader's own.
         monkeypatch.setattr(_lazy_fixed_width, "iter_fixed_width_records", spy)
+        monkeypatch.setattr(_fixed_width_reader, "iter_fixed_width_records", spy)
 
 
 def test_is_a_lazy_source_built_from_a_descriptor(tmp_path: Path) -> None:
@@ -122,7 +124,8 @@ def test_at18a_the_count_is_cached_while_the_identity_holds(
     assert src.num_rows == 5
     assert spy.opened == 1
     assert src.num_rows == 5
-    assert src.column_null_counts() == {"s": 0, "n": 0, "f": 0}
+    # A float "nan" reads as null and a framing pass cannot see it: unknown, never 0.
+    assert src.column_null_counts() == {"s": 0, "n": 0, "f": None}
     assert spy.opened == 1
     write(path, records(8))
     assert src.num_rows == 8
@@ -206,13 +209,13 @@ def _count_changes_during_the_pass(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> FixedWidthLazySource:
     src = lazy(path)
-    real = _lazy_fixed_width.iter_fixed_width_records
+    real = _fixed_width_reader.iter_fixed_width_records
 
     def rewriting(*args: Any, **kwargs: Any) -> Iterator[Any]:
         yield from real(*args, **kwargs)
         write(path, records(9))
 
-    monkeypatch.setattr(_lazy_fixed_width, "iter_fixed_width_records", rewriting)
+    monkeypatch.setattr(_fixed_width_reader, "iter_fixed_width_records", rewriting)
     return src
 
 
@@ -274,3 +277,47 @@ def test_at18d_a_bad_record_through_open_batches_is_value_free(tmp_path: Path) -
     with pytest.raises(FixedWidthParseError) as info:
         src.open_batches(10)
     _assert_sentinel_unreachable(info.value)
+
+
+def test_at18b_a_float_nan_is_null_as_in_the_resident_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "f.dat", line(0) + b"\n" + b"nan_row  " + b"   7" + b"   nan\n")
+    resident = pa.Table.from_pandas(read_fixed_width(path, LAYOUT), preserve_index=False)
+    got = lazy(path).to_table()
+    assert got.schema == resident.schema
+    assert got.column("f").to_pylist() == [0.5, None] == resident.column("f").to_pylist()
+    assert got.column("f").null_count == 1
+
+
+def test_at18d_an_int_beyond_64_bits_is_a_value_free_parse_error(tmp_path: Path) -> None:
+    big = _SENTINEL.encode() + b"9" * 20  # sentinel row with a 20-digit int in the n column
+    layout = {
+        "columns": [
+            {"name": "s", "start": 0, "width": 9},
+            {"name": "n", "start": 9, "width": 20, "type": "int"},
+        ]
+    }
+    path = write(tmp_path / "f.dat", _SENTINEL.encode() + b"1".ljust(20) + b"\n" + big + b"\n")
+    descriptor = {"type": "file", "format": "fixed_width", "path": str(path), "layout": layout}
+    src = FixedWidthLazySource.from_descriptor(descriptor, table="t")
+    with pytest.raises(FixedWidthParseError) as info:
+        list(src.iter_batches(10))
+    _assert_sentinel_unreachable(info.value)
+    assert "'n'" in str(info.value)
+    assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+def test_arguments_are_checked_at_the_call(tmp_path: Path) -> None:
+    src = lazy(write(tmp_path / "f.dat", records(3)), table="orders")
+    for bad_call in (
+        lambda: src.iter_batches(0),
+        lambda: src.iter_batches(2, columns=["nope"]),
+        lambda: src.iter_batches(2, columns=[]),
+        lambda: src.open_batches(0),
+        lambda: src.open_batches(2, columns=["nope"]),
+        lambda: src.to_table(["nope"]),
+    ):
+        with pytest.raises(ValueError, match="batch_rows|column") as info:
+            bad_call()  # raised by the call itself, not by the first next()
+        assert "row0" not in str(info.value)
+    with pytest.raises(ValueError, match="'nope'"):
+        src.to_table(["nope"])
