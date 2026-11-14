@@ -102,15 +102,15 @@ def test_at18_columns_select_a_projection(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        records(5) + b"\n\n",
-        b"\n" + records(5, sep=b"\n\n"),
-        records(5, sep=b"\r\n"),
-        records(5).rstrip(b"\n"),
+        records(40) + b"\n\n",
+        b"\n" + records(40, sep=b"\n\n"),
+        records(40, sep=b"\r\n"),
+        records(40).rstrip(b"\n"),
     ],
     ids=["trailing-blanks", "interleaved-blanks", "crlf", "no-final-newline"],
 )
 def test_at18a_num_rows_is_exact(tmp_path: Path, payload: bytes) -> None:
-    assert lazy(write(tmp_path / "f.dat", payload)).num_rows == 5
+    assert lazy(write(tmp_path / "f.dat", payload)).num_rows == 40
 
 
 def test_at18a_the_count_is_cached_while_the_identity_holds(
