@@ -178,7 +178,8 @@ def _endpoint_identity(url: str | None) -> str:
     # or user-info may name a different tenant by case alone.
     if not url:
         return ""
-    parts = urlsplit(url.rstrip("/"))
+    parts = urlsplit(url)
     userinfo, at, hostport = parts.netloc.rpartition("@")
     netloc = f"{userinfo}{at}{hostport.lower()}"
-    return urlunsplit((parts.scheme.lower(), netloc, parts.path, parts.query, parts.fragment))
+    path = parts.path.removesuffix("/")
+    return urlunsplit((parts.scheme.lower(), netloc, path, parts.query, parts.fragment))
