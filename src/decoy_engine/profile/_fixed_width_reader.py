@@ -27,7 +27,7 @@ and neither chains it in via `__cause__` or `__context__` (see
 may carry PII, and a chained cause OR context leaks through
 tracebacks/`logging.exception`/`exc_info=True` even when the message
 itself is clean. Bad data never raises inside the code that holds it:
-`_cast_value` and `_parse_records` return a failure message (position,
+`_cast_value` and `iter_fixed_width_records` return a failure message (position,
 column name, value length, caster type name) instead of raising, and
 `read_fixed_width` raises only after they have returned, from a frame
 that holds no line, value or record. This covers errors about the data;
@@ -49,7 +49,9 @@ never silently coerced to a default.
 from __future__ import annotations
 
 import os
-from typing import Any
+from collections.abc import Generator
+from dataclasses import dataclass
+from typing import Any, NoReturn
 
 import pandas as pd
 from pydantic import ValidationError as PydanticValidationError
@@ -217,44 +219,24 @@ def read_fixed_width(
         handle.close()
 
 
-def read_fixed_width_handle(
-    handle: FileHandle,
-    layout: FixedWidthLayout | dict[str, Any],
-    *,
-    max_records: int | None = None,
-) -> pd.DataFrame:
-    """`read_fixed_width` over a handle the caller's policy already authorized."""
-    path = handle.display
-    spec = _resolve_layout(layout, path=path)
+@dataclass(frozen=True)
+class RecordFailure:
+    """The first bad line of a fixed-width read: a value-free message, never data."""
 
-    records, failure = _parse_records(handle, spec, max_records)
-    if failure is not None and failure.startswith(_OVERLONG_PREFIX):
-        # Raised from a frame holding no line or value, like the other parse failures.
-        raise FixedWidthRecordOverlongError(failure[len(_OVERLONG_PREFIX) :])
-    if failure is not None:
-        # Raised here, after `_parse_records` has returned: this frame holds
-        # no line, value or parsed record, so nothing reachable from the
-        # exception (chain, traceback frames, captured locals) carries file
-        # content.
-        raise FixedWidthParseError(failure)
-    if records is None:  # pragma: no cover - _parse_records returns one or the other
-        raise RuntimeError("fixed-width parser returned neither records nor a failure")
-
-    column_names = [column.name for column in spec.columns]
-    return pd.DataFrame.from_records(records, columns=column_names)
+    message: str
 
 
-__all__ = ["read_fixed_width"]
+def iter_fixed_width_records(
+    handle: FileHandle, spec: FixedWidthLayout
+) -> Generator[dict[str, Any] | RecordFailure, None, None]:
+    """Yield one dict per non-blank record, or one `RecordFailure` and stop.
 
-
-def _parse_records(
-    handle: FileHandle, spec: FixedWidthLayout, max_records: int | None
-) -> tuple[list[dict[str, Any]] | None, str | None]:
-    """Parse up to `max_records` records. Returns `(records, None)`, or
-    `(None, message)` on the first bad line; never raises for bad data, so
-    no exception is ever created in a frame that holds file content."""
+    The one fixed-width parser and the one place the file is opened. It never
+    raises for bad data, so no exception is created in a frame that holds file
+    content; line locals are deleted before a failure is yielded and the record
+    local before the next read.
+    """
     required_width = spec.record_width
-    records: list[dict[str, Any]] = []
     line_no = 0
     path = handle.display
     rendered = _render_path(path)
@@ -262,29 +244,38 @@ def _parse_records(
     # ~8 KB chunks, so a capped read could fail on bytes past the cap and a
     # decode error could not name its real line.
     with handle.open_binary(open) as fh:
-        while max_records is None or len(records) < max_records:
+        while True:
             raw_bytes = fh.readline()
             if raw_bytes == b"":
-                break  # EOF
+                return  # EOF
             line_no += 1
             try:
                 raw_line = raw_bytes.decode("utf-8")
             except UnicodeDecodeError:
-                return None, f"{rendered}: line {line_no}: not valid UTF-8 text"
+                del raw_bytes
+                yield RecordFailure(f"{rendered}: line {line_no}: not valid UTF-8 text")
+                return
             line = raw_line.rstrip("\r\n")
+            del raw_bytes, raw_line
             if line == "":
                 continue
             if spec.exact_record_width and len(line) > required_width:
-                return None, (
+                message = (
                     f"{_OVERLONG_PREFIX}{rendered}: line {line_no}: record is {len(line)} chars, "
                     f"longer than the layout's exact {required_width} chars (framing error)"
                 )
+                del line
+                yield RecordFailure(message)
+                return
             if len(line) < required_width:
-                return None, (
+                message = (
                     f"{rendered}: line {line_no}: record is {len(line)} chars, "
                     f"shorter than the layout's required {required_width} chars "
                     "(row-width mismatch)"
                 )
+                del line
+                yield RecordFailure(message)
+                return
             row: dict[str, Any] = {}
             for column in spec.columns:
                 raw_value = line[column.start : column.start + column.width]
@@ -293,7 +284,98 @@ def _parse_records(
                     stripped, raw_value, column, path=path, line_no=line_no
                 )
                 if cast_failure is not None:
-                    return None, cast_failure
+                    del line, raw_value, stripped, value, row
+                    yield RecordFailure(cast_failure)
+                    return
                 row[column.name] = value
-            records.append(row)
+            del line
+            yield row
+            del row
+
+
+def _collect_records(
+    handle: FileHandle, spec: FixedWidthLayout, max_records: int | None
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Consume up to `max_records` records: `(records, None)`, or `(None, message)`.
+
+    On failure the partial list is cleared before returning, so the caller
+    raises from a frame that holds no parsed record.
+    """
+    records: list[dict[str, Any]] = []
+    parser = iter_fixed_width_records(handle, spec)
+    try:
+        # Zero reads nothing, as the capped read always did (the open is lazy).
+        while max_records is None or len(records) < max_records:
+            item = next(parser, None)
+            if item is None:
+                break
+            if isinstance(item, RecordFailure):
+                records.clear()
+                return None, item.message
+            records.append(item)
+    finally:
+        parser.close()
     return records, None
+
+
+def _raise_failure(message: str) -> NoReturn:
+    """Raise the typed parse error for `message`, from a frame holding no file data."""
+    if message.startswith(_OVERLONG_PREFIX):
+        raise FixedWidthRecordOverlongError(message[len(_OVERLONG_PREFIX) :])
+    raise FixedWidthParseError(message)
+
+
+def read_fixed_width_handle(
+    handle: FileHandle,
+    layout: FixedWidthLayout | dict[str, Any],
+    *,
+    max_records: int | None = None,
+) -> pd.DataFrame:
+    """`read_fixed_width` over a handle the caller's policy already authorized."""
+    spec = _resolve_layout(layout, path=handle.display)
+
+    records, failure = _collect_records(handle, spec, max_records)
+    if failure is not None:
+        # Raised after the collector returned: this frame holds no line, value or
+        # parsed record, so nothing reachable from the exception carries file content.
+        _raise_failure(failure)
+    if records is None:  # pragma: no cover - the collector returns one or the other
+        raise RuntimeError("fixed-width parser returned neither records nor a failure")
+
+    column_names = [column.name for column in spec.columns]
+    return pd.DataFrame.from_records(records, columns=column_names)
+
+
+def count_fixed_width_records(handle: FileHandle, layout: FixedWidthLayout | dict[str, Any]) -> int:
+    """Number of non-blank records, from one pass of the shared parser.
+
+    Blank lines are skipped and a missing final newline is fine. A bad record
+    raises the same value-free parse error a full read would.
+    """
+    spec = _resolve_layout(layout, path=handle.display)
+    count, failure = _count_records(handle, spec)
+    if failure is not None:
+        _raise_failure(failure)
+    return count or 0
+
+
+def _count_records(handle: FileHandle, spec: FixedWidthLayout) -> tuple[int | None, str | None]:
+    count = 0
+    parser = iter_fixed_width_records(handle, spec)
+    try:
+        for item in parser:
+            if isinstance(item, RecordFailure):
+                return None, item.message
+            count += 1
+            del item
+    finally:
+        parser.close()
+    return count, None
+
+
+__all__ = [
+    "RecordFailure",
+    "count_fixed_width_records",
+    "iter_fixed_width_records",
+    "read_fixed_width",
+]
