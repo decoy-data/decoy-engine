@@ -62,6 +62,7 @@ def _run(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> list[dict[str, Any]]
         registry=get_default_registry(),
         relationship_graph=graph,
         temp_disk_budget_bytes=1 << 40,
+        config={},
         **kwargs,
     )
     assert len(walks) == 2, walks  # non-vacuity: one walk per table

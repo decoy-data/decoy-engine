@@ -57,7 +57,8 @@ def make_config(
             for t in tables
         },
         "targets": {
-            t["name"]: {"type": "file", "format": "csv", "path": "/dev/null"} for t in tables
+            t["name"]: {"type": "file", "format": "csv", "path": f"/dev/null.{t['name']}"}
+            for t in tables
         },
         "tables": tables,
     }
