@@ -48,10 +48,12 @@ never silently coerced to a default.
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, BinaryIO, NoReturn
+from typing import Any, BinaryIO, NoReturn, cast
 
 import pandas as pd
 from pydantic import ValidationError as PydanticValidationError
@@ -274,14 +276,14 @@ def _parse_line(
 
 
 def iter_fixed_width_records(
-    handle: FileHandle, spec: FixedWidthLayout, *, cast: bool = True
+    handle: FileHandle, spec: FixedWidthLayout, *, cast_values: bool = True
 ) -> Generator[dict[str, Any] | RecordFailure, None, None]:
     """Yield one dict per non-blank record, or one `RecordFailure` and stop.
 
     The one fixed-width parser and the one place the file is opened. The open
     happens here, eagerly, so a missing path or a directory raises at the call;
     the generator closes the file. It never raises for bad data, so no exception
-    is created in a frame that holds file content. `cast=False` is the framing
+    is created in a frame that holds file content. `cast_values=False` is the framing
     pass for counting: decode, blank, short and overlong checks, no casts, and
     each record is an empty dict.
     """
@@ -289,13 +291,14 @@ def iter_fixed_width_records(
     # ~8 KB chunks, so a capped read could fail on bytes past the cap and a
     # decode error could not name its real line.
     fh = handle.open_binary(open)
-    records = _records(fh, handle.display, spec, cast)
+    records = _records(fh, handle.display, spec, cast_values)
     next(records)  # prime: an unstarted generator would skip its `finally` on close()
-    return records  # type: ignore[return-value]  # only the priming yield is None
+    # Only the priming yield is None, and it was just consumed.
+    return cast(Generator[dict[str, Any] | RecordFailure, None, None], records)
 
 
 def _records(
-    fh: BinaryIO, path: str, spec: FixedWidthLayout, cast: bool
+    fh: BinaryIO, path: str, spec: FixedWidthLayout, cast_values: bool
 ) -> Generator[dict[str, Any] | RecordFailure | None, None, None]:
     rendered = _render_path(path)
     line_no = 0
@@ -315,7 +318,7 @@ def _records(
                 continue
             message = _frame_failure(line, spec, rendered, line_no)
             row: dict[str, Any] | None = {}
-            if message is None and cast:
+            if message is None and cast_values:
                 row, message = _parse_line(line, spec, path, line_no)
             del line
             if message is not None:
@@ -386,8 +389,9 @@ def count_fixed_width_records(handle: FileHandle, layout: FixedWidthLayout | dic
     run, so a bad value does not fail the count; a bad frame (not UTF-8, short,
     overlong) raises the same value-free parse error a full read would.
     """
-    # A missing or unreadable file is reported before the layout is validated.
-    handle.stat()
+    # A missing file or a directory is reported before the layout is validated.
+    if stat.S_ISDIR(handle.stat().st_mode):
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), handle.display)
     spec = _resolve_layout(layout, path=handle.display)
     count, failure = _count_records(handle, spec)
     if failure is not None:
@@ -397,7 +401,7 @@ def count_fixed_width_records(handle: FileHandle, layout: FixedWidthLayout | dic
 
 def _count_records(handle: FileHandle, spec: FixedWidthLayout) -> tuple[int | None, str | None]:
     count = 0
-    parser = iter_fixed_width_records(handle, spec, cast=False)
+    parser = iter_fixed_width_records(handle, spec, cast_values=False)
     try:
         for item in parser:
             if isinstance(item, RecordFailure):

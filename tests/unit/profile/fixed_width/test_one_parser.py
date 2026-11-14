@@ -130,24 +130,43 @@ _GEN_LAYOUT = FixedWidthLayout.model_validate(
 _GOOD_LAST_COLUMN = b"123" + _SENTINEL.encode() + b"\n"
 
 
-def _failing_generator(tmp_path: Path, tail: bytes, **kwargs: Any) -> Any:
-    path = _write(tmp_path, _GOOD_LAST_COLUMN + tail)
+_CAST_LAYOUT = FixedWidthLayout.model_validate(
+    {
+        "columns": [
+            {"name": "s", "start": 0, "width": 9},
+            {"name": "n", "start": 9, "width": 3, "type": "int"},
+        ],
+        "exact_record_width": True,
+    }
+)
+_STEM = _SENTINEL_STEM.encode()
+# kind -> (layout, good first record, bad second line). The sentinel rides in the good record
+# and in the bad line, so a leaked local from either shows up.
+_CASES: dict[str, tuple[FixedWidthLayout, bytes, bytes]] = {
+    "utf8": (_GEN_LAYOUT, _GOOD_LAST_COLUMN, b"\xff" + _SENTINEL.encode() + b"\n"),
+    "short": (_GEN_LAYOUT, _GOOD_LAST_COLUMN, b"123" + _STEM + b"\n"),
+    "overlong": (_GEN_LAYOUT, _GOOD_LAST_COLUMN, b"123" + _SENTINEL.encode() + b"EXTRA\n"),
+    # the string column comes first, so a failed cast leaves a half-built row holding it
+    "cast": (_CAST_LAYOUT, _SENTINEL.encode() + b"123\n", _SENTINEL.encode() + b"abc\n"),
+}
+
+
+def _generator(tmp_path: Path, payload: bytes, layout: FixedWidthLayout) -> Any:
+    path = _write(tmp_path, payload)
     handle = fileaccess.current().open_read(FileRequest(FileRole.SOURCE, "read", str(path), "p"))
-    gen = iter_fixed_width_records(handle, _GEN_LAYOUT, **kwargs)
+    return iter_fixed_width_records(handle, layout)
+
+
+def _failing_generator(tmp_path: Path, kind: str) -> Any:
+    layout, good, bad = _CASES[kind]
+    gen = _generator(tmp_path, good + bad, layout)
     assert isinstance(next(gen), dict)
     return gen
 
 
-_BAD_TAILS = {
-    "utf8": b"\xff" + _SENTINEL.encode() + b"\n",
-    "short": b"12\n",
-    "overlong": b"123" + _SENTINEL.encode() + b"EXTRA\n",
-}
-
-
-@pytest.mark.parametrize("kind", sorted(_BAD_TAILS))
+@pytest.mark.parametrize("kind", sorted(_CASES))
 def test_failure_yield_frame_holds_no_sentinel(tmp_path: Path, kind: str) -> None:
-    gen = _failing_generator(tmp_path, _BAD_TAILS[kind])
+    gen = _failing_generator(tmp_path, kind)
     failure = next(gen)
     assert isinstance(failure, RecordFailure)
     assert _SENTINEL_STEM not in failure.message
@@ -155,8 +174,24 @@ def test_failure_yield_frame_holds_no_sentinel(tmp_path: Path, kind: str) -> Non
     gen.close()
 
 
+@pytest.mark.parametrize("stage", ["unstarted", "one_record", "exhausted", "after_failure"])
+def test_the_file_is_closed_in_every_ending(tmp_path: Path, stage: str) -> None:
+    bad = {"after_failure": b"short\n"}.get(stage, b"")
+    gen = _generator(tmp_path, _GOOD_LAST_COLUMN + bad, _GEN_LAYOUT)
+    fh = gen.gi_frame.f_locals["fh"]
+    assert not fh.closed
+    if stage == "one_record":
+        next(gen)
+    elif stage == "exhausted":
+        assert len(list(gen)) == 1
+    elif stage == "after_failure":
+        assert isinstance(list(gen)[-1], RecordFailure)
+    gen.close()
+    assert fh.closed
+
+
 def test_throw_at_the_utf8_failure_chains_nothing(tmp_path: Path) -> None:
-    gen = _failing_generator(tmp_path, _BAD_TAILS["utf8"])
+    gen = _failing_generator(tmp_path, "utf8")
     assert isinstance(next(gen), RecordFailure)
     with pytest.raises(RuntimeError) as info:
         gen.throw(RuntimeError("consumer abort"))
@@ -166,6 +201,11 @@ def test_throw_at_the_utf8_failure_chains_nothing(tmp_path: Path) -> None:
 def test_framing_mode_skips_casts_but_keeps_framing(tmp_path: Path) -> None:
     path = _write(tmp_path, b"abcdefghiXYZ\nshort\n")
     handle = fileaccess.current().open_read(FileRequest(FileRole.SOURCE, "read", str(path), "p"))
-    items = list(iter_fixed_width_records(handle, _GEN_LAYOUT, cast=False))
+    items = list(iter_fixed_width_records(handle, _GEN_LAYOUT, cast_values=False))
     assert items[0] == {}
     assert isinstance(items[1], RecordFailure) and "shorter" in items[1].message
+
+
+def test_row_count_of_a_directory_beats_a_bad_layout(tmp_path: Path) -> None:
+    with pytest.raises(IsADirectoryError):
+        FixedWidthFileSource(tmp_path, {"columns": []}).row_count()

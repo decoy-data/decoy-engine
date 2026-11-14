@@ -116,8 +116,8 @@ def largest_mask_table_rows_from_profile(
 
     The SC7a bounded-profiling core made `TableProfile.row_count` a count that
     needs no full-frame read (exact from a Parquet footer or a fixed_width
-    framing pass, a `row_count_exact=False` byte-size estimate for CSV) that no
-    longer requires reading the whole source into a frame. This function surfaces that count as the size
+    framing pass, a `row_count_exact=False` byte-size estimate for CSV). This
+    function surfaces that count as the size
     signal the SC2 gates need, so the reject-before-read fires on the LAZY
     (`sources={}`, `source_loader`) path where `largest_mask_table_rows` (which
     reads resident Arrow metadata) returns None -- the `None` hole the F2
