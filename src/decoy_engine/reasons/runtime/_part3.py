@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -391,12 +391,12 @@ POST_SCAN_INTEGRITY_SINK_UNREADABLE = _d(
     "The Post-scan integrity checks cannot read this sink back, so the run is refused.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.27.0",
 )
 POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
     "post_scan_integrity_transforms_unsupported",
     "The Post-scan integrity checks cannot compare a transformed table with its source.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.27.0",
 )

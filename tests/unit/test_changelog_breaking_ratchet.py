@@ -32,6 +32,51 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.25.0", "`profiling.starter_config(scan, *, baseline_path, targets, s"): (
+        "new builder; `refuses` names what the new `PipelineConfig` check does with the placeholder, covered by the namespace entry in the Breaking list"
+    ),
+    ("0.25.0", "`contracts.strategy_requirements` now holds the strategy req"): (
+        "moves the requirement table; the refusals named are the new `starter_config` function's own"
+    ),
+    ("0.25.0", '`config.target_identity` is the one definition of "same dest'): (
+        "new helper; the refusals named are the new `starter_config` function's own"
+    ),
+    ("0.25.0", "`post_scan.integrity: true` with regex detectors no longer k"): (
+        "relaxation: integrity runs on more routes and `execution_mode: stream` no longer refuses it"
+    ),
+    ("0.25.0", "A model detector, or `post_scan.ner_findings: fail`, still n"): (
+        "unchanged refusal: model detectors and `ner_findings: fail` still need resident values; the retired reason points at the new one"
+    ),
+    ("0.25.0", "An explicit integrity check is never run unchecked. With `po"): (
+        "Breaking: an explicit `post_scan.integrity: true` with a sink the gate cannot read back is refused before any sink is written"
+    ),
+    ("0.25.0", "The prefix `decoy-set-namespace-` is reserved for the placeh"): (
+        "Breaking: a namespace beginning `decoy-set-namespace-` is refused"
+    ),
+    ("0.25.0", "A run that streams its tables into a `ParquetTransactionalSi"): (
+        "guard inside the new staged gate's own re-read: a lazy source that changed between bind and read"
+    ),
+    ("0.25.0", "`ParquetTransactionalSink.staged_tables()` returns each stag"): (
+        "relaxation: an explicit `sequential` or `out_of_core` request that was refused now runs"
+    ),
+    ("0.25.0", "`run_pipeline` with a `source_loader` and a `tables:` entry "): (
+        "Breaking: a table masked through `source_loader` with no `sources:` entry is refused"
+    ),
+    ("0.25.0", "A second guard runs after the plan is built. A supplied mask"): (
+        "Breaking: the same loader-table refusal, as a second guard after the plan is built"
+    ),
+    ("0.25.0", "Breaking: every digest, HMAC and signature input is now buil"): (
+        "Breaking: every digest, HMAC and signature input is built by one canonical writer and several digests change"
+    ),
+    ("0.25.0", "A YAML date or timestamp, NaN, Infinity or an unpaired surro"): (
+        "Breaking: a YAML date or timestamp, NaN, Infinity or an unpaired surrogate in a config is refused at plan compile"
+    ),
+    ("0.25.0", "Boolean environment flags go through one parser, `decoy_engi"): (
+        "Breaking: environment flags read one accepted set and an unknown value raises `EnvFlagError`"
+    ),
+    ("0.25.0", "`DECOY_ML_DISABLED` used to disable ML only for `1`; it now "): (
+        "Breaking: environment flags read one accepted set and an unknown value raises `EnvFlagError`"
+    ),
     ("0.24.0", "- Two sentries hold the result: `tests/sentry/profiling/test"): (
         "describes two internal sentries; `raise` names a source raise site, not a consumer-visible failure"
     ),

@@ -9,6 +9,75 @@ minimum engine version it was tested against via its
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-14
+
+### Breaking for consumers
+
+- a namespace beginning `decoy-set-namespace-` on a column or a relationship now refuses (`config/namespace_placeholder_unset`); no shipped config uses the prefix.
+- a table masked through `source_loader` with strategies under `tables:` and no `sources:` entry now refuses (`config/loader_table_undeclared`) instead of returning the loader's rows unmasked.
+- environment flags read one accepted set (`1`, `true`, `yes`, `on`, `0`, `false`, `no`, `off`); an unknown `DECOY_PACK_REQUIRE_SIGNATURE` raises `EnvFlagError` instead of `ModelPackLoadError`, and the custom provider folder variable `CUSTOM_PROVIDERS_DIR` is now `DECOY_CUSTOM_PROVIDERS_DIR`.
+- a config holding a YAML date or timestamp, NaN, Infinity or an unpaired surrogate is now refused at plan compile (`plan/config_value_not_json`); quote the value or remove it.
+- every digest, HMAC and signature input is built by one canonical writer, so `pipeline_config_hash`, the phase envelope bytes, the pinned-plan fingerprint, the model pack signature scope, `profile_hash`, `PinnedEnvelope.digest`, the reproducibility `config_digest` (non-ASCII content), the physical-input identity hash and the subset request fingerprint change; a pinned plan or resume fingerprint from an older engine is refused with its existing mismatch code and must be rebuilt, and a model pack signed over non-ASCII manifest text must be signed again.
+- with `post_scan.integrity: true`, a sink the gate cannot read back (anything but the engine's own Parquet sink) now refuses the run before any sink is written (`runtime/post_scan_integrity_sink_unreadable`).
+
+### Added (starter_config builder, SCAN-MULTI S3-engine.2, 2026-11-14)
+
+`profiling.starter_config(scan, *, baseline_path, targets, seed, relationships)` turns a `ScanSet` into one starter pipeline config (`StarterConfig`: `config`, REVIEW `notes`, `suggestions`, `relationship_template`). Every column gets an entry, and a column no detector flagged is redacted with a note. Declared relationships are copied unchanged and never inferred. Their key columns hash under one shared namespace, or under the reserved `decoy-set-namespace-<n>` placeholder when none is declared, which `PipelineConfig` refuses until the user sets a real one. Cloud sources write to a local `masked/` folder with a note.
+
+`contracts.strategy_requirements` now holds the strategy requirement table (`StrategyRequirement`, `REQUIREMENTS_BY_STRATEGY`, `requirements_for`, `requirement_applies`); `plan.checks` re-exports the same names. `config.relationship_shape_error` is the shared shape check for a declared relationship (unknown table, key column count, missing key column). `starter_config` refuses two tables that would write one target path, and an empty explicit target.
+
+`config.target_identity` is the one definition of "same destination" (normalized file path, S3 bucket and key, GCS bucket and object). `starter_config` compares it, so two equal cloud targets or `out/a.csv` and `out/./a.csv` are refused.
+
+### Changed (regex integrity streams, only a model ask stays resident, POSTSCAN-PS12, 2026-11-14)
+
+`post_scan.integrity: true` with regex detectors no longer keeps a run on the resident route. It takes the sequential, out-of-core, chunked and unified-slice routes when they are eligible, and `execution_mode: stream` no longer refuses it. The gate runs the column suite over the staged output before the commit, so a failing finding blocks the run and nothing is published. A `fail` finding withholds the run on every route, as a failed key check does; now it does so also on the streamed routes.
+
+A model detector, or `post_scan.ner_findings: fail`, still needs resident values. Those runs stay resident with the new reason `route/post_scan_models_resident`, and stream mode still refuses them. The reason `route/post_scan_integrity_requested` is retired and points at it.
+
+An explicit integrity check is never run unchecked. With `post_scan.integrity: true`, a sink the gate cannot read back (anything but the engine's own Parquet sink), or a deferred gate while a sink is present, refuses the run before any sink is written or route reads a source, with `runtime/post_scan_integrity_sink_unreadable`. A transform-bearing table on a staged commit refuses before the commit with `runtime/post_scan_integrity_transforms_unsupported`, because its rows no longer line up with the raw source. Integrity with no sink and a deferred gate still runs report-only. Declared keys without integrity keep deferring on such a sink, and the result carries `quality_metrics["post_scan_gate_deferred"]`.
+
+Sink runs with relationships were held back while the staged gate, the tee and this change landed; with this change every route is gated and the `POSTSCAN-STREAM` hold ends.
+
+### Added (detector descriptors, starter decision and scan_baseline, SCAN-MULTI S3-engine.1, 2026-11-14)
+
+`profiling.recommendations.DETECTOR_DESCRIPTORS` holds one descriptor per detector id with the platform default and the starter choice `decoy scan` writes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from it and its content is unchanged. `profiling._starter_inference.infer_starter_strategy` is the CLI's `_infer_strategy_for_column` at 8fba6af, ported as it was (the review copy was renamed: the retired product word became "The scan"; the decisions are ported exactly), including its read of `confidence_bucket` (a field `DetectorMatch` does not carry; it names it `confidence`) and its strict 0.1 ambiguity window. A parity fixture and its capture script sit in `tests/fixtures/scan_multi/`.
+
+`PipelineConfig` gains the optional `scan_baseline: {path, schema}` block. `schema` is the closed tag `scan-set/v1`; unset it stays out of dumps and hashes.
+
+The prefix `decoy-set-namespace-` is reserved for the placeholder a starter pipeline writes where a declared relationship names no namespace. `ColumnConfig.namespace` and `RelationshipConfig.namespace` refuse it with the new reason `config/namespace_placeholder_unset`, which names the field location and never the value.
+
+### Changed (loader and transformed tables are checked on the sequential route, POSTSCAN-PS11, 2026-11-14)
+
+A sequential run whose tables come from a `source_loader`, or whose lazy tables declare transforms, now gets the blocking key check instead of the report-only deferral. The gate wraps the route's own loader and copies each key table's key and declared-cast columns, as the route read them (after transforms), into scratch Parquet. The baseline is read from that copy, so the loader is still called once per table and a table filtered or reshaped by its transforms is compared after the transforms. A key the run breaks blocks and commits nothing. The scratch copy is removed when the run ends.
+
+Loader and transform-bearing runs on the full-frame, out-of-core and mixed routes keep the deferral, and their result still carries `quality_metrics["post_scan_gate_deferred"]`.
+
+### Changed (staged sink read back before commit, POSTSCAN-PS10, 2026-11-14)
+
+A run that streams its tables into a `ParquetTransactionalSink` (the sequential, out-of-core and mixed routes, and the streamed full-frame lane) is now judged from the staged Parquet files before anything is published. A blocking key verdict commits nothing and removes the stage. The gate reads each staged table one row group at a time and re-reads lazy inputs in batches under the footer snapshot taken at bind time, so a source changed in between refuses with `runtime.lazy_source_changed`. Declared casting on a bounded route no longer defers the gate: the baseline re-read applies the run's own cast.
+
+`ParquetTransactionalSink.staged_tables()` returns each staged table with an opener for a new read-only descriptor of its file. A sink class the gate cannot read (a callable adapter or any foreign sink) keeps the route it takes today and delivers through the sink as before. The gate is deferred for that run: the result carries `quality_metrics["post_scan_gate_deferred"]` and the new warning `warning/post_scan_output_unreadable`, and an explicit `sequential` or `out_of_core` request runs rather than being refused. Runs the gate still defers are those with a `source_loader` and lazy tables that declare transforms.
+
+### Fixed (declared table never dropped from the plan, LOADER-SRC, 2026-11-14)
+
+`run_pipeline` with a `source_loader` and a `tables:` entry that has no `sources:` entry profiled the table as nothing, so the plan held no work for it and the raw rows came back as output; only a quality warning noted the undeclared columns. The run now refuses before the loader runs or any data row is read, with `ConfigError`, reason `config/loader_table_undeclared`.
+
+A second guard runs after the plan is built. A supplied mask table that has no plan entry is refused with `config/declared_table_dropped`, so no other path can echo a declared table. Both reasons are new and name only the table.
+
+### Fixed (one canonical JSON owner, DUP-FREEZE-E1, 2026-11-14)
+
+Breaking: every digest, HMAC and signature input is now built by one private package, `decoy_engine._canonical` (`canonical_json_bytes`: sorted keys, compact, UTF-8 text as written, NaN and Infinity refused), instead of ten local `json.dumps` variants. These digests change: `pipeline_config_hash`, the phase envelope bytes, the pinned-plan fingerprint, the model pack signature scope, `profile_hash`, `PinnedEnvelope.digest` and the reproducibility `config_digest` for content with non-ASCII text, and the physical-input identity hash and the subset request fingerprint for every config. A pinned plan or resume fingerprint made on an older engine is refused with its existing mismatch code and must be rebuilt, and a model pack signed over non-ASCII manifest text must be signed again. Record ids, CLI evidence manifest hashes, seeds, pool seeds and generated output do not move: the two seed-feeding fingerprints keep their bytes as `seed_fingerprint_bytes`, frozen under `SEED_PROTOCOL_VERSION`.
+
+A YAML date or timestamp, NaN, Infinity or an unpaired surrogate in a config is now refused at plan compile with the new reason `plan/config_value_not_json`, and NaN, Infinity or an unpaired surrogate in a `subset:` predicate or `keys` list is refused when the subset request is built with `config/config_value_not_json`, with no value in the message. Quote a config value as a string. A naive timestamp in a `subset:` literal stays valid, since a zone-less timestamp column takes no other spelling. A string with an unpaired surrogate in canonical JSON raises `config/canonical_json_invalid_string`. Before, a date raised a bare `TypeError`, NaN compiled, and a surrogate crashed with codec text.
+
+### Changed (one engine flag rule, DUP-FREEZE-E3, 2026-11-14)
+
+Boolean environment flags go through one parser, `decoy_engine.internal.env_flags.env_flag`. It accepts `1`, `true`, `yes`, `on`, `0`, `false`, `no` and `off` in any case, and gives the flag's default for an unset or empty variable. Any other value raises the new public `decoy_engine.errors.EnvFlagError`, code `config/env_flag_invalid`, whose text names the variable and never the value.
+
+`DECOY_ML_DISABLED` used to disable ML only for `1`; it now accepts the full set. An unknown value leaves ML off, and `classifier_status()` reports it down with cause `disabled`. `DECOY_PACK_REQUIRE_SIGNATURE` with an unknown value raises `EnvFlagError` from `ModelPackLoader.load()`; `load_with_fallback()` still returns `None`, and its warning no longer holds the value. The worker marker `DECOY_INSIDE_ISOLATED_WORKER` reads through the same parser. The custom provider folder variable `CUSTOM_PROVIDERS_DIR` is renamed `DECOY_CUSTOM_PROVIDERS_DIR`, with no alias. The new reason is `config/env_flag_invalid`.
+
+`VAULT_SKIP_VERIFY` decodes through the same registry with the Vault spelling set it already used (`t` and `y` count as true, any unknown value is false), so its behavior is unchanged and the adapter's own truth table is gone.
+
 ## [0.24.0] - 2026-11-14
 
 ### Breaking for consumers

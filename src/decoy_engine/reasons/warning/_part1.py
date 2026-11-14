@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CARDINALITY_MATCH_DEVIATION",
@@ -70,7 +69,7 @@ POST_SCAN_OUTPUT_UNREADABLE = _d(
     "post_scan_output_unreadable",
     "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not "
     "checked on the output.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 SCAN_CRASHED = _d("scan_crashed", "Scan crashed.")
 SCAN_HEADER_SUSPECT = _d(
