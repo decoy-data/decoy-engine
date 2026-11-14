@@ -1,0 +1,3 @@
+### Changed (one fixed-width parser, SAMPLE-SE3a, 2026-11-14)
+
+Every fixed-width read (profiling, sampling, the full read and the row count) now goes through one record parser, `profile._fixed_width_reader.iter_fixed_width_records`, which is also the one place the file is opened. A failing record is reported with the same value-free parse error on every path. `row_count` for a fixed-width source is a framing pass: it checks UTF-8, short and overlong records but does not cast values, so a bad value no longer fails the count. A missing file or a directory is reported before the layout is validated. A sentry keeps other modules from parsing fixed-width records on their own.
