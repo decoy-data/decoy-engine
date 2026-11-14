@@ -277,10 +277,9 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # --extra dev --extra lint --extra vault --extra cloud` on Python 3.10.20 (the profile
             # the dps-dependency-matrix workflow installs).
             # Re-pin history, each verified with a fresh 3.10.20 `uv sync --frozen` over the four
-            # extras (installed_distribution_set + compute_lock_fingerprint), not assumed. The cloud
-            # extra split and the release stamps changed only the hashed set (decoy-engine's own
-            # version string is hashed); reverting decoy-engine to 0.4.0 reproduces 6c0b2bbd... From
-            # 0.18.0 a re-pin keeps every prior release's row so its snapshots still compile.
+            # extras (installed_distribution_set + compute_lock_fingerprint). The cloud split and
+            # release stamps moved only the hashed engine version; engine 0.4.0 reproduces
+            # 6c0b2bbd.... From 0.18.0 a re-pin keeps every prior row so old snapshots compile.
             # Security bump (CI-E1s, engine 0.18.0 unchanged): putting certifi, cryptography, pyasn1,
             # urllib3 and werkzeug back reproduces 31ecf945.... 7d1c1a2a... is the lock on 0.19.0 (77
             # dists; b9b42047... with the engine moved). 78af2b5a... is the same lock with
@@ -308,10 +307,9 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # packaging==26.2). To reproduce: `--no-dev` install it into a 3.10.20 venv and run the
             # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
             # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps 0.6.0 to 0.25.0 changed
-            # just decoy-engine's own version. Only 0.6.0 (and 0.5.0) was installed in a real
-            # 3.10.20 venv; 0.7.0 to 0.25.0 are computed from the 63 pins. All stay.
-            # SCAN-ML M2 (1db3e3da...): computed, not installed; 67 pins, 69 dists. A real fit is CLI
-            # slice C1. Old set: d5898d1f...; 0.23.0: 73acf493...; 0.24.0: 620a48a5...; 0.25.0: c80550ef....
+            # just decoy-engine's own version. Only 0.6.0 (and 0.5.0) was installed in a real 3.10.20
+            # venv; later rows are computed from the pins. All stay. SCAN-ML M2 (1db3e3da..., 67 pins,
+            # real fit CLI C1). Old d5898d1f...; 0.23.0 73acf493...; 0.24.0 620a48a5...; 0.25.0 c80550ef....
             "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",
             "620a48a5b979d483aa3522900590c4fe5a376aeb9cedbd16a415639522c1204b",
             "73acf493827ce8dbd72c6da486eb4f30e72a66cf7abb90b0127cef3e14f75eec",
