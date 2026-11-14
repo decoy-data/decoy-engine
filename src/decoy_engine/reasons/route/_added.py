@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, Phase, RetryClass, Severity
+from decoy_engine.reasons._types import Kind, Outcome, Phase, RetryClass, Severity
 
 __all__ = [
     "MIXED_GENERATE_MASK_CHUNKED",
@@ -25,7 +25,7 @@ POST_VALIDATION_REQUESTED = _d(
 POST_SCAN_MODELS_RESIDENT = _d(
     "post_scan_models_resident",
     "The model Post-scan checks need the full frame resident.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 MIXED_GENERATE_MASK_CHUNKED = _d(
     "mixed_generate_mask_chunked",
