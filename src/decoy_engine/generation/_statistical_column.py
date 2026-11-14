@@ -100,15 +100,18 @@ def arrow_table(
     table_name: str,
     statistical_specs: Mapping[tuple[str, str], StatisticalSpec],
     columns: Sequence[Mapping[str, Any]] | None = None,
+    parent_types: Mapping[str, pa.DataType] | None = None,
 ) -> pa.Table:
     """The table for `data`, with each fitted statistical column typed by its spec.
 
     A column of `columns` that declares an `output_type` is cast to it here (the one whole-table
     cast site; `_streamed._table_batches` is the batch one) and typed by its compiled Arrow type.
+    A column named in `parent_types` (an `inherit` copy) is built with its parent column's type.
 
     Inference over drawn values would give `null` to a fitted column whose rows are all None
     (a small table, a narrow window) and `int64` to the same column in a full run, so the type
-    comes from the spec. Every other column keeps Arrow's inference. Runs after the generic
+    comes from the spec; an all-null or decimal copy would likewise infer another type than its
+    parent's. Every other column keeps Arrow's inference. Runs after the generic
     `null_probability` post-pass, so a column nulled to the last row keeps its type too.
     """
     from decoy_engine.generation.statistical import cell_format_arrow_type
@@ -120,6 +123,8 @@ def arrow_table(
         spec = statistical_specs.get((table_name, name))
         if name in declared:
             arrays[name] = pa.array(values, type=declared[name].arrow_type)
+        elif parent_types and name in parent_types:
+            arrays[name] = pa.array(values, type=parent_types[name])
         elif spec is not None and spec.cell_format is not None:
             arrays[name] = pa.array(values, type=cell_format_arrow_type(spec))
         else:

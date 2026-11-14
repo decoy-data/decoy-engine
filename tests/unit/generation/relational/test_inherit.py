@@ -450,7 +450,7 @@ def test_at7_pinned_compile_refuses_inherit() -> None:
 def _tampered_pinned_plan() -> PinnedPlan:
     """A compiled plan whose `member_state` column is turned into `inherit` after compile."""
     config = claims_config()
-    config["tables"][1]["generate_columns"][2] = {"name": "member_state", **STATE}
+    config["tables"][1]["generate_columns"][2] = {**STATE, "name": "member_state"}
     stored = compile_pinned_plan(copy.deepcopy(config), REF).to_dict()
     claims = next(t for t in stored["tables"] if t["name"] == "claims")
     entry = next(c for c in claims["columns"] if c["name"] == "member_state")

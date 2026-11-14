@@ -1286,6 +1286,7 @@ take it.
 | `constant` | `value` | `output_type` | |
 | `distribution` | `family` | `low`, `high`, `min`, `max`, `output_type` | `low`, `high` if `family: uniform` |
 | `lookup` | | `file`, `codeset`, `value_column`, `weight_column`, `output_type` | |
+| `inherit` | `via`, `column` | | |
 
 `derived_aggregate` is the one type whose required keys are checked at plan compile, not at
 config parse: its transform refuses a missing `op` or `column` with `derived_aggregate_op_missing`
@@ -1665,6 +1666,56 @@ customer's order count.
 
 A config with a per-parent aggregate runs on the whole-table route: streaming admission
 declines every `derived_aggregate` column, and a windowed read does not serve its table.
+
+#### Copying a parent column (`inherit`)
+
+A child column can carry a value of its parent row: a claim's member state, an order line's
+currency. An independent `categorical` would give claims in states their member never lived in.
+
+```yaml
+- name: members
+  row_count: 50
+  generate_columns:
+    - {name: member_id, type: sequence, start: 1}
+    - {name: state, type: categorical, categories: [CA, NY, TX]}
+- name: claims
+  row_count: 1000
+  generate_columns:
+    - {name: member_id, type: reference, reference_table: members, reference_column: member_id}
+    - {name: member_state, type: inherit, via: member_id, column: state}
+```
+
+- `via` names an earlier `reference` column of the same table; `column` is then a column of the
+  table that reference points at. A column of the child, or of any other table, with the same
+  name is never read, and the child does not need one.
+- Each row gets `column` from the parent row whose key equals the row's `via` value (a SQL
+  `LEFT JOIN` on a unique key). Nothing is drawn, so the column is the same under every seed
+  for the same foreign keys. It works with every reference distribution, `fitted` included.
+- A null foreign key gives a null; a parent row whose value is null gives a null.
+  `null_probability` applies after the copy, as on every type.
+- The column has the parent column's Arrow type, nulls and declared `output_type` included,
+  even when every copied value is null. `inherit` takes no `output_type` and no `unique`.
+- Copies chain across tables: a `claim_lines` column can `inherit` `claims.member_state`, itself
+  inherited from `members.state`. A `categorical` can condition on an inherited column.
+- Numeric typing judges the copy with the column it copies: a child `formula` that reads the
+  copy as text keeps the parent column text in both tables, as a reader of a `reference`
+  does.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `via` is not a `reference` column, or the parent key it references is not a `sequence` column with no `null_probability` | `config.generate_parent_lookup_key_not_unique` |
+| Validate | `via` is a reference to the column's own table | `config.generate_parent_lookup_self_reference` |
+| Validate | `via` or `column` missing | `missing` |
+| Validate | `column` names a per-parent aggregate | `config.generate_aggregate_read_before_fill` |
+| Validate | `unique: true` | `config.generate_unique_unsupported` |
+| Plan compile | `via` is missing or declared later, or `column` is not a column of the parent table | `plan.generate_column_forward_reference` |
+| Pinned compile | any `inherit` column | `plan.pinned_relational_option_unsupported` |
+| Pinned execute | an `inherit` column in a plan that did not come from pinned compile | `runtime.pinned_relational_option_unsupported` (a `GenerationError`) |
+| Run | a foreign key value with no parent row | `runtime.parent_lookup_key_missing` (a `GenerationError`) |
+| Run | a parent key value that occurs more than once | `runtime.parent_lookup_key_not_unique` (a `GenerationError`) |
+
+A config with an `inherit` column runs on the whole-table route: streaming admission declines
+it (`family_declined:inherit`), and a windowed read does not serve its table.
 
 #### Fitted fan-out (`distribution: fitted`)
 

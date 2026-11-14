@@ -65,6 +65,7 @@ ADMISSION_MATRIX: dict[str, tuple[bool, str]] = {
         "naive timestamp); null anchor -> null, invalid anchor -> WindowedDateError",
     ),
     "group_key": (False, "group-scoped keys; needs a bounded two-pass design"),
+    "inherit": (False, "reads a parent row by FK; no cross-table row seam"),
 }
 
 

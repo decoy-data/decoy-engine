@@ -32,6 +32,7 @@ VALID = {
     "constant": {"value": 1},
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"file": "x.csv"},
+    "inherit": {"via": "a", "column": "b"},
 }
 OTHER_TEN = sorted(VALID)
 

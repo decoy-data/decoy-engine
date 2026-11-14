@@ -52,6 +52,7 @@ __all__ = [
     "TypeOptions",
     "generate_family_problems",
     "option_problems",
+    "parent_lookup_keys",
     "problem_details",
     "refuse_unlisted_generate_families",
 ]
@@ -376,6 +377,15 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
         },
         required=("anchor", "max_days"),
     ),
+    # A copy of `column` of the parent row that `via`, an earlier `reference` column of this
+    # table, points at (`generation/relational/_inherit.py`).
+    "inherit": TypeOptions(
+        {
+            "via": OptionSpec(_str, ref_kind="column"),
+            "column": OptionSpec(_str, ref_kind="column_via_reference", ref_context_key="via"),
+        },
+        required=("via", "column"),
+    ),
     "group_key": TypeOptions(
         {"group_by": OptionSpec(_str, ref_kind="column"), "length": _I, "prefix": _S},
         required=("group_by",),
@@ -507,6 +517,21 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Found]:
     if any(_given(k, extras) for k in spec.together):
         found.extend(((k,), "missing") for k in spec.together if not _given(k, extras))
     return found
+
+
+def parent_lookup_keys(type_: Any) -> tuple[str, ...]:
+    """The options of generate type `type_` that name a lookup column, in registry order.
+
+    Each is the companion key of a `column_via_reference` input (`windowed_date.anchor_via`,
+    `inherit.via`): a column of this table that must lead to exactly one parent row.
+    """
+    spec = GENERATE_OPTIONS.get(type_) if isinstance(type_, str) else None
+    options = spec.keys.values() if spec is not None else ()
+    return tuple(
+        o.ref_context_key
+        for o in options
+        if o.ref_kind == "column_via_reference" and o.ref_context_key is not None
+    )
 
 
 _Loc = tuple[str | int, ...]

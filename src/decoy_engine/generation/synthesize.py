@@ -57,6 +57,7 @@ from decoy_engine.generation.kinds import (
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
+from decoy_engine.generation.relational._inherit import inherit_types, inherit_values
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
@@ -208,7 +209,13 @@ def _generate_tables_from_config(
         from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
         fill_referenced_formula_columns(gcols, data, seed, derive_key, table_name=name)
-        tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
+        tbl = arrow_table(
+            data,
+            table_name=name,
+            statistical_specs=statistical_specs,
+            columns=gcols,
+            parent_types=inherit_types(name, gcols, pools),
+        )
         warn_on_table_fidelity(
             config,
             gcols,
@@ -339,6 +346,8 @@ def _generate_column(
             col, table_name, reference_fanouts, reference_policy, on_warning
         )
         values = _reference(col, n, seed, derive_key, pools or {}, **extra)
+    elif kind == "inherit":
+        values = inherit_values(col, table_name, generated or {}, pools or {}, siblings)
     elif kind == "constant":
         values = constant_values(col, n)
     elif kind == "distribution":

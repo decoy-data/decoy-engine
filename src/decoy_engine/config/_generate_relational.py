@@ -31,10 +31,12 @@ The draw is uniform over earlier rows with an optional `max_per_parent`; any oth
 a minimum, nulls or uniqueness would be dropped without a word, so each is refused. `root_count`
 must lie between 1 and the table's `row_count`, and is ignored for a table with no rows.
 
-A column that reads its parent's row (a `windowed_date` with `anchor_via`) needs a foreign key
-that reaches exactly one parent row. `parent_key_problem` is the one rule for such a key, built
-on `is_exact_sequence_key`. The lookup column must be a `reference` to another table: the rows
-of the table being drawn are not finished, so a lookup through a self-reference is refused.
+A column that reads its parent's row (a `windowed_date` with `anchor_via`, an `inherit` with
+`via`) needs a foreign key that reaches exactly one parent row. `parent_key_problem` is the one
+rule for such a key, built on `is_exact_sequence_key`. The lookup column must be a `reference`
+to another table: the rows of the table being drawn are not finished, so a lookup through a
+self-reference is refused. `reference_root` follows an `inherit` copy to its parent column, so
+numeric typing and the aggregate input check judge the copy with the column it copies.
 
 `is_exact_sequence_key` is the one test for a key column whose every row is a distinct value:
 a `sequence` with no positive `null_probability`. The self-reference key check, the capacity
@@ -66,7 +68,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import _capacity, reasons
-from decoy_engine.config._generate_options import GENERATE_OPTIONS, OptionSpec
+from decoy_engine.config._generate_options import GENERATE_OPTIONS, OptionSpec, parent_lookup_keys
 from decoy_engine.config._generate_type_checks import numeric_as_text_read
 from decoy_engine.config._tables import generate_columns_of
 from decoy_engine.expressions import column_refs, compile_expr
@@ -305,24 +307,27 @@ def _lookup_problem(
 
 
 def parent_lookup_problems(tables: Sequence[Mapping[str, Any]]) -> list[Problem]:
-    """Parent-lookup problems of every generate column of `tables` that has `anchor_via`.
+    """Parent-lookup problems of every generate column of `tables` that reads its parent's row.
 
-    `tables` are the config's tables as mappings with `name` and `generate_columns`. A lookup
-    column that is missing is left alone: which column exists, and in what order, is the plan
-    check's rule over the resolved inputs.
+    The lookup column is named by an option the registry lists for the column's type
+    (`parent_lookup_keys`: `anchor_via` on `windowed_date`, `via` on `inherit`). `tables` are the
+    config's tables as mappings with `name` and `generate_columns`. A lookup column that is
+    missing is left alone: which column exists, and in what order, is the plan check's rule over
+    the resolved inputs.
     """
     by_name = {t.get("name"): t for t in tables}
     problems: list[Problem] = []
     for t_idx, table in enumerate(tables):
         columns = [c for c in generate_columns_of(table) if isinstance(c, Mapping)]
         for c_idx, col in enumerate(columns):
-            via_name = col.get("anchor_via")
-            target = _via_target(columns, via_name) if isinstance(via_name, str) else None
-            if target is None:
-                continue
-            code = _lookup_problem(target, table.get("name"), by_name)
-            if code is not None:
-                problems.append((("tables", t_idx, "generate_columns", c_idx, "anchor_via"), code))
+            for key in parent_lookup_keys(col.get("type")):
+                via_name = col.get(key)
+                target = _via_target(columns, via_name) if isinstance(via_name, str) else None
+                if target is None:
+                    continue
+                code = _lookup_problem(target, table.get("name"), by_name)
+                if code is not None:
+                    problems.append((("tables", t_idx, "generate_columns", c_idx, key), code))
     return problems
 
 
@@ -384,14 +389,24 @@ def _column_of(table: Mapping[str, Any] | None, name: Any) -> Mapping[str, Any] 
 def reference_root(
     tables: Mapping[Any, Mapping[str, Any]], key: tuple[str, str]
 ) -> tuple[str, str]:
-    """Follow `reference` columns from `key` to the column that decides the values.
+    """Follow `reference` and `inherit` columns from `key` to the column that decides the values.
 
-    `tables` maps a table name to its config; a cycle stops where it loops.
+    `tables` maps a table name to its config; a cycle stops where it loops. An `inherit` column
+    is followed to the parent endpoint of its resolved `column` input, the one the checks and
+    the run read; a column with no such input is its own root.
     """
     seen: set[tuple[str, str]] = set()
     while key not in seen:
         seen.add(key)
-        col = _column_of(tables.get(key[0]), key[1])
+        table = tables.get(key[0])
+        col = _column_of(table, key[1])
+        if table is not None and col is not None and col.get("type") == "inherit":
+            edges = iter_generate_input_refs(table, col)
+            copied = next((e for e in edges if e.option == "column" and e.source_key), None)
+            if copied is None:
+                return key
+            key = (copied.source_table, copied.source_column)
+            continue
         if col is None or col.get("type") != "reference":
             return key
         key = (str(col.get("reference_table")), str(col.get("reference_column")))

@@ -502,7 +502,7 @@ def test_pinnable_allowlist_covers_every_config_type() -> None:
     known = set(typing.get_args(GenerateColumnConfig.model_fields["type"].annotation))
     unclassified = known - set(PINNABLE_TYPES) - set(REJECTED_TYPES)
     assert not unclassified, f"classify for pinned mode: {sorted(unclassified)}"
-    assert set(REJECTED_TYPES) == {"faker", "formula", "lookup"}
+    assert set(REJECTED_TYPES) == {"faker", "formula", "lookup", "inherit"}
 
 
 def test_unlisted_type_is_refused_at_compile_and_execute(snap: str) -> None:

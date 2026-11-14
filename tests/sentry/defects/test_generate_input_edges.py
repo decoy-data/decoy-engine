@@ -96,6 +96,8 @@ RESOLVER_CALLERS = frozenset(
         ("generation/_grouped_windowed_generators.py", "_parent_anchor_cells"),
         ("config/_generate_relational.py", "_reads_aggregate"),
         ("generation/relational/_aggregate.py", "_per_parent_values"),
+        ("generation/relational/_inherit.py", "_edges"),
+        (RESOLVER_FILE, "reference_root"),
     }
 )
 # The per-consumer tables and resolvers the one registry replaced.
@@ -112,7 +114,12 @@ RETIRED = frozenset(
 )
 LOOKUP = "lookup_parent_values"
 LOOKUP_FILE = "generation/relational/_parent_lookup.py"
-LOOKUP_CALLERS = frozenset({("generation/_grouped_windowed_generators.py", "_parent_anchor_cells")})
+LOOKUP_CALLERS = frozenset(
+    {
+        ("generation/_grouped_windowed_generators.py", "_parent_anchor_cells"),
+        ("generation/relational/_inherit.py", "inherit_values"),
+    }
+)
 POOL_NAMES = frozenset({"pools"})
 VIA_RESOLVER = "_via_target"
 VIA_CALLERS = frozenset(
@@ -457,9 +464,37 @@ def _aggregate_via_cells() -> dict[str, bool]:
     }
 
 
+COPY = {"name": "copied", "type": "inherit", "via": "pid", "column": "born"}
+COPY_READER = {
+    "name": "label",
+    "type": "formula",
+    "formula": "'x' + copied",
+    "references": ["copied"],
+}
+
+
+def _inherit_cells() -> dict[str, bool]:
+    """The cells that hold only while the copied column is resolved in the parent table."""
+    return {
+        "a parent column with no same-named child column is accepted": _accepted(
+            _config([FK, COPY])
+        ),
+        "a column missing from the parent is refused": not _accepted(
+            _config([DATE, FK, COPY], parent_born=None)
+        ),
+        "a text reader of the copy keeps the parent column text": ("p", "born")
+        not in numeric_plan(_config([FK, COPY, COPY_READER], parent_born=COUNTER)),
+        "the copy depends on the parent column": reproducibility_exclusions(
+            _config([FK, COPY], parent_born={**DATE, "determinism": "fresh"})
+        ).get(("t", "copied"))
+        is not None,
+    }
+
+
 CELLS = {
     ("derived_aggregate", "column"): _aggregate_column_cells,
     ("derived_aggregate", "via"): _aggregate_via_cells,
+    ("inherit", "column"): _inherit_cells,
     ("windowed_date", "anchor"): _anchor_cells,
 }
 
@@ -468,6 +503,7 @@ def test_the_cross_table_descriptors_are_the_ones_this_sentry_knows() -> None:
     assert CROSS_TABLE == [
         ("derived_aggregate", "column"),
         ("derived_aggregate", "via"),
+        ("inherit", "column"),
         ("windowed_date", "anchor"),
     ]
     assert sorted(CELLS) == CROSS_TABLE
@@ -674,7 +710,7 @@ def via_resolutions(sources: dict[str, str]) -> list[str]:
 
 
 def test_the_lookup_keys_are_the_ones_this_sentry_knows() -> None:
-    assert sorted(VIA_KEYS) == ["anchor_via"]
+    assert sorted(VIA_KEYS) == ["anchor_via", "via"]
 
 
 def test_the_aggregate_lookup_key_is_a_child_column_of_the_named_table() -> None:

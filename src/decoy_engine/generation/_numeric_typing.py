@@ -18,7 +18,7 @@ counts against the column it reads and not against a same-named column of its ow
   comparisons are safe, ``+``, ``==`` or ``in`` against strings are not;
 * a relationship is safe only when every paired column is generated and has the same planned
   type, so a masked, source or text-typed end keeps both sides text;
-* a ``reference`` column copies its parent, so the two are checked together.
+* a ``reference`` or ``inherit`` column copies its parent, so the two are checked together.
 
 Removing one column can make a reader of another unsafe, so the check repeats until nothing
 changes. A reader or column type missing from the registry keeps the column text.
@@ -146,6 +146,12 @@ READERS: dict[str, Reader] = {
     ),
     "statistical.condition_on": Reader(False, "matched against snapshot category labels as text"),
     "categorical.condition_on": Reader(False, "matched against the declared by keys as text"),
+    "inherit.via": Reader(
+        True, "matched to the parent key by equality; both ends have the same planned type"
+    ),
+    "inherit.column": Reader(
+        True, "copies the parent cell and its type; the copy joins the parent's group"
+    ),
     "reference.reference_column": Reader(
         True, "copies the parent cell and its type; the group is checked together"
     ),

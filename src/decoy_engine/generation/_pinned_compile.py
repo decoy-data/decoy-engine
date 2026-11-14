@@ -71,6 +71,11 @@ REJECTED_TYPES = {
         "pinned_formula_unsupported",
         "formula columns are not available in pinned mode",
     ),
+    # Reads a parent row by lookup, which pinned execution does not do: the relational refusal.
+    "inherit": (
+        str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED),
+        "inherit columns are not available in pinned mode",
+    ),
 }
 
 # Matches the only string grammar `windowed_date` accepts (numeric ISO date or datetime, no
@@ -138,7 +143,8 @@ def relational_option_unsupported(tname: str, col: dict[str, Any]) -> bool:
     A self-reference reads its own table's rows; pinned execution draws a reference from a
     finished parent table only. A date anchored through ``anchor_via`` reads a parent row by
     lookup, and a per-parent aggregate reads its child table after it is drawn; pinned
-    execution does neither. Compile and execute both ask this one question.
+    execution does neither. Compile and execute both ask this one question. An ``inherit``
+    column is refused by type (``REJECTED_TYPES``) with the same refusal.
     """
     return (
         is_self_reference(tname, col)
@@ -197,16 +203,20 @@ def reject_unpinnable(config: dict[str, Any], *, at_execute: bool = False) -> No
             )
         by_name = {c.get("name"): c for c in gcols}
         for col in gcols:
-            _reject_column(tname, col, by_name)
+            _reject_column(tname, col, by_name, at_execute)
             if relational_option_unsupported(tname, col):
                 raise _relational_refusal(tname, str(col.get("name")), at_execute)
 
 
-def _reject_column(tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]]) -> None:
+def _reject_column(
+    tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]], at_execute: bool
+) -> None:
     cname = str(col.get("name"))
     kind = col.get("type")
     if kind in REJECTED_TYPES:
         code, why = REJECTED_TYPES[kind]
+        if code == str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED):
+            raise _relational_refusal(tname, cname, at_execute)
         raise PinnedModeError(code=code, message=f"{_where(tname, cname)}: {why}")
     if kind not in PINNABLE_TYPES:
         raise PinnedModeError(

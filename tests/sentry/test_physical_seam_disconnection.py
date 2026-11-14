@@ -517,6 +517,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_exact_int_sources.py",
             # §WHEN-NUMERIC: a pure value-shape guard on the gated pandas write (no physical seam).
             "src/decoy_engine/execution/_gated_string_guard.py",
+            # GEN-INHERIT E1: `inherit` maps to DETERMINISTIC_NO_DRAW here and has a capability
+            # row in `_capabilities.py` (listed below). Data entries only; neither imports
+            # `execution.physical`.
             "src/decoy_engine/execution/native/_determinism_protocol.py",
             # DRAW_SITES split by family: the record type and enums, and the per-family data
             # modules `_determinism_protocol.py` assembles (the two existing data siblings, already
