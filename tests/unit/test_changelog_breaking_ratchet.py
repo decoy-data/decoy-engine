@@ -32,6 +32,9 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.26.0", "`PipelineConfig` validation refuses (`config/target_shared_d"): (
+        "Breaking: a config where two declared tables share one target destination is refused"
+    ),
     ("0.25.0", "`profiling.starter_config(scan, *, baseline_path, targets, s"): (
         "new builder; `refuses` names what the new `PipelineConfig` check does with the placeholder, covered by the namespace entry in the Breaking list"
     ),
