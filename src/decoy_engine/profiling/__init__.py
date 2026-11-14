@@ -64,6 +64,11 @@ from decoy_engine.profiling.scan_set import (
     scan_set_to_dict,
     scan_sources,
 )
+from decoy_engine.profiling.starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    starter_config,
+)
 from decoy_engine.profiling.types import (
     ColumnProfile,
     Distribution,
@@ -86,6 +91,7 @@ __all__ = [
     "ChildFacts",
     "ChildKeyFacts",
     "ColumnProfile",
+    "ColumnSuggestion",
     "DetectorDescriptor",
     "Distribution",
     "FieldStats",
@@ -98,6 +104,7 @@ __all__ = [
     "ScanSourceError",
     "SentinelFlag",
     "StarterChoice",
+    "StarterConfig",
     "StrategyDefault",
     "TableScan",
     "TopValue",
@@ -114,4 +121,5 @@ __all__ = [
     "scan_set_to_dict",
     "scan_sources",
     "snapshot_joint_warnings",
+    "starter_config",
 ]
