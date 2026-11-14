@@ -982,7 +982,7 @@ S3-engine.1 depends on S1a and CONFIG-EXPLICIT E2 because both edit
 `config/_tables.py`; S3-engine.2 depends on S3-engine.1.
 
 **Files.**
-- new `src/decoy_engine/profiling/starter_config.py`: `starter_config`,
+- new `src/decoy_engine/profiling/_starter_config.py`: `starter_config`,
   `StarterConfig`, `ColumnSuggestion`.
 - `src/decoy_engine/profiling/recommendations.py`: extend the existing
   `DEFAULT_STRATEGY_BY_DETECTOR` authority (`:32-101` at the plan base) into
@@ -1368,7 +1368,7 @@ fixtures not counted). A slice over about 800 in total is cut into parts.
 | S1c | CLI `_scan_multi.py` (new) | ~420 |
 | S1c | CLI `_scan_set_io.py` (new) | ~90 |
 | S1c | CLI `scan.py` (1442) | net 0 or less: the single-file path and `_safe_field_record` move out |
-| S3-engine | engine `profiling/starter_config.py` (new) | ~330 |
+| S3-engine | engine `profiling/_starter_config.py` (new) | ~330 |
 | S3-engine | engine `profiling/_starter_inference.py` (new) | ~170 |
 | S3-engine | engine `profiling/recommendations.py` (about 120) | about 300 after descriptors and the derived compatibility view |
 | S3-engine | engine `config/_scan_baseline.py` (new) | ~40 |
