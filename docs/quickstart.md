@@ -73,6 +73,7 @@ targets:
 `strategy: faker` swaps a value for a synthetic one from a named provider;
 `redact` replaces every non-null value with a constant; `passthrough` leaves
 the column untouched. The full catalog is in [strategies](strategies.md).
+Each table needs its own destination: two tables that write to one path, or one bucket and key, are refused.
 
 ## 3. Validate, then run
 
