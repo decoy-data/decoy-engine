@@ -121,17 +121,16 @@ vault as one more file that can be lost.
    in any message, location or log line.
 2. `decoy.mask()` and `decoy tokenize` (both routes) refuse two outputs that the route can publish
    and that resolve to one file
-   on disk (symlinked folder, case-only difference on a folding volume, a hard link where either
-   writer changes the file in place, relative
+   on disk (symlinked folder, case-only difference on a folding volume, hard link, relative
    against absolute spelling, a relative path that leaves the base folder, a target against an
    enabled quarantine path, and for tokenize a target against `--vault`) with the CLI's existing
    `layout.output_path_collision`, before any declared source file or database relation is read
    and before any output is written. (`mask()` spools an in-memory `data=` frame to a private temp
    input first, `api.py:245-255`; that is the existing source adapter, not a published output.)
-   Two hard-linked names that both writers replace as plain entries are two outputs, because
-   each publish replaces its own directory entry (CL1 review rounds 1 and 2). An existing
-   tokenize vault (SQLite updates it in place) and a quarantine file or target written through
-   a final symlink change the shared inode, so a hard link to either is one destination.
+   They use the layout identity `decoy run` and `decoy validate` use: an existing file's inode
+   is its identity, so two hard-linked names are one destination, and every file target takes
+   part, including one no table writes. A refusal there loses no data (ruling C, T0895);
+   hard-link-aware layout identity is a V2-LOG item.
 3. For a config that is otherwise schema-valid, `decoy validate` and `decoy run` report the same
    first collision code: the engine code for declarations with one conservative identity, the
    layout code for outputs that meet only on disk. Exit 1 in both. Existing ordering for a config
@@ -418,7 +417,7 @@ Tests live in `tests/unit/test_api.py` and
 |---|---|---|
 | T-C1 | `decoy.mask(config=...)` with two equal absolute targets (the one equal-text `mask()` cell; flips in CL2) raises `LayoutError` `layout.output_path_collision`; no source read (patch `decoy.api._load_sources_from_config`, bound at import, `api.py:40`); `run_pipeline` never called (spy; quarantine is written inside it); no file under the folder | M-C1: skip the check |
 | T-C2 | `out={"a": p, "b": q}` where `q` is `p` through a symlinked folder, on distinct declared targets: refused. This disk-only cell remains a CL1 refusal after CL2 and asserts `_load_sources_from_config` and `run_pipeline` were not called and neither destination exists | M-C2: check before the `out=` merge; move the check below `_load_sources_from_config` |
-| T-C3 | case-only and NFC/NFD names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs them), a symlinked folder, and hard links: refused when one name is an existing tokenize vault, a quarantine path through a final symlink, or a target through a final symlink; two plain hard-linked targets are two outputs | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
+| T-C3 | case-only and NFC/NFD names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs them), a symlinked folder, and two existing hard links | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
 | T-C4 | distinct targets: both files written with their own rows; `config_dict` (targets and quarantine) is equal before and after the check (r3). Equal unused target entries remain accepted and unwritten | M-C4: build the check input with a shallow copy and edit it in place; include target keys that name no declared table |
 | T-C9 | `../shared.csv` against its absolute spelling; `sub/../a.csv` through a symlinked `sub` against the real path: all refused, nothing written outside the base | M-C9: pass the declared `config_dict` with `base_dir` instead of the placed paths |
 | T-C10 | a target equal to a valid enabled `quarantine.output_path`: refused, `_load_sources_from_config` and `run_pipeline` never called, neither file written | M-C10: leave quarantine out of the placed copy |
