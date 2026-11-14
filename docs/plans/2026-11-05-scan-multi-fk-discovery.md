@@ -1146,6 +1146,15 @@ rules replace the matching text above where they differ.
   any two tables with the same target path (explicit or default) are a
   builder input error naming both tables. Builder input errors raise
   `ValueError` with names only.
+- Destination identity (Codex r2). Add `target_identity(target) -> tuple[str,
+  ...]` to `config/_targets.py`, the one definition of "same destination":
+  file `("file", os.path.normpath(path))`, S3 `("s3", bucket, key)`, GCS
+  `("gcs", bucket, object)`; an unknown type raises. `_allocate_targets`
+  compares identities, not `path`. Filesystem aliasing (symlinks,
+  case-insensitive volumes) is the writer's concern at run time, not the
+  builder's. Added tests: T3-target-unique-cloud (two equal S3 targets, two
+  equal GCS targets, and `out/a.csv` vs `out/./a.csv` each refuse), mutation
+  M3-path-only (compare `path` only).
 - Placeholder prefix: import `NAMESPACE_PLACEHOLDER_PREFIX` from the public
   `decoy_engine.config` (export it there if it is not exported).
 - Placement additions: `contracts/strategy_requirements.py` (new, contracts
