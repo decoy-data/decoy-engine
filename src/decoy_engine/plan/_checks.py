@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
@@ -259,17 +260,15 @@ def check_composite_columns_length_match(profile: Profile) -> None:
     """Every relationship's parent.columns and each child.columns must
     have the same length.
 
-    The Profile-layer `Relationship` dataclass enforces this at construction
-    time; this check exists at the planner layer too so a Profile that was
-    hand-constructed via dict (e.g. through deserialization without going
-    through `Relationship.__post_init__`) gets caught here.
+    `Relationship.__post_init__` enforces this at construction; this check also
+    catches a Profile deserialized without it. The rule is `relationship_shape_error`.
 
     Compile-check ownership table row #5.
     """
     for rel in profile.relationships:
-        parent_len = len(rel.parent_columns)
-        child_len = len(rel.child_columns)
-        if parent_len != child_len:
+        pair = {"table": rel.parent_table, "columns": rel.parent_columns}
+        kid = {"table": rel.child_table, "columns": rel.child_columns}
+        if relationship_shape_error({"parent": pair, "children": [kid]}) is not None:
             raise PlanCompileError(
                 code=reasons.plan.COMPOSITE_COLUMNS_LENGTH_MISMATCH,
                 path=(
@@ -279,7 +278,7 @@ def check_composite_columns_length_match(profile: Profile) -> None:
                 message=(
                     f"Relationship {rel.parent_table}.{rel.parent_columns} -> "
                     f"{rel.child_table}.{rel.child_columns}: parent columns length "
-                    f"{parent_len} != child columns length {child_len}."
+                    f"{len(rel.parent_columns)} != child columns length {len(rel.child_columns)}."
                 ),
             )
 
