@@ -24,6 +24,7 @@ import os
 from collections.abc import Iterable, Mapping
 from pathlib import PurePath
 from typing import Annotated, ClassVar, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -151,8 +152,7 @@ def _target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ..
         return ("file", os.path.normpath(target.path))
     if isinstance(target, S3Target):
         # The endpoint names the store (AWS, MinIO, R2...); "" is the AWS default.
-        endpoint = (target.endpoint_url or "").rstrip("/").lower()
-        return ("s3", endpoint, target.bucket, target.key)
+        return ("s3", _endpoint_identity(target.endpoint_url), target.bucket, target.key)
     if isinstance(target, GCSTarget):
         return ("gcs", target.bucket, target.object)
     raise TypeError("unsupported target type has no destination identity")
@@ -171,3 +171,14 @@ def duplicate_target_groups(
         if name in active:
             by_identity.setdefault(_target_identity(target), []).append(name)
     return [names for names in by_identity.values() if len(names) > 1]
+
+
+def _endpoint_identity(url: str | None) -> str:
+    # Only the scheme and host are case-insensitive (RFC 3986 section 6.2.2.1); a path
+    # or user-info may name a different tenant by case alone.
+    if not url:
+        return ""
+    parts = urlsplit(url.rstrip("/"))
+    userinfo, at, hostport = parts.netloc.rpartition("@")
+    netloc = f"{userinfo}{at}{hostport.lower()}"
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path, parts.query, parts.fragment))
