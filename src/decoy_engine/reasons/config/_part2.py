@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -40,12 +39,12 @@ _d = _catalog.config("CanonicalJsonError")
 CANONICAL_JSON_INVALID_STRING = _d(
     "canonical_json_invalid_string",
     "Canonical JSON strings must contain only Unicode scalar values.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 CONFIG_VALUE_NOT_JSON = _d(
     "config_value_not_json",
     "A config value has a type JSON cannot hold; quote it as a string.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 
 _d = _catalog.config("PipelineValidationError")
@@ -122,7 +121,7 @@ _d = _catalog.config("EnvFlagError")
 ENV_FLAG_INVALID = _d(
     "env_flag_invalid",
     "An environment flag has a value outside the accepted spellings.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 
 # A table whose strategies sit under `tables:` must reach the plan. The two refusals below keep a
@@ -133,13 +132,13 @@ LOADER_TABLE_UNDECLARED = _d(
     "loader_table_undeclared",
     "A table masked through a source loader needs a sources entry; without one the run would "
     "pass its rows through unmasked.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 DECLARED_TABLE_DROPPED = _d(
     "declared_table_dropped",
     "A table declared under tables has no work in the compiled plan; the run would pass its "
     "rows through unmasked.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
 
 # The placeholder a starter pipeline writes where a declared relationship named no namespace.
@@ -147,5 +146,5 @@ DECLARED_TABLE_DROPPED = _d(
 NAMESPACE_PLACEHOLDER_UNSET = _d(
     "namespace_placeholder_unset",
     "A namespace still holds the placeholder a starter pipeline writes; set a real namespace.",
-    since=UNRELEASED,
+    since="1.27.0",
 )
