@@ -156,9 +156,8 @@ class FixedWidthLazySource(LazyFileIdentity, LazySource):
     def column_null_counts(self) -> dict[str, int | None]:
         return dict(self.footer_facts().null_counts)
 
-    def _projection(self, batch_rows: int, columns: Sequence[str] | None) -> pa.Schema:
+    def _projection(self, columns: Sequence[str] | None) -> pa.Schema:
         """The batch schema, checked before any generator exists so a bad call fails at the call."""
-        check_batch_rows(batch_rows)
         full = self.schema
         if columns is None:
             return full
@@ -194,7 +193,8 @@ class FixedWidthLazySource(LazyFileIdentity, LazySource):
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Generator[pa.RecordBatch, None, None]:
         """Yield the file's rows (or just `columns`) as batches of at most `batch_rows`."""
-        return self._stream(self._projection(batch_rows, columns), batch_rows, None)
+        batch_rows = check_batch_rows(batch_rows)
+        return self._stream(self._projection(columns), batch_rows, None)
 
     def open_batches(
         self,
@@ -209,14 +209,15 @@ class FixedWidthLazySource(LazyFileIdentity, LazySource):
         the file is unchanged since; the batch iterator checks the identity again when it is
         exhausted. The Parquet buffering arguments do not apply and are ignored."""
         del pre_buffer, buffer_size, use_threads
-        schema = self._projection(batch_rows, columns)
+        batch_rows = check_batch_rows(batch_rows)
+        schema = self._projection(columns)
         facts, verify = self._open_facts()
 
         return OpenedFixedWidthBatches(facts, self._stream(schema, batch_rows, verify))
 
     def to_table(self, columns: list[str] | None = None) -> pa.Table:
         """Read the file (or just `columns`) into memory. Fallback for small jobs."""
-        schema = self._projection(_TO_TABLE_ROWS, columns)
+        schema = self._projection(columns)
         return pa.Table.from_batches(
             list(self._stream(schema, _TO_TABLE_ROWS, None)), schema=schema
         )
