@@ -213,3 +213,16 @@ def test_e14b_an_endpoint_path_keeps_its_case() -> None:
     same = _s3(endpoint_url="HTTPS://GATEWAY/TenantA/")
     exc = _refusal(_config({"a": upper, "b": same}))
     assert _locs(exc) == [("targets", "a", "key"), ("targets", "b", "key")]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("https://h/T?t=/", "https://h/T?t="),
+        ("https://h/T#t/", "https://h/T#t"),
+        ("https://h/T//", "https://h/T/"),
+    ],
+)
+def test_e14c_only_one_path_slash_is_dropped(first: str, second: str) -> None:
+    a, b = _s3(endpoint_url=first), _s3(endpoint_url=second)
+    PipelineConfig.model_validate(_config({"a": a, "b": b}))
