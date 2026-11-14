@@ -33,6 +33,11 @@ from decoy_engine.profiling._snapshot_values import (
     distribution_snapshot_document,
     snapshot_joint_warnings,
 )
+from decoy_engine.profiling._starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    starter_config,
+)
 from decoy_engine.profiling._value_redaction import (
     MIN_RELEASE_COUNT,
     POLICY_RAW,
@@ -63,11 +68,6 @@ from decoy_engine.profiling.scan_set import (
     passes_through,
     scan_set_to_dict,
     scan_sources,
-)
-from decoy_engine.profiling.starter_config import (
-    ColumnSuggestion,
-    StarterConfig,
-    starter_config,
 )
 from decoy_engine.profiling.types import (
     ColumnProfile,

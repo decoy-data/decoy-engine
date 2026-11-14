@@ -1,20 +1,22 @@
 """`starter_config`: one scan over many tables becomes one starter pipeline config.
 
-Source pattern: the CLI's `decoy init` scaffold (scan, suggest per column, leave each judgment
+Modeled on the CLI's `decoy init` scaffold (scan, suggest per column, leave each judgment
 to a REVIEW note) generalized to many tables. Foreign keys are never inferred. A declared
 relationship's key columns all hash under one shared namespace, the keyed-pseudonym join rule
 of SDV's HMA1 (same key in, same token out across tables) and of the namespace registry's
 same-FK same-mask check. The per-column decision is `_starter_inference`'s; this module reads
 the descriptors and holds no detector table.
 
-The builder validates the config it returns (`PipelineConfig`). It does not run `compile_plan`:
-`plan` sits above `profiling` in the import layers, so the compile check lives in the tests and
-in the CLI. Output carries detector ids, strategy names, counts and fixed copy, never a cell value.
+The builder validates the config it returns (`PipelineConfig`) and the shape of each declared
+relationship. It does not run `compile_plan`: `plan` sits above `profiling` in the import layers,
+so the compile check lives in the tests and in the CLI. Which strategies need a namespace comes
+from the shared requirement registry, never a list kept here. Output carries detector ids, strategy names, counts and fixed copy, never a cell value.
 """
 
 from __future__ import annotations
 
 import copy
+import dataclasses
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -22,21 +24,20 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from pydantic import ValidationError
-
 from decoy_engine import reasons
-from decoy_engine.config import PipelineConfig, PipelineConfigError
-from decoy_engine.config._namespaces import NAMESPACE_PLACEHOLDER_PREFIX
+from decoy_engine.config import (
+    NAMESPACE_PLACEHOLDER_PREFIX,
+    PipelineConfigError,
+    parse_pipeline_config,
+    relationship_shape_error,
+)
+from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
-from decoy_engine.safe_output import ConfigProblem, validation_problems
+from decoy_engine.safe_output import ConfigProblem
 
 __all__ = ["ColumnSuggestion", "StarterConfig", "starter_config"]
 
-# Strategies that fail at run time without a namespace (execution/_strategies/*).
-_NAMESPACED = frozenset(
-    {"hash", "fpe", "date_shift", "shuffle", "categorical", "bucket_perturb", "code_set"}
-)
 _KEY_STRATEGY = "hash"
 _CHECK_NAMESPACE = "starter-check"
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
@@ -101,19 +102,15 @@ def starter_config(
     scan does not carry them. `targets` maps a table to a full target descriptor that replaces
     the default. A placeholder namespace is written where a declared relationship names none.
     """
+    _check_relationship_shapes(scan, relationships)
     keys = _key_namespaces(relationships)
-    given = targets or {}
+    allocated = _allocate_targets(scan, targets or {})
     suggestions: list[ColumnSuggestion] = []
     notes: dict[tuple[str, str], str] = {}
     sources: dict[str, Any] = {}
-    out_targets: dict[str, Any] = {}
     tables: list[dict[str, Any]] = []
-    used_dirs: set[str] = set()
     for table in scan.tables:
         sources[table.name] = copy.deepcopy(table.descriptor)
-        out_targets[table.name] = copy.deepcopy(
-            given.get(table.name) or _default_target(table, used_dirs)
-        )
         if table.descriptor["type"] != "file":
             notes[(table.name, "")] = _CLOUD_NOTE
         columns = []
@@ -132,7 +129,7 @@ def starter_config(
         "sources": sources,
         "tables": tables,
         "relationships": copy.deepcopy([dict(r) for r in relationships]),
-        "targets": out_targets,
+        "targets": allocated,
     }
     if baseline_path is not None:
         config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
@@ -179,15 +176,23 @@ def _suggestion(
 ) -> ColumnSuggestion:
     if key is not None:
         return ColumnSuggestion(table, column, _KEY_STRATEGY, namespace=key[0], is_key=True)
-    namespace = column if decision.strategy in _NAMESPACED else None
-    return ColumnSuggestion(
+    bare = ColumnSuggestion(
         table,
         column,
         decision.strategy,
         provider=decision.provider,
         provider_config=decision.provider_config,
-        namespace=namespace,
         deterministic=decision.deterministic,
+    )
+    return dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
+
+
+def _needs_namespace(s: ColumnSuggestion) -> bool:
+    """Whether the registry requires a namespace on the entry this suggestion becomes."""
+    entry = _entry(s)
+    return any(
+        req.path == ("namespace",) and requirement_applies(req, entry)
+        for req in requirements_for(s.strategy)
     )
 
 
@@ -222,12 +227,60 @@ def _note(
     return " ".join(p for p in parts if p)
 
 
-def _default_target(table: TableScan, used_dirs: set[str]) -> dict[str, Any]:
+def _check_relationship_shapes(scan: ScanSet, relationships: Sequence[Mapping[str, Any]]) -> None:
+    columns = {t.name: [f.name for f in t.profile.fields] for t in scan.tables}
+    for position, rel in enumerate(relationships):
+        found = relationship_shape_error(rel, columns)
+        if found is not None:
+            code, path = found
+            raise PipelineConfigError.from_problems(
+                [
+                    ConfigProblem(
+                        code,
+                        f"relationships[{position}]",
+                        f"A declared relationship does not fit the scanned tables ({path}).",
+                    )
+                ],
+                prefix="starter config input is invalid",
+            )
+
+
+def _allocate_targets(scan: ScanSet, given: Mapping[str, Any]) -> dict[str, Any]:
+    """The one place a target path is made. Raises ValueError (names only) on a bad input."""
+    readers: dict[str, int] = {}
+    for table in scan.tables:
+        if table.descriptor["type"] == "file":
+            readers[table.descriptor["path"]] = readers.get(table.descriptor["path"], 0) + 1
+    out: dict[str, Any] = {}
+    used_dirs: set[str] = set()
+    for table in scan.tables:
+        name = table.name
+        if name in given:
+            explicit = given[name]
+            if not isinstance(explicit, Mapping) or not explicit:
+                raise ValueError(f"the target given for table {name!r} is empty or not a mapping")
+            out[name] = copy.deepcopy(dict(explicit))
+        else:
+            shared = table.descriptor["type"] == "file" and readers[table.descriptor["path"]] > 1
+            out[name] = _default_target(table, used_dirs, shared)
+    seen: dict[str, str] = {}
+    for table in scan.tables:
+        path = out[table.name].get("path")
+        if not isinstance(path, str):
+            continue
+        if path in seen:
+            raise ValueError(f"tables {seen[path]!r} and {table.name!r} share one target path")
+        seen[path] = table.name
+    return out
+
+
+def _default_target(table: TableScan, used_dirs: set[str], shared: bool) -> dict[str, Any]:
     descriptor = table.descriptor
     target: dict[str, Any] = {"type": "file", "format": descriptor["format"]}
     if descriptor["type"] == "file":
         path = Path(descriptor["path"])
-        target["path"] = str(path.with_name(f"{path.stem}.masked{path.suffix}"))
+        middle = f".{_UNSAFE_NAME.sub('_', table.name)}" if shared else ""
+        target["path"] = str(path.with_name(f"{path.stem}{middle}.masked{path.suffix}"))
         if descriptor.get("layout"):
             target["layout"] = copy.deepcopy(descriptor["layout"])
     else:
@@ -240,6 +293,15 @@ def _default_target(table: TableScan, used_dirs: set[str]) -> dict[str, Any]:
         used_dirs.add(name)
         target["path"] = f"masked/{name}.{descriptor['format']}"
     return target
+
+
+def _problems_of(raw: dict[str, Any]) -> tuple[ConfigProblem, ...] | None:
+    """The value-free problems `raw` fails with, or None when it validates."""
+    try:
+        parse_pipeline_config(raw)
+    except PipelineConfigError as err:
+        return err.problems
+    return None
 
 
 def _check(config: dict[str, Any]) -> None:
@@ -255,21 +317,14 @@ def _check(config: dict[str, Any]) -> None:
             if str(column.get("namespace", "")).startswith(NAMESPACE_PLACEHOLDER_PREFIX):
                 column["namespace"] = _CHECK_NAMESPACE
                 placeholders += 1
-    try:
-        PipelineConfig.model_validate(swapped)
-    except ValidationError as exc:
-        raise PipelineConfigError.from_problems(
-            validation_problems(exc), prefix="starter config failed validation"
-        ) from None
+    failed = _problems_of(swapped)
+    if failed is not None:
+        raise PipelineConfigError.from_problems(failed, prefix="starter config failed validation")
     if not placeholders:
         return
-    try:
-        PipelineConfig.model_validate(config)
-    except ValidationError as exc:
-        problems = validation_problems(exc)
-        if problems and all(p.code == expected for p in problems):
-            return
-        raise PipelineConfigError.from_problems(
-            problems, prefix="starter config failed validation"
-        ) from None
-    raise PipelineConfigError("starter config accepted a placeholder namespace")
+    problems = _problems_of(config)
+    if problems is None:
+        raise PipelineConfigError("starter config accepted a placeholder namespace")
+    if problems and all(p.code == expected for p in problems):
+        return
+    raise PipelineConfigError.from_problems(problems, prefix="starter config failed validation")
