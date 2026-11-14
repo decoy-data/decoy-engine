@@ -982,7 +982,7 @@ S3-engine.1 depends on S1a and CONFIG-EXPLICIT E2 because both edit
 `config/_tables.py`; S3-engine.2 depends on S3-engine.1.
 
 **Files.**
-- new `src/decoy_engine/profiling/starter_config.py`: `starter_config`,
+- new `src/decoy_engine/profiling/_starter_config.py`: `starter_config`,
   `StarterConfig`, `ColumnSuggestion`.
 - `src/decoy_engine/profiling/recommendations.py`: extend the existing
   `DEFAULT_STRATEGY_BY_DETECTOR` authority (`:32-101` at the plan base) into
@@ -1101,6 +1101,77 @@ def starter_config(
 | T3-key-hash | a scan set with a declared relationship whose namespace is `cust` and whose parent key the detectors flag as `email`: parent and child key columns get `strategy: hash`, `namespace: cust`; the REVIEW note names `faker`; the config validates and compiles | M3-key-redact: let the `redact` fallback apply to key columns; M3-key-detector: keep the detector's `faker` |
 | T3-placeholder | the same relationship with no namespace: every key column gets `decoy-set-namespace-1`; `PipelineConfig.model_validate` raises `namespace_placeholder_unset` naming each column path; replacing the placeholder with any other value validates and compiles | M3-no-guard: drop the placeholder validator; M3-split-ns: give the child a different placeholder from the parent |
 | T3-placeholder-error-value-free | the validation error names the field path and the code only | M3-echo: put the whole value in the message |
+
+**S3-engine.2 amendment (2026-11-14, after Codex review r1).** These
+rules replace the matching text above where they differ.
+
+- Signature: `starter_config(scan, *, baseline_path=None, targets=None,
+  seed=42, relationships=())`. `relationships` is the declared list from
+  `--config`, copied unchanged.
+- Compile boundary. `plan` sits above `profiling` in `.importlinter`, so the
+  builder cannot call `compile_plan`. The builder runs
+  `PipelineConfig.model_validate` plus the two lower-layer checks below. The
+  "compiles" guarantee is held by tests: every acceptance fixture runs the
+  real `compile_plan` on the result (and on the placeholder-replaced copy).
+- Namespace requirements, one authority. Move `StrategyRequirement`,
+  `REQUIREMENTS_BY_STRATEGY`, `requirements_for` and the condition evaluation
+  (`_lookup`, `_applies`, made public as `requirement_applies`) from
+  `plan/checks/_required_settings.py` into new
+  `src/decoy_engine/contracts/strategy_requirements.py` (same tier as
+  `profiling`; imports only `reasons`). `plan/checks/_required_settings.py`
+  keeps `check_required_strategy_settings` and re-imports the rest;
+  `plan.checks` keeps its exports so `execution` callers do not change. The
+  builder sets `namespace` on a column exactly when some requirement of its
+  strategy has path `("namespace",)` and `requirement_applies` holds for the
+  column entry it is building. No strategy list lives in `profiling`. A test
+  asserts the builder's namespaced set equals the registry's for every
+  strategy and condition value (tokenize, shuffle with and without
+  `deterministic`, code_set gen and non-gen).
+- Relationship shape, one authority. Add a pure function to
+  `config/_relationships.py`: `relationship_shape_error(rel, columns_by_table)
+  -> tuple[code, path] | None`, checking in this order: unknown parent or child
+  table, parent/child column-count mismatch (the existing
+  `plan.composite_columns_length_mismatch` code), and a key column missing from
+  its table when `columns_by_table` knows that table. `plan/_checks.py`
+  (arity check) calls it for the count rule so the code and message stay the
+  same; the builder calls it with the scanned columns before it writes any
+  entry. Codes are the existing ones; no new reason identity. Messages name
+  table and column names only.
+- Destinations, one allocator. A private `_allocate_targets` in
+  `starter_config.py` is the only place a target path is made. An explicit
+  target applies when `table.name in targets` (membership, not truthiness);
+  an explicit empty or non-mapping value is a builder input error. A default
+  target is `<stem>.masked.<ext>` when one scanned table reads that source
+  file, and `<stem>.<table>.masked.<ext>` when several do. After allocation,
+  any two tables with the same target path (explicit or default) are a
+  builder input error naming both tables. Builder input errors raise
+  `ValueError` with names only.
+- Destination identity (Codex r2). Add `target_identity(target) -> tuple[str,
+  ...]` to `config/_targets.py`, the one definition of "same destination". It
+  takes the validated target models only (`FileTarget | S3Target | GCSTarget`),
+  so an unknown type cannot reach it: file `("file", os.path.normpath(path))`,
+  S3 `("s3", endpoint, bucket, key)` where endpoint is `endpoint_url`
+  with trailing slashes removed and lowercased, or `""` for the AWS default (so
+  two S3-compatible stores never collide; Codex r3), GCS `("gcs", bucket,
+  object)`; region and credentials are not identity. The builder refuses
+  shared destinations after validation, on the validated config's targets,
+  comparing identities, not `path`. Filesystem aliasing (symlinks,
+  case-insensitive volumes) is the writer's concern at run time, not the
+  builder's. Added tests: T3-target-unique-cloud (two equal S3 targets, two
+  equal GCS targets, and `out/a.csv` vs `out/./a.csv` each refuse), mutation
+  M3-path-only (compare `path` only).
+- Placeholder prefix: import `NAMESPACE_PLACEHOLDER_PREFIX` from the public
+  `decoy_engine.config` (export it there if it is not exported).
+- Placement additions: `contracts/strategy_requirements.py` (new, contracts
+  tier), `config/_relationships.py` (grows), `plan/checks/_required_settings.py`
+  (shrinks). `config/` and top-level module caps are unchanged.
+- Added acceptance tests: T3-target-unique (two tables from one file get two
+  targets; two explicit equal targets refuse), T3-target-explicit-empty
+  (empty explicit target refuses, never falls back), T3-rel-shape (unknown
+  table, arity mismatch and missing column each refuse with the shared code
+  before output), T3-namespace-registry (the equality test above). Mutations:
+  M3-truthy (use `targets.get(name) or default`), M3-local-list (reinstate a
+  profiling-local namespaced set).
 
 **Frozen-contract effects.** Additive public API and one additive optional
 config field (§3.4 config contract). The namespace validator narrows the
@@ -1311,7 +1382,7 @@ fixtures not counted). A slice over about 800 in total is cut into parts.
 | S1c | CLI `_scan_multi.py` (new) | ~420 |
 | S1c | CLI `_scan_set_io.py` (new) | ~90 |
 | S1c | CLI `scan.py` (1442) | net 0 or less: the single-file path and `_safe_field_record` move out |
-| S3-engine | engine `profiling/starter_config.py` (new) | ~330 |
+| S3-engine | engine `profiling/_starter_config.py` (new) | ~330 |
 | S3-engine | engine `profiling/_starter_inference.py` (new) | ~170 |
 | S3-engine | engine `profiling/recommendations.py` (about 120) | about 300 after descriptors and the derived compatibility view |
 | S3-engine | engine `config/_scan_baseline.py` (new) | ~40 |
