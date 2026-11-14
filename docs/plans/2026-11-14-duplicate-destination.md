@@ -8,8 +8,8 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 `catalogs/recurring-defects.md`; engine `CLAUDE.md`, `CODEMAP.md`,
 `docs/compatibility-contract.md`; CLI `CODEMAP.md`, `docs/ROADMAP.md`.
 
-Revision 2: Dennis round 1 (GO-WITH-FIXES, 2 V1, 5 DESIGN, 4 V2-LOG) remediated; changes are
-marked "(r2)" where a reviewer needs to find them.
+Revision 3: Dennis round 1 (GO-WITH-FIXES, 2 V1, 5 DESIGN, 4 V2-LOG) and round 2 (GO-WITH-FIXES,
+0 V1, 4 DESIGN, 6 V2-LOG) remediated; changes are marked "(r2)" or "(r3)".
 
 Bases (2026-11-14): engine `origin/main` `187a14e6`, CLI `origin/main` `65b710c` (pins
 `decoy-engine==0.24.0`). Related work in review: engine PR #589 (SCAN-MULTI S3-engine.2, branch
@@ -98,7 +98,8 @@ vault as one more file that can be lost.
 1. A pipeline config in which two or more targets have the same `target_identity` is refused by
    `PipelineConfig` validation, so by every caller that validates (`parse_pipeline_config`,
    `PipelineConfig.model_validate`), before any source is read or any output written. The code
-   is `config/target_shared_destination`; each table in the clash gets one problem located at the
+   is `target_shared_destination` (namespace `config`; the string tests and `--json` see has no
+   prefix, r3); each table in the clash gets one problem located at the
    field that names the destination (`targets.<table>.path`, `.key` or `.object`, the locations
    the CLI already prints), in config order (r2). The text is the registry's fixed summary. No path, bucket,
    key or object appears in any message, location or log line.
@@ -142,8 +143,8 @@ vault as one more file that can be lost.
   (`_part2.py:49`), the owner of every code `PipelineConfig` raises through `problem_details`
   (r2; the `target_file.*` codes in `_part1.py` belong to the legacy `validation_result` owner).
   `since=UNRELEASED`, summary "Two or more targets write to one destination. Give each table its
-  own target." It joins the unreleased set that release prep stamps, and the owner table in
-  `tests/unit/test_reason_registry.py:357`.
+  own target." It joins the unreleased set that release prep stamps, and gets its own registry test
+  (T-E11), not a row in an existing pinned table.
 - Calling convention (r2). `self.targets` holds pydantic models; #589's starter builder holds
   dicts. E1 calls `target_identity(t.model_dump())` unless #589 lands a signature that takes
   both. The `type` field is a discriminated union, so an unknown type never reaches the
@@ -163,43 +164,63 @@ vault as one more file that can be lost.
 
 - **CL1, `decoy.mask()` (r2: placed paths).** After `parse_pipeline_config` and the `out=` merge,
   before `_load_sources_from_config` (`api.py:506`), check the paths the writer will use, not the
-  declared text. Copy `config_dict`; replace each local file target's `path` with
-  `str(layout.place_target(raw))` and an enabled `quarantine.output_path` with
-  `str(layout.place_quarantine(config_dict))` (the call `api.py:535` already makes), on the
-  `RunLayout.fixed(base_dir)` the call builds; then call `resolved_output_collisions(placed, None)`.
+  declared text. Build a fresh check input, never a shallow copy (r3): a new dict
+  `{"targets": {t: {"type": "file", "path": str(layout.place_target(raw))}, ...}}` for each local
+  file target, plus `{"quarantine": {"enabled": True, "output_path": str(q)}}` only when
+  `q = layout.place_quarantine(config_dict)` is not `None` (`_layout.py:594-596` returns `None`
+  for an enabled quarantine with no string path; r3), on the `RunLayout.fixed(base_dir)` the call
+  builds. Then call `resolved_output_collisions(placed, None)`. `config_dict` itself is never
+  edited: the plan hash covers `quarantine` (`plan/_compile.py:622`), so a placed absolute path
+  there would change `mask()`'s hash against `decoy run` for the same config.
   Every path is now absolute, so `names_a_file_inside` no longer drops `../x.csv`. On a clash
   raise `OUTPUT_PATH_COLLISION.error(first=..., second=...)` with the original config locations,
-  the same `LayoutError` `decoy run` raises, documented under the API's `Raises:`. Import both
-  from the public `decoy.cli.io` (`io/__init__.py:69`, `:98`), not `_placement`. No new rule, no
-  new code. This lands on the current engine pin and closes the `mask()` data loss by itself.
+  the same `LayoutError` `decoy run` raises, documented under the API's `Raises:`. Import
+  `LayoutError` and `resolved_output_collisions` from the public `decoy.cli.io`
+  (`io/__init__.py:69`, `:98`), not `_placement`; `OUTPUT_PATH_COLLISION` is not exported there
+  yet, so CL1 adds it to `io/__init__.py` and its `__all__` (r3). No new rule, no new code. This lands on the current engine pin and closes the `mask()` data loss by itself.
 - **CL1, `decoy tokenize` (r2).** Move the layout check out of the `if out_dir is not None` guard
   (`tokenize.py:310`): before any folder or source, call `layout_findings(config_path, raw,
   placement)` with `OutputPlacement.fixed(out_dir, (("--vault", vault),))` under `--out-dir` (as
   today) and `OutputPlacement(typed=(("--vault", vault),))` on the project route (the shape
   `run` uses, `run/_prepare.py:257`), and render the refusal the way the `--out-dir` branch does
-  (`tokenize.py:315-321`). Same rule, same code, exit 1.
+  (`tokenize.py:315-321`). This brings the whole layout gate `run` already applies to the project
+  route, not only the collision rule (r3): `layout_issues` (`_placement.py:261-357`) also refuses
+  an escaping target, a path over the Windows length budget, mixed relative and absolute targets
+  (delivery root split), `--vault` under the project's `out/` (`layout.side_file_in_out`) and the
+  cloud root checks. Each is a refusal `decoy run` gives today for the same config; exit 1.
 - **CL2, run and validate parity (after the repin to the engine release that carries E1).**
   `decoy run` checks layout before the gate (`run/_prepare.py:260` `_refuse_layout_faults`,
   called at `:319`), while `decoy validate` runs the schema first and stops there
   (`gate/_layers.py:117`). With E1 in, the same config would give `layout.output_path_collision`
-  from run and `config/target_shared_destination` from validate. `_refuse_layout_faults` skips the
+  from run and `target_shared_destination` from validate. `_refuse_layout_faults` skips the
   early refusal only when `parse_pipeline_config(ctx.raw)` refuses with a problem whose code is
-  `config/target_shared_destination` (r2); the gate then reports it in both commands. Any other
+  `target_shared_destination` (r2); the gate then reports it in both commands. Any other
   schema refusal keeps today's order, so a source-less YAML that relies on `--duckdb-source`
   (refused by the schema at `_pipeline.py:216` before staging) still gets its layout fault
   before `acquire_relation` reads a source, the invariant at `_prepare.py:315-316` that
   `tests/e2e/test_vault_commit_order.py` pins. After-validators stop at the first raise, so that
-  YAML never reaches E1.
+  YAML never reaches E1. On `target_shared_destination` the early check raises the schema refusal
+  itself instead of returning (r3), so a YAML that declares `sources:`, runs with
+  `--duckdb-source` and has equal targets is refused before `acquire_relation`
+  (`_prepare.py:356`) reads a source. The refusal is built by the gate's own
+  `PipelineConfigError` to `GateFinding` mapping (`gate/_layers.py:136-141`), moved into one
+  helper both call, so no second construction appears.
 - **CL2, test expectations.** The AT-31 cells in `tests/e2e/project_layout/test_layout_gate.py`
   whose outputs are the same as written (two equal relative paths, equal absolute paths, dot and
-  separator spellings) now expect `config/target_shared_destination` at `targets.a.path` and
+  separator spellings) now expect `target_shared_destination` at `targets.a.path` and
   `targets.b.path`, which `_assert_collision` (`test_layout_gate.py:513-517`) already checks;
   the symlink, hard-link, case-folding and target-against-quarantine cells keep
   `layout.output_path_collision`. The `validate preflight` cells (`test_layout_gate.py:525`,
   `:554`, `:585`) report a schema failure as `schema.field` with no code
   (`preflight.py:695-700`); they change to expect `schema.field` at those locations. A `code` on
   preflight schema failures is a `--json` change and belongs to row 24zf's one error shape, not
-  here (OQ-5). Cloud
+  here (OQ-5).
+- **CL2, CL1 cells that flip (r3).** CL1's equal-text cells (one per entry point: T-C1 for
+  `mask()`, T-C8 (a) for tokenize) start failing at the repin, because the engine refuses first.
+  CL2 changes them to expect the engine refusal: `ConfigValidationError` with
+  `target_shared_destination` from `mask()`, and tokenize's schema-error exit
+  (`tokenize.py:238-242`) with that code. Every other CL1 cell uses a clash the engine cannot
+  see and keeps `layout.output_path_collision`. Cloud
   cells with two equal keys expect the engine code; the CLI's "shares its file name" branch in
   `_key_issues` stays as a defense.
 
@@ -207,13 +228,14 @@ vault as one more file that can be lost.
 
 | Input | Before | After |
 |---|---|---|
-| engine `PipelineConfig.model_validate` with two equal targets (any type) | accepted | `ValidationError`, one `config/target_shared_destination` per table |
-| CLI `validate`, two equal targets | exit 1 layout or cloud code | exit 1 `config/target_shared_destination` |
-| CLI `run`, two equal targets | exit 1 layout or cloud code | exit 1 `config/target_shared_destination` |
+| engine `PipelineConfig.model_validate` with two equal targets (any type) | accepted | `ValidationError`, one `target_shared_destination` per table |
+| CLI `validate`, two equal targets | exit 1 layout or cloud code | exit 1 `target_shared_destination` |
+| CLI `run`, two equal targets | exit 1 layout or cloud code | exit 1 `target_shared_destination` |
 | CLI `run` or `validate`, outputs equal only on disk | exit 1 `layout.output_path_collision` | unchanged |
 | `decoy.mask()`, two equal targets or `out=` paths | silent overwrite | CL1: `LayoutError` `layout.output_path_collision`; after the repin `ConfigValidationError` (`api.py:458-465`) with the engine code fires first (OQ-4; CLI changelog line) |
 | `decoy.mask()`, outputs equal only on disk, or `../x.csv` twice | silent overwrite | `LayoutError` `layout.output_path_collision` |
 | `decoy tokenize` (project route), two equal targets, or a target on `--vault` | silent overwrite | exit 1 `layout.output_path_collision`; after the repin, equal targets give the engine code first |
+| `decoy tokenize` (project route), an escaping target, mixed relative and absolute targets, `--vault` under `out/`, a path over the Windows budget, a cloud root fault | runs | exit 1 with the code `decoy run` gives for the same config (`layout.output_path_escapes`, `layout.side_file_in_out` and the other `layout_issues` codes) (r3) |
 | any config with distinct targets | runs | runs, same bytes |
 
 ## 6. Failure modes
@@ -222,7 +244,7 @@ vault as one more file that can be lost.
 
 | # | Class | Structure that closes it | Proof | Mutation that turns it red |
 |---|---|---|---|---|
-| 1 | Value-bearing output | the engine problem text is the registry summary; the location is `targets.<table>`; no path, bucket, key or object reaches a message, `str(exc)`, a log line or `--json`. CL1 reuses `OUTPUT_PATH_COLLISION`, which names config locations only | T-E8, T-C1 | interpolate the path into a custom message |
+| 1 | Value-bearing output | the engine problem text is the registry summary; the location is `targets.<table>.path`, `.key` or `.object`; no path, bucket, key or object reaches a message, `str(exc)`, a log line or `--json`. CL1 reuses `OUTPUT_PATH_COLLISION`, which names config locations only | T-E8, T-C1 | interpolate the path into a custom message |
 | 2 | Cleanup missing on an exit path | N/A with a reason: both refusals fire before any output is opened, so nothing is left behind | T-C1 (no file under the folder) | move the CL1 check after `_write_mask_outputs` |
 | 3 | State and concurrency | N/A: the validator and the CL1 check are pure functions of the config and the folder; no shared or module state is added | T-E6 (stable order) | collect problems in a module-level set |
 | 4 | Route parity and silent fallback | one engine choke point (`PipelineConfig`) covers every engine caller; CL1 brings `decoy.mask()` and `decoy tokenize` (both routes) to the rule `run`, `validate` and `ci check` already use, on the placed paths; CL2 makes `validate` and `run` report the same first code and keeps every other ordering | T-C1, T-C2, T-C5, T-C8, T-C9, T-C10, T-C11 | skip the CL1 check when `out=` is given; keep the tokenize `out_dir` guard; skip the early refusal on any schema failure |
@@ -286,7 +308,7 @@ share a destination are refused like any other pair.
 
 | Id | Test | Mutation that must turn it red |
 |---|---|---|
-| T-E1 | two file targets, same path: refused, problems at `targets.a` and `targets.b`, code `config/target_shared_destination` | M-E1: remove the validator |
+| T-E1 | two file targets, same path: refused, problems at `targets.a.path` and `targets.b.path`, code `target_shared_destination` | M-E1: remove the validator |
 | T-E2 | `out/a.csv` against `out/./a.csv` and `out//a.csv`: refused | M-E2: compare `path` instead of `target_identity` |
 | T-E3 | S3 same bucket and key refused; same key in another bucket accepted; same bucket, other key accepted | M-E3: drop the bucket from the comparison |
 | T-E4 | GCS, the three cells of T-E3 | M-E4: as M-E3 for GCS |
@@ -296,7 +318,7 @@ share a destination are refused like any other pair.
 | T-E8 | on the raw `PipelineConfig.model_validate` error (r2): no path, bucket, key or object text in `str(exc)` or any `errors()` `msg`, `input` or `ctx`; the same on `PipelineConfigError` problems; `__cause__` and `__context__` are `None`; the code is registered | M-E8: interpolate the path into a custom message |
 | T-E9 | distinct targets: the existing config fixtures still validate; the E1 full suite is green after the 7.1a migration | none |
 | T-E10 | an unknown target `type` is refused as today (discriminator), not by a bare exception from the validator | M-E10: make the validator accept a raw dict and call `target_identity` on it before the union check |
-| T-E11 | registry: `target_shared_destination` has owner `PipelineValidationError`, `since=UNRELEASED`, and the kind and retry of the other config codes (modelled on the GEN_UNIQUE registry test) | M-E11: declare it in `_part1.py` |
+| T-E11 | a standalone registry test (r3): `target_shared_destination` has owner `PipelineValidationError`, `since == UNRELEASED`, kind FAILURE, retry CONFIGURATION_REPAIR. It is not added to the `GEN_STRICT` table at `test_reason_registry.py:357`, whose tests pin `since == "1.13.0"` and the 1.13 manifest (`:379-400`) | M-E11: declare it under the `decoy_engine.validation_result` owner |
 
 ### 7.1a Engine callers E1 migrates (r2)
 
@@ -315,6 +337,10 @@ if a production caller appears.
 | `tests/unit/generation/unique/_gu_e2_support.py` | 19 |
 | `tests/unit/test_v2_generation.py` | 1048 |
 
+`scripts/gen_proof_manifest.py` has an exact size pin of 1230 lines
+(`tests/sentry/test_module_size.py:154`, `tests/sentry/baselines/module-size.json:23`): its edit is
+line-count neutral (four lines for four lines) with no census change (r3).
+
 Shared test helpers are a `testing.md` escalation trigger: E1 runs the full engine suite against
 the stored main baseline.
 
@@ -322,22 +348,23 @@ the stored main baseline.
 
 | Id | Test | Mutation |
 |---|---|---|
-| T-C1 | `decoy.mask(config=...)` with two equal absolute targets raises `LayoutError` `layout.output_path_collision`; no source read (patch `decoy.api._load_sources_from_config`, bound at import, `api.py:40`); `run_pipeline` never called (spy; quarantine is written inside it); no file under the folder | M-C1: skip the check |
-| T-C2 | `out={"a": p, "b": p}` on distinct declared targets: refused | M-C2: check before the `out=` merge |
-| T-C3 | relative dot spelling; case-only names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs it); a symlinked folder | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
-| T-C4 | distinct targets: both files written with their own rows | none |
-| T-C9 | two `../shared.csv` targets; `../shared.csv` against its absolute spelling; `sub/../a.csv` through a symlinked `sub` against the real path: all refused, nothing written outside the base | M-C9: pass the declared `config_dict` with `base_dir` instead of the placed paths |
-| T-C10 | a target equal to the enabled `quarantine.output_path`: refused, `run_pipeline` never called | M-C10: leave quarantine out of the placed copy |
-| T-C8 | `decoy tokenize` on the project route: (a) two equal targets, (b) a symlinked spelling of one target, (c) a target equal to `--vault`: exit 1 `layout.output_path_collision`, no output written, the vault file absent or byte-identical; (d) the same three under `--out-dir` stay refused | M-C8: keep the `out_dir is not None` guard |
+| T-C1 | `decoy.mask(config=...)` with two equal absolute targets (the one equal-text `mask()` cell; flips in CL2) raises `LayoutError` `layout.output_path_collision`; no source read (patch `decoy.api._load_sources_from_config`, bound at import, `api.py:40`); `run_pipeline` never called (spy; quarantine is written inside it); no file under the folder | M-C1: skip the check |
+| T-C2 | `out={"a": p, "b": q}` where `q` is `p` through a symlinked folder, on distinct declared targets: refused | M-C2: check before the `out=` merge |
+| T-C3 | case-only names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs it); a symlinked folder | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
+| T-C4 | distinct targets: both files written with their own rows; `config_dict` (targets and quarantine) is equal before and after the check (r3) | M-C4: build the check input with a shallow copy and edit it in place |
+| T-C9 | `../shared.csv` against its absolute spelling; `sub/../a.csv` through a symlinked `sub` against the real path: all refused, nothing written outside the base | M-C9: pass the declared `config_dict` with `base_dir` instead of the placed paths |
+| T-C10 | a target equal to the enabled `quarantine.output_path`: refused, `run_pipeline` never called; an enabled quarantine with no string path adds no `"None"` entry | M-C10: leave quarantine out of the placed copy |
+| T-C8 | `decoy tokenize` on the project route: (a) two equal targets (the one equal-text tokenize cell; flips in CL2), (b) a symlinked spelling of one target, (c) a target equal to `--vault`: exit 1 `layout.output_path_collision`, no output written, the vault file absent or byte-identical; (d) (b) and (c) under `--out-dir` stay refused; (e) distinct absolute targets with a vault outside `out/` still succeed. `tests/e2e/test_tokenize_cli.py` joins CL1's T1 set (r3) | M-C8: keep the `out_dir is not None` guard |
 
 ### 7.3 CLI CL2 (after the repin)
 
 | Id | Test | Mutation |
 |---|---|---|
-| T-C5 | the same config through `validate` and `run`: same first code, exit 1, for (a) two equal relative paths: `config/target_shared_destination`; (b) a symlinked folder: `layout.output_path_collision` | M-C5: keep the early layout refusal |
-| T-C6 | two S3 targets with one key: `config/target_shared_destination` from both commands | M-C6: as M-C5 |
-| T-C7 | updated AT-31 cells per 4.2, including the three `validate preflight` cells expecting `schema.field` at `targets.a.path` and `targets.b.path` | none |
+| T-C5 | the same config through `validate` and `run`: same first code, exit 1, for (a) two equal relative paths: `target_shared_destination`; (b) a symlinked folder: `layout.output_path_collision` | M-C5: keep the early layout refusal |
+| T-C6 | two S3 targets with one key: `target_shared_destination` from both commands | M-C6: as M-C5 |
+| T-C7 | updated AT-31 cells per 4.2, T-C1 and T-C8 (a) flipped to the engine refusal, including the three `validate preflight` cells expecting `schema.field` at `targets.a.path` and `targets.b.path` | none |
 | T-C11 | a source-less YAML that relies on `--duckdb-source`, plus a symlink collision: `run` exits 1 `layout.output_path_collision` and `acquire_relation` is never called | M-C11: skip the early refusal on any schema failure |
+| T-C11b | a YAML with `sources:`, run with `--duckdb-source`, and two equal targets: exit 1 `target_shared_destination`, `acquire_relation` never called (r3) | M-C11b: return instead of raising on that code |
 
 ## 7a. Reuse inventory
 
@@ -361,6 +388,8 @@ the stored main baseline.
 | docs | engine `docs/config-reference.md` targets section, or the file the builder finds holding it (`git grep -l "targets:" docs/`): one line, "each table needs its own destination" | |
 | CLI API check | `src/decoy/api.py` (CL1) | CLI `api.py` |
 | CLI tokenize check | `src/decoy/cli/tokenize.py` (CL1) | CLI `tokenize.py` |
+| CLI export | `src/decoy/cli/io/__init__.py`: `OUTPUT_PATH_COLLISION` and its `__all__` entry (CL1) | CLI `io/` |
+| CLI schema-refusal helper | the `PipelineConfigError` to `GateFinding` mapping moved out of `gate/_layers.py:136-141` into one helper `_layers` and `run/_prepare.py` both call (CL2) | CLI `gate/` |
 | CLI run parity | `src/decoy/cli/run/_prepare.py` (CL2) | CLI `run/` |
 | CLI tests | `tests/e2e/test_mask_api_destinations.py` (new, CL1); a tokenize cell file beside the existing tokenize e2e tests (CL1); `tests/e2e/project_layout/test_layout_gate.py` (CL2) | |
 
@@ -372,6 +401,8 @@ No new module; `config/` and top-level module counts are unchanged.
 - **Exit codes.** None move (1 before, 1 after).
 - **`--json` shapes.** Unchanged; some configs report a different code before REL-GATE (row 93)
   freezes codes. Preflight gains no `code` field here (OQ-5).
+- **`decoy tokenize`.** The project route gains the `layout_issues` refusals `decoy run` gives for
+  the same config (5); exit 1, existing codes (r3).
 - **Python API.** `decoy.mask()` raises `LayoutError` for a destination clash after CL1; after the
   repin, equal declarations raise `ConfigValidationError` instead (OQ-4).
 - **Determinism and output bytes.** Unchanged for every config that still validates.
@@ -380,9 +411,9 @@ No new module; `config/` and top-level module counts are unchanged.
 
 | Slice | Repo | Depends on | Content | Risk |
 |---|---|---|---|---|
-| CL1 | CLI | nothing | 4.2 CL1 bullets (`mask()` and `tokenize`), T-C1 to T-C4, T-C8 to T-C10 | R2 |
+| CL1 | CLI | nothing | 4.2 CL1 bullets (`mask()`, `tokenize`, the `OUTPUT_PATH_COLLISION` export), T-C1 to T-C4, T-C8 to T-C10 | R2 |
 | E1 | engine | #589 merged (`target_identity` on main, with the 4.1 calling convention pinned) | 4.1, 7.1a migration, T-E1 to T-E11, changelog, docs line; full suite | R2 |
-| CL2 | CLI | the engine release with E1, and the repin | 4.2 CL2 bullets, T-C5 to T-C7, T-C11, CLI changelog line | R1 |
+| CL2 | CLI | the engine release with E1, and the repin | 4.2 CL2 bullets (parity, the shared schema-refusal helper, the flipped CL1 cells), T-C5 to T-C7, T-C11, T-C11b, CLI changelog line | R1 |
 
 If #589 has not merged when E1 starts, E1 waits; it does not add its own identity function.
 
@@ -390,7 +421,7 @@ If #589 has not merged when E1 starts, E1 waits; it does not add its own identit
 
 - **OQ-1.** May two tables ever write into one destination on purpose (append, or a union file)?
   Working answer: no, refuse; a union belongs in a table, not in the writer.
-- **OQ-2.** Two codes stay: `config/target_shared_destination` (the declarations name one destination)
+- **OQ-2.** Two codes stay: `target_shared_destination` (the declarations name one destination)
   and `layout.output_path_collision` (two outputs meet on disk). Working answer: keep both; they
   point the user at different fixes.
 - **OQ-3 (r2).** Seven engine test helpers and `scripts/gen_proof_manifest.py` give every table
@@ -412,7 +443,7 @@ If #589 has not merged when E1 starts, E1 waits; it does not add its own identit
 | 3 | No exception context | the E1 problem is built by `problem_details` and raised by `ValidationError.from_exception_data` outside any `except`; CL1 raises `OUTPUT_PATH_COLLISION.error` outside any `except`. T-E8 and T-C1 assert `__cause__` and `__context__` are `None` on the refusal. |
 | 4 | Versioned read models | N/A: nothing persisted is read. |
 | 5 | Normalized guard scanners | N/A: no sentry is added. The 7.1a scan is a one-off builder check, not a guard. |
-| 6 | No reaching into private modules | CL1 imports `resolved_output_collisions`, `LayoutError` and `OUTPUT_PATH_COLLISION` from public `decoy.cli.io`, never `_placement` or `_layout_errors`. |
+| 6 | No reaching into private modules | CL1 imports `resolved_output_collisions`, `LayoutError` and `OUTPUT_PATH_COLLISION` from public `decoy.cli.io`, adding the missing `OUTPUT_PATH_COLLISION` export there, never `_placement` or `_layout_errors`. |
 | 7 | No hidden CI failures | N/A: no CI change. |
 | 8 | One input, one trust class per entry point | the config's target paths are one input with one rule per layer: engine identity on the declaration, CLI identity on the placed path; `mask()`, `tokenize`, `run`, `validate` and `ci check` all take the same CLI rule. |
 | 9 | Mutations on the final head | every M-* in section 7 reruns on the final head of each slice. |
@@ -451,7 +482,8 @@ new OS branch.
 - Do not change exit codes or `--json` shapes.
 - E1 does not start before #589 merges.
 - CL1 checks placed paths, never declared text; do not widen `names_a_file_inside`.
-- CL2 skips the early layout refusal only for `config/target_shared_destination`.
+- CL2 changes the early layout refusal only for `target_shared_destination`, and then raises.
+- The CL1 check input is built fresh; `config_dict` is never edited.
 
 ## 16. Verification status
 
