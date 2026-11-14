@@ -23,10 +23,17 @@ from pydantic import ValidationError
 
 from decoy_engine import reasons, write_fixed_width
 from decoy_engine.config import PipelineConfig, PipelineConfigError
-from decoy_engine.plan import compile_plan
+from decoy_engine.plan import PlanCompileError, compile_plan
+from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, check_required_strategy_settings
 from decoy_engine.profile import profile_source
 from decoy_engine.profiling import scan_sources
-from decoy_engine.profiling.starter_config import StarterConfig, starter_config
+from decoy_engine.profiling._starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    _entry,
+    _needs_namespace,
+    starter_config,
+)
 
 CANARY = "CANARY-5d2b83"
 PLACEHOLDER_CODE = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
@@ -359,6 +366,116 @@ def test_same_namespace_on_two_relationships_is_one_namespace(
     assert _columns(result, "customers")["email"]["namespace"] == "cust"
 
 
+def _two_tables_one_file(sources: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {"customers": sources["customers"], "customers_copy": dict(sources["customers"])}
+
+
+def test_two_tables_from_one_file_get_two_targets(sources: dict[str, dict[str, Any]]) -> None:
+    result = _build(_two_tables_one_file(sources))
+    paths = [t["path"] for t in result.config["targets"].values()]
+    assert len(set(paths)) == 2
+    assert paths[0].endswith("customers.customers.masked.csv")
+    assert paths[1].endswith("customers.customers_copy.masked.csv")
+    _compile(result.config)
+
+
+def test_one_table_per_file_keeps_the_plain_default(sources: dict[str, dict[str, Any]]) -> None:
+    assert _build(sources).config["targets"]["customers"]["path"].endswith("customers.masked.csv")
+
+
+def test_two_equal_explicit_targets_are_refused(
+    sources: dict[str, dict[str, Any]], tmp_path: Path
+) -> None:
+    same = {"type": "file", "format": "csv", "path": str(tmp_path / "out.csv")}
+    with pytest.raises(ValueError, match="customers.*orders") as err:
+        _build(sources, targets={"customers": same, "orders": dict(same)})
+    assert str(tmp_path) not in str(err.value)
+
+
+def test_an_explicit_target_equal_to_another_default_is_refused(
+    sources: dict[str, dict[str, Any]], tmp_path: Path
+) -> None:
+    clash = {"type": "file", "format": "csv", "path": str(tmp_path / "orders.masked.csv")}
+    with pytest.raises(ValueError, match="share one target path"):
+        _build(sources, targets={"customers": clash})
+
+
+@pytest.mark.parametrize("empty", [{}, None, "", []])
+def test_an_explicit_empty_target_is_refused_not_defaulted(
+    sources: dict[str, dict[str, Any]], empty: Any
+) -> None:
+    with pytest.raises(ValueError, match="customers"):
+        _build(sources, targets={"customers": empty})
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (
+            lambda r: r["parent"].update(table="nope"),
+            str(reasons.config.FK_UNKNOWN_NODE),
+        ),
+        (
+            lambda r: r["children"][0].update(table="nope"),
+            str(reasons.config.FK_UNKNOWN_NODE),
+        ),
+        (
+            lambda r: r["children"][0].update(columns=["customer_email", "amount"]),
+            str(reasons.plan.COMPOSITE_COLUMNS_LENGTH_MISMATCH),
+        ),
+        (
+            lambda r: r["parent"].update(columns=["no_such_column"]),
+            str(reasons.config.FK_UNKNOWN_COLUMN),
+        ),
+    ],
+)
+def test_a_misshapen_relationship_is_refused_before_output(
+    sources: dict[str, dict[str, Any]], mutate: Any, code: str
+) -> None:
+    rel = _relationship("ns")
+    mutate(rel)
+    with pytest.raises(PipelineConfigError) as err:
+        _build(sources, relationships=[rel])
+    assert [p.code for p in err.value.problems] == [code]
+    assert "user1@example.com" not in str(err.value)
+
+
+@pytest.mark.parametrize(
+    ("strategy", "extra"),
+    [
+        ("hash", {}),
+        ("fpe", {}),
+        ("date_shift", {}),
+        ("bucket_perturb", {}),
+        ("categorical", {}),
+        ("tokenize", {}),
+        ("redact", {}),
+        ("shuffle", {}),
+        ("shuffle", {"deterministic": True}),
+        ("code_set", {"provider_config": {"mode": "gen"}}),
+        ("code_set", {"provider_config": {"mode": "mask"}}),
+        ("code_set", {}),
+    ],
+)
+def test_namespace_is_set_exactly_when_the_registry_requires_it(
+    strategy: str, extra: dict[str, Any]
+) -> None:
+    assert strategy in REQUIREMENTS_BY_STRATEGY or strategy == "redact"
+    suggestion = ColumnSuggestion("t", "c", strategy, **extra)
+    entry = _entry(suggestion)
+    try:
+        check_required_strategy_settings({"tables": [{"name": "t", "columns": [entry]}]})
+    except PlanCompileError:
+        required = True
+    else:
+        required = False
+    assert _needs_namespace(suggestion) is required
+    if required:
+        check_required_strategy_settings(
+            {"tables": [{"name": "t", "columns": [{**entry, "namespace": "c"}]}]}
+        )
+
+
 def _inherited_env() -> dict[str, str]:
     keep = ("HOME", "VIRTUAL_ENV", "PYTHONPATH", "SYSTEMROOT", "TMPDIR", "LD_LIBRARY_PATH", "PATH")
     return {k: v for k, v in os.environ.items() if k in keep}
@@ -372,7 +489,7 @@ def test_the_same_scan_renders_the_same_bytes_under_any_hash_seed(tmp_path: Path
         sys.path.insert(0, sys.argv[2])
         from test_starter_config import _relationship, _write_sources
         from decoy_engine.profiling import scan_sources
-        from decoy_engine.profiling.starter_config import starter_config
+        from decoy_engine.profiling._starter_config import starter_config
         scan = scan_sources(_write_sources(Path(sys.argv[1])))
         r = starter_config(scan, relationships=[_relationship(None)])
         notes = [[*k, v] for k, v in r.notes.items()]

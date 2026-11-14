@@ -82,6 +82,7 @@ from decoy_engine.config._relationships import (
     OrphanPolicyLiteral,
     RelationshipConfig,
     RelationshipEnd,
+    relationship_shape_error,
 )
 from decoy_engine.config._scan_baseline import ScanBaselineConfig
 from decoy_engine.config._sources import (
@@ -178,5 +179,6 @@ __all__ = [
     "refuse_fixed_width_output_types",
     "refuse_namespace_placeholder",
     "refuse_unlisted_generate_families",
+    "relationship_shape_error",
     "value_key",
 ]
