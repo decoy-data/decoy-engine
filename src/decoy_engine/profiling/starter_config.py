@@ -1,0 +1,275 @@
+"""`starter_config`: one scan over many tables becomes one starter pipeline config.
+
+Source pattern: the CLI's `decoy init` scaffold (scan, suggest per column, leave each judgment
+to a REVIEW note) generalized to many tables. Foreign keys are never inferred. A declared
+relationship's key columns all hash under one shared namespace, the keyed-pseudonym join rule
+of SDV's HMA1 (same key in, same token out across tables) and of the namespace registry's
+same-FK same-mask check. The per-column decision is `_starter_inference`'s; this module reads
+the descriptors and holds no detector table.
+
+The builder validates the config it returns (`PipelineConfig`). It does not run `compile_plan`:
+`plan` sits above `profiling` in the import layers, so the compile check lives in the tests and
+in the CLI. Output carries detector ids, strategy names, counts and fixed copy, never a cell value.
+"""
+
+from __future__ import annotations
+
+import copy
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+
+from pydantic import ValidationError
+
+from decoy_engine import reasons
+from decoy_engine.config import PipelineConfig, PipelineConfigError
+from decoy_engine.config._namespaces import NAMESPACE_PLACEHOLDER_PREFIX
+from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
+from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
+from decoy_engine.safe_output import ConfigProblem, validation_problems
+
+__all__ = ["ColumnSuggestion", "StarterConfig", "starter_config"]
+
+# Strategies that fail at run time without a namespace (execution/_strategies/*).
+_NAMESPACED = frozenset(
+    {"hash", "fpe", "date_shift", "shuffle", "categorical", "bucket_perturb", "code_set"}
+)
+_KEY_STRATEGY = "hash"
+_CHECK_NAMESPACE = "starter-check"
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+_KEY_NOTE = (
+    "Key column of a declared relationship. hash with one namespace keeps the join after "
+    "masking; the scan suggested {suggested}."
+)
+_PLACEHOLDER_NOTE = (
+    "Set the same namespace on the relationship and on every key column of it before "
+    "running; `decoy validate` refuses the placeholder."
+)
+_LEADING_ZERO_NOTE = (
+    "{count} sampled values in this column start with 0. The scan read it as a number, but "
+    "`decoy run` reads CSV as text, so check that the strategy keeps leading zeros."
+)
+_CLOUD_NOTE = (
+    "`decoy run` does not read or write S3 or GCS until the CLI-CLOUD row lands. The target "
+    "is a local masked/ directory next to this file."
+)
+
+
+@dataclass(frozen=True)
+class ColumnSuggestion:
+    """What the starter writes for one column, before it becomes a config entry."""
+
+    table: str
+    column: str
+    strategy: str
+    provider: str | None = None
+    provider_config: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    namespace: str | None = None
+    deterministic: bool = False
+    is_key: bool = False
+
+
+@dataclass(frozen=True)
+class StarterConfig:
+    """The starter pipeline and the copy that explains it.
+
+    `notes` maps `(table, column)` to REVIEW text. The key `(table, "")` holds a note about the
+    table's source and target (the cloud note).
+    """
+
+    config: dict[str, Any]
+    notes: Mapping[tuple[str, str], str]
+    suggestions: tuple[ColumnSuggestion, ...]
+    relationship_template: tuple[str, ...]
+
+
+def starter_config(
+    scan: ScanSet,
+    *,
+    baseline_path: str | None = None,
+    targets: Mapping[str, dict[str, Any]] | None = None,
+    seed: int = 42,
+    relationships: Sequence[Mapping[str, Any]] = (),
+) -> StarterConfig:
+    """Build a starter pipeline config for the tables of `scan`.
+
+    `relationships` are the user's declared `RelationshipConfig` dicts, copied unchanged; the
+    scan does not carry them. `targets` maps a table to a full target descriptor that replaces
+    the default. A placeholder namespace is written where a declared relationship names none.
+    """
+    keys = _key_namespaces(relationships)
+    given = targets or {}
+    suggestions: list[ColumnSuggestion] = []
+    notes: dict[tuple[str, str], str] = {}
+    sources: dict[str, Any] = {}
+    out_targets: dict[str, Any] = {}
+    tables: list[dict[str, Any]] = []
+    used_dirs: set[str] = set()
+    for table in scan.tables:
+        sources[table.name] = copy.deepcopy(table.descriptor)
+        out_targets[table.name] = copy.deepcopy(
+            given.get(table.name) or _default_target(table, used_dirs)
+        )
+        if table.descriptor["type"] != "file":
+            notes[(table.name, "")] = _CLOUD_NOTE
+        columns = []
+        for stats in table.profile.fields:
+            decision = infer_starter_strategy(stats)
+            key = keys.get((table.name, stats.name))
+            suggestion = _suggestion(table.name, stats.name, decision, key)
+            suggestions.append(suggestion)
+            columns.append(_entry(suggestion))
+            notes[(table.name, stats.name)] = _note(table, stats.name, decision, key)
+        tables.append({"name": table.name, "columns": columns})
+
+    config: dict[str, Any] = {
+        "version": 2,
+        "global_settings": {"seed": seed},
+        "sources": sources,
+        "tables": tables,
+        "relationships": copy.deepcopy([dict(r) for r in relationships]),
+        "targets": out_targets,
+    }
+    if baseline_path is not None:
+        config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
+    _check(config)
+    return StarterConfig(
+        config=config,
+        notes=MappingProxyType(notes),
+        suggestions=tuple(suggestions),
+        relationship_template=tuple(t.name for t in scan.tables),
+    )
+
+
+def _key_namespaces(
+    relationships: Sequence[Mapping[str, Any]],
+) -> dict[tuple[str, str], tuple[str, bool]]:
+    """(table, column) -> (namespace, is_placeholder) for every declared key column."""
+    found: dict[tuple[str, str], tuple[str, bool]] = {}
+    for position, rel in enumerate(relationships, start=1):
+        declared = rel.get("namespace")
+        placeholder = declared is None
+        namespace = f"{NAMESPACE_PLACEHOLDER_PREFIX}{position}" if placeholder else str(declared)
+        ends = [rel["parent"], *rel["children"]]
+        for end in ends:
+            for column in end["columns"]:
+                slot = (end["table"], column)
+                if slot in found and found[slot][0] != namespace:
+                    raise PipelineConfigError.from_problems(
+                        [
+                            ConfigProblem(
+                                str(reasons.config.NAMESPACE_AMBIGUITY),
+                                f"relationships[{position - 1}]",
+                                "A key column is named by two relationships with different "
+                                "namespaces.",
+                            )
+                        ],
+                        prefix="starter config input is invalid",
+                    )
+                found[slot] = (namespace, placeholder)
+    return found
+
+
+def _suggestion(
+    table: str, column: str, decision: StarterDecision, key: tuple[str, bool] | None
+) -> ColumnSuggestion:
+    if key is not None:
+        return ColumnSuggestion(table, column, _KEY_STRATEGY, namespace=key[0], is_key=True)
+    namespace = column if decision.strategy in _NAMESPACED else None
+    return ColumnSuggestion(
+        table,
+        column,
+        decision.strategy,
+        provider=decision.provider,
+        provider_config=decision.provider_config,
+        namespace=namespace,
+        deterministic=decision.deterministic,
+    )
+
+
+def _entry(s: ColumnSuggestion) -> dict[str, Any]:
+    entry: dict[str, Any] = {"name": s.column, "strategy": s.strategy}
+    if s.provider:
+        entry["provider"] = s.provider
+    if s.namespace is not None:
+        entry["namespace"] = s.namespace
+    if s.provider_config:
+        entry["provider_config"] = dict(s.provider_config)
+    if s.deterministic:
+        entry["deterministic"] = True
+    return entry
+
+
+def _note(
+    table: TableScan,
+    column: str,
+    decision: StarterDecision,
+    key: tuple[str, bool] | None,
+) -> str:
+    if key is None:
+        parts = [decision.review]
+    else:
+        parts = [_KEY_NOTE.format(suggested=decision.strategy)]
+        if key[1]:
+            parts.append(_PLACEHOLDER_NOTE)
+    zeros = table.leading_zero_counts.get(column)
+    if zeros:
+        parts.append(_LEADING_ZERO_NOTE.format(count=zeros))
+    return " ".join(p for p in parts if p)
+
+
+def _default_target(table: TableScan, used_dirs: set[str]) -> dict[str, Any]:
+    descriptor = table.descriptor
+    target: dict[str, Any] = {"type": "file", "format": descriptor["format"]}
+    if descriptor["type"] == "file":
+        path = Path(descriptor["path"])
+        target["path"] = str(path.with_name(f"{path.stem}.masked{path.suffix}"))
+        if descriptor.get("layout"):
+            target["layout"] = copy.deepcopy(descriptor["layout"])
+    else:
+        # Cloud inputs are written to a local folder; two table names must not share a file.
+        base = _UNSAFE_NAME.sub("_", table.name)
+        name, n = base, 1
+        while name in used_dirs:
+            n += 1
+            name = f"{base}-{n}"
+        used_dirs.add(name)
+        target["path"] = f"masked/{name}.{descriptor['format']}"
+    return target
+
+
+def _check(config: dict[str, Any]) -> None:
+    """Validate the config; a placeholder must be the only thing that fails it.
+
+    A failure here is a builder bug, so the error names codes and locations, never values.
+    """
+    expected = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
+    swapped = copy.deepcopy(config)
+    placeholders = 0
+    for table in swapped["tables"]:
+        for column in table["columns"]:
+            if str(column.get("namespace", "")).startswith(NAMESPACE_PLACEHOLDER_PREFIX):
+                column["namespace"] = _CHECK_NAMESPACE
+                placeholders += 1
+    try:
+        PipelineConfig.model_validate(swapped)
+    except ValidationError as exc:
+        raise PipelineConfigError.from_problems(
+            validation_problems(exc), prefix="starter config failed validation"
+        ) from None
+    if not placeholders:
+        return
+    try:
+        PipelineConfig.model_validate(config)
+    except ValidationError as exc:
+        problems = validation_problems(exc)
+        if problems and all(p.code == expected for p in problems):
+            return
+        raise PipelineConfigError.from_problems(
+            problems, prefix="starter config failed validation"
+        ) from None
+    raise PipelineConfigError("starter config accepted a placeholder namespace")

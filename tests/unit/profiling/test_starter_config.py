@@ -62,7 +62,7 @@ def _write_sources(root: Path) -> dict[str, dict[str, Any]]:
         }
     )
     orders.to_csv(root / "orders.csv", index=False, header=False)
-    pd.DataFrame({"id": range(1, 21), "label": [f"x{i}" for i in range(20)]}).to_parquet(
+    pd.DataFrame({"id": range(1, 21), "label": [f"label-{i}-text" for i in range(20)]}).to_parquet(
         root / "events.parquet"
     )
     ledger = pd.DataFrame({"acct": [f"AC{i:04d}" for i in range(20)], "amt": range(20)})
@@ -187,7 +187,7 @@ def test_targets_sit_beside_the_input(sources: dict[str, dict[str, Any]], tmp_pa
         "format": "csv",
         "path": str(tmp_path / "customers.masked.csv"),
     }
-    assert targets["ledger"]["layout"] == LAYOUT
+    assert targets["ledger"]["layout"] == _build(sources).config["sources"]["ledger"]["layout"]
     assert targets["events"]["path"] == str(tmp_path / "events.masked.parquet")
 
 
@@ -301,7 +301,7 @@ def test_placeholder_namespace_is_shared_and_refused(sources: dict[str, dict[str
     parent = _columns(result, "customers")["email"]
     child = _columns(result, "orders")["customer_email"]
     assert parent["namespace"] == child["namespace"] == "decoy-set-namespace-1"
-    assert "Set the namespace on every key column" in result.notes[("customers", "email")]
+    assert "Set the same namespace on the relationship" in result.notes[("customers", "email")]
     with pytest.raises(ValidationError) as info:
         PipelineConfig.model_validate(result.config)
     errors = info.value.errors(include_input=False)
@@ -311,6 +311,8 @@ def test_placeholder_namespace_is_shared_and_refused(sources: dict[str, dict[str
         ("tables", 1, "columns", 1, "namespace"),
     }
     fixed = copy.deepcopy(result.config)
+    # The compiler resolves a relationship's namespace from the relationship, not its columns.
+    fixed["relationships"][0]["namespace"] = "cust"
     for table in fixed["tables"]:
         for column in table["columns"]:
             if column.get("namespace") == "decoy-set-namespace-1":
@@ -379,7 +381,7 @@ def test_the_same_scan_renders_the_same_bytes_under_any_hash_seed(tmp_path: Path
     )
     outputs = []
     for hash_seed in ("1", "2"):
-        done = subprocess.run(
+        done = subprocess.run(  # noqa: S603 - fixed argv, interpreter and script are ours
             [sys.executable, "-c", script, str(tmp_path), str(Path(__file__).parent)],
             env={**_inherited_env(), "PYTHONHASHSEED": hash_seed},
             capture_output=True,

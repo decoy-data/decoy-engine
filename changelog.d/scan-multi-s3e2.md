@@ -1,0 +1,3 @@
+### Added (starter_config builder, SCAN-MULTI S3-engine.2, 2026-11-14)
+
+`profiling.starter_config(scan, *, baseline_path, targets, seed, relationships)` turns a `ScanSet` into one starter pipeline config (`StarterConfig`: `config`, REVIEW `notes`, `suggestions`, `relationship_template`). Every column gets an entry, and a column no detector flagged is redacted with a note. Declared relationships are copied unchanged and never inferred. Their key columns hash under one shared namespace, or under the reserved `decoy-set-namespace-<n>` placeholder when none is declared, which `PipelineConfig` refuses until the user sets a real one. Cloud sources write to a local `masked/` folder with a note.
