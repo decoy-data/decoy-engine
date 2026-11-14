@@ -133,11 +133,13 @@ def target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ...
     """The one definition of "same destination" for a validated output target.
 
     File targets compare by normalized path, so `out/a.csv` and `out/./a.csv` are one
-    destination; cloud targets compare by bucket and key or object. Filesystem aliasing
+    destination; S3 compares by endpoint, bucket and key, GCS by bucket and object. Filesystem aliasing
     (symlinks, case-insensitive volumes) is the writer's concern, not this function's.
     """
     if isinstance(target, FileTarget):
         return ("file", os.path.normpath(target.path))
     if isinstance(target, S3Target):
-        return ("s3", target.bucket, target.key)
+        # The endpoint names the store (AWS, MinIO, R2...); "" is the AWS default.
+        endpoint = (target.endpoint_url or "").rstrip("/").lower()
+        return ("s3", endpoint, target.bucket, target.key)
     return ("gcs", target.bucket, target.object)

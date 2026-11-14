@@ -1150,7 +1150,10 @@ rules replace the matching text above where they differ.
   ...]` to `config/_targets.py`, the one definition of "same destination". It
   takes the validated target models only (`FileTarget | S3Target | GCSTarget`),
   so an unknown type cannot reach it: file `("file", os.path.normpath(path))`,
-  S3 `("s3", bucket, key)`, GCS `("gcs", bucket, object)`. The builder refuses
+  S3 `("s3", endpoint, bucket, key)` where endpoint is `endpoint_url`
+  with trailing slashes removed and lowercased, or `""` for the AWS default (so
+  two S3-compatible stores never collide; Codex r3), GCS `("gcs", bucket,
+  object)`; region and credentials are not identity. The builder refuses
   shared destinations after validation, on the validated config's targets,
   comparing identities, not `path`. Filesystem aliasing (symlinks,
   case-insensitive volumes) is the writer's concern at run time, not the

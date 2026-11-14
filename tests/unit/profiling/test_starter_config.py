@@ -422,6 +422,14 @@ def test_target_unique_cloud_equal_destinations_are_refused(
         _build(sources, targets={"customers": first, "orders": second})
 
 
+def test_target_unique_cloud_different_s3_endpoints_pass(
+    sources: dict[str, dict[str, Any]],
+) -> None:
+    minio = dict(_S3, endpoint_url="http://minio:9000")
+    result = _build(sources, targets={"customers": _S3, "orders": minio})
+    assert result.config["targets"]["orders"]["endpoint_url"] == "http://minio:9000"
+
+
 def test_target_unique_cloud_different_keys_pass(sources: dict[str, dict[str, Any]]) -> None:
     result = _build(sources, targets={"customers": _S3, "orders": dict(_S3, key="out/b.csv")})
     assert result.config["targets"]["orders"]["key"] == "out/b.csv"
