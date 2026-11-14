@@ -20,13 +20,13 @@ both CODEMAPs, and CL2 owns the engine repin so no intermediate CLI head has mis
 
 Bases (2026-11-14): engine `origin/main` `187a14e6`, CLI `origin/main` `65b710c` (pins
 `decoy-engine==0.24.0`). Related work in review: engine PR #589 (SCAN-MULTI S3-engine.2, branch
-`feat/scan-multi-s3e2`), whose plan amendment proposes `config.target_identity(target)` in
-`config/_targets.py` as the one definition of "same destination". Before #589 merges, that
-amendment becomes the private identity plus public duplicate-group boundary in 4.1; this plan
-reuses them and adds no second definition. The current public `normpath(path)` and S3
-`(bucket, key)` proposal is not a safe E1 base. #589 also routes its starter allocator through the
-shared duplicate-group function in 4.1, so the allocator
-and `PipelineConfig` do not keep two `seen` loops.
+`feat/scan-multi-s3e2`), which adds `config.target_identity(target)` in `config/_targets.py`
+as the one definition of "same destination". Orchestrator ruling (2026-11-14, T0888): #589 merges
+with its current public `target_identity` unchanged (its S3 identity already includes
+`endpoint_url`). E1, after #589 merges, adjusts that identity into the private conservative
+primitive of 4.1, adds the public `duplicate_target_groups`, and moves #589's starter allocator
+onto it, so the allocator and `PipelineConfig` do not keep two `seen` loops. This plan adds no
+second definition.
 
 Owner decisions used: the V1 bar (2026-11-02: a product-function break, data loss or corruption,
 or real values or secrets shown to a non-admin block V1); "names may show in messages; data values
@@ -121,12 +121,17 @@ vault as one more file that can be lost.
    in any message, location or log line.
 2. `decoy.mask()` and `decoy tokenize` (both routes) refuse two outputs that the route can publish
    and that resolve to one file
-   on disk (symlinked folder, case-only difference on a folding volume, hard link, relative
+   on disk (symlinked folder, case-only difference on a folding volume, a hard link where either
+   writer changes the file in place, relative
    against absolute spelling, a relative path that leaves the base folder, a target against an
    enabled quarantine path, and for tokenize a target against `--vault`) with the CLI's existing
    `layout.output_path_collision`, before any declared source file or database relation is read
    and before any output is written. (`mask()` spools an in-memory `data=` frame to a private temp
    input first, `api.py:245-255`; that is the existing source adapter, not a published output.)
+   Two hard-linked names that both writers replace as plain entries are two outputs, because
+   each publish replaces its own directory entry (CL1 review rounds 1 and 2). An existing
+   tokenize vault (SQLite updates it in place) and a quarantine file or target written through
+   a final symlink change the shared inode, so a hard link to either is one destination.
 3. For a config that is otherwise schema-valid, `decoy validate` and `decoy run` report the same
    first collision code: the engine code for declarations with one conservative identity, the
    layout code for outputs that meet only on disk. Exit 1 in both. Existing ordering for a config
@@ -164,7 +169,7 @@ vault as one more file that can be lost.
 - `config/_targets.py` owns both levels of the rule. Its private identity primitive computes the
   conservative tuple, and public `duplicate_target_groups(targets, active_names)` is the only
   grouping loop. It returns duplicate table-name groups in mapping order and renders no error.
-  #589's starter allocator and E1's model validator call that function, then render their own
+  #589's starter allocator (moved onto it in E1) and E1's model validator call that function, then render their own
   established exception shapes. Export it from `decoy_engine.config` so the starter code does not
   import another package's private module. A sentry in `tests/sentry/defects/` reuses
   `_defect_scan.ModuleIndex` for normalized imports and ASTs, asserts both `_pipeline.py` and
@@ -195,8 +200,8 @@ vault as one more file that can be lost.
   reaches the validator. The private identity primitive's unknown-type error (#589) must be a fixed, value-free
   `ValueError` that does not echo the submitted type literal. A later typed config caller sees a
   `ValidationError`, never a bare exception through `parse_pipeline_config`
-  (`config/_parse.py:24-29`). Request to the orchestrator: pin the identity, fixed error and tests
-  in #589 before it merges.
+  (`config/_parse.py:24-29`). E1 pins the identity, the fixed error and their tests; #589 merges
+  unchanged (T0888).
 - Identity is declaration-only. Symlinks, hard links, case folding, `..` aliases and relative
   against absolute are the writer's concern at run time, and the CLI's writer check covers them
   (4.2).
@@ -413,7 +418,7 @@ Tests live in `tests/unit/test_api.py` and
 |---|---|---|
 | T-C1 | `decoy.mask(config=...)` with two equal absolute targets (the one equal-text `mask()` cell; flips in CL2) raises `LayoutError` `layout.output_path_collision`; no source read (patch `decoy.api._load_sources_from_config`, bound at import, `api.py:40`); `run_pipeline` never called (spy; quarantine is written inside it); no file under the folder | M-C1: skip the check |
 | T-C2 | `out={"a": p, "b": q}` where `q` is `p` through a symlinked folder, on distinct declared targets: refused. This disk-only cell remains a CL1 refusal after CL2 and asserts `_load_sources_from_config` and `run_pipeline` were not called and neither destination exists | M-C2: check before the `out=` merge; move the check below `_load_sources_from_config` |
-| T-C3 | case-only and NFC/NFD names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs them), a symlinked folder, and two existing hard links | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
+| T-C3 | case-only and NFC/NFD names with `_placement._folds_case` monkeypatched true (as `test_layout_gate.py:609` does, so Linux CI runs them), a symlinked folder, and hard links: refused when one name is an existing tokenize vault, a quarantine path through a final symlink, or a target through a final symlink; two plain hard-linked targets are two outputs | M-C3: compare `normpath` text instead of `resolved_output_collisions` |
 | T-C4 | distinct targets: both files written with their own rows; `config_dict` (targets and quarantine) is equal before and after the check (r3). Equal unused target entries remain accepted and unwritten | M-C4: build the check input with a shallow copy and edit it in place; include target keys that name no declared table |
 | T-C9 | `../shared.csv` against its absolute spelling; `sub/../a.csv` through a symlinked `sub` against the real path: all refused, nothing written outside the base | M-C9: pass the declared `config_dict` with `base_dir` instead of the placed paths |
 | T-C10 | a target equal to a valid enabled `quarantine.output_path`: refused, `_load_sources_from_config` and `run_pipeline` never called, neither file written | M-C10: leave quarantine out of the placed copy |
@@ -433,7 +438,7 @@ Tests live in `tests/unit/test_api.py` and
 
 | Need | Reused | Not reused, why |
 |---|---|---|
-| same destination as declared | private identity plus public `config.duplicate_target_groups` (#589 amendment, shared by its starter and E1) | none |
+| same destination as declared | private identity plus public `config.duplicate_target_groups` (added in E1 from #589's `target_identity`, shared by its starter and E1) | none |
 | coded value-free config problem | `_generate_options.problem_details`, `validation_problems` | none |
 | same file on disk | CLI `resolved_output_collisions`, `OUTPUT_PATH_COLLISION` (from public `decoy.cli.io`) | none |
 | placed path the writer uses | `RunLayout.place_target`, `RunLayout.place_quarantine` | none |
@@ -444,7 +449,7 @@ Tests live in `tests/unit/test_api.py` and
 
 | Change | File | CODEMAP row |
 |---|---|---|
-| declaration identity and duplicate grouping | #589 updates `src/decoy_engine/config/_targets.py` and exports `duplicate_target_groups` from `config/__init__.py` before E1 | engine CODEMAP line 243: config models and their rules live in `src/decoy_engine/config/` |
+| declaration identity and duplicate grouping | E1 updates `src/decoy_engine/config/_targets.py` (from #589's `target_identity`) and exports `duplicate_target_groups` from `config/__init__.py` | engine CODEMAP line 243: config models and their rules live in `src/decoy_engine/config/` |
 | validator | `src/decoy_engine/config/_pipeline.py` (406 lines, about +25) | `config/_pipeline.py` |
 | reason code | `src/decoy_engine/reasons/config/_part2.py`, owner table in `tests/unit/test_reason_registry.py` | reasons |
 | engine tests | `tests/unit/config/test_target_destinations.py` (new, beside the other config model tests) | engine CODEMAP "Where things go" lines 240-244 and 275: config model tests mirror into `tests/unit/config/` |
@@ -482,10 +487,10 @@ engine test modules are in the CODEMAP's existing `tests/unit/config/` and
 | Slice | Repo | Depends on | Content | Risk |
 |---|---|---|---|---|
 | CL1 | CLI | nothing | 4.2 CL1 bullets (`mask()`, `tokenize`, the `OUTPUT_PATH_COLLISION` export), T-C1 to T-C4, T-C8 to T-C10 | R2 |
-| E1 | engine | #589 merged (the private conservative identity and public `duplicate_target_groups` on main, with the fixed unknown-type error and calling convention pinned) | 4.1, 7.1a migration, T-E1 to T-E15, changelog, docs line; full suite | R2 |
+| E1 | engine | #589 merged with its current `target_identity` | adjust the identity into the private conservative primitive (4.1), add public `duplicate_target_groups` with the fixed unknown-type error and calling convention, move #589's starter allocator onto it; 4.1, 7.1a migration, T-E1 to T-E15, changelog, docs line; full suite | R2 |
 | CL2 | CLI | the engine release with E1 | atomically repin the engine and apply the 4.2 CL2 bullets (parity, the public shared schema-refusal helper, the flipped CL1 cells), T-C5 to T-C7, T-C11, T-C11b, CLI changelog line; full CLI suite because a version pin and compatibility/error contract change | R2 |
 
-If #589 has not merged when E1 starts, E1 waits; it does not add its own identity function. CL2
+If #589 has not merged when E1 starts, E1 waits; it builds on #589's `target_identity` and does not add a second identity function. CL2
 does not take a prior standalone repin: its repin and parity fix are one reviewed head, so main
 never carries E1 with `run` and `validate` choosing different first codes for equal targets.
 
@@ -554,7 +559,7 @@ only after CLI placement; no new OS branch.
 - Do not quote a path, bucket, key or object in any message.
 - Do not echo an endpoint, credential reference or unknown target-type literal in an error.
 - Do not change exit codes or `--json` shapes.
-- E1 does not start before #589 merges with the conservative identity in 4.1.
+- E1 does not start before #589 merges; E1 itself makes #589's identity the conservative one in 4.1.
 - CL1 checks placed paths, never declared text; do not widen `names_a_file_inside`.
 - Both engine E1 and mask CL1 ignore target keys that name no declared table.
 - CL2 changes the early layout refusal only for `target_shared_destination`, and then raises.
@@ -567,5 +572,5 @@ only after CLI placement; no new OS branch.
   `187a14e6`).
 - Code facts in 1.1 and 4.2: read at the bases, not run. The tokenize gap and the `../x.csv`
   hole in CL1 come from Dennis r1's code reading, not from a probe.
-- The identity and grouping boundary are proposed in #589's plan amendment (`ed9e65c9`); their
-  code is not on that branch yet. E1 waits for the amended, reviewed implementation in 4.1.
+- #589 merges with its current public `target_identity` (orchestrator ruling, T0888). The
+  conservative identity and the grouping boundary of 4.1 are E1's work, after #589 merges.
