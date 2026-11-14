@@ -443,3 +443,37 @@ All checks rerun on the source head `b3a6e8d4` (the record commit after it chang
 - `DECOY_REQUIRE_NER=1 pytest -m ner -n 2` in the NER venv: 53 passed, 10 skipped (import skips
   only); no NER test skipped.
 - `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped (pre-GA capture).
+
+## Fix round after the #512 review (2026-11-14)
+
+Owner ruling on the Codex item: `match_rate` is nullable (`float | None`) under the same
+`post-scan-integrity/v2` tag, accepted pre-GA. `9d755a14` adds the `Breaking:` line to
+`changelog.d/scan-ml-m4.md`: a classifier `residual_pii` row has `match_rate: null`, and readers
+must accept null.
+
+`match_rate` grep (`git grep -n match_rate -- src`, then every `.match_rate` and `"match_rate"`
+read): no engine reader of a finding's `match_rate` does arithmetic or formatting. Every
+`.match_rate` read in `src/` is on `DetectorMatch` (`detection/detectors.py:678`,
+`profile/_pii.py:102`, `profiling/_distributions.py:103`, `profiling/profiler.py:65`, `:67`,
+`:153`, `profiling/eval/harness.py:128`, `verification/postmask/residual_pii.py:192`, `:195`) or
+on `ColumnRate` (`verification/postmask/_column_facts.py:120`); both stay non-null `float`.
+`profiling/_value_redaction.py:107` names the key in a profile allowlist only. The finding's own
+`match_rate` is only written (`_model_findings.py:146`, `:174`, `:216`, `runner.py:123`), never
+read in `src/`. No fix was needed, so no red test.
+
+A missed size breach was found while checking this head: M4's run-start detector load added six
+lines to `execution/_pipeline.py` (377) past its pinned ceiling of 371, so
+`tests/unit/execution/test_b6a_bookkeeping.py::test_pipeline_stays_under_its_ceiling_and_the_new_module_under_the_goal`
+and `tests/unit/execution/test_b6b_bookkeeping.py::test_module_sizes_hold_their_bars` failed on
+`d9f652b8` (they were not in the earlier selection; they pass on main). `2ee62277` moves the load
+and the context hand-over into `_pipeline_context.load_post_scan_detectors` and
+`with_post_scan_detectors` (the load still runs right after `resolve_subset`, before any read) and
+reflows two `run_pipeline` docstring paragraphs without changing their text. `_pipeline.py` is 371;
+no ceiling moved. The two failing tests were the red record.
+
+Mutations on `2ee62277`, each edited back by hand:
+
+- `with_post_scan_detectors` returns `ctx` unchanged: `tests/unit/execution/test_scanml_m4_run.py`
+  8 failed (NER venv).
+- `load_post_scan_detectors` returns `None`: `test_scanml_m4_run.py` plus
+  `test_scanml_m5_route_guard.py` 8 failed (NER venv).
