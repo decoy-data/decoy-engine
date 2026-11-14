@@ -151,11 +151,11 @@ def test_e10_an_unknown_type_is_a_discriminator_refusal_and_the_fallback_is_valu
     assert CANARY not in str(err.value)
 
 
-def test_e11_the_code_is_a_registered_unreleased_configuration_repair() -> None:
+def test_e11_the_code_is_a_registered_configuration_repair_released_in_1_28() -> None:
     spec = reasons.find("config", CODE)
     assert spec is not None
     assert spec.owner == "PipelineValidationError"
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.28.0"
     assert spec.kind is reasons.Kind.FAILURE
     assert [r.retry for r in spec.rules] == [reasons.RetryClass.CONFIGURATION_REPAIR]
     assert not re.search(r"[{}%]", spec.summary)
