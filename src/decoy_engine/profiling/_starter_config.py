@@ -24,14 +24,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from decoy_engine import reasons
 from decoy_engine.config import (
     NAMESPACE_PLACEHOLDER_PREFIX,
     PipelineConfig,
     PipelineConfigError,
+    TargetDescriptor,
+    duplicate_target_groups,
     parse_pipeline_config,
     relationship_shape_error,
-    target_identity,
 )
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
@@ -42,6 +45,7 @@ __all__ = ["ColumnSuggestion", "StarterConfig", "starter_config"]
 
 _KEY_STRATEGY = "hash"
 _CHECK_NAMESPACE = "starter-check"
+_TARGETS: TypeAdapter[dict[str, TargetDescriptor]] = TypeAdapter(dict[str, TargetDescriptor])
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 
 _KEY_NOTE = (
@@ -135,7 +139,8 @@ def starter_config(
     }
     if baseline_path is not None:
         config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
-    _refuse_shared_destinations(_check(config))
+    _refuse_shared_destinations(allocated, [t["name"] for t in tables])
+    _check(config)
     return StarterConfig(
         config=config,
         notes=MappingProxyType(notes),
@@ -298,14 +303,16 @@ def _problems_of(raw: dict[str, Any]) -> tuple[ConfigProblem, ...] | None:
     return None
 
 
-def _refuse_shared_destinations(validated: PipelineConfig) -> None:
-    """Refuse two tables writing one destination, judged on the validated targets."""
-    seen: dict[tuple[str, ...], str] = {}
-    for name, target in validated.targets.items():
-        identity = target_identity(target)
-        if identity in seen:
-            raise ValueError(f"tables {seen[identity]!r} and {name!r} share one target destination")
-        seen[identity] = name
+def _refuse_shared_destinations(targets: Mapping[str, Any], table_names: Sequence[str]) -> None:
+    """Refuse two tables writing one destination before the full validation reports it generically."""
+    try:
+        validated = _TARGETS.validate_python(dict(targets))
+    except ValidationError:
+        return  # a malformed target is reported by `_check`
+    groups = duplicate_target_groups(validated, table_names)
+    if groups:
+        first, second = groups[0][:2]
+        raise ValueError(f"tables {first!r} and {second!r} share one target destination")
 
 
 def _check(config: dict[str, Any]) -> PipelineConfig:

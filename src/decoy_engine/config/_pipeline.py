@@ -55,7 +55,7 @@ from decoy_engine.config._scan_baseline import ScanBaselineConfig
 from decoy_engine.config._sources import FileSource, SourceDescriptor
 from decoy_engine.config._subset import SubsetConfig
 from decoy_engine.config._tables import TableConfig
-from decoy_engine.config._targets import FileTarget, TargetDescriptor
+from decoy_engine.config._targets import FileTarget, TargetDescriptor, duplicate_target_groups
 from decoy_engine.config._validators import QuarantineConfig, ValidatorEntry
 from decoy_engine.contracts.declared_casting import ProtectedQuarantineConfig
 from decoy_engine.errors import ConfigRuleError
@@ -366,6 +366,21 @@ class PipelineConfig(BaseModel):
         if problems:
             raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
         return self
+
+    @model_validator(mode="after")
+    def _targets_distinct(self) -> PipelineConfig:
+        """Two declared tables cannot write to one destination; the second write would replace the first."""
+        groups = duplicate_target_groups(self.targets, [t.name for t in self.tables])
+        if not groups:
+            return self
+        code = str(reasons.config.TARGET_SHARED_DESTINATION)
+        clashing = {name for group in groups for name in group}
+        problems: list[tuple[tuple[str | int, ...], str]] = [
+            (("targets", name, target.destination_field), code)
+            for name, target in self.targets.items()
+            if name in clashing
+        ]
+        raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
 
     @model_validator(mode="after")
     def _subset_stage_constraints(self) -> PipelineConfig:
