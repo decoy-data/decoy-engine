@@ -202,3 +202,14 @@ def test_groups_come_back_as_table_names_in_mapping_order() -> None:
     }
     assert duplicate_target_groups(models, ["z", "a", "m", "q"]) == [["z", "m"]]
     assert duplicate_target_groups(models, ["z", "a", "q"]) == []
+
+
+def test_e14b_an_endpoint_path_keeps_its_case() -> None:
+    upper = _s3(endpoint_url="https://gateway/TenantA")
+    lower = _s3(endpoint_url="https://gateway/tenanta")
+    PipelineConfig.model_validate(_config({"a": upper, "b": lower}))
+    users = (_s3(endpoint_url="http://Ann@h/"), _s3(endpoint_url="http://ann@h/"))
+    PipelineConfig.model_validate(_config({"a": users[0], "b": users[1]}))
+    same = _s3(endpoint_url="HTTPS://GATEWAY/TenantA/")
+    exc = _refusal(_config({"a": upper, "b": same}))
+    assert _locs(exc) == [("targets", "a", "key"), ("targets", "b", "key")]
