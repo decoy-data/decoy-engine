@@ -210,20 +210,25 @@ def test_at11_every_format_keeps_the_same_rows(tmp_path: Path, fmt: str, lazy: b
 
 
 def test_at18e_lazy_fixed_width_with_blank_lines_keeps_the_same_rows(tmp_path: Path) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    cfg0, data, _ = sup.chain_job(base_dir)
+    want = _sample(cfg0, data)  # the Parquet chain, as AT-11 takes it
     cfg, _, lazy_sources = sup.chain_job(tmp_path, fmt="fixed_width")
     for desc in cfg["sources"].values():
         path = Path(desc["path"])
         rows = path.read_text(encoding="utf-8").splitlines()
         path.write_text("\n\n".join(["", *rows]), encoding="utf-8")  # blank lines, no final newline
-    want = _sample(cfg, sup.resident_sources(cfg))
-    got = _sample(cfg, lazy_sources)
-    for name, table in want.outputs.items():
-        for column in table.schema.names:
-            if column == "body":
-                continue
-            assert got.outputs[name].column(column).to_pylist() == (
-                table.column(column).to_pylist()
-            ), (name, column)
+    for sources in (lazy_sources, sup.resident_sources(cfg)):
+        got = _sample(cfg, sources)
+        assert set(got.outputs) == set(want.outputs)
+        for name, table in want.outputs.items():
+            for column in table.schema.names:
+                if column == "body":  # shuffled: valid output, not the same permutation
+                    continue
+                assert got.outputs[name].column(column).to_pylist() == (
+                    table.column(column).to_pylist()
+                ), (name, column)
 
 
 def test_at13_metrics_shape_and_display_rows(tmp_path: Path) -> None:
