@@ -312,6 +312,7 @@ def test_ooc_scratch_modes(
             budget_bytes=1 << 30,
             temp_disk_budget_bytes=1 << 40,
             out_of_core_reorder_threshold_rows=0 if lane == "reorder" else None,
+            config={},
         )
     finally:
         os.umask(old)
