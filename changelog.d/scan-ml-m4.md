@@ -1,3 +1,5 @@
+Breaking: a classifier `residual_pii` row in `post-scan-integrity/v2` has `match_rate: null`; readers must accept null
+
 ### Added (model findings in the post-scan, SCAN-ML M4, 2026-11-12)
 
 The post-scan runs the classifier and spaCy NER detectors a pipeline names in
