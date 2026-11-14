@@ -228,15 +228,6 @@ def _close(fd: int) -> None:
         pass
 
 
-def _sync(dir_fd: int) -> None:
-    """Best-effort fsync of the parent directory so a file rename survives a crash; a
-    failure here never fails an output that has already been published."""
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-
-
 def _rmtree_fd(dir_fd: int) -> None:
     """Remove everything beneath `dir_fd` without following any link."""
     for entry in list(os.scandir(dir_fd)):
@@ -447,7 +438,7 @@ class RootedOutputTxn(_StageDir):
                 _durable._sync_tree(state.stage_fd)
             _call(os.replace, state.stage_name, self._leaf, src_dir_fd=parent, dst_dir_fd=parent)
             if state.kind == "file":
-                _sync(parent)
+                _durable._sync(parent)
         state.finished = True
         if state.stage_fd >= 0:
             _close(state.stage_fd)

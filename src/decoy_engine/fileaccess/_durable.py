@@ -48,6 +48,15 @@ def _leaf_flags() -> int:
     return os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 
 
+def _sync(dir_fd: int) -> None:
+    """Best-effort fsync of the parent directory so a file rename survives a crash; a
+    failure here never fails an output that has already been published."""
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+
+
 def _sync_tree(dir_fd: int) -> None:
     """fsync every regular file and directory beneath `dir_fd`, deepest first, then `dir_fd`
     itself; no link is followed."""
