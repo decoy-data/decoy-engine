@@ -27,7 +27,11 @@ def _is_format_expr(node: ast.expr) -> bool:
     """`fmt`, `format`, or a `.get("format")` / `["format"]` read."""
     if isinstance(node, ast.Name):
         return node.id in {"fmt", "format", "file_format"}
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+    ):
         return any(isinstance(a, ast.Constant) and a.value == "format" for a in node.args)
     if isinstance(node, ast.Subscript):
         return isinstance(node.slice, ast.Constant) and node.slice.value == "format"
