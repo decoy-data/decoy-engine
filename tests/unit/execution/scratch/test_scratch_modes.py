@@ -29,6 +29,7 @@ from decoy_engine.plan._types import TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from tests.fileaccess.protected_dir.test_protected_dir import _Strict
+from tests.fileaccess.support import fd_path
 from tests.parity.test_out_of_core_fk_parity import _plan as _seeded_plan
 from tests.parity.test_out_of_core_fk_parity import _seed_for
 from tests.unit.execution.test_out_of_core_join_chunked import _edge, _plan
@@ -141,15 +142,6 @@ def test_handed_arena_is_the_route_root(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 # -- T-MODES (T01-T05): the scratch tree under any umask, both lanes ---------------------------
-
-
-def fd_path(fd: int) -> str:
-    """The path a directory descriptor names, to place a `dir_fd`-relative creation."""
-    if sys.platform == "darwin":
-        import fcntl
-
-        return fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0").decode()
-    return os.readlink(f"/proc/self/fd/{fd}")
 
 
 class _Created:
