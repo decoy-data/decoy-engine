@@ -373,3 +373,28 @@ tests/unit/test_reason_release_pin.py tests/unit/progress/test_consumer_contract
 no:cacheprovider -n 2 -rfE --tb=no`: 6927 passed, 10 failed, 87 errors, 6 skipped; failing ids
 identical to main `f34b398e`'s (the 56 + 31 root-only errors and the 10 `test_import_layers`
 failures).
+
+## Merge of a2 with the a1b owner fix and main 64e9349b (2026-11-15, message 10)
+
+`feat/f22-a2` `3d817771` merged as `7e860597`. a1b now declares `publication_lock_unavailable`,
+`publication_lock_timeout` and `publication_commit_uncertain` under
+`_fa = _catalog.decoy("decoy_engine.fileaccess")` (owner ruling: the package that raises them,
+for good). Conflicts and resolutions:
+
+- `reasons/decoy/_core.py`: each code is defined once. The `_fa` block holds exactly those three;
+  a3's `_p = _catalog.decoy("decoy_engine.publication")` binding and header now head the other
+  ten (`target_occupied`, `operation_conflict`, `commit_not_visible`, the vault pair and the five
+  sink-state codes), which keep that owner.
+- `docs/reasons.md`: a3's thirteen-code paragraph now names both owners.
+
+`10ffd0e6`: `test_the_publication_codes_are_registered_decoy_publication_reasons` and
+`test_f22_publication_codes_are_registered_pending` pinned all thirteen to
+`decoy_engine.publication`; they now pin each code's owner exactly (three `fileaccess`, ten
+`publication`). Both were red on the merge commit for those three codes only.
+
+Checks on the head (from a cleaned `src/`): ruff, format, mypy clean; `registry_renumber
+--check --main origin/main` consistent; `check_fragment` and `ratchet_check` exit 0.
+`pytest tests/fileaccess tests/sentry tests/unit/publication tests/unit/test_reason_registry.py
+tests/unit/test_reason_release_pin.py tests/unit/progress/test_consumer_contract.py -n 2`:
+6963 passed, 10 failed, 87 errors, 6 skipped; failing ids identical to main `64e9349b`'s;
+`tests/sentry/test_engine_string_targets.py` passes.
