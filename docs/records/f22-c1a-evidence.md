@@ -238,3 +238,14 @@ tests/unit/execution/publication tests/unit/test_reason_registry.py
 tests/unit/test_reason_release_pin.py -q -p no:cacheprovider -n 2 -rfE --tb=no`: 7037 passed,
 10 failed, 87 errors, 6 skipped; failing ids identical to main `f34b398e`'s (the 56 + 31 root-only
 errors and the 10 `test_import_layers` failures).
+
+## Merge of a3 with the owner fix and main 64e9349b (2026-11-15, message 10)
+
+`feat/f22-a3` `fa1c04e7` merged as `2c6b4210`, no conflict; each publication code is defined
+once (the three lock and durability codes under `decoy_engine.fileaccess`, ten under
+`decoy_engine.publication`). Checks (from a cleaned `src/`): ruff, format, mypy clean;
+`registry_renumber --check --main origin/main` consistent; `check_fragment` and `ratchet_check`
+exit 0. `pytest tests/fileaccess tests/sentry tests/unit/publication
+tests/unit/execution/publication tests/unit/test_reason_registry.py
+tests/unit/test_reason_release_pin.py -n 2`: 7073 passed, 10 failed, 87 errors, 6 skipped;
+failing ids identical to main `64e9349b`'s; the string-target sentry passes.
