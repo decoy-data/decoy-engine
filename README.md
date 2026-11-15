@@ -136,8 +136,9 @@ is private and may change without a version bump.
 - `CONTRIBUTING.md` -- build, test, and contribution flow.
 - `CODEMAP.md` -- complete codebase navigation map.
 - `tests/integration/golden/` -- canonical end-to-end caller shapes.
-- `decoy-cli` (PyPI) -- the command-line driver. Recommended unless you
-  are embedding the engine inside your own Python tool.
+- `decoy-cli` -- the command-line driver, installed from the CLI bundle on
+  Decoy's download page. Recommended unless you are embedding the engine
+  inside your own Python tool.
 
 ## License
 
