@@ -202,7 +202,7 @@ class ScratchArena:
         opener: ScratchArena | None = None,
     ) -> None:
         if issuer is not _ISSUER:
-            raise FileAccessUnavailable("a scratch arena is made by ScratchArena.open")
+            raise FileAccessUnavailable("a scratch arena is made by ScratchArena.fresh")
         self._root = root
         self._fd = fd
         self._rel = rel
@@ -215,7 +215,7 @@ class ScratchArena:
         self._finalizer = weakref.finalize(self, *cleanup)
 
     @classmethod
-    def open(cls, *, under: str | os.PathLike[str] | None = None) -> ScratchArena:
+    def fresh(cls, *, under: str | os.PathLike[str] | None = None) -> ScratchArena:
         """A fresh arena in the temp directory, or under `under` (ambient or a live issued root)."""
         if sys.platform == "win32":
             raise FileAccessUnavailable("the scratch arena needs a POSIX host in this release")

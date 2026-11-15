@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tests.sentry.fa import sinks
 from tests.sentry.fa.callgraph import FuncDef
-from tests.sentry.fa.resolve import module_name
+from tests.sentry.fa.resolve import ProjectIndex, Scope, build_import_map, module_name
 from tests.sentry.fa.scan import (
     CAPABILITY_ANNOTATIONS,
     CONN,
@@ -390,6 +390,34 @@ def source_modules(root: Path, package: str) -> dict[str, str]:
     """Dotted module name to the posix path relative to `root`."""
     files = sorted((root / package).rglob("*.py"))
     return {module_name(f, root): f.relative_to(root).as_posix() for f in files}
+
+
+def indexed_modules(index: ProjectIndex) -> Iterator[tuple[str, str, ast.Module, bool]]:
+    """`(path relative to the source root, module name, tree, is_package)` for every module the
+    index was built from, so a sentry reuses `scan_tree`'s parse."""
+    for name, (tree, is_package) in index.trees.items():
+        rel = name.replace(".", "/") + ("/__init__.py" if is_package else ".py")
+        yield rel, name, tree, is_package
+
+
+def scoped_nodes(
+    tree: ast.Module, current: str, is_package: bool
+) -> Iterator[tuple[str, ast.AST, Scope]]:
+    """Every node with its function's qualified name ("<module>" at top) and import scope."""
+
+    def visit(
+        body: list[ast.stmt], qual: str, scope: Scope
+    ) -> Iterator[tuple[str, ast.AST, Scope]]:
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                inner = scope.child(build_import_map(stmt.body, current, is_package))
+                name = stmt.name if qual == "<module>" else f"{qual}.{stmt.name}"
+                yield from visit(stmt.body, name, inner)
+                continue
+            for node in ast.walk(stmt):
+                yield qual, node, scope
+
+    yield from visit(tree.body, "<module>", Scope(build_import_map(tree.body, current, is_package)))
 
 
 def _in_scope(rel: str, scope: frozenset[str]) -> bool:
