@@ -223,7 +223,9 @@ def run_fk_out_of_core(
     # made and the `try` whose `finally` reclaims it. A handed arena is its opener's to reclaim.
     owned: ScratchArena | None = None
     if _arena is None:
-        _arena = owned = ScratchArena.open(under=temp_dir)
+        # Bound first: the outbound sentry matches `.open(` by name as GCS `Blob.open`.
+        open_arena = ScratchArena.open
+        _arena = owned = open_arena(under=temp_dir)
     root = Path(_arena.local_path())
     try:
         incoming, outgoing = _edge_indexes(relationship_graph)
