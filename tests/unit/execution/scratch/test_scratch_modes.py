@@ -368,7 +368,7 @@ def test_adopted_arena_is_non_owning(
         pytest.fail("run as a non-root user: root ignores directory modes, so this is vacuous")
     (tmp_path / "tmp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
-    with ScratchArena.open() as root:
+    with ScratchArena.fresh() as root:
         base = Path(root.local_path())
         if cell == "reorder_spill":
             _reorder_spill(base / "joins" / "t0001" / "duckdb")  # the leaf the reorder joiner names
