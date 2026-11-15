@@ -223,7 +223,7 @@ def run_fk_out_of_core(
     # made and the `try` whose `finally` reclaims it. A handed arena is its opener's to reclaim.
     owned: ScratchArena | None = None
     if _arena is None:
-        _arena = owned = ScratchArena.open(under=temp_dir)
+        _arena = owned = ScratchArena.fresh(under=temp_dir)
     root = Path(_arena.local_path())
     try:
         incoming, outgoing = _edge_indexes(relationship_graph)

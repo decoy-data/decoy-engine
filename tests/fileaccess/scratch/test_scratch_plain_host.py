@@ -139,7 +139,7 @@ def _run(lane: str, tmp_path: Path, scratch: Path, monkeypatch: pytest.MonkeyPat
 def test_jobs_succeed_without_quota_or_fscrypt(
     tmp_path: Path, temp_root: Path, monkeypatch: pytest.MonkeyPatch, cell: str
 ) -> None:
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         options = _mount_options(arena.local_path())
         assert options and not set(options) & set(_QUOTA_OPTIONS), options  # a plain host
         if cell == "error_path":  # ambient: a non-resource library failure is still value-free

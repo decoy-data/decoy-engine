@@ -107,7 +107,7 @@ def test_caller_temp_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: 
         assert os.path.realpath(root.parent) == os.path.realpath(target), root
         assert {w["mode"] for w in walks} == {0o700}, walks
         assert caller.is_symlink()
-        assert not [p for p in target.iterdir() if p.name.startswith(ARENA_PREFIX)]
+        assert list(target.iterdir()) == []
     else:
         jail = tmp_path / "jail"
         jail.mkdir()
@@ -122,15 +122,15 @@ def test_caller_temp_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: 
 
 def test_handed_arena_is_the_route_root(monkeypatch: pytest.MonkeyPatch) -> None:
     """A route given `_arena` spills into it and walks it: no fresh child, no reclaim."""
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         opens: list[Any] = []
-        real_open = ScratchArena.open
+        real_open = ScratchArena.fresh
 
         def spy(**kw: Any) -> ScratchArena:
             opens.append(kw)
             return real_open(**kw)
 
-        monkeypatch.setattr(ScratchArena, "open", spy)
+        monkeypatch.setattr(ScratchArena, "fresh", spy)
         walks = _run(monkeypatch, _arena=arena)
         root = Path(arena.local_path())
         assert opens == [], "the route opened a second arena"
