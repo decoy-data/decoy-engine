@@ -133,7 +133,14 @@ def capture_publication_failure(
 def observed_commit(sink: Any) -> CommitReceipt | None:
     """``sink.commit()``, recording the outcome; returns the sink's ``CommitReceipt`` (the
     value ``commit()`` returned, else the sink's ``receipt``), or ``None`` for a sink that
-    gives none. Exceptions propagate unchanged."""
+    gives none. Exceptions propagate unchanged.
+
+    The run's post-scan gate speaks first: a required gate that has not run refuses the commit,
+    before the evidence below, so a refusal is never recorded as a failed commit."""
+    from decoy_engine.execution.pipeline._post_scan import active_gate
+
+    if (gate := active_gate()) is not None:
+        gate.before_commit(sink)
     evidence = evidence_of(sink)
     try:
         returned = sink.commit()

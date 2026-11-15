@@ -18,8 +18,8 @@ MIB = 1 << 20
 
 def canonical(obj: Any) -> bytes:
     return json.dumps(
-        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("ascii")
+        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode("utf-8")
 
 
 def result_id(artifacts: Any) -> str:
@@ -62,6 +62,6 @@ def resign(document: dict[str, Any]) -> dict[str, Any]:
 
 def encode(document: dict[str, Any]) -> bytes:
     """Canonical bytes of a raw document; values JSON cannot hold are written by `json` as is."""
-    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
-        "ascii"
+    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
     )

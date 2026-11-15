@@ -28,10 +28,12 @@ from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._stitch import stitch_generate_mask_outputs
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
+from decoy_engine.execution.pipeline._post_scan import active_gate
 from decoy_engine.generation.pool import PoolCache
 
 if TYPE_CHECKING:
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
+    from decoy_engine.profile import LazySource
 
 __all__ = ["run_full_frame_route"]
 
@@ -87,10 +89,23 @@ def _raise_if_source_value_unrepresentable(
             ) from None
 
 
-def _render_and_seal(cast_run: Any, result: ExecutionResult) -> ExecutionResult:
-    """F06 for a lane that returns a finished result: render its outputs, then seal last."""
-    outputs, _, _ = cast_run.post_mask(result.outputs, {})
-    result = dataclasses.replace(result, outputs=outputs)
+def _render_and_seal(
+    cast_run: Any,
+    result: ExecutionResult,
+    *,
+    sources: Mapping[str, pa.Table | LazySource],
+    table_kinds: Mapping[str, str],
+) -> ExecutionResult:
+    """F06 for a lane that returns a finished result: render its outputs, judge them, then seal
+    last. The gate speaks after the render and before the seal, so a block leaves no sealed
+    artifact; with no cast run it judges the outputs as they are."""
+    if cast_run is not None:
+        outputs, _, _ = cast_run.post_mask(result.outputs, {})
+        result = dataclasses.replace(result, outputs=outputs)
+    if (gate := active_gate()) is not None:
+        gate.run_resident(result.outputs, sources, table_kinds)
+    if cast_run is None:
+        return result
     result.quality_metrics["declared_casting"], token = cast_run.finish()
     return dataclasses.replace(result, quarantine_access=token)
 
@@ -157,9 +172,9 @@ def _run_full_frame(
         ctx=ctx, decision=decision, caller_sources=caller_sources, pool_cache=pool_cache
     )
     if unified_slice_result is not None:
-        if cast_run is not None:
-            unified_slice_result = _render_and_seal(cast_run, unified_slice_result)
-        return unified_slice_result
+        return _render_and_seal(
+            cast_run, unified_slice_result, sources=caller_sources, table_kinds=ctx.table_kinds
+        )
 
     publish = ctx.publish
     with publish:
@@ -305,9 +320,10 @@ def _run_full_frame(
             post_validation_sample_size=ctx.post_validation_sample_size,
             post_validation_enforce=ctx.post_validation_enforce,
         )
-        _pipeline_finalize.compute_post_scan_integrity(
-            result, config=ctx.config, sources=step.sources
-        )
+        # Before the cast run seals and before the commit: a block commits nothing. An executor
+        # called outside `execute_route` has no bound gate.
+        if (gate := active_gate()) is not None:
+            gate.run_resident(outputs, step.sources, ctx.table_kinds)
         if cast_run is not None:
             # Seal only once nothing failure-capable remains but the publish itself; a failure
             # from here on still discards the sealed artifact through cast_run.abort().

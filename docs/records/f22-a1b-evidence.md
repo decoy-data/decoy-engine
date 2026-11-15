@@ -350,3 +350,99 @@ Second command: no failing id on either side; collected count unchanged.
 
 The review's after-V1 list stands as written in the review comment; of it, only the two lock
 sentences were added to `docs/publication.md`, since item 3 edits that page.
+
+## Merge of main with B-6 (2026-11-15)
+
+Main merged: `f34b398e` (52 commits past `a3cb996f`, including B-6 `c86ca58d`, #580, #590 release
+prep 0.25.0). Merge commit `a1b0571e` (parents `72e70984`, `f34b398e`); then two pure-move
+commits, `c687029b` and `530569a1`. Environment: `bash scripts/dev/bootstrap.sh` re-run after
+the merge (`--check` OK); Python 3.10.20, PyArrow 24.0.0, DuckDB 1.5.4.
+
+### Conflicts and resolutions
+
+| File | Resolution |
+|---|---|
+| `docs/reasons.md` | both sides: main's three pending paragraphs, then the F22 file-access paragraph |
+| `src/decoy_engine/reason_adapter.py` | both sides: the four F22 errno-only rows and main's `PostScanRouteError` row |
+| `src/decoy_engine/reasons/decoy/_core.py` | both sides in `__all__`, sorted (`PROCESS_OUT_OF_MEMORY`, then the `PUBLICATION_*` names) |
+| `tests/sentry/file_access_registry.toml` | `Count: 199` (base 197, a1b +3, main -1); the `_publish_durable` row renamed with the method (below) |
+| `src/decoy_engine/fileaccess/_output.py` | label sets split (below); a1b's `RootedOutputTxn.__init__` body, which already makes the stage inside its fd-closing `try` |
+| `src/decoy_engine/fileaccess/_local.py` | both import sets; a1b's `_durable` attribute and `_publish_durable(stage)` method renamed `_durable_dir` / `_publish_durable_dir`, since B-6's ambient vault already has `_publish_durable()`; B-6's `_parent_fd`, `_create_durable_stage`, `_close_parent`, `_unlink_stage`, `_publish_durable` unchanged |
+
+### `DURABLE_LABELS` split (orchestrator correction)
+
+On main `DURABLE_LABELS = frozenset({"vault"})` means a durable file publish by exclusive
+`link(2)` (`publish_exclusive_durable`); a1b's set of the same name meant the durable directory
+publish (stage tree fsync, rename, chain fsync, 243-byte leaf check). A union would have sent
+the vault through the directory code. Main's `DURABLE_LABELS` block and every main use are kept
+byte for byte; a1b's set is now `DIRECTORY_PUBLISH_LABELS = frozenset({"publication"})` and every
+a1b use reads it. No a1b test named the set. `STAGE_MODE` and B-6's `_restore_private_mode`
+never reached main: main and a1b already share one private creator (`PRIVATE_LABELS`,
+`create_private_at`, `create_private_child_at`), so `PRIVATE_LABELS` is the union
+{quarantine, isolated, vault, publication} and nothing was adopted. Directory fsync is unchanged
+on both paths: main's vault fsync still treats EINVAL/EBADF/ENOTSUP as unsupported, a1b's walk
+still raises `CommitUncertain` on any errno.
+
+### Census (owner ruling 2026-11-14: decompose, no census entry)
+
+After the merge `_output.py` was 658 lines and `_local.py` 637. Pure moves, no behaviour change,
+no public name renamed:
+
+- `c687029b`: B-6's `_DIR_FSYNC_UNSUPPORTED`, `discard_stage_at`, `publish_exclusive_durable`
+  verbatim from `_output.py` to `_durable.py` (the two `capability_creators` entries in
+  `tests/sentry/file_access_modules.toml` follow); the strict `sync_chain` body becomes
+  `_durable._sync_rooted_chain`; the ambient walk's logic becomes `_durable._walk_up`, with its
+  path calls (`realpath`, `_probe_dir`, `_open_dir`) left in `_local.py`.
+- `530569a1`: `_output._sync` (best-effort parent fsync, one caller) to `_durable.py`; the ambient
+  output-chain openers (`_open_dir`, `_open_dir_creating`, `_ensure_dirs`, `_make_stage_dir`) to
+  the new `fileaccess/_local_chain.py`, imported back into `_local.py` (so
+  `test_b6b_sink`'s patch of `_local._make_stage_dir` still applies). The `_open_dir` registry row,
+  the `file_access_modules.toml` comment and the CODEMAP row follow the move; two spies in main's
+  tests (`_dirmode_support._install_spies`, `test_directory_close_fault_does_not_mask_the_primary_error`)
+  now patch `_local_chain`, where the calls live, with every assertion unchanged.
+- The read-side handles were not moved: `LocalHandle.fileno` is a key in the shrink-only
+  `gcs-call-kwargs` baseline and `ratchet_check` counts a re-key as an added key, and
+  `LocalDirHandle.open_file` needs `LocalHandle` (an import cycle once re-exported).
+
+LOC now: `_output.py` 598, `_local.py` 565, `_durable.py` 300, `_local_chain.py` 68. fileaccess
+holds 18 modules (fan-out limit 25).
+
+### Mutations (detached worktree at `530569a1`, `PYTHONPATH=<worktree>/src`, each applied once,
+`tests/fileaccess/publication -n 2`, reverted with `git checkout -- src`, tree clean after each)
+
+| Mutation | Tests that went red |
+|---|---|
+| drop the stage fsync walk, both policies | `test_durable_dir_publish_fsync_order[strict]`, `[ambient]`; `test_durable_publish_faults[strict-file]`, `[strict-stage]`, `[ambient-file]`, `[ambient-stage]`; `test_ancestor_created_by_other_attempt[*]` (6); `test_umask_0477_first_attempt_publishes[strict-publication]`, `[ambient-publication]` (14) |
+| chain stops at the parent, both policies | `test_durable_dir_publish_fsync_order[strict]`, `[ambient]`; `test_durable_publish_faults[strict-chain:x]`, `[strict-chain:anchor]`, `[ambient-chain:x]`, `[ambient-chain:anchor]`; `test_ancestor_created_by_other_attempt[*]` (6); `test_unreadable_ancestor_fail_closed_seeded[ambient]`; `test_unreadable_ancestor_fail_closed_foreign_owner` (14) |
+| `validate_publication_leaf` a no-op (the 243-byte check) | `test_publication_leaf_limit[244-strict]`, `[244-ambient]`, `[244_multibyte-strict]`, `[244_multibyte-ambient]` (4) |
+
+Same red sets as on `b72cc1cc`.
+
+### Checks (code head `530569a1`; baseline `f34b398e` in a detached worktree,
+`decoy_engine.__file__` printed under it)
+
+| Command | Tree | Passed | Failed | Errors | Skipped | Other |
+|---|---|---|---|---|---|---|
+| `.venv/bin/python -m pytest tests/fileaccess tests/sentry tests/unit/test_reason_registry.py -q -p no:cacheprovider -n 2 -rfE --tb=no` | `f34b398e` | 6644 | 10 | 87 | 5 | |
+| same | `530569a1` | 6703 | 10 | 87 | 6 | failing ids identical (97) |
+| `.venv/bin/python -m pytest tests/unit --ignore=tests/unit/execution --ignore=tests/unit/scripts -q -p no:cacheprovider -n 2 -rfE --tb=no` | `f34b398e` | 14310 | 0 | 0 | 85 | 2 xfailed, 5 xpassed |
+| same | `530569a1` | 14308 | 2 | 0 | 85 | 2 xfailed, 5 xpassed; the two are below |
+| `.venv/bin/python -m pytest tests/unit/quality/test_dp_provenance.py tests/unit/test_version_agreement.py -q` after re-bootstrap | `530569a1` | 62 | 0 | 0 | 0 | |
+| B-6 vault and file-access tests (`git grep -l` for `DURABLE_LABELS`, `STAGE_MODE`, `vault`, `publish_exclusive_durable`, `write_durable` in `tests/fileaccess`, `tests/unit/test_vault*`, `tests/security`; 14 files) | `530569a1` | 682 | 0 | 0 | 2 | |
+| uid 65534: `pytest tests/fileaccess/publication tests/fileaccess/scratch/test_private_creators.py tests/fileaccess/test_private_mode_umask.py -q` (interpreter copied out of `/root`, `setpriv --reuid=65534 --regid=65534 --clear-groups`, `PYTHONPATH=src:.:.venv/lib/python3.10/site-packages`) | `530569a1` | 140 | 0 | 0 | 0 | copy removed after |
+| `.venv/bin/ruff check src tests`; `ruff format --check src tests`; `mypy src/decoy_engine` | `530569a1` | all clean (842 source files) | | | | |
+| `.venv/bin/python scripts/dev/registry_renumber.py --check --main origin/main` | `530569a1` | `registry consistent` | | | | the publication codes stay `since=UNRELEASED` |
+| `.venv/bin/python scripts/dev/check_fragment.py --base origin/main` | `530569a1` | exit 0 | | | | |
+| `.venv/bin/python scripts/dev/ratchet_check.py` | `530569a1` | exit 0, no growth | | | | |
+
+The failing ids of the first command are the known 56 + 31 root-only errors and the 10
+`test_import_layers` failures (import-linter not in `.venv`); no new id, none fixed, collected +59
+(the slice's tests). The two unit failures (`test_assert_lock_matches_installed_passes_on_real_env`,
+`test_installed_metadata_matches_pyproject`) were the editable install's metadata, built before
+the merge brought main's 0.25.0; they pass after `bootstrap.sh`, and the baseline ran after it.
+The unit run was not repeated after the re-bootstrap.
+
+### Not run
+
+`gates.sh`, the `tests/unit/execution tests/integration tests/parity tests/security` command,
+`tests/unit/scripts` (disk), the full suite, perf, macOS and Windows.
