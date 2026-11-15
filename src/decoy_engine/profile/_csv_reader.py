@@ -579,10 +579,13 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
 
 
 def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
-    """Whether pandas decompresses the CSV at `path` by its name (`compression="infer"`).
+    """What pandas infers from the name of `path` (`compression="infer"`): True when its
+    suffix names a compression format.
 
-    The one answer to that question, taken from pandas' own inference so it cannot drift from
-    what `read_csv_source` really reads. Looks at the name only; it opens nothing."""
+    Taken from pandas' own inference, so a pandas upgrade changes the answer with it. It looks at
+    the name only and opens nothing. It makes no claim about `read_csv_source` under every file
+    policy: a rooted policy hands pandas a descriptor path with no suffix, so that read infers
+    no compression."""
     return infer_compression(os.fspath(path), "infer") is not None
 
 

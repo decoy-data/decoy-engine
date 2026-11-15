@@ -15,40 +15,33 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-import pandas as pd
 import pytest
-from pandas.io.common import infer_compression
 
-from decoy_engine.profile._csv_reader import csv_is_compressed
+from decoy_engine.fileaccess import LocalFileAccess
+from decoy_engine.profile._csv_reader import CsvDialect, csv_is_compressed, read_csv_source
 
-SUFFIXES = [
-    ".csv",
-    ".CSV",
-    ".csv.gz",
-    ".CSV.GZ",
-    ".csv.bz2",
-    ".csv.zip",
-    ".csv.xz",
-    ".csv.zst",
-    ".csv.tar",
-    ".csv.tar.gz",
-    ".csv.tar.bz2",
-    ".csv.tar.xz",
-    ".csv.tgz",
-    ".csv.zz",
-    ".txt",
-]
-
-
-@pytest.mark.parametrize("suffix", SUFFIXES)
-def test_the_decision_agrees_with_pandas_inference(suffix: str) -> None:
-    path = f"data{suffix}"
-    assert csv_is_compressed(path) is (infer_compression(path, "infer") is not None)
+# Expected answers for the locked pandas, written out so a pandas change shows up here.
+EXPECTED: dict[str, bool] = {
+    ".csv": False,
+    ".CSV": False,
+    ".txt": False,
+    ".csv.gz": True,
+    ".CSV.GZ": True,
+    ".csv.bz2": True,
+    ".csv.zip": True,
+    ".csv.xz": True,
+    ".csv.zst": True,
+    ".csv.tar": True,
+    ".csv.tar.gz": True,
+    ".csv.tar.bz2": True,
+    ".csv.tar.xz": True,
+    ".csv.tgz": False,
+}
 
 
-def test_tgz_is_not_compressed_because_pandas_does_not_infer_it() -> None:
-    assert csv_is_compressed("a.csv.tgz") is False
-    assert csv_is_compressed("a.csv.tar.gz") is True
+@pytest.mark.parametrize(("suffix", "expected"), sorted(EXPECTED.items()))
+def test_the_decision_for_each_suffix(suffix: str, expected: bool) -> None:
+    assert csv_is_compressed(f"data{suffix}") is expected
 
 
 def _tar(raw: bytes, mode: str) -> bytes:
@@ -81,9 +74,12 @@ WRITERS = {
 
 
 @pytest.mark.parametrize("suffix", sorted(WRITERS))
-def test_the_decision_matches_what_pandas_really_reads(tmp_path: Path, suffix: str) -> None:
+def test_the_decision_matches_what_read_csv_source_reads(tmp_path: Path, suffix: str) -> None:
+    """Under the local policy the reader hands pandas the real path, so pandas' inference
+    applies and the decision says whether the file is read through a decompressor."""
     path = tmp_path / f"data{suffix}"
     path.write_bytes(WRITERS[suffix](RAW))
-    frame = pd.read_csv(path, dtype=str)
+    frame = read_csv_source(path, CsvDialect(), table="t", dtype=str, file_access=LocalFileAccess())
     assert list(frame.columns) == ["a", "b"]
-    assert csv_is_compressed(str(path)) is (suffix != ".csv")
+    assert list(frame["a"]) == ["1", "2"]
+    assert csv_is_compressed(str(path)) is EXPECTED[suffix]
