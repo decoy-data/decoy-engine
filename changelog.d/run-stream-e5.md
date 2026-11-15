@@ -1,0 +1,3 @@
+### Added (lazy-input predicate and compiled-run evidence, RUN-STREAM E5, 2026-11-15)
+
+`decoy_engine.execution.pipeline.lazy_input_tables` names the lazy candidates a run may take lazily. It asks the engine's own routing owners and excludes vault runs, declared-casting tables, relationship jobs that are not bounded-eligible, and transform-bearing mask tables when the post-scan gate applies. `RouteSummary.native_executed` is true only when a column ran a compiled backend from the operator registry; an idle kernel or a Python-planned column reports false. A lazy source with no sink now runs the auto-chunk lane and returns one resident output instead of failing.

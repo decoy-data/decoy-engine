@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.execution._operator_registry import OPERATORS
 
 ROUTE_UNKNOWN = "unknown"
 ROUTE_AUTO_CHUNK = "auto_chunk"
@@ -28,6 +29,12 @@ NATIVE_DECLINED_PREFIX = "declined: "
 # `<kernel>_extension_unavailable` / `<kernel>_ext_unavailable` (route namespace) and the
 # physical companion's own code. One rule, so a new kernel needs no second list.
 _NOT_INSTALLED_SUFFIXES = ("_extension_unavailable", "_ext_unavailable")
+# The backends a compiled kernel runs under, read from the operator registry: an operator that
+# names a required kernel plans one of these. Equality of planned and executed backend proves a
+# kernel ran only for a backend in this set; `arrow_python` equals itself without one.
+_COMPILED_BACKENDS = frozenset(
+    spec.planned_backend for spec in OPERATORS.values() if spec.required_kernel is not None
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,10 @@ class RouteSummary:
     out_of_core_memory_cap_source: str | None
     out_of_core_memory_limits_applied_bytes: tuple[int, ...]
     native: str | None
+    # True only when a column ran its planned backend and that backend is a registry-owned
+    # compiled one. False: lane evidence exists but no compiled kernel ran (a decline, an idle
+    # kernel, a Python-planned column). None: no lane evidence.
+    native_executed: bool | None
 
 
 def _block(metrics: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -127,6 +138,23 @@ def _native_status(units: list[_Unit]) -> str | None:
     return min(found, key=lambda s: (s != NATIVE_NOT_INSTALLED, s)) if found else None
 
 
+def _native_executed(units: list[_Unit]) -> bool | None:
+    """Whether a registry-owned compiled backend actually ran for any routed table."""
+    evidence = [u.chunked for u in units if u.chunked]
+    if not evidence:
+        return None
+    return any(
+        chunked.get("native_admitted") is True
+        and any(
+            col.get("planned_backend") in _COMPILED_BACKENDS
+            and col.get("executed_backend") == col.get("planned_backend")
+            for col in chunked.get("columns", ())
+            if isinstance(col, Mapping)
+        )
+        for chunked in evidence
+    )
+
+
 def _native_applied(units: list[_Unit]) -> int | None:
     """The clamp native actually ran with; a clamp recorded for a declined table is not evidence."""
     ran = [
@@ -188,4 +216,5 @@ def route_summary(
             [p.get("memory_limit_bytes") for p in applied]
         ),
         native=_native_status(units),
+        native_executed=_native_executed(units),
     )
