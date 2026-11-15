@@ -251,3 +251,4 @@ modules:
   - path: src/decoy_engine/publication/_descriptor.py
     pattern: Git content addressing plus RFC 8785 canonical JSON
     source: Git object model (content-addressed names); RFC 8785 JSON Canonicalization Scheme (IETF)
+    note: Keys and paths sort in Unicode code point order, as RFC 8785 sorts keys.
