@@ -57,7 +57,7 @@ Two deliberate, documented simplifications versus a real `decoy run`:
    refuse (a fan-in impossibility).
 2. Row counts for the capacity floor itself (not the routing size signal)
    trust ONLY an exact per-table count (`TableProfile.row_count_exact`):
-   Parquet/fixed_width footer counts, never a CSV byte-size estimate. A
+   Parquet footer or fixed_width framing-pass counts, never a CSV byte-size estimate. A
    parent table priced only by estimate makes the whole verdict `UNKNOWN`
    (R6) -- this checker refuses to price a capacity verdict on a guess.
 
@@ -77,7 +77,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine.config import FILE_SOURCE_PATH_FIELDS, post_scan_integrity_requested
+from decoy_engine.config import FILE_SOURCE_PATH_FIELDS
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline import classify_table_kinds
 from decoy_engine.execution._pipeline_route_exec import (
@@ -89,6 +89,7 @@ from decoy_engine.execution._pipeline_routing_signals import (
     largest_mask_table_rows_from_profile,
     out_of_core_admission,
 )
+from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.execution.out_of_core import resolve_budget, resolve_ooc_memory_limit
 from decoy_engine.execution.out_of_core._capacity_eval import (
     CapacityEstimate,
@@ -294,6 +295,10 @@ def estimate_job_capacity(
 
     base_dir_path = Path(base_dir)
     config = _resolved_config_copy(config_dump, base_dir_path)
+    if config.get("subset") is not None:
+        return _not_applicable(
+            "subset", "this job has a subset: block; the capacity check does not price it."
+        )
 
     table_kinds = classify_table_kinds(config)
     has_mask_table = any(kind == "mask" for kind in table_kinds.values())
@@ -304,8 +309,8 @@ def estimate_job_capacity(
             return floor_estimate
 
     job_seed = _normalize_job_seed_int(config)
-    # Bounded residency (the default): cheap row-count metadata plus a
-    # <=10k-row sample per source, never a full-frame read -- the SAME call
+    # Bounded residency (the default): row counts (a footer, or a framing pass for
+    # fixed_width) plus a <=10k-row sample per source, never a full-frame read -- the SAME call
     # `run_pipeline` makes before it decides a route (`_pipeline.py`), reused
     # here rather than re-derived so the relationship graph and per-table
     # row counts this function prices are the identical numbers the real run
@@ -365,7 +370,7 @@ def estimate_job_capacity(
             validators=(config.get("validators") or []),
             fidelity_report=False,
             vault_writer=None,
-            post_scan_integrity=post_scan_integrity_requested(config),
+            post_scan_resident=post_scan_resident_for(config),
             execution_mode="auto",
             graph=graph,
             resolved_substrate="pandas",
@@ -427,7 +432,7 @@ def estimate_job_capacity(
                 validators=(config.get("validators") or []),
                 fidelity_report=False,
                 vault_writer=None,
-                post_scan_integrity=post_scan_integrity_requested(config),
+                post_scan_resident=post_scan_resident_for(config),
                 execution_mode="auto",
                 graph=graph,
                 resolved_substrate="pandas",

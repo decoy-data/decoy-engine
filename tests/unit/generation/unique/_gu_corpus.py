@@ -25,7 +25,9 @@ def _base(tables: list[dict[str, Any]]) -> dict[str, Any]:
         "global_settings": {"seed": 4242},
         "sources": {},
         "tables": tables,
-        "targets": {t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables},
+        "targets": {
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"} for t in tables
+        },
     }
 
 
@@ -186,6 +188,9 @@ CORPUS: dict[str, dict[str, Any]] = {
 
 def digests(name: str) -> dict[str, Any]:
     cfg = PipelineConfig.model_validate(CORPUS[name]).model_dump()
+    # The pinned plan bytes embed the targets as captured, one shared path; the corpus now
+    # validates with one path per table, so the pre-DUP-DEST spelling is restored here.
+    cfg["targets"] = {n: {**t, "path": "o.csv"} for n, t in cfg["targets"].items()}
     plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
     tables = generate_tables(plan)
     cells = hashlib.sha256()
