@@ -75,10 +75,10 @@ class ExecutionResult:
     # artifact. None when no row was quarantined. Hidden from repr and never serialized into
     # evidence, because possessing it is the read right.
     quarantine_access: Any = field(default=None, repr=False)
+    sample_source_rows: dict[str, pa.Table] | None = field(default=None, repr=False, compare=False)
     # F22: the reference sink's commit receipt (outcome, digests, counts; no path or name).
     # None when the run published through no `ParquetTransactionalSink`.
     publication_receipt: CommitReceipt | None = None
-    sample_source_rows: dict[str, pa.Table] | None = field(default=None, repr=False, compare=False)
 
     @property
     def output(self) -> pa.Table:
