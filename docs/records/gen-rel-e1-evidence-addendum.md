@@ -5,7 +5,7 @@ history after review round 1: the merge of `origin/main` (2026-11-13), review ro
 final runs, and review round 3. The sections below were moved here unchanged from the primary
 record; the primary keeps the build, the mutation tables, the owner rulings and review round 1.
 
-### Main merge (2026-11-13)
+## Main merge (2026-11-13)
 
 PR #523 showed a conflict after round 1, so `origin/main` at `c86ca58d` was merged once
 (merge commit `26ffedb2`, no rebase). Main had released 0.23.0 since `c0961a17`, so the venv
@@ -44,7 +44,7 @@ applied once in this checkout, red, clean before and after. The T1 gate run star
 head was stopped for review round 2, which changed source; the gates below are on the final
 source head.
 
-### Review round 2 (2026-11-13)
+## Review round 2 (2026-11-13)
 
 Review round 2 (delta on `9e1734e1`) found two config-side readers of the bounds that the
 exclusivity sentry could not see. The widened sentry found a third.
@@ -102,7 +102,7 @@ three non-readers noted under round 1 B are settled: two were readers and now us
 `plan/_generation.py`'s fitted-conflict check stays a presence test (`is not None`) outside the
 scanned packages.
 
-### Final runs (final source head `f6e2a63b`)
+## Final runs (final source head `f6e2a63b`)
 
 Mutations: 64 of 64 red in a detached worktree at `/home/user/` importing its own `src`
 (Python 3.10.20), removed after; every anchor matched exactly once, and the 61 earlier red
@@ -141,7 +141,7 @@ origin/main` exit 0, `check_fragment.py --base origin/main` exit 0,
 No digest, golden or snapshot of generated output moved. Not run: the full suite, Python
 3.11, a rerun of `origin/main` (no branch step failed).
 
-### Review round 3 (2026-11-15)
+## Review round 3 (2026-11-15)
 
 Review round 3 on `872f097d` asked for two fixes.
 
