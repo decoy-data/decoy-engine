@@ -25,7 +25,6 @@ constant (S3 stamped 1; the F-series corrections bumped it to 2).
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
@@ -99,7 +98,12 @@ from decoy_engine.plan._types import (
     Plan,
     PlanCompileResult,
 )
-from decoy_engine.plan.checks import DEFERRED, check_generate_columns
+from decoy_engine.plan.checks import (
+    DEFERRED,
+    check_generate_columns,
+    check_required_strategy_settings,
+)
+from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
@@ -237,20 +241,13 @@ def compile_plan(
     # run_config_only_checks.
     check_top_code_config(config)
     check_bucket_perturb_config(config)
-    # Row 24 (Sprint 13 / coercion-13 S3, GATE-1 Q4, 2026-07-03): reject
-    # categorical (mask) columns whose categories is not a proper non-empty
-    # list (sibling silent-corruption leak). Config-only; both branches +
+    # Rows 24-26: categorical categories, fpe charset and faker provider (silent-passthrough
+    # leaks), then the required strategy settings. Config-only; both branches and
     # run_config_only_checks.
     check_categorical_categories(config)
-    # Row 25 (Sprint 2 honesty pack, S6, GATE-1 Q4, 2026-07-04): reject fpe
-    # columns whose resolved charset has fewer than 2 distinct characters
-    # (whole-column silent passthrough, discovery 0.1). Config-only; both
-    # branches + run_config_only_checks.
     check_fpe_charset_config(config)
-    # Row 26 (DE-03 sibling, 2026-07-13): reject `strategy: faker` columns with
-    # no provider (the seed-envelope builder drops them, leaking the raw value).
-    # Config-only; both branches + run_config_only_checks.
     check_faker_requires_provider(config)
+    check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. WARN-ONLY --
@@ -500,8 +497,9 @@ def run_config_only_checks(
     run accepts).
 
     Profile-dependent checks (basic_uniqueness / pool_capacity /
-    null_bearing_int / namespace + FK graph / composite wiring) stay
-    compile-time-only.
+    null_bearing_int / FK graph / composite wiring) stay compile-time-only.
+    The namespace check that reads the config alone runs here: a `coherent_with` group with two
+    different explicit namespaces raises `namespace_ambiguity`, as `compile_plan` does.
 
     Raises:
         PlanCompileError: on the first failing check.
@@ -549,13 +547,12 @@ def run_config_only_checks(
     # bound (silent-passthrough leak). Config-only.
     check_top_code_config(config)
     check_bucket_perturb_config(config)
-    # Row 24 (Sprint 13 S3, GATE-1 Q4): categorical (mask) categories shape.
+    # Rows 24-26 (categorical shape, fpe charset, faker provider) and the required strategy
+    # settings: config-only, so safe for decoy validate.
     check_categorical_categories(config)
-    # Row 25 (Sprint 2 honesty pack S6, GATE-1 Q4): fpe degenerate-charset
-    # whole-column passthrough. Config-only: safe for decoy validate.
     check_fpe_charset_config(config)
-    # Row 26 (DE-03 sibling): faker-without-provider rejection. Config-only.
     check_faker_requires_provider(config)
+    check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # F06: declared parsing/casting contracts. Reported only when a config declares any, so a
@@ -622,23 +619,26 @@ _NON_SEMANTIC_GLOBAL_SETTINGS = frozenset(
         "freetext_advisory_min_distinctness",
     }
 )
-_UNHASHED_BLOCKS = ("sources", "targets", "pre_scan", "name")
+_UNHASHED_BLOCKS = ("sources", "targets", "pre_scan", "name", "scan_baseline")
 
 
 def _hash_config(config: dict[str, Any]) -> str:
     """SHA-256 over a canonical JSON serialization of the masking-semantics
     portion of the config (M1 from S1 end-of-sprint Dennis review).
 
-    The `sources`, `targets`, `pre_scan` and `name` keys are explicitly excluded: `sources`,
+    The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
-    is called) and `pre_scan` only suggests, so none is masking semantics. A user swapping a local file source for an S3 source does not change which
+    is called), `pre_scan` only suggests and `scan_baseline` is a pointer no run reads, so none is
+    masking semantics. A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
     stays in: under `ner_findings: fail` its `dismissed` list decides what blocks.
 
-    Sort_keys=True, ensure_ascii=True, separators=(",", ":") for byte
-    stability across Python runtimes. Same masking semantics produce the
-    same hash regardless of key insertion order or source/target binding.
+    The bytes come from `canonical_json_bytes` (sorted keys, compact separators, UTF-8), so the
+    same masking semantics produce the same hash regardless of key insertion order or
+    source/target binding. A value JSON cannot hold (a YAML date or timestamp, NaN, Infinity, an
+    unpaired surrogate) is refused here with `config_value_not_json`, before the seed envelope
+    and every other site that hashes the config.
     """
     semantic_config = {k: v for k, v in config.items() if k not in _UNHASHED_BLOCKS}
     global_settings = semantic_config.get("global_settings")
@@ -648,19 +648,4 @@ def _hash_config(config: dict[str, Any]) -> str:
         semantic_config["global_settings"] = {
             k: v for k, v in global_settings.items() if k not in _NON_SEMANTIC_GLOBAL_SETTINGS
         }
-    # QA walks/generators F9 (2026-06-01, LOW correctness): no
-    # default=str. Pre-fix json.dumps silently called str() on any
-    # non-JSON-native value (datetime, UUID, dataclass), so two
-    # semantically different values that str-format identically
-    # produced the same hash. In practice configs arrive via
-    # yaml.safe_load (JSON-native only) so the bug never triggered,
-    # but the silent coercion would have hidden any future code path
-    # that fed non-native types into the planner. Now any such value
-    # raises TypeError at plan-compile time.
-    canonical = json.dumps(
-        semantic_config,
-        sort_keys=True,
-        ensure_ascii=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return hashlib.sha256(canonical_config_bytes(semantic_config)).hexdigest()

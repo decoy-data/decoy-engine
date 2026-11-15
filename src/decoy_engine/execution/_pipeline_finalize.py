@@ -30,14 +30,12 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.config import post_scan_integrity_requested
 from decoy_engine.execution._planner import AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile import Profile
-    from decoy_engine.profiling.model_pack import DetectorSet
     from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import NamespaceRegistry, RelationshipGraph
 
@@ -460,54 +458,21 @@ def finalize_validators_and_quarantine(
             quarantine_removed = quarantine_row_mask(
                 outputs, v_report, quarantine_cfg, row_errors=mask_row_errors
             )
+            from decoy_engine.execution.pipeline._post_scan import (
+                note_quarantined,
+                publish_after_gate,
+            )
+
+            # The gate must not count children of these parents as orphans the run introduced.
+            note_quarantined(outputs, quarantine_removed)
+            # The file carries row values, so it waits for the post-scan verdict.
             outputs, q_summary = apply_quarantine(
-                outputs, v_report, quarantine_cfg, row_errors=mask_row_errors
+                outputs,
+                v_report,
+                quarantine_cfg,
+                row_errors=mask_row_errors,
+                publish=publish_after_gate,
             )
             quality_metrics["quarantine"] = quarantine_manifest(q_summary)
 
     return outputs, quarantine_removed
-
-
-def compute_post_scan_integrity(
-    execution_result: ExecutionResult,
-    *,
-    config: Mapping[str, Any],
-    sources: Mapping[str, pa.Table],
-    detectors: DetectorSet | None = None,
-) -> None:
-    """`post_scan_integrity: true` (E3b): run the Post-scan integrity integrity checks over every
-    mask table and stamp the report under `quality_metrics["post_scan_integrity"]`.
-
-    The config key was accepted by the schema for a long time but nothing in the
-    spine honoured it, so a user who asked for the in-run check silently got
-    none. Report-only, with one opt-in exception: under `post_scan.ner_findings: fail`
-    an NER finding at `fail` or `error` raises `PostScanBlockedError` (carrying the
-    stamped report) before the run returns, so no caller receives the outputs. Other
-    findings alone never fail the run (the CLI's `--post-validate-enforce` and `report
-    integrity` are the enforcing surfaces); beside an NER block their code leads. `detectors` is the set `run_pipeline`
-    loaded strictly at run start. Runs only on the full-frame finalize branch, which
-    routing guarantees for an opted-in job (see `_sequential_eligible`), so the whole
-    output is resident here.
-    """
-    if not post_scan_integrity_requested(config):
-        return
-    from decoy_engine.verification import run_post_mask
-    from decoy_engine.verification.postmask._blocked import raise_if_ner_blocked
-    from decoy_engine.verification.postmask._model_findings import ner_findings_mode
-
-    table_kinds = execution_result.table_kinds or {}
-    mask_tables = [
-        name
-        for name, table in execution_result.outputs.items()
-        if table_kinds.get(name, "mask") == "mask" and name in sources
-    ]
-    if not mask_tables:
-        return
-    report = run_post_mask(
-        source_frames={name: sources[name].to_pandas() for name in mask_tables},
-        output_frames={name: execution_result.outputs[name].to_pandas() for name in mask_tables},
-        config=dict(config),
-        detectors=detectors,
-    )
-    execution_result.quality_metrics["post_scan_integrity"] = report
-    raise_if_ner_blocked(report, ner_findings=ner_findings_mode(config))

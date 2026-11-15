@@ -38,6 +38,7 @@ import pyarrow as pa
 from decoy_engine.config import classify_table_kinds
 from decoy_engine.execution import _guards, _pipeline_auto_chunk, _pipeline_routing
 from decoy_engine.execution._chunked_output_sink import OutputPublish
+from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
 from decoy_engine.fileaccess import config_relative
@@ -141,9 +142,7 @@ class PipelineRunContext:
     # F06: the resolved protected-quarantine runtime (sink + owner); None unless supplied.
     quarantine_runtime: Any = None
     out_of_core_threads: int | None = None
-    # The post-scan detector set `run_pipeline` loaded strictly at run start (a `DetectorSet`); kept
-    # out of repr and equality, so a context printed in a log or error never shows the loaded models.
-    post_scan_detectors: Any = field(default=None, repr=False, compare=False)
+    post_scan_detectors: Any = field(default=None, repr=False, compare=False)  # never printed
 
 
 @dataclass(frozen=True)
@@ -160,6 +159,12 @@ class RouteDecision:
     mixed: MixedStaticPlan | None = None
     # Set only for a run that requires streaming and takes the chunked lane.
     stream: StreamVerdict | None = None
+
+
+def refuse_vault_with_sink(sink: Any, vault_writer: Any) -> None:
+    """B0 (B-6 D1): the sink commits output inside the run; the vault could only follow it."""
+    if sink is not None and vault_writer is not None:
+        raise vault_requires_resident_output()
 
 
 def build_run_context(
@@ -248,11 +253,10 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
-    # Adapter selection runs up front, before any profiling or plan
-    # compilation, so an invalid substrate or count knob fails at submit
-    # time with a typed error instead of after the expensive stages.
-    # Construction is cheap and side-effect free for both adapters, so
-    # pure-generate jobs (which never use it) lose nothing.
+    # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
+    # substrate or count knob fails at submit time with a typed error instead of after the expensive
+    # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
+    # (which never use it) lose nothing.
     resolved_substrate = SUBSTRATE
     adapter = select_execution_adapter(fpe_chunk_count=fpe_chunk_count)
     # Auto-chunk knobs share the substrate knobs' fail-early contract.
@@ -280,6 +284,12 @@ def build_run_context(
     if execution_mode == "out_of_core":
         # Config-only, so nothing is profiled or read before the refusal.
         reject_any_per_table_transforms(config, route="execution_mode='out_of_core'")
+    if token_vault_writer is not None:
+        # B-6 D2: a token vault without a derivation scope predates vault-scoped tokens; refuse
+        # it before any source is profiled or read.
+        from decoy_engine.execution._strategies._tokenize import require_derivation_scope
+
+        require_derivation_scope(token_vault_writer)
 
     # None-normalize the skip list here (a mutable [] default would be shared across calls).
     skip = list(post_validation_skip) if post_validation_skip else []
@@ -337,6 +347,9 @@ def build_run_context(
     # Duplicate field names are refused after the config-only admission and before profiling,
     # routing and every pandas conversion: each looks columns up by name and would fail uncoded.
     _guards.refuse_duplicate_run_sources(config, caller_sources)
+    _guards.refuse_undeclared_loader_tables(
+        table_kinds, config, caller_sources, source_loader_schemas
+    )
     source_loader = _guards.refusing_source_loader(source_loader)
 
     supplied = caller_sources  # profiled whole: a subset run compiles from the full sources
@@ -355,6 +368,11 @@ def build_run_context(
         instance_default_locale=instance_default_locale,
     )
 
+    _guards.refuse_dropped_declared_tables(
+        table_kinds,
+        plan,
+        {*caller_sources, *(source_loader_schemas or {}), *(config.get("sources") or {})},
+    )
     # Late defense in depth: the compiled plan may not need more than admission covered.
     assert_plan_requirements_admitted(plan, admitted)
     resolved_key_provider = admitted.key_provider
@@ -449,18 +467,6 @@ def build_run_context(
         now_iso=now_iso,
         quarantine_runtime=quarantine_runtime,
     )
-
-
-def load_post_scan_detectors(config: Mapping[str, Any], file_access: Any) -> Any:
-    """The run's post-scan models, loaded strictly: one that cannot run refuses before any read."""
-    from decoy_engine.verification.postmask._model_findings import post_scan_detectors
-
-    return post_scan_detectors(config, file_access=file_access)
-
-
-def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> PipelineRunContext:
-    """`ctx` carrying the detector set loaded at run start, for the post-scan to use."""
-    return replace(ctx, post_scan_detectors=detectors)
 
 
 def with_quarantine_path(

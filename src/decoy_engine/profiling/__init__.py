@@ -28,11 +28,15 @@ from decoy_engine.profiling._scan_integrity import (
     RelationshipFacts,
     column_distinct,
     key_facts,
-    keys_comparable,
 )
 from decoy_engine.profiling._snapshot_values import (
     distribution_snapshot_document,
     snapshot_joint_warnings,
+)
+from decoy_engine.profiling._starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    starter_config,
 )
 from decoy_engine.profiling._value_redaction import (
     MIN_RELEASE_COUNT,
@@ -47,6 +51,9 @@ from decoy_engine.profiling._value_redaction import (
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (
     DEFAULT_STRATEGY_BY_DETECTOR,
+    DETECTOR_DESCRIPTORS,
+    DetectorDescriptor,
+    StarterChoice,
     StrategyDefault,
     get_default_strategy,
     known_detector_ids,
@@ -72,6 +79,7 @@ from decoy_engine.profiling.types import (
 
 __all__ = [
     "DEFAULT_STRATEGY_BY_DETECTOR",
+    "DETECTOR_DESCRIPTORS",
     "KEY_BATCH_ROWS",
     "MEMORY_LIMIT",
     "MIN_RELEASE_COUNT",
@@ -83,6 +91,8 @@ __all__ = [
     "ChildFacts",
     "ChildKeyFacts",
     "ColumnProfile",
+    "ColumnSuggestion",
+    "DetectorDescriptor",
     "Distribution",
     "FieldStats",
     "KeyBatches",
@@ -93,6 +103,8 @@ __all__ = [
     "ScanSetCoreRead",
     "ScanSourceError",
     "SentinelFlag",
+    "StarterChoice",
+    "StarterConfig",
     "StrategyDefault",
     "TableScan",
     "TopValue",
@@ -101,7 +113,6 @@ __all__ = [
     "get_default_strategy",
     "is_value_sensitive",
     "key_facts",
-    "keys_comparable",
     "known_detector_ids",
     "passes_through",
     "profile_columns",
@@ -110,4 +121,5 @@ __all__ = [
     "scan_set_to_dict",
     "scan_sources",
     "snapshot_joint_warnings",
+    "starter_config",
 ]

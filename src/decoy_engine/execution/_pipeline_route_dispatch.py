@@ -7,18 +7,26 @@ executors keep their signature (existing tests and `physical` drivers call them 
 patch them by module attribute; the calls below go through that attribute on purpose).
 
 Nothing here decides or re-decides a route: the decision arrives finished in `RouteDecision`.
+The run's post-scan models are loaded at run start (`load_post_scan_detectors`) and ride on the
+context (`with_post_scan_detectors`) to the gate `execute_route` binds.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Mapping
+from contextlib import nullcontext
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine import reasons
+from decoy_engine.config import post_scan_sink_kind, post_scan_sink_refusal
 from decoy_engine.declared_casting._boundary import open_cast_run
 from decoy_engine.execution import _pipeline_route_exec as _route_exec
 from decoy_engine.execution import _pipeline_sources as _psrc
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
-from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run
+from decoy_engine.execution.out_of_core._duckdb import bind_duckdb_run, current_duckdb_run
+from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_reader
 
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
@@ -29,7 +37,21 @@ __all__ = [
     "execute_out_of_core_route",
     "execute_route",
     "execute_sequential_route",
+    "load_post_scan_detectors",
+    "with_post_scan_detectors",
 ]
+
+
+def load_post_scan_detectors(config: Mapping[str, Any], file_access: Any) -> Any:
+    """The run's post-scan models, loaded strictly: one that cannot run refuses before any read."""
+    from decoy_engine.verification.postmask._model_findings import post_scan_detectors
+
+    return post_scan_detectors(config, file_access=file_access)
+
+
+def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> PipelineRunContext:
+    """`ctx` carrying the detector set loaded at run start, for the post-scan gate to use."""
+    return replace(ctx, post_scan_detectors=detectors)
 
 
 def execute_route(
@@ -39,15 +61,39 @@ def execute_route(
     carries the declared-route refusals the admission layers noted while deciding."""
     from decoy_engine.declared_casting._refusals import stamp
     from decoy_engine.execution import _pipeline_full_frame
+    from decoy_engine.execution.pipeline._post_scan import bind_gate, settle
 
-    if ctx.has_mask_table and decision.route == "sequential":
-        result = execute_sequential_route(ctx, decision)
-    elif ctx.has_mask_table and decision.route == "out_of_core":
-        result = execute_out_of_core_route(ctx, decision)
-    elif ctx.has_mask_table and decision.route == "mixed":
-        result = execute_mixed_route(ctx, decision)
-    else:
-        result = _pipeline_full_frame.run_full_frame_route(ctx, decision)
+    # One recorder for the whole run, the post-scan gate's connections included, so the resources
+    # block lists every connection the run opened.
+    with (
+        bind_duckdb_run(ctx.out_of_core_threads) as recorder,
+        bind_gate(ctx, decision.route if ctx.has_mask_table else "full_frame") as gate,
+    ):
+        # Before any sink write or route read: a callable sink delivers on `write`. The run
+        # context and the gate's snapshot have already read source metadata.
+        refusal = post_scan_sink_refusal(
+            ctx.config, post_scan_sink_kind(ctx.sink), deferred=gate.deferred
+        )
+        if refusal is not None:
+            # A literal symbol keeps the ad-hoc-code sentry satisfied; the guard keeps code and
+            # message in step with what the predicate returned.
+            assert refusal == reasons.runtime.POST_SCAN_INTEGRITY_SINK_UNREADABLE  # noqa: S101
+            raise ExecutionError(
+                code=reasons.runtime.POST_SCAN_INTEGRITY_SINK_UNREADABLE,
+                message=reasons.get("runtime", refusal).summary,
+            )
+        if ctx.has_mask_table and decision.route == "sequential":
+            result = execute_sequential_route(ctx, decision)
+        elif ctx.has_mask_table and decision.route == "out_of_core":
+            result = execute_out_of_core_route(ctx, decision)
+        elif ctx.has_mask_table and decision.route == "mixed":
+            result = execute_mixed_route(ctx, decision)
+        else:
+            result = _pipeline_full_frame.run_full_frame_route(ctx, decision)
+        result = settle(gate, ctx, result)
+        block = result.quality_metrics.get("resources", {}).get("out_of_core")
+        if block is not None:
+            block["applied"] = [asdict(pair) for pair in recorder.applied()]
     stamp(result.quality_metrics, refusals)
     return result
 
@@ -55,9 +101,14 @@ def execute_route(
 def execute_sequential_route(ctx: PipelineRunContext, decision: RouteDecision) -> ExecutionResult:
     """Run the sequential route; the out-of-core decline (if any) is stamped on its result."""
     loader = _psrc.resolve_sequential_loader(
-        ctx.source_loader, ctx.caller_sources, config=ctx.config, prepared=ctx.prepared.prepared
+        ctx.source_loader,
+        ctx.caller_sources,
+        config=ctx.config,
+        prepared=ctx.prepared.prepared,
+        tee=tee_reader(),
     )
     cast_run = open_cast_run(ctx.plan, ctx.quarantine_runtime)
+    attach_cast_run(cast_run)
     try:
         sequential_result = _sequential_route(ctx, decision, loader, cast_run)
     except BaseException as failure:
@@ -98,6 +149,7 @@ def execute_out_of_core_route(ctx: PipelineRunContext, decision: RouteDecision) 
     """Run the out-of-core route. `caller_sources` feeds the runner directly (TB-1: a
     `LazySource` streams natively there, no materialization)."""
     cast_run = open_cast_run(ctx.plan, ctx.quarantine_runtime)
+    attach_cast_run(cast_run)
     try:
         return _out_of_core_route(ctx, decision, cast_run)
     except BaseException as failure:
@@ -111,7 +163,10 @@ def _out_of_core_route(
 ) -> ExecutionResult:
     """Bind the run's DuckDB thread cap once; every nested connection reads it at
     `connect_duckdb`, and the settings they applied come back on the result."""
-    with bind_duckdb_run(ctx.out_of_core_threads) as recorder:
+    bound = current_duckdb_run()
+    with (
+        nullcontext(bound) if bound is not None else bind_duckdb_run(ctx.out_of_core_threads)
+    ) as recorder:
         result = _run_out_of_core(ctx, decision, cast_run)
     result.quality_metrics.setdefault("resources", {})["out_of_core"] = {
         "thread_cap": recorder.thread_cap,

@@ -34,7 +34,7 @@ from typing import Any
 
 import pandas as pd
 
-from decoy_engine.config import post_scan_integrity_requested
+from decoy_engine.config import post_scan_integrity_requested, post_scan_ner_findings
 from decoy_engine.detection._model_status import log_detector_models, log_detector_run
 from decoy_engine.detection._ner_rate import ner_rates
 from decoy_engine.detection.ner import DEFAULT_NER_MODEL, pipeline_version
@@ -57,16 +57,9 @@ _CLASSIFIER_BANDS = frozenset({"high", "review"})
 
 __all__ = [
     "model_findings",
-    "ner_findings_mode",
     "post_scan_detectors",
     "review",
 ]
-
-
-def ner_findings_mode(config: Mapping[str, Any]) -> str:
-    """The run's `post_scan.ner_findings` mode, `warn` when unset."""
-    block = config.get("post_scan")
-    return str(block.get("ner_findings") or "warn") if isinstance(block, Mapping) else "warn"
 
 
 def post_scan_detectors(
@@ -183,7 +176,7 @@ def _classifier_pass(
 
 
 def model_findings(
-    output_frames: Mapping[str, pd.DataFrame], config: dict[str, Any], detectors: DetectorSet
+    output_frames: Mapping[str, pd.DataFrame], config: Mapping[str, Any], detectors: DetectorSet
 ) -> list[ResidualPIIFinding]:
     """The classifier and NER findings over every output table, at warn-mode severity."""
     columns = configured_columns(config)
@@ -248,7 +241,7 @@ def review(
     block = config.get("post_scan")
     block = block if isinstance(block, Mapping) else {}
     dismissals = [d for d in block.get("dismissed") or () if isinstance(d, Mapping)]
-    promote = ner_findings_mode(config) == "fail"
+    promote = post_scan_ner_findings(config) == "fail"
     used: set[int] = set()
     out: list[ResidualPIIFinding] = []
     for finding in findings:
@@ -272,13 +265,11 @@ def log_post_scan(
     stale: Counter[str],
 ) -> None:
     """The `post_scan.detectors` line, then one `post_scan.models` line per checked table."""
-    mode = ner_findings_mode(config)
     columns = sum(len(frame.columns) for frame in output_frames.values())
-    counts: dict[str, int | str] = {
-        "tables": len(output_frames),
-        "columns": columns,
-        "ner_findings": str(mode),
-    }
+    # Field names of the log record, not reads of the setting (`config._post_scan` owns that).
+    counts: dict[str, int | str] = dict(
+        tables=len(output_frames), columns=columns, ner_findings=post_scan_ner_findings(config)
+    )
     log_detector_run("post_scan", detectors.runs(), counts)
     tables = [str(t) for t in output_frames]
     tables += [t for t in stale if t not in tables]
@@ -288,10 +279,10 @@ def log_post_scan(
             "post_scan",
             table,
             position,
-            {
-                "ner_findings": sum(f.source == "ner" for f in rows),
-                "classifier_findings": sum(f.source == "classifier" for f in rows),
-                "dismissed": sum(f.dismissed for f in rows),
-                "dismissed_stale": stale.get(table, 0),
-            },
+            dict(
+                ner_findings=sum(f.source == "ner" for f in rows),
+                classifier_findings=sum(f.source == "classifier" for f in rows),
+                dismissed=sum(f.dismissed for f in rows),
+                dismissed_stale=stale.get(table, 0),
+            ),
         )

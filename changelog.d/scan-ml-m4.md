@@ -15,7 +15,8 @@ unchanged, and any other exception adds one `error` finding and keeps the regex 
 in the `post_scan.models` log line. Under
 `post_scan.ner_findings: fail` an NER warning becomes `fail` (`promoted`), and an NER `fail` or
 `error` makes `run_pipeline` raise `PostScanBlockedError`, now exported from `decoy_engine`, before
-it returns, so no output is published. `post_scan_verdict` takes the `ner_findings` mode in place
+it returns, so no output is published. The post-scan gate decides that block with the run's mode,
+and a deferred gate, whose column suite is otherwise report-only, still raises it. `post_scan_verdict` takes the `ner_findings` mode in place
 of `ner_blocked`: a model finding blocks only through new reason code `post_scan/ner_blocked`,
 which ranks after every other code, and a classifier finding never blocks. The report gains
 `detectors`, `tables_checked` and `config_sha256`; the tag stays `post-scan-integrity/v2`.
