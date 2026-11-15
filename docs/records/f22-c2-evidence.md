@@ -288,3 +288,19 @@ clean; `registry_renumber --check --main f34b398e` consistent; `check_fragment` 
 
 Failing ids identical to main's in both commands (the 10 `test_import_layers` failures and
 56 + 31 root-only errors; the 6 root-only `test_scratch_root_umask` errors).
+
+## Merge of c1b with the owner fix and main 64e9349b (2026-11-15, message 10)
+
+`feat/f22-c1b` `c6434f6f` merged as `3e024dbd`, no conflict; each publication code is defined
+once (three under `decoy_engine.fileaccess`, ten under `decoy_engine.publication`).
+`_isolated_run.py` 588. Checks (from a cleaned `src/`): ruff, format, mypy clean;
+`registry_renumber --check --main origin/main` consistent; `check_fragment` and `ratchet_check`
+exit 0.
+
+| Command | Tree | Passed | Failed | Errors | Skipped |
+|---|---|---|---|---|---|
+| `pytest tests/fileaccess tests/sentry tests/unit/publication tests/unit/execution/publication tests/unit/test_reason_registry.py tests/unit/test_reason_release_pin.py -n 2` | `3e024dbd` | 7154 | 10 | 87 | 7 |
+| `pytest tests/unit/execution tests/integration tests/parity tests/security -n 2` (every isolated test included) | `64e9349b` | 12698 | 0 | 6 | 2396 |
+| same | `3e024dbd` | 12832 | 0 | 6 | 2397 |
+
+Failing ids identical to main's in both; the string-target sentry passes.
