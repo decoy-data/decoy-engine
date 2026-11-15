@@ -553,6 +553,71 @@ def test_a_declared_table_with_no_sink_still_runs_resident(tmp_path: Path) -> No
         assert got.outputs[name].equals(table), name
 
 
+def _leaky_suite(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, int]]:
+    """The real column suite plus one `fail` finding for a passthrough column the gate sees equal
+    to its source on every row. It needs the whole source and the whole collected output, so a
+    gate that never got the output cannot block. Returns the output rows each scan saw."""
+    real = _post_scan.run_post_mask
+    seen: list[dict[str, int]] = []
+
+    def suite(sources: Any, outputs: Any, **kw: Any) -> dict[str, Any]:
+        report = dict(real(sources, outputs, **kw))
+        seen.append({name: len(frame) for name, frame in outputs.items()})
+        leaked = [
+            {"table": name, "column": "p", "detector_id": "made_up", "severity": "fail"}
+            for name, frame in outputs.items()
+            if len(frame) and (frame["p"] == sources[name]["p"]).all()
+        ]
+        report["residual_pii"] = [*report.get("residual_pii", []), *leaked]
+        return report
+
+    monkeypatch.setattr(_post_scan, "run_post_mask", suite)
+    return seen
+
+
+def _blocked_by(run: Any) -> PostScanBlockedError:
+    with pytest.raises(PostScanBlockedError) as caught:
+        run()
+    return caught.value
+
+
+def test_a_lazy_no_sink_run_is_blocked_by_post_scan_exactly_as_the_resident_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # M-E5f installs the collector as the run's sink: the gate then sees a sink it cannot read
+    # and refuses or defers instead of blocking on the collected output.
+    cfg, table, lazy = _flat_job(tmp_path, rows=_E5A_ROWS)
+    cfg["post_scan"] = {"integrity": True}
+    seen = _leaky_suite(monkeypatch)
+    want = _blocked_by(lambda: support_run(cfg, {"t": table}))
+    taken = _paths(monkeypatch)
+    sinks = _context_sinks(monkeypatch)
+    got = _blocked_by(lambda: support_run(cfg, {"t": lazy}))
+    assert _E5A_ROWS // support.CHUNK > 1
+    assert taken == ["_run_streamed"]
+    assert sinks["context"] == [None]
+    assert seen == [{"t": _E5A_ROWS}, {"t": _E5A_ROWS}]
+    assert type(got) is type(want)
+    assert got.reason == want.reason
+    assert str(got) == str(want)
+
+
+def test_a_zero_row_lazy_source_through_the_collector_keeps_the_source_schema(
+    tmp_path: Path,
+) -> None:
+    # The `empty_schema` write, then `collected[table]`, with nothing to join. The resident lane
+    # refuses a table with no chunks, and `run_pipeline` never routes a zero-row table to the
+    # lane, so the collector's output is held to the empty table base `--chunked` writes.
+    cfg, table, lazy = _flat_job(tmp_path, rows=0)
+    outputs, *_rest, metrics = _lane_call(cfg, lazy)
+    assert list(outputs) == ["t"]
+    assert outputs["t"].equals(table.schema.empty_table())
+    via_run = support_run(cfg, {"t": lazy})
+    assert via_run.outputs["t"].equals(support_run(cfg, {"t": table}).outputs["t"])
+    assert metrics["auto_chunk"]["input"]["mode"] == "lazy"
+    assert metrics["auto_chunk"]["output"] == {"mode": "resident", "reason": reasons.route.NO_SINK}
+
+
 # ---------------------------------------------------------------- E5a: collector spill (AT-E5s)
 
 _SPILL_ROWS = 1_200_000
@@ -615,7 +680,8 @@ class _ScratchSpy:
         class Adapter(real_adapter):  # type: ignore[misc, valid-type]
             def __init__(self, fn: object, **kw: Any) -> None:
                 super().__init__(fn, **kw)
-                spy.parents.append(kw.get("spill_parent"))
+                if "spill_parent" in kw:  # the output-mode probe's stand-in sink takes none
+                    spy.parents.append(kw["spill_parent"])
 
         monkeypatch.setattr(_transactional_sink, "_CallableSinkAdapter", Adapter)
         real_add = _chunked_output_sink._Spill.add
