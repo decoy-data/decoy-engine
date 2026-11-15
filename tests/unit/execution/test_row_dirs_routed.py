@@ -258,7 +258,7 @@ def test_runner_removes_its_engine_made_root(
     sys_tmp = tmp_path / "systmp"
     sys_tmp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(sys_tmp))
-    roots = _spy(monkeypatch, fileaccess.ScratchArena, "open")
+    roots = _spy(monkeypatch, fileaccess.ScratchArena, "fresh")
     if fail:
 
         def boom(*_: Any, **__: Any) -> None:
