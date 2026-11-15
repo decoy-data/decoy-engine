@@ -52,7 +52,7 @@ READER_FILES = (
     "generation/statistical/_spec.py",
     "generation/relational/_cardinality.py",
     # The one reader of the per-parent bounds every generation route goes through.
-    "config/_generate_relational.py",
+    "config/_generate_relational/__init__.py",
 )
 # Transform parsers read the column dict as `cfg`, but only inside `from_dict`.
 FROM_DICT_FILES = (
@@ -197,7 +197,7 @@ BOUND_KEYS = frozenset({"min_per_parent", "max_per_parent"})
 # (file, top-level definition) that may name the keys: the one reader and the registry entries.
 BOUND_KEY_OWNERS = frozenset(
     {
-        ("config/_generate_relational.py", "per_parent_bounds"),
+        ("config/_generate_relational/__init__.py", "per_parent_bounds"),
         ("config/_generate_options.py", "_BASE_OPTIONS"),
         ("config/_generate_options.py", "_NONE_MEANS_ABSENT"),
     }
