@@ -98,7 +98,7 @@ def build_config(source_dir: str) -> dict[str, Any]:
             "format": "parquet",
             "path": str(Path(source_dir) / f"{name}.parquet"),
         }
-        targets[name] = {"type": "file", "format": "parquet", "path": "/dev/null"}
+        targets[name] = {"type": "file", "format": "parquet", "path": f"/dev/null.{name}"}
     return PipelineConfig.model_validate(
         {
             "version": 2,

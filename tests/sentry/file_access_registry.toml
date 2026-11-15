@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 202 (asserted by the sentry).
+# Count: 201 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -330,7 +330,7 @@ reason = "the isolated child reads its payload and writes its staged output; the
 
 [[entry]]
 module = "decoy_engine/execution/_pipeline_route_exec.py"
-function = "run_out_of_core_route"
+function = "resolve_temp_disk_budget"
 sink = "shutil.disk_usage"
 ordinal = 0
 rule = "`default_ooc_temp_root()`, `tempfile.gettempdir()`"
@@ -1003,16 +1003,6 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalOutputTxn.create_file"
-sink = "os.open"
-ordinal = 0
-disposition = "private"
-rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
-owner = "cam"
-reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
-
-[[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.create_file"
 sink = "Path.mkdir"
 ordinal = 0
 dir_category = "output_parent"
@@ -1025,7 +1015,7 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalOutputTxn.create_file"
 sink = "os.open"
-ordinal = 1
+ordinal = 0
 disposition = "public"
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
 owner = "cam"
@@ -1045,7 +1035,7 @@ reason = "ambient CLI semantics: the one policy that follows a caller path; neve
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalOutputTxn.create_file"
 sink = "os.open"
-ordinal = 2
+ordinal = 1
 disposition = "public"
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
 owner = "cam"
@@ -1108,7 +1098,7 @@ owner = "cam"
 reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
+module = "decoy_engine/fileaccess/_local_chain.py"
 function = "_open_dir"
 sink = "os.open"
 ordinal = 0
@@ -1137,7 +1127,7 @@ reason = "F22 5.0 rule D, POSIX arm only: the ambient durable walk fsyncs the ph
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn._publish_durable"
+function = "LocalOutputTxn._publish_durable_dir"
 sink = "os.replace"
 ordinal = 0
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
@@ -1352,7 +1342,7 @@ reason = "pyarrow and pandas readers over `io.BytesIO` of data fetched from S3/G
 
 [[entry]]
 module = "decoy_engine/profile/_fixed_width_reader.py"
-function = "_parse_records"
+function = "iter_fixed_width_records"
 sink = "open"
 ordinal = 0
 disposition = "read"
@@ -1389,7 +1379,7 @@ reason = "package data"
 
 [[entry]]
 module = "decoy_engine/profiling/_scan_integrity.py"
-function = "key_facts"
+function = "_key_facts"
 sink = "duckdb.connection.execute"
 ordinal = 0
 disposition = "read"

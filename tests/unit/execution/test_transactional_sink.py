@@ -74,6 +74,7 @@ def test_file_sink_commit_value_parity(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=graph,
         namespace_registry=fx.namespace_registry,
@@ -118,6 +119,7 @@ def test_file_sink_abort_atomicity(tmp_path: Path) -> None:
         adapter.run_sequential(
             fx.plan,
             _loader(fx.sources),
+            config={},
             registry=fx.registry,
             relationship_graph=graph,
             namespace_registry=fx.namespace_registry,
@@ -191,6 +193,7 @@ def test_three_method_sink_without_write_batches_is_transactional(tmp_path: Path
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -217,6 +220,7 @@ def test_callable_sink_back_compat(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -308,6 +312,7 @@ def test_run_sequential_abort_error_does_not_mask_original(tmp_path: Path) -> No
         adapter.run_sequential(
             fx.plan,
             _loader(fx.sources),
+            config={},
             registry=fx.registry,
             relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
             namespace_registry=fx.namespace_registry,

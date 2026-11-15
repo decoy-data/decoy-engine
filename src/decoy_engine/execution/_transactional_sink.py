@@ -24,9 +24,10 @@ table (`decoy_engine.publication._sink_state`).
 from __future__ import annotations
 
 import errno
+import functools
 import os
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -193,8 +194,8 @@ class StagedParquetWriter:
     ) -> None:
         self._stage = stage
         self.publication_evidence = evidence if evidence is not None else PublicationEvidence()
-        # What this writer has staged, so a publisher measures exactly these files.
-        self.staged: dict[str, None] = {}
+        # Each table staged and its component: a publisher measures exactly these files.
+        self.staged: dict[str, str] = {}
 
     def write(self, table: str, data: pa.Table) -> None:
         """Stage one masked table as Parquet.
@@ -214,7 +215,7 @@ class StagedParquetWriter:
         _validate_table_name(table)
         txn = self._stage()
         component = f"{table}.parquet"
-        _replace_staged(txn, component, self.staged)
+        _replace_staged(txn, table, self.staged)
         self.publication_evidence.last_operation = Operation.WRITE
         try:
             arrow_adapter.write_table(data, txn, component)
@@ -263,7 +264,7 @@ class StagedParquetWriter:
         _validate_table_name(table)
         txn = self._stage()
         component = f"{table}.parquet"
-        _replace_staged(txn, component, self.staged)
+        _replace_staged(txn, table, self.staged)
         evidence = self.publication_evidence
         evidence.last_operation = Operation.WRITE
         writer = arrow_adapter.parquet_writer(txn, component, schema)
@@ -291,7 +292,7 @@ class StagedParquetWriter:
 
         The size comes from the staged component's own descriptor: the stage has no path under
         a strict policy, and a name-based stat would race the publish rename."""
-        self.staged[component] = None
+        self.staged[table] = component
         try:
             fd = txn.open_file(component)
         except OSError:
@@ -308,11 +309,11 @@ class StagedParquetWriter:
             channel.publish_stored(table, size)
 
 
-def _replace_staged(txn: OutputTxn, component: str, staged: dict[str, None]) -> None:
+def _replace_staged(txn: OutputTxn, table: str, staged: dict[str, str]) -> None:
     """Writing a table again replaces its staged file, as the path write always did."""
-    staged.pop(component, None)
+    staged.pop(table, None)
     try:
-        txn.remove(component)
+        txn.remove(f"{table}.parquet")
     except FileNotFoundError:
         pass
 
@@ -422,6 +423,18 @@ class ParquetTransactionalSink:
             self._cleanup_staging()
         project_sink_state(self.publication_evidence, self._machine.state)
 
+    def staged_tables(self) -> Mapping[str, Callable[[], int]]:
+        """Each table staged so far, before commit, with an opener that returns a new read-only
+        descriptor of its staged Parquet file (the caller closes it). Empty once the stage is
+        published or discarded. The post-scan gate reads the output back through these."""
+        txn = self._txn
+        if txn is None:
+            return {}
+        return {
+            table: functools.partial(txn.open_file, component)
+            for table, component in self._writer.staged.items()
+        }
+
     @property
     def spill_parent(self) -> Path:
         """The directory a streamed run's schema hold-back may spill into: the target's
@@ -436,9 +449,11 @@ class ParquetTransactionalSink:
         _validate_table_name(table)
         return self._target / f"{table}.parquet"
 
-    def staged_tables(self) -> list[str]:
-        """Every file this sink staged: the one source of what its commit binds and describes."""
-        return list(self._writer.staged)
+    def staged_components(self) -> list[str]:
+        """Every file this sink staged: the one source of what its commit binds and describes.
+        It outlives the commit; `staged_tables()` is the post-scan gate's read-back while the
+        stage is open."""
+        return list(self._writer.staged.values())
 
     def _stage(self) -> OutputTxn:
         if self._txn is None:
@@ -469,7 +484,7 @@ class ParquetTransactionalSink:
         evidence = self.publication_evidence
         evidence.last_operation = Operation.COMMIT
         try:
-            tables = self.staged_tables()
+            tables = self.staged_components()
             receipt = publish_unit(self._out, self._stage(), self._request, tables=tables)
         except BaseException as exc:
             self._cleanup_staging()  # `publish_unit` aborted it; confirm where we can look
