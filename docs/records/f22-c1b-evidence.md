@@ -306,7 +306,7 @@ c1a `ea40c2cc`, c1b `53806a33`.
   thirteen publication codes moved to the pending form (`since=UNRELEASED`) with
   `scripts/dev/registry_renumber.py --to-unreleased`; the branch no longer changes
   `REGISTRY_VERSION` and its minor fixture is deleted. `registry_renumber.py --check`
-  reports "registry consistent". This supersedes the 1.25.0 renumber recorded earlier.
+  reports "registry consistent". This supersedes the earlier numeric renumber.
 - c1a: conflicts only in the `publication/` rows of `CODEMAP.md` and
   `src/decoy_engine/_MAP.md`; main's rows kept for its packages, the slice's row for
   `publication/`.
@@ -340,3 +340,77 @@ uid 65534 pass; the full suite; macOS; Windows. `origin/main` has moved past
 Open for review fix lists: later slices' test modules (a3, c1a, c1b) still define their
 own `["strict", "ambient"]` lists rather than the shared `POLICIES`, so their strict
 cells would not be skipped on a host without `openat2`.
+
+## Merge of main through c1a (2026-11-15)
+
+`feat/f22-c1a` `ddf403aa` (main `f34b398e` with B-6, #579 post-scan gate and #581, plus a1b, a2
+with the canonical JSON descriptor, a3 and c1a) merged as `72d22377`.
+
+Registry renumbered at merge from the old numeric claim to unreleased: one historical line of
+this record named that claim's version and now says "the earlier numeric renumber"; the codes
+stay `since=UNRELEASED`.
+
+### Conflicts and resolutions
+
+- `execution/_transactional_sink.py`: main's released `ParquetTransactionalSink.staged_tables()`
+  (0.25.0) returns `Mapping[table, opener]`, empty whenever no stage is open, and the post-scan
+  gate reads it before commit; c1b's method of the same name returned the component list it
+  hands to `publish_unit` and is read after the commit. As with `DURABLE_LABELS` in a1b, the
+  meanings are split: main's `staged_tables()` is kept as released, c1b's becomes
+  `staged_components()` (on the sink and on `OutputPublish`), both read from one writer record,
+  `StagedParquetWriter.staged: dict[table, component]` (main's record; c1b had kept components
+  only). The record is not cleared on publish (c1b needs it after commit); main's method stays
+  empty once the stage is published or discarded because it reads through the open stage.
+  `_replace_staged` takes the table. The owner's ruling holds: the sink hands its own full set
+  to `publish_unit`; no caller picks a subset. Renamed uses: `_chunked_output_sink.py`,
+  `test_route_outcome_matrix.py`, `docs/publication.md`, `CODEMAP.md`.
+- `execution/_publication_observer.py`: c1b's receipt-returning `observed_commit` keeps main's
+  post-scan `before_commit` call first.
+- `execution/_adapter.py`: both fields; see the field order fix below.
+- `tests/sentry/secret_material_census.json`: the two `StrategyContext` field lines are the
+  merged file's (160, 165); the census sentries pass.
+- `tests/parity/test_phase_f_f2_mixed_publish.py`, `tests/unit/execution/test_b6a_publish.py`:
+  both import sets (main's `_native_core` patch target replaces `_chunked_entry`).
+- `CODEMAP.md`: each row from the side that changed it.
+
+### Adaptations after the merge
+
+- `ed248794` refactor: `_transactional_sink.py` was at its 600-line cap and main's
+  `staged_tables()` took it to 615. RECOVERING's I/O (`_recover`) moved verbatim into
+  `publication/_sink_state.py` as `recover` (plan 9: the state machine and restart recovery
+  live there) and reuses `_publish._errno_name` instead of the sink's copy. The reason sentry's
+  forwarding-adapter row follows it. Now 582 lines; `_sink_state.py` 277.
+- `556d0d01` fix: `publication_receipt` sits after main's `sample_source_rows`, so
+  `ExecutionResult`'s released field order is unchanged, and main's new
+  `test_execution_result_fields_are_frozen` table gains the row
+  `("publication_receipt", "None", True, True)`.
+- `c741132e` test: main's new post-scan tests updated for the bound unit (owner-accepted, plan 13
+  Q5), exact equalities only: `test_at16_a_blocking_verdict_on_a_staged_sink_commits_nothing`
+  (control run), `test_at28_a_subclass_of_the_engine_sink_is_foreign` and
+  `test_regex_integrity_takes_the_bounded_route_with_a_staged_sink` now list
+  `_decoy_publication.json` with the two tables. Five "no stage left" checks
+  (`test_staged_gate._no_stage_left`, `test_integrity_refusals.py:113`,
+  `test_models_resident.py:153`, `test_wiring.py:161`, `:173`) globbed only `_decoy_stage_*`,
+  which the engine sink no longer uses; they now also glob `._decoy_publication_pending_*`, so
+  they still check what they claim.
+
+B-6's rule B0 (`vault_requires_resident_output`) is at the same sites as on main
+(`_pipeline_context.py:166`, `_chunked.py:444`, `native/_chunked_entry.py:652`,
+`out_of_core/_runner.py:188`). Census: `_transactional_sink.py` 582, `_chunked_output_sink.py`
+596, `_pipeline_context.py` 600, `out_of_core/_runner.py` 355 (each at most 600);
+`_sequential.py` 676 against main's 678 (net <= 0); `_isolated_run.py` 644, as main.
+
+### Checks (head `c741132e`; baseline main `f34b398e` in a detached worktree)
+
+| Command | Tree | Passed | Failed | Errors | Skipped |
+|---|---|---|---|---|---|
+| `pytest tests/fileaccess tests/sentry tests/unit/publication tests/unit/execution/publication tests/unit/test_reason_registry.py tests/unit/test_reason_release_pin.py -n 2` | `c741132e` | 7106 | 10 | 87 | 6 |
+| `pytest tests/unit/execution tests/integration tests/parity tests/security -n 2` | `f34b398e` | 12696 | 0 | 6 | 2396 |
+| same | `c741132e` | 12808 | 0 | 6 | 2396 |
+
+Failing ids identical to main's in both commands: the 10 `test_import_layers` failures and
+56 + 31 root-only errors (first), the 6 root-only `test_scratch_root_umask` errors (second).
+The first wide run on the merge commit had 6 failures (the three listings, the field freeze,
+two duplicated listings by parameter); the commits above fixed them. `ruff check`,
+`ruff format --check`, `mypy src/decoy_engine` (847 files) clean; `registry_renumber --check
+--main f34b398e` consistent; `check_fragment` and `ratchet_check` (`--base f34b398e`) exit 0.

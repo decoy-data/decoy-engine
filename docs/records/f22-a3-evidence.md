@@ -25,8 +25,8 @@ receipts, `publish_tables`, and the registry codes.
 | `publication/_publish.py` (new) | 341 | `publish_unit`, `publish_tables`, `_after_judge`, judge, D2, receipts |
 | `publication/_types.py` | 180 to 235 | `PublicationRefused`, `PublicationFailed`, `raise_for_outcome`; `CommitReceipt.reason_code` checked against the registry (`decoy` namespace) instead of by shape |
 | `publication/__init__.py` | 48 to 58 | exports |
-| `reasons/decoy/_core.py` | 158 to 268 | thirteen `decoy.publication_*` codes, owner `decoy_engine.publication`, outcome `publication`, `since` 1.25.0 |
-| `reasons/_registry.py` | 198 | `REGISTRY_VERSION` 1.23.0 to 1.25.0 |
+| `reasons/decoy/_core.py` | 158 to 268 | thirteen `decoy.publication_*` codes, owner `decoy_engine.publication`, outcome `publication`, `since` unreleased |
+| `reasons/_registry.py` | 198 | `REGISTRY_VERSION` 1.23.0 to unreleased |
 | `reason_adapter.py` | 446 to 462 | `_CODED`: `PublicationRefused`, `PublicationFailed` (namespace `decoy`); `_FIXED`: `CommitUncertain`, `LockUnavailable`, `LockTimeout` to their publication codes, `LeafTooLarge` to `decoy.publication_failed` |
 
 Six production files: plan 9 row a3 names four, plus `reason_adapter.py` (owner decision
@@ -34,12 +34,12 @@ Six production files: plan 9 row a3 names four, plus `reason_adapter.py` (owner 
 600 lines; no census entry changed.
 
 Registry procedure (`docs/reasons.md`, `scripts/release/reason_manifest_policy.py`), additive
-only: the slice builds at the next minor of its base (1.25.0); one pinned fixture for the minor,
+only: the slice builds at the next minor of its base (unreleased); one pinned fixture for the minor,
 the publication minor fixture under `tests/fixtures/f29/` (13 entries, generated from
 `reasons.manifest()` with the formatting that reproduces the 1.23 fixture byte for byte);
 `tests/fixtures/f29/consumer-contract.json` regenerated with
 `python tests/unit/progress/test_consumer_contract.py` (only `registry_version` moves, 27 lines);
-`docs/reasons.md` names 1.25.0 and the fixture; `tests/unit/test_reason_registry.py` gains the
+`docs/reasons.md` names unreleased and the fixture; `tests/unit/test_reason_registry.py` gains the
 pin test. `scripts/dev/registry_renumber.py --check` answers `main-not-merged` (main moved and is
 not merged into the stack), so the renumber to the next free minor is the merge-time step the
 policy describes.
@@ -103,7 +103,7 @@ clean after every revert and no commit carries a mutation.
 | skip `txn.abort()` when the outcome is `already_committed` (class 2) | 2: `test_exit_matrix_publish[ambient-E4_already_committed]`, `test_retry_already_committed[ambient]`; the strict cells stay green because the strict transaction's `weakref.finalize` discards an unreferenced stage when it is collected (A-4) |
 | report `already_committed` whatever the D2 fsync returned (class 3: "issue already_committed before its fsync") | 8: `test_exit_matrix_publish[*-E4a_chain_fsync_fails]` (2), `test_adopt_syncs_ancestor_chain[*]` (6) |
 | put the leaf name in the refusal text (class 1; 7.2 marker row) | 2: `test_marker_corpus_user_surfaces[strict,ambient]` |
-| add a `decoy` code at `since` 1.25.0 without its fixture entry (class 10) | `tests/sentry/test_reason_minor_fixtures.py::test_live_registry_has_one_complete_fixture_per_minor`, `tests/unit/test_reason_registry.py::test_every_symbol_matches_its_attribute` |
+| add a `decoy` code at `since` unreleased without its fixture entry (class 10) | `tests/sentry/test_reason_minor_fixtures.py::test_live_registry_has_one_complete_fixture_per_minor`, `tests/unit/test_reason_registry.py::test_every_symbol_matches_its_attribute` |
 | class 8, test side: the crash child's SIGKILL made a no-op | `test_adopt_syncs_ancestor_chain[*]` (6) red; with the two non-vacuity lines (`code == -SIGKILL`, kill marker) also deleted the same 6 pass on the no-kill build, so those lines are what make the crash cells non-vacuous |
 
 The "judge before lock" mutation was first applied wrongly (it edited the signature of `_locked`
@@ -318,7 +318,7 @@ a1a `2201c34c` (clean), a1b `96e8331b` (merges a1a, clean), a2 `dbebb07c` (merge
 `publication` to tier 2; both kept). In a3, `docs/reasons.md` and
 `tests/unit/test_reason_registry.py` (main's FPE fallback minor and the publication minor claimed
 the same version; both paragraphs and both tests kept). Then `scripts/dev/registry_renumber.py`
-moved the publication codes to the next free minor, 1.25.0: it renamed the pinned fixture to
+moved the publication codes to the next free minor, unreleased: it renamed the pinned fixture to
 the publication minor fixture under `tests/fixtures/f29/`, rewrote `since`,
 `REGISTRY_VERSION`, the `docs/reasons.md` sentence and the a3 test, and regenerated
 `tests/fixtures/f29/consumer-contract.json`. The tool does not rewrite `changelog.d/`, so the
@@ -349,3 +349,27 @@ PyArrow 24.0.0, DuckDB 1.5.4, polars 1.42.0, pandas 2.3.3; `--check` OK.
 No branch-only failing id. The one main-only id is a timeout on main. Collected counts rise only
 by the stack's own tests. `_output.py` 596 LOC, `_local.py` 579. Not run: the full suite, the
 perf suite, the uid 65534 pass.
+
+## Merge of main through a2 (2026-11-15)
+
+`feat/f22-a2` `ca2b59db` (main `f34b398e` with B-6, #581 and the 0.25.0 release, plus a2's switch
+to the canonical JSON form) merged as `5210fc79`. Conflicts were ledger files: `CODEMAP.md` (each
+row taken from the side that changed it), `docs/reasons.md` (main's three pending paragraphs plus
+a3's thirteen-code paragraph, which already covers a1b's three), `reasons/decoy/_core.py` (both
+names, sorted) and the file-access registry `Count` (201: base 200, a3 +2, a1b/main -1). The
+codes stay `since=UNRELEASED`.
+
+Registry renumbered at merge from 1.25.0 to unreleased: main has since released 1.25.0 to 1.27.0, so the six historical lines above that named the slice's old claim now say `unreleased` (the Markdown rewrite `registry_renumber.py --to-unreleased` applies; the tool itself refuses a claim below main's version).
+
+The descriptor encoding change (a2, owner ruling 2026-11-15) changed no expected bytes in this
+slice: every a3 test builds or reads descriptors through the codec, and none pinned the ASCII
+form.
+
+Checks on the head: `ruff check`, `ruff format --check`, `mypy src/decoy_engine` (846 files)
+clean; `registry_renumber --check --main f34b398e` consistent; `check_fragment` and
+`ratchet_check` (`--base f34b398e`) exit 0. `.venv/bin/python -m pytest tests/fileaccess
+tests/sentry tests/unit/publication tests/unit/test_reason_registry.py
+tests/unit/test_reason_release_pin.py tests/unit/progress/test_consumer_contract.py -q -p
+no:cacheprovider -n 2 -rfE --tb=no`: 6927 passed, 10 failed, 87 errors, 6 skipped; failing ids
+identical to main `f34b398e`'s (the 56 + 31 root-only errors and the 10 `test_import_layers`
+failures).

@@ -73,7 +73,6 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess
-from decoy_engine.config._subset_run import refuse_unapplied_subset
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._isolated_commit import (
     COMMITTED,
@@ -90,24 +89,25 @@ from decoy_engine.execution._isolated_commit import (
 from decoy_engine.execution._isolated_commit import signal_name as _signal_name
 from decoy_engine.execution._isolated_common import (
     CAPPED_ENV,
+    ISOLATED_OUTCOMES,
     ISOLATED_WORKER_ENV,
     RESULT_FILENAME,
     RLIMIT_KINDS,
-    IsolatedRunOutcome,
     IsolatedRunResult,
     abnormal_exit_text,
     classify_abnormal_exit,
-    exception_error_text,
-    is_memory_failure,
+    inside_isolated_worker,
     peak_rss_mb,
 )
 from decoy_engine.execution._isolated_memwatch import error_suffix, evidence_of, start_sampler
-from decoy_engine.execution._isolated_reason import reason_from_envelope
+from decoy_engine.execution._isolated_reason import (
+    envelope_failure,
+    in_process_failure,
+)
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole, entry_point
 from decoy_engine.profile import DeclarationRequest
 from decoy_engine.publication import CommitReceipt, PublicationRequest
-from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.reasons import decoy as _decoy_reasons
 
@@ -206,7 +206,6 @@ def run_pipeline_isolated(
         Sprint 1a-part-2 will consume.
 
     Raises:
-        PipelineValidationError: `config` sets `subset:` (raised before staging or spawn).
         FileAccessUnavailable: a strict policy is installed and the call would spawn a
             child, or names a `staging_dir` or `output_dir` path. Raised before any I/O.
         ValueError: a non-None `sink`/`source_loader`/`vault_writer`/
@@ -215,13 +214,13 @@ def run_pipeline_isolated(
             JSON-serializable. Always raised BEFORE any subprocess is
             spawned.
     """
-    refuse_unapplied_subset(config)
     _reject_unserializable_kwargs(run_pipeline_kwargs)
     if mem_cap_bytes is not None and rlimit_kind not in RLIMIT_KINDS:
         raise ValueError(f"rlimit_kind={rlimit_kind!r} is not one of {sorted(RLIMIT_KINDS)}")
     check_request(request)
+    already_isolated = isolate and inside_isolated_worker()
     _require_ambient_for_paths(
-        spawns=isolate and os.environ.get(ISOLATED_WORKER_ENV) != "1",
+        spawns=isolate and not already_isolated,
         names_paths=staging_dir is not None or output_dir is not None,
     )
 
@@ -238,7 +237,6 @@ def run_pipeline_isolated(
     # instead -- the re-entrant probe then reports a non-isolated measurement and
     # routing falls back to the in-process estimator, so the chain stops at
     # depth 1 (marker's docstring in `_isolated_common` has the full account).
-    already_isolated = isolate and os.environ.get(ISOLATED_WORKER_ENV) == "1"
     if not isolate or already_isolated:
         if already_isolated:
             _logger.warning(
@@ -288,6 +286,13 @@ def _require_ambient_for_paths(*, spawns: bool, names_paths: bool) -> None:
 
 
 def _reject_unserializable_kwargs(kwargs: dict[str, Any]) -> None:
+    mode = kwargs.get("subset_request", "config")
+    if not (isinstance(mode, str) and mode in ("config", "skip")):
+        # Fixed text: a typed request never crosses the wire and is never echoed here.
+        raise ValueError(
+            "run_pipeline_isolated carries only 'config' or 'skip' for subset_request; "
+            "call run_pipeline in-process to pass a SubsetRequest."
+        )
     offenders = [name for name in _NOT_SERIALIZABLE_KWARGS if kwargs.get(name) is not None]
     if offenders:
         raise ValueError(
@@ -309,19 +314,7 @@ def _run_in_process(
     try:
         result = run_pipeline(config, sources, **run_pipeline_kwargs)
     except BaseException as exc:
-        outcome: IsolatedRunOutcome = "oom_killed" if is_memory_failure(exc) else "crashed"
-        return IsolatedRunResult(
-            outcome=outcome,
-            peak_rss_mb=round(peak_rss_mb(), 1),
-            outputs=None,
-            quality_metrics={},
-            table_kinds={},
-            returncode=None,
-            signal_number=None,
-            error=exception_error_text(exc),
-            isolated=False,
-            reason=reason_from_exception(exc),
-        )
+        return in_process_failure(exc)
 
     receipt: CommitReceipt | None = None
     if output_dir is not None:
@@ -512,15 +505,17 @@ def _spawn_and_classify(
     if (
         proc.returncode == 0
         and envelope is not None
-        and envelope.get("outcome")
-        in (
-            "completed",
-            "oom_killed",
-            "crashed",
-        )
+        and envelope.get("outcome") in ISOLATED_OUTCOMES
     ):
         result = _result_from_envelope(envelope, pub, proc.pid, staging_output_dir)
-        return replace(result, memory_evidence=evidence_of(finished, abnormal=False))
+        # A self-reported `crashed` names an exception, not its cause. Native code at the cap
+        # can surface exhaustion as an unrelated type (an Arrow cancellation reaches Python as
+        # KeyboardInterrupt), so a crash that sat at its cap carries the pressure suspicion.
+        # `oom_killed` already names the cause and `completed` is not a failure.
+        return replace(
+            result,
+            memory_evidence=evidence_of(finished, abnormal=envelope["outcome"] == "crashed"),
+        )
 
     # The child died too hard to self-report (a harder rlimit trip the
     # kernel turned into a signal, or an external SIGKILL -- the governor
@@ -565,19 +560,7 @@ def _result_from_envelope(
     if outcome != "completed":
         # A self-reported failure may have staged part of its output; nothing commits it.
         shutil.rmtree(staging_output_dir, ignore_errors=True)
-        return IsolatedRunResult(
-            outcome=outcome,
-            peak_rss_mb=peak,
-            outputs=None,
-            quality_metrics={},
-            table_kinds={},
-            returncode=0,
-            signal_number=None,
-            error=envelope.get("error"),
-            isolated=True,
-            pid=pid,
-            reason=reason_from_envelope(envelope),
-        )
+        return envelope_failure(envelope, pid=pid)
 
     # Read back before publishing, so `outputs` is right with or without an `output_dir`.
     collected = collect(envelope, staging_output_dir, pub)

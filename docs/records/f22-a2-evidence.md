@@ -169,3 +169,56 @@ command) and `tests/unit/scripts/test_gates_shard.py` (run in the gates line abo
 - `_types.py` keeps the shape checks (`is_operation_id`, `is_hex64`, `is_count`) that the
   descriptor declaration reuses; if a4's managed unit or later outcomes widen the closed sets, the
   schema snapshot must move with them (v1 is frozen at GA).
+
+## Merge of main and the canonical JSON form (2026-11-15)
+
+`feat/f22-a1b` `254be660` (which carries main `f34b398e`, B-6 and #581) merged into a2 as
+`7e8e997d`. Conflicts were ledger files only: `.importlinter` and the `LAYERS` snapshot keep
+main's move of `subset` to tier 3 plus a2's `publication` in tier 2; CODEMAP keeps main's
+`plan/` and `run_result/` rows plus a2's `publication/` row.
+
+Two of main's new sentries flagged `publication/_descriptor.py` on the merge:
+
+- D3 (#581, `tests/sentry/defects/test_canonical_json_choke_point.py`): one canonical JSON owner
+  for every digest. The descriptor's own `_canonical` helper (sorted keys, `ensure_ascii=True`)
+  fed both the `result_id` digest and the stored bytes. **Owner ruling 2026-11-15:** switch to
+  main's form. This deviates from plan 5.2, whose pattern line names "ASCII" canonical JSON:
+  the descriptor bytes and the `result_id` input are now
+  `decoy_engine._canonical.canonical_json_bytes` (UTF-8 text as-is). Nothing is released, so
+  the schema stays `decoy-publication/v1` with no version bump; the strict reader and the 1 MiB
+  cap are unchanged, and `_descriptor.py` is on no D3 allowlist.
+  - Red first: `e33e19fb` and `4af4ac9c` add `tests/unit/publication/test_descriptor_canonical_form.py`.
+    On `7e8e997d` all three tests were red: the bytes differ from `canonical_json_bytes` for a
+    non-ASCII path (line 38), the module holds a sorted-key dump site (`['_canonical']`), and a
+    path with no UTF-8 form was accepted (`DID NOT RAISE`).
+  - Production `15cbb018`: the helper is deleted; `compute_result_id`, `encode_descriptor` and
+    the `not_canonical` check in `decode_descriptor` use `canonical_json_bytes` through
+    `_canonical_or_refuse`, which turns `CanonicalJsonError` into the closed
+    `descriptor_refused:not_canonical` token outside the handler. Behaviour change beyond the bytes:
+    an artifact path holding an unpaired surrogate (an undecodable filename byte through
+    `os.fsdecode`) was written as a `\udc80` escape before and is now refused as `not_canonical`
+    by the writer and the reader, since it has no UTF-8 form.
+  - Tests updated with it: `test_writer_sorts_and_escapes` became
+    `test_writer_sorts_and_writes_text_as_is` (it pinned the `é` escape; it now pins the UTF-8
+    bytes), and `tests/unit/publication/_doc.py` hand-builds with `ensure_ascii=False` and UTF-8.
+    The schema golden is ASCII-only, so its bytes, `result_id` and digest are unchanged (comment
+    corrected).
+  - Mutation (`encode_descriptor` back to the ASCII form, detached worktree, reverted, tree clean):
+    red `test_descriptor_bytes_and_result_id_are_the_canonical_form`,
+    `test_descriptor_module_has_no_sorted_key_dump_of_its_own`,
+    `test_writer_sorts_and_writes_text_as_is` and
+    `test_every_sorted_key_dump_outside_the_owner_is_an_allowlisted_document`.
+- Snapshot parse owner (`tests/sentry/generation/test_snapshot_parse_single_owner.py`): its surface
+  is every module whose text says "snapshot"; `_descriptor.py` names its schema-snapshot test
+  (`describe_declaration`), which is genuine, so the docstring stays and the exact map gains the
+  module's five sites with reasons: `_parse` (the reader's one `json.loads`) and the field
+  declaration's own `.load(raw)` calls (`_check_document`, `build_descriptor`, `decode_descriptor`,
+  `load` x3), none of which decodes snapshot bytes.
+
+Checks on the code head (`.venv` re-bootstrapped; Python 3.10.20, PyArrow 24.0.0, DuckDB 1.5.4):
+`ruff check`, `ruff format --check`, `mypy src/decoy_engine` (845 files) clean;
+`registry_renumber --check --main origin/main` consistent; `check_fragment --base origin/main`
+and `ratchet_check` exit 0. `.venv/bin/python -m pytest tests/fileaccess tests/sentry
+tests/unit/publication -q -p no:cacheprovider -n 2 -rfE --tb=no`: 6757 passed, 10 failed,
+87 errors, 6 skipped; failing ids identical to main `f34b398e`'s for `tests/fileaccess
+tests/sentry` (the 56 + 31 root-only errors and the 10 `test_import_layers` failures).
