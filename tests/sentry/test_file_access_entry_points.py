@@ -160,3 +160,13 @@ def test_an_unlisted_decorated_function_is_seen() -> None:
     assert seen - _listed_pairs() == seen
     bare = "@entry_point\ndef other(*, file_access=None): ...\n"
     assert decorated_entry_points(bare, "m") == {("m", "other")}
+
+
+def test_a_marked_function_that_is_not_listed_is_seen() -> None:
+    def seeded() -> None: ...
+
+    seeded.__decoy_entry_point__ = True  # type: ignore[attr-defined]
+    seeded.__module__ = "seeded_module"
+    assert unlisted_marked({"seeded_module": seeded_module_of(seeded)}) == [
+        ("seeded_module", seeded.__qualname__)
+    ]
