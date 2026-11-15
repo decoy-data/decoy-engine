@@ -131,7 +131,11 @@ def test_regex_integrity_takes_the_bounded_route_with_a_staged_sink(
         _config(tmp_path, integrity=True), route, sink=ParquetTransactionalSink(out)
     )
     assert routes == [route]
-    assert sorted(p.name for p in out.iterdir()) == ["child.parquet", "parent.parquet"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "_decoy_publication.json",
+        "child.parquet",
+        "parent.parquet",
+    ]
     report = result.quality_metrics["post_scan_integrity"]
     assert {"keys", "verdict", "residual_pii", "fk_preservation"} <= set(report)
     assert "post_scan_gate_deferred" not in result.quality_metrics
@@ -150,7 +154,7 @@ def test_a_failing_column_finding_on_a_staged_commit_publishes_nothing(
     )
     assert exc.reason == "post_scan.finding_blocked"
     assert not out.exists()
-    assert not list(tmp_path.glob("_decoy_stage_*"))
+    assert not [*tmp_path.glob("_decoy_stage_*"), *tmp_path.glob("._decoy_publication_pending_*")]
 
 
 def test_a_staged_run_is_held_back_when_the_column_suite_cannot_run(

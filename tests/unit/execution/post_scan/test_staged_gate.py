@@ -50,7 +50,7 @@ def _published(out: Path) -> list[str]:
 
 
 def _no_stage_left(root: Path) -> bool:
-    return not list(root.glob("_decoy_stage_*"))
+    return not [*root.glob("_decoy_stage_*"), *root.glob("._decoy_publication_pending_*")]
 
 
 # ----- AT-16: a blocking verdict commits nothing ------------------------------------------------
@@ -72,7 +72,7 @@ def test_at16_a_blocking_verdict_on_a_staged_sink_commits_nothing(
     control = tmp_path / "control"
     result, routes = _run(_config(tmp_path), route, sink=ParquetTransactionalSink(control))
     assert routes == [route]
-    assert _published(control) == ["child.parquet", "parent.parquet"]
+    assert _published(control) == ["_decoy_publication.json", "child.parquet", "parent.parquet"]
     assert result.quality_metrics["post_scan_integrity"]["verdict"]["blocking"] is False
 
 
@@ -370,7 +370,7 @@ def test_at28_a_subclass_of_the_engine_sink_is_foreign(tmp_path: Path) -> None:
     result, routes = _run(_config(tmp_path), "auto", sink=Subclassed(out))
     assert routes != ["full_frame"]
     assert commits == ["commit"]
-    assert _published(out) == ["child.parquet", "parent.parquet"]
+    assert _published(out) == ["_decoy_publication.json", "child.parquet", "parent.parquet"]
     assert "post_scan_gate_deferred" in result.quality_metrics
     assert len(_unreadable_warnings(result)) == 1
 
