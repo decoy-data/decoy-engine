@@ -6,11 +6,14 @@ exactly one baseline path. ``check`` compares the working tree with a base commi
 findings; an empty list means the ratchet holds. Baseline keys compare exactly, except the
 ``permitted::<file>::<site>::<digest>`` keys of the sentries in ``REKEY_PER_SITE``, which
 compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
-or lower it, never raise or drop it (see ``max_raised``). Messages carry ids, paths and keys only.
+or lower it, never raise or drop it (see ``max_raised``). A key of the form
+``<file>.py::<qualname>::<name>`` may also move 1:1 to a new key when the old site is gone from
+the source (see ``rehomes``). Messages carry ids, paths and keys only.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -148,6 +151,77 @@ def growth(
     return frozenset(grown), rekeyed
 
 
+def _source_for(root: Path, file: str) -> Path | None:
+    for cand in (root / "src" / file, root / file):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _qualname_node(tree: ast.AST, qualname: str) -> ast.AST | None:
+    node: ast.AST = tree
+    for part in qualname.split("."):
+        found = None
+        for child in ast.iter_child_nodes(node):
+            if (
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and child.name == part
+            ):
+                found = child
+                break
+        if found is None:
+            return None
+        node = found
+    return node
+
+
+def site_gone(root: Path, key: str) -> bool:
+    """True when ``<file>.py::<qualname>::<name>`` no longer appears in the source tree.
+
+    Proof by AST: the file is missing, the qualified function or class is missing, or it is
+    present but binds no parameter, assignment target or field called ``name``. Any other key
+    shape cannot be proven gone and returns false.
+    """
+    parts = key.split("::")
+    if len(parts) != 3 or not parts[0].endswith(".py"):
+        return False
+    file, qualname, name = parts
+    path = _source_for(root, file)
+    if path is None:
+        return True
+    node = _qualname_node(ast.parse(path.read_text(encoding="utf-8")), qualname)
+    if node is None:
+        return True
+    return not any(
+        (isinstance(n, ast.arg) and n.arg == name)
+        or (isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store))
+        for n in ast.walk(node)
+    )
+
+
+def rehomes(
+    root: Path, grown: frozenset[str], lost: dict[str, object]
+) -> tuple[frozenset[str], list[str]]:
+    """Split ``grown`` into keys that are 1:1 moves of ``lost`` keys, and the rest.
+
+    A grown key is a move when it pairs with its own distinct lost key that has the same last
+    segment, whose site is gone from the source (``site_gone``) and which carries no numeric
+    ``max``. Everything else stays growth, so the count of keys can never rise.
+    """
+    free = sorted(k for k, e in lost.items() if _max_of(e) is None and site_gone(root, k))
+    remaining: set[str] = set()
+    report: list[str] = []
+    for key in sorted(grown):
+        tail = key.rpartition("::")[2]
+        match = next((k for k in free if k.rpartition("::")[2] == tail), None)
+        if match is None or key.count("::") != 2 or not key.split("::")[0].endswith(".py"):
+            remaining.add(key)
+            continue
+        free.remove(match)
+        report.append(f"re-homed {match} -> {key} (old site gone; review)")
+    return frozenset(remaining), report
+
+
 def _fmt(keys: frozenset[str]) -> str:
     return ", ".join(sorted(keys))
 
@@ -201,6 +275,10 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
             report += [
                 f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed
             ]
+            if grown:
+                lost = {k: e for k, e in old.items() if k not in base.keys}
+                grown, moved = rehomes(root, grown, lost)
+                report += [f"{sid}: {line}" for line in moved]
             if grown:
                 findings.append(
                     f"{sid}: baseline gained key(s) not in the merge base: {_fmt(grown)}"

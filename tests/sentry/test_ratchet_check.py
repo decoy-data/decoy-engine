@@ -306,3 +306,57 @@ def test_a_rename_may_not_raise_a_numeric_max(
     assert (res.returncode == 1) is red, res.stdout + res.stderr
     if red:
         assert "replacement or split of a raised or dropped max for key(s): m::f" in res.stderr
+
+
+# --- re-homing a ``<file>.py::<qualname>::<name>`` key whose site left the source -----------
+
+OLD = "src/pkg/old.py::f::seed"
+NEW = "src/pkg/new.py::g::seed"
+NEW2 = "src/pkg/new.py::h::seed"
+
+
+def _commit_sources(repo: Path, old_src: str, new_src: str) -> None:
+    _write(repo, "src/pkg/old.py", old_src)
+    _write(repo, "src/pkg/new.py", new_src)
+    _write(repo, A, _baseline("a", [OLD]))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "sources")
+
+
+def test_one_to_one_rehome_with_the_old_site_gone_passes(repo: Path) -> None:
+    _commit_sources(repo, "def f(seed):\n    return seed\n", "X = 1\n")
+    _write(repo, "src/pkg/old.py", "X = 1\n")
+    _write(repo, "src/pkg/new.py", "def g(seed):\n    return seed\n")
+    _write(repo, A, _baseline("a", [NEW]))
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"re-homed {OLD} -> {NEW}" in res.stdout
+
+
+def test_rehome_that_also_grows_the_count_fails(repo: Path) -> None:
+    _commit_sources(repo, "def f(seed):\n    return seed\n", "X = 1\n")
+    _write(repo, "src/pkg/old.py", "X = 1\n")
+    _write(repo, "src/pkg/new.py", "def g(seed):\n    pass\n\ndef h(seed):\n    pass\n")
+    _write(repo, A, _baseline("a", [NEW, NEW2]))
+    _assert_red(repo, NEW2)
+
+
+def test_rehome_while_the_old_site_still_exists_fails(repo: Path) -> None:
+    _commit_sources(repo, "def f(seed):\n    return seed\n", "X = 1\n")
+    _write(repo, "src/pkg/new.py", "def g(seed):\n    return seed\n")
+    _write(repo, A, _baseline("a", [NEW]))
+    _assert_red(repo, NEW)
+
+
+def test_a_brand_new_key_still_fails(repo: Path) -> None:
+    _commit_sources(repo, "X = 1\n", "def g(seed):\n    return seed\n")
+    _write(repo, A, _baseline("a", [OLD, NEW]))
+    _assert_red(repo, NEW)
+
+
+def test_rehome_to_a_differently_named_binding_fails(repo: Path) -> None:
+    _commit_sources(repo, "def f(seed):\n    return seed\n", "X = 1\n")
+    _write(repo, "src/pkg/old.py", "X = 1\n")
+    _write(repo, "src/pkg/new.py", "def g(key):\n    return key\n")
+    _write(repo, A, _baseline("a", ["src/pkg/new.py::g::key"]))
+    _assert_red(repo, "src/pkg/new.py::g::key")
