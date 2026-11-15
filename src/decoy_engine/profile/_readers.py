@@ -40,14 +40,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess
-from decoy_engine._lexeme import LEXEME_KEY
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.profile._csv_reader import resolve_csv_dialect
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
 )
+from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 
@@ -254,6 +253,9 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
+        return self._iter_batches(check_batch_rows(batch_rows), columns)
+
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
@@ -285,6 +287,7 @@ class LazySource:
         default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
         `buffer_size` and `use_threads` default to pyarrow's own defaults. `columns` narrows the
         batches; the schema and facts stay the whole file's."""
+        batch_rows = check_batch_rows(batch_rows)
         options: dict[str, Any] = {}
         if pre_buffer is not None:
             options["pre_buffer"] = pre_buffer
@@ -529,38 +532,17 @@ def _at(field_key: str, name: str) -> str:
 def _build_file_source(
     descriptor: dict[str, Any], field_key: str, *, table: str = "source"
 ) -> ProfileSource:
+    from decoy_engine.profile._lazy_build import descriptor_path, file_format
+
+    descriptor_path(descriptor, field_key)
     fmt = descriptor.get("format")
-    path = descriptor.get("path")
-    if not isinstance(path, str):
-        raise ValueError(
-            "profile_source: file source missing string `path`, got "
-            f"{fileaccess.shown(repr(path), _at(field_key, 'path'))}"
+    entry = file_format(fmt)
+    if entry is None:
+        raise NotImplementedError(
+            f"profile_source: unsupported file format {fileaccess.shown(repr(fmt), _at(field_key, 'format'))}. "
+            "V1 supports csv | parquet | fixed_width only."
         )
-    if fmt == "csv":
-        dialect = resolve_csv_dialect(descriptor, table=table)
-        return CsvFileSource(
-            Path(path),
-            has_header=dialect.has_header,
-            column_names=None if dialect.column_names is None else list(dialect.column_names),
-            delimiter=dialect.delimiter,
-            lexeme_columns=tuple(descriptor.get(LEXEME_KEY) or ()),
-            field_key=field_key,
-            table=table,
-        )
-    if fmt == "parquet":
-        return ParquetFileSource(Path(path), field_key=field_key)
-    if fmt == "fixed_width":
-        layout = descriptor.get("layout")
-        if not isinstance(layout, dict):
-            raise ValueError(
-                "profile_source: fixed_width file source missing `layout`, got "
-                f"{fileaccess.shown(repr(layout), _at(field_key, 'layout'))}"
-            )
-        return FixedWidthFileSource(Path(path), layout, field_key=field_key)
-    raise NotImplementedError(
-        f"profile_source: unsupported file format {fileaccess.shown(repr(fmt), _at(field_key, 'format'))}. "
-        "V1 supports csv | parquet | fixed_width only."
-    )
+    return entry.resident(descriptor, field_key, table)
 
 
 __all__ = [
