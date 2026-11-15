@@ -215,6 +215,7 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.ReasonRef"),
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
+    ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),
@@ -225,6 +226,7 @@ nitpick_ignore = [
     # Literal aliases (detection.types, profiling.scan_set) that autoapi
     # renders as classes; their defining pages register no class target.
     ("py:class", "DetectorSource"),
+    ("py:class", "decoy_engine.detection.types.DetectorSource"),
     ("py:class", "Strategy"),
     # CI-E1: third-party names the intersphinx inventories do not index as
     # classes (polars lists members, duckdb ships no inventory).
