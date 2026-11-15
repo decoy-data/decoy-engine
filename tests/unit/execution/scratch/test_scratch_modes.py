@@ -99,7 +99,7 @@ def test_caller_temp_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: 
         assert os.path.realpath(root.parent) == os.path.realpath(target), root
         assert {w["mode"] for w in walks} == {0o700}, walks
         assert caller.is_symlink()
-        assert not [p for p in target.iterdir() if p.name.startswith(ARENA_PREFIX)]
+        assert list(target.iterdir()) == []
     else:
         jail = tmp_path / "jail"
         jail.mkdir()
