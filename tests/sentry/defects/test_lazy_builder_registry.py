@@ -87,3 +87,46 @@ def test_a_seeded_format_branch_is_seen() -> None:
 def test_a_table_lookup_is_not_a_branch() -> None:
     source = 'def f(d):\n    fmt = d.get("format")\n    return TABLE.get(fmt)\n'
     assert _seed(source, "f") == []
+
+
+# Round 2: aliases, getattr and an external dict are dispatch too.
+SEEDED_DISPATCH = {
+    "alias": (
+        'def f(d):\n    fmt = d["format"]\n    other = fmt\n    if other == d["x"]:\n'
+        "        return 1\n"
+    ),
+    "alias_in_tuple": (
+        'def f(d, names):\n    kind = d.get("format")\n    if kind in names:\n        return 1\n'
+    ),
+    "getattr_name": (
+        'def f(d, mod):\n    fmt = d.get("format")\n    return getattr(mod, fmt)(d)\n'
+    ),
+    "getattr_built_name": (
+        'def f(d, mod):\n    fmt = d.get("format")\n    return getattr(mod, "_" + fmt)(d)\n'
+    ),
+    "external_dict_subscript": ('def f(d):\n    fmt = d.get("format")\n    return OTHER[fmt](d)\n'),
+    "external_dict_get": ('def f(d):\n    return OTHER.get(d.get("format"))(d)\n'),
+}
+
+
+def test_every_seeded_dispatch_shape_is_seen() -> None:
+    for label, source in SEEDED_DISPATCH.items():
+        assert _seed(source, "f") != [], label
+
+
+def test_a_format_keyed_dict_outside_the_table_is_seen() -> None:
+    source = 'DISPATCH = {"csv": 1, "parquet": 2}\nFILE_FORMATS = {"csv": 1}\n'
+    assert module_format_tables(ast.parse(source)) == [1]
+
+
+def test_the_two_modules_hold_no_format_keyed_table_but_the_one() -> None:
+    for rel, _ in BUILDERS:
+        assert module_format_tables(_tree(rel)) == [], rel
+
+
+def test_the_approved_lookup_helper_is_not_a_branch() -> None:
+    source = (
+        'def f(d):\n    fmt = d.get("format")\n    entry = file_format(fmt)\n'
+        "    return repr(fmt), entry\n"
+    )
+    assert _seed(source, "f") == []

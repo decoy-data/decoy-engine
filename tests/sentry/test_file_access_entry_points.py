@@ -115,3 +115,48 @@ def test_every_internal_seam_exemption_is_real_and_not_also_an_entry_point(graph
 
 def test_the_out_of_core_driver_the_platform_calls_is_an_entry_point() -> None:
     assert "decoy_engine.execution.out_of_core._runner.run_fk_out_of_core" in ENTRY_POINTS
+
+
+def decorated_entry_points(source: str, module: str) -> set[tuple[str, str]]:
+    """(module, function) for every function in `source` decorated with `entry_point`."""
+    found: set[tuple[str, str]] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for dec in node.decorator_list:
+            name = dec.attr if isinstance(dec, ast.Attribute) else getattr(dec, "id", None)
+            if name == "entry_point":
+                found.add((module, node.name))
+    return found
+
+
+def _listed_pairs() -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for dotted in ENTRY_POINTS:
+        module, _, name = dotted.rpartition(".")
+        fn = getattr(importlib.import_module(module), name)
+        pairs.add((fn.__module__, fn.__qualname__))
+    return pairs
+
+
+def test_every_function_decorated_with_entry_point_is_listed() -> None:
+    """The call-graph walk cannot follow an indirect call (`entry.lazy(...)`), so a decorated
+    function that is not in ENTRY_POINTS is found here from its decorator instead."""
+    decorated: set[tuple[str, str]] = set()
+    for path in sorted((SRC / "decoy_engine").rglob("*.py")):
+        parts = path.relative_to(SRC).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts[:2] == ("decoy_engine", "fileaccess"):
+            continue
+        decorated |= decorated_entry_points(path.read_text(encoding="utf-8"), ".".join(parts))
+    assert sorted(decorated - _listed_pairs()) == []
+
+
+def test_an_unlisted_decorated_function_is_seen() -> None:
+    source = "@fileaccess.entry_point\ndef brand_new(x, *, file_access=None): ...\n"
+    seen = decorated_entry_points(source, "decoy_engine.profile._x")
+    assert seen == {("decoy_engine.profile._x", "brand_new")}
+    assert seen - _listed_pairs() == seen
+    bare = "@entry_point\ndef other(*, file_access=None): ...\n"
+    assert decorated_entry_points(bare, "m") == {("m", "other")}
