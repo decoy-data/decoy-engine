@@ -77,7 +77,7 @@ def test_field_lists_are_the_planned_ones() -> None:
 
 
 def test_a_valid_receipt_builds() -> None:
-    receipt = _receipt(os_error="ENOENT", reason_code="publication_target_occupied")
+    receipt = _receipt(os_error="ENOENT", reason_code="publication_commit_uncertain")
     assert receipt.os_error == "ENOENT" and receipt.durable is True
 
 
