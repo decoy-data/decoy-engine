@@ -222,3 +222,13 @@ and `ratchet_check` exit 0. `.venv/bin/python -m pytest tests/fileaccess tests/s
 tests/unit/publication -q -p no:cacheprovider -n 2 -rfE --tb=no`: 6757 passed, 10 failed,
 87 errors, 6 skipped; failing ids identical to main `f34b398e`'s for `tests/fileaccess
 tests/sentry` (the 56 + 31 root-only errors and the 10 `test_import_layers` failures).
+
+## Merge of a1b with main 64e9349b (2026-11-15, message 10)
+
+`feat/f22-a1b` `e53e1f95` (the owner fix that declares a1b's three codes under
+`decoy_engine.fileaccess`, plus main `64e9349b`) merged as `241172fa`, no conflict; the three
+codes stay defined once, under `_fa`. Checks (from a cleaned `src/`): ruff, format, mypy clean;
+`registry_renumber --check --main origin/main` consistent; `check_fragment` and `ratchet_check`
+exit 0. `pytest tests/fileaccess tests/sentry tests/unit/publication -n 2`: 6793 passed,
+10 failed, 87 errors, 6 skipped; failing ids identical to main `64e9349b`'s for the same dirs;
+`tests/sentry/test_engine_string_targets.py` passes.

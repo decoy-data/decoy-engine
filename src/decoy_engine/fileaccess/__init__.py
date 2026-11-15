@@ -95,6 +95,7 @@ ENTRY_POINTS: tuple[str, ...] = (
     "decoy_engine.profile._declared_columns.source_columns",
     "decoy_engine.profile._fixed_width_reader.read_fixed_width",
     "decoy_engine.profile._fixed_width_writer.write_fixed_width",
+    "decoy_engine.profile._lazy_build.build_lazy_source",
     "decoy_engine.profile._readers.build_declared_source",
     "decoy_engine.profile._readers.build_profile_source",
     "decoy_engine.profile._source.profile_source",
