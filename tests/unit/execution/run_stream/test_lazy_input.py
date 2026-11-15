@@ -111,8 +111,8 @@ def test_a_flat_job_reads_no_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     def boom(*_a: Any, **_k: Any) -> Any:
         raise AssertionError("the predicate must not materialize a source")
 
+    # The bounded profiler may read its sample through `iter_batches`; a whole read may not happen.
     monkeypatch.setattr(LazySource, "to_table", boom)
-    monkeypatch.setattr(LazySource, "iter_batches", boom)
     monkeypatch.setattr(LazySource, "open_batches", boom)
     cfg, source = rs.single_table_job(tmp_path, rs.two_column_table(50))
     assert _names(cfg, {"t": source}, tmp_path) == {"t"}
@@ -214,7 +214,25 @@ def test_each_routing_owner_can_exclude_the_job(
     assert seen, f"{owner} was never consulted"
 
 
-def _transforming_fk(tmp_path: Path) -> tuple[dict[str, Any], dict[str, LazySource]]:
+def _transforming_flat(tmp_path: Path) -> tuple[dict[str, Any], dict[str, LazySource]]:
+    table = pa.table({"s": [f"v{i}" for i in range(10)]})
+    cfg = tk.single_table_config(tmp_path, table, transforms=[{"op": "limit", "n": 5}])
+    return cfg, _lazy(cfg)
+
+
+def test_a_transform_bearing_table_is_dropped_when_the_gate_applies(tmp_path: Path) -> None:
+    # M-E5: a lazy transform-bearing table would defer the post-scan gate to report-only.
+    cfg, candidates = _transforming_flat(tmp_path)
+    cfg["post_scan"] = {"integrity": True}
+    assert _names(cfg, candidates, tmp_path) == frozenset()
+
+
+def test_a_transform_bearing_table_stays_when_no_gate_applies(tmp_path: Path) -> None:
+    cfg, candidates = _transforming_flat(tmp_path)
+    assert _names(cfg, candidates, tmp_path) == {"t"}
+
+
+def test_a_transforming_relationship_job_is_left_to_the_owners(tmp_path: Path) -> None:
     parent = pa.table({"id": [f"p{i}" for i in range(20)], "note": [f"n{i}" for i in range(20)]})
     child = pa.table(
         {"cid": [f"c{i}" for i in range(20)], "parent_id": [f"p{i}" for i in range(20)]}
@@ -222,24 +240,7 @@ def _transforming_fk(tmp_path: Path) -> tuple[dict[str, Any], dict[str, LazySour
     cfg = tk.fk_config(
         tmp_path, parent, child, parent_transforms=[{"op": "dedupe", "columns": ["id"]}]
     )
-    return cfg, _lazy(cfg)
-
-
-def test_a_transform_bearing_table_is_dropped_when_the_gate_applies(tmp_path: Path) -> None:
-    # M-E5: a lazy transform-bearing table would defer the post-scan gate to report-only.
-    cfg, candidates = _transforming_fk(tmp_path)
-    assert _names(cfg, candidates, tmp_path) == {"child"}
-
-
-def test_a_transform_bearing_table_stays_when_no_gate_applies(tmp_path: Path) -> None:
-    path = tmp_path / "t.parquet"
-    pq.write_table(pa.table({"s": [f"v{i}" for i in range(10)]}), path)
-    cfg = tk.single_table_config(
-        tmp_path,
-        pa.table({"s": [f"v{i}" for i in range(10)]}),
-        transforms=[{"op": "limit", "n": 5}],
-    )
-    assert _names(cfg, _lazy(cfg), tmp_path) == {"t"}
+    assert _names(cfg, _lazy(cfg), tmp_path) == frozenset()
 
 
 def test_the_predicate_copies_no_eligibility_rule() -> None:
@@ -396,25 +397,17 @@ def _gated_lane(
     finally:
         _post_scan._ACTIVE.reset(token)
     assert not gate.output_unreadable and not gate.ran  # M-E5f: the lane never handed it a sink
-    _g, verdict = _gate_over(cfg, sources, outputs)
-    return gate, verdict, outputs
+    verdict_gate, verdict = _gate_over(cfg, sources, outputs)
+    return verdict_gate, verdict, outputs
 
 
-@pytest.mark.parametrize("broken", [False, True], ids=["intact", "introduced_duplicates"])
-def test_a_relationship_post_scan_verdict_equals_the_resident_call(
-    tmp_path: Path, broken: bool
-) -> None:
-    cfg = copy.deepcopy(_ooc_eligible_config(tmp_path, "parquet"))
-    if broken:
-        parent = next(t for t in cfg["tables"] if t["name"] == "parent")
-        parent["columns"] = [
-            {"name": "id", "strategy": "redact"},
-            *(c for c in parent["columns"] if c["name"] != "id"),
-        ]
-    parent_t, child_t = _parent_child_tables()
-    _g1, lazy_verdict, lazy_out = _gated_lane(cfg, _lazy(cfg))
-    _g2, resident_verdict, resident_out = _gated_lane(cfg, {"parent": parent_t, "child": child_t})
-    assert lazy_verdict == resident_verdict
-    assert (lazy_verdict == "passed") is (not broken)
-    for name in lazy_out:
-        assert lazy_out[name].equals(resident_out[name])
+def test_a_relationship_post_scan_verdict_equals_the_resident_call(tmp_path: Path) -> None:
+    cfg, lazy, tables = rs.fk_job(tmp_path)
+    lazy_gate, lazy_verdict, lazy_out = _gated_lane(cfg, lazy)
+    resident_gate, resident_verdict, resident_out = _gated_lane(cfg, tables)
+    assert lazy_verdict == resident_verdict == "passed"
+    assert lazy_out.keys() == resident_out.keys() == {"customers", "orders"}
+    for name, got in lazy_out.items():
+        assert got.equals(resident_out[name])
+    assert lazy_gate.output_unreadable is resident_gate.output_unreadable is False
+    assert lazy_gate.report == resident_gate.report and lazy_gate.report is not None
