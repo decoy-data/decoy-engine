@@ -17,11 +17,19 @@ from __future__ import annotations
 import enum
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal
 
 from decoy_engine import reasons
+from decoy_engine.fileaccess import FileAccessDenied, LeafTooLarge, OutputDir
+from decoy_engine.publication._descriptor import (
+    DESCRIPTOR_NAME,
+    MAX_DESCRIPTOR_BYTES,
+    decode_descriptor,
+    descriptor_digest,
+)
+from decoy_engine.publication._publish import _errno_name
 from decoy_engine.publication._types import CommitReceipt, PublicationRefused, is_operation_id
 
 if TYPE_CHECKING:
@@ -38,6 +46,7 @@ __all__ = [
     "Landing",
     "SinkState",
     "SinkStateMachine",
+    "recover",
 ]
 
 Call = Literal["write", "commit", "reconcile", "abort"]
@@ -244,3 +253,25 @@ class SinkStateMachine:
             os_error=None,
         )
         raise PublicationRefused(code, receipt)
+
+
+def recover(out: OutputDir, prior: CommitReceipt) -> tuple[Exit, CommitReceipt]:
+    """RECOVERING's I/O: this result bound, then D4 (D2 only: a sink has no vault, rule B0)."""
+    found = data = None
+    try:
+        data = out.read_member(DESCRIPTOR_NAME, limit=MAX_DESCRIPTOR_BYTES)
+        found = None if data is None else decode_descriptor(data)
+    except OSError as exc:  # cannot tell what is bound: still uncertain
+        return Exit.FOUND_NOT_DURABLE, replace(prior, os_error=_errno_name(exc))
+    except (ValueError, LeafTooLarge, FileAccessDenied):  # never this sink's descriptor
+        found = None
+    if found is None or found.result_id != prior.result_id:
+        code = str(reasons.decoy.PUBLICATION_COMMIT_NOT_VISIBLE)
+        return Exit.NOT_VISIBLE, replace(prior, outcome="refused", reason_code=code, visible=False)
+    try:
+        out.sync_chain()
+    except OSError as exc:
+        return Exit.FOUND_NOT_DURABLE, replace(prior, os_error=_errno_name(exc))
+    digest = descriptor_digest(data)  # type: ignore[arg-type]
+    sealed = replace(prior, outcome="already_committed", reason_code=None, os_error=None)
+    return Exit.FOUND, replace(sealed, descriptor_digest=digest, visible=True, durable=True)

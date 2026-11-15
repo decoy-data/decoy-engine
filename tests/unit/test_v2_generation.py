@@ -732,11 +732,11 @@ class TestFormulaParityV1:
         assert _v2_run(col, 5) == _v1_run(col, 5)
 
     def test_inline_with_random(self):
-        # Inline path: random.randint(1, 100) is row-seeded via local_seed.
+        # Inline path: randint(1, 100) is row-seeded via local_seed.
         col = {
             "name": "rand",
             "type": "formula",
-            "formula": "random.randint(1, 100)",
+            "formula": "randint(1, 100)",
         }
         assert _v2_run(col, 10) == _v1_run(col, 10)
 
@@ -1051,7 +1051,8 @@ def _v2_run_multi(tables_cfg: list[dict], seed: int = 42, derive_key=None) -> di
         "sources": {},
         "tables": tables_cfg,
         "targets": {
-            t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables_cfg
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"}
+            for t in tables_cfg
         },
     }
     cfg = PipelineConfig.model_validate(cfg).model_dump()

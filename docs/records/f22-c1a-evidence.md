@@ -206,3 +206,35 @@ branch-only=0. Its `/tmp/gates.*` and `/tmp/gt.*` directories were removed.
   (outside this slice's files except for exports).
 - The machine's `leave` raises `KeyError` for an exit that is not valid from the current state
   (a programming error); the state is left unchanged in that case.
+
+## Merge of main through a3 (2026-11-15)
+
+`feat/f22-a3` `484ed9e2` (main `f34b398e` with B-6, #579 and #581, a1b and a2 on top, including
+a2's switch of the descriptor to the canonical JSON form) merged as `ca0dc11b`.
+
+Conflicts and resolutions:
+
+- `execution/_transactional_sink.py`: main (#579, post-scan gate) added
+  `ParquetTransactionalSink.staged_tables() -> Mapping[table, opener]` with a `table -> component`
+  record set when a staged file closes and cleared on publish and on cleanup; c1a had split the
+  write half into `StagedParquetWriter` and put the sink under the state table. Kept both: the
+  record now lives on the writer as `StagedParquetWriter.staged` (set in `_stored`, where main set
+  it), and the sink's `staged_tables()` is main's method over it, unchanged in behaviour (empty
+  before the stage is begun and after publish or discard). The sink clears the record where
+  main did (the successful publish and `_cleanup_staging`). Imports take both sides
+  (`functools`, `uuid`, `Mapping`). 537 lines (cap 600).
+- `CODEMAP.md`: each row taken from the side that changed it; main's
+  `execution/pipeline/_post_scan.py` row kept.
+
+The descriptor encoding change changed no expected bytes in this slice.
+
+Checks on the head: `ruff check`, `ruff format --check`, `mypy src/decoy_engine` (847 files)
+clean; `registry_renumber --check --main f34b398e` consistent; `check_fragment` and
+`ratchet_check` (`--base f34b398e`) exit 0. Main's sink and post-scan tests
+(`tests/unit/execution/test_staged_tables.py`, `tests/fileaccess/test_char_sink_publish.py` and
+the `tests/unit/execution` files naming `post_scan` or `staged_tables`): 427 passed, 10 skipped.
+`.venv/bin/python -m pytest tests/fileaccess tests/sentry tests/unit/publication
+tests/unit/execution/publication tests/unit/test_reason_registry.py
+tests/unit/test_reason_release_pin.py -q -p no:cacheprovider -n 2 -rfE --tb=no`: 7037 passed,
+10 failed, 87 errors, 6 skipped; failing ids identical to main `f34b398e`'s (the 56 + 31 root-only
+errors and the 10 `test_import_layers` failures).

@@ -170,7 +170,7 @@ def test_descriptor_describes_every_staged_table(
 ) -> None:
     """The sink hands its own full staged set to `publish_unit` on every route, so the bound
     descriptor describes exactly as many files as the sink staged; a streamed route's publish
-    session reports the same set (`staged_tables()` on both)."""
+    session reports the same set (`staged_components()` on both)."""
     import json
 
     from decoy_engine.execution import _chunked_output_sink
@@ -180,14 +180,14 @@ def test_descriptor_describes_every_staged_table(
     real = _chunked_output_sink.OutputPublish.commit
 
     def commit(self: Any) -> Any:
-        seen.append(self.staged_tables())
+        seen.append(self.staged_components())
         return real(self)
 
     monkeypatch.setattr(_chunked_output_sink.OutputPublish, "commit", commit)
     leaf = tmp_path / "out"
     sink = ParquetTransactionalSink(leaf, request=PublicationRequest("op-1"))
     receipt = _runner(route, tmp_path, monkeypatch)("A", sink)
-    staged = sink.staged_tables()
+    staged = sink.staged_components()
     bound = json.loads((leaf / DESCRIPTOR_NAME).read_bytes())
     assert staged and sorted(staged) == sorted(
         p.name for p in leaf.glob("*.parquet")

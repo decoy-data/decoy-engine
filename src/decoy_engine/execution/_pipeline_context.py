@@ -38,6 +38,7 @@ import pyarrow as pa
 from decoy_engine.config import classify_table_kinds
 from decoy_engine.execution import _guards, _pipeline_auto_chunk, _pipeline_routing
 from decoy_engine.execution._chunked_output_sink import OutputPublish
+from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
 from decoy_engine.fileaccess import config_relative
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._transactional_sink import TransactionalSink
     from decoy_engine.execution._transforms_prepare import PreparedSources
     from decoy_engine.execution.pipeline._stream import StreamVerdict
+    from decoy_engine.execution.pipeline._subset_stage import SubsetStageScope
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._types import Profile
@@ -158,6 +160,12 @@ class RouteDecision:
     stream: StreamVerdict | None = None
 
 
+def refuse_vault_with_sink(sink: Any, vault_writer: Any) -> None:
+    """B0 (B-6 D1): the sink commits output inside the run; the vault could only follow it."""
+    if sink is not None and vault_writer is not None:
+        raise vault_requires_resident_output()
+
+
 def build_run_context(
     config: dict[str, Any],
     sources: Mapping[str, pa.Table | LazySource] | None,
@@ -204,6 +212,7 @@ def build_run_context(
     quarantine_runtime: Any = None,
     out_of_core_threads: int | None = None,
     base_dir: str | Path | None = None,
+    subset_stage: SubsetStageScope | None = None,
 ) -> PipelineRunContext:
     """Resolve and validate every run input, in the order the inline code did.
 
@@ -275,6 +284,12 @@ def build_run_context(
     if execution_mode == "out_of_core":
         # Config-only, so nothing is profiled or read before the refusal.
         reject_any_per_table_transforms(config, route="execution_mode='out_of_core'")
+    if token_vault_writer is not None:
+        # B-6 D2: a token vault without a derivation scope predates vault-scoped tokens; refuse
+        # it before any source is profiled or read.
+        from decoy_engine.execution._strategies._tokenize import require_derivation_scope
+
+        require_derivation_scope(token_vault_writer)
 
     # None-normalize the skip list here (a mutable [] default would be shared across calls).
     skip = list(post_validation_skip) if post_validation_skip else []
@@ -332,11 +347,18 @@ def build_run_context(
     # Duplicate field names are refused after the config-only admission and before profiling,
     # routing and every pandas conversion: each looks columns up by name and would fail uncoded.
     _guards.refuse_duplicate_run_sources(config, caller_sources)
+    _guards.refuse_undeclared_loader_tables(
+        table_kinds, config, caller_sources, source_loader_schemas
+    )
     source_loader = _guards.refusing_source_loader(source_loader)
 
-    profile = profile_source(
-        config, seed=job_seed, declared=declared, supplied_sources=caller_sources
-    )
+    supplied = caller_sources  # profiled whole: a subset run compiles from the full sources
+    if subset_stage is not None and subset_stage.active:
+        caller_sources, selection = subset_stage.apply(caller_sources, config)
+
+    profile = profile_source(config, seed=job_seed, declared=declared, supplied_sources=supplied)
+    if subset_stage is not None and subset_stage.active:
+        profile = subset_stage.restrict_profile(profile, selection, subset_stage.head_rows)
 
     plan = compile_plan(
         config,
@@ -346,6 +368,11 @@ def build_run_context(
         instance_default_locale=instance_default_locale,
     )
 
+    _guards.refuse_dropped_declared_tables(
+        table_kinds,
+        plan,
+        {*caller_sources, *(source_loader_schemas or {}), *(config.get("sources") or {})},
+    )
     # Late defense in depth: the compiled plan may not need more than admission covered.
     assert_plan_requirements_admitted(plan, admitted)
     resolved_key_provider = admitted.key_provider

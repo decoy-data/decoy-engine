@@ -113,9 +113,11 @@ Package `decoy_engine.publication` (`_descriptor.py`) defines the descriptor a p
 carries as `_decoy_publication.json` at its root; `publish_unit` (below) writes it. This section
 is the format.
 
-The bytes are canonical JSON: keys sorted, separators `,` and `:` with no whitespace, ASCII only
-(other characters as `\u` escapes), no NaN or infinity. Equal content therefore has equal bytes,
-and `descriptor_digest` is the SHA-256 of the bytes.
+The bytes are the engine's one canonical JSON form (`decoy_engine._canonical.canonical_json_bytes`):
+keys sorted, separators `,` and `:` with no whitespace, UTF-8 with text written as-is (no `\u`
+escapes), no NaN or infinity. Equal content therefore has equal bytes, and `descriptor_digest` is
+the SHA-256 of the bytes. A value with no UTF-8 form (an unpaired surrogate, as an undecodable
+filename gives) is refused as `not_canonical` by the writer and the reader.
 
 | Field | Type |
 |---|---|
@@ -271,10 +273,11 @@ an abort every call is.
 
 `ParquetTransactionalSink(target, request=PublicationRequest(...))` stages each table as
 `<table>.parquet` in a `publication` stage beside the target and, on `commit()`, hands the stage
-and its own full staged set, `staged_tables()`, to `publish_unit`; no caller picks a subset, so
+and its own full staged set, `staged_components()`, to `publish_unit`; no caller picks a subset, so
 the bound descriptor describes every file the sink staged. A streamed route's publish session
 (`OutputPublish` in `execution/_chunked_output_sink.py`) reports the same set through its own
-`staged_tables()`. Without a `request` the sink is its own
+`staged_components()`. `staged_tables()` is the post-scan gate's read-back (table to opener)
+while the stage is open, and is empty after publish or discard. Without a `request` the sink is its own
 attempt: a fresh random `operation_id`, still judged by its measured result. A request carrying
 a vault is refused with `ValueError` when the sink is built: an engine sink never binds a vault
 (vault jobs publish through `publish_tables`).
