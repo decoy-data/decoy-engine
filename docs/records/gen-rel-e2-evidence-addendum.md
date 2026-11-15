@@ -57,3 +57,26 @@ files pass; mypy clean (884 files); `tests/sentry` 5717 passed, 0 failed, 2 skip
 `profile/` 19.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-15, `a7f278eb`), carried forward
+
+`origin/feat/gen-rel-e1` `1bccfb8a` merged into `d5962c3c` as `3a3f13a0`. It carries `origin/main` `a7f278eb`
+(#600, #582 one seed path for every seeded generator, #489 durable publication units).
+
+One conflict, `tests/native/test_draw_sites_catalogue_pinned.py`: this slice's
+"Re-pinned for GEN-REL E2" line and main's DUP-FREEZE E2 line (two `joint_mask` stream sites and the
+`gen.composite_build_pool` seed text) are both kept. The ordered ids, entry digests and
+coverage-map digests merged without a conflict and each matches the merged catalogue;
+`_CATALOGUE_DIGEST` is recomputed by the file's procedure (SHA-256 over
+`repr(protocol.DRAW_SITES)`) on the merged tree: `fce3b00f...`. No other file conflicted;
+main's change touches no source file of this slice, and main's seed sentry
+(`tests/sentry/defects/test_rng_construction.py`) passes over it.
+
+Checks on `3a3f13a0`, Python 3.10.20, `origin/main` `a7f278eb`: ruff and format on the changed
+files pass; mypy clean (887 files); `tests/sentry` 5783 passed, 0 failed, 2 skipped; layers 15 passed; this slice's test files (`tests/unit/config/test_generate_relational.py`, `tests/unit/execution/test_probe_scale.py`, `tests/unit/generation/relational`, the generation-order, pinned and unique old-input-bytes tests, `tests/unit/plan`) and main's seed sentry with the two
+draw-site catalogue tests: 1306 passed, 0 failed. Script checks (`registry_renumber.py --check --main
+origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 596 lines; the
+engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
