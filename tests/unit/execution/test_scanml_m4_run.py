@@ -340,7 +340,7 @@ def test_only_a_deferred_ner_fail_holds_the_quarantine_write(
 
     monkeypatch.setattr(_post_scan, "run_post_mask", spy)
     run()
-    assert seen == [ner_findings == "warn"], "only an NER-enforcing check runs before the write"
+    assert seen == [ner_findings == "warn"], "the write precedes a check that cannot block"
     assert qpath.exists()
 
 
