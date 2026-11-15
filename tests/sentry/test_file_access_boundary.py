@@ -30,7 +30,7 @@ from tests.sentry.fa.rules import (
     release_findings,
     source_modules,
 )
-from tests.sentry.fa.scan import scan_tree
+from tests.sentry.fa.scan import CONN, NativeFlow, scan_tree
 
 HERE = Path(__file__).parent
 SRC = HERE.parents[1] / "src"
@@ -343,7 +343,7 @@ def _source_trees(root: Path, package: str) -> dict[str, ast.Module]:
     }
 
 
-_EVASIONS = "fx/plain/scratch_release_evasions.py"
+_EVASIONS = "fx/scratch/scratch_release_evasions.py"
 _RELEASE_CELLS = {
     # cell: (listed modules, findings it must include)
     "unlisted_caller_evasions": (
@@ -371,8 +371,8 @@ def test_local_path_callers_are_allowlisted(cell: str) -> None:
     assert expected <= findings, sorted(expected - findings)
 
 
-_DERIVED = "fx/plain/scratch_native_derived.py"
-_READS = "fx/plain/scratch_read_evasions.py"
+_DERIVED = "fx/scratch/scratch_native_derived.py"
+_READS = "fx/scratch/scratch_read_evasions.py"
 _ISOLATED_RUN = "decoy_engine/execution/_isolated_run.py"
 
 
@@ -488,6 +488,51 @@ def test_pending_set_only_shrinks() -> None:
             grown, _ = growth(current, ancestor, per_site=False)
             assert not grown, f"SCRATCH_NATIVE_PENDING gained {sorted(grown)} over {sha[:12]}"
             break
+
+
+def _tracker_gaps(root: Path, package: str) -> tuple[int, list[str]]:
+    """The D9 `duckdb.connection.*` sites, and those whose receiver the native flow does not
+    hold as a connection."""
+    sites = [s for s in scan_tree(root, package)[0] if s.sink.startswith("duckdb.connection.")]
+    flow = NativeFlow(root, package)
+    dotted = {rel: mod for mod, rel in source_modules(root, package).items()}
+    gaps: list[str] = []
+    for site in sites:
+        qual = f"{dotted[site.module]}.{site.function}"
+        fd = flow.funcs.get(qual)
+        recv = getattr(site.node.func, "value", None)
+        if fd is None or recv is None or flow.kind(recv, fd, flow.names[qual]) != CONN:
+            gaps.append(f"{site.module}:{site.line} {site.function}: {site.sink}")
+    return len(sites), gaps
+
+
+_TRACKER_SEEDS = {
+    "seeded_plain": "import duckdb\n\n\ndef f():\n    conn = duckdb.connect()\n"
+    "    return conn.execute('SELECT 1')\n",
+    # a module-level alias resolves for D9 but not for the native flow
+    "seeded_module_alias": "import duckdb\n\nopen_db = duckdb.connect\n\n\ndef f():\n"
+    "    conn = open_db()\n    return conn.execute('SELECT 1')\n",
+}
+
+
+@pytest.mark.parametrize("cell", ["engine", *_TRACKER_SEEDS])
+def test_d9_connection_sites_are_native_connections(tmp_path: Path, cell: str) -> None:
+    """One way only: D9 sees no connection the native flow misses. The native flow sees more
+    (parameters, returns, `self.<attr>`); exact agreement comes when D9 reads it."""
+    if cell == "engine":
+        count, gaps = _tracker_gaps(SRC, "decoy_engine")
+        assert count and gaps == [], gaps
+        return
+    pkg = tmp_path / "seed"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "mod.py").write_text(_TRACKER_SEEDS[cell])
+    count, gaps = _tracker_gaps(tmp_path, "seed")
+    assert count == 1, "D9 did not see the seeded site"
+    if cell == "seeded_plain":
+        assert gaps == [], gaps
+    else:
+        assert gaps == ["seed/mod.py:8 f: duckdb.connection.execute"], gaps
 
 
 _LAZY_CELLS = {

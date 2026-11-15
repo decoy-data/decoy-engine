@@ -11,8 +11,8 @@ import pyarrow.parquet as pq
 from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.fileaccess import scratch_native as wrap
 from decoy_engine.fileaccess import scratch_native_iter as wrap_iter
-from fx.plain.scratch_read_evasions import _load
-from fx.plain.scratch_release_evasions import native_wrapped
+from fx.scratch.scratch_read_evasions import _load
+from fx.scratch.scratch_release_evasions import native_wrapped
 
 
 def scratch_native(fn, *args):
