@@ -28,7 +28,6 @@ import functools
 import os
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -42,27 +41,21 @@ from decoy_engine.execution._publication_observer import (
 )
 from decoy_engine.fileaccess import (
     FileAccess,
-    FileAccessDenied,
     FileAccessUnavailable,
     FileRequest,
     FileRole,
-    LeafTooLarge,
     OutputDir,
     OutputTxn,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.progress import get_active_channel
 from decoy_engine.publication import (
-    DESCRIPTOR_NAME,
-    MAX_DESCRIPTOR_BYTES,
     CommitReceipt,
     PublicationRequest,
-    decode_descriptor,
-    descriptor_digest,
     publish_unit,
     raise_for_outcome,
 )
-from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine
+from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine, recover
 from decoy_engine.reasons import CleanupState, Operation, PublicationState
 
 if TYPE_CHECKING:
@@ -514,7 +507,7 @@ class ParquetTransactionalSink:
             return None
         prior = cast(CommitReceipt, self.receipt)  # UNCERTAIN is only reached with one
         try:
-            exit_, receipt = _recover(self._out, prior)
+            exit_, receipt = recover(self._out, prior)
         except BaseException:
             self._leave(Exit.FOUND_NOT_DURABLE, prior)
             raise
@@ -587,29 +580,3 @@ def _raise_observed(sink: Any, receipt: CommitReceipt, operation: Operation) -> 
             exc.__cause__ = OSError(getattr(errno, receipt.os_error), receipt.os_error)
         capture_publication_failure(exc, sink, operation)
         raise
-
-
-def _recover(out: OutputDir, prior: CommitReceipt) -> tuple[Exit, CommitReceipt]:
-    """RECOVERING's I/O: this result bound, then D4 (D2 only: a sink has no vault, rule B0)."""
-    found = data = None
-    try:
-        data = out.read_member(DESCRIPTOR_NAME, limit=MAX_DESCRIPTOR_BYTES)
-        found = None if data is None else decode_descriptor(data)
-    except OSError as exc:  # cannot tell what is bound: still uncertain
-        return Exit.FOUND_NOT_DURABLE, replace(prior, os_error=_errno_name(exc))
-    except (ValueError, LeafTooLarge, FileAccessDenied):  # never this sink's descriptor
-        found = None
-    if found is None or found.result_id != prior.result_id:
-        code = str(reasons.decoy.PUBLICATION_COMMIT_NOT_VISIBLE)
-        return Exit.NOT_VISIBLE, replace(prior, outcome="refused", reason_code=code, visible=False)
-    try:
-        out.sync_chain()
-    except OSError as exc:
-        return Exit.FOUND_NOT_DURABLE, replace(prior, os_error=_errno_name(exc))
-    digest = descriptor_digest(data)  # type: ignore[arg-type]
-    sealed = replace(prior, outcome="already_committed", reason_code=None, os_error=None)
-    return Exit.FOUND, replace(sealed, descriptor_digest=digest, visible=True, durable=True)
-
-
-def _errno_name(exc: OSError) -> str:
-    return errno.errorcode.get(exc.errno or errno.EIO, "EIO")

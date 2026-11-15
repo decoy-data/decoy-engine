@@ -114,7 +114,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("publication/_types.py", "raise_for_outcome"): (
         "re-raises a CommitReceipt's code; the receipt accepts only a registered `decoy` code"
     ),
-    ("execution/_transactional_sink.py", "_recover"): (
+    ("publication/_sink_state.py", "recover"): (
         "builds the RECOVERING refusal receipt from the registry symbol "
         "`PUBLICATION_COMMIT_NOT_VISIBLE` as an exact `str` (a CommitReceipt takes no subclass)"
     ),
