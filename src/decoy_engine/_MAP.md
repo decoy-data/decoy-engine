@@ -11,6 +11,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `plan/` | `compile_plan` -> frozen `Plan`, seed envelope, plan-time checks |
 | `execution/` | `run_pipeline` spine, routes (full-frame oracle, unified slice, chunked dispatcher, sequential and out-of-core FK), strategy handlers, native companion bridge, transactional sink, capacity |
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
+| `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form) |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
 | `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome`, `_project.py` (`project_tables`, the per-table projection) |
 | `records/` | The local record library's engine side: `decoy-record/v1` envelope, `build`/`encode`/`decode`, the kind registry, canonical form and ids, the `decoy-library-export/v1` codec, the `decoy-job-log/v1` header and reader (no filesystem access) |
@@ -34,13 +35,13 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `validation/`, `validation_result.py` | `validate_config` and the validation wire shape |
 | `relationships/` | Relationship graph, namespace registry, orphan policy |
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
-| `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph |
+| `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
 | `determinism/`, `keyprovider.py`, `_reference_date.py` | Seed protocol, key derivation, reference-date anchoring |
 | `vault.py`, `unmask.py` | Token vault write and unmask |
-| `connectors/`, `sdk.py` | Connector SDK and in-tree file connectors (S3, GCS, SFTP, Postgres snapshot) |
+| `connectors/`, `sdk.py` | Connector SDK and in-tree file connectors (S3, GCS, SFTP, Postgres snapshot) and the conditional-write object store |
 | `data_discovery.py` | Read-only SQL over output (DuckDB) |
 | `context.py`, `instrumentation/` | Caller context and `Logger` protocol; opt-in timing collector |
 | `errors.py` | Engine exception types |

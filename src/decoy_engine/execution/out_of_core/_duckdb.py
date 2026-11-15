@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import re
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._scratch import scratch_arena
 from decoy_engine.execution.pipeline import detect_usable_cpus
 from decoy_engine.fileaccess import ScratchArena, scratch_native
+from decoy_engine.internal.memory_limit import parse_megabytes
 
 # `_budget.py` (`resolve_budget` / `resolve_ooc_memory_limit`) is the only
 # producer of the `memory_limit` string this module consumes, and it always
@@ -25,7 +25,6 @@ from decoy_engine.fileaccess import ScratchArena, scratch_native
 # COPY options for a scratch Parquet file `precreate_private` made 0600: DuckDB writes that file
 # in place instead of a sibling temp file renamed over it with an umask-derived mode.
 PRIVATE_COPY = "FORMAT PARQUET, USE_TMP_FILE false"
-_MEMORY_LIMIT_MB_PATTERN = re.compile(r"^(\d+)MB\Z")
 
 # Per-thread working-set estimate DuckDB's own threads config is sized
 # against: each thread holds its own scan/build buffers on top of the shared
@@ -78,6 +77,11 @@ def bind_duckdb_run(thread_cap: int | None) -> Iterator[DuckDBRunRecorder]:
         _RUN.reset(token)
 
 
+def current_duckdb_run() -> DuckDBRunRecorder | None:
+    """The recorder bound for this run, or `None` outside `bind_duckdb_run`."""
+    return _RUN.get()
+
+
 def connect_duckdb(*, temp_dir: ScratchArena | Path, memory_limit: str | None = None):
     """Open an in-memory DuckDB connection that spills into ``temp_dir``: an arena child, or a
     path adopted as one (transition arm (c)). Building it goes through the native boundary."""
@@ -118,8 +122,8 @@ def connect_duckdb(*, temp_dir: ScratchArena | Path, memory_limit: str | None = 
 
 
 def _memory_limit_bytes(memory_limit: str | None) -> int | None:
-    match = None if memory_limit is None else _MEMORY_LIMIT_MB_PATTERN.match(memory_limit)
-    return None if match is None else int(match.group(1)) * 1024 * 1024
+    megabytes = parse_megabytes(memory_limit)
+    return None if megabytes is None else megabytes * 1024 * 1024
 
 
 def _threads_for_memory_limit(
@@ -152,4 +156,10 @@ def _threads_for_memory_limit(
     return max(1, min(ceilings))
 
 
-__all__ = ["AppliedConnection", "DuckDBRunRecorder", "bind_duckdb_run", "connect_duckdb"]
+__all__ = [
+    "AppliedConnection",
+    "DuckDBRunRecorder",
+    "bind_duckdb_run",
+    "connect_duckdb",
+    "current_duckdb_run",
+]

@@ -20,7 +20,11 @@ is the schema only.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import os
+from collections.abc import Iterable, Mapping
+from pathlib import PurePath
+from typing import Annotated, ClassVar, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -41,6 +45,8 @@ class FileTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["file"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "path"
     format: Literal["csv", "parquet", "fixed_width"]
     path: str
     layout: FixedWidthLayout | None = Field(
@@ -77,6 +83,8 @@ class S3Target(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["s3"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "key"
     format: Literal["csv", "parquet"]
     bucket: str = Field(..., min_length=1, max_length=255)
     key: str = Field(..., min_length=1)
@@ -109,6 +117,8 @@ class GCSTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["gcs"]
+    # The field a duplicate-destination problem points at.
+    destination_field: ClassVar[str] = "object"
     format: Literal["csv", "parquet"]
     bucket: str = Field(..., min_length=1, max_length=255)
     object: str = Field(..., min_length=1)
@@ -126,3 +136,50 @@ TargetDescriptor = Annotated[
     FileTarget | S3Target | GCSTarget,
     Field(discriminator="type"),
 ]
+
+
+def _target_identity(target: FileTarget | S3Target | GCSTarget) -> tuple[str, ...]:
+    """The one definition of "same destination" for a validated output target.
+
+    S3 compares by endpoint, bucket and key, GCS by bucket and object. A file path with no `..`
+    component is normalized so `out/a.csv` and `out/./a.csv` are one destination. A path with `..`
+    keeps its text because the OS resolves `..` after a symlink from the link target, so
+    normalizing could merge two files. Filesystem aliasing is the writer's concern.
+    """
+    if isinstance(target, FileTarget):
+        if os.pardir in PurePath(target.path).parts:
+            return ("file", target.path)
+        return ("file", os.path.normpath(target.path))
+    if isinstance(target, S3Target):
+        # The endpoint names the store (AWS, MinIO, R2...); "" is the AWS default.
+        return ("s3", _endpoint_identity(target.endpoint_url), target.bucket, target.key)
+    if isinstance(target, GCSTarget):
+        return ("gcs", target.bucket, target.object)
+    raise TypeError("unsupported target type has no destination identity")
+
+
+def duplicate_target_groups(
+    targets: Mapping[str, FileTarget | S3Target | GCSTarget], active_names: Iterable[str]
+) -> list[list[str]]:
+    """Table names that share one destination, each group of 2+ in mapping order.
+
+    Only keys in `active_names` take part: the writers skip a target whose key names no table.
+    """
+    active = set(active_names)
+    by_identity: dict[tuple[str, ...], list[str]] = {}
+    for name, target in targets.items():
+        if name in active:
+            by_identity.setdefault(_target_identity(target), []).append(name)
+    return [names for names in by_identity.values() if len(names) > 1]
+
+
+def _endpoint_identity(url: str | None) -> str:
+    # Only the scheme and host are case-insensitive (RFC 3986 section 6.2.2.1); a path
+    # or user-info may name a different tenant by case alone.
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    userinfo, at, hostport = parts.netloc.rpartition("@")
+    netloc = f"{userinfo}{at}{hostport.lower()}"
+    path = parts.path.removesuffix("/")
+    return urlunsplit((parts.scheme.lower(), netloc, path, parts.query, parts.fragment))

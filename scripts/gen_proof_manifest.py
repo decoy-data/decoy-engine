@@ -146,10 +146,10 @@ def _run_hero(
             "providers": {**_CSV_IN, "path": str(tmp / "providers.csv")},
         },
         "targets": {
-            "members": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "claims": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "providers": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null"},
+            "members": {"type": "file", "format": "csv", "path": "/dev/null.members"},
+            "claims": {"type": "file", "format": "csv", "path": "/dev/null.claims"},
+            "providers": {"type": "file", "format": "csv", "path": "/dev/null.providers"},
+            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null.audit_log"},
         },
         "namespaces": {"member_identity": {"declared_by": ["members.member_id"]}},
         "tables": [
