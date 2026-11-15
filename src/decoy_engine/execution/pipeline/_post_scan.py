@@ -137,6 +137,15 @@ class PostScanGate:
         self._scratch_root: Path | None = None
 
     @property
+    def enforces_ner(self) -> bool:
+        """A deferred gate whose report-only check still blocks on NER (`ner_findings: fail`)."""
+        return (
+            self.deferred
+            and post_scan_integrity_requested(self._config)
+            and post_scan_ner_findings(self._config) == "fail"
+        )
+
+    @property
     def memory_limit(self) -> str:
         """The key scan's DuckDB cap: its own fixed cap or the run's budget share, whichever is
         less, never below the working floor. The scan spills to its scratch directory past it."""
@@ -538,7 +547,8 @@ def publish_after_gate(write: Callable[[], None]) -> None:
     """Run `write`, a publish that carries row values, once nothing can block the run: now when
     no gate will judge it, else in `settle` after the verdict passes. A blocked run drops it."""
     gate = active_gate()
-    if gate is None or not gate.required or gate.ran or gate.deferred:
+    # A deferred gate judges nothing, except the NER block its report-only check still enforces.
+    if gate is None or not gate.required or gate.ran or (gate.deferred and not gate.enforces_ner):
         write()
     else:
         gate._held.append(write)
