@@ -210,9 +210,7 @@ def _generate_tables_from_config(
         # the fidelity-gate dispatch) so configs without reference-bearing
         # formulas never pay pandas.
         if any(c.get("type") == "formula" and (c.get("references") or []) for c in gcols):
-            from decoy_engine.generation._referenced_formula import (
-                fill_referenced_formula_columns,
-            )
+            from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
             fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
         tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
