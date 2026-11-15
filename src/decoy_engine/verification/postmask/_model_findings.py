@@ -248,7 +248,7 @@ def review(
         if finding.severity == "warning" and not is_source_identity_finding(finding):
             hits = [i for i, d in enumerate(dismissals) if _matches(d, finding)]
             if hits:
-                used.update(hits)
+                used |= set(hits)
                 finding = replace(finding, severity="info", dismissed=True)
         if promote and finding.source == "ner" and finding.severity == "warning":
             finding = replace(finding, severity="fail", promoted=True)
