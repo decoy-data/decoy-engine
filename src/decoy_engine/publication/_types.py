@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal, get_args
 
+from decoy_engine.reasons import is_registered
+
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir
     from decoy_engine.vault import VaultWriter
@@ -61,8 +63,6 @@ _OUTCOMES: Final[tuple[str, ...]] = get_args(Outcome)
 OPERATION_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
 _OPERATION_ID = re.compile(OPERATION_ID_PATTERN)
 _HEX64 = re.compile(r"[0-9a-f]{64}")
-# Shape only: a3 checks a receipt's code against the registry it registers.
-_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _ERRNO_NAMES: Final = frozenset(errno.errorcode.values())
 # Counts and sizes are stored as JSON integers that other readers parse as signed 64-bit.
 MAX_COUNT: Final = 2**63 - 1
@@ -128,10 +128,7 @@ class CommitReceipt:
         _require(is_operation_id(self.operation_id), "operation_id")
         _require(
             self.reason_code is None
-            or (
-                type(self.reason_code) is str
-                and _REASON_CODE.fullmatch(self.reason_code) is not None
-            ),
+            or (type(self.reason_code) is str and is_registered(self.reason_code)),
             "reason_code",
         )
         for name in ("result_id", "descriptor_digest", "vault_digest"):
