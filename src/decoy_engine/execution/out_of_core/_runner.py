@@ -229,9 +229,7 @@ def run_fk_out_of_core(
         # run_staged's issued root, still handed as a path: the one root its budget covers.
         root = scratch_root(temp_dir)
     else:
-        # Bound first: the outbound sentry matches `.open(` by name as GCS `Blob.open`.
-        open_arena = ScratchArena.open
-        owned = open_arena(under=temp_dir)
+        owned = ScratchArena.fresh(under=temp_dir)
         root = Path(owned.local_path())
     try:
         incoming, outgoing = _edge_indexes(relationship_graph)
