@@ -174,3 +174,19 @@ def spy_pipeline(monkeypatch: pytest.MonkeyPatch) -> PipelineRecorder:
 
     monkeypatch.setattr(ner, "_pipeline", wrapped)
     return recorder
+
+
+def stub_post_scan_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`run_pipeline` loads its post-scan models strictly at run start. A routing test that asks
+    for NER where spaCy is absent replaces the load with a set naming the model; its columns are
+    not free text, so no cell would reach the model."""
+    from decoy_engine.detection.types import ModelRef
+    from decoy_engine.profiling.model_pack import DetectorSet
+    from decoy_engine.verification.postmask import _model_findings
+
+    ner = ModelRef("en_core_web_sm", "3.8.0")
+    monkeypatch.setattr(
+        _model_findings,
+        "load_detectors",
+        lambda sources, **_: DetectorSet(tuple(sources), None, ner),
+    )

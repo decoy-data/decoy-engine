@@ -184,7 +184,12 @@ def test_stream_mode_no_longer_refuses_regex_integrity(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("ask", MODEL_ASKS.values(), ids=MODEL_ASKS)
-def test_stream_mode_still_refuses_a_model_ask(tmp_path: Path, ask: dict[str, Any]) -> None:
+def test_stream_mode_still_refuses_a_model_ask(
+    tmp_path: Path, ask: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.unit.detection_verification._scanml_m4_support import stub_post_scan_models
+
+    stub_post_scan_models(monkeypatch)
     cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(30))
     cfg["post_scan"] = ask["post_scan"]
     sink, target = rs.engine_sink(tmp_path)

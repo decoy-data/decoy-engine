@@ -261,9 +261,13 @@ def _resident_case(name: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str,
     ],
 )
 def test_each_eligibility_reason_keeps_the_run_resident_and_the_sink_untouched(
-    reason: str, tmp_path: Path
+    reason: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cfg, kwargs, sink = _resident_case(reason, tmp_path)
+    if reason == "post_scan_integrity":
+        from tests.unit.detection_verification._scanml_m4_support import stub_post_scan_models
+
+        stub_post_scan_models(monkeypatch)
     src = pa.table(
         {
             "h": pa.array([f"u{i}@x.example" for i in range(support.ROWS)]),
