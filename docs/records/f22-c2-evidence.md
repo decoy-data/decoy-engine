@@ -240,3 +240,51 @@ plan-mandated creators (`atomic_commit`, `stage_tables`, the worker's
 `_stage_outputs`, the payload `sources/` mkdir), leaving 12. The owner ruled to
 lower the floor to 12. The floor is a non-vacuity guard (the scan still finds
 creators); the test's other non-vacuity lines are unchanged.
+
+## Merge of main through c1b (2026-11-15)
+
+`feat/f22-c1b` `f80d3137` (main `f34b398e` and the stack below, including a2's canonical JSON
+descriptor and c1b's `staged_tables()` / `staged_components()` split) merged as `1570299e`.
+
+Conflicts and resolutions:
+
+- `execution/_isolated_run.py`: main's #575 (`inside_isolated_worker` in place of reading
+  `ISOLATED_WORKER_ENV`), #573 (a self-reported `crashed` at the cap carries the memory-pressure
+  suspicion) and the `in_process_failure` / `envelope_failure` refactors are kept with c2's
+  publication path: `check_request(request)` and `already_isolated` both run at entry, and the
+  envelope result keeps c2's `pub` argument with main's `abnormal=envelope["outcome"] ==
+  "crashed"` evidence. Imports no longer used after both sides are applied were dropped
+  (`commit_error_text`, `commit_reason`, `exception_error_text`, `is_memory_failure`,
+  `reason_from_envelope`, `reason_from_exception`); c2's `_isolated_commit.py` still uses
+  `commit_error_text` and `commit_reason`. 588 lines.
+- `execution/_isolated_worker.py`: c2's staging through the parent's stage
+  (`_finalize_outputs(result, sink)`, `_row_errors`) plus main's #578 `PostScanBlockedError`
+  branch (outcome `blocked`, value-free report); the parent discards a non-`completed` child's
+  stage, so a blocked run publishes nothing.
+- `tests/sentry/file_access_registry.toml`: `Count: 189` (base 202, c2 -12, below -1).
+
+Ledgers that c2 now lets shrink (the commit after the merge):
+`tests/sentry/baselines/post-scan-commit.json` loses its two `_isolated_run.py` `atomic-commit`
+keys, whose reasons said they go when c2 retires `atomic_commit`;
+`test_the_isolated_parent_commits_only_from_its_two_named_sites` pinned those two keys and
+becomes `test_the_isolated_parent_has_no_atomic_commit_exception_left` (asserts none is left);
+`_isolated_run.py` (588 lines) leaves the module-size allowlist (ceiling was 625) and its
+`module-size.json` key. `ratchet_check` passes (keys removed only).
+
+No test asserted the old descriptor bytes or an exact output listing that needed changing here.
+c2 still imports `fileaccess._local._LocalStageDir`
+(`execution/_isolated_commit.py`, `_isolated_worker.py`): main offers no public seam for a private
+stage over an existing directory.
+
+Checks on the head: `ruff check`, `ruff format --check`, `mypy src/decoy_engine` (847 files)
+clean; `registry_renumber --check --main f34b398e` consistent; `check_fragment` and
+`ratchet_check` (`--base f34b398e`) exit 0.
+
+| Command | Tree | Passed | Failed | Errors | Skipped |
+|---|---|---|---|---|---|
+| `pytest tests/fileaccess tests/sentry tests/unit/publication tests/unit/execution/publication tests/unit/test_reason_registry.py tests/unit/test_reason_release_pin.py -n 2` | `8d007288` | 7118 | 10 | 87 | 7 |
+| `pytest tests/unit/execution tests/integration tests/parity tests/security -n 2` (every isolated test included) | `f34b398e` | 12696 | 0 | 6 | 2396 |
+| same | `8d007288` | 12830 | 0 | 6 | 2397 |
+
+Failing ids identical to main's in both commands (the 10 `test_import_layers` failures and
+56 + 31 root-only errors; the 6 root-only `test_scratch_root_umask` errors).
