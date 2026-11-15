@@ -1,9 +1,10 @@
 """GEN-REL: "is this column a sequence that keeps every key" has one owner.
 
-`config.is_exact_sequence_key` (`config/_generate_relational.py`) is the rule: a `sequence` with
-no positive `null_probability`, failing closed on a rate it cannot read. The self-reference key
-check, the capacity probe's bounds and the plan's weights-length check each used to restate it,
-and the copies drifted on rates that are not plain numbers. This sentry fails on a restatement.
+`config.is_exact_sequence_key` (`config/_generate_relational/__init__.py`) is the rule: a
+`sequence` with no positive `null_probability`, failing closed on a rate it cannot read. The
+self-reference key check, the capacity probe's bounds and the plan's weights-length check each
+used to restate it, and the copies drifted on rates that are not plain numbers. This sentry
+fails on a restatement.
 
 Scope, honestly: a function outside the owner that reads the `null_probability` key and tests
 `== "sequence"` as an operand of an `and`. A dispatcher that branches on `kind == "sequence"`
@@ -21,10 +22,10 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 PREDICATE = "is_exact_sequence_key"
-OWNER = ("config/_generate_relational.py", PREDICATE)
+OWNER = ("config/_generate_relational/__init__.py", PREDICATE)
 CALLERS = frozenset(
     {
-        ("config/_generate_relational.py", "parent_key_problem"),
+        ("config/_generate_relational/__init__.py", "parent_key_problem"),
         ("execution/_probe_scale.py", "_loosen_per_parent_bounds"),
         ("plan/checks/_generate_columns.py", "_check_reference_weights"),
     }

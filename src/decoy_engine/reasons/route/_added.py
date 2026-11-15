@@ -11,7 +11,7 @@ __all__ = [
     "MIXED_GENERATE_MASK_CHUNKED",
     "MIXED_RUNTIME_DECLINED",
     "OUT_OF_CORE_INELIGIBLE",
-    "POST_SCAN_INTEGRITY_REQUESTED",
+    "POST_SCAN_MODELS_RESIDENT",
     "POST_SCAN_MODELS_UNSUPPORTED",
     "POST_VALIDATION_REQUESTED",
     "SEQUENTIAL_INELIGIBLE",
@@ -22,9 +22,10 @@ _d = _catalog.route("decoy_engine.execution._pipeline_routing")
 POST_VALIDATION_REQUESTED = _d(
     "post_validation_requested", "The post-validation scans need the full frame resident."
 )
-POST_SCAN_INTEGRITY_REQUESTED = _d(
-    "post_scan_integrity_requested",
-    "The Post-scan integrity checks need the full frame resident.",
+POST_SCAN_MODELS_RESIDENT = _d(
+    "post_scan_models_resident",
+    "The model Post-scan checks need the full frame resident.",
+    since="1.27.0",
 )
 MIXED_GENERATE_MASK_CHUNKED = _d(
     "mixed_generate_mask_chunked",

@@ -94,7 +94,7 @@ def build_job(
         path = support.write_source(table, tmp_path / f"{name}.parquet")
         raw["sources"][name] = {"type": "file", "format": "parquet", "path": path}
         raw["tables"].append({"name": name, "columns": columns})
-        raw["targets"][name] = {"type": "file", "format": "parquet", "path": "/dev/null"}
+        raw["targets"][name] = {"type": "file", "format": "parquet", "path": f"/dev/null.{name}"}
         sources[name] = table
     raw.update(extra or {})
     return PipelineConfig.model_validate(declare_rest(raw)).model_dump(), sources

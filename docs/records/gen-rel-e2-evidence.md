@@ -370,6 +370,8 @@ policy sentries); the `layers` step runs `tests/sentry/layout/test_import_layers
 
 Each total in this record belongs to the head named beside it. The latest section below
 supersedes the sections above it for the final head.
+The main merge of 2026-11-15, carried forward, is in the companion record
+[gen-rel-e2-evidence-addendum.md](gen-rel-e2-evidence-addendum.md).
 
 ### 2026-11-12, first: `e27b9485`
 

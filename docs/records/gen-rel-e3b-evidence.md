@@ -687,6 +687,8 @@ On the docs-only record commit only `ruff`, `format` and `sentry` were rerun.
 
 Each total in this section and the next belongs to the head named beside it. These two sections
 supersede the sections above for the final head.
+The main merge of 2026-11-15, carried forward, is in the companion record
+[gen-rel-e3b-evidence-addendum.md](gen-rel-e3b-evidence-addendum.md) and supersedes both.
 
 `origin/feat/gen-rel-e3a` at `ed340c07` (slice 3 with its review round 1; it holds slices 1 and
 2 and `origin/main` `c86ca58d`, 0.23.0 released) merged as `df2b9ba5` (parents `16b2fcde`,
