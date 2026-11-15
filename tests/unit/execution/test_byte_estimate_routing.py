@@ -587,13 +587,9 @@ class TestFlagOnByteEstimateRouting:
 
 
 def _faker_col(name: str, namespace: str) -> dict[str, Any]:
-    return {
-        "name": name,
-        "strategy": "faker",
-        "provider": "person_email",
-        "deterministic": True,
-        "namespace": namespace,
-    }
+    # A key-preserving strategy: faker draws from a pool, so 200k keys collide and the post-scan
+    # gate rightly withholds the run.
+    return {"name": name, "strategy": "hash", "namespace": namespace}
 
 
 def _write_source(tmp_path: Path, table: pa.Table, name: str) -> str:
@@ -856,6 +852,10 @@ class TestEndToEndWiring:
                     engine_version="0.1.0",
                     out_of_core_budget_bytes=budget,
                     fidelity_report=True,
+                    # The static byte estimate is what this test pins. With the probe on,
+                    # the wide leg spawns a capped child that cannot succeed here and has
+                    # been seen to stall until the probe's 600 s timeout.
+                    use_probe_routing=False,
                 )
             except ExecutionError as exc:
                 return exc.code

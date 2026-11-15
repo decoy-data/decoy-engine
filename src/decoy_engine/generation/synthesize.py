@@ -38,7 +38,7 @@ from faker import Faker
 
 from decoy_engine.config import is_self_reference
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._numeric_typing import numeric_plan, restore_declared
+from decoy_engine.generation._numeric_typing import numeric_plan, reader_types, restore_declared
 from decoy_engine.generation._statistical_column import (
     arrow_table,
     statistical_generate,
@@ -146,6 +146,7 @@ def _generate_tables_from_config(
     ordered = [name for name, _parents in generation_order(config)]
     numeric = numeric_plan(config, provider_snapshot=provider_snapshot)
     policies = reference_policies(config)
+    types = reader_types(config, provider_snapshot=provider_snapshot)
     pools: dict[str, pa.Table] = {}
     out: dict[str, pa.Table] = {}
     for name in ordered:
@@ -212,11 +213,9 @@ def _generate_tables_from_config(
         # the fidelity-gate dispatch) so configs without reference-bearing
         # formulas never pay pandas.
         if any(c.get("type") == "formula" and (c.get("references") or []) for c in gcols):
-            from decoy_engine.generation._referenced_formula import (
-                fill_referenced_formula_columns,
-            )
+            from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
-            fill_referenced_formula_columns(gcols, data, seed, derive_key, table_name=name)
+            fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
         tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
         warn_on_table_fidelity(
             config,

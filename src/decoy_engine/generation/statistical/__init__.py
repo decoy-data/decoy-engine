@@ -31,6 +31,7 @@ from decoy_engine.generation.statistical._sample import (
     sample_column,
     select_table,
 )
+from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
 from decoy_engine.generation.statistical._spec import (
     StatisticalSpec,
     StatisticalSpecError,
@@ -57,6 +58,7 @@ __all__ = [
     "fitted_reference_values",
     "learn_cell_format",
     "load_spec",
+    "parse_snapshot_json",
     "sample_column",
     "scrub_cell_format",
     "select_table",
