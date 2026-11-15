@@ -18,12 +18,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine.fileaccess import entry_point
+
 if TYPE_CHECKING:
+    from decoy_engine.fileaccess import FileAccess
     from decoy_engine.profile._readers import LazySource
 
 __all__ = ["lazy_input_tables"]
 
 
+@entry_point
 def lazy_input_tables(
     config: dict[str, Any],
     candidates: Mapping[str, LazySource],
@@ -34,15 +38,17 @@ def lazy_input_tables(
     fidelity_report: bool,
     post_validation: bool,
     vault_active: bool,
+    file_access: FileAccess | None = None,
 ) -> frozenset[str]:
     """The candidate names that may arrive lazy; always a subset of `candidates`.
 
     `engine_version`, `base_dir` and `instance_default_locale` are the values the later
     `run_pipeline` call receives, so the plan compiled here is the plan that run compiles.
     Reads no data row beyond the bounded profile; candidate construction reads none.
+    Pass the same `file_access` policy as the later `run_pipeline` call: the profile reads the
+    descriptor files under it.
     """
-    from decoy_engine.config import classify_table_kinds
-    from decoy_engine.config._post_scan import post_scan_gate_applies
+    from decoy_engine.config import classify_table_kinds, post_scan_gate_applies
     from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
     from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 
