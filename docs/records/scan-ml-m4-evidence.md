@@ -496,3 +496,125 @@ Checks on `2ee62277` (the commits after it change only this record and the fragm
 - `DECOY_REQUIRE_NER=1 pytest -m ner -n 2` in the NER venv: 53 passed, 10 skipped (import skips
   only); no NER test skipped.
 - `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped (pre-GA capture).
+
+## Merge with main's streamed post-scan gate (2026-11-15)
+
+`668b5f16` merges `origin/main` at `38fddb2f` into `6a033736` (never rebased). Main replaced the
+in-run post-scan hook: #567 computes residual PII and the policy checks on column facts, #570 to
+#585 bind one gate per run (`execution/pipeline/_post_scan.py`, `PostScanGate`), and #587 streams
+regex integrity and keeps only a model ask resident. `compute_post_scan_integrity` is gone, so M4's
+hook is ported onto the gate rather than restored.
+
+### Per file
+
+- `execution/_pipeline_finalize.py`, `execution/_pipeline_full_frame.py`: main's side, unchanged.
+  The full-frame route, the unified-slice return and `settle` call `gate.run_resident`; the gate
+  carries M4's inputs.
+- `execution/pipeline/_post_scan.py` (merged without conflict, edited in the merge): `PostScanGate`
+  takes `detectors` (the set `run_pipeline` loaded strictly), `bind_gate` passes
+  `ctx.post_scan_detectors`; `_column_suite` and the deferred `_report_only` hand it to
+  `run_post_mask`; `_decide` computes the one verdict as
+  `post_scan_verdict(report, ner_findings=post_scan_ner_findings(config))` and raises through
+  main's `blocked_error`. A deferred gate (a source loader, or a lazy transformed table) keeps its
+  column suite report-only, as on main, but an NER block is never report-only: `_report_only` calls
+  `raise_if_ner_blocked`, which keeps M4's guarantee from before the merge (the old hook blocked on
+  every full-frame run). 573 lines, under the 600 goal.
+- `verification/postmask/runner.py`: main's facts runner with M4's `detectors` keyword on
+  `run_post_mask`. `_assemble` runs the model passes over the resident frames after the regex
+  wrapper and outside it, then `review` (dismissals, then promotion) and the log lines, and stamps
+  `detectors` and `tables_checked`. `run_post_mask_tables` (staged batches) is regex only: a model
+  ask never reaches it, because `post_scan_resident_reason` keeps the run resident. Dismissals
+  apply on both entries, so a regex-only staged run honours `post_scan.dismissed` like the frame
+  path. 406 lines.
+- `verification/postmask/residual_pii.py`: main's facts check; M4's `configured_columns` replaces
+  main's inline strategy lookup in `residual_pii_findings`, so the regex and model passes read one
+  lookup; `is_source_identity_finding` kept. Regex rows keep `source: regex` and the other M4 fields
+  at their defaults. 475 lines.
+- `config/_post_scan.py`: `post_scan_ner_findings(config)` is the one reader of the mode. Main's
+  `post-scan-model-predicate` sentry (#570) flags any `"ner_findings"` read outside this module, so
+  M4's `ner_findings_mode` moved here; its baseline stays empty. The two log records keep their
+  `ner_findings` field names, built with `dict(...)` keywords (field names, not reads).
+- `execution/_pipeline_context.py`: main's 600-line module at its goal. M4 keeps only the
+  `post_scan_detectors` field (`repr=False, compare=False`, one line); one comment block (adapter
+  selection, in `build_run_context`) is reflowed (text unchanged) to stay at 600. `load_post_scan_detectors` and
+  `with_post_scan_detectors` moved to `execution/_pipeline_route_dispatch.py` (207 lines), which
+  `_pipeline.py` already imports, so `_pipeline.py` stays at 371 (ceiling 371). The load still runs
+  right after `resolve_subset`, before any read.
+- `verification/postmask/_blocked.py`: main's #570 quarantined-orphans change merged beside M4's
+  verdict; only `raise_if_ner_blocked`'s docstring changed (now the deferred gate's enforcement).
+
+How a model ask stays resident: main's `post_scan_resident_reason` returns
+`route.post_scan_models_resident` when `post_scan_model_setting` sees a non-regex entry in
+`post_scan.detectors` or `ner_findings: fail`, which are M4's own config fields; routing,
+`decide_output_mode` and stream mode read that one predicate. No second route policy was added.
+
+### Golden re-derived
+
+AT-M4a `run_post_mask` stays byte-equal to the original golden on main's facts runner. The
+`run_pipeline` golden changed because main's gate stamps `keys` and `verdict` on every run report.
+It was re-derived from main itself: the AT-M4a module copied into a detached worktree of `38fddb2f`
+and run as `__main__`; its `run_post_mask` entry equals the old one and its `run_pipeline` entry
+differs only by `"keys": []` and the non-blocking `verdict`. That file is now
+`tests/fixtures/scanml_m4/regex_only_reports.json`.
+
+### Test setup changes
+
+- `tests/unit/detection_verification/test_scanml_m4_verdict.py::test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked`
+  and `tests/unit/execution/test_scanml_m4_run.py::test_a_regex_fail_alone_never_blocks` called
+  the deleted `compute_post_scan_integrity`; they now call `PostScanGate(...).run_resident`. The
+  first keeps every assertion. The second keeps its assertions on the report-only (deferred) gate,
+  where M4's raise is the only enforcement; on a gate that judges the run, main now blocks a regex
+  `fail` (#587), so the test asserts that block carries `finding_blocked` alone, never
+  `ner_blocked`.
+- New: `tests/unit/execution/test_scanml_m4_run.py::test_a_deferred_gate_still_blocks_under_ner_fail`
+  (`fail_finding`, `pass_error`), red under M-defer below.
+- `tests/unit/execution/test_b6a_publish.py::test_each_eligibility_reason_keeps_the_run_resident_and_the_sink_untouched[post_scan_integrity]`
+  and `tests/unit/execution/post_scan/test_models_resident.py::test_stream_mode_still_refuses_a_model_ask`
+  (main's model-ask routing cases) failed only where spaCy is absent: M4's strict load refuses
+  first. They replace the load with a set naming the model (`stub_post_scan_models` in
+  `_scanml_m4_support.py`, the M5 route-guard test's pattern); assertions unchanged.
+
+### Mutations on the source head `668b5f16`
+
+Each applied once, run in the NER venv with `DECOY_REQUIRE_NER=1 -n 2` over the six M4 files, the
+verdict file, `test_scanml_m4_run.py`, `test_scanml_m5_route_guard.py`,
+`tests/unit/execution/post_scan`, `tests/unit/detection_verification/postscan`,
+`tests/sentry/post_scan` and `tests/unit/test_reason_registry.py` (795 pass unmutated), then the
+mutated span edited back (`git diff` empty after each). `7f6d1a41` changes tests only.
+
+- m1 (model rows through the generic rule): 31 red, including `test_d_a_classifier_row_never_blocks` (4) and `test_under_warn_no_ner_row_blocks` (2).
+- m2 (no classifier exclusion): `test_d_a_classifier_row_never_blocks[error-fail]`, `[fail-fail]`.
+- m3 (bare `except Exception` in the model pass): both coded-error pass-through cases and the `post-scan-pass-through` sentry.
+- M-M4a (classifier when `detectors` is None): 93 red, including `test_platform_call_with_no_detectors_is_byte_equal_to_the_base` and `test_the_regex_only_hook_honours_dismissals`.
+- M-M4e (a model ask streams: `post_scan_resident_reason` returns None): 8 red, main's model-ask routing cases and `test_run_pipeline_auto_chunk_lane_runs_model_post_scan_configs_as_on_main[dispatcher]`.
+- M-M4e, re-expressed as skip the model passes on the auto-chunk lane (no detectors at the full-frame gate call when `decision.route_chunked`): both AT-M4e route-equality tests red. A first form keyed on `bind_gate`'s route survived, because the auto-chunk lane binds the gate as `full_frame`; it is not a guard.
+- M-M4g (NER `error` not blocking): `[B_ner_error]`, both `pass_error` run cases, the raising-pass case.
+- M-gate-mode (the gate's verdict without the mode): 7 red, every run-level NER block.
+- M-defer (no NER raise on the deferred gate): both new deferred cases.
+- `with_post_scan_detectors` returns `ctx` unchanged: 12 red. `load_post_scan_detectors` returns None: 12 red.
+
+### Checks
+
+On `7f6d1a41` (main `38fddb2f`):
+
+- ruff check, ruff format --check, mypy on the 16 `src` files the branch changes: pass.
+- `registry_renumber.py --check --main origin/main` (after `665f0e8d` dropped two released minor
+  numbers this record named), `ratchet_check.py --base origin/main`,
+  `check_fragment.py --base origin/main`: exit 0.
+- `GATES_WORKERS=2 scripts/dev/gates.sh --baseline --steps sentry,layers,licenses,tests <selection>`
+  (the M4 and M5 acceptance files, `tests/unit/detection_verification`,
+  `tests/unit/execution/post_scan`, the two bookkeeping tests, `tests/sentry`, the compat corpus,
+  the registry, public-API and tripwire tests, and every non-perf test `git grep` finds for the
+  names the port touches), rc 0: sentry 5596 passed, 3 failed, 31 errors (main 5591, 3, 31); layers
+  15; licenses 63; tests 7229 passed, 2 failed, 31 errors, 191 skipped (main 7156, 2, 31, 177).
+  The same 34 failing ids on both (`test_serial_resources::test_the_required_serial_registry_is_marked`
+  and the `test_outbound_clients` set, no `google`); no branch-only id; no main failure passing.
+  On `665f0e8d` the same run had three branch-only ids, fixed by the setup change above.
+- `DECOY_REQUIRE_NER=1 pytest -m ner -n 2 tests` in the NER venv: 53 passed, 10 skipped (module
+  import skips for google, paramiko, hvac, mimesis, the wheel builder, mutmut); no NER test skipped.
+- `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped (pre-GA capture).
+
+Module sizes: `_pipeline.py` 371 (ceiling 371), `_pipeline_context.py` 600 (goal 600, no entry),
+`pipeline/_post_scan.py` 573, `_pipeline_route_dispatch.py` 207, `runner.py` 406,
+`residual_pii.py` 475, `_model_findings.py` 288, `_blocked.py` 341, `config/_post_scan.py` 215.
+No census number moved.
