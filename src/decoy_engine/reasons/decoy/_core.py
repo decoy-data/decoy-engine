@@ -14,6 +14,7 @@ __all__ = [
     "ISOLATED_RUN_TIMED_OUT",
     "ISOLATED_WORKER_DIED",
     "ISOLATED_WORKER_OUT_OF_MEMORY",
+    "PROCESS_OUT_OF_MEMORY",
     "PUBLICATION_COMMIT_UNCERTAIN",
     "PUBLICATION_FAILED",
     "PUBLICATION_LOCK_TIMEOUT",
@@ -132,6 +133,13 @@ ISOLATED_WORKER_OUT_OF_MEMORY = _d(
     "isolated_worker_out_of_memory",
     "The isolated worker ran out of memory.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
+)
+# A bare MemoryError: the exception text can carry sizes and names, so the message is fixed.
+PROCESS_OUT_OF_MEMORY = _d(
+    "process_out_of_memory",
+    "The process ran out of memory.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.25.0",
 )
 ROW_ERRORS_FAILED = _d(
     "row_errors_failed", "Row-level strategy errors failed the run.", retry=RetryClass.NEVER

@@ -41,16 +41,16 @@ INSTALL = (
 # Reviewed snapshot of the tiers in .importlinter, top to bottom; `:` siblings may import each
 # other. Edit it in the same diff as the config.
 LAYERS: tuple[str, ...] = (
-    "unmask : subset : delivery : walks : identifiers : providers : records : support",
+    "unmask : delivery : walks : identifiers : providers : records : support",
     "execution : kernel : quarantine : publication : validation : verification : vault",
     "plan : generation : generators : transforms : declared_casting : secret_providers"
-    " : keyprovider : relationships : providers_v2 : reference_tables : quality",
+    " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
     " : contracts : connectors : expressions : validators : sdk : run_result",
     "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
     " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"
-    " : codesets : _execution_error : _field_names : _value_free",
+    " : codesets : _execution_error : _field_names : _value_free : _arrow_types : _canonical",
 )
 
 
@@ -258,7 +258,7 @@ def test_a_reviewed_new_package_goes_green_only_with_its_snapshot(
     (pkg / "__init__.py").write_text('"""A reviewed foundation leaf."""\n', encoding="utf-8")
     cfg = tree / ".importlinter"
     before = ignore_keys(cfg.read_text(encoding="utf-8"))
-    _edit(cfg, " : _value_free\n", " : _value_free : _probe_leaf\n")
+    _edit(cfg, " : _canonical\n", " : _canonical : _probe_leaf\n")
     assert lint_scratch(tree)
     text = cfg.read_text(encoding="utf-8")
     assert ignore_keys(text) == before
@@ -281,7 +281,11 @@ def test_a_downward_tier_move_goes_green_only_with_its_snapshot(
     cfg = tree / ".importlinter"
     before = ignore_keys(cfg.read_text(encoding="utf-8"))
     _edit(cfg, " : verification : vault\n", " : verification\n")
-    _edit(cfg, " : reference_tables : quality\n", " : reference_tables : quality : vault\n")
+    _edit(
+        cfg,
+        " : reference_tables : quality : subset\n",
+        " : reference_tables : quality : subset : vault\n",
+    )
     assert lint_scratch(tree)
     text = cfg.read_text(encoding="utf-8")
     assert ignore_keys(text) == before

@@ -127,7 +127,7 @@ def test_post_scan_integrity_is_forwarded_to_the_router(
     real = routing.decide_execution_route
 
     def spy(*args: Any, **kwargs: Any) -> Any:
-        seen.append(bool(kwargs.get("post_scan_integrity")))
+        seen.append(kwargs.get("post_scan_resident") is not None)
         return real(*args, **kwargs)
 
     monkeypatch.setattr(routing, "decide_execution_route", spy)
@@ -135,7 +135,10 @@ def test_post_scan_integrity_is_forwarded_to_the_router(
     cfg = _single_table_config(tmp_path, table, {"name": "n", "strategy": "redact"})
     estimate_job(cfg, tmp_path)
     estimate_job({**cfg, "post_scan": {"integrity": True}}, tmp_path)
-    assert seen == [False, True]
+    model_ask = {"integrity": True, "detectors": ["regex", "ner"], "ner_findings": "fail"}
+    estimate_job({**cfg, "post_scan": model_ask}, tmp_path)
+    # No post-scan and regex-only integrity stream; only a model ask is forwarded as resident.
+    assert seen == [False, False, True]
 
 
 def test_router_rejection_returns_unknown_unpriceable(
