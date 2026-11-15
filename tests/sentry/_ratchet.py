@@ -156,36 +156,35 @@ def growth(
     return frozenset(grown), rekeyed
 
 
-def _find_def(node: ast.AST, part: str) -> ast.AST | None:
-    """A def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
+def _find_defs(node: ast.AST, part: str) -> list[ast.AST]:
+    """Every def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
+    found: list[ast.AST] = []
     todo = list(ast.iter_child_nodes(node))
     while todo:
         child = todo.pop(0)
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if child.name == part:
-                return child
+                found.append(child)
             continue
         todo.extend(ast.iter_child_nodes(child))
-    return None
+    return found
 
 
-def _qualname_node(tree: ast.AST, qualname: str) -> ast.AST | None:
-    node: ast.AST | None = tree
+def _qualname_nodes(tree: ast.AST, qualname: str) -> list[ast.AST]:
+    nodes: list[ast.AST] = [tree]
     for part in qualname.split("."):
-        node = _find_def(node, part) if node is not None else None
-        if node is None:
-            return None
-    return node
+        nodes = [d for n in nodes for d in _find_defs(n, part)]
+    return nodes
 
 
-def _binds(n: ast.AST, name: str) -> bool:
-    """True when ``n`` binds ``name``: parameter, store, def/class, except, import, match, attr."""
+def _mentions(n: ast.AST, name: str) -> bool:
+    """True when ``n`` binds or reads ``name``: a closure that only reads it still holds the site."""
     if isinstance(n, ast.arg):
         return n.arg == name
     if isinstance(n, ast.Name):
-        return n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+        return n.id == name
     if isinstance(n, ast.Attribute):
-        return n.attr == name and isinstance(n.ctx, (ast.Store, ast.Del))
+        return n.attr == name
     if isinstance(n, ast.alias):
         return (n.asname or n.name.partition(".")[0]) == name
     if isinstance(n, ast.MatchMapping):
@@ -198,7 +197,8 @@ def site_gone(root: Path, key: str, base_ref: str) -> bool:
     """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
 
     ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
-    is present but binds no ``name`` in any form ``_binds`` knows. A missing file proves it only
+    is present but neither binds nor reads ``name`` (``_mentions``) in any same-named def. A
+    qualname part that is not an identifier (``<lambda>``) is never proven. A missing file proves it only
     when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
     file that never existed is "not proven" and returns false.
     """
@@ -206,11 +206,13 @@ def site_gone(root: Path, key: str, base_ref: str) -> bool:
     if len(parts) != 3 or not parts[0].endswith(".py") or not parts[2].isidentifier():
         return False
     file, qualname, name = parts
+    if not all(q.isidentifier() for q in qualname.split(".")):
+        return False
     path = root / "src" / file
     if not path.is_file():
         return _git_show(root, base_ref, f"src/{file}") is not None
-    node = _qualname_node(ast.parse(path.read_text(encoding="utf-8")), qualname)
-    return node is None or not any(_binds(n, name) for n in ast.walk(node))
+    nodes = _qualname_nodes(ast.parse(path.read_text(encoding="utf-8")), qualname)
+    return not any(_mentions(n, name) for node in nodes for n in ast.walk(node))
 
 
 def rehomes(
@@ -224,7 +226,7 @@ def rehomes(
 
     A grown key is a move only when its entry names the old key in ``moved_from`` and that old
     key was lost from this baseline, is proven gone (``site_gone``), carries no numeric ``max``,
-    and is named by no other entry. Anything else stays growth.
+    ends in the same bound name, and is named by no other entry. Anything else stays growth.
     """
     claims: dict[str, list[str]] = {}
     for key in grown:
@@ -235,7 +237,8 @@ def rehomes(
     remaining = set(grown)
     report: list[str] = []
     for old, keys in sorted(claims.items()):
-        if len(keys) != 1 or old not in lost or _max_of(lost[old]) is not None:
+        same_name = old.rpartition("::")[2] == keys[0].rpartition("::")[2]
+        if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
             continue
         if site_gone(root, old, base_ref):
             remaining.discard(keys[0])
