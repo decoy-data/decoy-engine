@@ -446,3 +446,57 @@ The unit run was not repeated after the re-bootstrap.
 
 `gates.sh`, the `tests/unit/execution tests/integration tests/parity tests/security` command,
 `tests/unit/scripts` (disk), the full suite, perf, macOS and Windows.
+
+## Reason owner fix and merge of main 64e9349b (2026-11-15, message 10)
+
+### Gate failure and fix
+
+The owner's full suite on `254be660` failed
+`tests/sentry/test_engine_string_targets.py::test_every_decoy_engine_string_target_resolves`:
+`src/decoy_engine/reasons/decoy/_core.py:174: decoy_engine.publication: decoy_engine has no
+attribute path publication`. The three a1b codes were declared under
+`_catalog.decoy("decoy_engine.publication")`, a package that exists only from a2.
+
+Why the local runs missed it: switching this checkout between slice branches left an ignored
+`src/decoy_engine/publication/__pycache__` directory, so `decoy_engine.publication` resolved as a
+namespace package and the sentry passed. After `git clean -fdX src/` the sentry was red on
+`254be660` (1 failed, 6 passed) with the gate's message. Every run below starts from a cleaned
+`src/`.
+
+Fix `9f3988a6` (owner ruling: at the source, no EXEMPT entry): `publication_lock_unavailable`,
+`publication_lock_timeout` and `publication_commit_uncertain` are declared under
+`_fa = _catalog.decoy("decoy_engine.fileaccess")`, the package that defines and raises
+`LockUnavailable`, `LockTimeout` and `CommitUncertain` (`fileaccess/_types.py`), and stay there.
+`docs/reasons.md` names the owner. Nothing else records it: `reason_adapter.py` maps the error
+classes to codes without an owner, the codes are pending (no manifest fixture, contract or pin
+row), and the changelog fragment names no owner.
+
+- After the fix: `test_engine_string_targets.py` 7 passed; with `tests/sentry/test_reason_registry.py`,
+  `tests/sentry/test_reason_minor_fixtures.py`, `tests/unit/test_reason_registry.py`,
+  `tests/unit/test_reason_release_pin.py`, `tests/unit/progress/test_consumer_contract.py` and
+  `test_errno_only_reasons.py`: 175 passed; `reason_release_pin.py --check` current; the a1b
+  targeted set (`tests/fileaccess tests/sentry tests/unit/test_reason_registry.py`) 6703 passed,
+  10 failed, 87 errors, failing ids identical to main `f34b398e`'s.
+- Mutation (owner back to `decoy_engine.publication`): the sentry red with the gate's message;
+  reverted, tree clean.
+
+### Merge of main
+
+Main `64e9349b` (4 commits past `f34b398e`, including the 0.26.0 release prep) merged as
+`8ecd2368`, no conflict. `bootstrap.sh` re-run (`uv.lock` and `pyproject.toml` moved), `--check`
+OK; Python 3.10.20, PyArrow 24.0.0, DuckDB 1.5.4.
+
+| Command | Tree | Passed | Failed | Errors | Skipped | Other |
+|---|---|---|---|---|---|---|
+| `.venv/bin/python -m pytest tests/fileaccess tests/sentry tests/unit --ignore=tests/unit/scripts -q -p no:cacheprovider -n 2 -rfE --tb=no` | `64e9349b` (detached worktree, `PYTHONPATH=<wt>/src`) | 28408 | 10 | 93 | 1262 | 2 xfailed, 5 xpassed |
+| same | `8ecd2368` | 28467 | 10 | 93 | 1263 | 2 xfailed, 5 xpassed |
+| B-6 vault and file-access tests (14 files, as before) | `8ecd2368` | 682 | 0 | 0 | 2 | |
+| uid 65534: `tests/fileaccess/publication tests/fileaccess/scratch/test_private_creators.py tests/fileaccess/test_private_mode_umask.py` | `8ecd2368` | 140 | 0 | 0 | 0 | copy removed |
+
+The first command is the a1b targeted set plus the whole `tests/sentry` (the string-target
+sentry included) and `tests/unit`. Failing ids identical (103): the 10 `test_import_layers`
+failures, 56 + 31 root-only errors in `tests/fileaccess/scratch`, and 6 root-only
+`test_scratch_root_umask` errors. Collected +60 is the slice's tests and the skipped +1 its
+`mode_0500` cell under root. `ruff check`, `ruff format --check`, `mypy src/decoy_engine`
+(845 files) clean; `registry_renumber --check --main origin/main` consistent;
+`check_fragment --base origin/main` and `ratchet_check` exit 0.
