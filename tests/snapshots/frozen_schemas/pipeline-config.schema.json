@@ -1,0 +1,2345 @@
+{
+  "$defs": {
+    "ColumnConfig": {
+      "additionalProperties": false,
+      "description": "Per-column masking declaration.\n\n`name` is the column name in the source data. `strategy` names the\nmasking strategy (open string; S4+ catalogs the values). `provider`\nnames the semantic provider; the planner validates it against\nS1_STUB_REGISTRY at compile time.\n\n`from_parent` strategy: the column is wired from a FK parent via the\nrelationship coordinator (S2). When `strategy: from_parent`, the\nrelationship coordinator owns the namespace + provider; ColumnConfig\ndeclares only the strategy + name.",
+      "properties": {
+        "allow_collisions": {
+          "default": false,
+          "title": "Allow Collisions",
+          "type": "boolean"
+        },
+        "backend_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "faker",
+                "mimesis",
+                "pool",
+                "decoy_native"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Type"
+        },
+        "backend_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Version"
+        },
+        "cardinality_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "reuse",
+                "unique",
+                "match_source_cardinality",
+                "scale_source_cardinality"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cardinality Mode"
+        },
+        "coherent_with": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coherent With",
+          "type": "array"
+        },
+        "deterministic": {
+          "default": false,
+          "title": "Deterministic",
+          "type": "boolean"
+        },
+        "dtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dtype"
+        },
+        "error_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Policy"
+        },
+        "logical_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logical Type"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "output_format": {
+          "default": null,
+          "title": "Output Format"
+        },
+        "parse_format": {
+          "default": null,
+          "title": "Parse Format"
+        },
+        "pool_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pool Size"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "provider_config": {
+          "additionalProperties": true,
+          "title": "Provider Config",
+          "type": "object"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "sentinel_to_null": {
+          "default": null,
+          "title": "Sentinel To Null"
+        },
+        "strategy": {
+          "title": "Strategy",
+          "type": "string"
+        },
+        "vault": {
+          "default": false,
+          "title": "Vault",
+          "type": "boolean"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        }
+      },
+      "required": [
+        "name",
+        "strategy"
+      ],
+      "title": "ColumnConfig",
+      "type": "object"
+    },
+    "DedupeOp": {
+      "additionalProperties": false,
+      "description": "Drop duplicate rows.\n\n``columns=None`` -- dedupe on ALL columns (a \"fully equal\" row).\n``columns=['a','b']`` -- dedupe on the named subset; the first row\nof each subset-equal group is kept.",
+      "properties": {
+        "columns": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Columns"
+        },
+        "op": {
+          "const": "dedupe",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "DedupeOp",
+      "type": "object"
+    },
+    "DeliveryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "strict",
+          "enum": [
+            "strict",
+            "best_effort"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "DeliveryConfig",
+      "type": "object"
+    },
+    "DeriveOp": {
+      "additionalProperties": false,
+      "description": "Compute a new column from an expression.\n\n``column`` is the name of the new column; it must not already exist\non the table at the point this op runs (compile-time check). The\n``expression`` evaluates through pandas ``DataFrame.eval`` against\nthe existing columns. Example: ``revenue / users`` produces a\nper-row ARPU column.",
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "expression": {
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "op": {
+          "const": "derive",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "expression"
+      ],
+      "title": "DeriveOp",
+      "type": "object"
+    },
+    "Dismissal": {
+      "additionalProperties": false,
+      "description": "A reviewed finding: matches only the warning whose every field here is equal.",
+      "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "detector_id": {
+          "title": "Detector Id",
+          "type": "string"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Version"
+        },
+        "source": {
+          "enum": [
+            "regex",
+            "classifier",
+            "ner"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Strategy"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "column",
+        "detector_id",
+        "source",
+        "strategy"
+      ],
+      "title": "Dismissal",
+      "type": "object"
+    },
+    "DpGenerateSettings": {
+      "additionalProperties": false,
+      "description": "Declares that this pipeline's `generate` output must be an honest,\napproximate `(epsilon, delta)`-DP marginal release (DPS Scope B,\n2026-07-22 rebuild of the DPS-3 declaration). Presence alone (key\nmembership on `global_settings.dp`, not truthiness of this model's\ncontents) is what `plan._checks_dp.check_dp_generate_contract` gates\non: it hard-rejects `allow_real_categories: true`, `high_cardinality:\ntrue`, and `condition_on` on a `type: statistical` generate column,\neach of which would silently void or fall outside the guarantee this\nblock declares.\n\n`epsilon`/`delta` here are an ENFORCED CEILING, not an annotation.\n`plan._checks_dp.verify_dp_snapshots` composes the `(epsilon_total,\ndelta_total)` actually spent by every distinct DP release (keyed by\n`release_id`, not content digest -- guide section 6 row F5) this\npipeline consumes and rejects the config (`dp_budget_exceeded`) if\nthat composed spend exceeds these declared values.\n\nThere is no per-column schema here: the real per-column domain and\ncarrier declarations are `fit_dp_snapshot`'s own `column_schema`\nargument at fit time (`quality/dp.py`), a separate step from this\ngenerate-side ceiling declaration. This block only declares the\ngenerate-side `(epsilon, delta)` contract and gates the anti-DP\ngenerate-column knobs.",
+      "properties": {
+        "delta": {
+          "default": 1e-06,
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Delta",
+          "type": "number"
+        },
+        "epsilon": {
+          "exclusiveMinimum": 0,
+          "title": "Epsilon",
+          "type": "number"
+        }
+      },
+      "required": [
+        "epsilon"
+      ],
+      "title": "DpGenerateSettings",
+      "type": "object"
+    },
+    "DropColumnOp": {
+      "additionalProperties": false,
+      "description": "Drop one or more columns by name.",
+      "properties": {
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "op": {
+          "const": "drop_column",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "columns"
+      ],
+      "title": "DropColumnOp",
+      "type": "object"
+    },
+    "FileSource": {
+      "additionalProperties": false,
+      "description": "A local-filesystem CSV, Parquet, or fixed-width source.\n\n`layout` carries the column-spec for `format==\"fixed_width\"` (see\n`FixedWidthLayout` for the schema contract); it is required for\nthat format and forbidden for `csv` / `parquet`.\n\n`has_header` / `column_names` / `column_names_file` / `delimiter` are\ncsv-only delimited-dialect controls. A csv source must set `has_header`:\n`true` when the first row names the columns, or `false` with the names given\ninline (`column_names`) or in a one-record header file (`column_names_file`),\nsince a wrong guess silently reads a data row as names or names as data.\n`delimiter` defaults to a comma.",
+      "properties": {
+        "column_names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "csv only. Column names for a headerless file (has_header=false); required in that case, forbidden when has_header is true.",
+          "title": "Column Names"
+        },
+        "column_names_file": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "csv only. Path to a one-record header file naming the columns of a headerless file (has_header=false); the alternative to `column_names`.",
+          "title": "Column Names File",
+          "x-decoy-path": true
+        },
+        "delimiter": {
+          "default": ",",
+          "description": "csv only. The single-character field delimiter (',' default, '\\t' for TSV, '|' for pipe-delimited).",
+          "title": "Delimiter",
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet",
+            "fixed_width"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "has_header": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "csv only, and required for csv. Whether the first row is a header. Set false for a headerless file and supply `column_names` or `column_names_file`.",
+          "title": "Has Header"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixedWidthLayout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Column-spec for format=='fixed_width'; required for that format, forbidden (must be omitted/None) for csv/parquet."
+        },
+        "path": {
+          "title": "Path",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "type": {
+          "const": "file",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "path"
+      ],
+      "title": "FileSource",
+      "type": "object"
+    },
+    "FileTarget": {
+      "additionalProperties": false,
+      "description": "A local-filesystem CSV, Parquet, or fixed-width target.\n\nMirrors `FileSource` on the output side: `layout` carries the column-spec\nfor `format==\"fixed_width\"` (see `FixedWidthLayout`); it is required for\nthat format and forbidden for `csv` / `parquet`. Fixed-width output is\nmaterialized by `write_fixed_width`, which inverts `read_fixed_width` over\nthe same `FixedWidthLayout` contract.",
+      "properties": {
+        "format": {
+          "enum": [
+            "csv",
+            "parquet",
+            "fixed_width"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixedWidthLayout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Column-spec for format=='fixed_width'; required for that format, forbidden (must be omitted/None) for csv/parquet."
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "const": "file",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "path"
+      ],
+      "title": "FileTarget",
+      "type": "object"
+    },
+    "FilterOp": {
+      "additionalProperties": false,
+      "description": "Drop rows where the predicate is False.\n\n``expression`` runs through pandas ``DataFrame.eval`` against the\ntable's columns. Reference rows by their column name; arithmetic\n+ comparison + logical operators are supported. Example:\n``age >= 18 and country == 'US'``.",
+      "properties": {
+        "expression": {
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "op": {
+          "const": "filter",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "expression"
+      ],
+      "title": "FilterOp",
+      "type": "object"
+    },
+    "FixedWidthColumn": {
+      "additionalProperties": false,
+      "description": "One column of a fixed-width record layout.\n\n`start` + `width` describe the half-open byte range `[start, start\n+ width)` within each record. `pad` is the single fill character\nused to pad the value out to `width` (default space); `align`\ntells the reader which side the pad lives on and therefore which\nside to strip: `\"left\"` (default) means the value is left-justified\nwith padding on the right, so the reader `rstrip`s; `\"right\"` means\nthe value is right-justified with padding on the left, so the\nreader `lstrip`s.",
+      "properties": {
+        "align": {
+          "default": "left",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "pad": {
+          "default": " ",
+          "maxLength": 1,
+          "minLength": 1,
+          "title": "Pad",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "type": {
+          "default": "str",
+          "enum": [
+            "str",
+            "int",
+            "float"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "start",
+        "width"
+      ],
+      "title": "FixedWidthColumn",
+      "type": "object"
+    },
+    "FixedWidthLayout": {
+      "additionalProperties": false,
+      "description": "An ordered column-spec for a fixed-width file.\n\nSee the module docstring for the frozen design decisions (0-based\n`start`, newline-delimited record model, the `str | int | float`\ntype set). `columns` must be non-empty, every name unique, and\nevery column's `start` at or after the previous column's end\n(`start + width`) -- overlapping or out-of-order columns fail loud\nat construction time, before any file is ever read.",
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/FixedWidthColumn"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "exact_record_width": {
+          "default": false,
+          "title": "Exact Record Width",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "columns"
+      ],
+      "title": "FixedWidthLayout",
+      "type": "object"
+    },
+    "GCSSource": {
+      "additionalProperties": false,
+      "description": "A Google Cloud Storage CSV / Parquet source.\n\nStructural mirror of S3Source. GCS uses `object` instead of `key` to\nmatch the GCS API surface (`bucket.object_name` vs S3 `bucket.key`).",
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string",
+          "x-decoy-locator": true
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque credentials identifier the platform resolves at run time. The engine never sees raw secrets; when None the SDK uses GCP ADC (Application Default Credentials).",
+          "title": "Credentials Ref",
+          "x-decoy-locator": true
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "object": {
+          "minLength": 1,
+          "title": "Object",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "type": {
+          "const": "gcs",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "object"
+      ],
+      "title": "GCSSource",
+      "type": "object"
+    },
+    "GCSTarget": {
+      "additionalProperties": false,
+      "description": "A Google Cloud Storage CSV / Parquet target.\n\nSymmetric with `GCSSource`. Atomic-move pattern at the platform layer\nmirrors `S3Target`.",
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string"
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque credentials identifier the platform resolves at run time. The engine never sees raw secrets; when None the SDK uses GCP ADC (Application Default Credentials).",
+          "title": "Credentials Ref"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "object": {
+          "minLength": 1,
+          "title": "Object",
+          "type": "string"
+        },
+        "type": {
+          "const": "gcs",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "object"
+      ],
+      "title": "GCSTarget",
+      "type": "object"
+    },
+    "GenerateColumnConfig": {
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "faker"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "faker_kwargs": {},
+              "faker_type": {},
+              "locale": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "faker_type"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sequence"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pad_length": {},
+              "pooled": {
+                "type": "null"
+              },
+              "prefix": {},
+              "start": {},
+              "step": {},
+              "suffix": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "start"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "categorical"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "categories": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "weights": {}
+            },
+            "required": [
+              "categories"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "formula"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "formula": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "references": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "formula"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "reference"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "distribution": {
+                      "const": "weighted"
+                    }
+                  },
+                  "required": [
+                    "distribution"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "weights"
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "determinism": {},
+              "distribution": {},
+              "max_per_parent": {},
+              "min_per_parent": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "reference_column": {},
+              "reference_table": {},
+              "snapshot_file": {},
+              "source_column": {},
+              "type": {},
+              "unique": {},
+              "weights": {}
+            },
+            "required": [
+              "reference_table",
+              "reference_column"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "statistical"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "allow_real_categories": {},
+              "condition_on": {},
+              "determinism": {},
+              "high_cardinality": {},
+              "name": {},
+              "null_probability": {},
+              "other_mode": {},
+              "pooled": {
+                "type": "null"
+              },
+              "snapshot_file": {},
+              "source_column": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "snapshot_file"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "derived"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "bounds": {},
+              "determinism": {},
+              "expression": {},
+              "name": {},
+              "null_probability": {},
+              "null_propagation": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "expression"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "derived_aggregate"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "column": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "op": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "op",
+              "column"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "grouped_series"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "generator": {},
+              "group_by": {},
+              "max_step": {},
+              "name": {},
+              "null_probability": {},
+              "order_by": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "start": {},
+              "step": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "group_by",
+              "order_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "windowed_date"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "anchor": {},
+              "determinism": {},
+              "distribution": {},
+              "max_days": {},
+              "min_days": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "anchor",
+              "max_days"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "group_key"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "group_by": {},
+              "length": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "prefix": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "group_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "constant"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "value": {}
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lookup"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "file"
+                ]
+              },
+              {
+                "required": [
+                  "codeset"
+                ]
+              }
+            ],
+            "properties": {
+              "codeset": {},
+              "determinism": {},
+              "file": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "value_column": {},
+              "weight_column": {}
+            },
+            "required": []
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "distribution"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "family": {
+                      "const": "uniform"
+                    }
+                  },
+                  "required": [
+                    "family"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "low",
+                    "high"
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "determinism": {},
+              "family": {},
+              "high": {},
+              "low": {},
+              "max": {},
+              "min": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "family"
+            ]
+          }
+        }
+      ],
+      "description": "A synthesis (generation) column declaration (S6).\n\nMirrors V1's generate column shape (decoy_engine.generators.columns): ``type``\nselects the generator, and the per-type options (``faker_type``, ``start``,\n``weights``, ...) ride FLAT on the column, exactly as V1 reads them\n(``column_config.get(\"faker_type\")``).\n\n``extra=\"allow\"`` carries those flat options so the front-end emit and the V1 parity\noracle line up, and so the dump and the seed fingerprint (which hashes every dumped key)\ndo not change. The key set is not open: ``_options_valid`` checks every extra against the\nper-type registry in ``config/_generate_options.py`` and refuses an unknown key, a missing\nrequired key or a bad static value, and the JSON schema closes each type the same way.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pooled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pooled"
+        },
+        "type": {
+          "enum": [
+            "faker",
+            "sequence",
+            "categorical",
+            "formula",
+            "reference",
+            "statistical",
+            "derived",
+            "derived_aggregate",
+            "grouped_series",
+            "windowed_date",
+            "group_key",
+            "constant",
+            "distribution",
+            "lookup"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "GenerateColumnConfig",
+      "type": "object"
+    },
+    "GlobalSettings": {
+      "additionalProperties": false,
+      "description": "Pipeline-wide settings.\n\n`seed` is the job-level seed material (S1 stub derivation; S3 swaps\nin real HMAC-keyed material). `post_validation` opts the pipeline\ninto post-mask invariant checks per the operating model §Validation\nrequirements. `on_pool_exhaustion` drives the planner's pool-capacity\npre-flight (read via `global_settings.get(\"on_pool_exhaustion\")` in\nplan-compile); default `scale_up` matches the engine default.\n`fidelity_warn_threshold` drives the generation-time fidelity\nwarn-gate: statistical generate columns are scored against their\nsource snapshot after generation and a warning is raised when the\noverall fidelity score, or any one comparable column's score, falls\nbelow this value (warn-only; never fails the run or changes output\nbytes).\n`categorical_retention_warn_threshold` (HC-5) drives the FIT-time\ncategorical-retention warn-gate (`quality._retention_gate`): a warning\nis logged for any snapshot column that fell to `freetext` via the\ncardinality cliff, or whose top-K collapse (or a requested joint\ntable's cell collapse) dropped retained mass below this value.\nWarn-only, same contract as `fidelity_warn_threshold`; `0.0` disables\nit entirely.\n`unconfigured_column_policy` (DE-03) drives the fail-closed output\nprojection: `error` rejects any output column the plan does not\ndeclare a strategy for; `warn` lets it pass through with a structured\nwarning. Unset defaults to the release phase (`warn` pre-GA migration\nwindow, `error` at GA); an explicit value here overrides that. See\n`execution/_output_projection.resolve_unconfigured_column_policy`.\n`mask_secret_ref` (DE-02) is a REFERENCE to the keyed-mask secret --\nnever the secret itself. Two ref kinds are supported: `env:NAME`\n(resolved from an environment variable) and `file:/PATH` (resolved\nfrom a file's contents), each hex- or base64-decoded to >=32 raw\nbytes. The engine resolves it at the run edge into a\n`SecretKeyProvider` and NEVER serializes the raw secret into the plan,\na log, or the manifest. A programmatically supplied\n`run(key_provider=...)` takes precedence over this ref. Unset means no\nsecret: a keyed plan with no secret is refused before any source\nread (no `job_seed` fallback). See `decoy_engine.keyprovider`.\n`freetext_advisory_min_avg_length` / `freetext_advisory_min_distinctness`\n(HC-7) drive the compile-time clinical free-text advisory\n(`quality._freetext_advisory`): an unmasked (`strategy: passthrough`)\nstring column whose name matches a clinical/claims free-text hint, or\nwhose average length and distinctness both clear these thresholds,\ngets a warning recommending `strategy: text_mask`. Warn-only, same\ncontract as `fidelity_warn_threshold`; never auto-assigns a strategy,\nnever mutates the plan/config, never changes output bytes.\n`freetext_advisory_min_avg_length <= 0` disables the advisory entirely\n(both branches).\n`dp` (DPS-3) opts this pipeline's `generate` output into a (epsilon,\ndelta)-DP marginal claim; see `DpGenerateSettings`. Unset (the\ndefault) means no DP contract and no gate -- byte-identical to every\nprior engine version.",
+      "properties": {
+        "categorical_retention_warn_threshold": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Categorical Retention Warn Threshold",
+          "type": "number"
+        },
+        "dp": {
+          "$ref": "#/$defs/DpGenerateSettings"
+        },
+        "fidelity_warn_threshold": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Fidelity Warn Threshold",
+          "type": "number"
+        },
+        "freetext_advisory_min_avg_length": {
+          "default": 40.0,
+          "title": "Freetext Advisory Min Avg Length",
+          "type": "number"
+        },
+        "freetext_advisory_min_distinctness": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Freetext Advisory Min Distinctness",
+          "type": "number"
+        },
+        "mask_secret_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mask Secret Ref"
+        },
+        "on_pool_exhaustion": {
+          "default": "scale_up",
+          "enum": [
+            "fail",
+            "scale_up",
+            "fall_back"
+          ],
+          "title": "On Pool Exhaustion",
+          "type": "string"
+        },
+        "post_validation": {
+          "default": false,
+          "title": "Post Validation",
+          "type": "boolean"
+        },
+        "reference_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Date"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "unconfigured_column_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "warn",
+                "error"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unconfigured Column Policy"
+        }
+      },
+      "required": [
+        "seed"
+      ],
+      "title": "GlobalSettings",
+      "type": "object"
+    },
+    "LimitOp": {
+      "additionalProperties": false,
+      "description": "Cap the row count via ``df.head(n)``; rows after position ``n`` are dropped.",
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "title": "N",
+          "type": "integer"
+        },
+        "op": {
+          "const": "limit",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "n"
+      ],
+      "title": "LimitOp",
+      "type": "object"
+    },
+    "NamespaceConfig": {
+      "additionalProperties": false,
+      "description": "One explicitly-declared namespace binding.",
+      "properties": {
+        "declared_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Declared By",
+          "type": "array"
+        }
+      },
+      "title": "NamespaceConfig",
+      "type": "object"
+    },
+    "PostScanConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "detectors": {
+          "default": [
+            "regex"
+          ],
+          "items": {
+            "enum": [
+              "regex",
+              "classifier",
+              "ner"
+            ],
+            "type": "string"
+          },
+          "title": "Detectors",
+          "type": "array"
+        },
+        "dismissed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Dismissal"
+          },
+          "title": "Dismissed",
+          "type": "array"
+        },
+        "integrity": {
+          "default": false,
+          "title": "Integrity",
+          "type": "boolean"
+        },
+        "ner_findings": {
+          "default": "warn",
+          "enum": [
+            "warn",
+            "fail"
+          ],
+          "title": "Ner Findings",
+          "type": "string"
+        },
+        "ner_model": {
+          "default": "en_core_web_sm",
+          "title": "Ner Model",
+          "type": "string"
+        }
+      },
+      "title": "PostScanConfig",
+      "type": "object"
+    },
+    "PreScanConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "detectors": {
+          "default": [
+            "regex"
+          ],
+          "items": {
+            "enum": [
+              "regex",
+              "classifier",
+              "ner"
+            ],
+            "type": "string"
+          },
+          "title": "Detectors",
+          "type": "array"
+        },
+        "ner_model": {
+          "default": "en_core_web_sm",
+          "title": "Ner Model",
+          "type": "string"
+        }
+      },
+      "title": "PreScanConfig",
+      "type": "object"
+    },
+    "ProtectedQuarantineConfig": {
+      "additionalProperties": false,
+      "description": "The one top-level protected-quarantine declaration. There is deliberately no path or key.",
+      "properties": {
+        "access_policy": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:\\-]{0,63}$",
+          "title": "Access Policy",
+          "type": "string"
+        },
+        "max_bytes": {
+          "maximum": 1099511627776,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "max_rows": {
+          "maximum": 100000000,
+          "minimum": 1,
+          "title": "Max Rows",
+          "type": "integer"
+        },
+        "required_protection": {
+          "const": "encrypted",
+          "title": "Required Protection",
+          "type": "string"
+        },
+        "retention_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Retention Seconds",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "access_policy",
+        "retention_seconds",
+        "max_rows",
+        "max_bytes",
+        "required_protection"
+      ],
+      "title": "ProtectedQuarantineConfig",
+      "type": "object"
+    },
+    "QuarantineConfig": {
+      "additionalProperties": false,
+      "description": "The ``quarantine:`` block in the pipeline config.\n\nWhen ``enabled`` is ``True`` and a configured ``trigger`` fires, the\noffending row is written to ``output_path`` instead of the main output.\nThe job continues and completes successfully.\n\nWired triggers (all three accepted by ``_WIRED_TRIGGERS``):\n  - ``validation_fail`` (SP-05): row failed a job-level validator.\n  - ``format_error`` (Sprint 2 honesty pack S5): a ``bucketize`` /\n    ``date_shift`` cell could not be coerced/parsed under its declared\n    strategy.\n  - ``mask_error`` (Sprint 2 honesty pack S6): a ``code_set``\n    ``chapter_preserve`` value could not be masked (input chapter absent\n    from the corpus, or a sole-member chapter bucket).\n\nAny trigger name outside ``_WIRED_TRIGGERS`` is rejected at config\nvalidation (a silent no-op is refused up front).\n\nExample YAML::\n\n    quarantine:\n      enabled: true\n      output_path: /mnt/quarantine/run-2026-06-27.jsonl\n      triggers:\n        - validation_fail\n        - format_error\n        - mask_error",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "output_path": {
+          "default": "",
+          "title": "Output Path",
+          "type": "string"
+        },
+        "triggers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Triggers",
+          "type": "array"
+        }
+      },
+      "title": "QuarantineConfig",
+      "type": "object"
+    },
+    "RelationshipConfig": {
+      "additionalProperties": false,
+      "description": "One FK relationship: parent + one or more children + policy + namespace.\n\n`orphan_policy` is required (S2 TODO 4: no default). The four valid\nvalues are documented in S2 spec §3.",
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/$defs/RelationshipEnd"
+          },
+          "minItems": 1,
+          "title": "Children",
+          "type": "array"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "orphan_policy": {
+          "enum": [
+            "preserve",
+            "remap",
+            "warn",
+            "fail"
+          ],
+          "title": "Orphan Policy",
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/$defs/RelationshipEnd"
+        }
+      },
+      "required": [
+        "parent",
+        "children",
+        "orphan_policy"
+      ],
+      "title": "RelationshipConfig",
+      "type": "object"
+    },
+    "RelationshipEnd": {
+      "additionalProperties": false,
+      "description": "One side of a relationship (parent or child).\n\n`columns` is a list (length 1 for single-column FKs; length >1 for\ncomposite-key FKs). Mirrors the S2 B2 resolution exactly.",
+      "properties": {
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "columns"
+      ],
+      "title": "RelationshipEnd",
+      "type": "object"
+    },
+    "S3Source": {
+      "additionalProperties": false,
+      "description": "An S3 (or S3-compatible) CSV / Parquet source.\n\nCompatible with real AWS S3 plus any S3-compatible service that accepts\na custom `endpoint_url` (MinIO, Cloudflare R2, Wasabi, B2). The engine\nfetches the object once into a buffer + reads into Arrow; no streaming\nin the V1 spec because the masked output is in-memory anyway.",
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string",
+          "x-decoy-locator": true
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque credentials identifier the platform resolves at run time. The engine never sees raw secrets; when None the SDK walks its default credential chain (env vars / instance profile / etc.).",
+          "title": "Credentials Ref",
+          "x-decoy-locator": true
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override the AWS endpoint (e.g. http://localhost:9000 for MinIO, https://<account>.r2.cloudflarestorage.com for Cloudflare R2). Leave None for real AWS S3.",
+          "title": "Endpoint Url",
+          "x-decoy-locator": true
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region",
+          "x-decoy-locator": true
+        },
+        "type": {
+          "const": "s3",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "key"
+      ],
+      "title": "S3Source",
+      "type": "object"
+    },
+    "S3Target": {
+      "additionalProperties": false,
+      "description": "An S3 (or S3-compatible) CSV / Parquet target.\n\nSymmetric with `S3Source`. The platform writes via the atomic-move\npattern (Q12 carry): upload to `<key>.<job_id>.tmp`, server-side\n`copy_object` to the canonical key on verify, then delete the tmp.\nA mid-upload failure leaves the canonical key untouched.",
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string"
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opaque credentials identifier the platform resolves at run time. The engine never sees raw secrets; when None the SDK walks its default credential chain (env vars / instance profile / etc.).",
+          "title": "Credentials Ref"
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override the AWS endpoint (e.g. http://localhost:9000 for MinIO, https://<account>.r2.cloudflarestorage.com for Cloudflare R2). Leave None for real AWS S3.",
+          "title": "Endpoint Url"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "type": {
+          "const": "s3",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "key"
+      ],
+      "title": "S3Target",
+      "type": "object"
+    },
+    "ScanBaselineConfig": {
+      "additionalProperties": false,
+      "description": "`scan_baseline: {path, schema}`. YAML says `schema`; the field is `schema_tag` because\n`schema` would shadow a pydantic model attribute, and the dump writes `schema` back.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "schema": {
+          "const": "scan-set/v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "schema"
+      ],
+      "title": "ScanBaselineConfig",
+      "type": "object"
+    },
+    "SortOp": {
+      "additionalProperties": false,
+      "description": "Sort rows by one or more columns.\n\n``ascending`` is per-column; if a single bool is provided it\napplies to all ``by`` entries. Default is True for all columns.\nSort is stable -- equal-key rows retain their input order.",
+      "properties": {
+        "ascending": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "default": true,
+          "title": "Ascending"
+        },
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "By",
+          "type": "array"
+        },
+        "op": {
+          "const": "sort",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "by"
+      ],
+      "title": "SortOp",
+      "type": "object"
+    },
+    "SubsetBudgetConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_table_seed_multiple": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Table Seed Multiple"
+        },
+        "max_total_rows": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Total Rows"
+        }
+      },
+      "title": "SubsetBudgetConfig",
+      "type": "object"
+    },
+    "SubsetConfig": {
+      "additionalProperties": false,
+      "description": "The `subset:` block. Requires at least one seed (an empty subset job is not meaningful).",
+      "properties": {
+        "allow_dangling": {
+          "default": false,
+          "title": "Allow Dangling",
+          "type": "boolean"
+        },
+        "budget": {
+          "$ref": "#/$defs/SubsetBudgetConfig"
+        },
+        "edge_directions": {
+          "additionalProperties": {
+            "enum": [
+              "both",
+              "downward",
+              "upward",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Edge Directions",
+          "type": "object"
+        },
+        "seeds": {
+          "items": {
+            "$ref": "#/$defs/SubsetSeedConfig"
+          },
+          "minItems": 1,
+          "title": "Seeds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "seeds"
+      ],
+      "title": "SubsetConfig",
+      "type": "object"
+    },
+    "SubsetPredicateConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "is_not_null"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "column",
+        "op"
+      ],
+      "title": "SubsetPredicateConfig",
+      "type": "object"
+    },
+    "SubsetSeedConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Count"
+        },
+        "fraction": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fraction"
+        },
+        "key_columns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Key Columns",
+          "type": "array"
+        },
+        "keys": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "sample",
+            "filter",
+            "keys"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "predicates": {
+          "items": {
+            "$ref": "#/$defs/SubsetPredicateConfig"
+          },
+          "title": "Predicates",
+          "type": "array"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "mode"
+      ],
+      "title": "SubsetSeedConfig",
+      "type": "object"
+    },
+    "TableConfig": {
+      "additionalProperties": false,
+      "description": "Per-table declaration.\n\nA table is EITHER a MASK table (``columns`` of mask ColumnConfig, fed by a\nsource) OR a GENERATE table (``generate_columns`` + ``row_count``, no source),\nenforced by the validator below. ``columns`` was ``min_length=1``; it is now\nvalidated CONDITIONALLY so a generate table can omit it. The mask path is\nunchanged when no generation fields are set.",
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/ColumnConfig"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "generate_columns": {
+          "items": {
+            "$ref": "#/$defs/GenerateColumnConfig"
+          },
+          "title": "Generate Columns",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "row_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Count"
+        },
+        "transforms": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "dedupe": "#/$defs/DedupeOp",
+                "derive": "#/$defs/DeriveOp",
+                "drop_column": "#/$defs/DropColumnOp",
+                "filter": "#/$defs/FilterOp",
+                "limit": "#/$defs/LimitOp",
+                "sort": "#/$defs/SortOp"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/FilterOp"
+              },
+              {
+                "$ref": "#/$defs/SortOp"
+              },
+              {
+                "$ref": "#/$defs/LimitOp"
+              },
+              {
+                "$ref": "#/$defs/DedupeOp"
+              },
+              {
+                "$ref": "#/$defs/DeriveOp"
+              },
+              {
+                "$ref": "#/$defs/DropColumnOp"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Transforms",
+          "type": "array"
+        },
+        "unique_together": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Unique Together",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TableConfig",
+      "type": "object"
+    },
+    "ValidatorEntry": {
+      "additionalProperties": false,
+      "description": "One validator in the ``validators:`` list.\n\n``name`` must match one of the built-in validator names (luhn, npi, iban,\nvin, fk_intact, no_orphan_children, leak_check, regex_match,\ncolumn_in_set, parent_window_respected, reconciliation_holds). Unknown\nnames are rejected at runtime by the validator registry with a\n``ValueError`` naming the offending validator and listing the known\nnames.\n\n``columns`` carries the per-table column lists for check-digit validators\n(luhn, npi, iban, vin) and the generic validators (regex_match,\ncolumn_in_set). FK and relationship validators (fk_intact,\nno_orphan_children, parent_window_respected, reconciliation_holds) read\nthe ``relationships:`` block from the top-level config; ``columns`` is\nunused for them.\n\n``params`` (Sprint 2 honesty pack, D5) is a free-form per-validator knob\nbag: leak_check's ``exempt``/``max_identical_ratio``/``min_rows``,\nregex_match's ``pattern``, column_in_set's ``allowed_values``/\n``allow_null``, and the relationship validators' edge + tolerance\nparameters all live here. Each validator validates its own ``params`` at\nrun time with a loud ``ValueError`` naming the validator and the\noffending key -- a discriminated per-validator pydantic schema would\ncouple the config schema to the registry contents and force a schema\nrelease for every future validator (D5 rationale). Additive: existing\nconfigs with no ``params`` key are unaffected (default empty dict).\n\nExample YAML::\n\n    validators:\n      - name: luhn\n        columns:\n          orders: [credit_card_number]\n      - name: fk_intact\n      - name: leak_check\n        columns:\n          orders: [card_number, email]\n        params:\n          max_identical_ratio: 0.02",
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ValidatorEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Strict, validated pipeline configuration.\n\nCallers do:\n\n    cfg_dict = PipelineConfig.model_validate(parsed_yaml).model_dump()\n\nand hand `cfg_dict` to `profile_source` and `compile_plan`. The\nengine functions do not re-validate. Validation is a one-time event\nat the choke-point.",
+  "properties": {
+    "delivery": {
+      "$ref": "#/$defs/DeliveryConfig"
+    },
+    "global_settings": {
+      "$ref": "#/$defs/GlobalSettings"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "namespaces": {
+      "additionalProperties": {
+        "$ref": "#/$defs/NamespaceConfig"
+      },
+      "title": "Namespaces",
+      "type": "object"
+    },
+    "post_scan": {
+      "$ref": "#/$defs/PostScanConfig"
+    },
+    "pre_scan": {
+      "$ref": "#/$defs/PreScanConfig"
+    },
+    "protected_quarantine": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtectedQuarantineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "quarantine": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QuarantineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/RelationshipConfig"
+      },
+      "title": "Relationships",
+      "type": "array"
+    },
+    "scan_baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScanBaselineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sources": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "file": "#/$defs/FileSource",
+            "gcs": "#/$defs/GCSSource",
+            "s3": "#/$defs/S3Source"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FileSource"
+          },
+          {
+            "$ref": "#/$defs/S3Source"
+          },
+          {
+            "$ref": "#/$defs/GCSSource"
+          }
+        ]
+      },
+      "title": "Sources",
+      "type": "object"
+    },
+    "subset": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubsetConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tables": {
+      "items": {
+        "$ref": "#/$defs/TableConfig"
+      },
+      "minItems": 1,
+      "title": "Tables",
+      "type": "array"
+    },
+    "targets": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "file": "#/$defs/FileTarget",
+            "gcs": "#/$defs/GCSTarget",
+            "s3": "#/$defs/S3Target"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FileTarget"
+          },
+          {
+            "$ref": "#/$defs/S3Target"
+          },
+          {
+            "$ref": "#/$defs/GCSTarget"
+          }
+        ]
+      },
+      "minProperties": 1,
+      "title": "Targets",
+      "type": "object"
+    },
+    "validators": {
+      "items": {
+        "$ref": "#/$defs/ValidatorEntry"
+      },
+      "title": "Validators",
+      "type": "array"
+    },
+    "version": {
+      "const": 2,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "global_settings",
+    "tables",
+    "targets"
+  ],
+  "title": "PipelineConfig",
+  "type": "object"
+}

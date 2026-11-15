@@ -36,6 +36,9 @@ FROZEN_PREFIXES = (
     "src/decoy_engine/config/",
     "src/decoy_engine/sdk.py",
     "src/decoy_engine/__init__.py",
+    "src/decoy_engine/run_result/",
+    "src/decoy_engine/reasons/",
+    "tests/snapshots/frozen_schemas/",
 )
 
 # Distinctive fragments of each section-9 checklist item (lowercased). Each must
