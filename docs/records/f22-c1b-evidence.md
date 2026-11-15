@@ -414,3 +414,21 @@ The first wide run on the merge commit had 6 failures (the three listings, the f
 two duplicated listings by parameter); the commits above fixed them. `ruff check`,
 `ruff format --check`, `mypy src/decoy_engine` (847 files) clean; `registry_renumber --check
 --main f34b398e` consistent; `check_fragment` and `ratchet_check` (`--base f34b398e`) exit 0.
+
+## Merge of c1a with the owner fix and main 64e9349b (2026-11-15, message 10)
+
+`feat/f22-c1a` `554c5ec2` merged as `e7643868`, no conflict; each publication code is defined
+once (three under `decoy_engine.fileaccess`, ten under `decoy_engine.publication`). Census:
+`_transactional_sink.py` 582, `_chunked_output_sink.py` 596, `_pipeline_context.py` 600,
+`out_of_core/_runner.py` 355, `_sequential.py` 676 against main's 678. Checks (from a cleaned
+`src/`): ruff, format, mypy clean; `registry_renumber --check --main origin/main` consistent;
+`check_fragment` and `ratchet_check` exit 0.
+
+| Command | Tree | Passed | Failed | Errors | Skipped |
+|---|---|---|---|---|---|
+| `pytest tests/fileaccess tests/sentry tests/unit/publication tests/unit/execution/publication tests/unit/test_reason_registry.py tests/unit/test_reason_release_pin.py -n 2` | `e7643868` | 7142 | 10 | 87 | 6 |
+| `pytest tests/unit/execution tests/integration tests/parity tests/security -n 2` | `64e9349b` | 12698 | 0 | 6 | 2396 |
+| same | `e7643868` | 12810 | 0 | 6 | 2396 |
+
+Failing ids identical to main's in both (the known 10 + 87, and the 6 root-only
+`test_scratch_root_umask` errors); the string-target sentry passes.
