@@ -101,6 +101,7 @@ SENTRIES = (
     "tests/sentry/defects/test_expression_column_refs.py",
     "tests/sentry/defects/test_generate_input_edges.py",
     "tests/sentry/defects/test_generate_option_reads.py",
+    "tests/sentry/defects/test_lazy_builder_registry.py",
     "tests/sentry/defects/test_ner_mismatch_single_site.py",
     "tests/sentry/defects/test_target_destination_choke_point.py",
     "tests/sentry/defects/test_reference_pool_choke_point.py",

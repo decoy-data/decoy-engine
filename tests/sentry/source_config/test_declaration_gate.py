@@ -59,7 +59,16 @@ ROUTES: dict[tuple[str, str], frozenset[str]] = {
     ("execution/native/_dispatch.py", "run_native_or_oracle_chunked"): frozenset({"_run_chunked"}),
 }
 
-READER_NAMES = frozenset({"build_declared_source", "build_profile_source", "read_csv_source"})
+READER_NAMES = frozenset(
+    {
+        "build_declared_source",
+        "build_lazy_source",
+        "build_profile_source",
+        "read_csv_source",
+        # Reads a `column_names_file` named by the config.
+        "resolve_csv_dialect",
+    }
+)
 
 # (file, enclosing function, reader) -> why this reader is not a bypass of the gate.
 READERS: dict[tuple[str, str, str], str] = {
@@ -71,6 +80,22 @@ READERS: dict[tuple[str, str, str], str] = {
     ),
     ("profile/_declared_columns.py", "source_columns", "build_declared_source"): (
         "the gate itself: schema discovery for non-csv sources"
+    ),
+    ("profile/_declared_columns.py", "source_columns", "resolve_csv_dialect"): (
+        "the gate itself: the dialect and any `column_names_file` for the header read"
+    ),
+    ("profile/_lazy_build.py", "_resident_csv", "resolve_csv_dialect"): (
+        "reads a `column_names_file` only; no data row, and the factory's callers are listed here"
+    ),
+    ("profile/_lazy_csv.py", "from_descriptor", "resolve_csv_dialect"): (
+        "candidate construction runs before the engine gate; it reads only the structural "
+        "`column_names_file`, never a data row"
+    ),
+    ("profiling/_scan_integrity.py", "_open_keys", "resolve_csv_dialect"): (
+        "scan route: its own entry, not a run route"
+    ),
+    ("profiling/scan_set.py", "_read_and_profile", "resolve_csv_dialect"): (
+        "scan route: its own entry, not a run route"
     ),
     ("profile/_lazy_csv.py", "_chunks", "read_csv_source"): (
         "chunk iterator behind a built source, reached only after a route's gate"
