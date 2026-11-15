@@ -88,8 +88,8 @@ READERS: dict[tuple[str, str, str], str] = {
         "reads a `column_names_file` only; no data row, and the factory's callers are listed here"
     ),
     ("profile/_lazy_csv.py", "from_descriptor", "resolve_csv_dialect"): (
-        "reads a `column_names_file` only, building the lazy source `build_lazy_source` returns "
-        "for a route that already ran the gate"
+        "candidate construction runs before the engine gate; it reads only the structural "
+        "`column_names_file`, never a data row"
     ),
     ("profiling/_scan_integrity.py", "_open_keys", "resolve_csv_dialect"): (
         "scan route: its own entry, not a run route"
