@@ -285,10 +285,12 @@ def test_a_residency_decision_outside_the_helper_is_flagged() -> None:
     assert [k.split("::")[2] for k in found] == ["decision-call"]
 
 
-def test_the_isolated_parent_commits_only_from_its_two_named_sites() -> None:
+def test_the_isolated_parent_has_no_atomic_commit_exception_left() -> None:
+    # F22 c2 publishes the isolated route through `publish_unit`, so `atomic_commit` and its two
+    # baseline exceptions are gone; a new one would need a new, reviewed baseline key.
     entries = _baseline("post-scan-commit")
     commits = {k.split("::", 3)[1] for k in entries if "::atomic-commit::" in k}
-    assert commits == {"_run_in_process", "_commit"}
+    assert commits == set()
 
 
 @pytest.mark.parametrize(
