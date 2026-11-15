@@ -467,3 +467,37 @@ def test_a_def_under_a_conditional_block_is_found(repo: Path) -> None:
     _write(repo, "src/p/new.py", WITH_G)
     _census(repo, {NEW: MOVED})
     _assert_red(repo, NEW)
+
+
+def test_a_closure_that_only_reads_the_name_is_not_gone(repo: Path) -> None:
+    key = "p/old.py::f.inner::seed"
+    src = "def f(seed):\n    def inner():\n        return seed\n    return inner\n"
+    _commit_census(repo, src, [key])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {"moved_from": key}})
+    _assert_red(repo, NEW)
+
+
+def test_a_lambda_qualname_is_never_proven_gone(repo: Path) -> None:
+    key = "p/old.py::f.<lambda>::seed"
+    _commit_census(repo, "X = 1\n", [key])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {"moved_from": key}})
+    _assert_red(repo, NEW)
+
+
+def test_every_same_named_def_is_checked(repo: Path) -> None:
+    src = "try:\n    def f():\n        pass\nexcept OSError:\n    def f(seed):\n        pass\n"
+    _commit_census(repo, src, [OLD])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_moved_from_must_keep_the_bound_name(repo: Path) -> None:
+    new = "p/new.py::g::signing_key"
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", "def g(signing_key):\n    pass\n")
+    _census(repo, {new: MOVED})
+    _assert_red(repo, new)
