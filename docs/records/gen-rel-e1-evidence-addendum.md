@@ -189,10 +189,10 @@ Conflicts, each resolved keeping both sides:
   both export or sentry lists, sorted.
 - `generation/synthesize.py`: `policies = reference_policies(config)` beside main's
   `types = reader_types(...)`; 600 lines.
-- `reasons/runtime/_part2.py`: main's `generate_formula_evaluation_failed` (`1.26.0`) stays above
+- `reasons/runtime/_part2.py`: main's `generate_formula_evaluation_failed` (released) stays above
   this branch's catalog switch, so it keeps main's family; the five GEN-REL runtime codes stay
   `since=UNRELEASED`. `reasons/warning/_part1.py`: main's `post_scan_output_unreadable`
-  (`1.27.0`) beside `reference_parent_pool_empty` (`UNRELEASED`); the `UNRELEASED` import kept.
+  (released) beside `reference_parent_pool_empty` (`UNRELEASED`); the `UNRELEASED` import kept.
 - `tests/unit/generation/unique/test_gen_unique_old_input_bytes.py`: both docstring paragraphs.
   The two sides moved different digests (this branch `reference_shapes.cells`, from the
   room-aware repair of `child.bounded`; main `all_basic_types.cells`, from a formula reading
