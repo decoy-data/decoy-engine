@@ -327,7 +327,7 @@ def test_each_root_arm_stages_the_same_bytes(tmp_path: Path, arm: str) -> None:
         assert staged.parent == tmp_path / "root"
         assert staged.read_bytes() == expected
         return
-    with ScratchArena.open(under=tmp_path / "arena") as arena:
+    with ScratchArena.fresh(under=tmp_path / "arena") as arena:
         staged = Path(_stage(tmp_path, root=arena)["t"].path)
         assert staged.parent == Path(arena.local_path())
         assert staged.read_bytes() == expected

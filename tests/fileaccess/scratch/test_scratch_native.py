@@ -110,7 +110,7 @@ def test_native_failure_text_is_value_free(
     cell: str,
 ) -> None:
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
-    with ScratchArena.open() as arena, policy:
+    with ScratchArena.fresh() as arena, policy:
         call = NATIVE[cell](arena)
         raw = _raw(call)
         assert any(s in str(raw) for s in SENTINELS), f"non-vacuity: {raw!r}"
