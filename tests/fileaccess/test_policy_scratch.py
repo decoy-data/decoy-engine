@@ -74,7 +74,7 @@ def test_the_path_arm_reads_back_a_component_not_a_released_path(tmp_path: Path)
 
 def test_the_stager_stages_on_an_arena(tmp_path: Path) -> None:
     schema = pa.schema([pa.field("k", pa.int64())])
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         staged = arena.create_dir("staged")
         stager = MaskedKeyStager(staged, columns=("k",), fixed_schema=schema)
         batch = pa.record_batch([pa.array([1, 2, 3])], schema=schema)
