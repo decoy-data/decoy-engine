@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import LEXEME_KEY
-from decoy_engine.profile._csv_reader import resolve_csv_dialect
+from decoy_engine.profile._csv_reader import csv_is_compressed, resolve_csv_dialect
 from decoy_engine.profile._lazy_csv import CsvLazySource
 from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import (
@@ -33,10 +33,6 @@ from decoy_engine.profile._readers import (
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import FileAccess
-
-# Suffixes pandas decompresses on its own (`compression="infer"`); a lazy CSV read has no
-# decompressing path, so these stay on the resident read.
-_COMPRESSED_SUFFIXES = (".gz", ".bz2", ".zip", ".xz", ".zst", ".tar", ".tgz")
 
 
 @dataclass(frozen=True)
@@ -93,7 +89,8 @@ def _lazy_csv(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
     path = descriptor_path(descriptor, f"sources.{table}.path")
-    if path.lower().endswith(_COMPRESSED_SUFFIXES):
+    # A lazy CSV read has no decompressing path, so a compressed file stays on the resident read.
+    if csv_is_compressed(path):
         return None
     return CsvLazySource.from_descriptor(
         descriptor, table=table, file_access=file_access, field_key=f"sources.{table}.path"

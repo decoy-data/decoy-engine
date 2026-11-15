@@ -23,34 +23,108 @@ def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
     raise AssertionError(f"function {name} not found")
 
 
-def _is_format_expr(node: ast.expr) -> bool:
-    """`fmt`, `format`, or a `.get("format")` / `["format"]` read."""
-    if isinstance(node, ast.Name):
-        return node.id in {"fmt", "format", "file_format"}
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-    ):
-        return any(isinstance(a, ast.Constant) and a.value == "format" for a in node.args)
+# The only places a format value may go: the table lookup, and an error message.
+ALLOWED_SINKS = frozenset({"file_format", "repr", "shown"})
+SEED_NAMES = frozenset({"fmt", "format", "file_fmt"})
+
+
+def _is_format_read(node: ast.AST) -> bool:
+    """`x.get("format")`, `x["format"]` or `getattr(x, "format")`."""
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr == "get":
+            return any(isinstance(a, ast.Constant) and a.value == "format" for a in node.args)
+        if isinstance(func, ast.Name) and func.id == "getattr":
+            return any(isinstance(a, ast.Constant) and a.value == "format" for a in node.args[1:])
     if isinstance(node, ast.Subscript):
         return isinstance(node.slice, ast.Constant) and node.slice.value == "format"
     return False
 
 
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    return func.attr if isinstance(func, ast.Attribute) else None
+
+
+def _names_in(node: ast.AST) -> set[str]:
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
+def _tainted(func: ast.FunctionDef) -> set[str]:
+    """Names that hold the format: seed names and every alias of one, to a fixed point."""
+    tainted = set(SEED_NAMES)
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            holds = any(_is_format_read(n) for n in ast.walk(value)) or bool(
+                _names_in(value) & tainted
+            )
+            if holds:
+                for target in targets:
+                    for name in _names_in(target):
+                        if name not in tainted:
+                            tainted.add(name)
+                            changed = True
+    return tainted
+
+
 def format_branches(func: ast.FunctionDef) -> list[str]:
-    """Format names used as literals, and comparisons or matches on the format."""
+    """Format names used as literals, and any use of the format value (or an alias of it)
+    other than aliasing it, passing it to the table lookup or naming it in a message.
+    That covers comparisons, `match`, `in`, `getattr`, name building and another dict."""
     found: list[str] = []
+    tainted = _tainted(func)
+    parents = {child: parent for parent in ast.walk(func) for child in ast.iter_child_nodes(parent)}
     for node in ast.walk(func):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in FORMATS:
             found.append(f"literal {node.value!r}@{node.lineno}")
-        if isinstance(node, ast.Compare) and any(
-            _is_format_expr(n) for n in (node.left, *node.comparators)
+        is_use = (isinstance(node, ast.Name) and node.id in tainted) or _is_format_read(node)
+        if not is_use:
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.Assign | ast.AnnAssign | ast.NamedExpr) and node is parent.value:
+            continue
+        if (
+            isinstance(parent, ast.Call)
+            and node in parent.args
+            and _call_name(parent) in ALLOWED_SINKS
         ):
-            found.append(f"compare@{node.lineno}")
-        if isinstance(node, ast.Match) and _is_format_expr(node.subject):
-            found.append(f"match@{node.lineno}")
+            continue
+        found.append(f"{type(parent).__name__.lower()}@{node.lineno}")
     return found
+
+
+def module_format_tables(tree: ast.Module) -> list[int]:
+    """Lines of a dict, set, tuple or list literal that names a format, other than the one
+    `FILE_FORMATS` assignment. A second table of formats is a second dispatch."""
+    skip: set[int] = set()
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        if any(isinstance(t, ast.Name) and t.id == "FILE_FORMATS" for t in targets):
+            skip.update(id(n) for n in ast.walk(node))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if id(node) in skip or not isinstance(node, ast.Dict | ast.Set | ast.Tuple | ast.List):
+            continue
+        elements = node.keys if isinstance(node, ast.Dict) else node.elts
+        if any(
+            isinstance(e, ast.Constant) and isinstance(e.value, str) and e.value in FORMATS
+            for e in elements
+            if e is not None
+        ):
+            lines.append(node.lineno)
+    return lines
 
 
 def _tree(rel: str) -> ast.Module:
