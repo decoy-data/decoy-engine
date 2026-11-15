@@ -406,7 +406,7 @@ def test_report_text_is_value_free(
 def test_adopt_under_a_strict_policy(tmp_path: Path, strict: Strict, cell: str) -> None:
     """A path at or below a live issued root is adopted under every policy, by the rule
     `open_protected_dir` applies; any other path still needs the ambient policy."""
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         inside = Path(arena.local_path()) / "staged" / "t0000"
         with strict():
             if cell == "under_live_root":
@@ -445,7 +445,7 @@ def test_reader_reads_only_beneath_its_directory(tmp_path: Path, strict: Strict)
 
     outside = tmp_path / "outside.parquet"
     pq.write_table(pa.table({"k": [9]}), outside)
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         os.close(arena.create_file("top.parquet"))
         child = arena.create_dir("staged")
         table = _staged(child, "k.parquet")
@@ -467,7 +467,7 @@ def test_reader_holds_its_own_descriptor() -> None:
     """The reader outlives the arena object it came from (its own descriptor), never the disk."""
     from decoy_engine.profile._readers import LazySource
 
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         child = arena.create_dir("staged")
         table = _staged(child, "k.parquet")
         reader = child.reader()
