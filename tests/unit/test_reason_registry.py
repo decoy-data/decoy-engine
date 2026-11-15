@@ -519,10 +519,17 @@ def test_f22_publication_codes_are_registered_pending() -> None:
         "publication_vault_mismatch",
         "publication_write_in_progress",
     )
+    # The file-access errors raise the lock and durability codes, so `fileaccess` owns them.
+    fileaccess = {
+        "publication_commit_uncertain",
+        "publication_lock_timeout",
+        "publication_lock_unavailable",
+    }
     for code in codes:
         spec = reasons.find("decoy", code)
         assert spec is not None
-        assert (spec.owner, spec.since) == ("decoy_engine.publication", reasons.UNRELEASED)
+        owner = "decoy_engine.fileaccess" if code in fileaccess else "decoy_engine.publication"
+        assert (spec.owner, spec.since) == (owner, reasons.UNRELEASED)
         assert not re.search(r"[{}%]", spec.summary)
         assert getattr(reasons.decoy, code.upper()) == code
 
