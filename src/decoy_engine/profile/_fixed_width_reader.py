@@ -51,7 +51,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from dataclasses import dataclass
 from typing import Any, BinaryIO, NoReturn, cast
 
@@ -331,26 +331,24 @@ def _records(
 
 
 def _collect_records(
-    handle: FileHandle, spec: FixedWidthLayout, max_records: int | None
+    parser: Iterator[dict[str, Any] | RecordFailure], max_records: int | None
 ) -> tuple[list[dict[str, Any]] | None, str | None]:
-    """Consume up to `max_records` records: `(records, None)`, or `(None, message)`.
+    """Consume up to `max_records` records from an open parser: `(records, None)`, or
+    `(None, message)`. Reads no record past the cap and leaves the parser open, so a caller can
+    take the next group from it; the caller closes it.
 
     On failure the partial list is cleared before returning, so the caller
     raises from a frame that holds no parsed record.
     """
     records: list[dict[str, Any]] = []
-    parser = iter_fixed_width_records(handle, spec)
-    try:
-        while max_records is None or len(records) < max_records:
-            item = next(parser, None)
-            if item is None:
-                break
-            if isinstance(item, RecordFailure):
-                records.clear()
-                return None, item.message
-            records.append(item)
-    finally:
-        parser.close()
+    while max_records is None or len(records) < max_records:
+        item = next(parser, None)
+        if item is None:
+            break
+        if isinstance(item, RecordFailure):
+            records.clear()
+            return None, item.message
+        records.append(item)
     return records, None
 
 
@@ -370,7 +368,11 @@ def read_fixed_width_handle(
     """`read_fixed_width` over a handle the caller's policy already authorized."""
     spec = _resolve_layout(layout, path=handle.display)
 
-    records, failure = _collect_records(handle, spec, max_records)
+    parser = iter_fixed_width_records(handle, spec)
+    try:
+        records, failure = _collect_records(parser, max_records)
+    finally:
+        parser.close()
     if failure is not None:
         # Raised after the collector returned: this frame holds no line, value or
         # parsed record, so nothing reachable from the exception carries file content.

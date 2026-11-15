@@ -18,7 +18,7 @@ Namespaces: `config`, `plan`, `runtime`, `provider`, `quality`, `connector`, `su
 
 ### Versioning
 
-`registry_version` (`1.27.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
+`registry_version` (`1.28.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
 
 Codes are append-only: a code never disappears or changes meaning. A retired code stays as a tombstone with its replacement link.
 
@@ -61,7 +61,7 @@ The one CONFIG-EXPLICIT E2b-r addition (`config.source_file.declared_column_miss
 
 The nine CONFIG-EXPLICIT E2b-s plan aliases (`plan.hash_requires_namespace`, `fpe_`, `date_shift_`, `bucket_perturb_`, `categorical_`, `tokenize_` and `shuffle_requires_namespace`, plus `plan.nested_strategy_unset` and `plan.nested_target_unset`; pending) repeat the code text of the runtime guards under the `PlanCompileError` owner, as `code_set_gen_requires_namespace` already does, so `decoy validate` refuses a missing setting with the code `run` would have raised. The runtime identities are unchanged.
 
-The thirteen F22 output-publication additions in the `decoy` namespace (owner `decoy_engine.publication`, outcome `publication`) are pending release: `publication_lock_unavailable`, `publication_lock_timeout`, `publication_target_occupied`, `publication_operation_conflict` and `publication_commit_uncertain` (the outcomes of judging and binding a unit under its destination lock, `docs/publication.md`), `publication_vault_mismatch` and `publication_vault_conflict` (vault-before-output ordering), and `publication_commit_not_visible`, `publication_write_in_progress`, `publication_commit_in_progress`, `publication_recovery_in_progress`, `publication_attempt_sealed` and `publication_attempt_aborted` (the publishing sink's states). The file-access errors `CommitUncertain`, `LockUnavailable` and `LockTimeout` map to their publication codes, and `LeafTooLarge` to `decoy.publication_failed`.
+The thirteen F22 output-publication additions in the `decoy` namespace (outcome `publication`) are pending release. `publication_lock_unavailable`, `publication_lock_timeout` and `publication_commit_uncertain` are owned by `decoy_engine.fileaccess`, whose errors raise them; the other ten by `decoy_engine.publication`. They are: `publication_lock_unavailable`, `publication_lock_timeout`, `publication_target_occupied`, `publication_operation_conflict` and `publication_commit_uncertain` (the outcomes of judging and binding a unit under its destination lock, `docs/publication.md`), `publication_vault_mismatch` and `publication_vault_conflict` (vault-before-output ordering), and `publication_commit_not_visible`, `publication_write_in_progress`, `publication_commit_in_progress`, `publication_recovery_in_progress`, `publication_attempt_sealed` and `publication_attempt_aborted` (the publishing sink's states). The file-access errors `CommitUncertain`, `LockUnavailable` and `LockTimeout` map to their publication codes, and `LeafTooLarge` to `decoy.publication_failed`.
 
 An older consumer that reads a record whose identity it does not know (same registry major) degrades to `decoy.unknown_reason_from_future`, keeping the original identity in an uninterpreted context field. An unsupported major becomes `decoy.unsupported_schema_version`. Neither is ever read as success or as retry advice.
 
