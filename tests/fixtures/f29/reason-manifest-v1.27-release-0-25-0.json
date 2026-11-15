@@ -1,0 +1,281 @@
+{
+  "entries": [
+    {
+      "code": "canonical_json_invalid_string",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "CanonicalJsonError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "Canonical JSON strings must contain only Unicode scalar values.",
+      "symbol": "CANONICAL_JSON_INVALID_STRING"
+    },
+    {
+      "code": "config_value_not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "CanonicalJsonError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "A config value has a type JSON cannot hold; quote it as a string.",
+      "symbol": "CONFIG_VALUE_NOT_JSON"
+    },
+    {
+      "code": "declared_table_dropped",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ConfigError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "A table declared under tables has no work in the compiled plan; the run would pass its rows through unmasked.",
+      "symbol": "DECLARED_TABLE_DROPPED"
+    },
+    {
+      "code": "env_flag_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "EnvFlagError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "An environment flag has a value outside the accepted spellings.",
+      "symbol": "ENV_FLAG_INVALID"
+    },
+    {
+      "code": "loader_table_undeclared",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ConfigError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "A table masked through a source loader needs a sources entry; without one the run would pass its rows through unmasked.",
+      "symbol": "LOADER_TABLE_UNDECLARED"
+    },
+    {
+      "code": "namespace_placeholder_unset",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ConfigError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "A namespace still holds the placeholder a starter pipeline writes; set a real namespace.",
+      "symbol": "NAMESPACE_PLACEHOLDER_UNSET"
+    },
+    {
+      "code": "config_value_not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "A config value has a type JSON cannot hold; quote it as a string.",
+      "symbol": "CONFIG_VALUE_NOT_JSON"
+    },
+    {
+      "code": "post_scan_models_resident",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "decision",
+      "namespace": "route",
+      "owner": "decoy_engine.execution._pipeline_routing",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "success",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "info"
+        },
+        {
+          "outcome": "success",
+          "phase": "compile",
+          "retry": "never",
+          "severity": "info"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "The model Post-scan checks need the full frame resident.",
+      "symbol": "POST_SCAN_MODELS_RESIDENT"
+    },
+    {
+      "code": "post_scan_integrity_sink_unreadable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "The Post-scan integrity checks cannot read this sink back, so the run is refused.",
+      "symbol": "POST_SCAN_INTEGRITY_SINK_UNREADABLE"
+    },
+    {
+      "code": "post_scan_integrity_transforms_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "The Post-scan integrity checks cannot compare a transformed table with its source.",
+      "symbol": "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED"
+    },
+    {
+      "code": "post_scan_output_unreadable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.27.0",
+      "summary": "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not checked on the output.",
+      "symbol": "POST_SCAN_OUTPUT_UNREADABLE"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.27.0"
+}

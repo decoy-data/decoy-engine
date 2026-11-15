@@ -13,7 +13,7 @@ from typing import Any
 
 from tests.unit.publication import _doc
 
-# Hand-written canonical bytes: keys sorted, no whitespace, ASCII.
+# Hand-written canonical bytes: keys sorted, no whitespace, text as-is (this document is ASCII).
 GOLDEN = (
     b'{"artifacts":[{"path":"accounts.parquet","role":"table","rows":2,"sha256":"'
     + b"1" * 64

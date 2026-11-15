@@ -2,8 +2,9 @@
 
 Pattern: Git content addressing plus RFC 8785 canonical JSON (Git object model, GPL-2.0 docs; RFC 8785, IETF). See: https://www.rfc-editor.org/rfc/rfc8785.
 
-Every published unit carries ``_decoy_publication.json``. Its bytes are canonical JSON (sorted
-keys, fixed separators, ASCII, no NaN), so equal content has equal bytes and
+Every published unit carries ``_decoy_publication.json``. Its bytes are the engine's one canonical
+JSON form, ``decoy_engine._canonical.canonical_json_bytes`` (sorted keys, fixed separators, UTF-8
+text as-is, no NaN), so equal content has equal bytes and
 ``descriptor_digest`` is a plain SHA-256 of them. ``result_id`` names the output content alone,
 as Git names an object by its bytes: a domain-separated SHA-256 of the canonical artifact list.
 It leaves out ``operation_id`` (the retry handle, Delta Lake's transaction identifier) and the
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Final, Literal, NoReturn, Protocol
 
+from decoy_engine._canonical import CanonicalJsonError, canonical_json_bytes
 from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.publication._types import (
     OPERATION_ID_PATTERN,
@@ -319,10 +321,17 @@ def describe_declaration() -> tuple[tuple[str, str], ...]:
     return tuple((name, spec.describe()) for name, spec in DESCRIPTOR_FIELDS)
 
 
-def _canonical(obj: Any) -> bytes:
-    return json.dumps(
-        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("ascii")
+def _canonical_or_refuse(obj: Any) -> bytes:
+    """``canonical_json_bytes``; a value with no canonical form (an unpaired surrogate, as an
+    undecodable filename gives) is refused with the closed token, outside the handler."""
+    data = b""
+    try:
+        data = canonical_json_bytes(obj)
+    except CanonicalJsonError:
+        pass
+    if not data:
+        _refuse("not_canonical")
+    return data
 
 
 def _ordered(artifacts: Iterable[Artifact]) -> tuple[Artifact, ...]:
@@ -332,7 +341,7 @@ def _ordered(artifacts: Iterable[Artifact]) -> tuple[Artifact, ...]:
 def compute_result_id(artifacts: Iterable[Artifact]) -> str:
     """The content identity of a unit: its artifacts in path order, nothing else."""
     listed = [_ARTIFACT.dump(a) for a in _ordered(artifacts)]
-    return hashlib.sha256(RESULT_DOMAIN + _canonical(listed)).hexdigest()
+    return hashlib.sha256(RESULT_DOMAIN + _canonical_or_refuse(listed)).hexdigest()
 
 
 def descriptor_digest(data: bytes) -> str:
@@ -379,7 +388,7 @@ def encode_descriptor(descriptor: Descriptor) -> bytes:
     """The canonical bytes of ``descriptor``, refused on the same rules the reader applies."""
     document = _DOCUMENT.dump(descriptor)
     _check_document(document)
-    data = _canonical(document)
+    data = _canonical_or_refuse(document)
     if len(data) > MAX_DESCRIPTOR_BYTES:
         _refuse("oversize")
     return data
@@ -434,6 +443,6 @@ def decode_descriptor(data: bytes) -> Descriptor:
         _refuse("schema_missing")
     _SCHEMA_TAG.load(raw["schema"])
     descriptor = _check_document(raw)
-    if _canonical(_DOCUMENT.dump(descriptor)) != data:
+    if _canonical_or_refuse(_DOCUMENT.dump(descriptor)) != data:
         _refuse("not_canonical")
     return descriptor

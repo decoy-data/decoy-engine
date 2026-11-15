@@ -33,9 +33,10 @@ table (`decoy_engine.publication._sink_state`).
 
 from __future__ import annotations
 
+import functools
 import os
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -189,6 +190,8 @@ class StagedParquetWriter:
     ) -> None:
         self._stage = stage
         self.publication_evidence = evidence if evidence is not None else PublicationEvidence()
+        # Each table staged so far and its component, until the stage is published or discarded.
+        self.staged: dict[str, str] = {}
 
     def write(self, table: str, data: pa.Table) -> None:
         """Stage one masked table as Parquet.
@@ -285,6 +288,7 @@ class StagedParquetWriter:
 
         The size comes from the staged component's own descriptor: the stage has no path under
         a strict policy, and a name-based stat would race the publish rename."""
+        self.staged[table] = component
         try:
             fd = txn.open_file(component)
         except OSError:
@@ -410,6 +414,18 @@ class ParquetTransactionalSink:
         if self._machine.leave(exit_):  # a pending abort applied on this exit
             self._cleanup_staging()
 
+    def staged_tables(self) -> Mapping[str, Callable[[], int]]:
+        """Each table staged so far, before commit, with an opener that returns a new read-only
+        descriptor of its staged Parquet file (the caller closes it). Empty once the stage is
+        published or discarded. The post-scan gate reads the output back through these."""
+        txn = self._txn
+        if txn is None:
+            return {}
+        return {
+            table: functools.partial(txn.open_file, component)
+            for table, component in self._writer.staged.items()
+        }
+
     @property
     def spill_parent(self) -> Path:
         """The directory a streamed run's schema hold-back may spill into: the target's
@@ -481,6 +497,7 @@ class ParquetTransactionalSink:
         if self._txn is not None:
             # Rename succeeded: staging is now the target directory; clear state.
             self._txn = None
+            self._writer.staged.clear()
             evidence.state = PublicationState.PUBLISHED
             evidence.cleanup = CleanupState.NOT_NEEDED
         self._leave(Exit.PUBLISHED)
@@ -497,6 +514,7 @@ class ParquetTransactionalSink:
     def _cleanup_staging(self) -> None:
         evidence = self.publication_evidence
         txn, self._txn = self._txn, None
+        self._writer.staged.clear()
         if txn is None:
             return
         # Confirm by looking where there is a path to look at (the ambient policy). A strict
