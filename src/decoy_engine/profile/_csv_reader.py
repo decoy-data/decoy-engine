@@ -41,6 +41,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TextIO, overload
 
 import pandas as pd
+from pandas.io.common import infer_compression
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import pandas_lexeme_kwargs
@@ -577,4 +578,21 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
     return frame
 
 
-__all__ = ["CsvDialect", "read_csv_bytes", "read_csv_source", "resolve_csv_dialect"]
+def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
+    """What pandas infers from the name of `path` (`compression="infer"`): True when its
+    suffix names a compression format.
+
+    Taken from pandas' own inference, so a pandas upgrade changes the answer with it. It looks at
+    the name only and opens nothing. It makes no claim about `read_csv_source` under every file
+    policy: a rooted policy hands pandas a descriptor path with no suffix, so that read infers
+    no compression."""
+    return infer_compression(os.fspath(path), "infer") is not None
+
+
+__all__ = [
+    "CsvDialect",
+    "csv_is_compressed",
+    "read_csv_bytes",
+    "read_csv_source",
+    "resolve_csv_dialect",
+]

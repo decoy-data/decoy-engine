@@ -38,6 +38,7 @@ from decoy_engine.profile._declared_columns import (
     source_columns,
 )
 from decoy_engine.profile._hash import profile_hash
+from decoy_engine.profile._lazy_build import build_lazy_source
 from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import (
     LazySource,
@@ -71,6 +72,7 @@ __all__ = [
     "RowCount",
     "TableProfile",
     "build_declared_source",
+    "build_lazy_source",
     "build_profile_source",
     "check_columns_declared",
     "declaration_findings",
