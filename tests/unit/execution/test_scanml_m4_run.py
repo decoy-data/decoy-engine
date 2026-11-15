@@ -273,13 +273,8 @@ def test_a_deferred_gate_still_blocks_under_ner_fail(
     assert s.rows(result.quality_metrics["post_scan_integrity"], "ner")
 
 
-@pytest.mark.parametrize("hit_cells", [300, None], ids=["fail_finding", "pass_error"])
-def test_a_deferred_ner_block_leaves_no_quarantine_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hit_cells: int | None
-) -> None:
-    """The quarantine file carries source row values. A deferred gate under `ner_findings: fail`
-    can still block, so the write waits for its check: a blocked run leaves no file, and a run the
-    same check passes publishes it."""
+def _quarantine_loader_run(tmp_path: Path, post_scan: dict[str, Any]) -> tuple[Any, Path]:
+    """A loader run (deferred gate) whose `age` column quarantines one row."""
     from decoy_engine.execution import run_pipeline
 
     ages = ["badX" if i == 3 else str(10 + i % 70) for i in range(ROWS)]
@@ -287,10 +282,9 @@ def test_a_deferred_ner_block_leaves_no_quarantine_file(
     qpath = tmp_path / "q.jsonl"
     quarantine = {"enabled": True, "output_path": str(qpath), "triggers": ["format_error"]}
     age = {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}
-    post_scan = {"detectors": ["regex", "ner"], "ner_findings": "fail"}
+    cfg = _cfg(tmp_path, table, post_scan, extra_columns=(age,), quarantine=quarantine)
 
     def run() -> Any:
-        cfg = _cfg(tmp_path, table, post_scan, extra_columns=(age,), quarantine=quarantine)
         return run_pipeline(
             cfg,
             sources=None,
@@ -300,6 +294,19 @@ def test_a_deferred_ner_block_leaves_no_quarantine_file(
             auto_chunk=False,
         )
 
+    return run, qpath
+
+
+@pytest.mark.parametrize("hit_cells", [300, None], ids=["fail_finding", "pass_error"])
+def test_a_deferred_ner_block_leaves_no_quarantine_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hit_cells: int | None
+) -> None:
+    """The quarantine file carries source row values. A deferred gate under `ner_findings: fail`
+    can still block, so the write waits for its check: a blocked run leaves no file, and a run the
+    same check passes publishes it."""
+    run, qpath = _quarantine_loader_run(
+        tmp_path, {"detectors": ["regex", "ner"], "ner_findings": "fail"}
+    )
     _fake_ner(monkeypatch, hit_cells)
     with pytest.raises(s.blocked_error()) as caught:
         run()
@@ -309,6 +316,31 @@ def test_a_deferred_ner_block_leaves_no_quarantine_file(
     result = run()
     assert "post_scan_gate_deferred" in result.quality_metrics
     assert result.quality_metrics["quarantine"]["total_quarantined"] == 1
+    assert qpath.exists()
+
+
+@pytest.mark.parametrize("ner_findings", ["fail", "warn"])
+def test_only_a_deferred_ner_fail_holds_the_quarantine_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ner_findings: str
+) -> None:
+    """The hold is for the NER block alone: under `warn` a deferred check never blocks, so the
+    file is written before the check runs, as on any other deferred run."""
+    from decoy_engine.execution.pipeline import _post_scan
+
+    run, qpath = _quarantine_loader_run(
+        tmp_path, {"detectors": ["regex", "ner"], "ner_findings": ner_findings}
+    )
+    _fake_ner(monkeypatch, 0)
+    seen: list[bool] = []
+    real = _post_scan.run_post_mask
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(qpath.exists())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_post_scan, "run_post_mask", spy)
+    run()
+    assert seen == [ner_findings == "warn"], "only an NER-enforcing check runs before the write"
     assert qpath.exists()
 
 
