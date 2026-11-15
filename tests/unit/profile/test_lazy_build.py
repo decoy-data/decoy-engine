@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.fileaccess import _read
 from decoy_engine.profile import (
     FixedWidthLazySource,
     LazySource,
@@ -30,6 +31,8 @@ LAYOUT: dict[str, Any] = {"columns": [{"name": "s", "start": 0, "width": 4}]}
 
 def _descriptor(fmt: str, path: str, **extra: Any) -> dict[str, Any]:
     descriptor: dict[str, Any] = {"type": "file", "format": fmt, "path": path, **extra}
+    if fmt == "csv":
+        descriptor.setdefault("has_header", True)
     if fmt == "fixed_width":
         descriptor.setdefault("layout", LAYOUT)
     return descriptor
@@ -101,14 +104,7 @@ def test_a_column_names_file_is_read_under_its_own_position(tmp_path: Path) -> N
 def test_the_declaration_gate_sentry_lists_the_builder_and_the_names_file_read() -> None:
     assert "build_lazy_source" in gate.READER_NAMES
     assert "resolve_csv_dialect" in gate.READER_NAMES
-    assert ("profile/_lazy_build.py", "build_lazy_source", "resolve_csv_dialect") in gate.READERS or (
-        "profile/_lazy_build.py",
-        "_lazy_csv",
-        "resolve_csv_dialect",
-    ) in gate.READERS or any(
-        rel == "profile/_lazy_csv.py" and reader == "resolve_csv_dialect"
-        for rel, _, reader in gate.READERS
-    )
+    assert ("profile/_lazy_csv.py", "from_descriptor", "resolve_csv_dialect") in gate.READERS
 
 
 @pytest.mark.parametrize(
@@ -120,19 +116,26 @@ def test_the_declaration_gate_sentry_lists_the_builder_and_the_names_file_read()
         ({"type": "file", "format": "fixed_width", "path": "x.txt"}, "sources.t.layout"),
     ],
 )
-def test_a_refusal_names_the_config_position(descriptor: dict[str, Any], tail: str) -> None:
+def test_a_refusal_names_the_config_position(
+    descriptor: dict[str, Any], tail: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Outside the ambient (CLI) policy a message names the config position, never the value.
+    monkeypatch.setattr(_read, "is_ambient", lambda: False)
     with pytest.raises(ValueError, match=tail.replace(".", r"\.")) as err:
         build_lazy_source("t", descriptor)
     assert "x.txt" not in str(err.value)
 
 
-def test_the_resident_builder_keeps_its_classes_and_refusals(tmp_path: Path) -> None:
+def test_the_resident_builder_keeps_its_classes_and_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def build(fmt: str) -> object:
         return build_declared_source("t", _descriptor(fmt, str(tmp_path / "a.dat")))
 
     assert type(build("csv")) is CsvFileSource
     assert type(build("parquet")) is ParquetFileSource
     assert type(build("fixed_width")) is FixedWidthFileSource
+    monkeypatch.setattr(_read, "is_ambient", lambda: False)
     with pytest.raises(NotImplementedError, match=r"sources\.t\.format"):
         build_declared_source("t", {"type": "file", "format": "xlsx", "path": "x"})
     with pytest.raises(ValueError, match=r"sources\.t\.path"):
