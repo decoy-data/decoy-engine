@@ -295,8 +295,12 @@ open a v2 file was a legal pre-GA hard delete: seed-keyed vaults stopped opening
 
 Backed by `docs/determinism.md`, the `determinism/` module, the
 `validation/post/_checks/_determinism_sample.py` post-check, and the golden
-tests `tests/integration/golden/test_determinism_invariants.py` and
-`tests/native/test_determinism_goldens.py`. The files under
+tests that compare against stored values: `tests/unit/determinism/test_derive_vectors.py`
+(reference vectors), `tests/unit/determinism/test_hkdf.py` and
+`tests/native/test_draw_site_providers_golden.py` (a digest per draw site).
+`tests/integration/golden/test_determinism_invariants.py` and
+`tests/native/test_determinism_goldens.py` compare two runs of the current code, so they catch
+nondeterminism, not a changed derivation. The files under
 `tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact`
 have had no reader since the V1 graph runner was deleted; they are known limit
 `RGF1-KL-2` in [frozen surfaces](frozen-surfaces.md).
@@ -924,11 +928,13 @@ collection. The requirements are `StrategyRequirement` descriptors in `decoy_eng
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,
-`disguises/schema.py`), with a drift-guard test. A config pins a disguise
-version so its output stays stable.
+`disguises/schema.py`). A config pins a disguise version so its output stays
+stable. No test yet refuses an edit to a released version (known limit `RGF1-KL-3` in
+[frozen surfaces](frozen-surfaces.md)); the loader tests pin only the dated version field and the
+bundle set.
 
 **Rule:** **never edit a released disguise version.** Add a new dated version.
-The drift-guard test enforces this; do not "fix" a shipped disguise in place.
+Review enforces this until a test does; do not "fix" a shipped disguise in place.
 
 ## 4. The rules for adding a feature without breaking anyone
 
@@ -999,9 +1005,9 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
 
 ## 6. How the freeze is enforced (the machinery)
 
-- **Golden / determinism snapshots** (`tests/snapshots/golden`,
-  `tests/integration/golden/test_determinism_invariants.py`) catch **output
-  drift**. A baseline change is a red flag, not a refresh chore.
+- **Golden / determinism snapshots** (the read `tests/snapshots/golden` baselines,
+  `tests/unit/determinism/test_derive_vectors.py`,
+  `tests/native/test_draw_site_providers_golden.py`) catch **output drift**. A baseline change is a red flag, not a refresh chore.
 - **The cross-version compatibility corpus** (`tests/integration/compat_corpus/`).
   Golden tests regenerate artifacts with *current* code, so they do **not** catch
   *format* drift. The corpus freezes synthetic artifacts produced at a known

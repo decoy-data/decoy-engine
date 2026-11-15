@@ -442,7 +442,6 @@
     },
     "SampleMarker": {
       "additionalProperties": false,
-      "description": "A run made with `--sample`: the head rows asked for, the seed tables, the rows read from\neach edgeless table and the scratch folder (relative to the project) the outputs went to.",
       "properties": {
         "head_tables": {
           "additionalProperties": {
