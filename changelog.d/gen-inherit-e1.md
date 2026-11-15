@@ -25,3 +25,4 @@ denormalized attribute agrees with its parent on every row.
 - Numeric typing judges the copy with the column it copies: a child `formula` reading the copy as
   text keeps the parent column text in both tables. A per-parent aggregate over an inherited
   column is judged by the column it copies.
+- The support bundle's `StrategyKind` gains `inherit`, so a bundle can name the type.

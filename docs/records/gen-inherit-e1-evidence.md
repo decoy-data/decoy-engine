@@ -1,0 +1,486 @@
+# GEN-INHERIT E1 build evidence
+
+Status: built on `feat/gen-inherit-e1`. No census number, threshold, baseline or allowlist rose.
+One catalogue-procedure pin moved (the `GEN_KIND_TO_SITE` map digest, below). No existing digest,
+golden or snapshot value moved, and no expected output value was edited.
+
+Spec: `docs/plans/2026-11-10-gen-inherit.md` on `origin/plan/gen-inherit`, slice row E1 (the
+`inherit` generate type), and GEN-REL's "GEN-INHERIT handoff frozen by E3a"
+(`docs/plans/gen-rel.md` on `origin/plan/gen-rel`). The plans stay on their plan branches.
+
+## Heads and environment
+
+- Base: `feat/gen-inherit-e2` at `3d6838b5` (slice 5, PR #561; it holds GEN-REL E1 to E3b with
+  their review fixes and `origin/main` `c86ca58d`). Main is not merged into this branch.
+- Commits: `2ad64961` the `synthesize.py` move (refactor), `ae1de728` the red acceptance tests
+  (source as at `2ad64961`), `838033de` the feature, `f58c0452` the generate-surface count in
+  the proof-manifest sentry (test only). Final source head: `838033de`. This record and one
+  fragment bullet are added in a docs-only commit after `f58c0452`.
+- Gates and script checks: Python 3.10.20 (temporary venv under the session scratch directory,
+  synced with `uv sync --frozen --python 3.10 --extra dev --extra lint --extra vault --extra
+  cloud`, removed after; `decoy_engine.__file__` is the checkout's `src`), PyArrow 24.0.0,
+  DuckDB 1.5.4. The `layers` step ran in `.venv-layers`.
+- Move run, red run, sweeps and mutations: Python 3.11.18 (the `.venv`), PyArrow 24.0.0,
+  DuckDB 1.5.4.
+
+## Commit 1: the `synthesize.py` move (`2ad64961`)
+
+`generation/synthesize.py` was 597 lines (aim 600, hard max 700, no census entry). The E1
+dispatch and the typed `arrow_table` call add 9 lines, so a move came first. The top-level
+definitions of `synthesize.py` are frozen by `tests/fixtures/h1/definition_owners.json`, so only a
+function-body block moved: the table guard of the referenced-formula post-pass.
+`_generate_tables_from_config` tested `any(c.get("type") == "formula" and c.get("references")
+...)` before a lazy import of `fill_referenced_formula_columns`; that function already selects
+exactly those columns (`type == "formula"`, a non-empty `formula`, non-empty `references`) and
+returns before it imports pandas when there are none. The guard now lives only there: the call
+is made for every table and the lazy import stays (the Phase F post-pass witnesses patch the
+module attribute and still see every call that fills a column). Behavior is unchanged.
+`synthesize.py`: 597 to 588 at the move, 597 at the final head. No definition left the file.
+
+Green run of the move (Python 3.11, 4 workers, the move applied, before the red tests):
+`tests/unit/generation tests/parity tests/native/test_determinism_goldens.py
+tests/native/test_draw_site_inventory_coverage.py tests/native/test_draw_sites_catalogue_pinned.py
+tests/unit/test_wave_b_definition_owners.py tests/unit/test_check_pure_move_scope.py
+tests/unit/test_v2_generation.py tests/integration/golden tests/unit/transforms
+tests/sentry/test_module_size.py tests/sentry/defects tests/acceptance`: 12083 passed, 1261
+skipped, 37 xfailed, 0 failed.
+
+## Red first (commit `ae1de728`, source as at `2ad64961`)
+
+`.venv/bin/python -m pytest -p no:xdist tests/unit/generation/relational/test_inherit.py
+tests/unit/config/test_generate_options.py tests/sentry/defects/test_reference_pool_choke_point.py`:
+40 failed, 284 passed, no collection error.
+
+| File | Red |
+| --- | --- |
+| `tests/unit/generation/relational/test_inherit.py` (new; AT-1, AT-3 to AT-7, AT-13, AT-14) | 26 |
+| `tests/unit/config/test_generate_options.py` (AT-2) | 12 |
+| `tests/sentry/defects/test_reference_pool_choke_point.py` (AT-12) | 2 |
+
+Reasons:
+
+- Absent type: `inherit` is not in the `GenerateColumnConfig.type` Literal, so every config cell
+  is refused with pydantic `literal_error` at `type` instead of its own code and location (AT-2,
+  AT-3 config cells); `GENERATE_OPTIONS["inherit"]` and the registry rows are missing
+  (`KeyError`, the registered-inputs and minimal-column cells).
+- Absent dispatch: `_generate_column` raises `ValueError: unexpected generator type 'inherit'`
+  (AT-3 runtime cell, AT-4, AT-5, AT-6 run cells, AT-13, AT-14 output cells).
+- Wrong outcome: plan compile does not refuse a missing parent column or a later `via` (`DID NOT
+  RAISE PlanCompileError`); reproducibility does not exclude the copy of a fresh parent column;
+  pinned compile refuses with `pinned_type_not_allowlisted`; the streamed entry raises
+  `GenerationUnboundedError` (no width bound for the type); `numeric_plan` gives no `int64` for
+  the parent key under a copy; `reference_root` stops at the copy (`('claims', 'member_state')`
+  instead of `('members', 'state')`, `('lines', 'code')` instead of `('members', 'member_id')`).
+- Absent module: `generation/relational/_inherit.py` (`FileNotFoundError`, AT-12).
+
+Green on the base by design (2 cells), each tied to a mutation shown red below:
+
+| Cell | Why green on the base | Mutation |
+| --- | --- | --- |
+| `test_at14_without_a_yielded_edge_the_key_is_returned_unchanged` | the base never hops at `inherit` | M7 (dereference a missing resolved edge), M6 |
+| `test_at14_a_malformed_copy_with_no_via_is_its_own_root` | the same | M7 |
+
+Test change after the red commit (none weakened): `_tampered_pinned_plan` in `test_inherit.py`
+built its placeholder column as `{"name": "member_state", **STATE}`, so `STATE`'s own `name`
+won and the plan held no `member_state` column (`StopIteration` in the helper, not a product
+outcome). It is now `{**STATE, "name": "member_state"}`; the assertions are unchanged.
+
+## What the slice does
+
+- Type and registry (`config/_tables.py`, `config/_generate_options.py`): `inherit` joins the
+  Literal. Its registry entry: `via` is `OptionSpec(_str, ref_kind="column")` and `column` is
+  `OptionSpec(_str, ref_kind="column_via_reference", ref_context_key="via")` (inline phase), both
+  required. New `parent_lookup_keys(type_)` in the registry module returns the companion key of
+  each `column_via_reference` input of a type (`anchor_via`, `via`).
+- Config check (`config/_generate_relational.py`): `parent_lookup_problems` reads its lookup
+  options from `parent_lookup_keys` instead of the literal `anchor_via`, so `inherit.via` gets the
+  same `parent_key_problem` rule and codes (`config.generate_parent_lookup_key_not_unique`,
+  `config.generate_parent_lookup_self_reference`) at its own location. No new check.
+- Numeric typing root (`config/_generate_relational.py::reference_root`): an `inherit` column
+  hops to the source endpoint of the `column` edge yielded by `iter_generate_input_refs` (an edge
+  with a `source_key`, so resolved through the reference); with no such edge it returns the
+  incoming key. It reads neither `via` nor `reference_table`. `READERS` classifies `inherit.via`
+  (equality match to the parent key) and `inherit.column` (copies the cell and its type; the
+  copy joins the parent's group) as numeric-safe.
+- Generator (`generation/relational/_inherit.py`, new, 110 lines): `inherit_values` takes both
+  edges from the resolver, reads the parent table named on the `column` edge from `pools`, and
+  calls `_parent_lookup.lookup_parent_values` only. A caller that skipped validation and the plan
+  check gets a typed `ValueError` naming the column only (the per-parent aggregate's precedent;
+  no reason code). `inherit_types` gives each copy its parent column's `pa.DataType` from
+  `pools[...].schema`. Method cited in the docstring: SQL `LEFT JOIN` on a unique key and SDV
+  HMA1 parent-to-child propagation.
+- Resident route (`generation/synthesize.py`, `generation/_statistical_column.py`): the
+  dispatch beside `reference`; `arrow_table(..., parent_types=...)` builds each copy with
+  `pa.array(values, type=parent_type)`. Only the resident call passes it.
+- Routes: `ADMISSION_MATRIX["inherit"] = (False, "reads a parent row by FK; no cross-table row
+  seam")` (streamed declines, `family_declined:inherit`); `REJECTED_TYPES["inherit"]` carries
+  `plan.pinned_relational_option_unsupported`, and `_reject_column` raises it through the one
+  relational refusal builder, so pinned compile gives the plan code and pinned execute the runtime
+  twin (`GenerationError`).
+- Bounds (`generation/_bounds.py`): the copy's width bound is its root column's bound
+  (`reference_root`), so a bounded streamed call over a plan with a copy is not refused as
+  unbounded before it falls back.
+- Native registries (`execution/native/_determinism_protocol.py`,
+  `execution/native/_capabilities.py`): `GEN_KIND_TO_SITE["inherit"] = DETERMINISTIC_NO_DRAW`
+  and a `_GEN_ONLY` row (not row-local, global over the parent table, output type not static).
+  No draw site was added.
+
+## Mutations (final source head `838033de`, detached worktree; 14 of 14 red)
+
+Each was applied once in a detached worktree of `838033de` that imports its own `src`
+(`PYTHONPATH=<worktree>/src`; the harness printed `decoy_engine.__file__` under the worktree),
+the four test files `test_inherit.py`, `test_generate_options.py`,
+`test_reference_pool_choke_point.py` and `test_generate_input_edges.py` run (Python 3.11.18,
+4 workers), and the file restored; every anchor matched exactly once. Statuses are read from the
+harness's results JSON: 14 entries, 14 `RED`. The worktree was clean at the end and is removed.
+No witness starts a child process, so no mutation was applied in the checkout.
+
+| Id | Mutation (plan name first) | File | Red |
+| --- | --- | --- | --- |
+| M1 | draw a random parent row | `generation/relational/_inherit.py` | 8: AT-3 missing key, AT-4 (two), AT-5, AT-6 copy, AT-13, AT-14 int64 ... |
+| M2 | resolve `column` in the child | `_inherit.py` | 1: `test_at6_the_copy_reads_the_parent_and_not_a_same_named_column` |
+| M3 | restore `inherit.column` to sibling-only `ref_kind="column"` | `config/_generate_options.py` | 24: AT-3 (config and run cells), AT-4, AT-5, AT-6, AT-7 streamed, AT-13, AT-14, `test_the_registered_inputs_are_exactly_these`, and the sentry's descriptor and lookup-key manifests ... |
+| M4 | inline a dict lookup in the `inherit` generator | `_inherit.py` | 3: AT-12 `test_inherit_copies_through_the_parent_lookup_and_builds_no_index`, scan 6 `test_only_the_parent_lookup_builds_a_key_to_row_map_over_a_pool_column`, AT-3 missing key |
+| M5 | `_reference_root` stops at `inherit` | `config/_generate_relational.py` | 6: AT-14 root cells and formula cell, AT-7 streamed (unbounded), `test_the_acceptance_cells_hold_on_the_registered_descriptors[inherit-column]` |
+| M6 | restore manual `via` lookup plus `via.reference_table` and `inherit.column` resolution | `config/_generate_relational.py` | 5: `test_at14_the_root_hop_reads_the_yielded_edge`, `test_at14_without_a_yielded_edge_...`, scan 8 `test_only_the_via_resolver_follows_a_lookup_column_to_its_parent`, the resolver-caller inventory, the inherit descriptor cell |
+| M7 | dereference a missing resolved edge | `config/_generate_relational.py` | 3: `test_at14_without_a_yielded_edge_the_key_is_returned_unchanged`, `test_at14_a_malformed_copy_with_no_via_is_its_own_root`, the inherit descriptor cell |
+| M8 | allow a non-unique key | `config/_generate_relational.py` | 3: the AT-3 not-unique cells |
+| M9 | resolve the table again at run from `column` | `_inherit.py` | 1: `test_at6_the_copy_reads_the_parent_and_not_a_same_named_column` |
+| M10 | drop the parent types so Arrow infers | `generation/synthesize.py` | 1: `test_at4_the_copy_has_the_parent_columns_type` |
+| M11 | pinned refuses `inherit` with a plain type code | `generation/_pinned_compile.py` | 2: AT-7 pinned compile and execute |
+| M12 | streaming admits `inherit` | `generation/_admission.py` | 2: AT-1, AT-7 streamed |
+| M13 | the copy's width bound is unbounded | `generation/_bounds.py` | 1: AT-7 streamed |
+| M14 | `inherit.via` is a numeric-unsafe reader | `generation/_numeric_typing.py` | 2: AT-1, `test_at14_without_a_text_reader_the_key_and_its_copy_are_int64` |
+
+M1 to M10 are the plan's E1 mutations, in the brief's order; M11 to M14 cover the pinned twin,
+the streamed decline, the bound and the reader classification. Under M3 the AT-3 config cells go
+red too: the lookup check reads its options from the `column_via_reference` descriptors, so a
+copy whose `column` is a sibling read is no lookup and gets no key check, as intended.
+
+## Draw-site catalogue (catalogue procedure)
+
+`inherit` draws nothing and adds no draw site; `DRAW_SITES`, its order and each entry digest are
+unchanged. `GEN_KIND_TO_SITE` gains `"inherit": DETERMINISTIC_NO_DRAW`, so its map digest in
+`tests/native/test_draw_sites_catalogue_pinned.py` was re-pinned by the file's procedure (a
+comment line naming the change, as GEN-TYPES E1 and E3 did): `2174d2a8...` to `b3836a41...`.
+The static draw-site scan needs no allowlist entry (`_inherit.py` holds no RNG token).
+
+## Execution files and the seam sentry
+
+`execution/native/_determinism_protocol.py` and `execution/native/_capabilities.py` changed, one
+data entry each, as the plan's Placement row lists. Both are already on the permitted lists of
+`tests/sentry/test_physical_seam_disconnection.py`; the list that records reasons gains a comment
+line for this change. Neither imports anything from `execution.physical`. No other `execution/`
+file changed.
+
+## Files outside the plan's E1 list
+
+- `generation/_referenced_formula.py` (the move; docstring only).
+- `config/_generate_relational.py` beyond `reference_root`: `parent_lookup_problems` reads its
+  options from the registry so `inherit.via` gets the shared key rule (the plan says the rule is
+  shared; the check was keyed to the literal `anchor_via`).
+- `support/_shape.py`: `StrategyKind.INHERIT`. `tests/unit/support/test_bundle_fields.py`
+  requires the support-bundle enum to mirror every generate type (the `lookup` precedent, #550).
+- `docs/proof-manifest.json` (regenerated by `scripts/gen_proof_manifest.py`: generate surface
+  14 to 15, `inherit` listed) and `docs/capability-matrix.md` (regenerated by
+  `scripts/gen_capability_matrix.py`).
+- Test support for the type enumerations: `tests/parity/_f0_matrix.py` (a `DEFERRED` row),
+  `tests/parity/_f_audit_matrix.py` and `_f_audit_cells.py` (an `inherit` row and cell),
+  `tests/fixtures/gen_strict/generate-config-identity.json` (additive: `t1.key`, `t2.r4`,
+  `t2.ih`; every existing dump entry and fingerprint unchanged), and the sentry manifest of
+  `tests/sentry/defects/test_generate_input_edges.py` (resolver callers `_inherit._edges` and
+  `reference_root`, lookup caller `inherit_values`, lookup keys `anchor_via` and `via`, and the
+  `inherit.column` descriptor cells).
+- `CODEMAP.md` (the Generation row names the copy), `docs/strategies.md`.
+
+`READER_FILES` did not need widening: `_inherit.py` reads no option key literally (both inputs
+come from the resolved edges). Module counts: `generation/` gains no direct module (`_inherit.py`
+is in `generation/relational/`); `config/` and `plan/` gain none.
+
+## Pre-existing tests whose expectation changed
+
+| Test | Before | Now | Why |
+| --- | --- | --- | --- |
+| `tests/parity/test_phase_f_audit_matrix.py::test_the_literal_has_fifteen_kinds_...` (renamed from `fourteen`) | 14 kinds | 15 | the new type |
+| `tests/unit/generation/test_pinned_generation.py::test_pinnable_allowlist_covers_every_config_type` | `REJECTED_TYPES == {faker, formula, lookup}` | `+ inherit` | the plan's pinned refusal |
+| `tests/unit/generation/unique/test_gu_e2_config.py` `VALID` | 14 types | `+ inherit` | the registry-remainder cell; `unique: true` on `inherit` is refused |
+| `tests/unit/config/test_generate_options.py::test_the_registered_inputs_are_exactly_these` | no `inherit` | `inherit.via`, `inherit.column` | AT-2 |
+| `tests/sentry/defects/test_generate_input_edges.py` | lookup keys `[anchor_via]`; three cross-table descriptors | `[anchor_via, via]`; four, with cells | the plan's registration |
+| `tests/native/test_draw_sites_catalogue_pinned.py` | `GEN_KIND_TO_SITE` digest `2174d2a8...` | `b3836a41...` | catalogue procedure |
+
+No masked-output test changed and no expected output value was edited.
+
+## Line counts
+
+Source, final head (base in brackets): `generation/synthesize.py` 597 (597; 588 after the move),
+`config/_generate_relational.py` 577 (562), `config/_generate_options.py` 574 (549),
+`execution/native/_capabilities.py` 560 (548), `config/_tables.py` 495 (494),
+`generation/_bounds.py` 431 (419), `generation/_pinned_compile.py` 413 (403),
+`support/_shape.py` 395, `generation/_numeric_typing.py` 333 (327), `generation/_admission.py`
+296 (295), `generation/_statistical_column.py` 222 (217),
+`execution/native/_determinism_protocol.py` 177 (176), `generation/relational/_inherit.py` 110
+(new), `generation/_referenced_formula.py` 76. At or above 550: `synthesize.py` 597,
+`_generate_relational.py` 577, `_generate_options.py` 574, `_capabilities.py` 560. All under the
+600 aim; no census entry added or raised. Tests at or above 550: `test_generate_options.py` 1013,
+`test_pinned_generation.py` 855, `test_generate_input_edges.py` 774, `_f_audit_cells.py` 710,
+`test_inherit.py` 604 (new).
+
+## Gates
+
+`GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline --steps
+ruff,format,mypy,sentry,layers,licenses,tests <the 154 T1 paths below>`, Python 3.10.20
+(temporary venv, `DECOY_VENV`), PyArrow 24.0.0, DuckDB 1.5.4, `origin/main` at `13c8e62b`. The
+baseline reruns only the steps that failed on the branch, in a detached worktree of
+`origin/main` with the same venv.
+
+| Step | Run 1 (`838033de`) | Run 2 (`f58c0452`, final head of code and tests) | Run 3 (`f58c0452`, `tests` only) |
+| --- | --- | --- | --- |
+| ruff | pass | pass | |
+| format | pass | pass | |
+| mypy | pass | pass | |
+| sentry | 5519 passed, 1 failed, 2 skipped | 5520 passed, 0 failed, 2 skipped | |
+| layers | 15 passed, 0 failed | 15 passed, 0 failed | |
+| licenses | 63 passed, 0 failed | 63 passed, 0 failed | |
+| tests | 13525 passed, 0 failed, 351 skipped | 13524 passed, 1 failed, 351 skipped | 13524 passed, 1 failed, 351 skipped |
+| baseline (`origin/main`) | sentry: 5612 passed, 0 failed | tests: 12893 passed, 1 failed | tests: 12893 passed, 1 failed |
+
+- Run 1, sentry: `tests/sentry/test_proof_manifest.py::test_surface_counts_match_capability_matrix`
+  (branch only) counts the generate surface by hand (14). It is a pre-existing test whose
+  expectation follows the new type, updated by its own procedure (a dated comment, 14 to 15, as
+  GEN-TYPES E1 and E3 did) in `f58c0452`, a test-only commit. Run 2's sentry step passes.
+- Runs 2 and 3, tests:
+  `tests/unit/execution/test_byte_estimate_routing.py::TestEndToEndWiring::test_width_change_flips_route_at_a_fixed_budget_and_row_count`
+  hit `Timeout (>300.0s) from pytest-timeout` on the branch and passed on `origin/main` (6.4 s)
+  in both baselines. It is the test slice 5 recorded timing out on the branch and on main alike.
+  It is a mask-only routing test (200 000-row parquet sources, faker masks, a fidelity report)
+  and reaches no code this slice changed. On the same source it passed in run 1's tests step;
+  on `f58c0452` it passed alone (6.4 s, gate venv), with the relational, config and audit tests
+  under 4 workers (5.5 s), and in a direct 4-worker run of every non-serial T1 path (13515
+  passed, 0 failed, 350 skipped). It is recorded as an intermittent timeout, branch-only in two
+  of four full T1 runs; I could not reproduce it outside the gate script and did not find a cause.
+  The test was not skipped, weakened or rerun with a longer timeout in the gate.
+- `tests/unit/test_version_agreement.py::test_installed_metadata_matches_pyproject` fails only on
+  the baseline worktree: the shared venv's editable install reports the branch's 0.23.0 while
+  `origin/main`'s `pyproject.toml` says 0.26.0. It passes on the branch.
+- Failure sets: run 2 branch 1, baseline 1, branch-only 1 (the timeout above); run 3 the same.
+  Other than that intermittent timeout there is no branch failure.
+- Draw-site results (runs 1 to 3): `tests/native/test_draw_site_inventory_coverage.py` 12 of 12
+  passed (`test_static_scan_finds_no_uncatalogued_draw_site` passed) and
+  `tests/native/test_draw_sites_catalogue_pinned.py` 5 of 5 passed (with the re-pinned map digest).
+
+### Script checks
+
+On `f58c0452` (clean tree), each against `origin/main` (`13c8e62b`) and against `c86ca58d`
+(the main this branch holds through slice 4; main is not merged here).
+
+| Check | `origin/main` (`13c8e62b`) | `c86ca58d` |
+| --- | --- | --- |
+| `registry_renumber.py --check --main` | 2 (`main-not-merged`) | 0 (`registry consistent`) |
+| `ratchet_check.py --base` | 1 | 0 |
+| `check_fragment.py --base` | 0 | 0 |
+| `reason_release_pin.py --check` | 0 (`reason release pin current`) | (no base) |
+
+The exit 2 is the known main-not-merged effect. The ratchet exit 1 names two
+`f29-producer-inventory` keys (`_text_mask.py` / `_mask_group_c.py`
+`ner_model_version_mismatch`) that `origin/main` removed from its own baseline in #577; this
+branch does not touch that file or those modules, so it clears on the main merge.
+
+
+## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
+
+```
+tests/acceptance/test_f06_route_cells.py
+tests/acceptance/test_f06_route_parity.py
+tests/fileaccess/test_char_error_text.py
+tests/fileaccess/test_x2_locators.py
+tests/fileaccess/test_x3_classification.py
+tests/generation
+tests/integration/compat_corpus/test_compat_corpus.py
+tests/integration/golden
+tests/integration/golden/test_determinism_invariants.py
+tests/integration/golden/test_fidelity_report_golden.py
+tests/native/test_c8_iii_d2_native_positional_when.py
+tests/native/test_capabilities.py
+tests/native/test_chunked_categorical_admission.py
+tests/native/test_chunked_entry_rev9_read.py
+tests/native/test_chunked_entry_side_channels.py
+tests/native/test_chunked_nondet_categorical_admission.py
+tests/native/test_column_access_surfaces.py
+tests/native/test_determinism_goldens.py
+tests/native/test_determinism_protocol.py
+tests/native/test_draw_site_providers_golden.py
+tests/native/test_draw_sites_catalogue_pinned.py
+tests/native/test_pooled_faker_draw_sites.py
+tests/native/test_unconfigured_passthrough_read.py
+tests/parity/test_numeric_typing_fk.py
+tests/parity/test_numeric_typing_readers.py
+tests/parity/test_phase_d_d1b2_categorical_disposition.py
+tests/parity/test_phase_d_d2c_ii_cat_seq.py
+tests/parity/test_phase_f_audit_matrix.py
+tests/parity/test_phase_f_audit_no_legacy.py
+tests/parity/test_phase_f_audit_vacuity.py
+tests/parity/test_phase_f_audit_zero_companion.py
+tests/parity/test_phase_f_f0_comparator.py
+tests/parity/test_phase_f_f0_composite_repeatability.py
+tests/parity/test_phase_f_f0_invariants.py
+tests/parity/test_phase_f_f0_matrix.py
+tests/parity/test_phase_f_f0_oracle.py
+tests/parity/test_phase_f_f0_witness.py
+tests/parity/test_phase_f_f2_mixed_admission.py
+tests/parity/test_phase_f_f2_mixed_backend_witness.py
+tests/parity/test_phase_f_f2_mixed_parity.py
+tests/parity/test_phase_f_f2_mixed_publish.py
+tests/parity/test_phase_f_f2_mixed_sweep.py
+tests/parity/test_phase_f_fr0_mixed_stitch.py
+tests/parity/test_phase_f_fr0_refreeze.py
+tests/parity/test_phase_f_fr0_route_independence.py
+tests/parity/test_phase_f_fr0_witness.py
+tests/physical/test_characterization_synthesis.py
+tests/physical/test_shadow_full_frame.py
+tests/physical/test_shadow_generation.py
+tests/physical/test_shadow_generation_faker.py
+tests/physical/test_unified_slice_positional.py
+tests/secret_providers/test_keyed_columns.py
+tests/unit/config
+tests/unit/determinism/test_derive_vectors.py
+tests/unit/execution/test_c8_iii_c_plan_when.py
+tests/unit/execution/test_categorical_weighted.py
+tests/unit/execution/test_created_target_contract.py
+tests/unit/execution/test_dgrn_windowed_date.py
+tests/unit/execution/test_group_key_chunked.py
+tests/unit/execution/test_multi_table_gates.py
+tests/unit/execution/test_ooc_cross_row_decline_message.py
+tests/unit/execution/test_pipeline_generation_contract.py
+tests/unit/execution/test_probe.py
+tests/unit/execution/test_probe_scale.py
+tests/unit/execution/test_probe_scale_kills.py
+tests/unit/execution/test_r3_failure_publication_trace.py
+tests/unit/execution/test_r3_public_signature_freeze.py
+tests/unit/execution/test_r3_route_executors.py
+tests/unit/execution/test_r3_within_route_baseline.py
+tests/unit/execution/test_technique_class.py
+tests/unit/execution/test_text_mask_chunked.py
+tests/unit/expressions
+tests/unit/generation
+tests/unit/generation/test_generate_determinism_ratchets.py
+tests/unit/generation/unique/test_gen_unique_old_input_bytes.py
+tests/unit/generators
+tests/unit/plan
+tests/unit/profiling/test_snapshot_cell_format.py
+tests/unit/profiling/test_snapshot_values.py
+tests/unit/profiling/test_snapshot_values_numeric_shape.py
+tests/unit/providers_v2/test_distribution_behavior_metadata.py
+tests/unit/quality/test_dp_flag_e2e.py
+tests/unit/quality/test_retention_gate.py
+tests/unit/quality/test_snapshot_fanout.py
+tests/unit/reasons
+tests/unit/relationships
+tests/unit/run_result
+tests/unit/scripts
+tests/unit/strategy_catalog
+tests/unit/test_check_pure_move_scope.py
+tests/unit/test_de02_keyprovider.py
+tests/unit/test_numpy_generic_timedelta.py
+tests/unit/test_public_api.py
+tests/unit/test_public_api_v2_choke_points.py
+tests/unit/test_r3_10_generation_key_contract.py
+tests/unit/test_reason_manifest_policy.py
+tests/unit/test_reason_registry.py
+tests/unit/test_reason_release_pin.py
+tests/unit/test_registry_renumber.py
+tests/unit/test_v2_generation.py
+tests/unit/test_wave_b_definition_owners.py
+tests/unit/transforms
+tests/native/test_draw_site_inventory_coverage.py
+tests/unit/execution/test_mem_estimate.py
+tests/unit/execution/test_byte_estimate_routing.py
+tests/unit/execution/test_mem_estimate_arrow_types.py
+tests/unit/execution/test_mem_estimate_nullable_metadata.py
+tests/unit/execution/test_pipeline_routing_route_kills.py
+tests/integration/test_byte_estimate_arrow_types_e2e.py
+tests/unit/generation/test_fr0_budget.py
+tests/unit/generation/relational/test_aggregate.py
+tests/unit/config/test_generate_relational.py
+tests/unit/expressions/test_column_refs.py
+tests/unit/expressions/test_lark_if_lazy.py
+tests/unit/transforms/test_derived.py
+tests/unit/test_expressions.py
+tests/unit/execution/test_derived_strategy.py
+tests/unit/execution/derived_visibility
+tests/unit/execution/test_engine_transforms_routes.py
+tests/unit/execution/test_runner.py
+tests/native/test_draw_sites_assembly.py
+tests/native/test_c1b_i_metadata_inventory.py
+tests/native/test_c5b_i_metadata_inventory.py
+tests/unit/plan/checks/test_generate_columns.py
+tests/unit/generation/test_conditional_categorical.py
+tests/unit/generation/test_fr0_reproducibility.py
+tests/connectors/test_community_connector_example.py
+tests/fileaccess/test_nested_explicit_policy.py
+tests/integration/test_fk_sequential_row_error_leak.py
+tests/native/test_native_plan.py
+tests/native/test_native_plan_config_aware.py
+tests/native/test_operator_registry.py
+tests/native/test_pool_quality.py
+tests/parity/test_phase_d_d2a_seq_baseline.py
+tests/parity/test_phase_d_d2a_seq_native.py
+tests/parity/test_phase_d_d2b_seq_shapes.py
+tests/parity/test_phase_d_d2c_fpe_seq.py
+tests/parity/test_phase_d_d2c_gap_closure.py
+tests/parity/test_phase_d_dcomp_composite_route.py
+tests/parity/test_phase_d_dcomp_composite_seq.py
+tests/parity/test_phase_d_fpe_int_key_seq.py
+tests/parity/test_phase_d_fpe_key_route.py
+tests/parity/test_phase_d_fpe_key_seq.py
+tests/parity/test_phase_d_fpe_key_seq_real.py
+tests/physical/test_bench_compare_harness.py
+tests/unit/detection_verification/postscan/test_fk_findings.py
+tests/unit/execution/test_expression_log_redaction.py
+tests/unit/execution/test_mixed_admission_core.py
+tests/unit/execution/test_out_of_core_join_chunked.py
+tests/unit/profile/test_dataclass_shapes.py
+tests/unit/providers_v2/test_registry.py
+tests/unit/support/test_bundle_fields.py
+tests/unit/support/test_shape_cells.py
+tests/unit/test_version_agreement.py
+```
+
+slice 5's 126 paths (its `gate_paths.txt`, including
+`tests/unit/execution/test_byte_estimate_routing.py`), the 27 test files outside them that import
+or name a module this slice changes (a grep for the touched modules and symbols), and
+`tests/unit/test_version_agreement.py`. Every other test file the slice adds or changes is
+inside a listed directory or in `tests/sentry`; the `sentry` step runs all of `tests/sentry`
+and the `layers` step `tests/sentry/layout/test_import_layers.py`.
+
+## Not run
+
+- The full suite; `tests/perf`; `testflight`; `tests/physical`, `tests/unit/execution`,
+  `tests/native` and `tests/parity` beyond the T1 paths (the earlier Python 3.11 sweep below
+  covered all of `tests/parity`, `tests/native`, `tests/unit` except `tests/unit/execution` and
+  `tests/unit/scripts`, `tests/integration/golden`, `tests/acceptance` and `tests/generation`).
+- The gate steps under Python 3.11; gates against a branch holding the current `origin/main`.
+- The full gate on the docs-only commit that adds this record and the fragment bullet; on it
+  `tests/sentry` (without the import-layer test) and the changelog ratchet test passed (5490
+  passed, 0 failed), and `check_fragment.py` exits 0 against both bases.
+
+Sweep (Python 3.11, before the support-enum, audit-matrix and pin updates): 9 failed, 25893
+passed; eight were the type enumerations fixed above, and
+`tests/unit/test_version_agreement.py::test_installed_metadata_matches_pyproject` failed because
+the `.venv` holds a stale 0.22.0 install (it passes in the gate venv). A first attempt that also
+ran `tests/unit/scripts` filled the disk (those tests copy the repository per case) and was
+discarded, as was a first direct T1 run without `tmp_path_retention_policy=failed`.
+
+## V2-LOG
+
+- `inherit` takes no `output_type`; a user who wants the copy cast differently from its parent
+  derives a column from it.
+- Pinned mode refuses `inherit` (the plan's non-goal); a pinned lookup seam would admit it.
+- The streamed route declines it; a cross-table row seam in the batch core would admit it.
+- `parent_lookup_keys` lives in the registry module and is not exported from `config`; the
+  public catalog does not say which option is a lookup column.
+- A caller that skips validation and the plan check gets an uncoded `ValueError` naming the
+  column (as the per-parent aggregate does); a coded run-time twin would need a reason code.
+- `tests/unit/scripts` copies the repository per case and can fill a 26 GB disk under a broad
+  sweep; keep it out of broad local runs.
+- The pre-existing `ratchet_check.py --base origin/main` finding (keys `origin/main` #577 removed
+  from `f29-producer-inventory`, a file this stack does not touch) clears on the main merge.
