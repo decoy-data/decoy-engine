@@ -2,7 +2,9 @@
 
 `PipelineConfig` is read from YAML, so its schema is the validation one; `RunResult` is written,
 so its schema is the serialization one. The files are meant to be read in review, hence the
-indented sorted form rather than the compact digest bytes of `_canonical`.
+indented sorted form rather than the compact digest bytes of `_canonical`. Descriptions (the
+model docstrings) are left out: the snapshot pins fields and types, and a docstring edit is not a
+frozen-surface change.
 
 `--check` prints one line per file that differs: the file name and the RFC 6901 pointer of the
 first difference in sorted key order. It never prints a value, so a schema that picked up a
@@ -27,9 +29,18 @@ def schemas() -> dict[str, dict[str, Any]]:
     from decoy_engine import PipelineConfig, RunResult
 
     return {
-        "pipeline-config.schema.json": PipelineConfig.model_json_schema(mode="validation"),
-        "run-result.schema.json": RunResult.model_json_schema(mode="serialization"),
+        "pipeline-config.schema.json": _shape(PipelineConfig.model_json_schema(mode="validation")),
+        "run-result.schema.json": _shape(RunResult.model_json_schema(mode="serialization")),
     }
+
+
+def _shape(node: Any) -> Any:
+    """``node`` without prose; a field named `description` is an object and stays."""
+    if isinstance(node, dict):
+        return {
+            k: _shape(v) for k, v in node.items() if not (k == "description" and isinstance(v, str))
+        }
+    return [_shape(v) for v in node] if isinstance(node, list) else node
 
 
 def render(document: dict[str, Any]) -> str:
