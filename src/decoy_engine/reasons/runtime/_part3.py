@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -51,6 +51,8 @@ __all__ = [
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NUMEXPR_REQUIRED",
+    "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
+    "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
     "RECORD_CORRUPT",
     "RECORD_INVALID",
     "RECORD_KIND_RESERVED",
@@ -187,14 +189,14 @@ TOKENIZE_VAULT_SCOPE_REQUIRED = _d(
     "The token vault writer has no valid derivation scope (16 to 64 bytes).",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.26.0",
 )
 TOKEN_VAULT_DERIVATION_UNSUPPORTED = _d(
     "token_vault_derivation_unsupported",
     "The token vault was created before vault-scoped token derivation; use a new vault.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.26.0",
 )
 TOP_CODE_BOUNDS_UNRESOLVABLE = _d("top_code_bounds_unresolvable", "Top code bounds unresolvable.")
 TOP_CODE_NON_INTEGRAL_OBJECT_COLUMN = _d(
@@ -274,14 +276,14 @@ VAULT_KEY_MISMATCH = _d(
 VAULT_COMMIT_FAILED = _d(
     "vault_commit_failed",
     "The vault could not be written durably; publish no output that it would reverse.",
-    since=UNRELEASED,
+    since="1.26.0",
 )
 VAULT_EXISTS = _d(
     "vault_exists",
     "A vault already exists at the target; choose a new path or remove it with its outputs.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.26.0",
 )
 VAULT_PROTOCOL_VERSION_MISMATCH = _d(
     "vault_protocol_version_mismatch",
@@ -380,3 +382,21 @@ RECORD_KIND_RESERVED = _d("record_kind_reserved", "Record kind reserved.", since
 _d = _catalog.runtime("ScanSourceError")
 
 SCAN_SOURCE_FAILED = _d("scan_source_failed", "A table could not be scanned.", since="1.10.0")
+
+# An explicit `post_scan.integrity: true` is never run unchecked: these refuse what it cannot judge.
+_d = _catalog.runtime("ExecutionError")
+
+POST_SCAN_INTEGRITY_SINK_UNREADABLE = _d(
+    "post_scan_integrity_sink_unreadable",
+    "The Post-scan integrity checks cannot read this sink back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)
+POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
+    "post_scan_integrity_transforms_unsupported",
+    "The Post-scan integrity checks cannot compare a transformed table with its source.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)

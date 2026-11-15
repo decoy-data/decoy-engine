@@ -24,6 +24,7 @@ __all__ = [
     "ORPHAN_FK",
     "OUT_OF_CORE_CALLER_MANAGED_RESIDENCY",
     "POOL_DOMINATES_CACHE",
+    "POST_SCAN_OUTPUT_UNREADABLE",
     "REFERENCE_PARENT_POOL_EMPTY",
     "SCAN_CRASHED",
     "SCAN_HEADER_SUSPECT",
@@ -66,6 +67,12 @@ OUT_OF_CORE_CALLER_MANAGED_RESIDENCY = _d(
     "out_of_core_caller_managed_residency", "Out of core caller managed residency."
 )
 POOL_DOMINATES_CACHE = _d("pool_dominates_cache", "Pool dominates cache.")
+POST_SCAN_OUTPUT_UNREADABLE = _d(
+    "post_scan_output_unreadable",
+    "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not "
+    "checked on the output.",
+    since="1.27.0",
+)
 REFERENCE_PARENT_POOL_EMPTY = _d(
     "reference_parent_pool_empty",
     "Reference column is null because its parent column has no keys.",

@@ -26,6 +26,7 @@ __all__ = [
     "FPE__UNENCRYPTABLE_DOMAIN",
     "FPE__UNENCRYPTABLE_LENGTH",
     "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT",
+    "GENERATE_FORMULA_EVALUATION_FAILED",
     "GENERATE_PER_PARENT_INFEASIBLE",
     "GENERATION_BUDGET_EXCEEDED",
     "GENERATION_COLUMN_UNBOUNDED",
@@ -315,6 +316,14 @@ SOURCE_REQUIRED_FOR_CARDINALITY_MODE = _d(
 TIMEZONE_NAIVE_DATETIME = _d("timezone_naive_datetime", "Timezone naive datetime.")
 UNIQUENESS_IMPOSSIBLE = _d("uniqueness_impossible", "Uniqueness impossible.")
 UNKNOWN_CARDINALITY_MODE = _d("unknown_cardinality_mode", "Unknown cardinality mode.")
+
+GENERATE_FORMULA_EVALUATION_FAILED = _d(
+    "generate_formula_evaluation_failed",
+    "A generate formula could not be evaluated for a row.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.26.0",
+)
 
 # Reference-draw refusals. A summary is the whole message beside the table and column names, so
 # none names a key, count, bound or weight.

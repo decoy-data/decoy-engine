@@ -9,6 +9,221 @@ minimum engine version it was tested against via its
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-14
+
+### Breaking for consumers
+
+- a config where two declared tables share one target destination now refuses (`config/target_shared_destination`); give each table its own target. `config.target_identity` is removed in favour of `config.duplicate_target_groups`.
+
+### Changed (one destination per table, DUP-DEST-E1, 2026-11-14)
+
+`PipelineConfig` validation refuses (`config/target_shared_destination`) two declared tables whose targets write to one destination, so the second write can no longer replace the first. File paths compare after normalization unless they contain `..`, S3 targets by endpoint, bucket and key, GCS targets by bucket and object. Targets whose key names no declared table are ignored. `decoy_engine.config.duplicate_target_groups` is the one grouping function.
+
+### Changed (one fixed-width parser, SAMPLE-SE3a, 2026-11-14)
+
+Every fixed-width read (profiling, sampling, the full read and the row count) now goes through one record parser, `profile._fixed_width_reader.iter_fixed_width_records`, which is also the one place the file is opened. A failing record is reported with the same value-free parse error on every path. `row_count` for a fixed-width source is a framing pass: it checks UTF-8, short and overlong records but does not cast values, so a bad value no longer fails the count. A missing file or a directory is reported before the layout is validated. A sentry keeps other modules from parsing fixed-width records on their own.
+
+## [0.25.0] - 2026-11-14
+
+### Breaking for consumers
+
+- a namespace beginning `decoy-set-namespace-` on a column or a relationship now refuses (`config/namespace_placeholder_unset`); no shipped config uses the prefix.
+- a table masked through `source_loader` with strategies under `tables:` and no `sources:` entry now refuses (`config/loader_table_undeclared`) instead of returning the loader's rows unmasked.
+- environment flags read one accepted set (`1`, `true`, `yes`, `on`, `0`, `false`, `no`, `off`); an unknown `DECOY_PACK_REQUIRE_SIGNATURE` raises `EnvFlagError` instead of `ModelPackLoadError`, and the custom provider folder variable `CUSTOM_PROVIDERS_DIR` is now `DECOY_CUSTOM_PROVIDERS_DIR`.
+- a config holding a YAML date or timestamp, NaN, Infinity or an unpaired surrogate is now refused at plan compile (`plan/config_value_not_json`); quote the value or remove it.
+- every digest, HMAC and signature input is built by one canonical writer, so `pipeline_config_hash`, the phase envelope bytes, the pinned-plan fingerprint, the model pack signature scope, `profile_hash`, `PinnedEnvelope.digest`, the reproducibility `config_digest` (non-ASCII content), the physical-input identity hash and the subset request fingerprint change; a pinned plan or resume fingerprint from an older engine is refused with its existing mismatch code and must be rebuilt, and a model pack signed over non-ASCII manifest text must be signed again.
+- with `post_scan.integrity: true`, a sink the gate cannot read back (anything but the engine's own Parquet sink) now refuses the run before any sink is written (`runtime/post_scan_integrity_sink_unreadable`).
+
+### Added (starter_config builder, SCAN-MULTI S3-engine.2, 2026-11-14)
+
+`profiling.starter_config(scan, *, baseline_path, targets, seed, relationships)` turns a `ScanSet` into one starter pipeline config (`StarterConfig`: `config`, REVIEW `notes`, `suggestions`, `relationship_template`). Every column gets an entry, and a column no detector flagged is redacted with a note. Declared relationships are copied unchanged and never inferred. Their key columns hash under one shared namespace, or under the reserved `decoy-set-namespace-<n>` placeholder when none is declared, which `PipelineConfig` refuses until the user sets a real one. Cloud sources write to a local `masked/` folder with a note.
+
+`contracts.strategy_requirements` now holds the strategy requirement table (`StrategyRequirement`, `REQUIREMENTS_BY_STRATEGY`, `requirements_for`, `requirement_applies`); `plan.checks` re-exports the same names. `config.relationship_shape_error` is the shared shape check for a declared relationship (unknown table, key column count, missing key column). `starter_config` refuses two tables that would write one target path, and an empty explicit target.
+
+`config.target_identity` is the one definition of "same destination" (normalized file path, S3 bucket and key, GCS bucket and object). `starter_config` compares it, so two equal cloud targets or `out/a.csv` and `out/./a.csv` are refused.
+
+### Changed (regex integrity streams, only a model ask stays resident, POSTSCAN-PS12, 2026-11-14)
+
+`post_scan.integrity: true` with regex detectors no longer keeps a run on the resident route. It takes the sequential, out-of-core, chunked and unified-slice routes when they are eligible, and `execution_mode: stream` no longer refuses it. The gate runs the column suite over the staged output before the commit, so a failing finding blocks the run and nothing is published. A `fail` finding withholds the run on every route, as a failed key check does; now it does so also on the streamed routes.
+
+A model detector, or `post_scan.ner_findings: fail`, still needs resident values. Those runs stay resident with the new reason `route/post_scan_models_resident`, and stream mode still refuses them. The reason `route/post_scan_integrity_requested` is retired and points at it.
+
+An explicit integrity check is never run unchecked. With `post_scan.integrity: true`, a sink the gate cannot read back (anything but the engine's own Parquet sink), or a deferred gate while a sink is present, refuses the run before any sink is written or route reads a source, with `runtime/post_scan_integrity_sink_unreadable`. A transform-bearing table on a staged commit refuses before the commit with `runtime/post_scan_integrity_transforms_unsupported`, because its rows no longer line up with the raw source. Integrity with no sink and a deferred gate still runs report-only. Declared keys without integrity keep deferring on such a sink, and the result carries `quality_metrics["post_scan_gate_deferred"]`.
+
+Sink runs with relationships were held back while the staged gate, the tee and this change landed; with this change every route is gated and the `POSTSCAN-STREAM` hold ends.
+
+### Added (detector descriptors, starter decision and scan_baseline, SCAN-MULTI S3-engine.1, 2026-11-14)
+
+`profiling.recommendations.DETECTOR_DESCRIPTORS` holds one descriptor per detector id with the platform default and the starter choice `decoy scan` writes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from it and its content is unchanged. `profiling._starter_inference.infer_starter_strategy` is the CLI's `_infer_strategy_for_column` at 8fba6af, ported as it was (the review copy was renamed: the retired product word became "The scan"; the decisions are ported exactly), including its read of `confidence_bucket` (a field `DetectorMatch` does not carry; it names it `confidence`) and its strict 0.1 ambiguity window. A parity fixture and its capture script sit in `tests/fixtures/scan_multi/`.
+
+`PipelineConfig` gains the optional `scan_baseline: {path, schema}` block. `schema` is the closed tag `scan-set/v1`; unset it stays out of dumps and hashes.
+
+The prefix `decoy-set-namespace-` is reserved for the placeholder a starter pipeline writes where a declared relationship names no namespace. `ColumnConfig.namespace` and `RelationshipConfig.namespace` refuse it with the new reason `config/namespace_placeholder_unset`, which names the field location and never the value.
+
+### Changed (loader and transformed tables are checked on the sequential route, POSTSCAN-PS11, 2026-11-14)
+
+A sequential run whose tables come from a `source_loader`, or whose lazy tables declare transforms, now gets the blocking key check instead of the report-only deferral. The gate wraps the route's own loader and copies each key table's key and declared-cast columns, as the route read them (after transforms), into scratch Parquet. The baseline is read from that copy, so the loader is still called once per table and a table filtered or reshaped by its transforms is compared after the transforms. A key the run breaks blocks and commits nothing. The scratch copy is removed when the run ends.
+
+Loader and transform-bearing runs on the full-frame, out-of-core and mixed routes keep the deferral, and their result still carries `quality_metrics["post_scan_gate_deferred"]`.
+
+### Changed (staged sink read back before commit, POSTSCAN-PS10, 2026-11-14)
+
+A run that streams its tables into a `ParquetTransactionalSink` (the sequential, out-of-core and mixed routes, and the streamed full-frame lane) is now judged from the staged Parquet files before anything is published. A blocking key verdict commits nothing and removes the stage. The gate reads each staged table one row group at a time and re-reads lazy inputs in batches under the footer snapshot taken at bind time, so a source changed in between refuses with `runtime.lazy_source_changed`. Declared casting on a bounded route no longer defers the gate: the baseline re-read applies the run's own cast.
+
+`ParquetTransactionalSink.staged_tables()` returns each staged table with an opener for a new read-only descriptor of its file. A sink class the gate cannot read (a callable adapter or any foreign sink) keeps the route it takes today and delivers through the sink as before. The gate is deferred for that run: the result carries `quality_metrics["post_scan_gate_deferred"]` and the new warning `warning/post_scan_output_unreadable`, and an explicit `sequential` or `out_of_core` request runs rather than being refused. Runs the gate still defers are those with a `source_loader` and lazy tables that declare transforms.
+
+### Fixed (declared table never dropped from the plan, LOADER-SRC, 2026-11-14)
+
+`run_pipeline` with a `source_loader` and a `tables:` entry that has no `sources:` entry profiled the table as nothing, so the plan held no work for it and the raw rows came back as output; only a quality warning noted the undeclared columns. The run now refuses before the loader runs or any data row is read, with `ConfigError`, reason `config/loader_table_undeclared`.
+
+A second guard runs after the plan is built. A supplied mask table that has no plan entry is refused with `config/declared_table_dropped`, so no other path can echo a declared table. Both reasons are new and name only the table.
+
+### Fixed (one canonical JSON owner, DUP-FREEZE-E1, 2026-11-14)
+
+Breaking: every digest, HMAC and signature input is now built by one private package, `decoy_engine._canonical` (`canonical_json_bytes`: sorted keys, compact, UTF-8 text as written, NaN and Infinity refused), instead of ten local `json.dumps` variants. These digests change: `pipeline_config_hash`, the phase envelope bytes, the pinned-plan fingerprint, the model pack signature scope, `profile_hash`, `PinnedEnvelope.digest` and the reproducibility `config_digest` for content with non-ASCII text, and the physical-input identity hash and the subset request fingerprint for every config. A pinned plan or resume fingerprint made on an older engine is refused with its existing mismatch code and must be rebuilt, and a model pack signed over non-ASCII manifest text must be signed again. Record ids, CLI evidence manifest hashes, seeds, pool seeds and generated output do not move: the two seed-feeding fingerprints keep their bytes as `seed_fingerprint_bytes`, frozen under `SEED_PROTOCOL_VERSION`.
+
+A YAML date or timestamp, NaN, Infinity or an unpaired surrogate in a config is now refused at plan compile with the new reason `plan/config_value_not_json`, and NaN, Infinity or an unpaired surrogate in a `subset:` predicate or `keys` list is refused when the subset request is built with `config/config_value_not_json`, with no value in the message. Quote a config value as a string. A naive timestamp in a `subset:` literal stays valid, since a zone-less timestamp column takes no other spelling. A string with an unpaired surrogate in canonical JSON raises `config/canonical_json_invalid_string`. Before, a date raised a bare `TypeError`, NaN compiled, and a surrogate crashed with codec text.
+
+### Changed (one engine flag rule, DUP-FREEZE-E3, 2026-11-14)
+
+Boolean environment flags go through one parser, `decoy_engine.internal.env_flags.env_flag`. It accepts `1`, `true`, `yes`, `on`, `0`, `false`, `no` and `off` in any case, and gives the flag's default for an unset or empty variable. Any other value raises the new public `decoy_engine.errors.EnvFlagError`, code `config/env_flag_invalid`, whose text names the variable and never the value.
+
+`DECOY_ML_DISABLED` used to disable ML only for `1`; it now accepts the full set. An unknown value leaves ML off, and `classifier_status()` reports it down with cause `disabled`. `DECOY_PACK_REQUIRE_SIGNATURE` with an unknown value raises `EnvFlagError` from `ModelPackLoader.load()`; `load_with_fallback()` still returns `None`, and its warning no longer holds the value. The worker marker `DECOY_INSIDE_ISOLATED_WORKER` reads through the same parser. The custom provider folder variable `CUSTOM_PROVIDERS_DIR` is renamed `DECOY_CUSTOM_PROVIDERS_DIR`, with no alias. The new reason is `config/env_flag_invalid`.
+
+`VAULT_SKIP_VERIFY` decodes through the same registry with the Vault spelling set it already used (`t` and `y` count as true, any unknown value is false), so its behavior is unchanged and the adapter's own truth table is gone.
+
+## [0.24.0] - 2026-11-14
+
+### Breaking for consumers
+
+- A generate `formula` now reads a plain `sequence`, an int or float `faker` column and a numeric column with nulls as numbers. Text use (`'ID-' + id`, `id.zfill(5)`, `id[-4:]`, `id == '1'`) is refused at compile; write `str(id)`, or compare with a number. A formula that raises fails the run with `generate_formula_evaluation_failed` instead of writing nulls. A null number reference gives a null result. A column a formula reads keeps its numeric Parquet type unless another reader needs it as text. `x if id else y` is now false for `id` 0.
+- a column that leaves out a setting its strategy needs (a namespace for `hash`, `fpe`, `date_shift`, `bucket_perturb`, `categorical`, `tokenize` and `shuffle` with `deterministic: true`, or `provider_config.strategy` and `target` for `nested`) is now refused at validation and compile; add the setting.
+- `derived` and `formula` now treat `Decimal('NaN')`, numpy NaN scalars, `pd.NaT`, `numpy.datetime64('NaT')` and `pd.NA` as missing, so a `derived` column that references a null parquet timestamp writes a null cell where it used to write a value such as `0`.
+- a vault writer is refused with a sink or a chunked entry, a `TokenVaultWriter` needs `derivation_scope`, tokenize output changes, and an existing vault file is refused instead of overwritten; see the entry.
+- with relationships declared, a run whose output gains primary key duplicates or nulls, or foreign key orphans the inputs did not have, now fails with `PostScanBlockedError` and publishes nothing; `decide_execution_route` takes `post_scan_resident` in place of `post_scan_integrity`, and `compute_post_scan_integrity` is removed; see the PS-8 entry.
+- a profile's `generated_at` ends `+00:00` instead of `Z`; a stored profile with `Z` still loads.
+- `run_pipeline_isolated` and `run_job_with_governor` gain the outcome `blocked`, so a caller that switches on the outcome needs a new case; see the PS-9 entry.
+
+### Changed (isolated runs report a post-scan block as its own outcome, POSTSCAN-PS9, 2026-11-14)
+
+`run_pipeline_isolated` now returns `outcome="blocked"` when the post-scan gate withholds a run, in the child process and on the in-process fallback. Before, the block read as `crashed`. The result keeps the reason (for example `post_scan/foreign_key_orphans_introduced`) and the value-free report in `quality_metrics["post_scan_integrity"]`, has `outputs=None`, and commits nothing to `output_dir`. `IsolatedRunOutcome` gains `blocked`.
+
+`run_job_with_governor` treats `blocked` as terminal. It tries no further route, records no trip, and returns `GovernorResult(outcome="blocked")` with the attempted route in `final_route` and the isolated result in `result`. `GovernorOutcome` gains `blocked`, so a caller that switches on `completed` and `exhausted` needs a third case. An envelope outcome that is not one of the four known strings (a bool, an unknown token) is still classified as a dead child.
+
+### Changed (one generated-at shape and one NER mismatch message, DUP-FREEZE-E4, 2026-11-14)
+
+- `ColumnProfile.generated_at` is now `datetime.now(timezone.utc).isoformat()`, the shape the
+  report, quality and post-mask writers already use. A stored profile that carries the older
+  `Z` suffix is a plain string field and loads unchanged.
+- The out-of-core `text_mask` route and the whole-frame `text_mask` handler call
+  `enforce_ner_model_version` instead of raising `ner_model_version_mismatch` inline. Both routes
+  now give the helper's text for the same column and versions (the out-of-core text used to be
+  shorter and named no column). The code is unchanged.
+- Two sentries hold the result: `tests/sentry/profiling/test_generated_at_shape.py` fails a `Z`
+  suffix or a naive `datetime.utcnow()` in the source, and
+  `tests/sentry/defects/test_ner_mismatch_single_site.py` fails any second raise site of the code.
+
+### Changed (post-scan gate wired into run_pipeline, POSTSCAN-STREAM PS-8, 2026-11-13)
+
+`run_pipeline` now runs the post-scan gate before a run's output becomes visible. When relationships are declared, a primary key that gains duplicates or nulls, or a foreign key that gains orphans the inputs did not have, withholds the run with `PostScanBlockedError`. With `post_scan.integrity: true`, a failing column finding also withholds the run; before this it was only reported. The report lands in `quality_metrics["post_scan_integrity"]` on every run that ran the gate.
+
+The gate blocks wherever it can read the output back: the resident full-frame route (with or without a sink, with lazy inputs re-read in batches), and the sequential, out-of-core and mixed routes when they return resident outputs. Where it cannot yet, the run is checked as before (the column suite, report only, and only under `post_scan.integrity`) and the result carries `quality_metrics["post_scan_gate_deferred"]`, the reason `post_scan/gate_deferred_route`. That covers a bounded route that writes its output to a sink as it goes, inputs supplied by a `source_loader`, and declared casting on a bounded route. No run that succeeded before is refused for this.
+
+A relationship whose parent table is generated treats the orphans its input child rows already carried as inherited, so `preserve` and `warn` runs on generated parents keep passing. Orphans that point at a parent row quarantine removed no longer withhold the run; they are reported as the warning `post_scan/foreign_key_orphans_quarantined`, and any other new orphan still blocks. A null-typed key column (zero rows, or all null) compares with every key type. Parent and child key ends match by the FK join's own key identity: when the ends have one type, or differ only in integer width, string encoding, or the unit (or zone) of zone-aware timestamps and durations, the values compare by type in DuckDB; any other mix (a string against an integer, an integer against a float, a date against a timestamp, timestamp units, decimals, booleans) is mapped to the join's key token first, so the gate counts the orphans the join sees. A run that turns a comparable key into a value the join refuses blocks with `post_scan/key_type_mismatch`; a refusal the input already had is reported and does not block. The gate's key scan uses the run's memory budget share, capped at 512MB and at least 128MB, honours `out_of_core_threads`, and spills to its scratch directory. `decide_execution_route` takes `post_scan_resident` in place of `post_scan_integrity`, and `compute_post_scan_integrity` is removed. A NaN float key counts as a null key, as the join reads it. Durations, zone-aware timestamps and nanosecond times of day compare at their finest unit, so keys one nanosecond apart stay distinct. A run the gate blocks writes no quarantine file: the file waits for the verdict on both the full-frame and sequential routes.
+
+### Changed (generate formula column types, GEN-FORMULA-SEQ, 2026-11-13)
+
+A `formula` that reads a plain `sequence`, a `pyint` or `pyfloat` style faker column or a numeric categorical gets the number, so `round(a / 3)` and `a * 2` give numbers where they gave nulls or repeated text. New plan refusal `plan/generate_formula_number_used_as_text` names the reference and a fix. New run failure `runtime/generate_formula_evaluation_failed` names the table, column, row index and a fixed reason word and never a cell value; a formula with no `references` that raises now fails the same way. `numeric_plan` and the new `reader_types` share one candidate-type rule. The `derived` failure text is unchanged; its helper is renamed `failure_text`.
+
+### Added (post-scan column suite on facts, PS-6, 2026-11-13)
+
+`run_post_mask_tables` runs the post-scan report over tables held as batches: residual PII and policy validation are computed from exact per-column counts (`residual_pii_findings`, `policy_findings`), and the declared key facts come from the caller. `run_post_mask` keeps its signature and builds the same facts from its frames, so its findings do not change. Nothing in a run calls the tables entry yet.
+
+A frame whose column names are integers now gets findings (the column named as text); the old runner reported one error for the whole check. A column that cannot be compared or converted (mixed int and str, Decimal with float, list or map cells) is isolated: the other columns and tables keep their findings, and a policy-validation error names the class only.
+
+On a column that has to be compared as text, equal numbers now match across types (float 10001.0 with int 10001, Decimal("1.50") with 1.5), and an int source value against the output text "1" now counts as identical (main reported it as different). Both can only raise a finding, never hide one.
+
+### Fixed (isolated probe child hang, nightly, 2026-11-13)
+
+- Classifying a run failure no longer imports engine modules. The classifier used to import every
+  registered error family, including `quality.dp` with opendp, scikit-learn and scipy's OpenBLAS.
+  A memory-capped isolated child that had just run out of address space then spun at 100% CPU in
+  OpenBLAS's init retry loop instead of reporting the failure, so the route probe hung until its
+  timeout and the nightly `test_width_change_flips_route_at_a_fixed_budget_and_row_count` failed.
+  The same path covered `safe_error_type` while a failure is serialized, and two table entries that
+  named a re-export module instead of the defining one, so a live exception could miss its family.
+
+### Fixed (chained column-level derived columns, DERIVE-CHAIN, 2026-11-13)
+
+A `derived` column that reads another column-level `derived` column is now accepted as a created column, so a declared column the source lacks is no longer refused when it sits at the end of such a chain. A chain whose root reads a missing source column, and a cycle, are still refused.
+
+### Changed (required strategy settings, CONFIG-EXPLICIT E2b-s, 2026-11-13)
+
+`compile_plan` and `run_config_only_checks` refuse a column with a missing required strategy setting before any executor runs, with the code the executor's own guard already raised: `fpe` with no namespace now fails `decoy validate` instead of failing at run. Nine plan-namespace reasons, all pending release, carry the same code text as their runtime counterparts: `plan/hash_requires_namespace`, `plan/fpe_requires_namespace`, `plan/date_shift_requires_namespace`, `plan/bucket_perturb_requires_namespace`, `plan/categorical_requires_namespace`, `plan/tokenize_requires_namespace`, `plan/shuffle_requires_namespace`, `plan/nested_strategy_unset` and `plan/nested_target_unset`. `code_set` in `gen` mode keeps its existing plan code. Existing specific checks keep precedence and the executor guards stay.
+
+The requirements live in `decoy_engine.plan.checks` (`StrategyRequirement`, `REQUIREMENTS_BY_STRATEGY`, `requirements_for`) and each `StrategyInfo` from `strategy_catalog()` gains a `requirements` tuple that projects the same descriptors.
+
+`run_config_only_checks` (and so `decoy validate`) now also raises `namespace_ambiguity` for a `coherent_with` group whose members declare different explicit namespaces, the same code and path `compile_plan` already raised. A blank or non-string setting counts as missing.
+
+### Fixed (a memory error behind an interrupt is classified out of memory, MEMCAP-OOM, 2026-11-13)
+
+An isolated run whose child hits its memory cap and surfaces the failure as a `KeyboardInterrupt` chained from a `MemoryError` (an Arrow cancellation can do this) is now classified `oom_killed`, so the governor can reroute it, instead of `crashed`. Only exception types along the `__cause__`/`__context__` chain are read, never their text. A bare interrupt stays `crashed`. A self-reported crash sampled near its cap now carries `suspected_memory_pressure`.
+
+### Fixed (chunked when guard accepts large_string, DUP-DEFECTS E3, 2026-11-13)
+
+A seeded categorical or non-deterministic faker column under `when:` now runs with `--chunked` on a parquet source whose text columns are `large_string`. The per-chunk guard refused them with `chunked_categorical_nondeterministic_when_not_supported` and a widening reason that does not apply to `large_string`. A new private leaf, `decoy_engine._arrow_types`, holds the `is_text` and `is_text_or_null` predicates.
+
+### Fixed (non-UTF-8 statistical snapshot, DUP-DEFECTS E1, 2026-11-13)
+
+A statistical `snapshot_file` holding a byte that is not valid UTF-8 is now refused with `statistical_snapshot_unreadable`, the same code a truncated snapshot gets. `decoy validate` no longer reports an internal error and `decoy run` exits 1 instead of 3. The message names the field and the path and carries no byte of the file. New `decoy_engine.generation.statistical.parse_snapshot_json` is the one parse step for snapshot bytes.
+
+### Fixed (one missing-cell rule for derived and formula, DUP-DEFECTS E2, 2026-11-13)
+
+`derived` and `formula` now treat `Decimal('NaN')`, numpy NaN scalars, `pd.NaT`, `numpy.datetime64('NaT')` and `pd.NA` as missing, like `None` and float NaN, and like the masking kernels. A `derived` column with `explicit_null` (the default) that references a null parquet timestamp now writes a null cell, where it used to run the expression with `NaT` and write a plausible value such as `0`. With `sentinel` or `default` the null date is replaced by `""` or `0` first, so an expression that compares it with a date can now fail that row. `formula` substitutes `""` for such cells and counts them. The strings `"NaT"` and `""` stay values. Rows without such a reference are unchanged.
+
+### Added (resume fingerprint and reasons, F23-E1, 2026-11-13)
+
+Thirteen reasons in the `decoy` namespace, all pending release: `decoy/resume_run_dir_invalid`, `decoy/resume_layout_unsupported`, `decoy/resume_route_unsupported`, `decoy/resume_vault_unsupported`, `decoy/resume_platform_unsupported`, `decoy/resume_no_checkpoint`, `decoy/resume_store_invalid`, `decoy/resume_superseded`, `decoy/resume_fingerprint_changed` and `decoy/resume_source_changed` (usage failures), `decoy/resume_in_progress` (failure, retry the operation), `decoy/resume_checkpoint_invalid` (decision) and `decoy/resume_store_not_removed` (warning).
+
+New `decoy_engine.delivery.resume` sub-package with `RunFingerprint`, `build_fingerprint` and `binding_digest`: the value-free key a resume store is tied to (config hash, injected component versions, an HMAC key check, chunk size) and the per-table hash of a source and target spec. Nothing in the engine calls them yet.
+
+### Changed (vault crypto core, B-6, 2026-11-12)
+
+- HKDF-SHA256 (`determinism/_hkdf.py`) delegates to PyCA `cryptography` (`HKDF`, `HKDFExpand`,
+  and `HKDF.extract` for the extract step) instead of a hand-written loop. Every derived key is byte-identical (RFC 5869 A.1 to
+  A.3 vectors and a corpus captured from the stdlib implementation). The empty-salt refusal holds
+  on both `hkdf_extract` and the one-shot `hkdf_sha256`.
+- Breaking, pre-GA, hard cut: `tokenize` derives each token under a per-vault subkey,
+  `derive(mask_key, namespace, b"tokenize-key/v1" || len(scope) || scope)`, where `scope` is the
+  new required `TokenVaultWriter.derivation_scope` (16 to 64 non-secret bytes the vault owner
+  mints once). The tokenize output changes: two vaults with the same key, namespace and plaintext
+  mint different tokens, and a `hash` output (any `truncate`) is no longer a token payload. A
+  writer without a scope (a vault from before this change) is refused with
+  `runtime/token_vault_derivation_unsupported`, a malformed scope with
+  `runtime/tokenize_vault_scope_required`. Both are raised before any source is read, with the
+  registered summary as their only text. There is no dual derivation and no migration: tokens
+  from an earlier vault cannot be reproduced.
+- Breaking, pre-GA: boundary rule B0. A file-vault `vault_writer` is refused with
+  `runtime/vault_requires_resident_output` wherever the engine cannot hold every output row until
+  the vault is published: `run_pipeline` with both a `sink` and a `vault_writer`,
+  `run_mask_chunked` and `run_mask_pipeline_chunked` with any `vault_writer`, and
+  `run_fk_out_of_core` with both. With a sink the engine commits output inside the run, so the
+  vault could only follow it. The refusal runs before any source or chunk is read.
+  `run_pipeline` without a sink, including its auto-chunk lane, is unchanged. The `decoy` CLI's
+  `run --chunked --vault` uses the refused combination and must refuse the flag pair before it
+  repins to this release.
+- Breaking, pre-GA: the file vault is published privately, durably and exclusively.
+  `VaultWriter.write` (a path string under the ambient policy, or a policy `OutputDir`) creates a
+  stage beside the vault through the private-file creator (mode `0600` whatever the umask), writes
+  and fsyncs it, links it to the vault name, fsyncs the directory and attempts to remove the stage (a failed removal leaves only the
+  encrypted 0600 stage). An
+  existing vault is refused with `runtime/vault_exists` (the ambient policy used to overwrite it
+  in place, writing through hard links). A write, fsync or link failure is
+  `runtime/vault_commit_failed`. Both texts are fixed and name no path. No failure path removes a
+  published vault. The ambient in-place write (the `vault_direct` stage label) is deleted.
+- The `cryptography` floor rises from 42 to 49: the HKDF extract step uses `HKDF.extract`, which
+  PyCA added in 49.
+
 ## [0.23.0] - 2026-11-12
 
 ### Breaking for consumers

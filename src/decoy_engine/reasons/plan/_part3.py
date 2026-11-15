@@ -5,12 +5,14 @@ from __future__ import annotations
 from decoy_engine.reasons import _catalog
 
 __all__ = [
+    "CONFIG_VALUE_NOT_JSON",
     "DEDUPE_UNSUPPORTED_TYPE",
     "GENERATE_CATEGORIES_MIXED",
     "GENERATE_COLUMN_FORWARD_REFERENCE",
     "GENERATE_FAKER_KWARGS_UNKNOWN",
     "GENERATE_FAKER_TYPE_UNKNOWN",
     "GENERATE_FORMULA_NAME_UNKNOWN",
+    "GENERATE_FORMULA_NUMBER_USED_AS_TEXT",
     "GENERATE_FORMULA_REFERENCE_MISSING",
     "GENERATE_FORMULA_REFERENCE_UNKNOWN",
     "GENERATE_FORMULA_TEMPLATE_SYNTAX",
@@ -92,6 +94,11 @@ TOP_CODE_INVALID_FLOOR = _d("top_code_invalid_floor", "Top code invalid floor.")
 # Summaries double as the refusal text plan checks show, so they never name a value.
 _d = _catalog.plan("PlanCompileError")
 
+CONFIG_VALUE_NOT_JSON = _d(
+    "config_value_not_json",
+    "A config value has a type JSON cannot hold; quote it as a string.",
+    since="1.27.0",
+)
 GENERATE_CATEGORIES_MIXED = _d(
     "generate_categories_mixed",
     "Generate column categories mix value types.",
@@ -116,6 +123,11 @@ GENERATE_FORMULA_NAME_UNKNOWN = _d(
     "generate_formula_name_unknown",
     "Generate column formula uses a name that is not defined.",
     since="1.13.0",
+)
+GENERATE_FORMULA_NUMBER_USED_AS_TEXT = _d(
+    "generate_formula_number_used_as_text",
+    "A formula uses a number reference as text.",
+    since="1.26.0",
 )
 GENERATE_FORMULA_REFERENCE_MISSING = _d(
     "generate_formula_reference_missing",
