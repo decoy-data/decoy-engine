@@ -37,7 +37,7 @@ import pyarrow as pa
 from faker import Faker
 
 from decoy_engine.config import is_self_reference
-from decoy_engine.generation import _faker_pool
+from decoy_engine.generation import _faker_pool, relational
 from decoy_engine.generation._numeric_typing import numeric_plan, reader_types, restore_declared
 from decoy_engine.generation._statistical_column import (
     arrow_table,
@@ -57,7 +57,6 @@ from decoy_engine.generation.kinds import (
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
-from decoy_engine.generation.relational._inherit import inherit_types, inherit_values
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
@@ -215,7 +214,7 @@ def _generate_tables_from_config(
             table_name=name,
             statistical_specs=statistical_specs,
             columns=gcols,
-            parent_types=inherit_types(name, gcols, pools),
+            parent_types=relational.inherit_types(name, gcols, pools),
         )
         warn_on_table_fidelity(
             config,
@@ -348,7 +347,7 @@ def _generate_column(
         )
         values = _reference(col, n, seed, derive_key, pools or {}, **extra)
     elif kind == "inherit":
-        values = inherit_values(col, table_name, generated or {}, pools or {}, siblings)
+        values = relational.inherit_values(col, table_name, generated or {}, pools or {}, siblings)
     elif kind == "constant":
         values = constant_values(col, n)
     elif kind == "distribution":
