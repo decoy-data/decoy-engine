@@ -111,10 +111,15 @@ class _CallableSinkAdapter:
     Preserves the pre-existing non-transactional contract: write() calls the
     callable immediately (so partial output on abort is the documented
     behavior). commit() and abort() are no-ops.
+
+    `spill_parent` (RUN-STREAM E5a): where a streamed hold-back may spill. Only the engine's own
+    no-sink collector passes one, a private run scratch root it removes on every exit; every
+    other caller keeps `None`, so a hold-back that must spill still refuses as before.
     """
 
-    def __init__(self, fn: object) -> None:
+    def __init__(self, fn: object, *, spill_parent: Path | None = None) -> None:
         self._fn = fn
+        self.spill_parent = spill_parent
         # The callable publishes as it goes, so a failure leaves the output state unknowable.
         self.publication_evidence = PublicationEvidence()
 
