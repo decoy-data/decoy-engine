@@ -294,8 +294,7 @@ def test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from decoy_engine.detection._ner_rate import NerRate
-    from decoy_engine.execution import _pipeline_finalize
-    from decoy_engine.execution._adapter import ExecutionResult
+    from decoy_engine.execution.pipeline._post_scan import PostScanGate
 
     mf = importlib.import_module(_FINDINGS)
     monkeypatch.setattr(mf, "pipeline_version", lambda _model: _NER[1])
@@ -309,12 +308,10 @@ def test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked(
     cfg = s.config(
         [s.table_config("t", [])], post_scan={"detectors": ["regex", "ner"], "ner_findings": "fail"}
     )
-    result = ExecutionResult(outputs={"t": table}, table_kinds={"t": "mask"})
+    gate = PostScanGate(cfg, detectors=_fake_set("ner"))
     caught: BaseException | None = None
     try:
-        _pipeline_finalize.compute_post_scan_integrity(
-            result, config=cfg, sources={"t": table}, detectors=_fake_set("ner")
-        )
+        gate.run_resident({"t": table}, {"t": table}, {"t": "mask"})
     except Exception as exc:
         caught = exc
     assert type(caught) is _main_class(), f"not the one blocked-run error: {type(caught)}"

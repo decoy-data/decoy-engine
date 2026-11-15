@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 import pytest
 
+from tests.sentry.post_scan import _route_coverage as coverage
 from tests.sentry.post_scan import _scan as scan
 
 SENTRIES: dict[str, Callable[[], list[str]]] = {
@@ -21,6 +22,10 @@ SENTRIES: dict[str, Callable[[], list[str]]] = {
     "post-scan-key-core": scan.key_core_sites,
     "post-scan-reason-identity": scan.serializer_sites,
     "post-scan-gate-applies": scan.applies_sites,
+    "post-scan-commit": scan.commit_sites,
+    "post-scan-model-predicate": scan.model_sites,
+    "post-scan-readability": scan.readability_sites,
+    "post-scan-route-coverage": coverage.coverage_sites,
 }
 
 
@@ -213,3 +218,123 @@ def test_setting_required_from_a_local_expression_in_the_gate_is_flagged() -> No
     found = _keys(scan.required_label, planted, scan.GATE)
     assert [k.split("::")[2] for k in found] == ["required-assign"]
     assert _keys(scan.applies_label, planted, scan.GATE)
+
+
+# ----- no commit without the gate -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "label"),
+    [
+        ("def f(sink):\n    sink.commit()\n", "commit-call"),
+        ("def f(self):\n    self._tsink.commit()\n", "commit-call"),
+        ("def f(a, b):\n    atomic_commit(a, b)\n", "atomic-commit"),
+        ("def f(x):\n    return getattr(x, 'commit')\n", "getattr-commit"),
+    ],
+)
+def test_a_commit_outside_the_observer_is_flagged(source: str, label: str) -> None:
+    found = _keys(scan.commit_label, source, "execution/x.py")
+    assert [k.split("::")[2] for k in found] == [label]
+
+
+def test_the_publish_session_wrapper_is_allowed_only_in_its_own_files() -> None:
+    source = "def f(publish):\n    publish.commit()\n"
+    (home,) = _keys(scan.commit_label, source, "execution/_pipeline_full_frame.py")
+    (other,) = _keys(scan.commit_label, source, "execution/x.py")
+    assert scan.session_commit(home)
+    assert not scan.session_commit(other)
+
+
+def test_calling_the_sink_commit_directly_in_the_sequential_route_is_flagged() -> None:
+    real = _real("execution/_sequential.py")
+    planted = real.replace("observed_commit(_tsink)", "_tsink.commit()", 1)
+    assert planted != real
+    found = _keys(scan.commit_label, planted, "execution/_sequential.py")
+    assert any("::commit-call::" in k for k in found)
+
+
+# ----- one model predicate ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "label"),
+    [
+        ("def f(b):\n    return b.get('ner_findings')\n", "ner-findings-read"),
+        ("def f(b):\n    return b.detectors != 'regex'\n", "detectors-compare"),
+    ],
+)
+def test_a_model_check_outside_the_predicate_is_flagged(source: str, label: str) -> None:
+    found = _keys(scan.model_label, source, "verification/x.py")
+    assert [k.split("::")[2] for k in found] == [label]
+
+
+def test_inlining_the_model_test_in_the_route_guard_is_flagged() -> None:
+    planted = _real("verification/postmask/_route_guard.py") + (
+        "\n\ndef _planted(block):\n    return block.get('ner_findings') == 'fail'\n"
+    )
+    found = _keys(scan.model_label, planted, "verification/postmask/_route_guard.py")
+    assert found
+
+
+# ----- one route residency decision -------------------------------------------------------
+
+
+def test_a_residency_decision_outside_the_helper_is_flagged() -> None:
+    source = "def f(c):\n    return post_scan_resident_reason(c)\n"
+    found = _keys(scan.readability_label, source, "execution/x.py")
+    assert [k.split("::")[2] for k in found] == ["decision-call"]
+
+
+def test_the_isolated_parent_commits_only_from_its_two_named_sites() -> None:
+    entries = _baseline("post-scan-commit")
+    commits = {k.split("::", 3)[1] for k in entries if "::atomic-commit::" in k}
+    assert commits == {"_run_in_process", "_commit"}
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "execution/_isolated_run.py",
+        "execution/_isolated_reason.py",
+        "execution/_isolated_worker.py",
+    ],
+)
+def test_an_atomic_commit_added_to_the_blocked_outcome_path_is_flagged(rel: str) -> None:
+    planted = _real(rel) + "\n\ndef _blocked_path(a, b):\n    atomic_commit(a, b)\n"
+    found = _keys(scan.commit_label, planted, rel)
+    assert f"decoy_engine/{rel}::_blocked_path::atomic-commit::0" in found
+    assert f"decoy_engine/{rel}::_blocked_path::atomic-commit::0" not in _baseline(
+        "post-scan-commit"
+    )
+
+
+# ----- every route has a gate cell --------------------------------------------------------
+
+
+def test_every_route_names_a_cell_that_proves_the_gate() -> None:
+    assert set(coverage.GATE_TESTS) == {*coverage.ROUTES, *coverage.EXTRA_ROUTES}
+    assert coverage.coverage_sites() == []
+
+
+def test_dropping_the_mixed_entry_is_flagged() -> None:
+    kept = {r: t for r, t in coverage.GATE_TESTS.items() if r != "mixed"}
+    assert coverage.coverage_sites(kept) == ["route-coverage::mixed::missing-entry::0"]
+
+
+def test_a_new_route_without_a_cell_is_flagged() -> None:
+    found = coverage.coverage_sites(routes=(*coverage.ROUTES, "streamed_native"))
+    assert "route-coverage::streamed_native::missing-entry::0" in found
+
+
+def test_an_entry_naming_a_missing_test_is_flagged() -> None:
+    gone = {**coverage.GATE_TESTS, "stream": coverage.CELLS.replace("test_gate_cell", "nope")}
+    assert coverage.coverage_sites(gone) == ["route-coverage::stream::no-gate-proof::0"]
+
+
+def test_dropping_a_cells_key_from_the_cell_module_is_flagged() -> None:
+    path = coverage.CELLS.partition("::")[0]
+    text = (scan.ROOT / path).read_text(encoding="utf-8")
+    assert '    "mixed": (' in text
+    planted = text.replace('    "mixed": (', '    "mixed_gone": (', 1)
+    found = coverage.coverage_sites(sources={path: planted})
+    assert found == ["route-coverage::mixed::no-gate-proof::0"]

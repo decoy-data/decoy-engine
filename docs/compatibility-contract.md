@@ -122,6 +122,36 @@ footers and schemas, before any data row is read, staged, profiled or masked. Fi
 `profile_source` gains the keyword-only `declared` capability. No registry code is added. The chunked entries are
 unchanged here; CONFIG-EXPLICIT E2d gates them (below).
 
+**Pre-GA correction (declared table never dropped, LOADER-SRC, 2026-11-14).** A table that masks through a
+`source_loader`, has strategies under `tables:` and no `sources:` entry or caller table is refused by `run_pipeline`
+before the loader runs or any data row is read, as `ConfigError` with reason `config/loader_table_undeclared` (new). After the plan is built,
+`run_pipeline` also refuses any supplied mask table that has no plan entry, as
+`ConfigError` with reason `config/declared_table_dropped` (new). Both texts name the table, never a value. Before
+this, such a run returned the loader's rows unmasked. A declared table that nothing supplies is unchanged (no
+output for it). Loader tables with a `sources:` entry are unchanged.
+
+**Pre-GA addition (scan baseline and namespace placeholder, SCAN-MULTI S3-engine.1, 2026-11-14).** `PipelineConfig`
+gains the optional `scan_baseline: {path: str, schema: "scan-set/v1"}` block, default absent and omitted from
+`model_dump()` while unset, so a config without it hashes as before. The block is a pointer no run reads, so it
+is left out of `pipeline_config_hash` (with `sources`, `targets`, `pre_scan` and `name`): two configs that differ
+only in `scan_baseline` hash the same. `ColumnConfig.namespace` and
+`RelationshipConfig.namespace` refuse any value starting `decoy-set-namespace-` with `config/namespace_placeholder_unset`
+(new, `since` unreleased), naming the field location and never the value. No shipped config used the prefix. No
+artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profiling.DETECTOR_DESCRIPTORS` with its
+content unchanged.
+
+**Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
+through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
+`1`, `true`, `yes`, `on` (true) and `0`, `false`, `no`, `off` (false); an unset or empty variable gives the flag's
+default. Any other spelling raises `decoy_engine.errors.EnvFlagError` (reason `config/env_flag_invalid`, new,
+`since` unreleased), whose text names the variable and never the value. `DECOY_ML_DISABLED` accepted only `1`
+before and now accepts the set; an unknown spelling there leaves ML off (`classifier_status()` reports
+`disabled`), and from `ModelPackLoader.is_ml_disabled` it raises. An unknown `DECOY_PACK_REQUIRE_SIGNATURE` raises
+`EnvFlagError` instead of `ModelPackLoadError`, so `load()` callers catch the new error; `load_with_fallback`
+still returns `None` and its warning no longer holds the value. The engine-set `DECOY_INSIDE_ISOLATED_WORKER`
+marker reads through the same parser, so any accepted true spelling counts as inside a worker. The custom
+provider folder variable `CUSTOM_PROVIDERS_DIR` is renamed `DECOY_CUSTOM_PROVIDERS_DIR` with no alias.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
@@ -421,6 +451,44 @@ NFC-normalized source value, so a `date_format` with a Unicode literal suffix ho
 a codepoint newer than the running Python's Unicode version can land on a different
 day on the companion and Python paths. The companion result is canonical; ASCII
 formats are identical (documented in `docs/strategies.md`, bucket_perturb).
+
+`derived` and `formula` share one missing-cell rule with the masking kernels from 2026-11-13
+(slice DUP-DEFECTS E2): `None`, any float NaN, `Decimal('NaN')`, `pd.NaT`,
+`numpy.datetime64('NaT')` and `pd.NA` are missing; the strings `"NaT"` and `""` are values.
+Before, `derived` and `formula` counted only `None` and float NaN. This is a one-time pre-GA
+output break, with no shim and no flag, for rows where a referenced cell is `Decimal('NaN')`, a
+numpy NaN scalar, `NaT` or `pd.NA`: `explicit_null` now writes a null where the expression ran,
+`sentinel` and `default` now substitute for those cells (an expression that then fails the row
+reports today's value-free text), and `formula` substitutes `""` and counts it. Rows without such
+a reference are unchanged. No `SEED_PROTOCOL_VERSION` change.
+
+**2026-11-13, generate `formula` types (pre-GA break).** A generate `formula` now reads a plain
+`sequence`, an int or float `faker` column and a numeric column with nulls as numbers, not as
+cell text. Output of such a formula changes (`a * 2` was `'11'`, is `2`), a column a formula
+reads keeps its numeric Parquet type unless another reader needs it as text, and a formula that
+raises fails the run instead of writing nulls. No seed draw moves and
+`SEED_PROTOCOL_VERSION` is unchanged. The refreeze is recorded in
+`docs/records/2026-11-13-formula-typing-refreeze.md`.
+
+**2026-11-14, one canonical JSON owner (pre-GA break, DUP-FREEZE E1).** Every digest, HMAC
+and signature input is now built by `decoy_engine._canonical.canonical_json_bytes`: sorted keys,
+compact separators, UTF-8 text written as-is, NaN and Infinity refused. The same module holds the
+one frozen seed form, `seed_fingerprint_bytes` (ASCII-escaped, byte-for-byte what
+`strategy_config_fingerprint` and the pool `_config_hash` wrote before), named under
+`SEED_PROTOCOL_VERSION`. No seed, pool seed or generated output byte moves, and no record id or
+CLI evidence manifest hash moves. Some digests change, with no shim and no flag.
+`pipeline_config_hash`, the phase envelope bytes, the pinned-plan fingerprint, the model pack
+signature scope, `profile_hash`, `PinnedEnvelope.digest` and the reproducibility `config_digest`
+move only for content that holds non-ASCII text; the physical-input identity hash and the subset
+request fingerprint move for every config (they used default separators and a `repr` fallback).
+A pinned plan or resume fingerprint made before the change
+refuses with its existing digest-mismatch code and is rebuilt; a model pack signed over non-ASCII
+manifest text is signed again. Plan compile now refuses a config value JSON cannot hold (a YAML date or
+timestamp, NaN, Infinity, an unpaired surrogate) with the new reason `config_value_not_json`;
+quote the value as a string. `subset_request_from_config` refuses NaN, Infinity and an unpaired
+surrogate the same way, but keeps a naive timestamp literal, the only spelling a zone-less
+timestamp column accepts; the subset request fingerprint writes it as tagged wall-clock text.
+No `SEED_PROTOCOL_VERSION` change.
 
 ### 3.4 The public API + CLI contract
 
@@ -735,7 +803,7 @@ formats are identical (documented in `docs/strategies.md`, bucket_perturb).
   or whose `post_scan.ner_findings` is `fail`, before any source is read. The error carries
   `route.post_scan_models_unsupported` (registry unreleased); `str(error)` and `message` are the fixed
   registry summary, `route` and `setting` name the route and the config field, and the exception
-  chain is empty. Regex-only `integrity: true` behaves as before on these routes. `run_sequential`
+  chain is empty. Regex-only `integrity: true` is not refused on these routes; `run_pipeline` judges it from the staged output (POSTSCAN-STREAM PS-12). `run_sequential`
   and `run_fk_out_of_core` take a required keyword-only `config` (the raw pipeline config), as do
   the wrappers that forward to them (`PandasExecutionAdapter.run_sequential`, the physical
   `SequentialAdapter.run` and `OutOfCoreAdapter.run`); a caller that passed none must now pass
@@ -779,6 +847,27 @@ namespaces would collapse to one token. tokenize is an always-keyed strategy,
 so at GA it requires a resolved >=32-byte secret like every other keyed
 surface (`keyed_strategy_requires_secret`); it never derives tokens from the
 public job seed.
+
+A file-vault `vault_writer` is accepted only where the engine holds every output
+row until the caller can publish the vault first (B-6 boundary rule B0, 2026-11-01;
+breaking, pre-GA): `run_pipeline(sink=..., vault_writer=...)` with both set,
+`run_mask_chunked` and `run_mask_pipeline_chunked` with any `vault_writer`, and
+`run_fk_out_of_core` with both a `sink` and a `vault_writer` raise
+`ExecutionError(code="vault_requires_resident_output")` before any source or chunk
+is read. The parameters stay in the signatures (so the refusal is explicit, not a
+`TypeError`); `vault_writer=None` is unchanged. A vault job runs through
+`run_pipeline` without a sink; its auto-chunk lane still bounds masking memory.
+
+`TokenVaultWriter` gained a required `derivation_scope: bytes` attribute on
+2026-11-01 (B-6 D2; a breaking protocol change, legal pre-GA only): a non-secret,
+vault-unique 16-to-64-byte value the vault owner mints once and stores with the
+vault. Tokens are derived under it (`tokenize-key/v1` subkey), so two vaults never
+mint the same token for one plaintext and a token payload is never a `hash`
+output. Tokens minted before this change cannot be reproduced: a writer without a
+scope is refused with `token_vault_derivation_unsupported`, and a malformed one
+with `tokenize_vault_scope_required`, before any source is read. There is no
+compatibility derivation and no migration (hard cut); an old vault stays readable
+only by the release that wrote it.
 
 `keyed_columns_for_config` and `KeyedColumn` joined the public API on 2026-11-08
 (init wizard part E3), additive under §4.1. `keyed_columns_for_config(config)`
@@ -844,6 +933,14 @@ masks. It names the first missing column and the count (config names, never a va
 undeclared source column, then missing declared column. Before this, `run` failed late with a bare `KeyError`. The reverse rule belongs to the execution
 choke point, which knows the columns the config creates: `profile_source`, `prepare_declared_sources`
 and `check_columns_declared` called without a created-column policy apply the forward rule only.
+
+**Required strategy settings (CONFIG-EXPLICIT E2b-s).** `compile_plan` and `run_config_only_checks` refuse a column
+that omits a setting its strategy needs, with the code the executor guard raises (registered again under the `plan`
+namespace, registry unreleased): a `namespace` for `hash`, `fpe`, `date_shift`, `bucket_perturb`, `categorical`,
+`tokenize`, `shuffle` with `deterministic: true` and `code_set` with `provider_config.mode: gen`, and
+`provider_config.strategy` and `target` for `nested`. Missing means absent, `None`, an empty string or an empty
+collection. The requirements are `StrategyRequirement` descriptors in `decoy_engine.plan.checks`, and
+`StrategyInfo.requirements` carries the same rows. Specific earlier checks keep precedence.
 
 ### 3.5 Disguises
 

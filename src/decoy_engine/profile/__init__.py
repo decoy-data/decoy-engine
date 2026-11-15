@@ -38,6 +38,7 @@ from decoy_engine.profile._declared_columns import (
     source_columns,
 )
 from decoy_engine.profile._hash import profile_hash
+from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import (
     LazySource,
     ProfileSource,
@@ -60,6 +61,7 @@ __all__ = [
     "CsvDialect",
     "DeclarationFinding",
     "DeclarationRequest",
+    "FixedWidthLazySource",
     "LazySource",
     "PIIClass",
     "PreparedDeclaredSources",

@@ -283,16 +283,16 @@ def run_pipeline(
     this oracle call to the SAME registry snapshot as its own coordinator-side call. `None` (every
     real caller) resolves against the live registry.
     """
+    _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
     config, stage = resolve_subset(config, subset_request, source_loader)
-    detectors = _ctx.load_post_scan_detectors(config, file_access)
+    detectors = _dispatch.load_post_scan_detectors(config, file_access)
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
     # MG-5: `tokenize` masks per-cell through a platform-injected token vault, threaded only to
     # the FULL-FRAME adapter (bounded routes fail closed with `tokenize_requires_vault`). A vault
     # is passed only for a tokenize job, so its presence forces full-frame and disables
-    # auto-chunk while the route is `auto`. An explicit execution_mode is left untouched
-    # (a caller that forces a bounded route for a tokenize job gets the honest fail-closed).
+    # auto-chunk while the route is `auto`; an explicit execution_mode is left untouched.
     if token_vault_writer is not None and execution_mode == "auto":
         execution_mode = "full_frame"
         auto_chunk = False
@@ -351,7 +351,7 @@ def run_pipeline(
                 subset_stage=stage,
             )
         ctx = _ctx.with_quarantine_path(ctx, quarantine_path, base_dir)
-        ctx = _ctx.with_post_scan_detectors(ctx, detectors)
+        ctx = _dispatch.with_post_scan_detectors(ctx, detectors)
         with collect_refusals() as refusals:
             decision = _ctx.decide_route(ctx)
             _emit_route(_progress, decision)

@@ -234,14 +234,44 @@ def test_block_predicate_routing_with_a_fake_detector(
     assert "post_scan_integrity" in _run(warn, table, auto_chunk=False).quality_metrics
 
 
+@pytest.mark.parametrize("hit_cells", [300, None], ids=["fail_finding", "pass_error"])
+def test_a_deferred_gate_still_blocks_under_ner_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hit_cells: int | None
+) -> None:
+    """A loader run defers the gate, whose column suite is then report-only. An NER block under
+    `ner_findings: fail` is never report-only, so it still withholds the outputs."""
+    from decoy_engine.execution import run_pipeline
+
+    _fake_ner(monkeypatch, hit_cells)
+    table = _source()
+
+    def run(post_scan: dict[str, Any]) -> Any:
+        return run_pipeline(
+            _cfg(tmp_path, table, post_scan),
+            sources=None,
+            source_loader=lambda _name: table,
+            source_loader_schemas={"t": table.schema},
+            engine_version=_V,
+            auto_chunk=False,
+        )
+
+    with pytest.raises(s.blocked_error()) as caught:
+        run({"detectors": ["regex", "ner"], "ner_findings": "fail"})
+    _assert_safe(caught.value)
+    result = run({"detectors": ["regex", "ner"]})
+    assert "post_scan_gate_deferred" in result.quality_metrics
+    assert s.rows(result.quality_metrics["post_scan_integrity"], "ner")
+
+
 def test_a_regex_fail_alone_never_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The NER enforcement adds nothing for a regex `fail`: the report-only check of a deferred
+    gate (where M4's raise is the only enforcement) returns, and a gate that judges the run blocks
+    with the regex code alone, never `ner_blocked`."""
     import inspect
 
-    from decoy_engine.execution import _pipeline_finalize
-    from decoy_engine.execution._adapter import ExecutionResult
+    from decoy_engine.execution.pipeline._post_scan import PostScanGate
 
-    compute = _pipeline_finalize.compute_post_scan_integrity
-    assert "detectors" in inspect.signature(compute).parameters, "no detectors are passed in"
+    assert "detectors" in inspect.signature(PostScanGate).parameters, "no detectors are passed in"
     _fake_ner(monkeypatch, 0)
     import importlib
 
@@ -250,12 +280,18 @@ def test_a_regex_fail_alone_never_blocks(monkeypatch: pytest.MonkeyPatch) -> Non
     cfg = s.config(
         [s.table_config("t", [])], post_scan={"detectors": ["regex", "ner"], "ner_findings": "fail"}
     )
-    result = ExecutionResult(outputs={"t": table}, table_kinds={"t": "mask"})
     detectors = mf.load_detectors(("regex", "ner"), ner_model="en_core_web_sm")
-    compute(result, config=cfg, sources={"t": table}, detectors=detectors)
-    report = result.quality_metrics["post_scan_integrity"]
+    deferred = PostScanGate(cfg, detectors=detectors, deferred=True)
+    deferred.run_resident({"t": table}, {"t": table}, {"t": "mask"})
+    report = deferred.report
+    assert report is not None
     assert s.rows(report, "regex", column="email", severity="fail"), report["residual_pii"]
     assert not s.rows(report, "ner")
+    with pytest.raises(s.blocked_error()) as caught:
+        PostScanGate(cfg, detectors=detectors).run_resident(
+            {"t": table}, {"t": table}, {"t": "mask"}
+        )
+    assert [c.code for c in caught.value.verdict.codes] == ["finding_blocked"]
 
 
 def test_the_run_context_never_shows_its_detector_set(tmp_path: Path) -> None:
