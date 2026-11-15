@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -52,7 +51,7 @@ _d = _catalog.config("PipelineValidationError")
 TARGET_SHARED_DESTINATION = _d(
     "target_shared_destination",
     "Two or more targets write to one destination. Give each table its own target.",
-    since=UNRELEASED,
+    since="1.28.0",
 )
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",
