@@ -169,7 +169,7 @@ def _install_spies(found: dict[str, Any]) -> None:
 
         _output._make_dir_core = core_spy  # type: ignore[attr-defined]
 
-    from decoy_engine.fileaccess import _local
+    from decoy_engine.fileaccess import _local_chain
 
     entry = _output.make_parent_dir_at
 
@@ -178,7 +178,7 @@ def _install_spies(found: dict[str, Any]) -> None:
         return entry(parent_fd, name)
 
     _output.make_parent_dir_at = entry_spy  # type: ignore[assignment]
-    _local.make_parent_dir_at = entry_spy  # type: ignore[assignment]
+    _local_chain.make_parent_dir_at = entry_spy  # type: ignore[assignment]
 
     real_validate = _component.validate_component
 

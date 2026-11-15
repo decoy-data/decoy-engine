@@ -368,15 +368,40 @@ def column_access(entry: Mapping[str, Any], registry: Any) -> ColumnAccess:
         access = _WRITES_UNKNOWN if declare is None else declare(entry)
         # The when gate is not applied to composite nodes, but the declaration stays
         # conservative: the predicate's names count as read too.
-        if has_when(entry):
-            access = _union(access, SURFACE_DECLARATIONS["surface:when"](entry))
-        return access
+        return _with_when(access, entry)
     declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
     # An undeclared strategy may write anything: fail closed.
     access = _WRITES_UNKNOWN if declare is None else declare(entry)
-    if has_when(entry):
-        access = _union(access, SURFACE_DECLARATIONS["surface:when"](entry))
-    return access
+    return _with_when(access, entry)
+
+
+def _with_when(access: ColumnAccess, entry: Mapping[str, Any]) -> ColumnAccess:
+    """`access` plus the columns the entry's `when:` predicate reads. The gate leaves unmatched
+    rows untouched and never reads the entry's own target, so the predicate makes no claim about
+    who writes that target and `own_target` stays the entry's."""
+    if not has_when(entry):
+        return access
+    merged = _union(access, SURFACE_DECLARATIONS["surface:when"](entry))
+    return replace(merged, own_target=access.own_target)
+
+
+def scalar_creating_reads(entry: Mapping[str, Any]) -> frozenset[str]:
+    """The sibling columns a scalar entry that creates its own target reads, else empty.
+
+    Execution orders the entry after these, from the same declaration `created_columns`
+    admits by, so a created column runs after every column its value reads. An entry that does
+    not create its target orders after nothing. Reads that cannot be named (`reads_unknown`)
+    never drop the ones that can, so a dependent never reads a driver before it is masked.
+    A `when:` predicate adds no edge: the gate reads the frame as it stands when the entry
+    runs, and ordering on it would change which rows match and could form a new cycle.
+    """
+    declare = SURFACE_DECLARATIONS.get(f"scalar:{entry.get('strategy')}")
+    if declare is None:
+        return frozenset()
+    access = declare(entry)
+    if access.own_target != OWN_TARGET_CREATES:
+        return frozenset()
+    return access.reads - {entry.get("name")}
 
 
 def created_columns(
@@ -385,19 +410,36 @@ def created_columns(
     """Columns the config creates on this table, given the columns the source has.
 
     A column entry counts only when its declaration says it creates its own target and every
-    column it reads is a source column, so a target that is read, or whose inputs are absent or
-    unreadable, is not created. A `derive` target counts the same way against the source
+    column it reads is a source column, a created derive target or another created column, so a
+    target that is read, or whose inputs are absent, unreadable or circular, is not created. A `derive` target counts the same way against the source
     columns its own expression reads.
     """
     have = frozenset(source_columns)
+    derived = _derive_created(table_entry, have)
+    readable = have | derived  # transforms run before the columns, so their targets are readable
+    pending = [
+        (entry["name"], column_access(entry, registry), _predicate_reads(entry))
+        for entry in table_entry.get("columns") or []
+        if isinstance(entry, Mapping) and isinstance(entry.get("name"), str)
+    ]
     created: set[str] = set()
-    for entry in table_entry.get("columns") or []:
-        if not isinstance(entry, Mapping) or not isinstance(entry.get("name"), str):
-            continue
-        access = column_access(entry, registry)
-        if _creates_from(access, have):
-            created.add(entry["name"])
-    return frozenset(created) | _derive_created(table_entry, have)
+    # The executor orders a column after the columns its value reads, so a created column may
+    # read an earlier-resolved created one. Resolve to a fixed point: each pass admits the
+    # entries whose inputs are now readable, and whatever never resolves (a missing input, a
+    # cycle) stays out. A `when:` predicate adds no ordering edge (`scalar_creating_reads`), so
+    # it may name only columns on the frame before any column runs, never a created one.
+    progressed = True
+    while progressed:
+        progressed = False
+        for name, access, predicate in pending:
+            if (
+                name not in created
+                and predicate <= readable
+                and _creates_from(access, readable | created)
+            ):
+                created.add(name)
+                progressed = True
+    return frozenset(created) | derived
 
 
 def _derive_created(table_entry: Mapping[str, Any], have: frozenset[str]) -> frozenset[str]:
@@ -405,8 +447,10 @@ def _derive_created(table_entry: Mapping[str, Any], have: frozenset[str]) -> fro
 
     The ops are walked in order, as `apply_transforms` applies them: a dropped column is no
     longer readable, a target already on the frame is refused at run time (so it is never a
-    created column), and a column an earlier derive made does not exist in the source to be
-    read. A target written twice must qualify on every write.
+    created column), and a target an earlier derive made is readable while it qualified and is
+    still on the frame. A target written twice must qualify on every write. The central
+    `surface:transforms` declaration cannot answer this: it merges the ops into one read and
+    write set, with no per-target verdict and no drop or shadow tracking.
     """
     frame = set(have)
     ok: dict[str, bool] = {}
@@ -418,10 +462,19 @@ def _derive_created(table_entry: Mapping[str, Any], have: frozenset[str]) -> fro
         elif op.get("op") == "derive" and isinstance(op.get("column"), str):
             target = op["column"]
             names = predicate_names(str(op.get("expression")))
-            good = names is not None and names <= frame & have and target not in frame
+            made = frozenset(t for t, g in ok.items() if g) & frame
+            good = names is not None and names <= (frame & have) | made and target not in frame
             ok[target] = ok.get(target, True) and good
             frame.add(target)
     return frozenset(t for t, good in ok.items() if good)
+
+
+def _predicate_reads(entry: Mapping[str, Any]) -> frozenset[str]:
+    """The columns the entry's `when:` predicate names. Unreadable names are caught by
+    `column_access`, which marks the entry `reads_unknown`."""
+    if not has_when(entry):
+        return frozenset()
+    return SURFACE_DECLARATIONS["surface:when"](entry).reads
 
 
 def _creates_from(access: ColumnAccess, have: frozenset[str]) -> bool:

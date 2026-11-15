@@ -79,7 +79,7 @@ def test_directory_close_fault_does_not_fail_the_call(
 def test_directory_close_fault_does_not_mask_the_primary_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import decoy_engine.fileaccess._local as local
+    import decoy_engine.fileaccess._local_chain as local
 
     def refuse(parent_fd: int, name: str) -> int:
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))

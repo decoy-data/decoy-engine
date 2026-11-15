@@ -227,7 +227,7 @@ def test_writer_round_trips_through_the_reader() -> None:
     assert codec.descriptor_digest(raw) == hashlib.sha256(raw).hexdigest()
 
 
-def test_writer_sorts_and_escapes() -> None:
+def test_writer_sorts_and_writes_text_as_is() -> None:
     codec = _codec()
     arts = [*_artifacts(codec)]
     arts.append(
@@ -235,7 +235,7 @@ def test_writer_sorts_and_escapes() -> None:
     )
     built = codec.build_descriptor(operation_id="op-1", artifacts=arts, vault=None)
     raw = codec.encode_descriptor(built)
-    assert raw.isascii() and b"donn\\u00e9es/t.parquet" in raw
+    assert not raw.isascii() and "données/t.parquet".encode() in raw  # canonical form (D3)
     assert [a.path for a in built.artifacts] == sorted(a.path for a in arts)
     assert codec.decode_descriptor(raw) == built
 
