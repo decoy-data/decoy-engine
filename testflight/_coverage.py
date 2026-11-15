@@ -103,6 +103,13 @@ _GENERATE_TYPE_ALLOWLIST: dict[str, str] = {
         "no current job has a reference-pool generate column; will be added in "
         "a future job that exercises the lookup-reference generation path"
     ),
+    "inherit": (
+        "copies a parent row's column through a reference foreign key, so a job needs a "
+        "generated parent and child table; it makes no draw of its own (pinned as "
+        "DETERMINISTIC_NO_DRAW in the draw-site catalogue) and is covered by "
+        "tests/unit/generation/relational/test_inherit.py; a test-flight job case is a "
+        "tracked V2-LOG item"
+    ),
     # statistical, group_key, grouped_series, and windowed_date were allowlisted
     # here in TH-1.2 (only unit-tested). TH-3.2 removed them: Job D
     # (jobs/d_longitudinal_visits) now exercises all four end-to-end as
