@@ -1051,7 +1051,8 @@ def _v2_run_multi(tables_cfg: list[dict], seed: int = 42, derive_key=None) -> di
         "sources": {},
         "tables": tables_cfg,
         "targets": {
-            t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables_cfg
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"}
+            for t in tables_cfg
         },
     }
     cfg = PipelineConfig.model_validate(cfg).model_dump()

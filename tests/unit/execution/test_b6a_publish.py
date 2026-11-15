@@ -19,8 +19,10 @@ import pytest
 from decoy_engine.config import PipelineConfig
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
+from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6a_support as b6a
+from tests.unit.execution._r3_scenarios import traced_engine_sink
 from tests.unit.execution.test_auto_chunk_dispatcher import _row_error_job
 from tests.unit.execution.test_isolated_worker_streaming import _fk_config
 
@@ -228,7 +230,10 @@ def _resident_case(name: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str,
     elif name == "post_validation":
         kwargs["post_validation"] = True
     elif name == "post_scan_integrity":
-        extra["post_scan"] = {"integrity": True}
+        # Only a model ask needs the whole output resident; regex integrity streams.
+        extra["post_scan"] = {"integrity": True, "detectors": ["regex", "ner"]}
+        # A foreign sink refuses an explicit integrity check, so this case uses the engine's own.
+        sink = ParquetTransactionalSink(tmp_path / "published")
     elif name == "streaming_disabled":
         kwargs["stream_chunked_output"] = False
     elif name == "no_sink":
@@ -341,6 +346,10 @@ def test_non_routed_runs_never_enter_the_new_code(
         if case in ("sequential", "out_of_core"):
             run_dir = tmp_path / label
             run_dir.mkdir()
+            # Declared keys are gated before commit and the gate reads only the engine's own
+            # sink class back, so the bounded routes take that class, with its calls recorded.
+            sink = traced_engine_sink(ParquetTransactionalSink(run_dir / "published"))
+            sinks[label] = sink
             results[label] = _fk_run(run_dir, case, sink, **extra)
             continue
         cfg, src = shared_job

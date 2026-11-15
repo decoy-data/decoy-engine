@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 from decoy_engine import read_fixed_width
 from decoy_engine.config import PipelineConfig
 from decoy_engine.profile._lazy_csv import CsvLazySource
+from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import LazySource
 from tests._declared_schema import declare_rest
 
@@ -120,6 +121,8 @@ def lazy_sources(cfg: dict[str, Any]) -> dict[str, Any]:
     for name, desc in cfg["sources"].items():
         if desc["format"] == "csv":
             out[name] = CsvLazySource.from_descriptor(desc, table=name)
+        elif desc["format"] == "fixed_width":
+            out[name] = FixedWidthLazySource.from_descriptor(desc, table=name)
         elif desc["format"] == "parquet":
             out[name] = LazySource(Path(desc["path"]))
     return out

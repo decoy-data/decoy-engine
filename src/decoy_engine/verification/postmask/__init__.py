@@ -51,14 +51,17 @@ from decoy_engine.verification.postmask._keys import (
     KeyCounts,
     KeyResult,
     check_keys,
+    key_columns,
     keys_report,
 )
 from decoy_engine.verification.postmask._stream_input import (
     TableBatches,
     from_lazy,
+    from_staged,
     from_table,
     key_batches,
     missing_columns,
+    with_cast,
 )
 from decoy_engine.verification.postmask.runner import run_post_mask, run_post_mask_tables
 from decoy_engine.verification.postmask.types import (
@@ -85,12 +88,15 @@ __all__ = [
     "blocked_error",
     "check_keys",
     "from_lazy",
+    "from_staged",
     "from_table",
     "key_batches",
+    "key_columns",
     "keys_report",
     "missing_columns",
     "post_scan_verdict",
     "run_post_mask",
     "run_post_mask_tables",
     "severity_counts",
+    "with_cast",
 ]

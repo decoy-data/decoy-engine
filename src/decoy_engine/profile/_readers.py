@@ -17,9 +17,10 @@ splits the three things profiling actually needs -- a true row count, a schema,
 and a bounded sample -- so each can come from cheap metadata plus a
 `<= sample_rows` read instead of a full-frame load.
 
-Row-count honesty: Parquet and fixed_width give an exact count in O(1) (footer
-`num_rows`; `filesize // record_bytes`). CSV has no footer and newline-counting
-is O(bytes) I/O, so its count is an explicit byte-size *estimate*
+Row-count honesty: Parquet gives an exact count in O(1) (footer `num_rows`);
+fixed_width gives an exact count from one framing pass of its record parser
+(O(bytes), no casts). CSV has no footer and newline-counting is O(bytes) I/O,
+so its count is an explicit byte-size *estimate*
 (`RowCount.exact=False`); downstream admission (SC7b) keys off that flag rather
 than trusting a CSV number it cannot cheaply verify.
 
@@ -39,11 +40,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess
-from decoy_engine._lexeme import LEXEME_KEY
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.profile._csv_reader import resolve_csv_dialect
-from decoy_engine.profile._fixed_width_reader import read_fixed_width_handle
+from decoy_engine.profile._fixed_width_reader import (
+    count_fixed_width_records,
+    read_fixed_width_handle,
+)
+from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 
@@ -61,11 +64,10 @@ BOUNDED_FALLBACK_ROWS = 10_000
 class RowCount:
     """A table's total row count plus whether that count is exact.
 
-    `exact=True` for Parquet (footer `num_rows`) and fixed_width
-    (`filesize // record_bytes`); `exact=False` for CSV, whose count is an
-    O(1) byte-size estimate. The flag rides onto `TableProfile.row_count_exact`
-    so route admission knows whether it is trusting a footer count or an
-    estimate.
+    `exact=True` for Parquet (footer `num_rows`) and fixed_width (a framing
+    pass); `exact=False` for CSV, whose count is an O(1) byte-size estimate.
+    The flag rides onto `TableProfile.row_count_exact` so route admission knows
+    whether it is trusting a footer count or an estimate.
     """
 
     value: int
@@ -251,6 +253,9 @@ class LazySource:
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows as batches of at most `batch_rows` each."""
+        return self._iter_batches(check_batch_rows(batch_rows), columns)
+
+    def _iter_batches(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         handle = self._handle()
         try:
             parquet_file = arrow_adapter.parquet_file(handle)
@@ -282,6 +287,7 @@ class LazySource:
         default (`False` on 24.0.0, `True` on 25.0.1); pass it to pin the behavior.
         `buffer_size` and `use_threads` default to pyarrow's own defaults. `columns` narrows the
         batches; the schema and facts stay the whole file's."""
+        batch_rows = check_batch_rows(batch_rows)
         options: dict[str, Any] = {}
         if pre_buffer is not None:
             options["pre_buffer"] = pre_buffer
@@ -404,9 +410,9 @@ class ParquetFileSource(_PolicyBound):
 class FixedWidthFileSource(_PolicyBound):
     """`ProfileSource` for a local fixed-width file.
 
-    Row count is O(1) and exact: `filesize // bytes-per-record`, where the
-    per-record byte length (columns + line terminator) is read from the first
-    line. The bounded sample reads only the first `sample_rows` records.
+    Row count is exact and costs one framing pass of the shared record parser (no casts; blank
+    lines skipped, a missing final newline fine). The bounded sample reads only
+    the first `sample_rows` records.
     """
 
     path: Path
@@ -420,14 +426,7 @@ class FixedWidthFileSource(_PolicyBound):
 
     def row_count(self) -> RowCount:
         with self._handle() as handle:
-            size = handle.stat().st_size
-            with handle.open_binary() as fh:
-                first_line = fh.readline()
-        if not first_line:
-            return RowCount(0, exact=True)
-        # A fixed-width file has uniform record bytes (columns + terminator);
-        # the first line's byte length divides the file size into records.
-        return RowCount(size // len(first_line), exact=True)
+            return RowCount(count_fixed_width_records(handle, self.layout), exact=True)
 
     def schema(self) -> pa.Schema:
         with self._handle() as handle:
@@ -533,38 +532,17 @@ def _at(field_key: str, name: str) -> str:
 def _build_file_source(
     descriptor: dict[str, Any], field_key: str, *, table: str = "source"
 ) -> ProfileSource:
+    from decoy_engine.profile._lazy_build import descriptor_path, file_format
+
+    descriptor_path(descriptor, field_key)
     fmt = descriptor.get("format")
-    path = descriptor.get("path")
-    if not isinstance(path, str):
-        raise ValueError(
-            "profile_source: file source missing string `path`, got "
-            f"{fileaccess.shown(repr(path), _at(field_key, 'path'))}"
+    entry = file_format(fmt)
+    if entry is None:
+        raise NotImplementedError(
+            f"profile_source: unsupported file format {fileaccess.shown(repr(fmt), _at(field_key, 'format'))}. "
+            "V1 supports csv | parquet | fixed_width only."
         )
-    if fmt == "csv":
-        dialect = resolve_csv_dialect(descriptor, table=table)
-        return CsvFileSource(
-            Path(path),
-            has_header=dialect.has_header,
-            column_names=None if dialect.column_names is None else list(dialect.column_names),
-            delimiter=dialect.delimiter,
-            lexeme_columns=tuple(descriptor.get(LEXEME_KEY) or ()),
-            field_key=field_key,
-            table=table,
-        )
-    if fmt == "parquet":
-        return ParquetFileSource(Path(path), field_key=field_key)
-    if fmt == "fixed_width":
-        layout = descriptor.get("layout")
-        if not isinstance(layout, dict):
-            raise ValueError(
-                "profile_source: fixed_width file source missing `layout`, got "
-                f"{fileaccess.shown(repr(layout), _at(field_key, 'layout'))}"
-            )
-        return FixedWidthFileSource(Path(path), layout, field_key=field_key)
-    raise NotImplementedError(
-        f"profile_source: unsupported file format {fileaccess.shown(repr(fmt), _at(field_key, 'format'))}. "
-        "V1 supports csv | parquet | fixed_width only."
-    )
+    return entry.resident(descriptor, field_key, table)
 
 
 __all__ = [
