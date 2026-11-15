@@ -618,3 +618,79 @@ Module sizes: `_pipeline.py` 371 (ceiling 371), `_pipeline_context.py` 600 (goal
 `pipeline/_post_scan.py` 573, `_pipeline_route_dispatch.py` 207, `runner.py` 406,
 `residual_pii.py` 475, `_model_findings.py` 288, `_blocked.py` 341, `config/_post_scan.py` 215.
 No census number moved.
+
+## Delta review fixes (2026-11-15)
+
+### Fixes
+
+- A deferred NER block left the quarantine file on disk. `publish_after_gate` wrote at once on any
+  deferred gate, so on a loader run (or a lazy table with transforms) with quarantine and
+  `ner_findings: fail` the JSONL, which carries source row values, was published before
+  `_report_only` raised `ner_blocked`. `PostScanGate.enforces_ner` (deferred, integrity requested,
+  `post_scan_ner_findings(config) == "fail"`) now holds the write in `_held`; `settle` flushes it
+  after the check passes and a raise drops it. Every other deferred run still writes at once.
+  Commit `52f9e1b9`.
+- `test_scanml_m5_route_guard.py` called its own byte copy of `stub_post_scan_models`; it now
+  calls the helper in `tests/unit/detection_verification/_scanml_m4_support.py`. Assertions
+  unchanged. Commit `39d1fea7`.
+
+### Red first
+
+`test_a_deferred_ner_block_leaves_no_quarantine_file[fail_finding, pass_error]` (a loader run, one
+`bucketize` row quarantined, the fake NER detector) was red on `9ca21a3a` at
+`assert not qpath.exists()`, both cases; green after the fix, with the passing counterpart
+(the same run, no NER hit) publishing the file from the held write.
+`test_only_a_deferred_ner_fail_holds_the_quarantine_write[fail, warn]` spies on the deferred
+check and pins the narrow scope: under `warn` the file exists before the check runs, under `fail`
+it does not.
+
+### Mutations on the source head `52f9e1b9` (tests as of `883ea80b`)
+
+Run over `tests/unit/execution/test_scanml_m4_run.py` and `tests/unit/execution/post_scan` (180
+pass unmutated); the mutated span edited back by hand, `git diff` clean after each.
+
+- M-hold-off (`publish_after_gate` ignores the flag): 3 red, both block cases and the hold case
+  `[fail]`.
+- M-hold-all (flag true on every deferred gate): 2 red, the hold case `[warn]` and main's
+  `test_a_gate_that_will_not_judge_the_run_publishes_at_once`. Over all of `tests/unit/execution`
+  (before the `[warn]` case existed) main's test was the only red one.
+- M-flag-mode (the flag without `== "fail"`): 1 red, the hold case `[warn]`. The block tests stay
+  green under it, as they run under `fail`.
+
+### Checks
+
+On `61ef1cc8` (the last code commit; the docs commit after it changes this record and the
+fragment only). origin/main is now `64e9349b`, which the branch does not contain; it was not
+merged.
+
+- ruff check, ruff format --check on the 32 Python files the branch changes; mypy on the 16 `src`
+  files: pass.
+- `GATES_WORKERS=2 scripts/dev/gates.sh --baseline --steps sentry,layers,licenses,tests
+  <selection>` (`tests/unit/execution`, `tests/unit/detection_verification`, `tests/sentry`, the
+  compat corpus and every test file `git grep` finds for `publish_after_gate`, `quarantine` or
+  `PostScanGate`), rc 0, baseline origin/main `64e9349b`: sentry 5596 passed, 3 failed, 31 errors
+  (main 5614, 3, 31); layers 15; licenses 63; tests 16243 passed, 2 failed, 37 errors, 1316
+  skipped (main 16191, 2, 37, 1302). The same 40 failing ids on both: the 34 known
+  (`test_serial_resources::test_the_required_serial_registry_is_marked` and the
+  `test_outbound_clients` set, no `google`) and six `test_scratch_root_umask` cases this
+  selection now collects. No branch-only id.
+- `DECOY_REQUIRE_NER=1 pytest -m ner -n 2 tests` in the NER venv: 53 passed, 10 skipped (module
+  import skips as before); `test_scanml_m4_run.py` in that venv: 16 passed.
+- `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped.
+- `registry_renumber.py --check --main origin/main`, `ratchet_check.py --base origin/main`,
+  `check_fragment.py --base origin/main`: exit 0 on the docs head.
+
+Module sizes: `pipeline/_post_scan.py` 583 (under the 600 goal), `_pipeline.py` 371,
+`_pipeline_context.py` 600. No census number moved.
+
+### V2-LOG (from the delta review, not acted on)
+
+- (a) A deferred NER block whose report also has a regex `fail` or `error` row leads its verdict
+  with `finding_blocked` or `check_error`; it should lead with `ner_blocked`.
+- (b) The sentry at `tests/sentry/post_scan/_scan.py:313-315` matches only the string constant
+  (pre-existing on main).
+- (c) Model loading in `_pipeline_route_dispatch.py` imports the private `_model_findings`;
+  export `post_scan_detectors` from `verification.postmask`.
+- (d) The deferred gate's report has no `verdict` key, and the two log records use
+  `ner_findings` with two meanings.
+- (e) The lazy-table-with-transforms deferred case is not pinned by a test.
