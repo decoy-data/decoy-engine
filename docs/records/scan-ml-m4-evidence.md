@@ -81,7 +81,7 @@ Commit `e6a19865` (tests only) on `91a52eaa`, every failure an `AssertionError`:
   `residual-PII findings carry no source` (AT-M4e classifier, after a setup fix below), the
   registry fixture test (`post_scan.ner_blocked` not registered), `test_public_api`
   (`PostScanBlockedError` missing), the M1 tripwire `test_scan_ml_reasons` (now asserting the M4
-  code is registered; it was 1.26.0 then, now the pending value), and the minor-fixture sentry
+  code is registered; it was a numbered minor then, now the pending value), and the minor-fixture sentry
   (a fixture above the live minor).
 - NER venv, `DECOY_REQUIRE_NER=1`: the same 29 plus the 13 NER tests, 42 failed, 108 passed,
   0 skipped (`run_post_mask takes no detectors`, `residual-PII findings carry no source`,
@@ -229,7 +229,7 @@ Full suite:  trigger engine exports plus reason registry, orchestrator runs it
 `4cca4058` merges `origin/feat/scanml-m5` at `a0d4ad08`, which contains main `9e451dac` (#506
 release-stamped registry, #514, #517, #524, #525, #526, #528, #534 and others). Conflicts, all in
 registry carriers: `docs/reasons.md`, `reasons/_registry.py` and `consumer-contract.json` take the
-M5 side, which equals main (1.24.0, no SCAN-ML fixture paragraph); `tests/unit/test_reason_registry.py`
+M5 side, which equals main (main's minor, no SCAN-ML fixture paragraph); `tests/unit/test_reason_registry.py`
 takes the M5 side plus the M4 test rewritten by hand to the pending form
 (`test_scanml_m4_post_scan_block_is_registered_as_pending`, no fixture). No conflict around
 `compute_post_scan_integrity`: on main #517, #525 and #526 add library modules
