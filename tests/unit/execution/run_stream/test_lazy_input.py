@@ -1,15 +1,19 @@
-"""RUN-STREAM E5 (AT-E5): `lazy_input_tables` and the no-sink resident collector.
+"""RUN-STREAM E5 (AT-E5) and E5a (AT-E5a, AT-E5s): `lazy_input_tables` and the no-sink resident
+collector.
 
 The predicate names the candidate tables that may arrive lazy and copies no routing rule: every
 exclusion below is an existing engine owner answering. The collector lets a lazy source run the
-auto-chunk lane with no publication sink, returning one resident output.
+auto-chunk lane with no publication sink, returning one resident output. E5a makes that collector
+reachable through `run_pipeline` and gives it a private run scratch root to spill into.
 """
 
 from __future__ import annotations
 
 import ast
+import contextlib
 import copy
 import inspect
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -328,8 +332,8 @@ def test_the_collector_is_local_and_leaves_no_publication_evidence(
     real = _transactional_sink._CallableSinkAdapter
 
     class Spy(real):  # type: ignore[misc, valid-type]
-        def __init__(self, fn: object) -> None:
-            super().__init__(fn)
+        def __init__(self, fn: object, **kw: Any) -> None:
+            super().__init__(fn, **kw)
             made.append(self)
 
     monkeypatch.setattr(_transactional_sink, "_CallableSinkAdapter", Spy)
@@ -348,8 +352,8 @@ def test_an_external_sink_never_gets_the_collector(
     real = _transactional_sink._CallableSinkAdapter
 
     class Spy(real):  # type: ignore[misc, valid-type]
-        def __init__(self, fn: object) -> None:
-            super().__init__(fn)
+        def __init__(self, fn: object, **kw: Any) -> None:
+            super().__init__(fn, **kw)
             made.append(self)
 
     monkeypatch.setattr(_transactional_sink, "_CallableSinkAdapter", Spy)
@@ -411,3 +415,251 @@ def test_a_relationship_post_scan_verdict_equals_the_resident_call(tmp_path: Pat
         assert got.equals(resident_out[name])
     assert lazy_gate.output_unreadable is resident_gate.output_unreadable is False
     assert lazy_gate.report == resident_gate.report and lazy_gate.report is not None
+
+
+# ---------------------------------------------------------------- E5a: through run_pipeline
+
+
+def support_run(cfg: dict[str, Any], sources: Mapping[str, Any], **extra: Any) -> Any:
+    from decoy_engine.execution import run_pipeline
+
+    return run_pipeline(cfg, sources=sources, **support.run_kwargs(**extra))
+
+
+def _reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Rows of every batch the Parquet reader yields."""
+    yields: list[int] = []
+    real = pq.ParquetFile.iter_batches
+
+    def spy(self: Any, *args: Any, **kwargs: Any) -> Any:
+        for batch in real(self, *args, **kwargs):
+            yields.append(batch.num_rows)
+            yield batch
+
+    monkeypatch.setattr(pq.ParquetFile, "iter_batches", spy)
+    return yields
+
+
+def _never_materialized(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    from decoy_engine.execution import _pipeline_sources
+
+    real = _pipeline_sources.materialize_source
+
+    def spy(value: Any) -> Any:
+        if isinstance(value, LazySource) and Path(value.path) == path:
+            raise AssertionError("the admitted lazy source was materialized")
+        return real(value)
+
+    monkeypatch.setattr(_pipeline_sources, "materialize_source", spy)
+
+
+def _context_sinks(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    from decoy_engine.execution import _pipeline_context
+
+    seen: dict[str, list[Any]] = {"context": [], "commit": []}
+    real_build = _pipeline_context.build_run_context
+
+    def build(*args: Any, **kwargs: Any) -> Any:
+        ctx = real_build(*args, **kwargs)
+        seen["context"].append(ctx.sink)
+        return ctx
+
+    real_commit = PostScanGate.before_commit
+
+    def before_commit(self: Any, sink: Any) -> None:
+        seen["commit"].append(sink)
+        real_commit(self, sink)
+
+    monkeypatch.setattr(_pipeline_context, "build_run_context", build)
+    monkeypatch.setattr(PostScanGate, "before_commit", before_commit)
+    return seen
+
+
+def _paths(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    taken: list[str] = []
+    for name in ("_run_streamed", "_run_dispatcher", "_run_legacy"):
+        real = getattr(ac, name)
+        monkeypatch.setattr(
+            ac, name, lambda *a, _n=name, _r=real, **k: (taken.append(_n), _r(*a, **k))[1]
+        )
+    return taken
+
+
+_E5A_ROWS = 200  # 13 chunks of `support.CHUNK` rows
+
+
+def test_a_lazy_table_with_no_sink_streams_its_input_through_run_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AT-E5a; M-E5a restores the streamed-output-only input mode and turns this red.
+    cfg, table, lazy = _flat_job(tmp_path, rows=_E5A_ROWS)
+    want = support_run(cfg, {"t": table})
+    reads = _reads(monkeypatch)
+    _never_materialized(monkeypatch, Path(lazy.path))
+    sinks = _context_sinks(monkeypatch)
+    taken = _paths(monkeypatch)
+    got = support_run(cfg, {"t": lazy})
+    assert _E5A_ROWS // support.CHUNK > 3 and len(reads) >= 3, reads
+    assert taken == ["_run_streamed"]
+    assert sinks["context"] == [None] and all(s is None for s in sinks["commit"])
+    assert list(got.outputs) == ["t"] and got.outputs["t"].equals(want.outputs["t"])
+    lane = got.quality_metrics["auto_chunk"]
+    assert lane["input"]["mode"] == "lazy"
+    assert lane["output"] == {"mode": "resident", "reason": reasons.route.NO_SINK}
+    assert got.quality_metrics["execution"]["outputs_streamed"] is False
+
+
+def test_the_dispatcher_kill_switch_does_not_leave_the_streamed_collector_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AT-E5a V2-LOG pin: `dispatcher_enabled=False` has no effect on a lazy no-sink lane.
+    cfg, table, lazy = _flat_job(tmp_path, rows=_E5A_ROWS)
+    enabled = support_run(cfg, {"t": lazy})
+    taken = _paths(monkeypatch)
+    got = support_run(cfg, {"t": lazy}, chunked_dispatcher_enabled=False)
+    assert taken == ["_run_streamed"]
+    assert got.outputs["t"].equals(enabled.outputs["t"])
+    want = support_run(cfg, {"t": table})
+    assert got.outputs["t"].equals(want.outputs["t"])
+    for key in ("input", "output"):
+        assert got.quality_metrics["auto_chunk"][key] == enabled.quality_metrics["auto_chunk"][key]
+    lane, lane_reason = ac.select_lane(False)
+    assert got.quality_metrics["auto_chunk"]["lane"] == lane
+    assert got.quality_metrics["auto_chunk"]["lane_reason"] == lane_reason
+
+
+def test_a_declared_table_with_no_sink_still_runs_resident(tmp_path: Path) -> None:
+    # The collector refuses a declared table, so E5a keeps that table's input resident.
+    path = tmp_path / "t.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "start": pa.array(["2020-01-02"] * _E5A_ROWS),
+                "n": pa.array([f"a{i}" for i in range(_E5A_ROWS)]),
+            }
+        ),
+        path,
+    )
+    cols = [
+        column("start", logical_type="date", parse_format=ISO_DATE, error_policy="null"),
+        column("n"),
+    ]
+    cfg = validate(config(cols, source_path=str(path), table="t"))
+    cfg["sources"]["t"]["format"] = "parquet"
+    want = support_run(cfg, {"t": pq.read_table(path)})
+    got = support_run(cfg, {"t": LazySource(path)})
+    assert list(got.outputs) == list(want.outputs)
+    for name, table in want.outputs.items():
+        assert got.outputs[name].equals(table), name
+
+
+# ---------------------------------------------------------------- E5a: collector spill (AT-E5s)
+
+_SPILL_ROWS = 1_200_000
+_SPILL_NULLS = 1_100_000
+_SPILL_CHUNK = 100_000
+
+
+@pytest.fixture(scope="module")
+def spill_job(tmp_path_factory: pytest.TempPathFactory) -> tuple[dict[str, Any], Path]:
+    """The first column is null through row 1,100,000, so its output type resolves only after
+    more than one 1,048,576-row group is held back (mirrors AT-C1i with no sink)."""
+    base = tmp_path_factory.mktemp("e5s")
+    dates = [f"2021-{1 + (i % 12):02d}-15" for i in range(_SPILL_ROWS - _SPILL_NULLS)]
+    table = pa.table(
+        {
+            "val": pa.array([None] * _SPILL_NULLS + dates, pa.string()),
+            "p": pa.array(range(_SPILL_ROWS), pa.int64()),
+        }
+    )
+    path = Path(support.write_source(table, base / "late.parquet"))
+    column = {
+        "name": "val",
+        "strategy": "bucket_perturb",
+        "namespace": "tier_ns",
+        "provider_config": {"date_format": "%Y-%m-%d", "bucket": "month"},
+    }
+    return support.make_cfg([column, support.pass_col("p")], path=str(path)), path
+
+
+def _spill_run(cfg: dict[str, Any], source: Any) -> Any:
+    return support_run(
+        cfg, {"t": source}, chunk_size_rows=_SPILL_CHUNK, auto_chunk_threshold_rows=1_000
+    )
+
+
+class _ScratchSpy:
+    """Records each collector scratch root (and its mode), the adapter's `spill_parent` and the
+    hold stage directories present at each spill write."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, fail: BaseException | None = None) -> None:
+        from decoy_engine.execution import _chunked_output_sink
+        from decoy_engine.execution.out_of_core import _scratch
+
+        self.roots: list[tuple[Path, int]] = []
+        self.parents: list[Any] = []
+        self.holds: list[tuple[Path, int]] = []
+        self.writes = 0
+        real_root = _scratch.engine_scratch_root
+
+        @contextlib.contextmanager
+        def root(parent: Path | None) -> Any:
+            with real_root(parent) as made:
+                self.roots.append((made, stat.S_IMODE(made.stat().st_mode)))
+                yield made
+
+        monkeypatch.setattr(_scratch, "engine_scratch_root", root)
+        real_adapter = _transactional_sink._CallableSinkAdapter
+        spy = self
+
+        class Adapter(real_adapter):  # type: ignore[misc, valid-type]
+            def __init__(self, fn: object, **kw: Any) -> None:
+                super().__init__(fn, **kw)
+                spy.parents.append(kw.get("spill_parent"))
+
+        monkeypatch.setattr(_transactional_sink, "_CallableSinkAdapter", Adapter)
+        real_add = _chunked_output_sink._Spill.add
+
+        def add(this: Any, chunk: pa.Table) -> None:
+            real_add(this, chunk)
+            self.writes += 1
+            if self.writes == 1 and self.roots:
+                for entry in self.roots[-1][0].iterdir():
+                    if entry.name.startswith("_decoy_hold_"):
+                        self.holds.append((entry, stat.S_IMODE(entry.stat().st_mode)))
+            if fail is not None:
+                raise fail
+
+        monkeypatch.setattr(_chunked_output_sink._Spill, "add", add)
+
+
+def test_the_no_sink_collector_spills_beneath_its_own_run_root(
+    spill_job: tuple[dict[str, Any], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AT-E5s; M-E5s drops the collector's spill parent (HOLD_BACK_SPILL_UNAVAILABLE).
+    cfg, path = spill_job
+    want = _spill_run(cfg, pq.read_table(path))
+    spy = _ScratchSpy(monkeypatch)
+    got = _spill_run(cfg, LazySource(path))
+    assert got.quality_metrics["auto_chunk"]["input"]["mode"] == "lazy"
+    assert got.outputs["t"].equals(want.outputs["t"])
+    assert spy.writes > 0
+    assert len(spy.roots) == 1 and spy.roots[0][1] == 0o700
+    root = spy.roots[0][0]
+    assert spy.parents == [root]
+    assert spy.holds and all(h.parent == root and mode == 0o700 for h, mode in spy.holds)
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("fail", [RuntimeError("injected spill failure"), KeyboardInterrupt()])
+def test_a_failure_after_the_first_spill_write_removes_the_hold_and_the_run_root(
+    fail: BaseException, spill_job: tuple[dict[str, Any], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AT-E5s; M-E5s2 closes the scratch scope only on success and leaves the root behind.
+    cfg, path = spill_job
+    spy = _ScratchSpy(monkeypatch, fail=fail)
+    with pytest.raises(type(fail)):
+        _spill_run(cfg, LazySource(path))
+    assert spy.writes == 1 and len(spy.roots) == 1 and spy.holds
+    assert not any(h.exists() for h, _mode in spy.holds)
+    assert not spy.roots[0][0].exists()

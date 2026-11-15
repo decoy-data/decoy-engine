@@ -21,9 +21,9 @@ from tests.unit.execution import _b6b_support as b6b
 from tests.unit.execution import _transform_testkit as tk
 from tests.unit.execution.test_b6a_publish import _resident_case
 
+# RUN-STREAM E5a: `no_sink` alone keeps the routed table lazy (see the no-sink cells below).
 RESIDENT_REASONS = [
     "streaming_disabled",
-    "no_sink",
     "sink_not_streaming",
     "legacy_lane",
     "validators_present",
@@ -46,9 +46,86 @@ def _lazy_of_cfg(cfg: dict[str, Any]) -> LazySource:
 def test_a_routed_lazy_table_with_a_resident_output_is_materialized_once_before_the_lane(
     reason: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    cfg, kwargs, sink = _resident_case(reason, tmp_path)
+    _assert_materialized_once(cfg, kwargs, sink, reason, monkeypatch)
+
+
+# RUN-STREAM E5a: with no sink, the consumers that read the sources whole keep their resident input.
+@pytest.mark.parametrize(
+    "consumer", ["validators_present", "quarantine_enabled", "fidelity_report", "post_validation"]
+)
+def test_no_sink_with_a_whole_source_consumer_is_still_materialized_once(
+    consumer: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, kwargs, _sink = _resident_case(consumer, tmp_path)
+    _assert_materialized_once(cfg, kwargs, None, "no_sink", monkeypatch)
+
+
+def test_a_routed_lazy_table_with_no_sink_stays_lazy_and_the_lane_collects_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, kwargs, sink = _resident_case("no_sink", tmp_path)
+    assert sink is None
+    kwargs["now_iso"] = "2026-01-01T00:00:00+00:00"
+    handed = {b6b.TABLE: _lazy_of_cfg(cfg)}
+    want = b6b.run(cfg, b6b.twin_sources(handed), None, **kwargs)
+    reads: list[str] = []
+    real_to_table = LazySource.to_table
+    monkeypatch.setattr(
+        LazySource, "to_table", lambda self: (reads.append("to_table"), real_to_table(self))[1]
+    )
+    got = b6b.run(cfg, handed, None, **kwargs)
+    assert reads == []
+    assert list(got.outputs) == list(want.outputs)
+    for name in want.outputs:
+        assert got.outputs[name].equals(want.outputs[name], check_metadata=True), name
+    assert b6b.input_block(got)["mode"] == "lazy"
+    assert got.quality_metrics["auto_chunk"]["output"] == {"mode": "resident", "reason": "no_sink"}
+    assert got.quality_metrics["execution"]["outputs_streamed"] is False
+
+
+def test_input_modes_keeps_only_the_routed_table_lazy_when_no_sink_is_the_only_reason() -> None:
+    from decoy_engine import reasons
+    from decoy_engine.execution._chunked_input import REASON_LAZY, input_modes
+
+    no_sink = reasons.route.NO_SINK
+
+    def modes(**over: Any) -> dict[str, tuple[str, str]]:
+        args: dict[str, Any] = {
+            "out_mode": "resident",
+            "out_reason": no_sink,
+            "routed": "t",
+            "split": None,
+            "reason_with_sink": REASON_LAZY,
+        }
+        args.update(over)
+        return input_modes(["t", "u"], **args)
+
+    assert modes() == {"t": ("lazy", REASON_LAZY), "u": ("resident", "not_dispatched")}
+    integrity = reasons.route.POST_SCAN_INTEGRITY
+    assert modes(reason_with_sink=integrity)["t"] == ("lazy", REASON_LAZY)
+    for whole in (
+        reasons.route.VALIDATORS_PRESENT,
+        reasons.route.QUARANTINE_ENABLED,
+        reasons.route.FIDELITY_REPORT,
+        reasons.route.POST_VALIDATION,
+        reasons.route.DECLARED_CASTING,
+        None,
+    ):
+        assert modes(reason_with_sink=whole)["t"] == ("resident", no_sink), whole
+    assert modes(out_reason=reasons.route.STREAMING_DISABLED)["t"][0] == "resident"
+    assert modes(routed=None)["t"] == ("resident", "not_dispatched")
+
+
+def _assert_materialized_once(
+    cfg: dict[str, Any],
+    kwargs: dict[str, Any],
+    sink: Any,
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from decoy_engine.execution import _pipeline_finalize
 
-    cfg, kwargs, sink = _resident_case(reason, tmp_path)
     kwargs["now_iso"] = "2026-01-01T00:00:00+00:00"
     handed = {b6b.TABLE: _lazy_of_cfg(cfg)}
     twin_sink = b6b.b6a.RecordingSink() if isinstance(sink, b6b.b6a.RecordingSink) else sink
