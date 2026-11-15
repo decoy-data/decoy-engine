@@ -67,3 +67,24 @@ files pass; mypy clean (886 files); `tests/sentry` 5776 passed, 0 failed, 2 skip
 `profile/` 19.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-15, `a7f278eb`), carried forward
+
+`origin/feat/gen-rel-e3a` `9251cc7b` merged into `91b0a80e` as `6870ee8f`, without a conflict. It
+carries `origin/main` `a7f278eb` (#600, #582 one seed path for every seeded generator, #489
+durable publication units) and slice 2's re-pin of the draw-site catalogue, which this slice does
+not touch: `tests/native/test_draw_sites_catalogue_pinned.py` comes in as slice 2 resolved it
+(both "Re-pinned for ..." lines, `_CATALOGUE_DIGEST` recomputed by the file's procedure) and
+passes on this tree. Main's change touches no source file of this slice, and main's seed sentry
+(`tests/sentry/defects/test_rng_construction.py`) passes over it.
+
+Checks on `6870ee8f`, Python 3.10.20, `origin/main` `a7f278eb`: ruff and format on the changed
+files pass; mypy clean (889 files); `tests/sentry` 5842 passed, 0 failed, 2 skipped; layers 15
+passed; this slice's test files and their neighbours (the numeric-typing parity files,
+`tests/unit/config`, `tests/unit/generation`, `tests/unit/plan`, `tests/unit/generators`, the
+derived and aggregate transforms, the definition-owners test) with the two draw-site
+catalogue tests: 4568 passed, 0 failed, 40 skipped. Script checks (`registry_renumber.py`,
+`ratchet_check.py`, `check_fragment.py`, `reason_release_pin.py --check`): each exit 0.
+`generation/synthesize.py` 599 lines (the module-size cell passes); the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
