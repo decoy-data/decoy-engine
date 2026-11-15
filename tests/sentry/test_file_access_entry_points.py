@@ -155,8 +155,8 @@ def test_every_function_decorated_with_entry_point_is_listed() -> None:
 
 def test_an_unlisted_decorated_function_is_seen() -> None:
     source = "@fileaccess.entry_point\ndef brand_new(x, *, file_access=None): ...\n"
-    seen = decorated_entry_points(source, "decoy_engine.profile._x")
-    assert seen == {("decoy_engine.profile._x", "brand_new")}
+    seen = decorated_entry_points(source, "seeded_module")
+    assert seen == {("seeded_module", "brand_new")}
     assert seen - _listed_pairs() == seen
     bare = "@entry_point\ndef other(*, file_access=None): ...\n"
     assert decorated_entry_points(bare, "m") == {("m", "other")}
