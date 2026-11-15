@@ -71,6 +71,7 @@ ENTRY_POINTS: tuple[str, ...] = (
     "decoy_engine.execution.capacity.estimate_job_capacity",
     "decoy_engine.execution.native._chunked_entry.run_mask_chunked",
     "decoy_engine.execution.out_of_core._runner.run_fk_out_of_core",
+    "decoy_engine.execution.pipeline._lazy_input.lazy_input_tables",
     "decoy_engine.generation._pinned_compile.compile_pinned_plan",
     "decoy_engine.generation._pinned_compile.compile_pinned_plan_with_generation",
     "decoy_engine.generation._pinned_execute.execute_pinned",

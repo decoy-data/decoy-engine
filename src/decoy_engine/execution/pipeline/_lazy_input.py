@@ -18,12 +18,16 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine.fileaccess import entry_point
+
 if TYPE_CHECKING:
+    from decoy_engine.fileaccess import FileAccess
     from decoy_engine.profile._readers import LazySource
 
 __all__ = ["lazy_input_tables"]
 
 
+@entry_point
 def lazy_input_tables(
     config: dict[str, Any],
     candidates: Mapping[str, LazySource],
@@ -34,6 +38,7 @@ def lazy_input_tables(
     fidelity_report: bool,
     post_validation: bool,
     vault_active: bool,
+    file_access: FileAccess | None = None,
 ) -> frozenset[str]:
     """The candidate names that may arrive lazy; always a subset of `candidates`.
 
