@@ -8,6 +8,8 @@ from decoy_engine.reasons._types import RetryClass
 __all__ = [
     "FINDING_BLOCKED",
     "FOREIGN_KEY_ORPHANS_INTRODUCED",
+    "FOREIGN_KEY_ORPHANS_QUARANTINED",
+    "GATE_DEFERRED_ROUTE",
     "KEY_COLUMN_MISSING",
     "KEY_TYPE_MISMATCH",
     "PRIMARY_KEY_DUPLICATES_INTRODUCED",
@@ -35,6 +37,20 @@ FOREIGN_KEY_ORPHANS_INTRODUCED = _d(
     "The run left more foreign keys without a parent in the output than its inputs held.",
     retry=_repair,
     since="1.25.0",
+)
+GATE_DEFERRED_ROUTE = _verdict(
+    "gate_deferred_route",
+    "The blocking post-scan gate cannot read this route yet, so the run was checked as before "
+    "and not withheld.",
+    retry=_repair,
+    since="1.26.0",
+)
+FOREIGN_KEY_ORPHANS_QUARANTINED = _d(
+    "foreign_key_orphans_quarantined",
+    "Quarantine removed parent rows, so some child rows in the output have no parent. The run "
+    "is not withheld for them.",
+    retry=_repair,
+    since="1.26.0",
 )
 KEY_COLUMN_MISSING = _d(
     "key_column_missing",

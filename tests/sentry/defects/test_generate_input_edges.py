@@ -2,8 +2,8 @@
 
 Which column a generate option reads is declared once, as `OptionSpec.ref_kind` (with
 `ref_context_key` and `ref_phase`) in `config/_generate_options.py`, and resolved once, by
-`iter_generate_input_refs` in `config/_generate_relational.py`. The plan check, numeric typing
-and the reproducibility report all consume the resolved edges. A second option-key table or a
+`iter_generate_input_refs` in `config/_generate_relational/__init__.py`. The plan check,
+numeric typing and the reproducibility report all consume the resolved edges. A second option-key table or a
 consumer that resolves an option value by itself would read a same-named column of the wrong
 table, so this sentry fails on:
 
@@ -49,7 +49,7 @@ from decoy_engine.plan import PlanCompileError
 SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 REGISTRY_FILE = "config/_generate_options.py"
 RESOLVER = "iter_generate_input_refs"
-RESOLVER_FILE = "config/_generate_relational.py"
+RESOLVER_FILE = "config/_generate_relational/__init__.py"
 RESOLVER_FUNCTIONS = frozenset({RESOLVER, "_named_columns", "_source_table", "_via_target"})
 # Every string the resolver may hold: the descriptor vocabulary it branches on, the parse-tree
 # node of a column read, and the keys of the one structure it follows, a `reference` column.
