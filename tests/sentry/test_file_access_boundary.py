@@ -518,7 +518,9 @@ _TRACKER_SEEDS = {
 @pytest.mark.parametrize("cell", ["engine", *_TRACKER_SEEDS])
 def test_d9_connection_sites_are_native_connections(tmp_path: Path, cell: str) -> None:
     """One way only: D9 sees no connection the native flow misses. The native flow sees more
-    (parameters, returns, `self.<attr>`); exact agreement comes when D9 reads it."""
+    (parameters, returns, `self.<attr>`). Folding D9 onto `NativeFlow` is owned by slice S4b (plan
+    10.2, "D9 and the native tracker"): it would turn 23 bare `duckdb.connection.*` calls into D9
+    sites that each need a registry row, so it waits until the last native call is wrapped."""
     if cell == "engine":
         count, gaps = _tracker_gaps(SRC, "decoy_engine")
         assert count and gaps == [], gaps

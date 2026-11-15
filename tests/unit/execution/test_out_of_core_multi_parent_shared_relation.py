@@ -168,8 +168,8 @@ def test_no_relation_file_outlives_the_run(
 
     class _KeptArena(ScratchArena):
         @classmethod
-        def open(cls, *, under: str | os.PathLike[str] | None = None) -> ScratchArena:
-            arena = ScratchArena.open(under=under)
+        def fresh(cls, *, under: str | os.PathLike[str] | None = None) -> ScratchArena:
+            arena = ScratchArena.fresh(under=under)
             monkeypatch.setattr(arena, "reclaim", lambda: None)
             kept.append(arena)
             return arena
