@@ -257,3 +257,33 @@ the two draw-site catalogue tests: 2053 passed, 0 failed, 7 skipped. Script chec
 root and `config/` hold 25 modules, `profile/` 19.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-15, `a7f278eb`)
+
+`origin/main` `a7f278eb` (#600 install story, #582 one seed path for every seeded generator,
+#489 durable publication units) merged into `9a0b1181` as `39383719`.
+
+One conflict, `tests/native/test_draw_sites_catalogue_pinned.py`: both sides re-pinned
+`_CATALOGUE_DIGEST`. Main (DUP-FREEZE E2) added `mask.joint_mask_null_fallback` and
+`mask.joint_mask_gen_row` after `mask.joint_mask_keyed_row` and changed the
+`gen.composite_build_pool` seed text; this slice changed `gen.reference`. The ordered ids, the
+entry digests and the coverage-map digests merged without a conflict and each matches the merged
+catalogue (42 entries). Both "Re-pinned for ..." lines are kept, and `_CATALOGUE_DIGEST` is the
+file's own procedure (SHA-256 over `repr(protocol.DRAW_SITES)`) on the merged tree:
+`895b26ce...`; main pinned `cfaa8fd8...` and this branch `49e1c138...`, each without the other
+side's entries. `execution/native/_draw_sites_gen.py` auto-merged main's `gen.composite_build_pool`
+seed text beside this slice's `gen.reference` entry.
+
+Files both sides touched, read against both parents: `CODEMAP.md` (main's `fileaccess/` and
+`determinism/` rows), `docs/reasons.md` (main's F22 paragraph), `docs/strategies.md`, the sentry
+manifest (main's `test_rng_construction.py`). Main's new seed sentry
+(`tests/sentry/defects/test_rng_construction.py`) passes over this chain's generation code.
+
+Gate on `39383719` (`GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline --steps
+ruff,format,mypy,sentry,layers,licenses,tests` over the 57 T1 paths, `tests/unit/reasons` and
+the native catalogue readers, Python 3.10.20, baseline `a7f278eb`): ruff, format and mypy pass;
+sentry 5764 passed, 0 failed, 2 skipped; layers 15 passed; licenses 63 passed; tests 7142
+passed, 0 failed, 60 skipped; no branch-only failure. Script checks against `origin/main`
+(`registry_renumber.py`, `ratchet_check.py`, `check_fragment.py`, `reason_release_pin.py
+--check`): each exit 0. `generation/synthesize.py` 600 lines; the engine root and `config/` hold
+25 modules (main's packages: `determinism/` 3, `fileaccess/` 17, `generation/composite/` 10).
