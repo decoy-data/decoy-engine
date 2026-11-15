@@ -387,7 +387,7 @@ of the dump when unset, so an old record keeps its wire form. The engine adds th
 | F13 | Remap breaks an FK join, splits a shared domain or an old vault, or leaves a derived column stale | one side remapped | `remap_domain_split`, `remap_vault_split`, `remap_column_conditional` | RM-6, RM-14, RP-5 |
 | F14 | Stale manifest applied to a changed config | config edited after preview | ids recomputed, `remap_manifest_stale` | RM-8 |
 | F15 | Old record unreadable after the run-result change | a required field | optional field, excluded when unset | EV-1, EV-2 |
-| F16 | Error carries a path, value or OS text via exception context | `raise ... from exc` | raise after the `except` block; contexts asserted `None` | VH-10, RM-7 |
+| F16 | Error carries a path, value or OS text via exception context | `raise ... from exc` | raise after the `except` block; contexts asserted `None` for every error the new code raises (errors passed through from `unmask_pipeline` keep its existing value-free `__cause__`, V2-LOG item 4) | VH-10, RM-7 |
 | F17 | Remapped int or date column differs from a fresh mask (recovered as string) | unmask returns `pa.string()`; int canonicalization differs | `remap_source_type_unsupported` before any read | RM-9 |
 | F18 | Remap output rows filtered, sorted or deduplicated, so other columns no longer line up | `TableConfig.transforms` kept in the derived config | allowlist-built derived config; row count and passthrough byte-equality check (`remap_row_alignment_failed`) | RM-10 |
 | F19 | A selected column unmask did not reverse (nested fpe, irreversible, partial miss) passes through and is re-masked from masked values | only vault misses checked | per-column status check against `reversal_method`; `hits`/`misses` fields | RM-5, RM-11, RM-13 |
@@ -518,8 +518,8 @@ of the dump when unset, so an old record keeps its wire form. The engine adds th
 ## 8. Acceptance tests (red first)
 
 Every cell is written before its slice's code and fails on the base tree (a missing name counts as
-red only where the cell also asserts behavior). Count: 53 cells, 48 engine (VH 13, DV 10 with
-DV-4b, RP 7, RM 16, EV 2) and 5 CLI (CV). Revision 1 had 44 (39 engine, 5 CLI); its report's 46
+red only where the cell also asserts behavior). Count: 54 cells, 48 engine (VH 13, DV 10 with
+DV-4b, RP 7, RM 16, EV 2) and 6 CLI (CV). Revision 1 had 44 (39 engine, 5 CLI); its report's 46
 was a miscount. "Mut" marks the cells whose closing structure gets
 a seeded mutation in the gate (`mutmut` or the hand mutation named in the cell).
 
@@ -541,7 +541,7 @@ a seeded mutation in the gate (`mutmut` or the hand mutation named in the cell).
 | VH-12 | `key_check_value`: 16 hex; stable for one key; differs for a different secret and for a different `key_version`; refuses a short key | KCV contract | truncate to 4 bytes (length assertion red) |
 | VH-13 | compat corpus: `decoy-vault-v3__synthetic.vault` round-trips and its header tamper bite-test fires | F4 at format level | |
 
-### E2, domain version (`tests/unit/domains/test_version.py`, `test_build.py`; sentry `tests/sentry/test_domain_traits_complete.py`)
+### E2, domain version (`tests/unit/contracts/test_domain_version.py`, `tests/unit/domains/test_build.py`; sentry `tests/sentry/test_domain_traits_complete.py`)
 
 | Cell | Asserts | Failure it catches | Mut |
 |---|---|---|---|
@@ -578,7 +578,7 @@ a seeded mutation in the gate (`mutmut` or the hand mutation named in the cell).
 | RM-4 | a manifest holding one `unavailable` column is refused with no tables and no `unmask_pipeline` call (spy) | F12 | skip the `unavailable`-row refusal |
 | RM-5 | a vault missing one row of a selected column gives `remap_source_unavailable`, no tables, and a message holding a count only; the unmask report shows `hits = n - 1`, `misses = 1` | F12, F19 | accept a partial miss (check `status` only) |
 | RM-6 | parent and child FK in one namespace remapped together still join; the child alone gives `remap_domain_split` | F13 | drop the domain-split check |
-| RM-7 | canary source values absent from `caplog` and every raised message across RM-3 to RM-8; contexts `None` | F5, F16 | |
+| RM-7 | canary source values absent from `caplog` and every raised message across RM-3 to RM-8; `__cause__` and `__context__` are `None` for every error `apply_remap` itself raises; an unmask error passed through keeps its existing value-free cause (unmask.py:296) | F5, F16 | |
 | RM-8 | config edited after the preview (one `provider_config` key) gives `remap_manifest_stale`; an edit that only changes `pipeline_config_hash` (a non-keyed column) gives it too | F14, TOCTOU | compare the manifest ids with themselves |
 | RM-9 | an fpe column over an int source and a `vault: true` hash column over a date source are `remap_source_type_unsupported` in the manifest, and `apply_remap` refuses them before any read even when the manifest row is edited to `planned` | F17 | skip the dtype check in `apply_remap` |
 | RM-10 | a table with `transforms` (filter, sort, dedupe) remaps with input row count and order kept and every non-selected column byte-equal; `derived_config` holds no `transforms`, `generate_columns`, `row_count`, casting, scans or delivery key; a `run_pipeline` stub that drops one row gives `remap_row_alignment_failed` and no tables | F18 | keep `transforms` in the derived config; skip the alignment check |
@@ -604,6 +604,7 @@ a seeded mutation in the gate (`mutmut` or the hand mutation named in the cell).
 | CV-3 | `vault_tampered` maps to the runtime exit code with a value-free message and `--json` envelope |
 | CV-4 | a keyed `decoy run` writes `domains` into its run result; an unkeyed run omits it |
 | CV-5 | a v2 vault passed to `unmask` exits with the re-mask remedy |
+| CV-6 | `decoy run --vault <path>` where `<path>` exists refuses with `vault_exists` and leaves the file byte-identical (the row FRAME "CLI refuses to overwrite an existing vault", already enforced by `_publish`, `src/decoy_engine/vault.py:332,394`; this cell pins it for v3) |
 
 ## 9. Goldens, pins and sentries that move
 
@@ -675,20 +676,20 @@ a seeded mutation in the gate (`mutmut` or the hand mutation named in the cell).
 | `src/decoy_engine/vault/_load.py` (about 190) | `vault/` | same | `_writer.py` | `load_vault`, `read_vault_header` |
 | `src/decoy_engine/keyprovider.py` (changed, 271 to about 300) | root | `_MAP.md` keyprovider row | `determinism/` | `key_check_value`; no new root module |
 | `src/decoy_engine/secret_providers/_requirements.py` (changed, 293 to about 320) and its `__init__.py` | `secret_providers/` | "Secret providers, file access" row | `_preflight.py` | `keyed_columns_for_plan`, export `column_is_keyed`; one registry |
-| `src/decoy_engine/domains/__init__.py` (new, about 50) | `domains/` (new top-level package) | new row "Identity domains, rotation and remap" (a map change, stated here) | `unmask.py`, `vault/` | a sub-package, not a root module; 6 modules, far under 25 |
+| `src/decoy_engine/domains/__init__.py` (new, about 50) | `domains/` (new top-level package) | new row "Identity domains, rotation and remap" (a map change, stated here) | `unmask.py`, `vault/` | a sub-package, not a root module; 5 modules, far under 25 |
 | `src/decoy_engine/domains/_traits.py` (about 150) | `domains/` | same | `_version.py` | per-strategy traits registry |
-| `src/decoy_engine/domains/_version.py` (about 240) | `domains/` | same | `_traits.py` | `DomainVersion`, write and read models, id |
+| `src/decoy_engine/contracts/domain_version.py` (about 220) | `contracts/` | CODEMAP "Versioned contracts" row (`CODEMAP.md:262`) | `declared_casting.py` | `decoy-domain-version/v1` write and read models and the id; a versioned document CLI and platform consume belongs in `contracts/` (tier 4, no execution imports), and the id needs only `_canonical`; `domains/` keeps the logic that builds it |
 | `src/decoy_engine/domains/_build.py` (about 180) | `domains/` | same | `_version.py` | `domain_versions_for_plan`, `compare_domain_versions` |
 | `src/decoy_engine/domains/_rotation.py` (about 260) | `domains/` | same | `_build.py` | `preview_rotation`, three mode handlers |
-| `src/decoy_engine/domains/_manifest.py` (about 180) | `domains/` | same | `_rotation.py` | `RemapManifest` write and read models |
+| `src/decoy_engine/contracts/remap_manifest.py` (about 180) | `contracts/` | CODEMAP "Versioned contracts" row | `domain_version.py` | `decoy-remap-manifest/v1` write and read models (moves with the manifest to the Q5 row if Q7 is answered as recommended) |
 | `src/decoy_engine/domains/_remap.py` (about 280) | `domains/` | same | `_manifest.py` | `apply_remap` over `unmask_pipeline` and `run_pipeline` |
-| `src/decoy_engine/run_result/_model.py` (changed, 409 to about 435) and `_build.py` | `run_result/` | existing | `_build.py` | an optional field |
+| `src/decoy_engine/run_result/_model.py` (changed, 409 to about 445) and `_build.py` | `run_result/` | existing | `_build.py` | the optional `domains` field and its own `DomainEvidence` type, defined here (tier 4) and not imported from `domains/` (tier 1) or `contracts/` (an independent tier-4 sibling); `domains/` converts into it |
 | `src/decoy_engine/unmask.py` (changed, about +40) | root | existing unmask row | `vault/` | `reversal_method` export, `hits`/`misses` on `UnmaskColumnReport`; no new root module |
 | `src/decoy_engine/fileaccess/__init__.py` (changed, +2 rows) | `fileaccess/` | existing | - | `ENTRY_POINTS` rows for `read_vault_header` and `apply_remap` |
 | `src/decoy_engine/reasons/runtime/` part files | `reasons/` | "Reason codes" row | existing parts | appended codes; a new part file only if a part passes 600 lines |
-| `.importlinter` | root | "Layer contracts" row | `pyproject.toml` | `domains` joins tier 1 (`unmask : delivery : ...`): it imports `unmask` (tier 1), `execution` and `vault` (tier 2), `plan`, `keyprovider` and `secret_providers` (tier 3), `_canonical` and `_value_free` (lower); nothing below imports it |
+| `.importlinter` | root | "Layer contracts" row | `pyproject.toml` | `domains` joins tier 1 (`unmask : delivery : ...`): it imports `unmask` (tier 1), `execution` and `vault` (tier 2), `plan`, `keyprovider` and `secret_providers` (tier 3), `contracts` (the document models), `_canonical` and `_value_free` (lower); nothing below imports it |
 | `tests/unit/vault/test_v3_format.py`, `test_v3_tamper.py` | `tests/unit/vault/` (exists) | "Unit tests" row | `test_run_entries.py` | mirrors `src/` |
-| `tests/unit/domains/test_*.py` (five files) | `tests/unit/domains/` (new) | "Unit tests" row | - | mirrors `src/` |
+| `tests/unit/domains/test_*.py` (four files), `tests/unit/contracts/test_domain_version.py`, `test_remap_manifest.py` | `tests/unit/domains/` (new), `tests/unit/contracts/` | "Unit tests" row | - | mirrors `src/` |
 | `tests/sentry/test_domain_traits_complete.py`, `tests/sentry/test_domain_seed_fields_classified.py`, `tests/sentry/defects/test_key_check_choke_point.py` | `tests/sentry/`, `tests/sentry/defects/` | "Sentry test" row | `test_vault_writer_routes.py` | registered in `scripts/dev/sentry_registry.toml` |
 | `tests/fixtures/domains/domain-version-v1-vectors.json` | `tests/fixtures/` | existing fixture tree | `tests/fixtures/hkdf/` | permanent golden vectors |
 | `tests/integration/compat_corpus/decoy-vault-v3__synthetic.vault` | compat corpus | existing | the v2 artifact (now a negative fixture) | corpus scope already includes the vault |
@@ -780,7 +781,10 @@ no body unless it explains why, final line `cam`.
   One-way columns without a vault cannot be remapped (F09 contract: a remap "cannot reconstruct
   unavailable inputs from a one-way hash"); the operator re-runs the mask job from source under
   the new key. `when`-conditioned, derived-from, composite-FK and non-string-source remap are
-  follow-ups.
+  follow-ups. Coverage is narrow: because a selection must cover whole domains and whole vaults,
+  any selected table that also holds a `date_shift`, `shuffle` or vault-less `hash` column in an
+  affected domain refuses the whole remap, so in practice remap serves string fpe and vaulted
+  columns in tables built around them, and most operators will re-run from source.
 - **Q7. Build the E3 remap manifest and E4 `apply_remap` in row 79, or move them to the Q5 remap
   row?** E4 has no V1 consumer while the Q5 CLI commands are deferred. Recommended: move the
   `RemapManifest` half of E3 and all of E4 to the Q5 row, so they ship with the command that uses
@@ -846,19 +850,34 @@ no body unless it explains why, final line `cam`.
   blocked until answered.
 - D9 mutations: added for RM-4, RM-5, VH-7, RM-9 to RM-12, RM-14, RM-15.
 - D10 `config_hash`: produced only by `pipeline_config_hash` on the validated config (4.5).
-- Cell count: 44 in revision 1 (the earlier 46 was a miscount); 53 now (section 8).
+- Cell count: 44 in revision 1 (the earlier 46 was a miscount); 54 now with CV-6 (section 8).
 
-### Deferred (V2-LOG)
+### Deferred (V2-LOG), Dennis r1
 
-The r1 verdict file recorded only counts for the 10 V2-LOG items, not their text. The items below
-are the V2-LOG-class limits this plan already defers; the coordinator should send the 10 item
-texts so each can be matched or added here.
+1. Key-label and value domain overlap: `derive(mask_key, ns, label)` shares input space with the
+   hash strategy's `derive(mask_key, ns, canonical(value))`, so a hash column in namespace `vault`
+   over the value `"vault-key/v1"` outputs the v2 Fernet key, and over `"ff1-key/v1"` in an fpe
+   namespace outputs the FF1 key. The v3 `vault_id` closes it for the vault key. Follow-up:
+   reserved internal namespaces. Hostile-input class, V2 threat model.
+2. `K_vault` is both the AES key and the input that derives the nonce prefix. Follow-up: derive
+   the prefix from `mask_key` plus `vault_id` under its own label, or store a random prefix in the
+   header as Tink does.
+3. The domain id in run results lets someone test a guessed weak secret offline, the same as any
+   masked output. V2 threat model (with the KCV item in FRAME non-goals).
+4. `unmask_pipeline` re-raises `VaultError` `from exc` (`src/decoy_engine/unmask.py:296`), so
+   errors `apply_remap` passes through carry a value-free `__cause__`. RM-7 and F16 now scope the
+   `None` assertion to errors the new code raises; cleaning the unmask re-raise is a follow-up.
+5. Folded in: the domain-version and remap-manifest document models live in `contracts/` per the
+   CODEMAP "Versioned contracts" row (section 10).
+6. Folded in: the E5 `DomainEvidence` type is defined in `run_result` (tier 4) and `domains/`
+   converts into it (section 10).
+7. Folded in: the row FRAME "CLI refuses to overwrite an existing vault" is cited (`_publish`,
+   `vault_exists`) and pinned by CV-6.
+8. Folded in: Q6 now tells the owner how narrow remap coverage is.
+9. Cell count: fixed in revision 2 (section 8).
+10. Pure-move checker path: fixed in revision 2 (`scripts/check_pure_move.py`).
 
-- Remap of non-string source columns (type record and restore).
-- Remap of `when`-conditioned, derived-from and composite-FK columns.
-- Remap on chunked, sequential and out-of-core routes (full frame only in V1).
-- KCV resistance to offline guessing of weak secrets (V2 threat model).
-- An authenticated meta header for the SQLite tokenize store (Q4).
-- Reading `decoy-vault/v2` files (hard cut, Q2).
-- Domain registry, ownership, grants and revocation (platform).
-- Rotation UI and approval workflow.
+Other limits this plan defers: remap of non-string sources, of `when`-conditioned, derived-from
+and composite-FK columns, and on bounded routes; an authenticated header for the SQLite tokenize
+store (Q4); reading `decoy-vault/v2` files (Q2); the platform domain registry, grants and
+revocation; rotation UI and approval.
