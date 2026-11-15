@@ -852,6 +852,10 @@ class TestEndToEndWiring:
                     engine_version="0.1.0",
                     out_of_core_budget_bytes=budget,
                     fidelity_report=True,
+                    # The static byte estimate is what this test pins. With the probe on,
+                    # the wide leg spawns a capped child that cannot succeed here and has
+                    # been seen to stall until the probe's 600 s timeout.
+                    use_probe_routing=False,
                 )
             except ExecutionError as exc:
                 return exc.code

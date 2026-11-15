@@ -122,6 +122,24 @@ footers and schemas, before any data row is read, staged, profiled or masked. Fi
 `profile_source` gains the keyword-only `declared` capability. No registry code is added. The chunked entries are
 unchanged here; CONFIG-EXPLICIT E2d gates them (below).
 
+**Pre-GA correction (declared table never dropped, LOADER-SRC, 2026-11-14).** A table that masks through a
+`source_loader`, has strategies under `tables:` and no `sources:` entry or caller table is refused by `run_pipeline`
+before the loader runs or any data row is read, as `ConfigError` with reason `config/loader_table_undeclared` (new). After the plan is built,
+`run_pipeline` also refuses any supplied mask table that has no plan entry, as
+`ConfigError` with reason `config/declared_table_dropped` (new). Both texts name the table, never a value. Before
+this, such a run returned the loader's rows unmasked. A declared table that nothing supplies is unchanged (no
+output for it). Loader tables with a `sources:` entry are unchanged.
+
+**Pre-GA addition (scan baseline and namespace placeholder, SCAN-MULTI S3-engine.1, 2026-11-14).** `PipelineConfig`
+gains the optional `scan_baseline: {path: str, schema: "scan-set/v1"}` block, default absent and omitted from
+`model_dump()` while unset, so a config without it hashes as before. The block is a pointer no run reads, so it
+is left out of `pipeline_config_hash` (with `sources`, `targets`, `pre_scan` and `name`): two configs that differ
+only in `scan_baseline` hash the same. `ColumnConfig.namespace` and
+`RelationshipConfig.namespace` refuse any value starting `decoy-set-namespace-` with `config/namespace_placeholder_unset`
+(new, `since` unreleased), naming the field location and never the value. No shipped config used the prefix. No
+artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profiling.DETECTOR_DESCRIPTORS` with its
+content unchanged.
+
 **Pre-GA correction (one environment flag rule, DUP-FREEZE E3, 2026-11-14).** Every boolean engine flag reads
 through one parser (`decoy_engine.internal.env_flags.env_flag`). The accepted set, after `strip().lower()`, is
 `1`, `true`, `yes`, `on` (true) and `0`, `false`, `no`, `off` (false); an unset or empty variable gives the flag's
@@ -788,7 +806,7 @@ No `SEED_PROTOCOL_VERSION` change.
   or whose `post_scan.ner_findings` is `fail`, before any source is read. The error carries
   `route.post_scan_models_unsupported` (registry unreleased); `str(error)` and `message` are the fixed
   registry summary, `route` and `setting` name the route and the config field, and the exception
-  chain is empty. Regex-only `integrity: true` behaves as before on these routes. `run_sequential`
+  chain is empty. Regex-only `integrity: true` is not refused on these routes; `run_pipeline` judges it from the staged output (POSTSCAN-STREAM PS-12). `run_sequential`
   and `run_fk_out_of_core` take a required keyword-only `config` (the raw pipeline config), as do
   the wrappers that forward to them (`PandasExecutionAdapter.run_sequential`, the physical
   `SequentialAdapter.run` and `OutOfCoreAdapter.run`); a caller that passed none must now pass

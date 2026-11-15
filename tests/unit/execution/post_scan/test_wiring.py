@@ -1,7 +1,7 @@
 """AT-16, AT-20, AT-25, AT-14 and AT-24: the post-scan gate wired into `run_pipeline` (plan 4.5).
 
 Every route that returns resident outputs runs the gate before its result is visible; a route that
-reads its output back to block is deferred: it is checked as before and the result says so.
+reads its output back to block is deferred only when its inputs cannot be re-read.
 A blocking verdict commits nothing. All values are made up.
 """
 
@@ -20,6 +20,7 @@ import pytest
 from decoy_engine import reasons, run_pipeline
 from decoy_engine.execution._chunked_input import capture_source_facts
 from decoy_engine.execution._publication_observer import observed_commit
+from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution.pipeline import _post_scan
 from decoy_engine.execution.pipeline._post_scan import PostScanGate
 from decoy_engine.reason_adapter import reason_from_exception
@@ -117,7 +118,7 @@ def test_at16_a_blocking_verdict_commits_nothing_on_every_no_sink_route(
     assert not list(tmp_path.glob("*.out.parquet"))
 
 
-def test_at16_a_commit_with_no_output_left_to_read_defers_the_gate() -> None:
+def test_at16_a_commit_into_a_sink_the_gate_cannot_read_is_deferred_and_goes_through() -> None:
     sink = RecordingSink()
     gate = PostScanGate({"relationships": [{"x": 1}]})
     token = _post_scan._ACTIVE.set(gate)
@@ -125,7 +126,7 @@ def test_at16_a_commit_with_no_output_left_to_read_defers_the_gate() -> None:
         observed_commit(sink)
     finally:
         _post_scan._ACTIVE.reset(token)
-    assert gate.deferred and sink.calls == [("commit",)]
+    assert gate.output_unreadable and sink.calls == [("commit",)]
 
 
 def test_at16_a_gate_that_ran_lets_the_commit_through() -> None:
@@ -146,28 +147,41 @@ FAIL = {"severity": "fail"}
 
 @pytest.mark.parametrize(
     ("mode", "integrity"),
-    [("full_frame", False), ("auto", True)],
-    ids=["keys-full_frame", "integrity-auto"],
+    [("full_frame", False), ("full_frame", True)],
+    ids=["keys-full_frame", "integrity-full_frame"],
 )
 def test_at16_a_resident_sink_run_is_gated_before_the_sink_is_touched(
     tmp_path: Path, mode: str, integrity: bool
 ) -> None:
-    sink = RecordingSink()
+    out = tmp_path / "sink"
     config = _config(tmp_path, broken=True, integrity=integrity)
-    exc = _blocked(lambda: _run(config, mode, sink=sink))
+    exc = _blocked(lambda: _run(config, mode, sink=ParquetTransactionalSink(out)))
     assert exc.reason == DUPLICATES
+    assert not out.exists()
+    assert not list(tmp_path.glob("_decoy_stage_*"))
+
+
+def test_at16_integrity_with_a_sink_the_gate_cannot_read_refuses_fail_closed(
+    tmp_path: Path,
+) -> None:
+    """An explicit integrity check is never deferred: the run refuses before the sink is used."""
+    sink = RecordingSink()
+    with pytest.raises(Exception) as caught:
+        _run(_config(tmp_path, broken=True, integrity=True), "auto", sink=sink)
+    assert str(getattr(caught.value, "code", "")) == "post_scan_integrity_sink_unreadable"
     assert sink.calls == []
+    assert not list(tmp_path.glob("_decoy_stage_*"))
 
 
 @pytest.mark.parametrize("route", ["sequential", "out_of_core"])
-def test_at16_a_bounded_route_that_writes_to_the_sink_defers_the_gate(
+def test_at16_a_bounded_route_with_a_sink_the_gate_cannot_read_runs_deferred(
     tmp_path: Path, route: str
 ) -> None:
+    """Plan AT-28: a foreign sink keeps its route and delivers; the gate is deferred for it."""
     sink = RecordingSink()
-    result, routes = _run(_config(tmp_path, broken=True), route, sink=sink)
-    assert routes == [route]
-    assert result.quality_metrics["post_scan_gate_deferred"] == DEFERRED
+    result = _run(_config(tmp_path, broken=True), route, sink=sink)[0]
     assert ("commit",) in sink.calls
+    assert "post_scan_gate_deferred" in result.quality_metrics
 
 
 def test_at16_integrity_with_a_sink_and_lazy_inputs_still_withholds_on_a_failing_finding(
@@ -181,12 +195,13 @@ def test_at16_integrity_with_a_sink_and_lazy_inputs_still_withholds_on_a_failing
     cfg, _, lazy = subset_sup.job(tmp_path)
     cfg["subset"] = None
     cfg["post_scan"] = {"integrity": True}
-    sink = RecordingSink()
+    out = tmp_path / "sink"
+    sink = ParquetTransactionalSink(out)
     exc = _blocked(
         lambda: run_pipeline(cfg, lazy, engine_version=V, sink=sink, execution_mode="full_frame")
     )
     assert exc.reason == "post_scan.finding_blocked"
-    assert sink.calls == []
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -222,8 +237,8 @@ def test_at20_a_job_with_no_keys_and_no_integrity_gets_no_report(tmp_path: Path)
 
 
 def test_at20_integrity_adds_the_column_suite_to_the_same_report(tmp_path: Path) -> None:
-    result, routes = _run(_config(tmp_path, integrity=True))
-    assert routes == ["full_frame"]  # the column suite needs the whole output
+    result, routes = _run(_config(tmp_path, integrity=True), "full_frame")
+    assert routes == ["full_frame"]
     report = result.quality_metrics["post_scan_integrity"]
     assert {"keys", "verdict", "residual_pii", "fk_preservation"} <= set(report)
 
@@ -308,9 +323,9 @@ def test_the_gate_is_bound_for_the_run_and_unbound_after(
     seen: list[PostScanGate | None] = []
     real = _post_scan.settle
 
-    def spy(gate: PostScanGate, *args: Any) -> None:
+    def spy(gate: PostScanGate, *args: Any) -> Any:
         seen.append(_post_scan.active_gate())
-        real(gate, *args)
+        return real(gate, *args)
 
     monkeypatch.setattr(_post_scan, "settle", spy)
     _run(_config(tmp_path), "full_frame")
@@ -501,10 +516,14 @@ def test_at20_the_mixed_route_with_no_sink_is_checked_over_its_stitched_outputs(
     assert {k["table"] for k in report["keys"]} == {"people", "accounts"}
 
 
-def test_at20_a_mixed_job_with_a_sink_defers_the_gate(tmp_path: Path) -> None:
+def test_at20_a_mixed_job_with_a_sink_the_gate_cannot_read_keeps_its_route_deferred(
+    tmp_path: Path,
+) -> None:
     sink = RecordingSink()
-    result, _ = _mixed_run(tmp_path, sink=sink)
-    assert result.quality_metrics["post_scan_gate_deferred"] == DEFERRED
+    result, routes = _mixed_run(tmp_path, sink=sink)
+    assert "mixed" in routes
+    assert ("commit",) in sink.calls
+    assert "post_scan_gate_deferred" in result.quality_metrics
 
 
 def test_at24_an_excluded_edge_to_a_generated_parent_leaves_inherited_orphans_unblocked(

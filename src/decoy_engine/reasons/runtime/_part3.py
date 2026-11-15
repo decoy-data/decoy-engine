@@ -51,6 +51,8 @@ __all__ = [
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NUMEXPR_REQUIRED",
+    "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
+    "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
     "RECORD_CORRUPT",
     "RECORD_INVALID",
     "RECORD_KIND_RESERVED",
@@ -380,3 +382,21 @@ RECORD_KIND_RESERVED = _d("record_kind_reserved", "Record kind reserved.", since
 _d = _catalog.runtime("ScanSourceError")
 
 SCAN_SOURCE_FAILED = _d("scan_source_failed", "A table could not be scanned.", since="1.10.0")
+
+# An explicit `post_scan.integrity: true` is never run unchecked: these refuse what it cannot judge.
+_d = _catalog.runtime("ExecutionError")
+
+POST_SCAN_INTEGRITY_SINK_UNREADABLE = _d(
+    "post_scan_integrity_sink_unreadable",
+    "The Post-scan integrity checks cannot read this sink back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)
+POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
+    "post_scan_integrity_transforms_unsupported",
+    "The Post-scan integrity checks cannot compare a transformed table with its source.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)

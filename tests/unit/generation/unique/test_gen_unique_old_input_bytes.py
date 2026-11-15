@@ -14,6 +14,11 @@ moved. `config_json` and `fingerprints` are untouched.
 number: `f = score * 2` went from repeated text to multiplication. Its before and after digests
 are in docs/records/2026-11-13-formula-typing-refreeze.md; `config_json` and `fingerprints` did not
 move.
+
+DUP-DEST E1 made `PipelineConfig` refuse two tables on one destination, so the corpus now gives
+each table its own path. Targets are data binding and never reach generation, so `digests()`
+puts the captured shared `o.csv` target back after validation; `config_json` keeps its old bytes
+and `cells` and `fingerprints` are untouched.
 """
 
 from __future__ import annotations
