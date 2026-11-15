@@ -39,3 +39,21 @@ failed, 2 skipped; layers 15 passed; this slice's test files
 `generation/synthesize.py` is 596 lines; the engine root and `config/` hold 25 modules each.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-15, `64e9349b`), carried forward
+
+`origin/feat/gen-rel-e1` `9a0b1181` merged into `04f7e4a8` as `814252f0`, without a conflict. It carries
+`origin/main` `64e9349b` (#598, one format table for resident and lazy file sources), whose
+change is in `profile/`, `fileaccess/` and their sentries; it touches no source or test file of
+this slice (`CODEMAP.md`'s `profile/` row and the sentry manifest merged beside this slice's
+lines).
+
+Checks on `814252f0`, Python 3.10.20, `origin/main` `64e9349b`: ruff and format on the changed
+files pass; mypy clean (884 files); `tests/sentry` 5717 passed, 0 failed, 2 skipped; layers 15 passed; this slice's test files (`tests/unit/config/test_generate_relational.py`, `tests/unit/execution/test_probe_scale.py`, `tests/unit/generation/relational`, `tests/unit/generation/test_generation_order.py`, `tests/unit/generation/test_pinned_generation.py`, `tests/unit/plan`, the unique old-input-bytes pins) with main's
+`tests/unit/profile` and the two draw-site catalogue tests: 1897 passed, 0 failed. Script checks
+(`registry_renumber.py --check --main origin/main`, `ratchet_check.py --base origin/main`,
+`check_fragment.py --base origin/main`, `reason_release_pin.py --check`): each exit 0.
+`generation/synthesize.py` 596 lines; the engine root and `config/` hold 25 modules,
+`profile/` 19.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
