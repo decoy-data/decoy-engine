@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 from decoy_engine.fileaccess._openat2 import openat2_usable
+from tests.fileaccess.support import fd_path
 
 UNIT_FILE = "t.parquet"
 UNIT_BYTES = b"F22-A1A-UNIT"
@@ -71,7 +72,7 @@ def _resolve(path: Any, dir_fd: int | None) -> str:
     text = os.fsdecode(path)
     if dir_fd is None or os.path.isabs(text):
         return os.path.abspath(text)
-    return os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), text)
+    return os.path.join(fd_path(dir_fd), text)
 
 
 def _denied() -> OSError:

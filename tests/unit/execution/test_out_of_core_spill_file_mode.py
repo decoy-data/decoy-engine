@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,6 +25,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from tests.acceptance._f06_support import INT64, column, run, zero_pad
+from tests.fileaccess.support import fd_path
 
 UMASKS = (0o000, 0o077, 0o777)
 ROWS = 3000
@@ -81,7 +81,7 @@ class _Recorder:
             st = os.lstat(name, dir_fd=dir_fd)
         except FileNotFoundError:
             return
-        here = _fd_path(dir_fd) + os.sep
+        here = fd_path(dir_fd) + os.sep
         if here.startswith(self.real_base):
             self._keep(os.path.join(here[len(self.real_base) :], os.fsdecode(name)), st)
 
@@ -90,14 +90,6 @@ class _Recorder:
         for dirpath, dirnames, filenames in os.walk(top):
             for name in (*dirnames, *filenames):
                 self._note(os.path.join(dirpath, name))
-
-
-def _fd_path(fd: int) -> str:
-    if sys.platform == "darwin":
-        import fcntl
-
-        return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0"))
-    return os.readlink(f"/proc/self/fd/{fd}")
 
 
 @pytest.fixture
