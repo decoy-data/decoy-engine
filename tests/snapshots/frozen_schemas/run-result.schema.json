@@ -1,0 +1,891 @@
+{
+  "$defs": {
+    "BaselineLink": {
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "title": "Record Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id"
+      ],
+      "title": "BaselineLink",
+      "type": "object"
+    },
+    "Check": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "codes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Codes",
+          "type": "array"
+        },
+        "counts": {
+          "$ref": "#/$defs/CheckCounts"
+        },
+        "id": {
+          "enum": [
+            "post_validation",
+            "post_scan_integrity",
+            "fidelity",
+            "native_post_run"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "warned",
+            "failed",
+            "error",
+            "not_run"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "blocking",
+        "counts",
+        "codes"
+      ],
+      "title": "Check",
+      "type": "object"
+    },
+    "CheckCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "minimum": 0,
+          "title": "Error",
+          "type": "integer"
+        },
+        "fail": {
+          "minimum": 0,
+          "title": "Fail",
+          "type": "integer"
+        },
+        "pass": {
+          "minimum": 0,
+          "title": "Pass",
+          "type": "integer"
+        },
+        "warning": {
+          "minimum": 0,
+          "title": "Warning",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pass",
+        "warning",
+        "fail",
+        "error"
+      ],
+      "title": "CheckCounts",
+      "type": "object"
+    },
+    "ConfigRef": {
+      "additionalProperties": false,
+      "properties": {
+        "file_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "File Sha256"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "semantic_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Semantic Hash"
+        }
+      },
+      "required": [
+        "name",
+        "file_sha256",
+        "semantic_hash"
+      ],
+      "title": "ConfigRef",
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "in_place",
+            "strict",
+            "best_effort"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "delivered",
+            "partial",
+            "nothing",
+            "not_applicable"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "vault": {
+          "enum": [
+            "not_used",
+            "committed",
+            "failed"
+          ],
+          "title": "Vault",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "outcome",
+        "vault"
+      ],
+      "title": "Delivery",
+      "type": "object"
+    },
+    "EvidenceLink": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest_hash": {
+          "title": "Manifest Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "manifest_hash"
+      ],
+      "title": "EvidenceLink",
+      "type": "object"
+    },
+    "Failure": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "usage",
+            "parameter",
+            "runtime",
+            "capacity",
+            "cancelled"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "error_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error Class"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "category",
+        "error_class",
+        "reason"
+      ],
+      "title": "Failure",
+      "type": "object"
+    },
+    "Links": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BaselineLink"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceLink"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "log": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogLink"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "log",
+        "evidence",
+        "baseline"
+      ],
+      "title": "Links",
+      "type": "object"
+    },
+    "LogLink": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "title": "LogLink",
+      "type": "object"
+    },
+    "NativeRoute": {
+      "additionalProperties": false,
+      "properties": {
+        "applicable": {
+          "title": "Applicable",
+          "type": "boolean"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "enum": [
+                "pandas",
+                "native",
+                "unified_slice"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      "required": [
+        "applicable",
+        "state"
+      ],
+      "title": "NativeRoute",
+      "type": "object"
+    },
+    "PhaseTiming": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_s": {
+          "minimum": 0,
+          "title": "Elapsed S",
+          "type": "number"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "elapsed_s"
+      ],
+      "title": "PhaseTiming",
+      "type": "object"
+    },
+    "ProducerInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "cli_version": {
+          "title": "Cli Version",
+          "type": "string"
+        },
+        "engine_version": {
+          "title": "Engine Version",
+          "type": "string"
+        },
+        "event_schema": {
+          "minimum": 0,
+          "title": "Event Schema",
+          "type": "integer"
+        },
+        "registry_version": {
+          "title": "Registry Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cli_version",
+        "engine_version",
+        "registry_version",
+        "event_schema"
+      ],
+      "title": "ProducerInfo",
+      "type": "object"
+    },
+    "Route": {
+      "additionalProperties": false,
+      "properties": {
+        "chunked": {
+          "title": "Chunked",
+          "type": "boolean"
+        },
+        "execution_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "full_frame",
+                "sequential",
+                "out_of_core",
+                "chunked",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Execution Mode"
+        },
+        "native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeRoute"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Route Reason"
+        }
+      },
+      "required": [
+        "execution_mode",
+        "route_reason",
+        "chunked",
+        "native"
+      ],
+      "title": "Route",
+      "type": "object"
+    },
+    "SampleMarker": {
+      "additionalProperties": false,
+      "description": "A run made with `--sample`: the head rows asked for, the seed tables, the rows read from\neach edgeless table and the scratch folder (relative to the project) the outputs went to.",
+      "properties": {
+        "head_tables": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Head Tables",
+          "type": "object"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Roots",
+          "type": "array"
+        },
+        "rows": {
+          "minimum": 0,
+          "title": "Rows",
+          "type": "integer"
+        },
+        "scratch": {
+          "title": "Scratch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rows",
+        "roots",
+        "head_tables",
+        "scratch"
+      ],
+      "title": "SampleMarker",
+      "type": "object"
+    },
+    "TableDelivery": {
+      "additionalProperties": false,
+      "properties": {
+        "dropped_because": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dropped Because"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "enum": [
+                "csv",
+                "parquet",
+                "fixed_width"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Format"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Output"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "state": {
+          "enum": [
+            "delivered",
+            "failed",
+            "withheld",
+            "dropped",
+            "none"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "format",
+        "output",
+        "reason",
+        "dropped_because"
+      ],
+      "title": "TableDelivery",
+      "type": "object"
+    },
+    "TableResult": {
+      "additionalProperties": false,
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/TableDelivery"
+        },
+        "elapsed_s": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Elapsed S"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "mask",
+            "generate"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "outcome": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "not_run"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "row_errors": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Row Errors"
+        },
+        "rows_out": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rows Out"
+        },
+        "rows_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "outputs",
+                "phase",
+                "rate"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rows Source"
+        }
+      },
+      "required": [
+        "index",
+        "name",
+        "kind",
+        "outcome",
+        "rows_out",
+        "rows_source",
+        "row_errors",
+        "elapsed_s",
+        "reason",
+        "delivery"
+      ],
+      "title": "TableResult",
+      "type": "object"
+    },
+    "Timings": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_s": {
+          "minimum": 0,
+          "title": "Elapsed S",
+          "type": "number"
+        },
+        "finished_at": {
+          "title": "Finished At",
+          "type": "string"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/PhaseTiming"
+          },
+          "title": "Phases",
+          "type": "array"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "started_at",
+        "finished_at",
+        "elapsed_s",
+        "phases"
+      ],
+      "title": "Timings",
+      "type": "object"
+    },
+    "WarningEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "column": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Column"
+        },
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "table": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Table"
+        }
+      },
+      "required": [
+        "code",
+        "table",
+        "column",
+        "count"
+      ],
+      "title": "WarningEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/Check"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "command": {
+      "const": "run",
+      "default": "run",
+      "title": "Command",
+      "type": "string"
+    },
+    "config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConfigRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delivery": {
+      "$ref": "#/$defs/Delivery"
+    },
+    "exit_code": {
+      "maximum": 255,
+      "minimum": 0,
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Failure"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "invocation_id": {
+      "title": "Invocation Id",
+      "type": "string"
+    },
+    "links": {
+      "$ref": "#/$defs/Links"
+    },
+    "pipeline_kind": {
+      "anyOf": [
+        {
+          "enum": [
+            "mask",
+            "generate",
+            "mixed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Pipeline Kind"
+    },
+    "producer": {
+      "$ref": "#/$defs/ProducerInfo"
+    },
+    "route": {
+      "$ref": "#/$defs/Route"
+    },
+    "sample": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleMarker"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema": {
+      "default": "decoy-run-result/v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "findings",
+        "partially_delivered",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "tables": {
+      "items": {
+        "$ref": "#/$defs/TableResult"
+      },
+      "title": "Tables",
+      "type": "array"
+    },
+    "timings": {
+      "$ref": "#/$defs/Timings"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/WarningEntry"
+      },
+      "maxItems": 256,
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "invocation_id",
+    "status",
+    "exit_code",
+    "pipeline_kind",
+    "producer",
+    "config",
+    "route",
+    "delivery",
+    "tables",
+    "checks",
+    "warnings",
+    "failure",
+    "timings",
+    "links"
+  ],
+  "title": "RunResult",
+  "type": "object"
+}

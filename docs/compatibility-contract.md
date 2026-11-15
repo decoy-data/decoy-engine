@@ -295,8 +295,11 @@ open a v2 file was a legal pre-GA hard delete: seed-keyed vaults stopped opening
 
 Backed by `docs/determinism.md`, the `determinism/` module, the
 `validation/post/_checks/_determinism_sample.py` post-check, and the golden
-suites (`tests/snapshots/golden/mask_faker_seeded`,
-`tests/integration/golden/test_determinism_invariants.py`).
+tests `tests/integration/golden/test_determinism_invariants.py` and
+`tests/native/test_determinism_goldens.py`. The files under
+`tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact`
+have had no reader since the V1 graph runner was deleted; they are known limit
+`RGF1-KL-2` in [frozen surfaces](frozen-surfaces.md).
 
 The guarantee: **same input + same seed → byte-identical output, forever, within
 a major version.** A user who masked with one version and later masks *new rows*
