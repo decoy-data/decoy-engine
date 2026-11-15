@@ -214,17 +214,52 @@ def _top_level_names(stmt: ast.stmt) -> set[str]:
     return {t.id for t in targets if isinstance(t, ast.Name)}
 
 
+def _bound_aliases(tree: ast.Module, skipped: set[int]) -> set[str]:
+    """Names assigned a bound key, a container holding one, or another such name.
+
+    Resolved module-wide and to a fixed point, so `k = "min_per_parent"; m = k` makes both
+    aliases. Assignments inside an owner do not alias: the owner may name the keys.
+    """
+
+    def names_a_key(value: ast.expr, aliases: set[str]) -> bool:
+        if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+            return any(names_a_key(elt, aliases) for elt in value.elts)
+        if isinstance(value, ast.Constant):
+            return value.value in BOUND_KEYS
+        return isinstance(value, ast.Name) and value.id in aliases
+
+    bindings: list[tuple[str, ast.expr]] = []
+    for node in ast.walk(tree):
+        if id(node) in skipped:
+            continue
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        bindings += [(t.id, node.value) for t in targets if isinstance(t, ast.Name)]
+    aliases: set[str] = set()
+    while True:
+        grown = {name for name, value in bindings if names_a_key(value, aliases)}
+        if grown <= aliases:
+            return aliases
+        aliases |= grown
+
+
 def _bound_key_uses(tree: ast.Module, owners: frozenset[str] = frozenset()) -> list[int]:
     """Lines where a bound key, outside `owners`, is used to read a column.
 
     A read passes the key to a call (`col.get(k)`, a helper), subscripts with it, compares with
     it, or lists it in a container that is iterated or named (a key tuple read in a loop). A key
-    that only labels a problem location, or is the target of a write, reads nothing.
+    that only labels a problem location, or is the target of a write, reads nothing. The key is
+    the literal or a name aliasing it (`_bound_aliases`); iterating an alias reads its keys.
     """
     skipped: set[int] = set()
     for stmt in tree.body:
         if _top_level_names(stmt) & owners:
             skipped |= {id(node) for node in ast.walk(stmt)}
+    aliases = _bound_aliases(tree, skipped)
     keys: list[ast.expr] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -233,18 +268,24 @@ def _bound_key_uses(tree: ast.Module, owners: frozenset[str] = frozenset()) -> l
             keys.append(node.slice)
         elif isinstance(node, ast.Compare):
             keys += [node.left, *node.comparators]
-        elif isinstance(node, (ast.For, ast.comprehension)) and isinstance(
-            node.iter, (ast.Tuple, ast.List, ast.Set)
-        ):
-            keys += node.iter.elts
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            if isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)):
+                keys += node.iter.elts
+            else:
+                keys.append(node.iter)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(
             node.value, (ast.Tuple, ast.List, ast.Set)
         ):
             keys += node.value.elts
+    keys = [key.value if isinstance(key, ast.Starred) else key for key in keys]
     return sorted(
         key.lineno
         for key in keys
-        if isinstance(key, ast.Constant) and key.value in BOUND_KEYS and id(key) not in skipped
+        if id(key) not in skipped
+        and (
+            (isinstance(key, ast.Constant) and key.value in BOUND_KEYS)
+            or (isinstance(key, ast.Name) and key.id in aliases)
+        )
     )
 
 
@@ -282,3 +323,19 @@ def test_the_bound_scan_sees_a_direct_read() -> None:
     )
     assert _bound_key_uses(tree) == [1, 3, 4, 8, 9, 12]
     assert _bound_key_uses(tree, frozenset({"KEYS", "h"})) == [1, 3, 9, 12]
+
+
+def test_the_bound_scan_sees_a_read_through_an_alias() -> None:
+    tree = ast.parse(
+        'k = "min_per_parent"\n'
+        "m = k\n"
+        "lo = col.get(k)\n"
+        "hi = col[m]\n"
+        "has = k in col\n"
+        "KEYS = [k]\n"
+        "for key in KEYS:\n    pass\n"
+        "vals = [col.get(x) for x in KEYS]\n"
+        "col[k] = 1\n"
+    )
+    assert _bound_key_uses(tree) == [3, 4, 5, 6, 7, 9]
+    assert _bound_key_uses(tree, frozenset({"KEYS"})) == [3, 4, 5]
