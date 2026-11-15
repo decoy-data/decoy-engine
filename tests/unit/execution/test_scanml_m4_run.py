@@ -53,7 +53,14 @@ def _source(every: int = 2) -> pa.Table:
     return pa.Table.from_pandas(frame, preserve_index=False)
 
 
-def _cfg(tmp_path: Path, table: pa.Table, post_scan: dict[str, Any]) -> dict[str, Any]:
+def _cfg(
+    tmp_path: Path,
+    table: pa.Table,
+    post_scan: dict[str, Any],
+    *,
+    extra_columns: tuple[dict[str, Any], ...] = (),
+    quarantine: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     path = tmp_path / "t.csv"
     table.to_pandas().to_csv(path, index=False)
     raw = {
@@ -68,11 +75,14 @@ def _cfg(tmp_path: Path, table: pa.Table, post_scan: dict[str, Any]) -> dict[str
                     {"name": "notes", "strategy": "text_redact"},
                     {"name": "email", "strategy": "passthrough"},
                     {"name": "code", "strategy": "redact"},
+                    *extra_columns,
                 ],
             }
         ],
         "targets": {"t": {"type": "file", "format": "csv", "path": str(tmp_path / "o.csv")}},
     }
+    if quarantine is not None:
+        raw["quarantine"] = quarantine
     return PipelineConfig.model_validate(raw).model_dump()
 
 
@@ -261,6 +271,45 @@ def test_a_deferred_gate_still_blocks_under_ner_fail(
     result = run({"detectors": ["regex", "ner"]})
     assert "post_scan_gate_deferred" in result.quality_metrics
     assert s.rows(result.quality_metrics["post_scan_integrity"], "ner")
+
+
+@pytest.mark.parametrize("hit_cells", [300, None], ids=["fail_finding", "pass_error"])
+def test_a_deferred_ner_block_leaves_no_quarantine_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hit_cells: int | None
+) -> None:
+    """The quarantine file carries source row values. A deferred gate under `ner_findings: fail`
+    can still block, so the write waits for its check: a blocked run leaves no file, and a run the
+    same check passes publishes it."""
+    from decoy_engine.execution import run_pipeline
+
+    ages = ["badX" if i == 3 else str(10 + i % 70) for i in range(ROWS)]
+    table = _source().append_column("age", pa.array(ages, type=pa.string()))
+    qpath = tmp_path / "q.jsonl"
+    quarantine = {"enabled": True, "output_path": str(qpath), "triggers": ["format_error"]}
+    age = {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}
+    post_scan = {"detectors": ["regex", "ner"], "ner_findings": "fail"}
+
+    def run() -> Any:
+        cfg = _cfg(tmp_path, table, post_scan, extra_columns=(age,), quarantine=quarantine)
+        return run_pipeline(
+            cfg,
+            sources=None,
+            source_loader=lambda _name: table,
+            source_loader_schemas={"t": table.schema},
+            engine_version=_V,
+            auto_chunk=False,
+        )
+
+    _fake_ner(monkeypatch, hit_cells)
+    with pytest.raises(s.blocked_error()) as caught:
+        run()
+    _assert_safe(caught.value)
+    assert not qpath.exists()
+    _fake_ner(monkeypatch, 0)
+    result = run()
+    assert "post_scan_gate_deferred" in result.quality_metrics
+    assert result.quality_metrics["quarantine"]["total_quarantined"] == 1
+    assert qpath.exists()
 
 
 def test_a_regex_fail_alone_never_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
