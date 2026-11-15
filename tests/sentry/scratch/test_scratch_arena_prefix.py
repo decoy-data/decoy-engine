@@ -13,12 +13,12 @@ from __future__ import annotations
 import ast
 import os
 import re
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tests.sentry.fa.resolve import ProjectIndex, Scope, build_import_map, module_name, resolve
+from tests.sentry.fa.resolve import ProjectIndex, Scope, resolve
+from tests.sentry.fa.rules import indexed_modules, scoped_nodes, source_modules
 from tests.sentry.fa.scan import scan_tree
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -46,45 +46,16 @@ PRIVATE_ENTRIES = {
     "create_private_child_at": ["_restore_missing_owner_bits"],
 }
 
-Walked = Iterator[tuple[str, ast.AST, Scope]]
-
-
-def _modules(src: Path) -> Iterator[tuple[str, str, ast.Module, bool]]:
-    for path in sorted((src / "decoy_engine").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        yield (
-            path.relative_to(src).as_posix(),
-            module_name(path, src),
-            tree,
-            path.name == "__init__.py",
-        )
-
-
-def _walk(tree: ast.Module, current: str, is_package: bool) -> Walked:
-    """Every node with its function's qualified name ("<module>" at top) and import scope."""
-
-    def visit(body: list[ast.stmt], qual: str, scope: Scope) -> Walked:
-        for stmt in body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                inner = scope.child(build_import_map(stmt.body, current, is_package))
-                name = stmt.name if qual == "<module>" else f"{qual}.{stmt.name}"
-                yield from visit(stmt.body, name, inner)
-                continue
-            for node in ast.walk(stmt):
-                yield qual, node, scope
-
-    yield from visit(tree.body, "<module>", Scope(build_import_map(tree.body, current, is_package)))
-
 
 def prefix_findings(src: Path) -> list[str]:
     """Spellings of the arena's names outside `_scratch.py`: a `decoy-arena` literal (any
     `prefix=` value included), `ARENA_PREFIX` read or looked up, or a name constant imported
     from the arena module (`_MARKER` and `_MAGIC` are common private names elsewhere)."""
     out: list[str] = []
-    for rel, _name, tree, _pkg in _modules(src):
+    for rel in source_modules(src, "decoy_engine").values():
         if rel == ARENA:
             continue
-        for node in ast.walk(tree):
+        for node in ast.walk(ast.parse((src / rel).read_text(encoding="utf-8"))):
             text = node.value if isinstance(node, ast.Constant) else None
             if (
                 (isinstance(text, str) and ("decoy-arena" in text or text == "ARENA_PREFIX"))
@@ -103,7 +74,7 @@ def prefix_findings(src: Path) -> list[str]:
 
 def choke_point_findings(src: Path) -> list[str]:
     """Creations outside the two choke points, and a private entry point's restorer changed."""
-    sinks = scan_tree(src)[0]
+    sinks, index = scan_tree(src)
     out = [
         f"{s.module}:{s.line} {s.function}: {s.sink}"
         for s in sinks
@@ -112,14 +83,10 @@ def choke_point_findings(src: Path) -> list[str]:
     ]
     # A name stays in `OUTPUT_RAW` only while its own body holds a raw creation.
     holders = {s.function for s in sinks if s.module == OUTPUT and s.sink in ARENA_BANNED}
-    index = ProjectIndex("decoy_engine")
-    modules = list(_modules(src))
-    for _rel, name, tree, pkg in modules:
-        index.add(name, tree, pkg)
     core_calls: dict[str, list[str]] = {}
-    for rel, name, tree, pkg in modules:
+    for rel, name, tree, pkg in indexed_modules(index):
         definition = _flag_definition(tree) if rel == OUTPUT else set()
-        for qual, node, scope in _walk(tree, name, pkg):
+        for qual, node, scope in scoped_nodes(tree, name, pkg):
             where = f"{rel}:{getattr(node, 'lineno', 0)} {qual}"
             if _is_create_flag(rel, node, scope, index) and id(node) not in definition:
                 if rel == OUTPUT:
