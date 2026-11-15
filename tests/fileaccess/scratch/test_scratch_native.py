@@ -143,7 +143,7 @@ def test_native_failure_text_is_value_free(
     cell: str,
 ) -> None:
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
-    with ScratchArena.open() as arena, policy:
+    with ScratchArena.fresh() as arena, policy:
         if cell in SITES:
             _site_cell(arena, monkeypatch, cell)
             return

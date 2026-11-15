@@ -29,6 +29,7 @@ from decoy_engine.plan._types import TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from tests.fileaccess.protected_dir.test_protected_dir import _Strict
+from tests.fileaccess.support import fd_path
 from tests.parity.test_out_of_core_fk_parity import _plan as _seeded_plan
 from tests.parity.test_out_of_core_fk_parity import _seed_for
 from tests.unit.execution.test_out_of_core_join_chunked import _edge, _plan
@@ -107,7 +108,7 @@ def test_caller_temp_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: 
         assert os.path.realpath(root.parent) == os.path.realpath(target), root
         assert {w["mode"] for w in walks} == {0o700}, walks
         assert caller.is_symlink()
-        assert not [p for p in target.iterdir() if p.name.startswith(ARENA_PREFIX)]
+        assert list(target.iterdir()) == []
     else:
         jail = tmp_path / "jail"
         jail.mkdir()
@@ -122,15 +123,15 @@ def test_caller_temp_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cell: 
 
 def test_handed_arena_is_the_route_root(monkeypatch: pytest.MonkeyPatch) -> None:
     """A route given `_arena` spills into it and walks it: no fresh child, no reclaim."""
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         opens: list[Any] = []
-        real_open = ScratchArena.open
+        real_open = ScratchArena.fresh
 
         def spy(**kw: Any) -> ScratchArena:
             opens.append(kw)
             return real_open(**kw)
 
-        monkeypatch.setattr(ScratchArena, "open", spy)
+        monkeypatch.setattr(ScratchArena, "fresh", spy)
         walks = _run(monkeypatch, _arena=arena)
         root = Path(arena.local_path())
         assert opens == [], "the route opened a second arena"
@@ -141,15 +142,6 @@ def test_handed_arena_is_the_route_root(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 # -- T-MODES (T01-T05): the scratch tree under any umask, both lanes ---------------------------
-
-
-def fd_path(fd: int) -> str:
-    """The path a directory descriptor names, to place a `dir_fd`-relative creation."""
-    if sys.platform == "darwin":
-        import fcntl
-
-        return fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0").decode()
-    return os.readlink(f"/proc/self/fd/{fd}")
 
 
 class _Created:
@@ -368,7 +360,7 @@ def test_adopted_arena_is_non_owning(
         pytest.fail("run as a non-root user: root ignores directory modes, so this is vacuous")
     (tmp_path / "tmp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
-    with ScratchArena.open() as root:
+    with ScratchArena.fresh() as root:
         base = Path(root.local_path())
         if cell == "reorder_spill":
             _reorder_spill(base / "joins" / "t0001" / "duckdb")  # the leaf the reorder joiner names
@@ -466,7 +458,7 @@ def test_connect_duckdb_spills_into_its_directory(
         pytest.fail("run as a non-root user: root ignores directory modes, so this is vacuous")
     (tmp_path / "tmp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
-    with ScratchArena.open() as root:
+    with ScratchArena.fresh() as root:
         spill = Path(root.local_path()) / "joins" / "duckdb"
         old = os.umask(0o777)
         try:
@@ -492,7 +484,7 @@ def test_connect_duckdb_refuses_a_loose_spill_dir(
         pytest.fail("run as a non-root user: root ignores directory modes, so this is vacuous")
     (tmp_path / "tmp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
-    with ScratchArena.open() as root:
+    with ScratchArena.fresh() as root:
         loose = Path(root.local_path()) / "patients_tbl"
         loose.mkdir()
         os.chmod(loose, 0o755)  # noqa: S103 - the loose directory under test
