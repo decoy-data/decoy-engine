@@ -139,6 +139,52 @@ def _tree(rel: str) -> ast.Module:
     return ast.parse((SRC / rel).read_text(encoding="utf-8"))
 
 
+FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+# The one function that may read the table: its body is pinned below.
+TABLE_LOOKUP = "file_format"
+PINNED_LOOKUP = ast.dump(
+    ast.parse("FILE_FORMATS.get(fmt) if isinstance(fmt, str) else None", mode="eval").body
+)
+
+
+def _body_without_docstring(func: ast.FunctionDef) -> list[ast.stmt]:
+    body = list(func.body)
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+        body = body[1:]
+    return body
+
+
+def file_format_is_pinned(tree: ast.Module) -> bool:
+    """`file_format` returns exactly the one table lookup and nothing else."""
+    func = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == TABLE_LOOKUP),
+        None,
+    )
+    if func is None:
+        return False
+    body = _body_without_docstring(func)
+    return (
+        len(body) == 1
+        and isinstance(body[0], ast.Return)
+        and body[0].value is not None
+        and ast.dump(body[0].value) == PINNED_LOOKUP
+    )
+
+
+def scan_module(tree: ast.Module) -> list[str]:
+    """Format dispatch in every function, async function and lambda of a module, nested ones
+    included. Only `file_format` is exempt, by exact name."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, FUNCTION_NODES):
+            continue
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == TABLE_LOOKUP:
+            continue
+        label = getattr(node, "name", "<lambda>")
+        found.extend(f"{label}: {hit}" for hit in format_branches(node))
+    return found
+
+
 def test_neither_builder_branches_on_format_outside_the_table() -> None:
     for rel, name in BUILDERS:
         assert format_branches(_function(_tree(rel), name)) == [], (rel, name)

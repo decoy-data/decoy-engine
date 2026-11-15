@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import pkgutil
+import types
 from pathlib import Path
 
 import pytest
@@ -117,16 +119,35 @@ def test_the_out_of_core_driver_the_platform_calls_is_an_entry_point() -> None:
     assert "decoy_engine.execution.out_of_core._runner.run_fk_out_of_core" in ENTRY_POINTS
 
 
-def decorated_entry_points(source: str, module: str) -> set[tuple[str, str]]:
-    """(module, function) for every function in `source` decorated with `entry_point`."""
+def _engine_modules() -> tuple[list[types.ModuleType], dict[str, str]]:
+    """Every importable `decoy_engine` module, and the ones that could not be imported (name to
+    its source file). The walk imports each module, so a function wrapped by
+    `entry_point` under any alias, `functools` re-wrap or async form carries the runtime marker."""
+    import decoy_engine
+
+    modules: list[types.ModuleType] = []
+    failed: dict[str, str] = {}
+    for info in pkgutil.walk_packages(decoy_engine.__path__, "decoy_engine."):
+        try:
+            modules.append(importlib.import_module(info.name))
+        except ImportError:
+            spec = info.module_finder.find_spec(info.name)  # type: ignore[call-arg,union-attr]
+            failed[info.name] = spec.origin or "" if spec else ""
+    return modules, failed
+
+
+def marked_functions(modules: list[types.ModuleType]) -> set[tuple[str, str]]:
+    """(module, qualname) of every function that `entry_point` wrapped and the module defines
+    itself (`__module__` check, so a re-export is not counted twice)."""
     found: set[tuple[str, str]] = set()
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        for dec in node.decorator_list:
-            name = dec.attr if isinstance(dec, ast.Attribute) else getattr(dec, "id", None)
-            if name == "entry_point":
-                found.add((module, node.name))
+    for module in modules:
+        for obj in vars(module).values():
+            if (
+                inspect.isfunction(obj)
+                and getattr(obj, "__decoy_entry_point__", False)
+                and obj.__module__ == module.__name__
+            ):
+                found.add((module.__name__, obj.__qualname__))
     return found
 
 
@@ -139,27 +160,28 @@ def _listed_pairs() -> set[tuple[str, str]]:
     return pairs
 
 
-def test_every_function_decorated_with_entry_point_is_listed() -> None:
-    """The call-graph walk cannot follow an indirect call (`entry.lazy(...)`), so a decorated
-    function that is not in ENTRY_POINTS is found here from its decorator instead."""
-    decorated: set[tuple[str, str]] = set()
-    for path in sorted((SRC / "decoy_engine").rglob("*.py")):
-        parts = path.relative_to(SRC).with_suffix("").parts
-        if parts[-1] == "__init__":
-            parts = parts[:-1]
-        if parts[:2] == ("decoy_engine", "fileaccess"):
-            continue
-        decorated |= decorated_entry_points(path.read_text(encoding="utf-8"), ".".join(parts))
-    assert sorted(decorated - _listed_pairs()) == []
+def test_a_module_that_cannot_be_imported_defines_no_entry_point() -> None:
+    """A module needing an optional extra (mimesis, lightgbm) cannot be imported in every venv,
+    so the marker walk cannot see inside it. It is skipped only if its source never names
+    `entry_point`; one that does fails here instead of hiding a function."""
+    _, failed = _engine_modules()
+    named = sorted(
+        name for name, origin in failed.items() if "entry_point" in Path(origin).read_text()
+    )
+    assert named == []
 
 
-def test_an_unlisted_decorated_function_is_seen() -> None:
-    source = "@fileaccess.entry_point\ndef brand_new(x, *, file_access=None): ...\n"
-    seen = decorated_entry_points(source, "seeded_module")
-    assert seen == {("seeded_module", "brand_new")}
-    assert seen - _listed_pairs() == seen
-    bare = "@entry_point\ndef other(*, file_access=None): ...\n"
-    assert decorated_entry_points(bare, "m") == {("m", "other")}
+def test_every_function_marked_by_entry_point_is_listed() -> None:
+    """The call-graph walk cannot follow an indirect call (`entry.lazy(...)`), so a marked
+    function that is not in ENTRY_POINTS is found here from the marker `entry_point` sets."""
+    modules, _ = _engine_modules()
+    assert sorted(marked_functions(modules) - _listed_pairs()) == []
+
+
+def test_the_marker_walk_sees_every_listed_entry_point() -> None:
+    """The walk is not vacuous: it finds each listed function, so a renamed marker fails here."""
+    modules, _ = _engine_modules()
+    assert _listed_pairs() <= marked_functions(modules)
 
 
 def test_a_marked_function_that_is_not_listed_is_seen() -> None:
@@ -167,6 +189,11 @@ def test_a_marked_function_that_is_not_listed_is_seen() -> None:
 
     seeded.__decoy_entry_point__ = True  # type: ignore[attr-defined]
     seeded.__module__ = "seeded_module"
-    assert unlisted_marked({"seeded_module": seeded_module_of(seeded)}) == [
-        ("seeded_module", seeded.__qualname__)
-    ]
+    module = types.ModuleType("seeded_module")
+    module.seeded = seeded  # type: ignore[attr-defined]
+    found = marked_functions([module])
+    assert found == {("seeded_module", seeded.__qualname__)}
+    assert found - _listed_pairs() == found
+    reexport = types.ModuleType("other")
+    reexport.seeded = seeded  # type: ignore[attr-defined]
+    assert marked_functions([reexport]) == set()
