@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
+    "CANONICAL_JSON_INVALID_STRING",
+    "CONFIG_VALUE_NOT_JSON",
+    "DECLARED_TABLE_DROPPED",
+    "ENV_FLAG_INVALID",
     "GENERATE_COLUMN_DUPLICATE",
     "GENERATE_FORMULA_INVALID",
     "GENERATE_OPTION_RANGE",
@@ -16,7 +21,10 @@ __all__ = [
     "GENERATE_UNIQUE_DOMAIN_TOO_SMALL",
     "GENERATE_UNIQUE_UNSUPPORTED",
     "GENERATE_WEIGHTS_INVALID",
+    "LOADER_TABLE_UNDECLARED",
+    "NAMESPACE_PLACEHOLDER_UNSET",
     "PIPELINE_NAME_INVALID",
+    "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
 ]
@@ -27,8 +35,25 @@ VARIABLE_UNKNOWN_SCOPE = _d("variable.unknown_scope", "Variable unknown scope.")
 VARIABLE_UNRESOLVED = _d("variable.unresolved", "Variable unresolved.")
 
 # Summaries double as the refusal text the config layer shows, so they never name a value.
-_d = _catalog.config("PipelineValidationError")
+_d = _catalog.config("CanonicalJsonError")
 
+CANONICAL_JSON_INVALID_STRING = _d(
+    "canonical_json_invalid_string",
+    "Canonical JSON strings must contain only Unicode scalar values.",
+    since="1.27.0",
+)
+CONFIG_VALUE_NOT_JSON = _d(
+    "config_value_not_json",
+    "A config value has a type JSON cannot hold; quote it as a string.",
+    since="1.27.0",
+)
+
+_d = _catalog.config("PipelineValidationError")
+TARGET_SHARED_DESTINATION = _d(
+    "target_shared_destination",
+    "Two or more targets write to one destination. Give each table its own target.",
+    since=UNRELEASED,
+)
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",
     "Two generate columns in one table have the same name.",
@@ -89,4 +114,38 @@ PIPELINE_NAME_INVALID = _d(
     "Pipeline name must be 1 to 64 letters, digits, dot, dash or underscore, start with a letter or "
     "digit, not end in a dot and not be a Windows device name.",
     since="1.12.0",
+)
+
+# The variable name is a fixed engine constant; the refusal text never carries the value read.
+_d = _catalog.config("EnvFlagError")
+
+ENV_FLAG_INVALID = _d(
+    "env_flag_invalid",
+    "An environment flag has a value outside the accepted spellings.",
+    since="1.27.0",
+)
+
+# A table whose strategies sit under `tables:` must reach the plan. The two refusals below keep a
+# declared table from being echoed unmasked; texts name the table (a config key), never a value.
+_d = _catalog.config("ConfigError")
+
+LOADER_TABLE_UNDECLARED = _d(
+    "loader_table_undeclared",
+    "A table masked through a source loader needs a sources entry; without one the run would "
+    "pass its rows through unmasked.",
+    since="1.27.0",
+)
+DECLARED_TABLE_DROPPED = _d(
+    "declared_table_dropped",
+    "A table declared under tables has no work in the compiled plan; the run would pass its "
+    "rows through unmasked.",
+    since="1.27.0",
+)
+
+# The placeholder a starter pipeline writes where a declared relationship named no namespace.
+# The text never carries the submitted value; the error location names the field.
+NAMESPACE_PLACEHOLDER_UNSET = _d(
+    "namespace_placeholder_unset",
+    "A namespace still holds the placeholder a starter pipeline writes; set a real namespace.",
+    since="1.27.0",
 )
