@@ -571,6 +571,8 @@ This record is added in a docs-only commit on top of `6d0297cf`. On that commit 
 
 Each total in this section and the next belongs to the head named beside it. These two sections
 supersede the sections above for the final head.
+Review round 2 and the main merge of 2026-11-15, carried forward, are in the companion record
+[gen-inherit-e2-evidence-addendum.md](gen-inherit-e2-evidence-addendum.md) and supersede both.
 
 `origin/feat/gen-rel-e3b` at `91c554f2` (slice 4 with its forward merge and review round 1; it
 holds slices 1 to 3 and `origin/main` `c86ca58d`, 0.23.0 released) merged as `3f0c16f7` (parents
