@@ -677,8 +677,10 @@ merged.
 - `DECOY_REQUIRE_NER=1 pytest -m ner -n 2 tests` in the NER venv: 53 passed, 10 skipped (module
   import skips as before); `test_scanml_m4_run.py` in that venv: 16 passed.
 - `pytest tests/integration/compat_corpus`: 5 passed, 1 skipped.
-- `registry_renumber.py --check --main origin/main`, `ratchet_check.py --base origin/main`,
-  `check_fragment.py --base origin/main`: exit 0 on the docs head.
+- `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`: exit 0 on the
+  docs head. `registry_renumber.py --check --main origin/main` exits 2 with `main-not-merged`,
+  because main moved to `64e9349b` (no registry change in it; it overlaps the branch only in
+  `CODEMAP.md`); against the merge base, `--main 38fddb2f`, it reports `registry consistent`, exit 0.
 
 Module sizes: `pipeline/_post_scan.py` 583 (under the 600 goal), `_pipeline.py` 371,
 `_pipeline_context.py` 600. No census number moved.
