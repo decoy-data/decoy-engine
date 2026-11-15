@@ -170,9 +170,9 @@ class StrictJsonError(CanonicalJsonError):
         return (type(self), (self.token,))
 
 
-def strict_json_loads(data: bytes | str, *, max_int_digits: int = 20) -> Any:
+def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
     """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
-    ``max_int_digits`` digits.
+    ``max_int_digits`` digits (``None`` sets no digit limit).
 
     The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
     error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
@@ -188,7 +188,7 @@ def strict_json_loads(data: bytes | str, *, max_int_digits: int = 20) -> Any:
         found.append("non_finite")
 
     def integer(text: str) -> int | None:
-        if len(text.lstrip("-")) > max_int_digits:
+        if max_int_digits is not None and len(text.lstrip("-")) > max_int_digits:
             found.append("out_of_range")
             return None
         return int(text)

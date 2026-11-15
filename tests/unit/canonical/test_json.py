@@ -199,3 +199,13 @@ def test_strict_json_loads_parses_valid_json_and_honours_the_digit_bound() -> No
     assert strict_json_loads("[" + "9" * 20 + "]") == [int("9" * 20)]
     with pytest.raises(StrictJsonError):
         strict_json_loads("[123]", max_int_digits=2)
+
+
+def test_strict_json_loads_without_a_digit_limit_keeps_long_integers() -> None:
+    assert strict_json_loads("[" + "9" * 40 + "]", max_int_digits=None) == [int("9" * 40)]
+
+
+def test_strict_json_loads_turns_deep_nesting_into_not_json() -> None:
+    with pytest.raises(StrictJsonError) as caught:
+        strict_json_loads("[" * 100_000 + "]" * 100_000)
+    assert caught.value.token == "not_json"
