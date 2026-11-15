@@ -146,7 +146,7 @@ def test_arena_prefix_used_only_by_open(
 
         assert ARENA_PREFIX == "decoy-arena-v1-"
         monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
-        with ScratchArena.open() as arena:
+        with ScratchArena.fresh() as arena:
             name = os.path.basename(arena.local_path())
             assert SWEEP_NAME.fullmatch(name), name
             assert os.listdir(tmp_path) == [name]
