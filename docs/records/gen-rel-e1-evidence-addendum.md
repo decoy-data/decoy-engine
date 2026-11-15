@@ -2,7 +2,7 @@
 
 This companion to [the GEN-REL E1 build evidence](gen-rel-e1-evidence.md) holds the delta
 history after review round 1: the merge of `origin/main` (2026-11-13), review round 2 and its
-final runs, and review round 3. The sections below were moved here unchanged from the primary
+final runs, review round 3 and the main merge of 2026-11-15. The first sections below were moved here unchanged from the primary
 record; the primary keeps the build, the mutation tables, the owner rulings and review round 1.
 
 ## Main merge (2026-11-13)
@@ -26,7 +26,7 @@ Conflicts, each resolved as a union:
 
 Files both sides touched that merged without a conflict were read against both parents:
 `CODEMAP.md` (main's rows added beside this branch's), `docs/reasons.md` (main's
-`registry_version` 1.25.0 from its release beside this branch's GEN-REL paragraph),
+released `registry_version` beside this branch's GEN-REL paragraph),
 `tests/sentry/test_physical_seam_disconnection.py` (main's new permitted entries beside the
 `_probe_scale.py` entry) and `tests/sentry/test_sentry_manifest.py` (main's new sentries
 added). Main's changes are in the vault, post-scan, connector, run-result, chunked and
@@ -172,3 +172,68 @@ The same scan over the sources of `feat/gen-rel-e2`, `feat/gen-rel-e3a`, `feat/g
 Not run: the full suite and the gate script; only the focused files named here, ruff on the
 changed file, and `tests/sentry/test_module_size.py`. No source, digest, golden or snapshot
 changed.
+
+## Main merge (2026-11-15)
+
+`origin/main` `38fddb2f` (32 commits past `c86ca58d`, through #597, the fixed width-flip
+routing test) merged into `4983ed22` as `3a9199e9`. Follow-up commits: `d48e05d6` (the four
+headings above were `###` under an H1, which the docs build refuses) and `f48e7854`
+(`refactor(engine): hold capacity and relational config as packages`).
+
+Conflicts, each resolved keeping both sides:
+
+- `.importlinter` and the layer snapshot in `tests/sentry/layout/test_import_layers.py`: the
+  bottom tier holds this branch's `_capacity` and main's `_arrow_types` and `_canonical`.
+- `CODEMAP.md`: this branch's `config/` row and main's `plan/` row (`checks/_formula_types.py`).
+- `config/__init__.py`, `relationships/__init__.py`, `tests/sentry/test_sentry_manifest.py`:
+  both export or sentry lists, sorted.
+- `generation/synthesize.py`: `policies = reference_policies(config)` beside main's
+  `types = reader_types(...)`; 600 lines.
+- `reasons/runtime/_part2.py`: main's `generate_formula_evaluation_failed` (`1.26.0`) stays above
+  this branch's catalog switch, so it keeps main's family; the five GEN-REL runtime codes stay
+  `since=UNRELEASED`. `reasons/warning/_part1.py`: main's `post_scan_output_unreadable`
+  (`1.27.0`) beside `reference_parent_pool_empty` (`UNRELEASED`); the `UNRELEASED` import kept.
+- `tests/unit/generation/unique/test_gen_unique_old_input_bytes.py`: both docstring paragraphs.
+  The two sides moved different digests (this branch `reference_shapes.cells`, from the
+  room-aware repair of `child.bounded`; main `all_basic_types.cells`, from a formula reading
+  `score` as a number). Neither corpus config has the other side's feature, and the merged code
+  reproduces both pinned values, so nothing was re-pinned.
+
+Semantic checks: `git diff HEAD^1 HEAD` and `git diff HEAD^2 HEAD` read hunk by hunk for the 18
+files both sides touched. Nothing was dropped: `_per_parent_bounds_valid` sits beside main's
+`_targets_distinct`, `PinnedPlan.reference_policies` is in the fingerprint (now built by main's
+`canonical_json_bytes`), the reference draw keeps `reference_policy` and `on_warning`, and the
+formula post-pass takes main's `types=`. Main's new code passes this chain's sentries (bound
+reads, `generate_columns_of`, draw-site inventory, seam), so no call site needed a fix.
+
+Fan-out: each side added one module to the engine root and to `config/` (this branch
+`_capacity.py` and `_generate_relational.py`, main `_arrow_types.py` and `_scan_baseline.py`), so
+the merge held 26 in each against the cap of 25 (`test_package_fanout_within_limit`, 2 failed on
+`3a9199e9`, 0 on main). `f48e7854` keeps each module unchanged as its package's `__init__.py`,
+after main's `_canonical/` precedent: the import paths, `.importlinter` and the layer snapshot do
+not change, no allowlist entry is added, and CODEMAP and `_MAP.md` say why. The option-read
+sentry names the new path; a bound read seeded into the moved module still fails
+`test_per_parent_bounds_are_read_only_through_the_config_helper`.
+
+Gates, `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline --steps
+ruff,format,mypy,sentry,layers,licenses,tests` over the 57 T1 paths, `tests/unit/reasons` and
+the native catalogue readers (inventory coverage, assembly, determinism protocol, the c1b and c5b
+inventories, capabilities), Python 3.10.20, `origin/main` `38fddb2f`:
+
+| Step | `3a9199e9` | `f48e7854` |
+| --- | --- | --- |
+| ruff, format, mypy | pass | pass |
+| sentry | 5673 passed, 2 failed, 2 skipped | 5675 passed, 0 failed, 2 skipped |
+| layers | 15 passed | 15 passed |
+| licenses | 63 passed | 63 passed |
+| tests | 7108 passed, 0 failed, 60 skipped | 7108 passed, 0 failed, 60 skipped |
+
+On `3a9199e9` main's sentry step passed 5625 with 0 failed; the two fan-out cells were the only
+branch-only failures. `f48e7854` has no failing step.
+
+Script checks against `origin/main` `38fddb2f`, on this record's commit: `registry_renumber.py
+--check --main origin/main` exit 0 (it had flagged the version this addendum named in its first
+merge section, now reworded), `ratchet_check.py --base origin/main` exit 0, `check_fragment.py
+--base origin/main` exit 0, `reason_release_pin.py --check` exit 0.
+
+Not run: the full suite and Python 3.11.
