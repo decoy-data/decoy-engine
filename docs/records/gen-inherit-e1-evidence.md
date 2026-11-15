@@ -286,6 +286,108 @@ The exit 2 is the known main-not-merged effect. The ratchet exit 1 names two
 branch does not touch that file or those modules, so it clears on the main merge.
 
 
+## Main merges and owner rulings (2026-11-15)
+
+Totals in this section belong to the head named beside them and supersede the sections above
+for the final head.
+
+### Merges
+
+- `ade8c178` merged `origin/feat/gen-inherit-e2` `72bc46bf`, which carried `origin/main`
+  `38fddb2f` (32 commits through #597) up the stack, slice 1's move of `_capacity` and
+  `config/_generate_relational` into packages (each module unchanged as the package's
+  `__init__.py`; the engine root and `config/` stay at the fan-out cap of 25) and the
+  late-formula test move of slice 5. One conflict, `generation/synthesize.py`: this slice's
+  unconditional post-pass call (the guard lives in `fill_referenced_formula_columns`) now passes
+  main's `name, types=types`; the module is 598 lines. `config/_generate_relational/__init__.py`
+  equals this slice's module byte for byte (577 lines).
+- `97ff1401` merged `origin/feat/gen-inherit-e2` `8899b393`, carrying `origin/main`
+  `64e9349b` (#598, a `profile/` format table) without a conflict.
+
+On `ade8c178` the T1 gate below had four branch-only failures, all from main #574 (a formula
+reads its references typed and refuses a text spelling of a number): AT-14's formula cell, the
+input-edges sentry's `inherit-column` cell (a formula as the text reader), main's per-type table
+in `test_formula_types.py` (no `inherit` entry) and the testflight live-registry guard (no job
+or allowlist entry for `inherit`).
+
+### Owner rulings
+
+1. Main wins on AT-14 (`1a936f42`). The cells are re-derived from main's behaviour; main's code
+   is unchanged.
+
+   | Before | After |
+   | --- | --- |
+   | `test_at14_a_child_formula_reading_the_copy_keeps_the_parent_key_text`: a formula `'M-' + member_code` keeps `members.member_id` text | `test_at14_a_child_text_reader_of_the_copy_keeps_the_parent_key_text`: a `group_key` with `group_by: member_code` (a reader that still reads text) keeps both columns text and the copy equal to the key |
+   | (none) | `test_at14_a_child_formula_using_the_copy_as_text_is_refused`: `'M-' + member_code` is refused at validate with `plan.generate_formula_number_used_as_text` at `tables.claims.generate_columns.label.formula` |
+   | (none) | `test_at14_a_child_formula_reads_the_copy_as_a_number` (`'M-' + str(member_code)` and `f'M-{member_code}'`): `member_id` and the copy stay `int64` and each label is `M-` and the key |
+   | input-edges sentry `COPY_READER`: a formula `'x' + copied` | a `group_key` with `group_by: copied` |
+
+   `tests/unit/generators/test_formula_types.py` gains an `inherit` entry in `_EXAMPLES` (a
+   copy of a parent `sequence` through a reference) and `_EXAMPLE_TABLES` for its parent table,
+   so the fidelity cells run it with and without nulls. The other AT-14 cells (without a text
+   reader the key and copy are `int64`, the root hops) are unchanged.
+
+   Red first: the new test file against the pre-merge source (`a2302bf4`, detached worktree):
+   the refusal cell fails (`DID NOT RAISE PlanCompileError`) and both number cells fail
+   (`None == int64`: the formula kept the key text). The `group_key` cell and the sentry cell
+   pass on both sources: they hold under the old and the new formula rule, so neither can be red
+   without a mutation; they stay tied to M1, M3 and M5 (below).
+2. Testflight (`d15634dc`): `testflight/_coverage.py` `_GENERATE_TYPE_ALLOWLIST` gains
+   `inherit`, with the reason "copies a parent row's column through a reference foreign key, so
+   a job needs a generated parent and child table; it makes no draw of its own (pinned as
+   DETERMINISTIC_NO_DRAW in the draw-site catalogue) and is covered by
+   tests/unit/generation/relational/test_inherit.py; a test-flight job case is a tracked
+   V2-LOG item". No test ratchets the dict's size.
+3. Facade import (`a27a82c5`): `generation/relational/__init__.py` exports `inherit_types` and
+   `inherit_values`; `synthesize.py` imports the package (`from decoy_engine.generation import
+   _faker_pool, relational`) and calls `relational.inherit_types(...)` and
+   `relational.inherit_values(...)`. Importing the two names beside `reference_draw_extras`
+   would format to a six-line block (602 lines). The module is 597 lines; the
+   definition-owners fixture is unchanged; `decoy_engine`, `generation.synthesize`,
+   `generation.relational` and `config` import fresh without a cycle; layers 15 passed. The
+   other crossings into `relational._aggregate` and `relational._self_reference` are unchanged.
+
+### Mutations (final source head `a27a82c5`, detached worktree, 15 of 15 red)
+
+The harness now names `config/_generate_relational/__init__.py`, and M10's anchor is the
+`relational.inherit_types(` call. M15 is new. Red counts (previous run in brackets):
+
+| Id | Red | AT-14 cells among them |
+| --- | --- | --- |
+| M1 | 10 (8) | both number cells, the int64 cell, the text-reader cell |
+| M2 | 1 (1) | |
+| M3 | 27 (24) | the refusal, number, int64, root and text-reader cells |
+| M4 | 3 (3) | |
+| M5 `reference_root` stops at inherit | 7 (6) | the refusal cell, the three root cells, the text-reader cell, the sentry's `inherit-column` cell |
+| M6 | 5 (5) | the yielded-edge and missing-edge cells |
+| M7 dereference a missing resolved edge | 3 (3) | the missing-edge and no-`via` cells |
+| M8 to M13 | 3, 1, 1, 2, 2, 1 (unchanged) | |
+| M14 `inherit.via` numeric-unsafe | 4 (2) | both number cells and the int64 cell |
+| M15 a formula reads its references as text again | 2 (new) | both number cells |
+
+### Gates (final source head `a27a82c5`)
+
+`GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline --steps
+ruff,format,mypy,sentry,layers,licenses,tests` over the 154 T1 paths below (they include
+`tests/unit/execution/test_byte_estimate_routing.py`), Python 3.10.20, baseline `origin/main`
+`64e9349b`:
+
+| Step | `ade8c178` | `a27a82c5` |
+| --- | --- | --- |
+| ruff, format, mypy | pass | pass |
+| sentry | 5772 passed, 1 failed, 2 skipped | 5796 passed, 0 failed, 2 skipped |
+| layers | 15 passed | 15 passed |
+| licenses | 63 passed | 63 passed |
+| tests | 13773 passed, 3 failed, 351 skipped | 13781 passed, 0 failed, 351 skipped |
+
+`ade8c178` ran against `origin/main` `38fddb2f` (main 5625 sentry and 12894 tests passed, 0
+failed); its four failures are listed above. `a27a82c5` has no failing step, the routing test
+included. Script checks on `a27a82c5` against `origin/main` `64e9349b`:
+`registry_renumber.py --check --main origin/main`, `ratchet_check.py --base origin/main`,
+`check_fragment.py --base origin/main` and `reason_release_pin.py --check` each exit 0.
+`generation/synthesize.py` 597 lines; `tests/unit/plan/checks/test_generate_columns.py` 856;
+the engine root and `config/` hold 25 modules, `profile/` 19.
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
@@ -484,3 +586,5 @@ discarded, as was a first direct T1 run without `tmp_path_retention_policy=faile
   sweep; keep it out of broad local runs.
 - The pre-existing `ratchet_check.py --base origin/main` finding (keys `origin/main` #577 removed
   from `f29-producer-inventory`, a file this stack does not touch) clears on the main merge.
+- A test-flight job case for `inherit` (a generated parent and child table); until then
+  `testflight/_coverage.py` allowlists the type with that reason.
