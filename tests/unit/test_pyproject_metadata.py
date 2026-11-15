@@ -74,3 +74,13 @@ def test_native_companion_ships_the_root_license() -> None:
     assert project["license"] == "FSL-1.1-ALv2"
     assert project["license-files"] == ["LICENSE"]
     assert (native / "LICENSE").read_bytes() == (PYPROJECT.parent / "LICENSE").read_bytes()
+
+
+def test_readme_install_story() -> None:
+    """RG-L: V1 users get the engine inside the CLI bundle; the README must not offer a public
+    `pip install decoy-engine` until a public package exists."""
+    readme = (PYPROJECT.parent / "README.md").read_text(encoding="utf-8")
+    install = readme.split("## Install", 1)[1].split("\n## ", 1)[0]
+    assert "pip install decoy-engine" not in install
+    assert "CLI bundle" in install
+    assert "FSL-1.1-ALv2" in readme

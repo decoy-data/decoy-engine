@@ -9,6 +9,10 @@ minimum engine version it was tested against via its
 
 ## [Unreleased]
 
+### Changed
+
+- The README install section now says the engine ships inside the `decoy` CLI bundle and that a public `decoy-engine` package comes later; it no longer offers `pip install decoy-engine`. A test pins the wording.
+
 ## [0.26.0] - 2026-11-14
 
 ### Breaking for consumers
