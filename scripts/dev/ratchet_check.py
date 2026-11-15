@@ -5,6 +5,8 @@ Usage: ratchet_check.py [--root DIR] [--base REF]
 A key may not be added, except that for sentries in REKEY_PER_SITE the
 `permitted::<file>::<site>::<digest>` keys count per site: re-keying a site (same count, new
 digest) passes and prints a review line; a higher count or a new site fails.
+A `<file>.py::<qualname>::<name>` key may move 1:1 to a new key of the same last segment when
+the old site is gone from the source (AST proof) and the key count does not grow.
 The logic lives in tests/sentry/_ratchet.py so the unit tests and this gate step share it.
 """
 
