@@ -168,26 +168,26 @@ UNSUPPORTED_SCHEMA_VERSION = _d(
     retry=RetryClass.NEVER,
 )
 
-# F22 output publication (`decoy_engine.publication`, docs/publication.md): the outcomes of
-# judging and binding an output unit under its destination lock, and the publishing sink's
-# refusals. Each text is fixed; no path, table name or OS message rides with a code.
-_p = _catalog.decoy("decoy_engine.publication")
+# F22 durable publication in `decoy_engine.fileaccess` (docs/publication.md): the codes of the
+# errno-only errors its destination lock and durable bind raise (`LockUnavailable`,
+# `LockTimeout`, `CommitUncertain`). Each text is fixed; no path, name or OS message rides along.
+_fa = _catalog.decoy("decoy_engine.fileaccess")
 
-PUBLICATION_LOCK_UNAVAILABLE = _p(
+PUBLICATION_LOCK_UNAVAILABLE = _fa(
     "publication_lock_unavailable",
     "The output destination cannot be locked on this filesystem.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
     outcome=Outcome.PUBLICATION,
     since=UNRELEASED,
 )
-PUBLICATION_LOCK_TIMEOUT = _p(
+PUBLICATION_LOCK_TIMEOUT = _fa(
     "publication_lock_timeout",
     "Another writer held the output destination lock past the deadline.",
     retry=RetryClass.RETRY_OPERATION,
     outcome=Outcome.PUBLICATION,
     since=UNRELEASED,
 )
-PUBLICATION_COMMIT_UNCERTAIN = _p(
+PUBLICATION_COMMIT_UNCERTAIN = _fa(
     "publication_commit_uncertain",
     "The output is visible but its durability could not be confirmed.",
     retry=RetryClass.RETRY_OPERATION,
