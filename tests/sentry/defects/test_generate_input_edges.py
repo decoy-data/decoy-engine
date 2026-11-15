@@ -465,12 +465,9 @@ def _aggregate_via_cells() -> dict[str, bool]:
 
 
 COPY = {"name": "copied", "type": "inherit", "via": "pid", "column": "born"}
-COPY_READER = {
-    "name": "label",
-    "type": "formula",
-    "formula": "'x' + copied",
-    "references": ["copied"],
-}
+# `group_key` reads the cell as text; a formula binds the copy as a number since formulas read
+# their references typed.
+COPY_READER = {"name": "label", "type": "group_key", "group_by": "copied"}
 
 
 def _inherit_cells() -> dict[str, bool]:

@@ -514,20 +514,41 @@ def _code_config(*extra: dict[str, Any]) -> dict[str, Any]:
     return claims_config(claim_cols=kids)
 
 
-LABEL = {
-    "name": "label",
-    "type": "formula",
-    "formula": "'M-' + member_code",
-    "references": ["member_code"],
-}
+# `group_key` reads the cell as text, so a reader of the copy keeps the parent key text.
+TEXT_READER = {"name": "label", "type": "group_key", "group_by": "member_code"}
 
 
-def test_at14_a_child_formula_reading_the_copy_keeps_the_parent_key_text() -> None:
-    config = _code_config(LABEL)
+def _formula(expr: str) -> dict[str, Any]:
+    return {"name": "label", "type": "formula", "formula": expr, "references": ["member_code"]}
+
+
+def test_at14_a_child_text_reader_of_the_copy_keeps_the_parent_key_text() -> None:
+    config = _code_config(TEXT_READER)
     assert ("members", "member_id") not in numeric_plan(config)
     out = resident(config)
     assert out["members"].schema.field("member_id").type == pa.string()
     assert out["claims"].schema.field("member_code").type == pa.string()
+    for row in out["claims"].to_pylist():
+        assert row["member_code"] == row["member_id"]
+        assert row["label"] is not None
+
+
+def test_at14_a_child_formula_using_the_copy_as_text_is_refused() -> None:
+    # A formula binds the copy as the parent's number, so a text spelling is refused at compile.
+    config = _code_config(_formula("'M-' + member_code"))
+    with pytest.raises(PlanCompileError) as info:
+        run_config_only_checks(config)
+    assert info.value.code == str(reasons.plan.GENERATE_FORMULA_NUMBER_USED_AS_TEXT)
+    assert info.value.path == "tables.claims.generate_columns.label.formula"
+
+
+@pytest.mark.parametrize("expr", ["'M-' + str(member_code)", "f'M-{member_code}'"])
+def test_at14_a_child_formula_reads_the_copy_as_a_number(expr: str) -> None:
+    config = _code_config(_formula(expr))
+    assert numeric_plan(config).get(("members", "member_id")) == pa.int64()
+    out = resident(config)
+    assert out["members"].schema.field("member_id").type == pa.int64()
+    assert out["claims"].schema.field("member_code").type == pa.int64()
     for row in out["claims"].to_pylist():
         assert row["member_code"] == row["member_id"]
         assert row["label"] == f"M-{row['member_code']}"
