@@ -112,9 +112,11 @@ Package `decoy_engine.publication` (`_descriptor.py`) defines the descriptor a p
 carries as `_decoy_publication.json` at its root; `publish_unit` (below) writes it. This section
 is the format.
 
-The bytes are canonical JSON: keys sorted, separators `,` and `:` with no whitespace, ASCII only
-(other characters as `\u` escapes), no NaN or infinity. Equal content therefore has equal bytes,
-and `descriptor_digest` is the SHA-256 of the bytes.
+The bytes are the engine's one canonical JSON form (`decoy_engine._canonical.canonical_json_bytes`):
+keys sorted, separators `,` and `:` with no whitespace, UTF-8 with text written as-is (no `\u`
+escapes), no NaN or infinity. Equal content therefore has equal bytes, and `descriptor_digest` is
+the SHA-256 of the bytes. A value with no UTF-8 form (an unpaired surrogate, as an undecodable
+filename gives) is refused as `not_canonical` by the writer and the reader.
 
 | Field | Type |
 |---|---|
