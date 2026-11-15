@@ -52,6 +52,16 @@ def _names_in(node: ast.AST) -> set[str]:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
 
+def _holds_format(node: ast.AST, tainted: set[str]) -> bool:
+    """Whether `node` carries the format value. The table lookup and a message do not: what
+    they return is a table entry or text, not the format."""
+    if isinstance(node, ast.Call) and _call_name(node) in ALLOWED_SINKS:
+        return False
+    if _is_format_read(node) or (isinstance(node, ast.Name) and node.id in tainted):
+        return True
+    return any(_holds_format(child, tainted) for child in ast.iter_child_nodes(node))
+
+
 def _tainted(func: ast.FunctionDef) -> set[str]:
     """Names that hold the format: seed names and every alias of one, to a fixed point."""
     tainted = set(SEED_NAMES)
@@ -65,9 +75,7 @@ def _tainted(func: ast.FunctionDef) -> set[str]:
                 targets, value = [node.target], node.value
             else:
                 continue
-            holds = any(_is_format_read(n) for n in ast.walk(value)) or bool(
-                _names_in(value) & tainted
-            )
+            holds = _holds_format(value, tainted)
             if holds:
                 for target in targets:
                     for name in _names_in(target):
@@ -158,8 +166,8 @@ def test_a_seeded_format_branch_is_seen() -> None:
         assert _seed(source, "f") != [], source
 
 
-def test_a_table_lookup_is_not_a_branch() -> None:
-    source = 'def f(d):\n    fmt = d.get("format")\n    return TABLE.get(fmt)\n'
+def test_the_approved_table_lookup_is_not_a_branch() -> None:
+    source = 'def f(d):\n    fmt = d.get("format")\n    return file_format(fmt)\n'
     assert _seed(source, "f") == []
 
 
