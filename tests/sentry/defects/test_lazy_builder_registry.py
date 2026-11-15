@@ -212,3 +212,31 @@ def test_the_approved_lookup_helper_is_not_a_branch() -> None:
         "    return repr(fmt), entry\n"
     )
     assert _seed(source, "f") == []
+
+
+# Round 3: a helper is a builder too. Every function in both modules is scanned.
+def test_every_function_in_both_modules_is_free_of_format_dispatch() -> None:
+    for rel, _ in BUILDERS:
+        assert scan_module(_tree(rel)) == [], rel
+
+
+def test_a_helper_that_dispatches_on_format_is_seen() -> None:
+    cases = {
+        "def": 'def _pick(d):\n    return d["format"] == "parquet"\n',
+        "async def": 'async def _pick(d):\n    fmt = d.get("format")\n    return fmt in OTHER\n',
+        "lambda": 'pick = lambda d: d["format"] == OTHER\n',
+        "nested": 'def outer(d):\n    def inner():\n        return d["format"] == OTHER\n    return inner\n',
+    }
+    for label, source in cases.items():
+        assert scan_module(ast.parse(source)) != [], label
+
+
+def test_file_format_is_exempt_only_while_it_is_the_one_table_lookup() -> None:
+    assert file_format_is_pinned(_tree("_lazy_build.py"))
+    wider = (
+        "def file_format(fmt):\n"
+        '    if fmt == "csv":\n        return 1\n'
+        "    return FILE_FORMATS.get(fmt) if isinstance(fmt, str) else None\n"
+    )
+    assert not file_format_is_pinned(ast.parse(wider))
+    assert scan_module(ast.parse(wider)) == []
