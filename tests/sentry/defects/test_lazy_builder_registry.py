@@ -29,7 +29,9 @@ SEED_NAMES = frozenset({"fmt", "format", "file_fmt"})
 
 
 def _is_format_read(node: ast.AST) -> bool:
-    """`x.get("format")`, `x["format"]` or `getattr(x, "format")`."""
+    """`x.get("format")`, `x["format"]`, `getattr(x, "format")` or the attribute `x.format`."""
+    if isinstance(node, ast.Attribute) and node.attr == "format":
+        return True
     if isinstance(node, ast.Call):
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr == "get":
@@ -52,6 +54,23 @@ def _names_in(node: ast.AST) -> set[str]:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
 
+def _is_format_method(node: ast.AST) -> bool:
+    """`"{}".format(x)`: the call target is the str method, not a read of a `.format` field."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+    )
+
+
+def _children(node: ast.AST) -> list[ast.AST]:
+    """Child nodes, minus the `.format` of a `str.format` call (its receiver stays)."""
+    if _is_format_method(node):
+        assert isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        return [node.func.value, *node.args, *node.keywords]
+    return list(ast.iter_child_nodes(node))
+
+
 def _holds_format(node: ast.AST, tainted: set[str]) -> bool:
     """Whether `node` carries the format value. The table lookup and a message do not: what
     they return is a table entry or text, not the format."""
@@ -59,7 +78,7 @@ def _holds_format(node: ast.AST, tainted: set[str]) -> bool:
         return False
     if _is_format_read(node) or (isinstance(node, ast.Name) and node.id in tainted):
         return True
-    return any(_holds_format(child, tainted) for child in ast.iter_child_nodes(node))
+    return any(_holds_format(child, tainted) for child in _children(node))
 
 
 def _tainted(func: ast.FunctionDef) -> set[str]:
@@ -95,12 +114,23 @@ def format_branches(func: ast.FunctionDef) -> list[str]:
     for node in ast.walk(func):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in FORMATS:
             found.append(f"literal {node.value!r}@{node.lineno}")
-        is_use = (isinstance(node, ast.Name) and node.id in tainted) or _is_format_read(node)
+        parent = parents.get(node)
+        if isinstance(node, ast.Attribute) and _is_format_method(parent) and parent.func is node:  # type: ignore[union-attr]
+            continue
+        walrus_use = (
+            isinstance(node, ast.NamedExpr)
+            and not isinstance(parent, ast.Expr)
+            and _holds_format(node.value, tainted)
+        )
+        is_use = (
+            (isinstance(node, ast.Name) and node.id in tainted)
+            or _is_format_read(node)
+            or walrus_use
+        )
         if not is_use:
             continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             continue
-        parent = parents.get(node)
         if isinstance(parent, ast.Assign | ast.AnnAssign | ast.NamedExpr) and node is parent.value:
             continue
         if (
@@ -152,6 +182,20 @@ def _body_without_docstring(func: ast.FunctionDef) -> list[ast.stmt]:
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
         body = body[1:]
     return body
+
+
+def file_format_is_pinned_across(trees: list[ast.Module]) -> bool:
+    """Exactly one `file_format` is defined across all the modules, and it is the pinned one.
+    The scan exempts the name in every module, so a second definition would be a free pass."""
+    defs = [
+        n
+        for tree in trees
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and n.name == TABLE_LOOKUP
+    ]
+    if len(defs) != 1:
+        return False
+    return file_format_is_pinned(ast.Module(body=list(defs), type_ignores=[]))
 
 
 def file_format_is_pinned(tree: ast.Module) -> bool:
@@ -286,3 +330,38 @@ def test_file_format_is_exempt_only_while_it_is_the_one_table_lookup() -> None:
     )
     assert not file_format_is_pinned(ast.parse(wider))
     assert scan_module(ast.parse(wider)) == []
+
+
+# Round 4: attribute reads, walrus reads, and a second `file_format` are dispatch or a free pass.
+def test_an_attribute_read_of_format_is_seen() -> None:
+    assert _seed("def f(d):\n    return d.format in OTHER\n", "f") != []
+    assert _seed('def f(d):\n    return "{}".format(d)\n', "f") == []
+
+
+def test_a_walrus_read_of_format_is_seen() -> None:
+    cases = [
+        'def f(d):\n    if (fmt := d.get("format")) in OTHER:\n        return 1\n',
+        'def f(d):\n    return (kind := d["format"]) in OTHER\n',
+    ]
+    for source in cases:
+        assert _seed(source, "f") != [], source
+    bare = 'def f(d):\n    (fmt := d.get("format"))\n    return file_format(fmt)\n'
+    assert _seed(bare, "f") == []
+    sink = 'def f(d):\n    return file_format(fmt := d.get("format"))\n'
+    assert _seed(sink, "f") == []
+
+
+def test_file_format_is_defined_once_across_both_modules_and_pinned() -> None:
+    trees = [_tree(rel) for rel, _ in BUILDERS]
+    assert file_format_is_pinned_across(trees)
+    pinned = "def file_format(fmt):\n    return FILE_FORMATS.get(fmt) if isinstance(fmt, str) else None\n"
+    loose = 'def file_format(fmt):\n    return fmt == "csv"\n'
+    other = ast.parse(loose)
+    assert file_format_is_pinned_across([ast.parse(pinned)])
+    assert not file_format_is_pinned_across([ast.parse(pinned), other])
+    assert not file_format_is_pinned_across([other, ast.parse(pinned)])
+    assert not file_format_is_pinned_across([ast.parse("x = 1\n")])
+    # The mutant: the pinned copy sits in one module, a branching copy in the other. The old
+    # check looked at the first module only and passed.
+    assert file_format_is_pinned(ast.parse(pinned))
+    assert scan_module(other) == []
