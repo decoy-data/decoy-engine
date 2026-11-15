@@ -456,18 +456,9 @@ def test_run_pipeline_auto_chunk_lane_runs_model_post_scan_configs_as_on_main(
 
     monkeypatch.setattr(module, name, spy)
     extra = {"chunked_dispatcher_enabled": False} if lane == "oracle" else {}
-    # The run loads its post-scan models first. This routing test runs without spaCy: no column
-    # here is free text, so no cell would reach the model.
-    from decoy_engine.detection.types import ModelRef
-    from decoy_engine.profiling.model_pack import DetectorSet
-    from decoy_engine.verification.postmask import _model_findings
+    from tests.unit.detection_verification._scanml_m4_support import stub_post_scan_models
 
-    ner = ModelRef("en_core_web_sm", "3.8.0")
-    monkeypatch.setattr(
-        _model_findings,
-        "load_detectors",
-        lambda sources, **_: DetectorSet(tuple(sources), None, ner),
-    )
+    stub_post_scan_models(monkeypatch)
 
     def run(post_scan: dict[str, Any]) -> Any:
         # A sink the gate can read back, so the resident decision is the post-scan's. (A foreign
