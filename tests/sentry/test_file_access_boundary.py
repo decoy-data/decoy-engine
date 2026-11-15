@@ -343,7 +343,7 @@ def _source_trees(root: Path, package: str) -> dict[str, ast.Module]:
     }
 
 
-_EVASIONS = "fx/plain/scratch_release_evasions.py"
+_EVASIONS = "fx/scratch/scratch_release_evasions.py"
 _RELEASE_CELLS = {
     # cell: (listed modules, findings it must include)
     "unlisted_caller_evasions": (
@@ -371,8 +371,8 @@ def test_local_path_callers_are_allowlisted(cell: str) -> None:
     assert expected <= findings, sorted(expected - findings)
 
 
-_DERIVED = "fx/plain/scratch_native_derived.py"
-_READS = "fx/plain/scratch_read_evasions.py"
+_DERIVED = "fx/scratch/scratch_native_derived.py"
+_READS = "fx/scratch/scratch_read_evasions.py"
 _ISOLATED_RUN = "decoy_engine/execution/_isolated_run.py"
 
 
