@@ -1,0 +1,27 @@
+{
+  "entries": [
+    {
+      "code": "target_shared_destination",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.28.0",
+      "summary": "Two or more targets write to one destination. Give each table its own target.",
+      "symbol": "TARGET_SHARED_DESTINATION"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.28.0"
+}
