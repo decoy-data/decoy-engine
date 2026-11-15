@@ -1,9 +1,9 @@
 """The ``decoy-publication/v1`` descriptor: one field declaration, its writer and its strict reader.
 
-Pattern: Git content addressing plus RFC 8785 canonical JSON (Git object model, GPL-2.0 docs; RFC 8785, IETF). See: https://www.rfc-editor.org/rfc/rfc8785.
+Pattern: Git content addressing plus RFC 8785 canonical JSON (Git object model, GPL-2.0 docs; RFC 8785, IETF). Keys and paths sort in Unicode code point order. See: https://www.rfc-editor.org/rfc/rfc8785.
 
 Every published unit carries ``_decoy_publication.json``. Its bytes are the engine's one canonical
-JSON form, ``decoy_engine._canonical.canonical_json_bytes`` (sorted keys, fixed separators, UTF-8
+JSON form, ``decoy_engine._canonical.canonical_json_bytes`` (keys sorted in Unicode code point order, fixed separators, UTF-8
 text as-is, no NaN), so equal content has equal bytes and
 ``descriptor_digest`` is a plain SHA-256 of them. ``result_id`` names the output content alone,
 as Git names an object by its bytes: a domain-separated SHA-256 of the canonical artifact list.
@@ -23,15 +23,19 @@ outside any parse handler so no exception context carries them.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Any, Final, Literal, NoReturn, Protocol
+from typing import Any, Final, Literal, NoReturn, Protocol, cast
 
-from decoy_engine._canonical import CanonicalJsonError, canonical_json_bytes
-from decoy_engine.fileaccess._component import is_valid_component
+from decoy_engine._canonical import (
+    CanonicalJsonError,
+    StrictJsonError,
+    canonical_json_bytes,
+    strict_json_loads,
+)
+from decoy_engine.fileaccess import is_valid_component
 from decoy_engine.publication._types import (
     OPERATION_ID_PATTERN,
     ROLES,
@@ -317,7 +321,7 @@ _DOCUMENT = _Object(Descriptor, DESCRIPTOR_FIELDS)
 
 
 def describe_declaration() -> tuple[tuple[str, str], ...]:
-    """The wire shape as text, for the schema snapshot."""
+    """The wire shape as text, for the declaration pin test."""
     return tuple((name, spec.describe()) for name, spec in DESCRIPTOR_FIELDS)
 
 
@@ -395,38 +399,15 @@ def encode_descriptor(descriptor: Descriptor) -> bytes:
 
 
 def _parse(data: bytes) -> Any:
-    """Strict JSON: the hooks record a defect and parsing goes on, so nothing raises inside."""
-    found: list[Check] = []
-
-    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        if len({key for key, _ in items}) != len(items):
-            found.append("duplicate_key")
-        return dict(items)
-
-    def constant(_name: str) -> None:
-        found.append("non_finite")
-
-    def integer(text: str) -> int | None:
-        if len(text.lstrip("-")) > _MAX_INT_DIGITS:
-            found.append("out_of_range")
-            return None
-        return int(text)
-
+    """Strict JSON; the shared decoder's closed token is the refusal check."""
     parsed: Any = None
-    malformed = False
+    refused: Check | None = None
     try:
-        parsed = json.loads(
-            data.decode("utf-8"),
-            object_pairs_hook=pairs,
-            parse_constant=constant,
-            parse_int=integer,
-        )
-    except (UnicodeDecodeError, ValueError, RecursionError):
-        malformed = True
-    if malformed:
-        _refuse("not_json")
-    if found:
-        _refuse(found[0])
+        parsed = strict_json_loads(data, max_int_digits=_MAX_INT_DIGITS)
+    except StrictJsonError as error:
+        refused = cast(Check, error.token)
+    if refused is not None:
+        _refuse(refused)
     return parsed
 
 

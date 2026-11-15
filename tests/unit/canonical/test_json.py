@@ -12,8 +12,10 @@ from decoy_engine import reasons
 from decoy_engine._canonical import (
     CanonicalJsonError,
     CanonicalStringError,
+    StrictJsonError,
     canonical_json_bytes,
     seed_fingerprint_bytes,
+    strict_json_loads,
 )
 from decoy_engine.errors import DecoyError
 
@@ -159,3 +161,41 @@ def test_the_errors_survive_a_pickle_round_trip(error: CanonicalJsonError) -> No
     again = pickle.loads(pickle.dumps(error))  # noqa: S301 - bytes this test just produced
     assert type(again) is type(error)
     assert str(again) == str(error) and again.code == error.code
+
+
+@pytest.mark.parametrize(
+    ("text", "token"),
+    [
+        ('{"a": 1, "a": 2}', "duplicate_key"),
+        ('{"a": NaN}', "non_finite"),
+        ("[Infinity]", "non_finite"),
+        ("[-Infinity]", "non_finite"),
+        ("[" + "9" * 21 + "]", "out_of_range"),
+        ("[-" + "9" * 21 + "]", "out_of_range"),
+        ("{not json", "not_json"),
+        ("", "not_json"),
+    ],
+)
+def test_strict_json_loads_refuses_each_defect_with_a_closed_token(text: str, token: str) -> None:
+    for data in (text, text.encode()):
+        with pytest.raises(StrictJsonError) as caught:
+            strict_json_loads(data)
+        assert caught.value.token == token
+        assert str(caught.value) == token
+        assert caught.value.__context__ is None
+
+
+def test_strict_json_loads_refuses_bad_utf8_without_input_text() -> None:
+    with pytest.raises(StrictJsonError) as caught:
+        strict_json_loads(b"\xff\xfe")
+    assert caught.value.token == "not_json"
+    assert caught.value.__context__ is None
+
+
+def test_strict_json_loads_parses_valid_json_and_honours_the_digit_bound() -> None:
+    assert strict_json_loads(b'{"a": [1, -2, 1.5, "x", null, true]}') == {
+        "a": [1, -2, 1.5, "x", None, True]
+    }
+    assert strict_json_loads("[" + "9" * 20 + "]") == [int("9" * 20)]
+    with pytest.raises(StrictJsonError):
+        strict_json_loads("[123]", max_int_digits=2)

@@ -15,6 +15,9 @@ bytes depend on the machine; every other non-JSON type is refused. An unpaired s
 string or an object key is refused before encoding: the ASCII form would otherwise escape it and
 the UTF-8 form would crash on it with codec text.
 
+``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity and
+an over-long integer, and names the defect as a closed token, never as input text.
+
 Every refusal is raised after the encoder or the walk has returned, outside any ``except`` block,
 so the error holds no ``__context__`` and no text of the value.
 """
@@ -32,8 +35,10 @@ from decoy_engine._error_base import DecoyError
 __all__ = [
     "CanonicalJsonError",
     "CanonicalStringError",
+    "StrictJsonError",
     "canonical_json_bytes",
     "seed_fingerprint_bytes",
+    "strict_json_loads",
 ]
 
 _SURROGATE = re.compile("[\ud800-\udfff]")
@@ -145,3 +150,53 @@ def seed_fingerprint_bytes(value: object) -> bytes:
     holds that list. Changing a byte this writes is a seed protocol change.
     """
     return _encode(value, ensure_ascii=True)
+
+
+STRICT_JSON_TOKENS = ("not_json", "duplicate_key", "non_finite", "out_of_range")
+
+
+class StrictJsonError(ValueError):
+    """Strict JSON was refused. ``token`` is one of ``STRICT_JSON_TOKENS``; no input text."""
+
+    def __init__(self, token: str) -> None:
+        super().__init__(token)
+        self.token = token
+
+
+def strict_json_loads(data: bytes | str, *, max_int_digits: int = 20) -> Any:
+    """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
+    ``max_int_digits`` digits.
+
+    The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
+    error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
+    """
+    found: list[str] = []
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        if len({key for key, _ in items}) != len(items):
+            found.append("duplicate_key")
+        return dict(items)
+
+    def constant(_name: str) -> None:
+        found.append("non_finite")
+
+    def integer(text: str) -> int | None:
+        if len(text.lstrip("-")) > max_int_digits:
+            found.append("out_of_range")
+            return None
+        return int(text)
+
+    parsed: Any = None
+    malformed = False
+    try:
+        text = data.decode("utf-8") if isinstance(data, bytes) else data
+        parsed = json.loads(
+            text, object_pairs_hook=pairs, parse_constant=constant, parse_int=integer
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        malformed = True
+    if malformed:
+        raise StrictJsonError("not_json")
+    if found:
+        raise StrictJsonError(found[0])
+    return parsed
