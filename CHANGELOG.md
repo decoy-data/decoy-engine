@@ -9,6 +9,20 @@ minimum engine version it was tested against via its
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-14
+
+### Breaking for consumers
+
+- a config where two declared tables share one target destination now refuses (`config/target_shared_destination`); give each table its own target. `config.target_identity` is removed in favour of `config.duplicate_target_groups`.
+
+### Changed (one destination per table, DUP-DEST-E1, 2026-11-14)
+
+`PipelineConfig` validation refuses (`config/target_shared_destination`) two declared tables whose targets write to one destination, so the second write can no longer replace the first. File paths compare after normalization unless they contain `..`, S3 targets by endpoint, bucket and key, GCS targets by bucket and object. Targets whose key names no declared table are ignored. `decoy_engine.config.duplicate_target_groups` is the one grouping function.
+
+### Changed (one fixed-width parser, SAMPLE-SE3a, 2026-11-14)
+
+Every fixed-width read (profiling, sampling, the full read and the row count) now goes through one record parser, `profile._fixed_width_reader.iter_fixed_width_records`, which is also the one place the file is opened. A failing record is reported with the same value-free parse error on every path. `row_count` for a fixed-width source is a framing pass: it checks UTF-8, short and overlong records but does not cast values, so a bad value no longer fails the count. A missing file or a directory is reported before the layout is validated. A sentry keeps other modules from parsing fixed-width records on their own.
+
 ## [0.25.0] - 2026-11-14
 
 ### Breaking for consumers
