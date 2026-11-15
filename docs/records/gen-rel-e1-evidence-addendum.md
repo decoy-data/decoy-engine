@@ -237,3 +237,23 @@ merge section, now reworded), `ratchet_check.py --base origin/main` exit 0, `che
 --base origin/main` exit 0, `reason_release_pin.py --check` exit 0.
 
 Not run: the full suite and Python 3.11.
+
+## Main merge (2026-11-15, `64e9349b`)
+
+`origin/main` `64e9349b` (#598, one format table for resident and lazy file sources) merged into
+`36e20e9e` as `f07dc0d7`, without a conflict. Main's change is in `profile/` (a new
+`_lazy_build.py`), `fileaccess/` and their sentries; it touches no file of this slice except
+`CODEMAP.md` (its `profile/` row) and `tests/sentry/test_sentry_manifest.py` (its new sentry
+beside this slice's), both read against the two parents.
+
+Checks on `f07dc0d7`, Python 3.10.20: ruff and format on the changed files pass; mypy clean
+(883 files); `tests/sentry` 5698 passed, 0 failed, 2 skipped; layers 15 passed; this slice's
+test files (`tests/unit/config`, `tests/unit/generation/relational`, the probe-scale, pinned,
+streamed-entry, capacity, unique old-input-bytes and relationships tests, the phase-F witness
+and invariant files, `tests/unit/test_v2_generation.py`) with main's `tests/unit/profile` and
+the two draw-site catalogue tests: 2053 passed, 0 failed, 7 skipped. Script checks against
+`origin/main` `64e9349b` (`registry_renumber.py`, `ratchet_check.py`, `check_fragment.py`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines; the engine
+root and `config/` hold 25 modules, `profile/` 19.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
