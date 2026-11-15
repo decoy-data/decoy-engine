@@ -45,9 +45,10 @@ def lazy_input_tables(
     `engine_version`, `base_dir` and `instance_default_locale` are the values the later
     `run_pipeline` call receives, so the plan compiled here is the plan that run compiles.
     Reads no data row beyond the bounded profile; candidate construction reads none.
+    Pass the same `file_access` policy as the later `run_pipeline` call: the profile reads the
+    descriptor files under it.
     """
-    from decoy_engine.config import classify_table_kinds
-    from decoy_engine.config._post_scan import post_scan_gate_applies
+    from decoy_engine.config import classify_table_kinds, post_scan_gate_applies
     from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
     from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 
