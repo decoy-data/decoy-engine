@@ -279,9 +279,7 @@ def run_staged(fn: Callable[..., Any], call: dict[str, Any], default_batch_rows:
     plan, sources = call.pop("plan"), call.pop("sources")
     call.pop("_staged", None)
     call.pop("_arena", None)  # the route's own default; a second value would be a duplicate
-    # Bound first: the outbound sentry matches `.open(` by name as GCS `Blob.open`.
-    open_arena = ScratchArena.open
-    with open_arena(under=call.get("temp_dir")) as arena:
+    with ScratchArena.fresh(under=call.get("temp_dir")) as arena:
         batch_rows = call.get("batch_rows") or default_batch_rows
         staged = stage_declared_sources(
             run, sources, arena, batch_rows, call.get("temp_disk_budget_bytes")
