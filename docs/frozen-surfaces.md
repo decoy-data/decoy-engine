@@ -85,7 +85,7 @@ have nothing more.
 |---|---|---|---|
 | Pipeline YAML schema | design note 3 of the REL-GATE plan | `src/decoy_engine/config/` | `tests/snapshots/test_frozen_schemas.py`, `tests/snapshots/frozen_schemas/pipeline-config.schema.json` |
 | Run-result schema | design note 3 of the REL-GATE plan | `src/decoy_engine/run_result/` | `tests/snapshots/test_frozen_schemas.py`, `tests/snapshots/frozen_schemas/run-result.schema.json` |
-| Determinism: same input and seed give the same bytes | contract 3.3 | `src/decoy_engine/determinism/` | `tests/unit/determinism/test_derive_vectors.py`, `tests/unit/determinism/test_hkdf.py`, `tests/native/test_draw_site_providers_golden.py`, `accepted-known-limit: RGF1-KL-2` |
+| Determinism: same input and seed give the same bytes | contract 3.3 | `src/decoy_engine/determinism/` | `tests/unit/determinism/test_derive_vectors.py`, `tests/unit/determinism/test_hkdf.py`, `tests/native/test_draw_site_providers_golden.py`, `tests/native/test_determinism_goldens.py`, `accepted-known-limit: RGF1-KL-2` |
 | Disguise registry (every disguise spec) | contract 3.5 | `src/decoy_engine/disguises/` | `tests/unit/test_disguises_loader.py`, `accepted-known-limit: RGF1-KL-3` |
 | Reason registry | contract 3.4 | `src/decoy_engine/reasons/` | `tests/unit/test_reason_registry.py`, `tests/sentry/test_reason_baseline_frozen.py`, `tests/unit/test_reason_release_pin.py` |
 | Engine version literal | `pyproject.toml` | `src/decoy_engine/release.py` | `tests/unit/test_version_agreement.py` |
@@ -101,6 +101,6 @@ reviewed change; `--check` prints the file and the first differing JSON pointer,
 | Id | Surface | Limit |
 |---|---|---|
 | `RGF1-KL-1` | identifier and composite generator tags | The unit tests check format and validity, not known outputs, so a change to what a seed produces under the same `/v1` tag would pass. |
-| `RGF1-KL-2` | determinism golden files | `tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact` have no reader since the V1 graph runner and its test were deleted (commit `b9b73e19e`). The files stay. The row's tests pin the derivation (a reference vector and HKDF) and each draw site's output by stored digest; `tests/integration/golden/test_determinism_invariants.py` and `tests/native/test_determinism_goldens.py` only compare two runs of the current code. |
+| `RGF1-KL-2` | determinism golden files | `tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact` have no reader since the V1 graph runner and its test were deleted (commit `b9b73e19e`). The files stay. The row's tests pin the derivation (a reference vector and HKDF), each draw site's provider output by stored digest, and the shipped handlers' output against those providers; `tests/integration/golden/test_determinism_invariants.py` only compares two runs of the current code. |
 | `RGF1-KL-3` | disguise registry | No test refuses an edit to a released disguise version. The loader tests pin the dated version field and the bundle set only. |
 | `RGF1-KL-4` | public names | Signatures and fields are not pinned except where a row names a signature or shape test. |
