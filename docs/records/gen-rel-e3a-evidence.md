@@ -625,6 +625,8 @@ commit changes no Python file.
 
 Each total in this section and the next belongs to the head named beside it. These two
 sections supersede the sections above for the final head.
+The main merge of 2026-11-15, carried forward, is in the companion record
+[gen-rel-e3a-evidence-addendum.md](gen-rel-e3a-evidence-addendum.md) and supersedes both.
 
 `origin/feat/gen-rel-e2` at `45c99dff` (slice 2's review fixes; it holds slice 1 `872f097d`
 and `origin/main` `c86ca58d`, 0.23.0 released) merged as `72823f4c` (parents `e91b848c`,

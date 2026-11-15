@@ -12,8 +12,9 @@ reads which column comes resolved from ``config.iter_generate_input_refs``, so a
 another table (a date anchored to a parent column, a parent's aggregate over its children)
 counts against the column it reads and not against a same-named column of its own table:
 
-* formula references, aggregate input, group labels, window anchors and statistical conditioning
-  read the cell as text, so they keep it text;
+* aggregate input, group labels, window anchors and statistical conditioning read the cell as
+  text, so they keep it text; a formula reads the candidate value itself, and a compile check
+  refuses its text spellings;
 * a ``derived`` expression is judged per use (see ``_numeric_derived``): arithmetic and numeric
   comparisons are safe, ``+``, ``==`` or ``in`` against strings are not;
 * a relationship is safe only when every paired column is generated and has the same planned
@@ -34,7 +35,7 @@ Anything else stays text exactly as before. Rendered text is unchanged for numer
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -126,7 +127,7 @@ class Reader:
 # tests/sentry/test_numeric_reader_registry.py fails otherwise.
 READERS: dict[str, Reader] = {
     "formula.references": Reader(
-        False, "formula locals are the cell text; str methods and + need text"
+        True, "formula locals are the candidate values; text use is refused at compile"
     ),
     "derived.expression": Reader(
         True, "decided per expression by derived_uses_as_numbers, not per kind"
@@ -181,25 +182,15 @@ def _readers(tables: Mapping[str, Any]) -> tuple[dict[Key, list[_Read]], set[str
     return readers, opaque
 
 
-def numeric_plan(
-    config: Mapping[str, Any],
-    *,
-    provider_snapshot: Mapping[str, Any] | None = None,
+def _base_types(
+    cols: Mapping[Key, Mapping[str, Any]],
+    tables: Mapping[str, Any],
+    provider_snapshot: Mapping[str, Any] | None,
 ) -> dict[Key, pa.DataType]:
-    """``{(table, column): int64 | float64}`` for each generated column that is numeric.
-
-    A column starts as a candidate when its values provably fit (see the module docstring) and
-    then stays numeric only while every reader of it, and of every ``reference`` column that copies
-    it, is numeric-safe. Removing a column can make another reader unsafe, so this runs to a fixed
-    point; it only ever removes, so it terminates.
-    """
+    """The candidate type of each sequence and faker column whose values provably fit."""
     from decoy_engine.generation.synthesize import _get_default_faker
     from decoy_engine.internal.faker_setup import snapshot_custom_faker_providers
 
-    tables = {t["name"]: t for t in config.get("tables") or [] if t.get("generate_columns")}
-    cols: dict[Key, Mapping[str, Any]] = {
-        (tn, c["name"]): c for tn, t in tables.items() for c in t["generate_columns"]
-    }
     probe = custom = None
     base: dict[Key, pa.DataType] = {}
     for (tn, cn), col in cols.items():
@@ -219,6 +210,68 @@ def numeric_plan(
             continue
         if dtype is not None:
             base[(tn, cn)] = dtype
+    return base
+
+
+def _generated_type(
+    cols: Mapping[Key, Mapping[str, Any]],
+    tables: Mapping[str, Any],
+    base: Mapping[Key, pa.DataType],
+    numeric: Collection[Key],
+    key: Key,
+) -> pa.DataType | None:
+    """The type of the values a column's generator makes, through its reference root.
+
+    A sequence or faker root is its candidate type while it is in *numeric*, else text.
+    """
+    root = reference_root(tables, key)
+    if root in numeric:
+        return base[root]
+    col = cols.get(root)
+    return generated_arrow_type(col) if col is not None else None
+
+
+def _generate_columns(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[Key, Any]]:
+    tables = {t["name"]: t for t in config.get("tables") or [] if t.get("generate_columns")}
+    cols = {(tn, c["name"]): c for tn, t in tables.items() for c in t["generate_columns"]}
+    return tables, cols
+
+
+def reader_types(
+    config: Mapping[str, Any],
+    *,
+    provider_snapshot: Mapping[str, Any] | None = None,
+) -> dict[Key, pa.DataType]:
+    """``{(table, column): type}`` a sibling reader sees, for every generated column.
+
+    A sequence or faker candidate reads as int64 or float64 even when another reader keeps it
+    text in the output: this is the one answer a formula binds, so adding a formula reader never
+    changes what another reader sees.
+    """
+    tables, cols = _generate_columns(config)
+    base = _base_types(cols, tables, provider_snapshot)
+    out: dict[Key, pa.DataType] = {}
+    for key in cols:
+        dtype = _generated_type(cols, tables, base, base.keys(), key)
+        if dtype is not None:
+            out[key] = dtype
+    return out
+
+
+def numeric_plan(
+    config: Mapping[str, Any],
+    *,
+    provider_snapshot: Mapping[str, Any] | None = None,
+) -> dict[Key, pa.DataType]:
+    """``{(table, column): int64 | float64}`` for each generated column that is numeric.
+
+    A column starts as a candidate when its values provably fit (see the module docstring) and
+    then stays numeric only while every reader of it, and of every ``reference`` column that copies
+    it, is numeric-safe. Removing a column can make another reader unsafe, so this runs to a fixed
+    point; it only ever removes, so it terminates.
+    """
+    tables, cols = _generate_columns(config)
+    base = _base_types(cols, tables, provider_snapshot)
     if not base:
         return {}
 
@@ -251,11 +304,7 @@ def numeric_plan(
 
     def generated(key: Key) -> pa.DataType | None:
         """The type of the values the generator makes, which sibling readers see."""
-        root = reference_root(tables, key)
-        if root in candidates:
-            return base[root]
-        col = cols.get(root)
-        return generated_arrow_type(col) if col is not None else None
+        return _generated_type(cols, tables, base, candidates, key)
 
     def is_number(key: Key) -> bool:
         dtype = generated(key) if key in cols else None
@@ -303,8 +352,11 @@ def numeric_plan(
 def restore_declared(
     col: Mapping[str, Any], values: list[Any], dtype: pa.DataType | None
 ) -> list[Any]:
-    """Return *values* typed as the plan declared; text cells of a numeric column are parsed."""
-    if dtype is None or col.get("type") not in ("sequence", "faker"):
+    """Return *values* typed as the plan declared; text cells of a numeric column are parsed.
+
+    A ``reference`` column is cast by its parent's type, which the caller passes as *dtype*.
+    """
+    if dtype is None or col.get("type") not in ("sequence", "faker", "reference"):
         return values
     if pa.types.is_integer(dtype):
         cast: Any = int
