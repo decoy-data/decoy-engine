@@ -155,12 +155,19 @@ def seed_fingerprint_bytes(value: object) -> bytes:
 STRICT_JSON_TOKENS = ("not_json", "duplicate_key", "non_finite", "out_of_range")
 
 
-class StrictJsonError(ValueError):
-    """Strict JSON was refused. ``token`` is one of ``STRICT_JSON_TOKENS``; no input text."""
+class StrictJsonError(CanonicalJsonError):
+    """Strict JSON was refused. ``token`` is one of ``STRICT_JSON_TOKENS``; no input text.
+
+    It sits under ``CanonicalJsonError`` so it is a ``DecoyError`` and a ``ValueError`` in the
+    registered config family, with no new exception family to classify.
+    """
 
     def __init__(self, token: str) -> None:
         super().__init__(token)
         self.token = token
+
+    def __reduce__(self) -> tuple[type[StrictJsonError], tuple[str]]:
+        return (type(self), (self.token,))
 
 
 def strict_json_loads(data: bytes | str, *, max_int_digits: int = 20) -> Any:
