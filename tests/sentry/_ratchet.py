@@ -7,8 +7,9 @@ findings; an empty list means the ratchet holds. Baseline keys compare exactly, 
 ``permitted::<file>::<site>::<digest>`` keys of the sentries in ``REKEY_PER_SITE``, which
 compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
 or lower it, never raise or drop it (see ``max_raised``). A key of the form
-``<file>.py::<qualname>::<name>`` may also move 1:1 to a new key when the old site is gone from
-the source (see ``rehomes``). Messages carry ids, paths and keys only.
+``<file>.py::<qualname>::<name>`` key of a ``REHOME_BY_BINDING`` sentry may also move 1:1 to a new
+entry that declares ``moved_from`` when the old site is gone from the source (see ``rehomes``).
+Messages carry ids, paths and keys only.
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ PLACEHOLDERS = frozenset({"todo", "tbd", "fixme", "xxx", "n/a", "none"})
 # Only sentries whose last key segment is a message digest may re-key; for any other sentry a
 # changed last segment can mean a different permitted thing, so it compares exactly.
 REKEY_PER_SITE = frozenset({"validation-name-messages"})
+# Only these sentries may move a key to a new home, and only by a declared ``moved_from``. Their
+# keys are ``<file under src/>::<qualname>::<binding name>``; other sentries use other key shapes
+# (src-relative paths, ordinals) for which "the old site is gone" cannot be proven.
+REHOME_BY_BINDING = frozenset({"secret-material-census"})
 
 
 @dataclass(frozen=True)
@@ -151,74 +156,90 @@ def growth(
     return frozenset(grown), rekeyed
 
 
-def _source_for(root: Path, file: str) -> Path | None:
-    for cand in (root / "src" / file, root / file):
-        if cand.is_file():
-            return cand
+def _find_def(node: ast.AST, part: str) -> ast.AST | None:
+    """A def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
+    todo = list(ast.iter_child_nodes(node))
+    while todo:
+        child = todo.pop(0)
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if child.name == part:
+                return child
+            continue
+        todo.extend(ast.iter_child_nodes(child))
     return None
 
 
 def _qualname_node(tree: ast.AST, qualname: str) -> ast.AST | None:
-    node: ast.AST = tree
+    node: ast.AST | None = tree
     for part in qualname.split("."):
-        found = None
-        for child in ast.iter_child_nodes(node):
-            if (
-                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and child.name == part
-            ):
-                found = child
-                break
-        if found is None:
+        node = _find_def(node, part) if node is not None else None
+        if node is None:
             return None
-        node = found
     return node
 
 
-def site_gone(root: Path, key: str) -> bool:
-    """True when ``<file>.py::<qualname>::<name>`` no longer appears in the source tree.
+def _binds(n: ast.AST, name: str) -> bool:
+    """True when ``n`` binds ``name``: parameter, store, def/class, except, import, match, attr."""
+    if isinstance(n, ast.arg):
+        return n.arg == name
+    if isinstance(n, ast.Name):
+        return n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+    if isinstance(n, ast.Attribute):
+        return n.attr == name and isinstance(n.ctx, (ast.Store, ast.Del))
+    if isinstance(n, ast.alias):
+        return (n.asname or n.name.partition(".")[0]) == name
+    if isinstance(n, ast.MatchMapping):
+        return n.rest == name
+    # def, class, except-as, match capture, type-param and any later form that names itself.
+    return getattr(n, "name", None) == name
 
-    Proof by AST: the file is missing, the qualified function or class is missing, or it is
-    present but binds no parameter, assignment target or field called ``name``. Any other key
-    shape cannot be proven gone and returns false.
+
+def site_gone(root: Path, key: str, base_ref: str) -> bool:
+    """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
+
+    ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
+    is present but binds no ``name`` in any form ``_binds`` knows. A missing file proves it only
+    when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
+    file that never existed is "not proven" and returns false.
     """
     parts = key.split("::")
-    if len(parts) != 3 or not parts[0].endswith(".py"):
+    if len(parts) != 3 or not parts[0].endswith(".py") or not parts[2].isidentifier():
         return False
     file, qualname, name = parts
-    path = _source_for(root, file)
-    if path is None:
-        return True
+    path = root / "src" / file
+    if not path.is_file():
+        return _git_show(root, base_ref, f"src/{file}") is not None
     node = _qualname_node(ast.parse(path.read_text(encoding="utf-8")), qualname)
-    if node is None:
-        return True
-    return not any(
-        (isinstance(n, ast.arg) and n.arg == name)
-        or (isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store))
-        for n in ast.walk(node)
-    )
+    return node is None or not any(_binds(n, name) for n in ast.walk(node))
 
 
 def rehomes(
-    root: Path, grown: frozenset[str], lost: dict[str, object]
+    root: Path,
+    base_ref: str,
+    grown: frozenset[str],
+    head_entries: dict[str, object],
+    lost: dict[str, object],
 ) -> tuple[frozenset[str], list[str]]:
-    """Split ``grown`` into keys that are 1:1 moves of ``lost`` keys, and the rest.
+    """Split ``grown`` into declared 1:1 moves of ``lost`` keys, and the rest.
 
-    A grown key is a move when it pairs with its own distinct lost key that has the same last
-    segment, whose site is gone from the source (``site_gone``) and which carries no numeric
-    ``max``. Everything else stays growth, so the count of keys can never rise.
+    A grown key is a move only when its entry names the old key in ``moved_from`` and that old
+    key was lost from this baseline, is proven gone (``site_gone``), carries no numeric ``max``,
+    and is named by no other entry. Anything else stays growth.
     """
-    free = sorted(k for k, e in lost.items() if _max_of(e) is None and site_gone(root, k))
-    remaining: set[str] = set()
+    claims: dict[str, list[str]] = {}
+    for key in grown:
+        entry = head_entries.get(key)
+        old = entry.get("moved_from") if isinstance(entry, dict) else None
+        if isinstance(old, str):
+            claims.setdefault(old, []).append(key)
+    remaining = set(grown)
     report: list[str] = []
-    for key in sorted(grown):
-        tail = key.rpartition("::")[2]
-        match = next((k for k in free if k.rpartition("::")[2] == tail), None)
-        if match is None or key.count("::") != 2 or not key.split("::")[0].endswith(".py"):
-            remaining.add(key)
+    for old, keys in sorted(claims.items()):
+        if len(keys) != 1 or old not in lost or _max_of(lost[old]) is not None:
             continue
-        free.remove(match)
-        report.append(f"re-homed {match} -> {key} (old site gone; review)")
+        if site_gone(root, old, base_ref):
+            remaining.discard(keys[0])
+            report.append(f"re-homed {old} -> {keys[0]} (declared in moved_from; old site gone)")
     return frozenset(remaining), report
 
 
@@ -275,9 +296,9 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
             report += [
                 f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed
             ]
-            if grown:
+            if grown and sid in REHOME_BY_BINDING:
                 lost = {k: e for k, e in old.items() if k not in base.keys}
-                grown, moved = rehomes(root, grown, lost)
+                grown, moved = rehomes(root, base_ref, grown, base.reasons, lost)
                 report += [f"{sid}: {line}" for line in moved]
             if grown:
                 findings.append(
