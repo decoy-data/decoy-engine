@@ -25,9 +25,10 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine._execution_error import lazy_source_changed
+from decoy_engine._execution_error import lazy_source_changed as lazy_source_changed
 from decoy_engine.config._csv_dialect import CsvDialect
 from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect
+from decoy_engine.profile._lazy_identity import LazyFileIdentity, check_batch_rows
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
 if TYPE_CHECKING:
@@ -37,8 +38,6 @@ if TYPE_CHECKING:
 
 # Rows per chunk in the counting pass; only the counts survive each chunk.
 _FACTS_CHUNK_ROWS = 65_536
-
-_Identity = tuple[int, int, int, int]
 
 
 @contextlib.contextmanager
@@ -101,7 +100,7 @@ class OpenedCsvBatches(OpenedLazyBatches):
 
 
 @dataclass(frozen=True)
-class CsvLazySource(LazySource):
+class CsvLazySource(LazyFileIdentity, LazySource):
     """A batch-readable handle onto one on-disk CSV file, declared by `dialect`."""
 
     dialect: CsvDialect = field(default_factory=CsvDialect)
@@ -141,11 +140,6 @@ class CsvLazySource(LazySource):
             columns=columns,
         )
 
-    def _identity(self) -> _Identity:
-        with self._handle() as handle:
-            st = handle.stat()
-        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-
     def preflight(self) -> pa.Schema:
         """The all-text schema from the dialect and the header, before any data row is read."""
         header = read_csv_source(
@@ -163,19 +157,9 @@ class CsvLazySource(LazySource):
     def schema(self) -> pa.Schema:
         return self.preflight()
 
-    def footer_facts(self) -> FooterFacts:
-        """Schema, exact row count and exact null counts. Routing calls this several times,
-        so the snapshot is reused while a single stat says the file is the one it describes;
-        otherwise one bounded pass refreshes it. Nothing else refreshes the snapshot."""
-        if "facts" in self._seen and self._identity() == self._seen["identity"]:
-            facts: FooterFacts = self._seen["facts"]
-            return facts
-        return self._count_pass()
-
-    def _count_pass(self) -> FooterFacts:
-        """One bounded pass between two identity reads (the first ahead of `preflight`, so a
-        header change shows as a change)."""
-        before = self._identity()
+    def _measure(self) -> FooterFacts:
+        """One bounded pass; the preflight sits inside the identity window, so a header change
+        shows as a change."""
         schema = self.preflight()
         rows = 0
         nulls = dict.fromkeys(schema.names, 0)
@@ -184,18 +168,13 @@ class CsvLazySource(LazySource):
                 rows += len(frame)
                 for name, count in frame.isna().sum().items():
                     nulls[str(name)] = nulls.get(str(name), 0) + int(count)
-        if self._identity() != before:
-            raise lazy_source_changed(self.table, "the file changed while its facts were read")
-        facts = FooterFacts(
+        return FooterFacts(
             num_rows=rows,
             schema=schema,
             null_counts=tuple(nulls.items()),
             row_groups=0,
             max_row_group_rows=0,
         )
-        self._seen["facts"] = facts
-        self._seen["identity"] = before
-        return facts
 
     @property
     def num_rows(self) -> int:
@@ -208,6 +187,9 @@ class CsvLazySource(LazySource):
         self, batch_rows: int, *, columns: list[str] | None = None
     ) -> Iterator[pa.RecordBatch]:
         """Yield the file's rows (or just `columns`) as text batches of at most `batch_rows`."""
+        return self._stream(check_batch_rows(batch_rows), columns)
+
+    def _stream(self, batch_rows: int, columns: list[str] | None) -> Iterator[pa.RecordBatch]:
         names = self.preflight().names if columns is None else columns
         schema = _text_schema(list(names))
         with _closing(self._chunks(batch_rows, columns)) as chunks:
@@ -227,14 +209,8 @@ class CsvLazySource(LazySource):
         the file is unchanged since; the batch iterator checks the identity again when it is
         exhausted. The Parquet buffering arguments do not apply to CSV and are ignored."""
         del pre_buffer, buffer_size, use_threads
-        if "facts" in self._seen and self._identity() != self._seen["identity"]:
-            raise lazy_source_changed(self.table, "the file changed since its facts were read")
-        facts: FooterFacts = self._seen["facts"] if "facts" in self._seen else self.footer_facts()
-        identity: _Identity = self._seen["identity"]
-
-        def verify() -> None:
-            if self._identity() != identity:
-                raise lazy_source_changed(self.table, "the file changed while it was read")
+        batch_rows = check_batch_rows(batch_rows)
+        facts, verify = self._open_facts()
 
         if columns is None:
             return OpenedCsvBatches(facts, self._chunks(batch_rows), verify)
