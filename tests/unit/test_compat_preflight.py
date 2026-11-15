@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_compat_preflight.py"
+ROOT = Path(__file__).resolve().parents[2]
+_SCRIPT = ROOT / "scripts" / "check_compat_preflight.py"
 _spec = importlib.util.spec_from_file_location("check_compat_preflight", _SCRIPT)
 assert _spec and _spec.loader
 preflight = importlib.util.module_from_spec(_spec)
@@ -75,3 +76,14 @@ def test_config_prefix_is_precise() -> None:
     assert preflight.touched_frozen(["src/decoy_engine/config.py"])
     assert preflight.touched_frozen(["src/decoy_engine/config/loader.py"])
     assert preflight.touched_frozen(["src/decoy_engine/configuration_helper.py"]) == []
+
+
+def test_run_result_and_reasons_are_frozen_prefixes() -> None:
+    # REL-GATE RG-F1: the run-result model, the reason registry and the schema snapshots.
+    changed = [
+        "src/decoy_engine/run_result/_model.py",
+        "src/decoy_engine/reasons/_registry.py",
+        "tests/snapshots/frozen_schemas/run-result.schema.json",
+    ]
+    assert all((ROOT / path).exists() for path in changed[:2])
+    assert preflight.touched_frozen(changed) == changed
