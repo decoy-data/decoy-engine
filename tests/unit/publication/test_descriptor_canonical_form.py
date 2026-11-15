@@ -11,6 +11,8 @@ import hashlib
 import inspect
 import json
 
+import pytest
+
 from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine.publication import _descriptor as codec
 from tests.sentry.defects.test_canonical_json_choke_point import sorted_dump_sites
@@ -44,3 +46,20 @@ def test_descriptor_bytes_and_result_id_are_the_canonical_form() -> None:
 def test_descriptor_module_has_no_sorted_key_dump_of_its_own() -> None:
     tree = ast.parse(inspect.getsource(codec))
     assert sorted_dump_sites(tree) == []
+
+
+def test_a_path_with_no_utf8_form_is_refused_with_the_closed_token() -> None:
+    escaped = "a\udc80.parquet"  # an undecodable filename byte, as `os.fsdecode` gives it
+    art = codec.Artifact(role="table", path=escaped, size=1, sha256="4" * 64, rows=0)
+    with pytest.raises(ValueError) as writer:
+        codec.encode_descriptor(
+            codec.build_descriptor(operation_id="op-1", artifacts=[art], vault=None)
+        )
+    assert str(writer.value) == "descriptor_refused:not_canonical"
+    document = json.loads(codec.encode_descriptor(_built()).decode("utf-8"))
+    document["artifacts"][1]["path"] = escaped
+    raw = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("ascii")
+    with pytest.raises(ValueError) as reader:
+        codec.decode_descriptor(raw)
+    assert str(reader.value) == "descriptor_refused:not_canonical"
+    assert writer.value.__context__ is None and reader.value.__context__ is None
