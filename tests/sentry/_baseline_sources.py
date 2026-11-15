@@ -191,6 +191,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_file_access_entry_points.py", "INTERNAL_SEAMS"),
     ),
     Source(
+        "post-scan-route-exempt",
+        "test_post_scan_route_guard.py",
+        in_code("test_post_scan_route_guard.py", "EXEMPT"),
+    ),
+    Source(
         "locator-waivers", "test_locator_hygiene.py", in_code("test_locator_hygiene.py", "WAIVERS")
     ),
     Source(
@@ -267,6 +272,85 @@ SOURCES: tuple[Source, ...] = (
         "tests/sentry/baselines/gcs-call-kwargs.json",
         lambda: set(
             json.loads((BASELINES / "gcs-call-kwargs.json").read_text(encoding="utf-8"))["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-blocking",
+        "tests/sentry/baselines/post-scan-blocking.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-blocking.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-pass-through",
+        "tests/sentry/baselines/post-scan-pass-through.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-pass-through.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-key-core",
+        "tests/sentry/baselines/post-scan-key-core.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-key-core.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-reason-identity",
+        "tests/sentry/baselines/post-scan-reason-identity.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-reason-identity.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-gate-applies",
+        "tests/sentry/baselines/post-scan-gate-applies.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-gate-applies.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-commit",
+        "tests/sentry/baselines/post-scan-commit.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-commit.json").read_text(encoding="utf-8"))["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-model-predicate",
+        "tests/sentry/baselines/post-scan-model-predicate.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-model-predicate.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-readability",
+        "tests/sentry/baselines/post-scan-readability.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-readability.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(
+        "post-scan-route-coverage",
+        "tests/sentry/baselines/post-scan-route-coverage.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-route-coverage.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
         ),
     ),
 )

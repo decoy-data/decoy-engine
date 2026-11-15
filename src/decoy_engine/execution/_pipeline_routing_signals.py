@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import fileaccess
-from decoy_engine.config import post_scan_integrity_requested
 from decoy_engine.execution._mem_estimate_arrow import (  # noqa: F401 - read here by tests
     column_arrow_types as _column_arrow_types,
 )
@@ -34,6 +33,7 @@ from decoy_engine.execution._pipeline_routing_samples import (
     _resident_column_arrays as _resident_column_arrays,
 )
 from decoy_engine.execution._transforms_admission import admission_signals, decline_out_of_core
+from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
@@ -114,10 +114,10 @@ def largest_mask_table_rows_from_profile(
     """`(rows, exact)` of the largest mask-kind table by the PROFILE row count,
     or None when the profile carries no mask-kind table.
 
-    The SC7a bounded-profiling core made `TableProfile.row_count` a cheap
-    metadata count (exact from a Parquet/fixed_width footer, an
-    `row_count_exact=False` byte-size estimate for CSV) that no longer requires
-    reading the whole source. This function surfaces that count as the size
+    The SC7a bounded-profiling core made `TableProfile.row_count` a count that
+    needs no full-frame read (exact from a Parquet footer or a fixed_width
+    framing pass, a `row_count_exact=False` byte-size estimate for CSV). This
+    function surfaces that count as the size
     signal the SC2 gates need, so the reject-before-read fires on the LAZY
     (`sources={}`, `source_loader`) path where `largest_mask_table_rows` (which
     reads resident Arrow metadata) returns None -- the `None` hole the F2
@@ -576,7 +576,7 @@ def resolve_execution_route(
         validators=validators,
         fidelity_report=fidelity_report,
         post_validation=post_validation,
-        post_scan_integrity=post_scan_integrity_requested(config),
+        post_scan_resident=post_scan_resident_for(config),
         vault_writer=vault_writer,
         execution_mode=execution_mode,
         graph=graph,
