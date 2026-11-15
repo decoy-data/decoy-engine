@@ -55,7 +55,7 @@ def test_ooc_private_dir_under_an_arena_root_under_any_policy(tmp_path: Path) ->
     jail.mkdir()
     policy = _Strict(jail)
     try:
-        with fileaccess.ScratchArena.open() as arena, fileaccess.scope(policy):
+        with fileaccess.ScratchArena.fresh() as arena, fileaccess.scope(policy):
             child = _scratch.private_dir(Path(arena.local_path()) / "a" / "b")
             assert child.is_dir() and _mode(child) == 0o700
     finally:
@@ -258,7 +258,7 @@ def test_runner_removes_its_engine_made_root(
     sys_tmp = tmp_path / "systmp"
     sys_tmp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(sys_tmp))
-    roots = _spy(monkeypatch, fileaccess.ScratchArena, "open")
+    roots = _spy(monkeypatch, fileaccess.ScratchArena, "fresh")
     if fail:
 
         def boom(*_: Any, **__: Any) -> None:
