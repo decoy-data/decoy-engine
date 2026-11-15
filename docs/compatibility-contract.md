@@ -299,7 +299,8 @@ tests that compare against stored values: `tests/unit/determinism/test_derive_ve
 (reference vectors), `tests/unit/determinism/test_hkdf.py` and
 `tests/native/test_draw_site_providers_golden.py` (a digest per draw-site provider), with
 `tests/native/test_determinism_goldens.py` checking that the shipped engine's output equals those
-providers; the last two together pin shipped output.
+providers for the sites it lists (byte for byte, `mask.fpe` by key). The other provider sites are
+pinned only at the provider (`RGF1-KL-2` in `docs/frozen-surfaces.md`).
 `tests/integration/golden/test_determinism_invariants.py` compares two runs of the current code,
 so it catches nondeterminism, not a changed derivation. The files under
 `tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact`
