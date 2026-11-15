@@ -28,6 +28,10 @@ PUBLICATION_CODES = (
     "publication_attempt_sealed",
     "publication_attempt_aborted",
 )
+# Raised by the file-access errors (`LockUnavailable`, `LockTimeout`, `CommitUncertain`).
+FILEACCESS_CODES = frozenset(
+    {"publication_lock_unavailable", "publication_lock_timeout", "publication_commit_uncertain"}
+)
 
 HEX = "1" * 64
 
@@ -57,7 +61,9 @@ def test_the_publication_codes_are_registered_decoy_publication_reasons() -> Non
     for code in PUBLICATION_CODES:
         spec = reasons.find("decoy", code)
         assert spec is not None, code
-        assert spec.owner == "decoy_engine.publication"
+        # The file-access errors raise these three, so `decoy_engine.fileaccess` owns them.
+        owner = "fileaccess" if code in FILEACCESS_CODES else "publication"
+        assert spec.owner == f"decoy_engine.{owner}", code
         assert spec.default_rule.outcome is reasons.Outcome.PUBLICATION
 
 
