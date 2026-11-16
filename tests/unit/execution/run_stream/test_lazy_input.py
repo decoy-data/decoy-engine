@@ -1,6 +1,6 @@
-"""RUN-STREAM E5 (AT-E5): `lazy_input_tables` and the no-sink resident collector.
+"""RUN-STREAM E5 (AT-E5): the resident-fallback pre-pass and the no-sink resident collector.
 
-The predicate names the candidate tables that may arrive lazy and copies no routing rule: every
+The pre-pass names the lazy tables a run reads whole and copies no routing rule: every
 exclusion below is an existing engine owner answering. The collector lets a lazy source run the
 auto-chunk lane with no publication sink, returning one resident output.
 """
@@ -8,6 +8,7 @@ auto-chunk lane with no publication sink, returning one resident output.
 from __future__ import annotations
 
 import ast
+import contextlib
 import copy
 import inspect
 from collections.abc import Mapping
@@ -49,7 +50,8 @@ def _names(
     base: Path,
     **over: Any,
 ) -> frozenset[str]:
-    from decoy_engine.execution.pipeline import lazy_input_tables
+    """The candidates the pre-pass keeps lazy."""
+    from decoy_engine.execution.pipeline._lazy_input import resident_fallback_tables
 
     args: dict[str, Any] = {
         "engine_version": V,
@@ -57,10 +59,11 @@ def _names(
         "instance_default_locale": None,
         "fidelity_report": False,
         "post_validation": False,
-        "vault_active": False,
+        "vault_writer": object() if over.pop("vault_active", False) else None,
+        "file_access": None,
     }
     args.update(over)
-    return lazy_input_tables(cfg, candidates, **args)
+    return frozenset(candidates) - resident_fallback_tables(cfg, candidates, **args)
 
 
 def _fk(tmp_path: Path) -> tuple[dict[str, Any], dict[str, LazySource]]:
@@ -109,7 +112,7 @@ def test_a_declared_casting_table_is_never_named(tmp_path: Path) -> None:
 
 def test_a_flat_job_reads_no_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("the predicate must not materialize a source")
+        raise AssertionError("the pre-pass must not materialize a source")
 
     # The bounded profiler may read its sample through `iter_batches`; a whole read may not happen.
     monkeypatch.setattr(LazySource, "to_table", boom)
@@ -243,7 +246,7 @@ def test_a_transforming_relationship_job_is_left_to_the_owners(tmp_path: Path) -
     assert _names(cfg, _lazy(cfg), tmp_path) == frozenset()
 
 
-def test_the_predicate_copies_no_eligibility_rule() -> None:
+def test_the_pre_pass_copies_no_eligibility_rule() -> None:
     from decoy_engine.execution.pipeline import _lazy_input
 
     tree = ast.parse(inspect.getsource(_lazy_input))
@@ -275,6 +278,150 @@ def test_the_predicate_copies_no_eligibility_rule() -> None:
         "CROSS_TABLE_CYCLE",
     ):
         assert code not in source, f"{code} is a routing reason; ask the owner instead"
+
+
+# ---------------------------------------------------------------- the run_pipeline wiring
+
+
+def _spy_context(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Record the `sources` mapping `build_run_context` receives."""
+    from decoy_engine.execution import _pipeline_context
+
+    seen: dict[str, Any] = {}
+    real = _pipeline_context.build_run_context
+
+    def spy(config: Any, sources: Any, **kw: Any) -> Any:
+        seen["sources"] = sources
+        return real(config, sources, **kw)
+
+    monkeypatch.setattr(_pipeline_context, "build_run_context", spy)
+    return seen
+
+
+def _run(cfg: dict[str, Any], sources: Mapping[str, Any], **kw: Any) -> Any:
+    from decoy_engine.execution import run_pipeline
+
+    return run_pipeline(cfg, sources=sources, engine_version=V, **kw)
+
+
+def _declared_cast_job(tmp_path: Path) -> tuple[dict[str, Any], LazySource, Path]:
+    path = tmp_path / "t.parquet"
+    pq.write_table(pa.table({"start": pa.array(["2020-01-02"] * 5)}), path)
+    cols = [column("start", logical_type="date", parse_format=ISO_DATE, error_policy="null")]
+    cfg = validate(config(cols, source_path=str(path), table="t"))
+    cfg["sources"]["t"]["format"] = "parquet"
+    return cfg, LazySource(path), path
+
+
+def test_a_rejected_lazy_table_reaches_the_context_resident(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # M-E5e: a declared-cast table is read whole through `materialize_source`.
+    cfg, lazy, _path = _declared_cast_job(tmp_path)
+    seen = _spy_context(monkeypatch)
+    fallback = _run(cfg, {"t": lazy}, resident_fallback=True)
+    assert isinstance(seen["sources"]["t"], pa.Table)
+    resident = _run(cfg, {"t": lazy.to_table()})
+    assert fallback.outputs["t"].equals(resident.outputs["t"])
+    assert (
+        fallback.quality_metrics["execution"]["route"]
+        == (resident.quality_metrics["execution"]["route"])
+    )
+
+
+def test_a_vault_run_reads_every_lazy_table_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # M-E5h: the vault rule.
+    cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(50))
+    seen = _spy_context(monkeypatch)
+
+    class _Vault:
+        pass
+
+    # The vault writer is only inspected by the pre-pass here; the run itself may refuse it later.
+    with contextlib.suppress(Exception):
+        _run(cfg, {"t": lazy}, resident_fallback=True, vault_writer=_Vault())
+    assert isinstance(seen["sources"]["t"], pa.Table)
+
+
+def test_a_safe_lazy_table_stays_lazy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # M-E5j: reading a table the rules keep lazy turns this red.
+    cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(50))
+    seen = _spy_context(monkeypatch)
+    _run(cfg, {"t": lazy}, resident_fallback=True)
+    assert seen["sources"]["t"] is lazy
+
+
+def _forbid_pre_pass(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from decoy_engine.execution.pipeline import _lazy_input
+
+    calls: list[str] = []
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        calls.append("pre-pass")
+        raise AssertionError("the pre-pass must not run")
+
+    monkeypatch.setattr(_lazy_input, "resident_fallback_tables", boom)
+    return calls
+
+
+def test_the_default_runs_no_pre_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # M-E5g: the keyword defaults to False.
+    import inspect
+
+    from decoy_engine.execution import run_pipeline
+
+    assert inspect.signature(run_pipeline).parameters["resident_fallback"].default is False
+    cfg, lazy, _path = _declared_cast_job(tmp_path)
+    calls = _forbid_pre_pass(monkeypatch)
+    seen = _spy_context(monkeypatch)
+    _run(cfg, {"t": lazy}, auto_chunk=False)
+    assert calls == []
+    assert seen["sources"]["t"] is lazy
+
+
+def test_stream_skips_the_pre_pass_and_reads_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # M-E5k: `stream` raises `streaming_unavailable` before any source is read.
+    cfg, lazy, _path = _declared_cast_job(tmp_path)
+    reads: list[str] = []
+
+    def spy_read(self: LazySource, *a: Any, **k: Any) -> Any:
+        reads.append("read")
+        raise AssertionError("no source may be read")
+
+    for name in ("to_table", "iter_batches", "open_batches"):
+        monkeypatch.setattr(LazySource, name, spy_read)
+    calls = _forbid_pre_pass(monkeypatch)
+    with pytest.raises(Exception) as excinfo:
+        _run(cfg, {"t": lazy}, resident_fallback=True, execution_mode="stream")
+    assert "streaming_unavailable" in str(excinfo.value)
+    assert reads == []
+    assert calls == []
+
+
+def test_an_explicit_route_skips_the_pre_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, lazy, _path = _declared_cast_job(tmp_path)
+    calls = _forbid_pre_pass(monkeypatch)
+    _spy_context(monkeypatch)
+    with contextlib.suppress(
+        Exception
+    ):  # the lazy table may be refused later; only the call matters
+        _run(cfg, {"t": lazy}, resident_fallback=True, execution_mode="full_frame")
+    assert calls == []
+
+
+def test_the_pre_pass_is_private() -> None:
+    from decoy_engine.execution import pipeline
+    from decoy_engine.fileaccess import ENTRY_POINTS
+
+    assert "lazy_input_tables" not in pipeline.__all__
+    assert not hasattr(pipeline, "resident_fallback_tables")
+    assert not [e for e in ENTRY_POINTS if "_lazy_input" in e]
 
 
 # ---------------------------------------------------------------- the collector

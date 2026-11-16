@@ -88,6 +88,8 @@ FROZEN_PARAMETERS: tuple[tuple[str, str, str, str], ...] = (
         "'config'",
         "SubsetRequest | Literal['config', 'skip']",
     ),
+    # Additive: a plain auto run reads whole the lazy sources it cannot keep lazy.
+    ("resident_fallback", "KEYWORD_ONLY", "False", "bool"),
 )
 FROZEN_RETURN = "ExecutionResult"
 
@@ -111,7 +113,7 @@ def test_run_pipeline_return_annotation_is_frozen() -> None:
 
 def test_the_frozen_table_covers_every_parameter_once() -> None:
     names = [row[0] for row in FROZEN_PARAMETERS]
-    assert len(names) == len(set(names)) == 46
+    assert len(names) == len(set(names)) == 47
     positional = [r[0] for r in FROZEN_PARAMETERS if r[1] == "POSITIONAL_OR_KEYWORD"]
     assert positional == ["config", "sources"]
 
