@@ -89,7 +89,7 @@ from decoy_engine.execution._transforms_prepare import prepare_transform_sources
 from decoy_engine.execution.pipeline._subset_stage import resolve_subset
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
-from decoy_engine.progress import ProgressChannel, ProgressSink, use_progress
+from decoy_engine.progress import ProgressSink, use_progress
 from decoy_engine.secret_providers import AdmissionScope
 
 if TYPE_CHECKING:
@@ -160,6 +160,7 @@ def run_pipeline(
     quarantine_path: str | None = None,
     base_dir: str | Path | None = None,
     subset_request: SubsetRequest | Literal["config", "skip"] = "config",
+    resident_fallback: bool = False,
 ) -> ExecutionResult:
     """Execute a mixed mask + generate config end-to-end.
 
@@ -282,6 +283,7 @@ def run_pipeline(
     forwarded straight to the `generate_tables` call below, so the shadow-parity harness can pin
     this oracle call to the SAME registry snapshot as its own coordinator-side call. `None` (every
     real caller) resolves against the live registry.
+    `resident_fallback`: a plain `auto` run reads whole each lazy source it cannot keep lazy.
     """
     _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
     config, stage = resolve_subset(config, subset_request, source_loader)
@@ -289,10 +291,8 @@ def run_pipeline(
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
-    # MG-5: `tokenize` masks per-cell through a platform-injected token vault, threaded only to
-    # the FULL-FRAME adapter (bounded routes fail closed with `tokenize_requires_vault`). A vault
-    # is passed only for a tokenize job, so its presence forces full-frame and disables
-    # auto-chunk while the route is `auto`; an explicit execution_mode is left untouched.
+    # MG-5: a `tokenize` job's token vault reaches only the full-frame adapter, so under `auto`
+    # it forces full-frame and disables auto-chunk; an explicit execution_mode is left alone.
     if token_vault_writer is not None and execution_mode == "auto":
         execution_mode = "full_frame"
         auto_chunk = False
@@ -349,23 +349,12 @@ def run_pipeline(
                 secret_cache_policy=secret_cache_policy,
                 base_dir=base_dir,
                 subset_stage=stage,
+                resident_fallback=resident_fallback,
             )
         ctx = _ctx.with_quarantine_path(ctx, quarantine_path, base_dir)
         ctx = _dispatch.with_post_scan_detectors(ctx, detectors)
         with collect_refusals() as refusals:
             decision = _ctx.decide_route(ctx)
-            _emit_route(_progress, decision)
+            _dispatch.emit_route(_progress, decision)
             result = _dispatch.execute_route(ctx, decision, refusals)
         return stage.stamp(result)
-
-
-def _emit_route(channel: ProgressChannel, decision: Any) -> None:
-    """One route event per run: the layer-1 route and, when the planner picked a
-    lane below it, that lane's mode (identifiers only, no sizes or paths)."""
-    plan_decision = getattr(decision, "execution_plan_decision", None)
-    lane = getattr(plan_decision, "mode", None)
-    if getattr(decision, "route_chunked", False):
-        lane = "chunked"
-    channel.route(
-        str(getattr(decision, "route", "unknown")), lane=None if lane is None else str(lane)
-    )
