@@ -59,3 +59,42 @@ def test_d_t2_an_unknown_check_id_is_still_refused() -> None:
 def test_d_t2_a_non_blocking_failed_pre_check_cannot_claim_blocking() -> None:
     result = build(pre_checks=(drift("passed", True, DETECTED),))
     assert result.checks[0].blocking is False and result.status == "succeeded"
+
+
+@pytest.mark.parametrize("status", ["passed", "warned", "not_run"])
+def test_d_t2_only_a_failed_or_error_pre_check_can_block(status: str) -> None:
+    result = build(pre_checks=(drift(status, True, DETECTED),))
+    assert result.checks[0].blocking is False and result.status == "succeeded"
+
+
+def test_d_t2_an_error_pre_check_that_blocks_gives_findings() -> None:
+    result = build(pre_checks=(drift("error", True, BLOCKED),))
+    assert result.checks[0].blocking is True and result.status == "findings"
+
+
+def test_d_t2_a_pre_check_block_does_not_make_engine_checks_blocking() -> None:
+    from types import SimpleNamespace
+
+    facts = SimpleNamespace(
+        outputs={},
+        row_errors=(),
+        warnings=(),
+        quality_metrics={"quality_summary": {}, "failed_checks": [{"code": None}]},
+    )
+    result = build(result=facts, blocking=False, pre_checks=(drift("failed", True, BLOCKED),))
+    by_id = {c.id: c for c in result.checks}
+    assert by_id["post_validation"].status == "failed"
+    assert by_id["post_validation"].blocking is False
+    assert by_id["scan_drift"].blocking is True and result.status == "findings"
+
+
+def test_d_t2_pre_checks_hold_only_scan_drift() -> None:
+    other = Check(
+        id="fidelity",
+        status="failed",
+        blocking=True,
+        counts=CheckCounts(**{"pass": 0, "warning": 0, "fail": 1, "error": 0}),
+        codes=(),
+    )
+    with pytest.raises(ValueError):
+        build(pre_checks=(other,))
