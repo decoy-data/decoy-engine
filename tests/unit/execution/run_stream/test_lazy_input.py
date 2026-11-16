@@ -906,8 +906,8 @@ def _spill_run(cfg: dict[str, Any], source: Any) -> Any:
 
 
 class _ScratchSpy:
-    """Records each collector scratch arena (and its root's mode), the adapter's `spill_scratch`
-    and the hold stage directories present at each spill write."""
+    """Records each collector scratch arena (and its root's mode), what the adapter's
+    `open_spill_scratch` hands back and the hold stage directories present at each spill write."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, fail: BaseException | None = None) -> None:
         from decoy_engine.execution import _chunked_output_sink
@@ -916,6 +916,7 @@ class _ScratchSpy:
         self.roots: list[tuple[Path, int]] = []
         self.arenas: list[Any] = []
         self.scratches: list[Any] = []
+        self.fresh_calls = 0
         self.holds: list[tuple[Path, int]] = []
         self.writes = 0
         real_open = ScratchArena.fresh.__func__  # type: ignore[attr-defined]
@@ -923,6 +924,7 @@ class _ScratchSpy:
 
         def opened(cls: Any, **kw: Any) -> Any:
             arena = real_open(cls, **kw)
+            spy.fresh_calls += 1
             root = Path(arena.local_path())
             spy.arenas.append(arena)
             spy.roots.append((root, stat.S_IMODE(root.stat().st_mode)))
@@ -933,9 +935,16 @@ class _ScratchSpy:
 
         class Adapter(real_adapter):  # type: ignore[misc, valid-type]
             def __init__(self, fn: object, **kw: Any) -> None:
+                opener = kw.get("open_spill_scratch")
+                if opener is not None:  # the output-mode probe's stand-in sink takes none
+
+                    def recording() -> Any:
+                        arena = opener()
+                        spy.scratches.append(arena)
+                        return arena
+
+                    kw["open_spill_scratch"] = recording
                 super().__init__(fn, **kw)
-                if "spill_scratch" in kw:  # the output-mode probe's stand-in sink takes none
-                    spy.scratches.append(kw["spill_scratch"])
 
         monkeypatch.setattr(_transactional_sink, "_CallableSinkAdapter", Adapter)
         real_add = _chunked_output_sink._Spill.add
@@ -966,7 +975,7 @@ def test_the_no_sink_collector_spills_beneath_its_own_run_root(
     assert spy.writes > 0
     assert len(spy.roots) == 1 and spy.roots[0][1] == 0o700
     root = spy.roots[0][0]
-    assert spy.scratches == spy.arenas
+    assert spy.scratches == spy.arenas and spy.fresh_calls == 1
     assert spy.holds and all(h.parent == root and mode == 0o700 for h, mode in spy.holds)
     assert not root.exists()
 
@@ -983,6 +992,73 @@ def test_a_failure_after_the_first_spill_write_removes_the_hold_and_the_run_root
     assert spy.writes == 1 and len(spy.roots) == 1 and spy.holds
     assert not any(h.exists() for h, _mode in spy.holds)
     assert not spy.roots[0][0].exists()
+
+
+def test_a_no_spill_lazy_no_sink_run_creates_no_scratch_arena(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # E5b; M-E5b1 enters the arena eagerly again and turns this red.
+    cfg, table, lazy = _flat_job(tmp_path, rows=_E5A_ROWS)
+    want = support_run(cfg, {"t": table})
+    spy = _ScratchSpy(monkeypatch)
+    reads = _reads(monkeypatch)
+    got = support_run(cfg, {"t": lazy})
+    assert got.quality_metrics["auto_chunk"]["input"]["mode"] == "lazy" and len(reads) >= 3
+    assert got.outputs["t"].equals(want.outputs["t"])
+    assert spy.fresh_calls == 0 and spy.arenas == [] and spy.writes == 0
+
+
+def test_the_spill_opener_is_memoized_and_enters_the_run_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # E5b; M-E5b2 makes a second call open a second arena, M-E5b4 opens it outside the scope.
+    from contextlib import ExitStack
+
+    spy = _ScratchSpy(monkeypatch)
+    collected: dict[str, pa.Table] = {}
+    with ExitStack() as scope:
+        sink = ac._collector(collected, scope)
+        assert spy.fresh_calls == 0
+        first = sink.open_spill_scratch()
+        assert sink.open_spill_scratch() is first
+        assert spy.fresh_calls == 1
+        root = spy.roots[0][0]
+        assert root.exists()
+    assert not root.exists()
+
+
+class _Win32:
+    """Stands in for `sys` inside the scratch module, so only `ScratchArena.fresh` sees win32."""
+
+    platform = "win32"
+
+
+def test_a_win32_host_does_not_refuse_a_no_spill_lazy_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # E5b; the base resident read worked on win32, so a run that never spills must too.
+    from decoy_engine.fileaccess import _scratch
+
+    cfg, table, lazy = _flat_job(tmp_path, rows=_E5A_ROWS)
+    want = support_run(cfg, {"t": table})
+    monkeypatch.setattr(_scratch, "sys", _Win32)
+    got = support_run(cfg, {"t": lazy})
+    assert got.quality_metrics["auto_chunk"]["input"]["mode"] == "lazy"
+    assert got.outputs["t"].equals(want.outputs["t"])
+
+
+def test_a_win32_host_refuses_a_spilling_lazy_run_at_the_spill(
+    spill_job: tuple[dict[str, Any], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # E5b: the refusal moves from before the first read to the first spill; no scratch is left.
+    from decoy_engine.fileaccess import FileAccessUnavailable, _scratch
+
+    cfg, path = spill_job
+    spy = _ScratchSpy(monkeypatch)
+    monkeypatch.setattr(_scratch, "sys", _Win32)
+    with pytest.raises(FileAccessUnavailable):
+        _spill_run(cfg, LazySource(path))
+    assert spy.writes == 0 and spy.arenas == []
 
 
 # ------------------------------------------------ the collector spill under a strict policy
