@@ -126,9 +126,9 @@ call. `write` fsyncs the chain too. When the leaf already exists (`vault_exists`
 fsyncs the leaf and its chain, then `same_rows` opens the bytes under the writer's key
 (`BytesHandle`, constant display `<vault>`) and compares the rows and the dropped-key count.
 Equal rows give `VaultCommit(..., adopted=True)` and the leaf is never rewritten. A leaf that
-cannot be read or made durable is `vault_commit_failed`; other rows, another key's data or a
-leaf over twice this vault's size plus 64 KiB is `publication_vault_conflict`. Neither error
-text carries a path, key or row.
+cannot be read or made durable raises `VaultError` with `vault_commit_failed`; other rows,
+another key's data or a leaf over twice this vault's size plus 64 KiB returns `None`, and the
+caller refuses with `publication_vault_conflict`. No error text carries a path, key or row.
 
 ## The `decoy-publication/v1` descriptor
 

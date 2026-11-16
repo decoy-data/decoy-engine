@@ -78,14 +78,15 @@ def same_rows(blob: bytes, writer: VaultWriter) -> bool:
     return writer.reads_as_own(BytesHandle(blob))
 
 
-def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit:
+def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit | None:
     """Adopt the vault at `out` for `writer`, durably.
 
     The leaf and its chain are fsynced by `adopt_file` before the rows are compared, so the
     `VaultCommit` covers a leaf whose own directory fsync failed or was killed, and the leaf is
-    never rewritten. Raises `VaultError` with ``vault_commit_failed`` when the leaf cannot be read
-    or made durable, and ``publication_vault_conflict`` when it holds other rows, another key's
-    data or more than this vault could."""
+    never rewritten. Returns `None` for a conflict (other rows, another key's data, or more than
+    this vault could hold): the caller refuses with `publication_vault_conflict`, which is a
+    `decoy` code and so cannot ride a `VaultError`. Raises `VaultError` with
+    ``vault_commit_failed`` when the leaf cannot be read or made durable."""
     own, entries = writer.serialize()
     blob = None
     failed = too_big = False
@@ -101,8 +102,5 @@ def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit:
             message=reasons.get("runtime", reasons.runtime.VAULT_COMMIT_FAILED).summary,
         )
     if blob is None or not same_rows(blob, writer):
-        raise VaultError(
-            code=reasons.decoy.PUBLICATION_VAULT_CONFLICT,
-            message=reasons.get("decoy", reasons.decoy.PUBLICATION_VAULT_CONFLICT).summary,
-        )
+        return None
     return vault.issue_commit(blob, entries, adopted=True)

@@ -47,7 +47,6 @@ from tests.fileaccess.publication._vault_support import (
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX durable vault")
 REL = f"vaults/{LEAF}"
 COMMIT_FAILED = reasons.runtime.VAULT_COMMIT_FAILED
-CONFLICT = reasons.decoy.PUBLICATION_VAULT_CONFLICT
 
 
 @pytest.fixture
@@ -258,15 +257,8 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
         assert probe.synced_at_issue[0][-3:] == _chain(base)  # leaf, then the chain
         assert fingerprint(leaf) == before
 
-        refusals: list[tuple[Any, str]] = [
-            (writer(OTHER_ROWS), CONFLICT),  # different rows
-            (writer(key=OTHER_KEY), CONFLICT),  # another key opens nothing
-        ]
-        for other, code in refusals:
-            with pytest.raises(VaultError) as caught:
-                _vault_order.adopt_vault(out, other)
-            assert caught.value.code == code
-            _text_is_value_free(caught.value, base)
+        for other in (writer(OTHER_ROWS), writer(key=OTHER_KEY)):  # different rows; another key
+            assert _vault_order.adopt_vault(out, other) is None  # the conflict: no commit
             assert fingerprint(leaf) == before
         big = base / "vaults" / "big.dcyvault"
         big.write_bytes(os.urandom(200_000))
@@ -280,9 +272,8 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
                 return real_reads(self, handle)
 
             monkeypatch.setattr(type(writer()), "reads_as_own", counting)
-            with pytest.raises(VaultError) as caught:  # over the cap: no decrypt attempted
-                _vault_order.adopt_vault(bigout, writer())
-            assert caught.value.code == CONFLICT and decrypted == []
+            # over the cap: a conflict, and no decrypt attempted
+            assert _vault_order.adopt_vault(bigout, writer()) is None and decrypted == []
             monkeypatch.undo()
         finally:
             if bigfd >= 0:
