@@ -38,7 +38,7 @@ from typing import Any, TypeGuard
 
 import pyarrow as pa
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import fileaccess
 from decoy_engine.errors import DecoyError
 from decoy_engine.execution._isolated_common import IsolatedRunResult, commit_error_text
 from decoy_engine.execution._isolated_reason import commit_reason
@@ -52,6 +52,8 @@ from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.publication import (
     CommitReceipt,
     PublicationRequest,
+    failed_receipt,
+    publish_tables,
     publish_unit,
     raise_for_outcome,
 )
@@ -61,7 +63,6 @@ from decoy_engine.reasons import (
     Operation,
     Phase,
     PublicationState,
-    ReasonCode,
     ReasonContext,
 )
 
@@ -70,7 +71,6 @@ __all__ = [
     "CommitError",
     "Publication",
     "begin_publication",
-    "check_request",
     "collect",
     "failed_publication",
     "publish_resident",
@@ -102,12 +102,6 @@ class Publication:
     target: Path
 
 
-def check_request(request: PublicationRequest | None) -> None:
-    """A request is a `PublicationRequest` without a vault: the route never binds one (B0)."""
-    if request is not None and (type(request) is not PublicationRequest or request.vault):
-        raise ValueError("request must be a PublicationRequest without a vault")
-
-
 def _request(request: PublicationRequest | None) -> PublicationRequest:
     return request if request is not None else PublicationRequest(uuid.uuid4().hex)
 
@@ -115,27 +109,6 @@ def _request(request: PublicationRequest | None) -> PublicationRequest:
 def _output(output_dir: Path) -> OutputDir:
     req = FileRequest(FileRole.TARGET_OUTPUT, "write", str(output_dir), _FIELD_KEY)
     return fileaccess.capture().output_dir(req)
-
-
-def _failed(
-    request: PublicationRequest,
-    code: ReasonCode = reasons.decoy.PUBLICATION_FAILED,
-    *,
-    os_errno: int | None = None,
-) -> CommitReceipt:
-    """A `failed` receipt for a refusal before `publish_unit` (nothing measured or bound)."""
-    return CommitReceipt(
-        outcome="failed",
-        operation_id=request.operation_id,
-        reason_code=str(code),
-        result_id=None,
-        descriptor_digest=None,
-        vault_digest=None,
-        artifacts=(),
-        visible=False,
-        durable=False,
-        os_error=None if os_errno is None else errno.errorcode.get(os_errno, "EIO"),
-    )
 
 
 def begin_publication(
@@ -147,34 +120,26 @@ def begin_publication(
     try:
         txn = out.begin("dir", "exclusive", label="publication")
     except OSError as exc:  # errno only: a parent that cannot be made or opened
-        return _failed(request, os_errno=exc.errno)
+        return failed_receipt(request, os_errno=exc.errno)
     return Publication(out, txn, request, Path(txn.local_stage_path()), output_dir)
 
 
 def publish_resident(
     output_dir: Path, outputs: dict[str, pa.Table], request: PublicationRequest | None
 ) -> tuple[CommitReceipt, Path | None]:
-    """The fallback's publication: stage every table as `<table>.parquet` in a `publication`
-    stage beside `output_dir` and bind it with `publish_unit`, as `publish_tables` does, but
-    with the stage held here so a refusal's cleanup is confirmed by looking. Returns the
-    receipt and the stage path (already discarded unless bound)."""
-    pub = begin_publication(output_dir, request)
-    if isinstance(pub, CommitReceipt):
-        return pub, None
-    try:
-        if not _names_ok(list(outputs)):
-            return _failed(pub.request), pub.stage
-        for name, data in outputs.items():
-            arrow_adapter.write_table(data, pub.txn, f"{name}.parquet")
-        components = [f"{name}.parquet" for name in outputs]
-        return publish_unit(pub.out, pub.txn, pub.request, tables=components), pub.stage
-    except OSError as exc:  # errno only: a staging write failed, nothing is bound
-        return _failed(pub.request, os_errno=exc.errno), pub.stage
-    finally:
-        pub.txn.abort()  # a no-op once bound
+    """The fallback's publication: `publish_tables` into a `publication` stage beside
+    `output_dir`, each table as `<table>.parquet`. Returns the receipt and the stage path, so a
+    refusal's cleanup is confirmed by looking (the stage is already discarded unless bound)."""
+    stages: list[str] = []
+    receipt = publish_tables(
+        _output(output_dir), outputs, _request(request), suffix=".parquet", on_stage=stages.append
+    )
+    return receipt, Path(stages[0]) if stages else None
 
 
 def _names_ok(names: object) -> TypeGuard[list[str]]:
+    """The child's envelope names, which are its word only: a list of table names that are each
+    one path component and map to distinct valid stage components."""
     if type(names) is not list or any(type(n) is not str for n in names):
         return False
     try:
@@ -248,7 +213,7 @@ def collect(
     if outputs is None:
         if pub is not None:
             pub.txn.abort()
-        return _failed(request, os_errno=code)
+        return failed_receipt(request, os_errno=code)
     if pub is None:
         return outputs, None
     components = [f"{name}.parquet" for name in outputs]

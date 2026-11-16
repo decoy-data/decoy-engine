@@ -78,7 +78,6 @@ from decoy_engine.execution._isolated_commit import (
     COMMITTED,
     Publication,
     begin_publication,
-    check_request,
     collect,
     failed_publication,
     publish_resident,
@@ -107,7 +106,7 @@ from decoy_engine.execution._isolated_reason import (
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole, entry_point
 from decoy_engine.profile import DeclarationRequest
-from decoy_engine.publication import CommitReceipt, PublicationRequest
+from decoy_engine.publication import CommitReceipt, PublicationRequest, check_request
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.reasons import decoy as _decoy_reasons
 
@@ -210,14 +209,17 @@ def run_pipeline_isolated(
             child, or names a `staging_dir` or `output_dir` path. Raised before any I/O.
         ValueError: a non-None `sink`/`source_loader`/`vault_writer`/
             `registry`/`derive_key` was passed, `rlimit_kind` is not a
-            known kind, `request` carries a vault, or `config`/`run_pipeline_kwargs` is not
+            known kind, or `config`/`run_pipeline_kwargs` is not
             JSON-serializable. Always raised BEFORE any subprocess is
             spawned.
+        TypeError, NotImplementedError: `request` is not a `PublicationRequest`, or carries a
+            vault (`publication.check_request`). Raised before any I/O.
     """
     _reject_unserializable_kwargs(run_pipeline_kwargs)
     if mem_cap_bytes is not None and rlimit_kind not in RLIMIT_KINDS:
         raise ValueError(f"rlimit_kind={rlimit_kind!r} is not one of {sorted(RLIMIT_KINDS)}")
-    check_request(request)
+    if request is not None:
+        check_request(request)
     already_isolated = isolate and inside_isolated_worker()
     _require_ambient_for_paths(
         spawns=isolate and not already_isolated,
