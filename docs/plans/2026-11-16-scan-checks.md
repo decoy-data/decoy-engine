@@ -253,7 +253,7 @@ so batch boundaries do not change the result; the existing exact `column_distinc
   every `source_loader` run, even the teed sequential route selected in M4, and any remaining
   `_deferred` case (`_post_scan.py:480-493`). The refusal is not claimed to precede all source reads:
   `build_routing_facts` profiles through `profile_source` at `_routing_facts.py:89-94` before
-  `execute_route` enters `bind_gate` at `_pipeline_route_dispatch.py:72`. DI-T9 spies at that route
+  `execute_route` enters `bind_gate` at `execution/_pipeline_route_dispatch.py:72`. DI-T9 spies at that route
   boundary. Declared D8 quarantine counting still records removed rows when the gate is deferred so
   the central count cannot silently diverge.
 - Transform-bearing mask tables are refused in that same `bind_gate` choke point with the existing
@@ -477,7 +477,7 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
   `bind_gate`, runtime exit before any route read or output.
 - Loader or other deferred distribution gate: `runtime.post_scan_distribution_deferred` in
   `bind_gate` (`_post_scan.py:496`), runtime exit before any route read or output. Routing facts may
-  already have profiled sources before dispatch (`_pipeline_route_dispatch.py:72`).
+  already have profiled sources before dispatch (`execution/_pipeline_route_dispatch.py:72`).
 - CLI `--chunked` with distribution: the existing chunked-integrity refusal, exit 1.
 - Uncalibrated NER model: `provider.ner_model_uncalibrated` at detector load, exit by the provider
   category, before any row is read.
@@ -586,14 +586,14 @@ must keep passing. Each test lists a mutation that must turn it red.
 | Id | Slice | Asserts | Fails before | Mutation |
 |---|---|---|---|---|
 | DI-T1 | DI-1a | `distribution` without `integrity: true` refused with `post_scan_inactive`; `tolerance_pct` 0, 101, `True`, `"5"` refused; an omitted block keeps the old dump and plan hash | key unknown | MDI-1: lax float |
-| DI-T2 | DI-1a | `preserved_facts` covers every behaviour label and every strategy in `SCALAR_HANDLERS`; an unknown name in `NULLS_NOT_PRESERVED` fails; a property test generated from `SCALAR_HANDLERS` runs every strategy claimed to preserve nulls on a null-bearing column and output null positions equal source null positions; `joint_mask` is in `NULLS_NOT_PRESERVED`; `redact` is not; `distribution_behavior_for("group_key") == "destroys_frequency"`; the golden at `tests/unit/providers_v2/test_distribution_behavior_metadata.py:39` moves with it | no function | MDI-2: give an unknown strategy every fact; drop `joint_mask` from `NULLS_NOT_PRESERVED` |
+| DI-T2 | DI-1a | `preserved_facts` covers every behaviour label and every strategy in `SCALAR_HANDLERS`; an unknown name in `NULLS_NOT_PRESERVED` fails; a property test generated from `SCALAR_HANDLERS` runs every strategy claimed to preserve nulls on a null-bearing column and output null positions equal source null positions; `joint_mask` is in `NULLS_NOT_PRESERVED`; `redact` is not; `distribution_behavior_for("group_key") == "destroys_frequency"`; the golden at `tests/unit/providers_v2/test_distribution_behavior_metadata.py:39` moves with it | no function | MDI-2: give an unknown strategy every fact; drop `joint_mask` from `NULLS_NOT_PRESERVED`; restore `group_key` to `preserves_cardinality_only`; add `redact` to `NULLS_NOT_PRESERVED` |
 | DI-T3 | DI-1a | moments over batches cut at 1, 7 and 50 000 rows equal the whole-column mean and std to 1e-9 | no moments | MDI-3: average per-batch means |
-| DI-T4 | DI-1b | shuffle on a numeric column: no breach at 1%; a planted transform scaling values by 1.2 under passthrough: `mean` breach at 5% with `delta_pct` set; no cell value in the report (canary sweep) | no section | MDI-4: compare output with itself |
+| DI-T4 | DI-1b | At the facts level, feed equal numeric source and output frames to the facts collector and pass its result to `distribution_findings`: there is no breach at 1%. Repeat with an output frame whose mean is 1.2 times the source mean: there is a `mean` breach at 5% with `delta_pct` set. In a separate full pipeline cell, replace `SCALAR_HANDLERS["passthrough"]` with a test-only scaling handler before `PandasExecutionAdapter` copies the registry, then run a transform-free passthrough table. The passthrough contract declares moments preserved, `bind_gate` admits the table because it has no transform, and the run reaches the same `mean` breach. Both cells sweep the report for canary values | `distribution_findings` and the report section do not exist | MDI-4: compare output facts with themselves |
 | DI-T5 | DI-1b | hash column: `distinct_ratio` checked, `mean` not; faker and redact columns: only `row_count` and `null_rate`; `joint_mask`, `group_key`, `windowed_date` (null anchor rows), `grouped_series`, `derived` and `formula` columns: only `row_count`, and no breach when their nulls differ from the source; for every strategy with `when:`, only `row_count` plus `null_rate` when that strategy preserves nulls | no section | MDI-5: give a conditional column cardinality or moments; drop a null-destroying strategy from the fact table |
 | DI-T6 | DI-1b | (a) resident D8 quarantine drops 3 of 100 rows at 5%: `row_count` compares 97 with 100 minus 3, no breach, source-side `null_rate` still counts all 100 rows, and a column fact is not `error`; (b) a deferred D8 quarantine records the same removed count despite the gate mode; (c) declared-cast quarantine drops bad rows before masking and `_source(..., raw=True)` drops the same rows on the source pass, so row count and fact inputs match without D8 subtraction | no section | MDI-6: compare with the raw source count; restore the deferred early return; bypass `_source` for the resident suite |
 | DI-T7 | DI-1b | with subset on, the source side is the subset rows (`caller_sources`) | no section | MDI-7: read the supplied sources |
 | DI-T8 | DI-1b | engine chunked and out-of-core routes give the same `distribution` rows as the resident route; a transform-bearing mask table is refused in `bind_gate` with `post_scan_integrity_transforms_unsupported` before any route read or output | no section | MDI-8: skip on streaming; allow a transform-bearing table through |
-| DI-T9 | DI-2 | `on_breach: fail` with a breach: the run raises `PostScanBlockedError` with `distribution_breach`, nothing published, exit 4 through the CLI; `warn`: the run delivers, check `warned`; loader cell: even the teed sequential route refuses distribution with `post_scan_distribution_deferred`; deferred cell: the same code refuses any other deferred distribution gate. The spy is at `execute_route`'s `bind_gate` entry (`_pipeline_route_dispatch.py:72`) and proves no route read or output, while allowing the earlier `build_routing_facts` profile read | never blocks | MDI-9: map fail rows to warnings; MDI-13: let a loader or deferred distribution run enter the route |
+| DI-T9 | DI-2 | `on_breach: fail` with a breach: the run raises `PostScanBlockedError` with `distribution_breach`, nothing published, exit 4 through the CLI; `warn`: the run delivers, check `warned`; loader cell: even the teed sequential route refuses distribution with `post_scan_distribution_deferred`; deferred cell: the same code refuses any other deferred distribution gate. The spy is at `execute_route`'s `bind_gate` entry (`execution/_pipeline_route_dispatch.py:72`) and proves no route read or output, while allowing the earlier `build_routing_facts` profile read | never blocks | MDI-9: map fail rows to warnings; MDI-13: let a loader or deferred distribution run enter the route |
 | DI-T10 | DI-2 | a fact `error` row blocks under `fail` with `check_error` | no rows | MDI-10: drop error rows |
 | DI-T11 | DI-2 | unreadable sink with `distribution` set is refused before start | guard (existing integrity rule) | MDI-11: exempt distribution |
 | DI-T12 | DI-3 | e2e SCAN-10: warn prints one line per breach naming table, column and fact; fail exits 4 and names `table.column (fact)`; `report integrity` lists the section; `--chunked` with `distribution` is refused before any source is opened | no output | MDI-12: print the measured mean |
@@ -676,6 +676,10 @@ library path also needs rows 36 and 37, which are their own rows.
 - The missing-at-run-time evidence warning gets registered code `warning.scan_baseline_missing`
   (review round 2, L2), with a fixed value-free summary and a reason fixture. It does not affect a
   run unless `--evidence-out` asked to hash the missing baseline.
+- DESIGN (pre-existing, follow-up only): CLI `src/decoy/cli/report.py` is 2,309 lines on CLI
+  `origin/main` `ba7b613e9`, above the 900-line design cap. This plan changes one bucket tuple in that
+  file and adds no new report module. Split the existing file by cohesive report concern in a later
+  CLI cleanup; this does not decide this plan's verdict.
 
 ## 11. Roadmap edits when this plan passes
 
@@ -720,3 +724,12 @@ decided as recorded in section 9.
 | L2 missing-baseline evidence warning | V2-LOG | Register `warning.scan_baseline_missing` and pin it in the missing-baseline cell | 3.2, 3.4, 6c, B-T6, 10 |
 | L3 100M-row cost | V2-LOG | State that the source-only facts pass opens a lazy source a second time | 4.3, 6d |
 | L4 class 4 cells | V2-LOG | Name the transform, declared-cast quarantine and deferred-quarantine cells | 6e, DI-T6, DI-T8 |
+
+## 14. Codex review resolution (on `4b5ffd13f`)
+
+| Finding | Label | Resolution | Section |
+|---|---|---|---|
+| HIGH DI-T4 cannot reach a breach because every transform-bearing table is refused | V1 | Replace the transform fixture with a direct facts-level mean breach and a transform-free full pipeline breach through the existing `SCALAR_HANDLERS` test seam. Keep the transform refusal in DI-T8 | DI-T4 |
+| LOW DI-T2 omits mutations for both corrected metadata facts | V2-LOG | Add mutations that restore `group_key` to `preserves_cardinality_only` and mark `redact` as null-destroying | DI-T2 |
+| LOW route-dispatch citations name the old package | V2-LOG | Cite `execution/_pipeline_route_dispatch.py` at every occurrence | 4.2, 6a, DI-T9 |
+| LOW CLI `report.py` is 2,309 lines | V2-LOG / DESIGN (pre-existing) | Record a non-blocking cohesive-split follow-up; make no source change in this plan remediation | 10 |
