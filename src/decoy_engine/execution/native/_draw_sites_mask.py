@@ -131,11 +131,11 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.date_shift",
         family="source_keyed_hmac",
-        call_site="transforms/date_shift.py:120",
+        call_site="execution/_strategies/_date_shift.py:301",
         entropy_root="mask_key",
         seed_derivation=(
-            "min_days + (int.from_bytes(hmac_new(key, val, sha256).digest()[:8], "
-            '"big") % range_size)  # keyed path; legacy path uses md5(val)'
+            "min_days + (int.from_bytes(derive(mask_key, namespace, value)[:8], "
+            '"big") % range_size)'
         ),
         api_operation="HMAC-SHA256(column_key, value) reduced mod range_size",
         call_shape="per-value integer day offset in [min_days, max_days]",
@@ -146,9 +146,9 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
         config_fingerprint_source="namespace_registry(namespace)+min_days+max_days",
         provider_version=_V6,
         notes=(
-            "Execution handler derives the column key via derive(mask_key, namespace, "
-            "value) (execution/_strategies/_date_shift.py:198). Legacy no-key configs "
-            "use md5(value) (transforms/date_shift.py:108)."
+            "Execution handler derives the offset via derive(mask_key, namespace, "
+            "value) (execution/_strategies/_date_shift.py:301). The mask key is the "
+            "admitted secret; there is no key-free path."
         ),
         mirror_call_sites=("execution/_strategies/_date_shift.py:198",),
     ),

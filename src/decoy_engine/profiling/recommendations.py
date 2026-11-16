@@ -76,7 +76,7 @@ class DetectorDescriptor:
 #   faker        -> faker_type, locale, ...    (transforms/faker_based.py)
 #   fpe          -> charset, preserve_separators, validate_luhn
 #                                              (transforms/fpe.py)
-#   date_shift   -> jitter_days                (transforms/date_shift.py)
+#   date_shift   -> jitter_days                (execution/_strategies/_date_shift.py)
 #   redact       -> redact_with                (transforms/redact.py)
 # The override endpoint surfaces these directly to the mask
 # inspector, so a mismatch here silently corrupts the user's
