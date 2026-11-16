@@ -142,15 +142,13 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
-    year_bins = spec.stats.get("year_bins") or []
-    try:
-        years = [int(b["year"]) for b in year_bins]
-        weights = [float(b["count"]) for b in year_bins]
-    except (TypeError, ValueError, KeyError):
+    buckets = spec.datetime_buckets
+    if buckets is None:
         _refuse(table, col, CODE_DEGENERATE, "year_bins", "year_bins entries are malformed")
+    weights = [float(b.count) for b in buckets]
     total = sum(weights)
     if (
-        not years
+        not buckets
         or any(w < 0 or not math.isfinite(w) for w in weights)
         or not math.isfinite(total)  # two finite weights can sum to inf and pass `total > 0`
         or not total > 0
@@ -159,8 +157,10 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
     bad = sorted(
         {
             y
-            for y, w in zip(years, weights, strict=True)
-            if w > 0 and not _MIN_YEAR <= y <= _MAX_SAMPLED_YEAR
+            for b, w in zip(buckets, weights, strict=True)
+            if w > 0
+            for y in (b.start_year, b.end_year)
+            if not _MIN_YEAR <= y <= _MAX_SAMPLED_YEAR
         }
     )
     if bad:
@@ -191,6 +191,15 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             "min",
             f"datetime min {parsed_bounds['min']} is after max {parsed_bounds['max']}",
         )
+    # A folded range has no per-year weights to check its edge against, so its outer year must be
+    # the bound's year; otherwise the draw would pile up at the clamp.
+    live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
+    for bound, year, edge in (
+        ("min", live[0].start_year, live[0]),
+        ("max", live[-1].end_year, live[-1]),
+    ):
+        if edge.start_year != edge.end_year and parsed_bounds[bound].year != year:
+            _refuse(table, col, CODE_DEGENERATE, bound, f"datetime {bound} is outside its range")
 
 
 def _check_categorical(

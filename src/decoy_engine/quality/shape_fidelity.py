@@ -55,6 +55,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from decoy_engine.contracts.distribution_snapshot import with_year_weights
+
 QUALITY_SHAPE_FIDELITY_SCHEMA_VERSION = "quality-shape-fidelity/v1"
 
 _SCORE_PRECISION = 6
@@ -74,8 +76,8 @@ def compute_shape_fidelity(
     Returns:
         Dict matching schema `quality-shape-fidelity/v1`.
     """
-    src_cols = source_snapshot.get("columns", {})
-    out_cols = output_snapshot.get("columns", {})
+    src_cols = with_year_weights(source_snapshot)
+    out_cols = with_year_weights(output_snapshot)
     shared_columns = sorted(set(src_cols.keys()) & set(out_cols.keys()))
 
     column_results: list[dict[str, Any]] = []
@@ -170,8 +172,12 @@ def _column_shape_similarity(
         out_counts.append(int(out_stats.get("other_count", 0)))
         return _shape_tvd(src_counts, out_counts, label="freq_vector_sorted_tvd")
     if src_kind == "datetime":
-        src_counts = [int(b["count"]) for b in src_stats.get("year_bins", [])]
-        out_counts = [int(b["count"]) for b in out_stats.get("year_bins", [])]
+        if src_stats.get("year_weights") is None or out_stats.get("year_weights") is None:
+            return {"shape_similarity": None, "method": "malformed_year_bins", "comparable": False}
+        # Milli-rows keep a range's fractional per-year share through `_shape_tvd`'s int(); the
+        # scale cancels in the normalization, so one-year buckets score exactly as before.
+        src_counts = [round(w * 1000) for w in src_stats["year_weights"].values()]
+        out_counts = [round(w * 1000) for w in out_stats["year_weights"].values()]
         return _shape_tvd(src_counts, out_counts, label="year_bins_sorted_tvd")
     if src_kind == "freetext":
         return _shape_tvd(
