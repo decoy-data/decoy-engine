@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.execution._distribution_behavior import distribution_behavior_for
+from decoy_engine.contracts.distribution_behavior import distribution_behavior_for
 from decoy_engine.execution._technique_class import technique_class_for
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size

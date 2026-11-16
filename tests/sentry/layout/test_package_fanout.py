@@ -29,7 +29,7 @@ LAYOUT_HEADING = "## Where Things Go"
 # Each entry names the map's target sub-package for the next module.
 FANOUT_ALLOWLIST: dict[str, int] = {
     # next route cluster: execution/chunked/, execution/sequential/ or execution/isolated/.
-    "src/decoy_engine/execution": 104,
+    "src/decoy_engine/execution": 103,
     # next family: execution/_strategies/<family>/.
     "src/decoy_engine/execution/_strategies": 29,
     # next modules: execution/native/draw/ or execution/native/chunked/.
