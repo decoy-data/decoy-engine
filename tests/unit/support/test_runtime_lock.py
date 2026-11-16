@@ -22,11 +22,10 @@ from typing import Any
 import pytest
 
 import decoy_engine
-from decoy_engine import determinism, keyprovider, release
+from decoy_engine import determinism, keyprovider, providers_v2, release
 from decoy_engine.delivery.resume import _records
 from decoy_engine.delivery.resume._fingerprint import build_fingerprint
 from decoy_engine.keyprovider import MaskSecretError, SecretKeyProvider, is_key_version_label
-from decoy_engine.providers_v2 import _registry
 from decoy_engine.support import (
     LockDifference,
     _runtime_lock,
@@ -127,11 +126,11 @@ def _patch_faker_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _patch_provider_added(monkeypatch: pytest.MonkeyPatch) -> None:
-    registry = _registry.get_default_registry()
+    registry = providers_v2.get_default_registry()
     adapter = registry.get_adapter("synthetic_ssn")
     caps = registry.get_capabilities("synthetic_ssn").model_copy(update={"provider": "zz_extra"})
     extended = registry.override("zz_extra", adapter, caps)
-    monkeypatch.setattr(_registry, "get_default_registry", lambda: extended)
+    monkeypatch.setattr(providers_v2, "get_default_registry", lambda: extended)
 
 
 def _patch_seed_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
