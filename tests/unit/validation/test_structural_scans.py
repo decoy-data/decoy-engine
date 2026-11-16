@@ -386,15 +386,62 @@ class TestCardinalityCollisions:
         assert w.detail["source_distinct"] == len({canonicalize_derive_source(v) for v in ints})
 
     def test_both_routes_report_equal_detail(self, tmp_path: Path) -> None:
-        """AT-Z6."""
+        """AT-Z6: full_frame and out_of_core (which needs an FK shape) report the same detail."""
+        n = 200
+        parent = pa.table(
+            {
+                "id": pa.array([f"p{i}" for i in range(n)], type=pa.string()),
+                "name": pa.array([f"src-{i}" for i in range(n)], type=pa.string()),
+            }
+        )
+        child = pa.table(
+            {
+                "cid": pa.array([f"c{i}" for i in range(n)], type=pa.string()),
+                "parent_id": pa.array([f"p{i}" for i in range(n)], type=pa.string()),
+            }
+        )
+        paths = {}
+        for name, tbl in (("parent", parent), ("child", child)):
+            paths[name] = tmp_path / f"{name}.parquet"
+            pq.write_table(tbl, paths[name])
+
+        def hash_col(name: str, ns: str) -> dict[str, Any]:
+            return {"name": name, "strategy": "hash", "namespace": ns}
+
+        raw = {
+            "version": 2,
+            "global_settings": {"seed": 7},
+            "sources": {
+                n_: {"type": "file", "path": str(p_), "format": "parquet"}
+                for n_, p_ in paths.items()
+            },
+            "targets": {
+                n_: {
+                    "type": "file",
+                    "path": str(tmp_path / f"{n_}.out.parquet"),
+                    "format": "parquet",
+                }
+                for n_ in paths
+            },
+            "tables": [
+                {"name": "parent", "columns": [hash_col("id", "ns"), _fcol("name", pool_size=10)]},
+                {"name": "child", "columns": [hash_col("cid", "cns"), hash_col("parent_id", "ns")]},
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "child", "columns": ["parent_id"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "ns",
+                }
+            ],
+        }
+        cfg = PipelineConfig.model_validate(declare_rest(raw)).model_dump()
         seen = []
         for mode in ("full_frame", "out_of_core"):
-            sub = tmp_path / mode
-            sub.mkdir()
-            cfg, src = _faker_cfg(sub, _DISTINCT, [_fcol("a", pool_size=10)])
             r = run_pipeline(
                 cfg,
-                sources=src,
+                sources={"parent": parent, "child": child},
                 engine_version=_VERSION,
                 post_validation=True,
                 execution_mode=mode,  # type: ignore[arg-type]
@@ -402,6 +449,7 @@ class TestCardinalityCollisions:
             (w,) = _collisions(r)
             seen.append(_detail(w))
         assert seen[0] == seen[1]
+        assert seen[0]["pool_size"] == 10 and seen[0]["distinct_lost"] > 0
 
     def test_scale_and_match_modes_are_covered(self, tmp_path: Path) -> None:
         """AT-Z6b."""
