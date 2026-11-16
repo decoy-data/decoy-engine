@@ -13,6 +13,7 @@ not a leak).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pandas as pd
@@ -126,6 +127,23 @@ class TestDateShiftRowErrors:
         ctx = _ctx()
         DateShiftStrategyHandler().run(df, "dob", seed, ctx)
         assert ctx.row_errors == []
+
+    def test_unparseable_cell_values_are_never_logged(self, caplog) -> None:
+        """Ported from the deleted V1 class test: a bad date cell is data, so it reaches no log."""
+        marker = "bob@example.com"
+        df = pd.DataFrame({"dob": ["2024-01-01", marker, "2024-02-02", marker]})
+        seed = _col(
+            "date_shift",
+            namespace="ns1",
+            provider_config=(("date_format", "%Y-%m-%d"), ("max_days", 5), ("min_days", 1)),
+        )
+        ctx = _ctx()
+        with caplog.at_level(logging.DEBUG):
+            out_df, _ = DateShiftStrategyHandler().run(df, "dob", seed, ctx)
+        assert out_df["dob"].iloc[1] == marker and out_df["dob"].iloc[3] == marker
+        assert [e.row_index for e in ctx.row_errors] == [1, 3]
+        assert marker not in caplog.text
+        assert all(marker not in e.reason for e in ctx.row_errors)
 
 
 def _nested_seed(cfg: dict[str, Any]) -> ColumnSeed:

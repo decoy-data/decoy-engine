@@ -50,7 +50,6 @@ TRUTH_TEST_BASELINE: dict[str, int] = {
     "plan/_generation.py": 3,
     "plan/_serialize.py": 1,
     "plan/checks/_generate_columns.py": 2,
-    "secret_providers/_requirements.py": 1,
     "unmask.py": 1,
 }
 

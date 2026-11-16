@@ -374,12 +374,6 @@
     "decoy_engine/transforms/_ff1.py::_prf::update::0": {
       "reason": "cryptography AES CipherContext.update"
     },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
-    },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::1": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
-    },
     "decoy_engine/transforms/joint_mask.py::_pick_rows_mask::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
