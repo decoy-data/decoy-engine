@@ -115,6 +115,14 @@ def test_input_modes_keeps_only_the_routed_table_lazy_when_no_sink_is_the_only_r
         assert modes(reason_with_sink=whole)["t"] == ("resident", no_sink), whole
     assert modes(out_reason=reasons.route.STREAMING_DISABLED)["t"][0] == "resident"
     assert modes(routed=None)["t"] == ("resident", "not_dispatched")
+    # M-E5a3: a table dispatched through a split, with no routed table, never takes this path.
+    from decoy_engine.execution._pipeline_multi_table import MultiTableSplit
+
+    split = MultiTableSplit(("t", "u"), (), {"t": "r", "u": "r"})
+    assert modes(routed=None, split=split) == {
+        "t": ("resident", no_sink),
+        "u": ("resident", no_sink),
+    }
 
 
 def _assert_materialized_once(
