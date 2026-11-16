@@ -158,7 +158,7 @@ def test_at16_a_resident_sink_run_is_gated_before_the_sink_is_touched(
     exc = _blocked(lambda: _run(config, mode, sink=ParquetTransactionalSink(out)))
     assert exc.reason == DUPLICATES
     assert not out.exists()
-    assert not list(tmp_path.glob("_decoy_stage_*"))
+    assert not [*tmp_path.glob("_decoy_stage_*"), *tmp_path.glob("._decoy_publication_pending_*")]
 
 
 def test_at16_integrity_with_a_sink_the_gate_cannot_read_refuses_fail_closed(
@@ -170,7 +170,7 @@ def test_at16_integrity_with_a_sink_the_gate_cannot_read_refuses_fail_closed(
         _run(_config(tmp_path, broken=True, integrity=True), "auto", sink=sink)
     assert str(getattr(caught.value, "code", "")) == "post_scan_integrity_sink_unreadable"
     assert sink.calls == []
-    assert not list(tmp_path.glob("_decoy_stage_*"))
+    assert not [*tmp_path.glob("_decoy_stage_*"), *tmp_path.glob("._decoy_publication_pending_*")]
 
 
 @pytest.mark.parametrize("route", ["sequential", "out_of_core"])
@@ -189,7 +189,7 @@ def test_at16_integrity_with_a_sink_and_lazy_inputs_still_withholds_on_a_failing
 ) -> None:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
         finding = {"table": "customers", "column": "email", "detector_id": "email"}
-        return {"schema_version": "post-scan-integrity/v2", "residual_pii": [finding | FAIL]}
+        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
 
     monkeypatch.setattr(_post_scan, "run_post_mask", failing)
     cfg, _, lazy = subset_sup.job(tmp_path)
@@ -219,7 +219,7 @@ def test_at20_the_gate_runs_once_and_the_report_rides_on_the_result(
     result, routes = _run(_config(tmp_path), route)
     assert routes == [route]
     report = result.quality_metrics["post_scan_integrity"]
-    assert report["schema_version"] == "post-scan-integrity/v2"
+    assert report["schema_version"] == "post-scan-integrity/v3"
     assert report["verdict"] == {"blocking": False, "codes": [], "warnings": []}
     assert {(k["table"], k["kind"]) for k in report["keys"]} == {
         ("parent", "primary"),

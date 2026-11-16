@@ -94,6 +94,8 @@ class GenerationResult:
     tables: dict[str, pa.Table] | None
     peak_reserved_bytes: int
     declines: tuple[str, ...] = field(default=())
+    # F22: the streamed sink's `CommitReceipt` (typed loosely: `publication` is a tier above).
+    publication_receipt: Any = None
 
 
 def is_bounded_sink(sink: Any) -> bool:
@@ -102,9 +104,8 @@ def is_bounded_sink(sink: Any) -> bool:
     return sink is not None and getattr(sink, "bounded_write_batches", False) is True
 
 
-# A caller-supplied layout is held as a Python sequence of ints: an 8-byte slot plus, for a
-# non-cached value, a 28-byte int object. Charged before the run so it is in the ledger, never
-# silently outside it.
+# A caller-supplied layout is a Python sequence of ints: an 8-byte slot plus a 28-byte int object
+# per non-cached value. Charged before the run so it is in the ledger, never silently outside it.
 _LAYOUT_ENTRY_BYTES = 36
 
 
@@ -295,8 +296,7 @@ def _table_batches(
     declared = output_types(cols)
     for size in sizes:
         arrays = []
-        # Post-null-mask values of the columns already emitted in THIS batch, which is what the
-        # legacy path's `generated` mapping holds when a windowed_date column reads its anchor.
+        # Columns emitted so far in THIS batch, post-null-mask (legacy `generated`): date anchors.
         emitted: dict[str, list[Any]] = {}
         for col, name, stream, field_, gen_type in zip(
             cols, names, streams, schema, generated, strict=True
@@ -525,8 +525,10 @@ def run_generation(
         with OutputPublish(sink, True, False) as publish:
             publish.open()
             generate(lambda n, s, b: sink.write_batches(n, _pg.count_rows(n, b), schema=s))
-            publish.commit()
-        return GenerationResult("streamed", reason, counts, None, ledger.peak_bytes)
+            receipt = publish.commit()
+        return GenerationResult(
+            "streamed", reason, counts, None, ledger.peak_bytes, publication_receipt=receipt
+        )
 
     def accumulate(name: str, schema: pa.Schema, batches: Iterator[pa.RecordBatch]) -> None:
         batch_list = list(_pg.count_rows(name, batches))

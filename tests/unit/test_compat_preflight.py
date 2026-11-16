@@ -5,7 +5,10 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_compat_preflight.py"
+from scripts.release.frozen_map import MAP_PATH, frozen_prefixes
+
+ROOT = Path(__file__).resolve().parents[2]
+_SCRIPT = ROOT / "scripts" / "check_compat_preflight.py"
 _spec = importlib.util.spec_from_file_location("check_compat_preflight", _SCRIPT)
 assert _spec and _spec.loader
 preflight = importlib.util.module_from_spec(_spec)
@@ -72,6 +75,46 @@ def test_fenced_code_block_checkboxes_do_not_count() -> None:
 
 def test_config_prefix_is_precise() -> None:
     # config.py and config/ are frozen; an unrelated configuration.py is not.
-    assert preflight.touched_frozen(["src/decoy_engine/config.py"])
     assert preflight.touched_frozen(["src/decoy_engine/config/loader.py"])
     assert preflight.touched_frozen(["src/decoy_engine/configuration_helper.py"]) == []
+
+
+def test_run_result_and_reasons_are_frozen_prefixes() -> None:
+    # REL-GATE RG-F1: the run-result model, the reason registry and the schema snapshots.
+    changed = [
+        "src/decoy_engine/run_result/_model.py",
+        "src/decoy_engine/reasons/_registry.py",
+        "tests/snapshots/frozen_schemas/run-result.schema.json",
+    ]
+    assert all((ROOT / path).exists() for path in changed[:2])
+    assert preflight.touched_frozen(changed) == changed
+
+
+def _map_prefixes() -> tuple[str, ...]:
+    return frozen_prefixes(MAP_PATH.read_text(encoding="utf-8"))
+
+
+def test_every_owning_path_in_the_map_counts_as_frozen() -> None:
+    prefixes = _map_prefixes()
+    assert len(prefixes) > 30, "the map lost its owning paths"
+    assert prefixes == preflight.FROZEN_PREFIXES
+    # A directory prefix is tried through a file under it; a file path is tried as is.
+    cases = [p + "x.py" if p.endswith("/") else p for p in prefixes]
+    assert preflight.touched_frozen(cases) == cases
+
+
+def test_surfaces_the_old_hand_list_missed_are_frozen() -> None:
+    changed = [
+        "src/decoy_engine/verification/postmask/types.py",
+        "src/decoy_engine/quality/report.py",
+        "src/decoy_engine/profiling/scan_set.py",
+        "src/decoy_engine/records/_envelope.py",
+        "src/decoy_engine/release.py",
+    ]
+    assert preflight.touched_frozen(changed) == changed
+
+
+def test_a_path_the_map_does_not_own_is_not_frozen() -> None:
+    changed = ["src/decoy_engine/not_in_the_map.py", "src/decoy_engine/vault_helper.py"]
+    assert not any(c.startswith(_map_prefixes()) for c in changed)
+    assert preflight.touched_frozen(changed) == []

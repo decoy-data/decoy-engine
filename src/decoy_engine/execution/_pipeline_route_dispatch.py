@@ -7,12 +7,15 @@ executors keep their signature (existing tests and `physical` drivers call them 
 patch them by module attribute; the calls below go through that attribute on purpose).
 
 Nothing here decides or re-decides a route: the decision arrives finished in `RouteDecision`.
+The run's post-scan models are loaded at run start (`load_post_scan_detectors`) and ride on the
+context (`with_post_scan_detectors`) to the gate `execute_route` binds.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import nullcontext
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
@@ -28,13 +31,29 @@ from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_read
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
+    from decoy_engine.progress import ProgressChannel
 
 __all__ = [
+    "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
     "execute_route",
     "execute_sequential_route",
+    "load_post_scan_detectors",
+    "with_post_scan_detectors",
 ]
+
+
+def load_post_scan_detectors(config: Mapping[str, Any], file_access: Any) -> Any:
+    """The run's post-scan models, loaded strictly: one that cannot run refuses before any read."""
+    from decoy_engine.verification.postmask._model_findings import post_scan_detectors
+
+    return post_scan_detectors(config, file_access=file_access)
+
+
+def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> PipelineRunContext:
+    """`ctx` carrying the detector set loaded at run start, for the post-scan gate to use."""
+    return replace(ctx, post_scan_detectors=detectors)
 
 
 def execute_route(
@@ -188,3 +207,15 @@ def _run_out_of_core(
 def execute_mixed_route(ctx: PipelineRunContext, decision: RouteDecision) -> ExecutionResult:
     """Run the production mixed (generate + mask) route."""
     return _route_exec.run_mixed_route(ctx, decision)
+
+
+def emit_route(channel: ProgressChannel, decision: Any) -> None:
+    """One route event per run: the layer-1 route and, when the planner picked a
+    lane below it, that lane's mode (identifiers only, no sizes or paths)."""
+    plan_decision = getattr(decision, "execution_plan_decision", None)
+    lane = getattr(plan_decision, "mode", None)
+    if getattr(decision, "route_chunked", False):
+        lane = "chunked"
+    channel.route(
+        str(getattr(decision, "route", "unknown")), lane=None if lane is None else str(lane)
+    )

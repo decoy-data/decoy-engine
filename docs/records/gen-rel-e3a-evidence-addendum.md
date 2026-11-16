@@ -104,3 +104,23 @@ origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base o
 engine root and `config/` hold 25 modules, `publication/` 2.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `ddd014a5`), carried forward
+
+`origin/feat/gen-rel-e2` `b235ec73` (holding `origin/main` `ddd014a5`, release 0.27.0) merged into `ac2495e6`
+as `3cfb05cd`, with one documentation conflict: `docs/reasons.md`, where main added the thirteen F22 output-publication additions paragraph and this slice added the GEN-REL E3a paragraph at the same place; both are kept, main's first. Main's twelve commits after `1c8e413c` (publication judge and
+bind, the sink state table, `publish_unit` through the sink and the isolated route, resume
+store records, the pre-scan model pass, lazy-input streaming, the scratch arena move and the
+frozen-surface map) do not touch the draw-site catalogue. Of this slice's files main touches `config/__init__.py` (the `post_scan_ner_findings` export), `reason_adapter.py` and `tests/sentry/test_reason_registry.py` (its publication and resume adapters), the secret-material census (line moves in main's files) and the sentry manifest; each merged beside this slice's lines.
+The release consumed main's changelog fragments; this chain's fragments are kept. The
+`generation/_streamed.py` comment rewording that holds it at 600 lines arrives from gen-rel-e1.
+
+Checks on `3cfb05cd`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
+`tests/sentry` 5951 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with this slice's test files, the two draw-site catalogue tests and the fan-out sentry: 4613
+passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main ddd014a5`,
+`ratchet_check.py --base ddd014a5`, `check_fragment.py --base ddd014a5`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 599 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.

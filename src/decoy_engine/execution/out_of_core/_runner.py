@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Mapping
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -79,13 +78,12 @@ from decoy_engine.execution.out_of_core._route_policy import (
     decide_route,
     validate_outgoing_parent_columns,
 )
-from decoy_engine.execution.out_of_core._scratch import scratch_root
 from decoy_engine.execution.out_of_core._source import LazySource
 from decoy_engine.execution.out_of_core._stream_driver import stream_table
 from decoy_engine.execution.out_of_core._stream_driver_support import (  # noqa: F401 -- one resolver
     _code_set_records_and_evidence_for_table,
 )
-from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.fileaccess import FileAccess, ScratchArena, entry_point
 from decoy_engine.progress import get_active_channel
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
 
@@ -127,6 +125,7 @@ def run_fk_out_of_core(
     file_access: FileAccess | None = None,
     cast_run: Any = None,
     _staged: bool = False,
+    _arena: ScratchArena | None = None,
 ) -> ExecutionResult:
     """Run the out-of-core FK relationship route as a batch stream.
 
@@ -220,10 +219,12 @@ def run_fk_out_of_core(
         job_seed=plan.seed_envelope.job_seed,
         max_pool_bytes=min(budget_bytes, _faker_pool_cap) if budget_bytes else _faker_pool_cap,
     )
-    # Entered only after the pool exists, so nothing that can fail sits between the root being
-    # made and the `try` whose `finally` removes it.
-    owned_root = ExitStack()  # removes an engine-made root; a caller-named one is left alone
-    root = scratch_root(temp_dir, owned_root)
+    # Opened only after the pool exists, so nothing that can fail sits between the arena being
+    # made and the `try` whose `finally` reclaims it. A handed arena is its opener's to reclaim.
+    owned: ScratchArena | None = None
+    if _arena is None:
+        _arena = owned = ScratchArena.fresh(under=temp_dir)
+    root = Path(_arena.local_path())
     try:
         incoming, outgoing = _edge_indexes(relationship_graph)
         parent_relations: dict[RelationshipEdge, ParentKeyRelation] = {}
@@ -239,17 +240,22 @@ def run_fk_out_of_core(
         # job's evidence list matches the pandas oracle's shape byte-for-byte.
         code_set_corpora: dict[tuple[str, str], dict[str, Any]] = {}
         hash_run = OocHashRun(native_threads=native_threads, faker_pool=faker_pool)
+        relations, joins = _arena.create_dir("relations"), _arena.create_dir("joins")
         for index, table_name in enumerate(_table_order(plan, relationship_graph, sources)):
             if table_name not in sources:
                 continue
             _pg = get_active_channel()
             # Before the load step so a table that fails there reads failed, not not_run.
             _pg_started = _pg.phase_start("mask", table=table_name)
+            relation_dir, join_dir = (
+                relations.create_dir(f"t{index:04d}"),
+                joins.create_dir(f"t{index:04d}"),
+            )
             # The merge runs before any joiner opens, so it takes the undivided build cap.
             table_incoming_edges = resolve_incoming(
                 incoming[table_name],
                 parent_relations,
-                temp_dir=root / "relations" / f"t{index:04d}" / "merged",
+                temp_dir=Path(relation_dir.create_dir("merged").local_path()),  # arm (a), S2a-1c
                 memory_limit=memory_limit_for(budget_bytes, 1) if budget_bytes else memory_limit,
             )
             table_outgoing_edges = tuple(outgoing[table_name])
@@ -265,7 +271,7 @@ def run_fk_out_of_core(
                 temp_disk_budget_bytes=temp_disk_budget_bytes,
                 threshold_rows=reorder_threshold_rows,
             )
-            # Shared by both drivers; the reorder branch adds only memory-sizing kwargs.
+            # Shared by both drivers; each branch adds its scratch, the reorder one memory sizing.
             table_kwargs: dict[str, Any] = {
                 "plan": plan,
                 "table_name": table_name,
@@ -273,8 +279,6 @@ def run_fk_out_of_core(
                 "incoming_edges": table_incoming_edges,
                 "outgoing_edges": table_outgoing_edges,
                 "parent_relations": parent_relations,
-                "temp_dir": root / "joins" / f"t{index:04d}",
-                "relation_dir": root / "relations" / f"t{index:04d}",
                 "staging_path": root / "staged" / f"t{index:04d}" / "masked_keys.parquet",
                 "memory_limit": memory_limit,
                 "batch_rows": batch_rows,
@@ -296,13 +300,20 @@ def run_fk_out_of_core(
             if route.reorder_caps is not None:
                 stream_table(
                     **table_kwargs,
+                    temp_dir=Path(join_dir.local_path()),  # arm (a): a path until S2b-1
+                    relation_dir=Path(relation_dir.local_path()),
                     mask_key=key_box.open()[0],
                     run_bytes_cap=route.reorder_caps.run_bytes_cap,
                     merge_fan_in=route.reorder_caps.merge_fan_in,
                     reorder_caps=route.reorder_caps,
                 )
             else:
-                _stream_table(**table_kwargs, mask_key=key_box.open()[0])
+                _stream_table(
+                    **table_kwargs,
+                    temp_dir=join_dir,
+                    relation_dir=relation_dir,
+                    mask_key=key_box.open()[0],
+                )
             _pg.flush(table_name)
             # This route drops no row, so the source count is the written count.
             _pg.phase_finish("mask", _pg_started, table=table_name, rows_out=_pg_rows)
@@ -319,10 +330,14 @@ def run_fk_out_of_core(
         _validate_batch.finish_validation(validators, quality_metrics)
         seal = {"quarantine_access": seal_evidence(cast_run, quality_metrics)}  # last, pre-publish
         if sink is not None:
-            observed_commit(sink)
+            receipt = observed_commit(sink)
             committed = True
             return ExecutionResult(
-                outputs={}, warnings=tuple(warnings), quality_metrics=quality_metrics, **seal
+                outputs={},
+                warnings=tuple(warnings),
+                quality_metrics=quality_metrics,
+                publication_receipt=receipt,
+                **seal,
             )
         return ExecutionResult(
             outputs=outputs, warnings=tuple(warnings), quality_metrics=quality_metrics, **seal
@@ -334,15 +349,13 @@ def run_fk_out_of_core(
     finally:
         # The relation/join staging subtrees hold (source_key, masked_key) pairs
         # on disk and the staged subtree holds output values (which can include
-        # preserved raw orphan keys); a caller-supplied temp_dir is NOT torn
-        # down (no owned_root to close), so without this those keys sit at
-        # rest after a successful run. Only the parts the runner itself created
-        # get wiped here; the rest of a caller-owned root is the caller's
-        # responsibility.
+        # preserved raw orphan keys), so they go as soon as the run ends, even
+        # inside a handed arena whose opener reclaims it later.
         shutil.rmtree(root / "relations", ignore_errors=True)
         shutil.rmtree(root / "joins", ignore_errors=True)
         shutil.rmtree(root / "staged", ignore_errors=True)
-        owned_root.close()
+        if owned is not None:
+            owned.reclaim()  # a failure reports RETAINED; the run's own outcome stands
         # Release the run's faker pools (in-memory numpy arrays) and reset the
         # reservation ledger; nothing survives the run.
         faker_pool.close()
