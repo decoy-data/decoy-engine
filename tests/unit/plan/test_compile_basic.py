@@ -117,6 +117,26 @@ class TestCompileDeterminism:
         p2 = compile_plan(with_pointer, simple_profile, decoy_engine_version="0.1.0")
         assert p1.pipeline_config_hash == p2.pipeline_config_hash
 
+    def test_on_drift_moves_the_config_hash_and_path_and_schema_do_not(
+        self, simple_config: dict, simple_profile: Profile
+    ) -> None:
+        def hash_of(block: dict | None) -> str:
+            config = (
+                dict(simple_config) if block is None else {**simple_config, "scan_baseline": block}
+            )
+            return compile_plan(
+                config, simple_profile, decoy_engine_version="0.1.0"
+            ).pipeline_config_hash
+
+        pointer = {"path": "x.json", "schema": "scan-set/v1"}
+        bare = hash_of(None)
+        warn = hash_of({**pointer, "on_drift": "warn"})
+        fail = hash_of({**pointer, "on_drift": "fail"})
+        assert hash_of(pointer) == bare
+        assert hash_of({**pointer, "on_drift": None}) == bare
+        assert len({bare, warn, fail}) == 3
+        assert hash_of({**pointer, "path": "elsewhere/y.json", "on_drift": "warn"}) == warn
+
     def test_two_compiles_equal(self, simple_config: dict, simple_profile: Profile) -> None:
         p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         p2 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
