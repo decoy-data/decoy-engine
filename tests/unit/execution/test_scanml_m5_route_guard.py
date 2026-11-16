@@ -456,6 +456,9 @@ def test_run_pipeline_auto_chunk_lane_runs_model_post_scan_configs_as_on_main(
 
     monkeypatch.setattr(module, name, spy)
     extra = {"chunked_dispatcher_enabled": False} if lane == "oracle" else {}
+    from tests.unit.detection_verification._scanml_m4_support import stub_post_scan_models
+
+    stub_post_scan_models(monkeypatch)
 
     def run(post_scan: dict[str, Any]) -> Any:
         # A sink the gate can read back, so the resident decision is the post-scan's. (A foreign

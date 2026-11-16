@@ -24,3 +24,19 @@ def test_reset_lifts_both_latches() -> None:
 
 def test_it_is_public() -> None:
     assert "reset_for_tests" in fileaccess.__all__
+
+
+def test_handed_stage_dir_refuses_a_non_ambient_policy(rooted, tmp_path) -> None:
+    with fileaccess.scope(rooted):
+        with pytest.raises(FileAccessUnavailable):
+            fileaccess.handed_stage_dir(tmp_path, "test.handed")
+
+
+def test_own_entry_refuses_a_non_ambient_policy(rooted, tmp_path) -> None:
+    entry = tmp_path / "member"
+    entry.write_bytes(b"x")
+    entry.chmod(0o644)
+    with fileaccess.scope(rooted):
+        with pytest.raises(FileAccessUnavailable):
+            fileaccess.own_entry(entry, 0o600)
+    assert entry.stat().st_mode & 0o777 == 0o644

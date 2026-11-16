@@ -299,8 +299,8 @@ def _run_admitted(
             row_errors=(),
             quarantine_access=quarantine_token,
         )
-        publish.commit()
-        return result
+        receipt = publish.commit()
+        return dataclasses.replace(result, publication_receipt=receipt)
 
 
 def _edge_block(static: MixedStaticPlan) -> dict[str, Any] | None:

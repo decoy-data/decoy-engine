@@ -93,6 +93,12 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/pipeline/_stream.py",
     # RUN-STREAM E3: the route summary only reads recorded metrics; no physical import.
     "execution/pipeline/_route_summary.py",
+    # RUN-STREAM E5: the resident-fallback pre-pass reads config, profile and plan owners
+    # only; no physical import.
+    "execution/pipeline/_lazy_input.py",
+    # The routing facts the run context and the pre-pass share: declaration, profile, plan and
+    # graph owners only; no physical import.
+    "execution/pipeline/_routing_facts.py",
     # B6a (incremental output sink): the streamed lane's row-group assembly and publish
     # session sit between the dispatcher lane and the caller's sink; no physical import.
     "execution/_chunked_output_sink.py",
@@ -415,6 +421,12 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # RUN-STREAM E3: `route_summary` reads recorded quality_metrics blocks and imports
             # nothing from `execution.physical`.
             "src/decoy_engine/execution/pipeline/_route_summary.py",
+            # RUN-STREAM E5: the resident-fallback pre-pass decides from config, profile
+            # and plan owners and imports nothing from `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_lazy_input.py",
+            # The shared routing facts (declaration, profile, plan, graph) import nothing from
+            # `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_routing_facts.py",
             # Dcomp-OOC (composite FK strict parity): the out-of-core joiners raise the one
             # orphan FAIL error producer (`_fk_resolve.orphan_fk_violation_error`) directly.
             # Both import nothing from `execution.physical`.
