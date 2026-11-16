@@ -3,7 +3,7 @@
 Exposes random access by row index and HMAC-keyed access.
 HMAC keying uses decoy_engine.internal.crypto.hmac_hex per the
 established-methodology rule (same HMAC-SHA256 primitive used by
-transforms/date_shift.py and generators/_formula.py).
+the date_shift handler and generators/_formula.py).
 
 Keyed access (keyed_row) is an id-sorted positional selection:
 rows are sorted ascending by the 'id' column at construction time,
