@@ -1741,15 +1741,14 @@ owner = "cam"
 reason = "`StageDir.remove` of a directory, removal of a child that failed its mode check, and the root at reclaim"
 
 [[entry]]
-module = "decoy_engine/execution/_isolated_commit.py"
-function = "_own"
+module = "decoy_engine/fileaccess/_local.py"
+function = "own_entry"
 sink = "os.open"
 ordinal = 0
 disposition = "read"
 rule = "the publication stage this parent opened beside the caller's output_dir (`OutputTxn.local_stage_path()` of its own `begin`), or the engine-made staging under its work root, or a payload source file it just wrote there; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
 owner = "cam"
 reason = "F22 class 6 and V1-b: the parent repairs the mode of what it admits from the untrusted child through the entry's own descriptor (no link followed) and reads the admitted tables back; a strict policy never gets here"
-ambient_only = true
 
 [[entry]]
 module = "decoy_engine/execution/_isolated_run.py"

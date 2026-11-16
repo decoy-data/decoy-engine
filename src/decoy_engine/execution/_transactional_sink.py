@@ -46,6 +46,7 @@ from decoy_engine.fileaccess import (
     FileRole,
     OutputDir,
     OutputTxn,
+    StageDir,
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.progress import get_active_channel
@@ -187,7 +188,7 @@ class StagedParquetWriter:
     """
 
     def __init__(
-        self, stage: Callable[[], OutputTxn], evidence: PublicationEvidence | None = None
+        self, stage: Callable[[], StageDir], evidence: PublicationEvidence | None = None
     ) -> None:
         self._stage = stage
         self.publication_evidence = evidence if evidence is not None else PublicationEvidence()
@@ -284,7 +285,7 @@ class StagedParquetWriter:
             raise
         self._stored(table, txn, component)
 
-    def _stored(self, table: str, txn: OutputTxn, component: str) -> None:
+    def _stored(self, table: str, txn: StageDir, component: str) -> None:
         """Record a closed staged file and report its serialized size (`stored_output`).
 
         The size comes from the staged component's own descriptor: the stage has no path under
@@ -306,7 +307,7 @@ class StagedParquetWriter:
             channel.publish_stored(table, size)
 
 
-def _replace_staged(txn: OutputTxn, table: str, staged: dict[str, str]) -> None:
+def _replace_staged(txn: StageDir, table: str, staged: dict[str, str]) -> None:
     """Writing a table again replaces its staged file, as the path write always did."""
     staged.pop(table, None)
     try:

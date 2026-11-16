@@ -25,11 +25,8 @@ so the cleanup of a refused stage is confirmed by looking (F29).
 
 from __future__ import annotations
 
-import errno
 import json
-import os
 import signal
-import stat
 import sys
 import uuid
 from dataclasses import dataclass
@@ -44,10 +41,15 @@ from decoy_engine.execution._isolated_common import IsolatedRunResult, commit_er
 from decoy_engine.execution._isolated_reason import commit_reason
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution._transactional_sink import _validate_table_name
-from decoy_engine.fileaccess import FileRequest, FileRole, OutputDir, OutputTxn
-from decoy_engine.fileaccess._component import is_valid_component
-from decoy_engine.fileaccess._local import _LocalStageDir
-from decoy_engine.fileaccess._output import _call, _close
+from decoy_engine.fileaccess import (
+    FileRequest,
+    FileRole,
+    OutputDir,
+    OutputTxn,
+    handed_stage_dir,
+    is_valid_component,
+    own_entry,
+)
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.publication import (
     CommitReceipt,
@@ -151,24 +153,10 @@ def _names_ok(names: object) -> TypeGuard[list[str]]:
     return len(set(components)) == len(components) and all(map(is_valid_component, components))
 
 
-def _own(path: Path, mode: int, *, directory: bool = False) -> None:
-    """Set `mode` on a file or directory through its own descriptor, opened read-only without
-    following a link: the repair a narrowing umask makes necessary (V1-b). Anything but the
-    expected kind, or an entry its owner cannot read, raises with the errno only."""
-    fd = _call(os.open, path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
-    try:
-        kind = os.fstat(fd).st_mode
-        if not (stat.S_ISDIR(kind) if directory else stat.S_ISREG(kind)):
-            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
-        os.fchmod(fd, mode)
-    finally:
-        _close(fd)
-
-
 def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, str]:
     """Write each source table into the private work root, owner-only from creation, so the
     child can read it whatever the umask; returns the manifest the payload carries."""
-    stage = _LocalStageDir(work_root, "isolated.sources", private=True)
+    stage = handed_stage_dir(work_root, "isolated.sources")
     manifest: dict[str, str] = {}
     for index, (name, table) in enumerate(sources.items()):
         component = f"s{index:04d}.parquet"  # opaque: a name can hold "/" or ".."
@@ -183,7 +171,7 @@ def _admit(stage: Path, names: list[str]) -> bool:
     umask decided its modes. A link or a directory under a table's name raises."""
     posix = sys.platform != "win32"
     if posix:
-        _own(stage, 0o700, directory=True)
+        own_entry(stage, 0o700, directory=True)
     listing = FileRequest(FileRole.TARGET_OUTPUT, "read_dir", str(stage), _FIELD_KEY)
     with fileaccess.capture().open_dir(listing) as handle:
         found = sorted(entry.name for entry in handle.entries())
@@ -191,7 +179,7 @@ def _admit(stage: Path, names: list[str]) -> bool:
     if found != expected:
         return False
     for component in expected if posix else ():
-        _own(stage / component, 0o600)
+        own_entry(stage / component, 0o600)
     return True
 
 
