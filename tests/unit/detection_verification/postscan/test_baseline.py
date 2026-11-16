@@ -54,7 +54,7 @@ def names(refs: Any) -> list[str]:
     return [r.code for r in refs]
 
 
-VERSION = {"schema_version": "post-scan-integrity/v2"}
+VERSION = {"schema_version": "post-scan-integrity/v3"}
 RELS = [rel("p", ["id"], ("c", ["pid"]))]
 
 

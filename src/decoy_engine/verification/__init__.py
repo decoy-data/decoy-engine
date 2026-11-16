@@ -5,7 +5,7 @@ Public entry point:
 
 Runs AFTER a successful mask job (residual-PII re-scan, FK preservation, policy
 validation). Post-scan phase: the entrypoint is `run_post_mask`, returning a
-`PostMaskReport` under the `"post-scan-integrity/v2"` schema, gated by the
+`PostMaskReport` under the `"post-scan-integrity/v3"` schema, gated by the
 `post_scan.integrity` config field. Depends on `decoy_engine.detection` only.
 """
 
