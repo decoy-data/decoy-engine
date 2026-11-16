@@ -117,3 +117,36 @@ def test_year_weights_split_by_seconds_and_keep_a_single_year_exact() -> None:
     w = year_weights((DatetimeBucket(2019, 2020, 100),))
     assert sum(w.values()) == pytest.approx(100.0)
     assert w[2020] > w[2019]  # leap year holds more seconds
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"start_year": 2001, "end_year": 9999, "count": 0},  # strictly past the sampled bound
+        {"start_year": 0, "end_year": 5, "count": 3},
+        {"start_year": -(10**9), "end_year": 10**9, "count": 1},
+        {"start_year": 2000, "end_year": 10**9, "count": 0},
+    ],
+)
+def test_v2_range_outside_supported_years_is_refused_whatever_its_count(
+    entry: dict[str, int],
+) -> None:
+    with pytest.raises(ValueError) as exc:
+        decode_datetime_buckets(
+            V2, _stats({"start_year": 2000, "end_year": 2000, "count": 5}, entry)
+        )
+    assert "9999" not in str(exc.value)
+    with pytest.raises(ValueError):
+        encode_datetime_buckets([DatetimeBucket(entry["start_year"], entry["end_year"], 0)])
+
+
+def test_v2_range_at_the_supported_bounds_decodes() -> None:
+    got = decode_datetime_buckets(V2, _stats({"start_year": 1, "end_year": 9998, "count": 1}))
+    assert got == (DatetimeBucket(1, 9998, 1),)
+
+
+def test_pinned_v2_list_outside_supported_years_is_refused() -> None:
+    from decoy_engine.contracts.distribution_snapshot import pinned_buckets
+
+    bad = [{"start_year": -(10**9), "end_year": 10**9, "count": 1}]
+    assert pinned_buckets("datetime", {}, bad) is None

@@ -26,6 +26,11 @@ SCHEMA_VERSION_V1 = "distribution-snapshot/v1"
 SCHEMA_VERSION_V2 = "distribution-snapshot/v2"
 ACCEPTED_SCHEMA_VERSIONS = (SCHEMA_VERSION_V1, SCHEMA_VERSION_V2)
 
+# The years a datetime bucket may name. `datetime(year + 1, 1, 1)` must be representable, so the top
+# is 9998. A multi-year range outside it is refused at decode whatever its count.
+MIN_YEAR = 1
+MAX_SAMPLED_YEAR = 9998
+
 
 @dataclass(frozen=True)
 class DatetimeBucket:
@@ -56,8 +61,20 @@ class _LegacyBucketV1(BaseModel):
     count: int | float = Field(ge=0, allow_inf_nan=False)
 
 
+class _PinnedBucket(BaseModel):
+    """A bucket inside a compiled plan's pinned spec. It carries the count as ``load_spec`` decoded
+    it, so a v1 fractional count survives the pin; stored v2 files still use ``DatetimeBucketV2``."""
+
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+
+    start_year: int
+    end_year: int
+    count: int | float = Field(ge=0, allow_inf_nan=False)
+
+
 _V2_LIST = TypeAdapter(list[DatetimeBucketV2])
 _V1_LIST = TypeAdapter(list[_LegacyBucketV1])
+_PINNED_LIST = TypeAdapter(list[_PinnedBucket])
 
 
 def encode_datetime_buckets(buckets: Sequence[DatetimeBucket]) -> list[dict[str, int]]:
@@ -101,11 +118,30 @@ def decode_datetime_buckets(
     return buckets
 
 
+def _decode_pinned(stored: Sequence[Any]) -> tuple[DatetimeBucket, ...]:
+    failed = False
+    try:
+        buckets = tuple(
+            DatetimeBucket(b.start_year, b.end_year, b.count)
+            for b in _PINNED_LIST.validate_python(list(stored))
+        )
+    except ValidationError:
+        failed = True
+    if failed:
+        raise ValueError("a year_bins entry has wrong fields or types")
+    _check_order(buckets)
+    return buckets
+
+
 def _check_order(buckets: Sequence[DatetimeBucket]) -> None:
     previous_end: int | None = None
     for b in buckets:
         if b.start_year > b.end_year:
             raise ValueError("a year_bins range ends before it starts")
+        if b.start_year != b.end_year and not (
+            b.start_year >= MIN_YEAR and b.end_year <= MAX_SAMPLED_YEAR
+        ):
+            raise ValueError("a year_bins range is outside the supported years")
         if previous_end is not None and b.start_year <= previous_end:
             raise ValueError("year_bins ranges overlap or are out of order")
         previous_end = b.end_year
@@ -128,7 +164,10 @@ def pinned_buckets(
     """Buckets for a pinned spec. A pin written with the field stores v2 entries; an older pin has
     only the v1 `year_bins` in its stats. ``None`` for a non-datetime kind or an unreadable list."""
     if stored is not None:
-        return decoded_or_none(SCHEMA_VERSION_V2, {"year_bins": list(stored)})
+        try:
+            return _decode_pinned(stored)
+        except ValueError:
+            return None
     return decoded_or_none(SCHEMA_VERSION_V1, stats) if kind == "datetime" else None
 
 
@@ -149,6 +188,27 @@ def year_weights(buckets: Sequence[DatetimeBucket]) -> dict[int, float]:
         for y, s in seconds.items():
             out[y] = float(b.count) * s / total
     return out
+
+
+def names_unsupported_year(stats: Mapping[str, Any]) -> bool:
+    """True when a raw ``year_bins`` entry names an integer year outside the supported range. Lets a
+    caller tell "refused for an out-of-range year" from "malformed" after ``decoded_or_none``
+    returned ``None``; it reads no value into any message."""
+    raw = stats.get("year_bins")
+    if not isinstance(raw, list):
+        return False
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            continue
+        for key in ("year", "start_year", "end_year"):
+            y = entry.get(key)
+            if (
+                isinstance(y, int)
+                and not isinstance(y, bool)
+                and not MIN_YEAR <= y <= MAX_SAMPLED_YEAR
+            ):
+                return True
+    return False
 
 
 def with_year_weights(document: Mapping[str, Any]) -> dict[str, Any]:

@@ -132,3 +132,12 @@ def test_admission_requires_the_outer_range_edges_to_agree_with_min_and_max() ->
     with pytest.raises(GenerationAdmissionError) as exc:
         _verdict(bad)
     assert exc.value.code == "statistical_stats_degenerate"
+
+
+def test_load_spec_refuses_a_range_outside_the_supported_years_with_a_coded_error() -> None:
+    from decoy_engine.generation.statistical import StatisticalSpecError
+
+    snap = _snapshot(SCHEMA_VERSION_V2, [{"start_year": 2000, "end_year": 9999, "count": 5}])
+    with pytest.raises(StatisticalSpecError) as exc:
+        load_spec({"name": "d", "source_column": "d"}, snapshot=snap)
+    assert exc.value.code == "statistical_snapshot_schema_mismatch"
