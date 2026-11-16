@@ -27,6 +27,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from ._inherited import check_inherited_columns
 from ._invariants import (
     _VALUE_CHANGING_STRATEGIES,
     check_chapter_preserve,
@@ -454,6 +455,16 @@ def evaluate_invariants(
             check_joint_mask_consistency,
             job_name,
             inv.joint_mask_consistency,
+            result_a,
+        )
+
+    # inherit generate columns: each copy equals its parent row's value through the FK.
+    if inv.inherited_columns:
+        _run(
+            "inherited_columns",
+            check_inherited_columns,
+            job_name,
+            inv.inherited_columns,
             result_a,
         )
 

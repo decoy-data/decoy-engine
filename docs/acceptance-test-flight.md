@@ -243,6 +243,15 @@ source code.
 **joint_mask consistency.** Each output tuple for a joint_mask column must be
 a row that exists in the reference table (NDC, MCC, etc.).
 
+**Inherited columns.** For an `inherit` generate column, every child value must
+equal the value of the parent row its foreign key names, with the same type, and
+a null key must give a null. The harness builds the parent's key-to-value map from
+the output tables (the parent key must be unique) and compares each child row,
+without the engine's lookup code. Floors on the number of null-key rows and of
+distinct copied values keep the check from passing on a fixture that could not
+show a fault. Job D's `clinic_stays.clinic_tier` copies `clinics.clinic_tier`
+through a `reference` key with a 10% null rate.
+
 **Strategy coverage.** The union of strategies declared across all job
 manifests must equal the live `SCALAR_HANDLERS` registry minus an explicit
 documented allowlist. A new strategy added without a corresponding job or
