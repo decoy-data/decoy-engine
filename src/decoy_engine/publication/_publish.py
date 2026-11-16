@@ -23,7 +23,7 @@ import hashlib
 import mmap
 import os
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -38,6 +38,7 @@ from decoy_engine.fileaccess import (
     LeafTooLarge,
     LockTimeout,
     LockUnavailable,
+    is_valid_component,
 )
 from decoy_engine.publication._descriptor import (
     DESCRIPTOR_NAME,
@@ -110,6 +111,12 @@ def _receipt(
     )
 
 
+def failed_receipt(request: PublicationRequest, *, os_errno: int | None = None) -> CommitReceipt:
+    """A `failed` receipt for a refusal before `publish_unit`: nothing was measured or bound."""
+    name = None if os_errno is None else errno.errorcode.get(os_errno, "EIO")
+    return _receipt(request, "failed", reasons.decoy.PUBLICATION_FAILED, os_error=name)
+
+
 def _read_stored(out: OutputDir) -> _Stored:
     """The destination's state; anything unreadable or malformed is occupied, never adopted."""
     code: str | None = None
@@ -164,7 +171,9 @@ def _measure(txn: OutputTxn, tables: Sequence[str], request: PublicationRequest)
     return _Measured(descriptor, encode_descriptor(descriptor))
 
 
-def _check_request(request: PublicationRequest, tables: Sequence[str]) -> list[str]:
+def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> list[str]:
+    """Refuse a request or table list `publish_unit` and `publish_tables` would not take, before
+    any I/O; return the table list."""
     if type(request) is not PublicationRequest:
         raise TypeError("request must be a PublicationRequest")
     if request.vault is not None:  # binding without its vault would break rule V
@@ -199,7 +208,7 @@ def publish_unit(
     destination already holds. The stage is aborted on every exit but a bind."""
     try:
         _check_stage(out, txn)
-        names = _check_request(request, tables)
+        names = check_request(request, tables)
         return _locked(out, txn, request, names)
     finally:
         txn.abort()  # a no-op after publish
@@ -327,22 +336,35 @@ def _bind(txn: OutputTxn, request: PublicationRequest, new: _Measured) -> Commit
 
 
 def publish_tables(
-    out: OutputDir, tables: Mapping[str, pa.Table], request: PublicationRequest
+    out: OutputDir,
+    tables: Mapping[str, pa.Table],
+    request: PublicationRequest,
+    *,
+    suffix: str = "",
+    on_stage: Callable[[str], None] | None = None,
 ) -> CommitReceipt:
     """The resident entry: stage each table as Parquet into a ``publication`` stage of ``out``
-    under its name, then ``publish_unit``. A staging failure aborts the stage."""
+    under its name plus ``suffix``, then ``publish_unit``. A staging failure aborts the stage.
+
+    ``on_stage`` is called with the stage's local path once it exists, so a caller can look at
+    the stage afterwards to confirm its cleanup (F29)."""
     from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 
-    names = _check_request(request, list(tables))
+    names = check_request(request, list(tables))
+    components = [f"{name}{suffix}" for name in names]
+    if not all(map(is_valid_component, components)) or len(set(components)) != len(components):
+        raise ValueError("invalid tables")
     failure: str | None = None
     try:
         txn = out.begin("dir", "exclusive", label="publication")
     except OSError as exc:
         failure = _errno_name(exc)
     else:
+        if on_stage is not None:
+            on_stage(txn.local_stage_path())
         try:
-            for name in names:
-                arrow_adapter.write_table(tables[name], txn, name)
+            for name, component in zip(names, components, strict=True):
+                arrow_adapter.write_table(tables[name], txn, component)
         except OSError as exc:
             failure = _errno_name(exc)
             txn.abort()
@@ -350,5 +372,5 @@ def publish_tables(
             txn.abort()
             raise
         else:
-            return publish_unit(out, txn, request, tables=names)
+            return publish_unit(out, txn, request, tables=components)
     return _receipt(request, "failed", reasons.decoy.PUBLICATION_FAILED, os_error=failure)

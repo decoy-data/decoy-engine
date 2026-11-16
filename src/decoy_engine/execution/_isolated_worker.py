@@ -22,7 +22,6 @@ every capped run fail on import instead of on the job it is meant to bound).
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -33,13 +32,14 @@ import pyarrow.parquet as pq
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._isolated_common import (
     RESULT_FILENAME,
+    StagingSink,
     apply_mem_cap,
     exception_error_text,
     is_memory_failure,
     peak_rss_mb,
 )
 from decoy_engine.execution._pipeline import run_pipeline
-from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.fileaccess import FileRequest, FileRole, write_private
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.verification.postmask import PostScanBlockedError
@@ -68,7 +68,9 @@ def _write_envelope_file(envelope: dict[str, Any], result_path: Path) -> None:
     completed run into a `crashed` one just because the envelope itself
     failed to serialize.
     """
-    result_path.write_text(json.dumps(envelope, default=str), encoding="utf-8")
+    # Owner-only at creation: under a narrowing umask a plain write is unreadable to the parent.
+    data = json.dumps(envelope, default=str).encode("utf-8")
+    write_private(FileRequest(FileRole.CONFIG, "write", str(result_path), "isolated.result"), data)
 
 
 def _load_sources(
@@ -111,75 +113,33 @@ def _load_sources(
     }
 
 
-def _stage_outputs(outputs: dict[str, pa.Table], staging_output_dir: str) -> list[str]:
-    """Write each output table to the staging directory the driver chose.
+def _finalize_outputs(result: ExecutionResult, sink: StagingSink) -> list[str]:
+    """Stage `result.outputs` for the parent's publication (TB-1 fix #2); return what is staged.
 
-    This IS the "child writes to a staging location" half of spec §12
-    ruling 3 -- the driver never lets this directory become visible at a
-    caller-facing target path until it observes a clean exit + a `completed`
-    envelope (see `_isolated_run.run_pipeline_isolated`'s commit step). A
-    SIGKILL between this write and process exit leaves an orphaned staging
-    directory the driver discards, never a partial target.
-    """
-    # Peak-bias caveat for B5 (LOW-4): this write itself allocates Parquet
-    # write buffers, so a peak sampled AFTER this call (see `_run` below)
-    # includes the staging write's own footprint, not purely the masking/
-    # generation work's peak. Left as-is for part-1 (reordering risks other
-    # invariants); B5's telemetry consumer should be aware peak_rss_mb is a
-    # slight overestimate of the job's own working set for this reason.
-    os.makedirs(staging_output_dir, exist_ok=True)
-    written = []
-    for table, data in outputs.items():
-        dest = f"{staging_output_dir}/{table}.parquet"
-        pq.write_table(data, dest)  # type: ignore[no-untyped-call, unused-ignore]
-        written.append(table)
-    return written
+    Two shapes, distinguished by `execution_telemetry`'s `outputs_streamed` stamp
+    (`_pipeline_route_exec.py`):
 
+    - STREAMED (sequential/out_of_core, the auto-chunk lane and a fully dispatched multi-table
+      split; since B6b those lanes also read their input lazily, as batches): `result.outputs`
+      is `{}` by construction and the sink already staged bounded batches, so this worker never
+      holds a full output table resident.
+    - RESIDENT (full_frame; the sink is passed but never touched on that route): the ordinary
+      in-memory `result.outputs`, staged here through the same sink.
 
-def _finalize_outputs(result: ExecutionResult, staging_output_dir: str) -> list[str]:
-    """Stage `result.outputs` for the driver's atomic commit (TB-1 fix #2).
-
-    Two shapes, distinguished by `execution_telemetry`'s `outputs_streamed`
-    stamp (`_pipeline_route_exec.py`):
-
-    - STREAMED (sequential/out_of_core, and since B6a the auto-chunk lane and a fully
-      dispatched multi-table split, now that `_run` always hands
-      `run_pipeline` a `ParquetTransactionalSink` pointed at
-      `staging_output_dir`; since B6b those lanes also read their input lazily, as
-      batches, so a routed job holds neither side resident): `result.outputs` is `{}` by construction (see
-      `run_out_of_core_route`/`run_sequential_route`'s docstrings) -- the
-      sink already wrote bounded batches straight to `staging_output_dir`
-      and committed them there (`ParquetTransactionalSink.commit`'s single
-      atomic rename), so this worker never holds a full output table
-      resident. `staged_tables` is enumerated from what actually landed on
-      disk rather than from `result.outputs.keys()`, which is empty.
-    - RESIDENT (full_frame; the sink is passed but never touched on that
-      route by construction -- `_pipeline.py`'s full_frame continuation
-      never references `sink`): `result.outputs` is the ordinary in-memory
-      dict, staged via `_stage_outputs` exactly as pre-TB-1. Unchanged
-      behavior for the route this sprint does not touch.
+    Peak-bias caveat for B5 (LOW-4): staging allocates Parquet write buffers, so a peak sampled
+    after this call includes the staging write's own footprint.
     """
     execution = result.quality_metrics.get("execution") or {}
-    if not result.outputs and execution.get("outputs_streamed"):
-        return sorted(p.stem for p in Path(staging_output_dir).glob("*.parquet"))
-    return _stage_outputs(result.outputs, staging_output_dir)
+    if result.outputs or not execution.get("outputs_streamed"):
+        for table, data in result.outputs.items():
+            sink.write(table, data)
+    return sink.staged_names()
 
 
-def _stage_row_errors(row_errors: tuple[Any, ...], staging_output_dir: str) -> None:
-    """Write row_errors alongside the staged outputs (MED-4).
-
-    `row_errors.json` is a plain list of `{table, column, row_index,
-    trigger, reason}` objects -- `RowErrorRecord` is already all str/int
-    fields, so no richer serialization is needed. Written into the SAME
-    staging directory `_stage_outputs` just created, so it rides the
-    identical commit-or-discard fate as the output Parquet: read back by
-    the driver before the atomic rename (or before discard when there is
-    no `output_dir`), never left behind. A no-op when there are no row
-    errors, so the common case adds no extra file.
-    """
-    if not row_errors:
-        return
-    payload = [
+def _row_errors(row_errors: tuple[Any, ...]) -> list[dict[str, Any]]:
+    """Row errors as plain objects for the envelope (MED-4): the user-facing quarantine surface
+    crosses the process boundary with the result, never as a file in the parent's stage."""
+    return [
         {
             "table": r.table,
             "column": r.column,
@@ -189,9 +149,6 @@ def _stage_row_errors(row_errors: tuple[Any, ...], staging_output_dir: str) -> N
         }
         for r in row_errors
     ]
-    path = f"{staging_output_dir}/row_errors.json"
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh)
 
 
 def _run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -207,19 +164,14 @@ def _run(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         # Every job loads lazily (B6b); see `_load_sources`'s docstring.
         sources = _load_sources(payload.get("sources") or {}, lazy=True)
-        # TB-1 fix #2: always hand run_pipeline a sink pointed at this run's
-        # own staging directory. A route that streams (sequential,
-        # out_of_core) writes bounded batches straight through it and
-        # commits before returning (`result.outputs == {}`); full_frame
-        # never touches `sink` at all (see `_finalize_outputs`), so passing
-        # one here is a no-op for that route -- safe to do unconditionally,
-        # since the worker does not know the route in advance (the decision
-        # happens inside `run_pipeline`, after this call is already made).
-        sink = ParquetTransactionalSink(Path(staging_output_dir))
+        # TB-1 fix #2: always hand run_pipeline a sink on the parent's stage. A route that
+        # streams writes bounded batches straight through it; full_frame never touches it
+        # (see `_finalize_outputs`). The worker does not know the route in advance.
+        sink = StagingSink(staging_output_dir)
         result = run_pipeline(payload["config"], sources, sink=sink, **payload["kwargs"])
         # Staging allocates too, so a memory failure here must self-report as well.
-        staged_tables = _finalize_outputs(result, staging_output_dir)
-        _stage_row_errors(result.row_errors, staging_output_dir)
+        staged_tables = _finalize_outputs(result, sink)
+        row_errors = _row_errors(result.row_errors)
     except PostScanBlockedError as exc:
         # The gate withheld the output: a verdict, not a crash. The report is value-free.
         return {
@@ -241,8 +193,8 @@ def _run(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "outcome": "completed",
         "peak_rss_mb": round(peak_rss_mb(), 1),
-        "staging_output_dir": payload["staging_output_dir"],
         "staged_tables": staged_tables,
+        "row_errors": row_errors,
         "quality_metrics": dict(result.quality_metrics),
         "table_kinds": dict(result.table_kinds),
     }

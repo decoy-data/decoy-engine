@@ -378,7 +378,6 @@ SCRATCH_NATIVE_PENDING = frozenset(
         "decoy_engine/execution/out_of_core/_payload_store.py",  # S2b-1
         "decoy_engine/execution/out_of_core/_external_sort.py",  # S2b-2
         "decoy_engine/execution/out_of_core/_external_sort_run.py",  # S2b-2
-        "decoy_engine/execution/_isolated_run.py",  # S3a
         "decoy_engine/execution/_isolated_worker.py",  # S3a
         "decoy_engine/execution/native/_pool_quality.py",  # S4b-0
         "decoy_engine/profiling/_scan_integrity.py",  # S2a-1c-iii
