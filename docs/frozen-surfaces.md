@@ -63,7 +63,7 @@ have nothing more.
 
 | Surface | Completeness source | Owning code | Pinning test or snapshot |
 |---|---|---|---|
-| Run entry point: `ExecutionResult`, `run_pipeline` | `decoy_engine.__all__` | `src/decoy_engine/execution/` | `tests/unit/execution/test_r3_public_signature_freeze.py`, `tests/unit/test_public_api.py` |
+| Run entry point: `ExecutionResult`, `run_pipeline` | `decoy_engine.__all__` | `src/decoy_engine/execution/`, `src/decoy_engine/__init__.py` | `tests/unit/execution/test_r3_public_signature_freeze.py`, `tests/unit/test_public_api.py` |
 | Pipeline config model: `PipelineConfig` | `decoy_engine.__all__` | `src/decoy_engine/config/` | `tests/snapshots/test_frozen_schemas.py`, `tests/snapshots/frozen_schemas/pipeline-config.schema.json`, `tests/unit/test_public_api.py` |
 | Run result: `RUN_RESULT_SCHEMA`, `RunResult`, `RunResultRead`, `derive_outcome` | `decoy_engine.__all__` | `src/decoy_engine/run_result/` | `tests/snapshots/test_frozen_schemas.py`, `tests/unit/run_result/test_model_shapes.py`, `tests/unit/run_result/test_outcome.py`, `tests/unit/test_public_api.py` |
 | Connector SDK: `CheckResult`, `ConnectorConfig`, `FileMeta`, `FileSink`, `FileSource`, `PermanentError`, `TransientError`, `WriteResult`, `sdk.CAP_DRY_RUN`, `sdk.CAP_INTROSPECTION`, `sdk.CAP_MULTIPART`, `sdk.CAP_RESUMABLE`, `sdk.CAP_SIGNED_URL`, `sdk.CAP_STREAMING`, `sdk.CheckResult`, `sdk.ConfigError`, `sdk.ConnectorConfig`, `sdk.ConnectorError`, `sdk.FileMeta`, `sdk.FileSink`, `sdk.FileSource`, `sdk.PermanentError`, `sdk.SDK_VERSION`, `sdk.TransientError`, `sdk.WriteResult` | `decoy_engine.__all__`, `decoy_engine.sdk.__all__` | `src/decoy_engine/sdk.py` | `tests/unit/test_sdk_smoke.py`, `tests/unit/test_public_api.py`, `accepted-known-limit: RGF1-KL-4` |

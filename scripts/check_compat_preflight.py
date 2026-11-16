@@ -23,23 +23,17 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
-# Frozen-surface paths (compatibility-contract section 3). Prefix match against
-# the repo-relative changed-file path. Extend as new artifact writers are added;
-# over-inclusion only asks for the checklist, it never silently passes.
-FROZEN_PREFIXES = (
-    "src/decoy_engine/vault.py",
-    "src/decoy_engine/unmask.py",
-    "src/decoy_engine/determinism/",
-    "src/decoy_engine/disguises/",
-    "src/decoy_engine/config.py",
-    "src/decoy_engine/config/",
-    "src/decoy_engine/sdk.py",
-    "src/decoy_engine/__init__.py",
-    "src/decoy_engine/run_result/",
-    "src/decoy_engine/reasons/",
-    "tests/snapshots/frozen_schemas/",
-)
+# Run by file path, so only scripts/ is on sys.path; the helper is imported from the root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.release.frozen_map import load_frozen_prefixes
+
+# Frozen-surface paths come from the map, docs/frozen-surfaces.md, the one list the map
+# sentry also reads. Prefix match against the repo-relative changed-file path; a row added
+# to the map is covered here with no second edit.
+FROZEN_PREFIXES = load_frozen_prefixes()
 
 # Distinctive fragments of each section-9 checklist item (lowercased). Each must
 # appear on a ticked checkbox line in the PR body.
