@@ -21,7 +21,7 @@ from decoy_engine.verification.postmask.runner import run_post_mask
 
 CANARY = "CANARY-7d3f"
 BASE = {
-    "schema_version": "post-scan-integrity/v2",
+    "schema_version": "post-scan-integrity/v3",
     "residual_pii": [],
     "fk_preservation": [],
     "policy_validation": [],

@@ -9,6 +9,146 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-16
+
+### Breaking for consumers
+
+- `run_pipeline_isolated` with an `output_dir` now binds a unit holding `_decoy_publication.json` (lock file `.<leaf>.decoy-lock` beside it), returns `already_committed` for a retry of the same result instead of failing, refuses a stage holding anything the child did not name, and reports a failed publication with the receipt's code (`publication_target_occupied` for a target holding something else) instead of `publication_failed`; the isolated `atomic_commit`, `stage_tables` and `sibling_staging_dir` helpers are removed
+- every directory the engine's reference sink publishes now holds `_decoy_publication.json`, its parent holds `.<leaf>.decoy-lock`, and a commit onto a target holding another result raises `PublicationRefused` instead of `OSError`
+- `joint_mask` output changes for null `key_by` values and for `mode: gen`, and `apply_joint_mask` takes a required `table` keyword
+- `ScratchArena.open(under=...)` is removed with no alias; call `ScratchArena.fresh(under=...)`
+- `decoy_engine.verification.postmask.post_scan_verdict` no longer takes `ner_blocked`; pass the run's `ner_findings` mode (`warn` or `fail`, default `warn`) instead, and expect the new reason code `post_scan/ner_blocked` for a blocking model finding
+- `run_pipeline_isolated` no longer writes `row_errors.json` into `output_dir`; read row errors from `IsolatedRunResult.row_errors`
+- the post-scan report is emitted as `post-scan-integrity/v3` (it was `post-scan-integrity/v2`) and allows `match_rate: null` for a classifier finding; a reader that checks the tag must accept v3, and the engine's own verdict reader still accepts v2 and v3
+
+### Changed (isolated route publishes through publish_unit, F22 c2, 2026-11-12)
+
+`run_pipeline_isolated` publishes `output_dir` through `publish_unit` in both modes and returns the receipt on `IsolatedRunResult.publication_receipt`; it takes `request=PublicationRequest(...)` (keyword) so a retry keeps its `operation_id`, and refuses a request carrying a vault. The isolated child stages owner-only Parquet files into a `publication` stage the parent opened beside `output_dir`, through the reference sink's write half (`StagedParquetWriter`): no descriptor, lock file or rename in the child, and its row errors travel in the result envelope. The parent admits exactly the tables the envelope names, each a regular file, refuses a child-written descriptor, an extra file, a directory, a link or a missing table with nothing bound, makes each admitted file `0600` and the stage `0700`, and lets `publish_unit` measure sizes, digests and row counts itself. The in-process fallback stages into its own `publication` stage and binds it the same way. A publication that does not commit is a `crashed` result whose `error` is `publication <outcome>: <code>` (plus the errno name) and whose F29 reason is the receipt's code. Payload source copies and the result envelope are written owner-only from creation, so the route works under a umask that strips owner bits. The unused `CommitError` class stays registered with the reason adapter.
+
+Behaviour changes on the isolated route: a target that already holds something else is refused with the pending reason `decoy.publication_target_occupied` (it was `decoy.publication_failed`); a publication that ends `commit_uncertain` is a `crashed` result that carries the receipt and an `unknown` publication state; `row_errors.json` is no longer written into `output_dir` when a run has row errors, because row errors now reach the caller only on `IsolatedRunResult.row_errors`; the lock file `.<staging>.decoy-lock` that the isolated child left beside `output_dir` since the sink began publishing is gone.
+
+### Changed (no-sink lazy input reaches the collector, RUN-STREAM E5a, 2026-11-15)
+
+A lazy source with no sink now runs the auto-chunk lane through `run_pipeline` and returns one resident output. `run_pipeline` keeps a routed lazy table lazy when its output stays resident only because no sink was supplied. The auto-chunk lane reads it in batches and returns the masked table in `ExecutionResult.outputs`, where the table used to be read whole first. Runs with validators, quarantine, a fidelity report, post-validation or declared casting still read the source whole, as before. On that lane, a table whose column types resolve only after more than one row group spills its held-back chunks into a private engine scratch directory, removed on every exit. `chunked_dispatcher_enabled=False` does not move this lane to the legacy masker, as on today's lazy sink lane.
+
+### Added (resume records and plan, F23 E2, 2026-11-16)
+
+`decoy_engine.delivery.resume` gains the two persisted records of a resume store and the keep or rerun decision. `RunRecord` (`decoy-resume-run/v1`, written once before any table) holds the run, invocation and operation ids, the route, the `RunFingerprint` and the chunked tables in order. `TableRecord` (`decoy-resume-table/v1`, written after a table's file is placed) holds the table's index and digests, the measured `Artifact`, `source_sha256` and the fingerprint digest. Both are canonical JSON, read by a strict reader (exact tag, every field, no unknown field, exact types, `re.fullmatch` shapes, relative paths, at most 64 KiB); a refusal is a `ValueError` naming a closed check token, `resume_record_refused:<check>`. `plan_resume` takes the stored record, the current fingerprint and table entries and one `TableCheck` per table, and returns a `ResumePlan` (`keep`, `rerun`, `warnings`) or raises `ResumeRefusedError` with `resume_fingerprint_changed` (naming the field, `tables` or `bindings`) or `resume_source_changed`. A kept table whose file no longer verifies is rerun with a `resume_checkpoint_invalid` warning. Nothing calls them yet. Also an internal move: the strict reader specs of the publication descriptor now live in `decoy_engine._canonical._strict_spec`, with no change to the descriptor format or its refusals.
+
+### Added (frozen-surface map and schema snapshots, REL-GATE RG-F1, 2026-11-15)
+
+`docs/frozen-surfaces.md` lists each surface that freezes at the D-4 engine release CLI 1.0.0 pins, with the code that owns it and the test that pins it; a sentry fails when a contract 3.1 tag or a public name has no row. The JSON schemas of `PipelineConfig` and `RunResult`, without their descriptions, are committed under `tests/snapshots/frozen_schemas/` and checked by `scripts/release/frozen_schemas.py --check`, which prints a file name and a JSON pointer, never a value. The compatibility pre-flight reads its frozen paths from that map, so it covers every owning path the map lists.
+
+### Changed (reference sink commits through publish_unit, F22 c1b, 2026-11-12)
+
+`ParquetTransactionalSink.commit()` now publishes through `publish_unit`: the staged tables are measured, judged under the destination lock and bound with one durable rename, with the `decoy-publication/v1` descriptor `_decoy_publication.json` inside the unit and the lock file `.<leaf>.decoy-lock` beside it. `commit()` returns a `CommitReceipt` (also on `sink.receipt`) for `published` and for `already_committed`, which a retry of the same result now gets instead of `OSError` 39; a target holding another result raises `PublicationRefused` (`publication_target_occupied`, or `publication_operation_conflict` for the same `operation_id`) and is never replaced; a failed rename raises `PublicationFailed`; a bound unit whose chain fsync failed raises `CommitUncertain`. Unit files are `0600` and directories `0700`. The sink takes `request=PublicationRequest(...)` (keyword) so a retry keeps its `operation_id`, refuses a request carrying a vault, and gains `reconcile()`, which seals an uncertain sink once its own result is bound and fsynced to the anchor. An empty commit binds a unit holding only the descriptor. The sink's F29 evidence follows its state (sealed `published`, uncertain `unknown`, refused, failed and aborted `not_published`). `ExecutionResult` and `GenerationResult` gain `publication_receipt`, set by `run_sequential`, `run_fk_out_of_core`, the full-frame streamed and mixed routes of `run_pipeline`, and streamed generation.
+
+### Added (model hits in the pre-scan, SCAN-ML M3a, 2026-11-16)
+
+`scan_sources` takes a keyword `pre_scan` (a `PreScanConfig`). With `classifier` or `ner` in its
+`detectors`, the scan loads those models strictly before the first table and records one
+`ModelHit` per column and detector in `TableScan.model_hits`. The classifier reads a 60-row
+subsample per column and a `high` or `review` band is a hit. NER scores free-text columns only and a
+hit carries a rate bucket (`<10%`, `10-50%`, `>=50%`). `ScanSet.detectors` lists each source that
+ran with its model id and version, and `scan-set/v1` gains `detectors` and a per-field `model_hits`,
+both additive: a record written earlier still validates and reads back with empty lists. The scan
+logs `pre_scan.detectors` and one `pre_scan.models` line per table on `decoy_engine.detectors`,
+counts only. The starter config ignores model hits until the suggestions land in a later slice.
+`pre_scan=None`, the default, runs the regex detectors as before.
+
+### Added (resident fallback and compiled-run evidence, RUN-STREAM E5, 2026-11-15)
+
+`run_pipeline` takes a keyword `resident_fallback` (default `False`). With `True` on a plain `auto` run, it reads whole, before routing, each caller `LazySource` it cannot keep lazy: vault runs, declared-casting tables, relationship jobs without a bounded route, and transform-bearing mask tables when the post-scan gate applies. `RouteSummary.native_executed` is true only when a column ran a compiled backend from the operator registry; an idle kernel or a Python-planned column reports false. The auto-chunk lane now collects a lazy source with no sink into one resident output.
+
+### Added (scratch native boundary, F25 S1b, 2026-11-12)
+
+`decoy_engine.fileaccess` exports `scratch_native(fn, *args, **kwargs)` and `scratch_native_iter(batches)`. `scratch_native` runs one DuckDB or pyarrow call on engine scratch and, under every policy, the ambient one included, turns a library failure into `FileAccessReadError("engine.scratch")` with no library text, cause or context. Memory failures and resource-errno `OSError`s keep their class, rebuilt without text that could carry a path or cell value where needed, and a file-access denial passes unchanged. `scratch_native_iter` applies the same mapping to each pull of a native batch iterator. No engine route calls either yet.
+
+### Changed (declared staging hands one scratch arena to the route, F25 S2a-1, 2026-11-12)
+
+A declared out-of-core job stages its typed copies into one scratch arena (a private child of the caller's `temp_dir`, ambient policy only, or in the system temp directory) and hands that arena to the route, so the copy and the route's spill sit in one root and count against one `temp_disk_budget_bytes`, under a strict file-access policy too. Each typed copy is created 0600 by the arena. The arena is removed when the job ends. The internal staging writer `stage_typed_sources` takes the arena or, for the subset stage until it moves onto the arena, a directory as before. The internal helper `scratch_root` is removed; `engine_scratch_root` stays with the subset stage as its only caller.
+
+### Changed (out-of-core scratch root on the arena, F25 S2a-1, 2026-11-12)
+
+`run_fk_out_of_core(temp_dir=...)` now runs in a fresh private (0700) scratch arena made inside the caller's directory, ambient policy only as before, and removes that arena when the run ends. The caller's directory keeps its own mode: it is no longer tightened to 0700, and one that already holds other files is no longer refused. A missing `temp_dir` is still created 0700. With no `temp_dir` the run opens its arena in the system temp directory. A symlinked `temp_dir` is followed, as the arena's own base open does.
+
+### Changed (out-of-core scratch subtrees made through the arena, F25 S2a-1a, 2026-11-12)
+
+The out-of-core route now makes its per-table relation, multi-parent merge, join and per-edge join directories as children of its scratch arena (0700 under any umask, read back before use), instead of leaving each callee to create them by path. Output bytes and scratch modes are unchanged; each table's join and merge directories now exist from the start of its pass, empty when unused. Callees not yet on the arena still receive these directories as paths.
+
+### Changed (scratch reader issued by the arena, F25 S2a-1b-i, 2026-11-12)
+
+The reader that serves engine scratch files (`ScratchAccess`) now lives with the scratch arena and is issued only by `ScratchArena.reader()`, on a descriptor of its own. Declared staging reads its typed copies through the arena's reader. The arena's transitional path adoption now accepts a path at or below a live issued root under every file access policy, as `open_protected_dir` does; any other path still needs the ambient policy. Output bytes are unchanged.
+
+### Changed (out-of-core key stager on the scratch arena, F25 S2a-1b-ii, 2026-11-12)
+
+The out-of-core masked-key stager now writes its narrow copy through the scratch arena (created 0600 by the arena, read back by component through the arena's reader, no path released), and the internal helper `scratch_access_for` is removed. Callers that still name the staged file by path have its directory adopted by the arena without being owned by it, so the run's own cleanup still removes it. A non-resource Parquet failure while staging now raises the value-free `FileAccessReadError("engine.scratch")`, as other scratch writes do. Output bytes are unchanged.
+
+### Changed (out-of-core DuckDB connections on the scratch arena, F25 S2a-1c-i, 2026-11-12)
+
+`connect_duckdb` now spills into a scratch arena directory: an arena child it is handed, or (transitionally) a path it adopts as one, made 0700 where missing and checked, never chmodded, where it exists. Building the connection goes through the scratch native boundary, so a DuckDB failure while connecting now raises the value-free `FileAccessReadError("engine.scratch")` instead of DuckDB's own error with its text; memory and resource-errno failures keep their class. An existing spill directory that is not owner-only is now refused (`ProtectedDirUnsafe`) instead of being chmodded to 0700. Output bytes are unchanged.
+
+### Changed (ScratchArena.open is now ScratchArena.fresh, F25, 2026-11-15)
+
+`ScratchArena.open(under=...)` is renamed `ScratchArena.fresh(under=...)`. The name `open` collided with the GCS `Blob.open` name the outbound client sentry matches, and an arena is not a GCS client. Behavior is unchanged; there is no alias for the old name (pre-GA hard rename).
+
+### Changed (reference sink state table, F22 c1a, 2026-11-12)
+
+`ParquetTransactionalSink` now moves every call through one state table (`decoy_engine.publication._sink_state`: open, writing, committing, recovering, sealed, uncertain, refused, failed, aborted), with the transition under one lock and the I/O outside it. After a commit the sink is sealed: a second `commit()` returns at once with no I/O and a `write` is refused with `publication_attempt_sealed` (it used to be accepted into a new stage whose commit then failed). A call that arrives while another is in flight is refused busy (`publication_write_in_progress`, `publication_commit_in_progress`); an `abort()` that arrives in flight is applied when that call ends. After a failed write or commit every call but `abort()` is refused, and after an abort every call is (`publication_attempt_aborted`). The write half is split out as `StagedParquetWriter`, which only stages Parquet files. The commit still publishes with the plain rename; the published output is unchanged.
+
+### Added (model findings in the post-scan, SCAN-ML M4, 2026-11-12)
+
+The post-scan runs the classifier and spaCy NER detectors a pipeline names in
+`post_scan.detectors`, after the regex detectors, over every output table. `run_post_mask` takes a
+keyword `detectors`; without it the post-scan runs the regex detectors only, as before.
+`run_pipeline` loads the requested models strictly at run start, so a model that cannot run
+refuses the run before any row is masked. A model finding names its `source`, the `model` that
+ran and a rate (NER) or a band (classifier), never a value; its severity comes from one table by
+the column's configured strategy, and classifier findings are never above `warning`. NER scores
+free-text columns only. Each model pass runs in its own `try`: a coded engine error propagates
+unchanged, and any other exception adds one `error` finding and keeps the regex findings.
+`post_scan.dismissed` entries lower the exact `warning` they name to `info`; a stale one is counted
+in the `post_scan.models` log line. Under
+`post_scan.ner_findings: fail` an NER warning becomes `fail` (`promoted`), and an NER `fail` or
+`error` makes `run_pipeline` raise `PostScanBlockedError`, now exported from `decoy_engine`, before
+it returns, so no output is published. The post-scan gate decides that block with the run's mode,
+and a deferred gate, whose column suite is otherwise report-only, still raises it and drops the run's quarantine file. `post_scan_verdict` takes the `ner_findings` mode in place
+of `ner_blocked`: a model finding blocks only through new reason code `post_scan/ner_blocked`,
+which ranks after every other code, and a classifier finding never blocks. The report gains
+`detectors`, `tables_checked` and `config_sha256`; the tag is `post-scan-integrity/v3`. The post-scan report is now `post-scan-integrity/v3`: v3 allows `match_rate: null` for a classifier finding, whose band is in its own field, and readers of v2 are unaffected (the engine's verdict reader accepts both).
+The regex-only hook, `run_post_mask` with `detectors=None`, now honours `post_scan.dismissed`: a
+matching regex `warning` is reported as `info` with `dismissed: true`.
+
+### Added (publish_unit judge and bind, F22 a3, 2026-11-12)
+
+`decoy_engine.publication.publish_unit(out, txn, request, tables=[...])` binds an `immutable_directory/v1` output unit under the destination lock: it reads the bound `_decoy_publication.json`, measures the staged Parquet tables itself (size, SHA-256, footer row count), judges, and only then writes the descriptor and publishes the `publication` stage durably. The same result already bound gives `already_committed` after the unit tree and its directory chain are fsynced; the same `operation_id` with a different result gives `operation_conflict`; a different result, files without a descriptor, or an unreadable, oversized or malformed descriptor is refused with `publication_target_occupied`, and the bound unit is never replaced or merged into. `publish_tables(out, {name: table}, request)` is the resident entry. Every exit is a value-free `CommitReceipt`; `raise_for_outcome` turns a receipt into `PublicationRefused`, `PublicationFailed` or `CommitUncertain`. Thirteen reasons in the `decoy` namespace, all pending release: `decoy/publication_attempt_aborted`, `decoy/publication_attempt_sealed`, `decoy/publication_commit_in_progress`, `decoy/publication_commit_not_visible`, `decoy/publication_commit_uncertain`, `decoy/publication_lock_timeout`, `decoy/publication_lock_unavailable`, `decoy/publication_operation_conflict`, `decoy/publication_recovery_in_progress`, `decoy/publication_target_occupied`, `decoy/publication_vault_conflict`, `decoy/publication_vault_mismatch`, `decoy/publication_write_in_progress`. `CommitUncertain`, `LockUnavailable`, `LockTimeout` and `LeafTooLarge` now map to registered reasons. A request carrying a vault is not accepted yet.
+
+### Added (publication descriptor and receipt types, F22 a2, 2026-11-12)
+
+New package `decoy_engine.publication` with the `decoy-publication/v1` descriptor (`_decoy_publication.json`): canonical JSON in the engine's one canonical form, `canonical_json_bytes` (sorted keys, fixed separators, UTF-8 text as-is) holding `schema`, `unit` (`immutable_directory/v1`), `operation_id`, `result_id`, the sorted artifacts (`path`, `role`, `rows`, `sha256`, `size`), the vault (`null` or `sha256`, `size`, `entry_count`) and `engine_version`. `result_id` is a domain-separated SHA-256 of the canonical artifact list only. One field declaration drives the writer (`build_descriptor`, `encode_descriptor`) and the strict reader (`decode_descriptor`), which refuses a missing or unknown schema, missing or unknown fields, any non-exact JSON type (a `bool` is never a count), negative or oversized counts, unknown tokens, any digest or `operation_id` that does not `re.fullmatch` its shape (a trailing newline included), duplicate keys, non-finite numbers, absolute or `..` paths, unsorted artifacts, a `result_id` that does not recompute, non-canonical bytes and anything over 1 MiB, with a `ValueError` naming a closed check token only. Also `PublicationRequest`, `CommitReceipt`, `ArtifactSummary` and `VaultBinding`, each shape-checked when built. Nothing calls them yet; publishing with the descriptor arrives in a later slice.
+
+The descriptor bytes and the `result_id` input use `decoy_engine._canonical.canonical_json_bytes`, the one canonical JSON owner (D3), instead of an ASCII-escaped form, so a non-ASCII artifact path is written as UTF-8; an artifact path with no UTF-8 form (an undecodable filename byte) is refused as `not_canonical`.
+
+### Added (durable directory publish, destination lock and member reads, F22 a1b, 2026-11-11)
+
+`fileaccess` gains the `publication` stage label. On Linux and macOS, on both the ambient and strict policies, a `publication` directory stage keeps its pending name `._decoy_publication_pending_<token>` for its life, its files are 0600 (owner bits restored when the umask stripped them), and `publish()` is durable: every staged file and directory is fsynced deepest first, the stage is renamed onto the leaf, then the parent (the commit point) and each directory above it are fsynced up to and including the anchor (the strict capability root; on the ambient policy the mount boundary). A failure before the rename raises with the errno only and keeps the stage for `abort()`; a failure after it raises the new `CommitUncertain` with the leaf bound and kept. On the ambient policy an unreadable directory above the ones this attempt created ends the walk only when another uid owns it. `OutputDir` gains `lock(timeout_s)` (`flock` on `.<leaf>.decoy-lock` beside the leaf, never unlinked; `LockTimeout`, or `LockUnavailable` with no lock-free fallback), `read_member(component, limit=)` (bounded, `None` when absent, `LeafTooLarge` over the limit) and `sync_chain()`. The new errors carry an errno name only, with no cause or context, and map to three new `decoy` reasons, all pending release: `decoy/publication_commit_uncertain`, `decoy/publication_lock_timeout` and `decoy/publication_lock_unavailable`; `LeafTooLarge` maps to `decoy.publication_failed`. A publication destination leaf is at most 243 bytes (255 less the lock name's 12), so its lock name fits one component: `lock()` and `begin(..., label="publication")` deny a longer leaf with `FileAccessDenied` before any I/O, on both policies. A strict `begin` that cannot make its stage directory closes every descriptor it opened, and the ambient `sync_chain()` mount-boundary probe keeps only its errno. Other labels and Windows are unchanged.
+
+### Changed (one seed form for joint_mask streams and composite specs, DUP-FREEZE-E2, 2026-11-14)
+
+- Breaking, pre-GA: the two seeded `joint_mask` streams no longer start from the first 8 bytes of the job seed. The null-key fallback of mask mode and the whole of gen mode now derive their NumPy seed from `derive(job_seed, namespace, source)`, where the source is a label, then the length-prefixed table name, reference name and `\x1f`-joined target columns. Before, every `joint_mask` group of a run, in every table, walked one stream and picked the same reference row index, so two groups with disjoint columns on one reference were coupled row for row. Rows that use a non-null `key_by` value are byte-identical to before (the keyed path is unchanged). Output moves for rows with a null `key_by` and for every row of a `mode: gen` group. `apply_joint_mask` takes a required keyword-only `table`, which the strategy handler fills from the context table; an empty name is a `ValueError`, since it would put every group on one stream. `joint_mask` stays off the chunked and out-of-core routes (it is declined with `out_of_core_cross_row_strategy_unsupported`), so gen mode has one route.
+- `decoy_engine.determinism` gains `seed_bytes_to_int`, `resolve_seed` and `fresh_seed` (`determinism/_seeds.py`). `seed_bytes_to_int` takes exactly 8 bytes and is the one conversion from seed bytes to a NumPy seed integer; it replaces the private copy in the pool sampler and a `ValueError` (no seed text) replaces that copy's `GenerationError` for a wrong width.
+- A composite generator resolves its seed once per call. `generate_bundle` and `build_pool` of `composite_address`, `composite_city_state_zip`, `composite_custom`, `composite_name_email`, `composite_person` and `composite_provider` run `resolve_seed(spec.seed)` first and pass that spec to every draw, so the street pool, the bundle build, `BundlePool.seed` and the sample of one call share one seed. A spec with no seed gets one fresh 8-byte seed per call instead of an all-zero seed for the pools and a separate `os.urandom(8)` for the sample. A spec that carries an 8-byte job seed or the 32-byte deterministic mask key is byte-identical to before. Each composite caches its pools by the seed they were built with, so a second call on one instance with a different seed equals a fresh instance.
+- The native mirror `CompositeBuildPoolProvider.generator` needs an 8-byte seed and no longer maps a missing seed to zeros.
+- Draw-site catalogue: `mask.joint_mask_null_fallback` and `mask.joint_mask_gen_row` join `mask.joint_mask_keyed_row`, each with one provider that reproduces the source bytes. `gen.composite_build_pool` names `resolve_seed(spec.seed)` in its seed text. `SEED_PROTOCOL_VERSION` and every `derive` input layout are unchanged; the two new sources are new inputs to `derive`.
+
+### Added (lazy source builder, RUN-STREAM-E4, 2026-11-15)
+
+`decoy_engine.profile.build_lazy_source(table, descriptor)` returns the lazy backend for a local source: `LazySource` for Parquet, `CsvLazySource` for CSV, `FixedWidthLazySource` for fixed-width. It returns `None` for a compressed CSV, a cloud source and an unknown format, so a caller keeps its resident read. Building opens no data row and names `sources.<table>.path` in a refusal. The resident source builder now reads the same one format table, so a new format is added in one place.
+
+### Added (lazy fixed-width source, SAMPLE-SE3b, 2026-11-14)
+
+`decoy_engine.profile.FixedWidthLazySource` reads a fixed-width file as bounded Arrow batches behind the `LazySource` surface, through the one fixed-width record parser. The schema comes from the layout, the row count is one framing pass, and a file that changes between the count and the read is refused with `runtime.lazy_source_changed`. Nothing in the run path uses it yet; it is the fixed-width backend for the stream route.
+
 ### Changed
 
 - The README install section now says the engine ships inside the `decoy` CLI bundle and that a public `decoy-engine` package comes later; it no longer offers `pip install decoy-engine`. A test pins the wording.
