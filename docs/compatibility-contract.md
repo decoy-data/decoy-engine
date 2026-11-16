@@ -83,6 +83,17 @@ value raises `ExecutionError` (`invalid_execution_knob`) before any read. `decoy
 `materialization_check` stage-transfer field (never an output). A config with no `subset:` block behaves
 exactly as before.
 
+**Pre-GA additive keyword with RUN-STREAM E5 (2026-11-15).** `run_pipeline(..., resident_fallback: bool =
+False)` is keyword-only (47 frozen parameters). With `True` on a plain `auto` run, the run reads whole,
+before routing, each caller `LazySource` it cannot keep lazy (a vault run, a declared-casting table, a
+relationship job without a bounded route, a transform-bearing mask table under a post-scan gate), so the
+route and the post-scan verdict are those of a run handed those tables resident. `False` disables that
+pre-pass for every other caller. It is a no-op under `execution_mode="stream"`, an explicit route and a
+tokenize job. The pre-pass is private: nothing is added to `decoy_engine.execution.pipeline` or the engine
+root. `RouteSummary` gains `native_executed: bool | None`, true only when an executed column ran a compiled
+backend from the operator registry. The no-sink lazy auto-chunk lane returns one resident output with either
+keyword value.
+
 **Pre-GA additive fields with SAMPLE SE2 (2026-11-12).** `ExecutionResult.sample_source_rows: dict[str, pa.Table] | None`
 (default `None`, hidden from `repr`, not compared) holds the first kept source rows per table, only for a sample
 request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`, `roots`, `head_tables`,
