@@ -193,7 +193,12 @@ unit, its bytes and its inode numbers are unchanged. A zero-table publish binds 
 only its descriptor, so an empty unit is never silently replaced either. Every exit but a bind
 aborts the stage.
 
-Every exit is a `CommitReceipt`:
+Every exit is a `CommitReceipt`, once the arguments are accepted. An argument error is raised, not
+returned: a `ValueError` from `build_descriptor`, a `FileAccessDenied` for a bad component name,
+and a `ValueError` for a stage that is not a `publication` directory stage of the same
+`OutputDir`.
+
+The exits:
 
 | Exit | `outcome` | `reason_code` | `visible` | `durable` |
 |---|---|---|---|---|

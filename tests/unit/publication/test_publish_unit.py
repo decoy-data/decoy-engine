@@ -132,6 +132,48 @@ def test_refused_overwrite_survivor(base: Path, policy: str, prior: str) -> None
         close_root(root_fd)
 
 
+@pytest.mark.parametrize("policy", POLICIES)
+def test_refuses_a_stage_that_is_not_a_publication_directory(
+    base: Path, policy: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.publication import PublicationRequest, publish_unit
+
+    parent = base / "a"
+    parent.mkdir()
+    out, root_fd = make_out(policy, base, "a/out")
+    try:
+        txn = out.begin("dir", "exclusive", label="table_sink")
+        with pytest.raises(ValueError):
+            publish_unit(out, txn, PublicationRequest("op-1"), tables=[])
+        assert sorted(parent.iterdir()) == []  # the stage was aborted, nothing bound
+        with pytest.raises(Exception):
+            txn.publish()  # an aborted stage cannot be published afterwards
+    finally:
+        close_root(root_fd)
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_refuses_a_stage_of_another_output_dir(
+    base: Path, policy: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.publication import PublicationRequest, publish_unit
+
+    (base / "a").mkdir()
+    (base / "b").mkdir()
+    out, root_fd = make_out(policy, base, "a/out")
+    other, other_fd = make_out(policy, base, "b/out")
+    try:
+        txn = other.begin("dir", "exclusive", label="publication")
+        with pytest.raises(ValueError):
+            publish_unit(out, txn, PublicationRequest("op-1"), tables=[])
+        assert sorted((base / "a").iterdir()) == []
+        assert stages_left(base / "b") == []  # the foreign stage was aborted, not bound
+        assert not (base / "b" / "out").exists()
+    finally:
+        close_root(root_fd)
+        close_root(other_fd)
+
+
 @pytest.mark.parametrize("case", sorted(EXITS))
 @pytest.mark.parametrize("policy", POLICIES)
 def test_exit_matrix_publish(
