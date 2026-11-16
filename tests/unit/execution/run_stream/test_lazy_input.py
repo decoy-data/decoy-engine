@@ -917,6 +917,7 @@ class _ScratchSpy:
         self.arenas: list[Any] = []
         self.scratches: list[Any] = []
         self.fresh_calls = 0
+        self.opener_calls = 0
         self.holds: list[tuple[Path, int]] = []
         self.writes = 0
         real_open = ScratchArena.fresh.__func__  # type: ignore[attr-defined]
@@ -939,6 +940,7 @@ class _ScratchSpy:
                 if opener is not None:  # the output-mode probe's stand-in sink takes none
 
                     def recording() -> Any:
+                        spy.opener_calls += 1
                         arena = opener()
                         spy.scratches.append(arena)
                         return arena
@@ -1058,6 +1060,8 @@ def test_a_win32_host_refuses_a_spilling_lazy_run_at_the_spill(
     monkeypatch.setattr(_scratch, "sys", _Win32)
     with pytest.raises(FileAccessUnavailable):
         _spill_run(cfg, LazySource(path))
+    # An eager open refuses inside `_collector`, before any sink exists to call the opener.
+    assert spy.opener_calls == 1
     assert spy.writes == 0 and spy.arenas == []
 
 
