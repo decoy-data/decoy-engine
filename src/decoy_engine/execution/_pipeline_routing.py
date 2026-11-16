@@ -162,7 +162,7 @@ class BoundedAdmission:
     """Whether a relationship mask job has a bounded route, and the signals behind the answer.
 
     `admitted` is the one decision the resident-fallback pre-pass takes. Its signals come from the
-    router's own functions, so the pre-pass and `resolve_execution_route` cannot drift apart."""
+    router's own functions; a parity test holds it equal to `resolve_execution_route`."""
 
     eligible: bool
     cyclic: bool
@@ -194,7 +194,7 @@ def bounded_admission(
 ) -> BoundedAdmission:
     """The bounded-route admission for one job: sequential eligibility, the cross-table cycle
     test, out-of-core admission with the transform decline, and the FK dtype hazard, each from
-    its existing owner. Side-effect free; reads no data row.
+    its existing owner. Reads no data row (it may open a file footer for the row count).
 
     Off the relationship-with-a-mask-table shape no bounded route applies, so the result is the
     inert not-compatible one, as `out_of_core_routing_signals` reports."""

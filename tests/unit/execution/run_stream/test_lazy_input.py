@@ -257,7 +257,7 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
         if isinstance(n, ast.Call)
     }
     imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
-    # The four routing rules are one function in the routing signals, not a copy here.
+    # The five routing rules are one composition in `_pipeline_routing`, not a copy here.
     assert "bounded_admission" in called
     owners = {
         "compile_declared_casting_contract",

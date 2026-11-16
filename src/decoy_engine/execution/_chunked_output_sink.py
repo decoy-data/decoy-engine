@@ -449,8 +449,8 @@ def _cast(chunk: pa.Table, schema: pa.Schema) -> pa.Table:
 class _Spill:
     """Held-back chunks beyond one row group, one Arrow IPC file each in a private scratch
     stage beside the sink's own staging directory. The stage is a policy-issued output
-    transaction, so a strict policy decides where spilled rows may land and `TMPDIR` is never
-    consulted. Read back through the stage, not a memory map, so pages do not stay resident.
+    transaction, so a strict policy decides where spilled rows may land (`TMPDIR` only for the
+    no-sink collector's scratch). Read back through the stage, not a memory map, so pages do not stay resident.
     A sink holding a `spill_scratch` capability (the no-sink collector) gets a child of it."""
 
     def __init__(self, stats: StreamStats, sink: Any, table: str) -> None:
