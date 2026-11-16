@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess, reasons
@@ -610,10 +612,31 @@ def test_the_control_vault_built_from_chunks_reads_as_own() -> None:
     assert _vault_order.same_rows(blob, writer()) is True
 
 
+_NAMES = ("namespace", "masked", "source")
+
+
+def _arrow_payload(columns: dict[str, Any]) -> bytes:
+    buf = pa.BufferOutputStream()
+    pq.write_table(pa.table(columns), buf)
+    return buf.getvalue().to_pybytes()
+
+
 _MALFORMED_PAYLOADS = {
     "not parquet": b"not a parquet file",
     "wrong schema": _parquet(_SAME, names=("namespace", "masked", "other")),
     "missing columns": _parquet([("a",)], names=("namespace",)),
+    "int64 columns": _arrow_payload({n: pa.array([1, 2], type=pa.int64()) for n in _NAMES}),
+    "null-typed column": _arrow_payload(
+        {"namespace": pa.array(["ns", "ns"]), "masked": pa.nulls(2), "source": pa.array(["a", "b"])}
+    ),
+    "null values": _arrow_payload(
+        {
+            "namespace": pa.array(["ns", "ns"]),
+            "masked": pa.array(["m1", None], type=pa.string()),
+            "source": pa.array(["a", "b"]),
+        }
+    ),
+    "reordered columns": _arrow_payload({n: pa.array(["x", "y"]) for n in reversed(_NAMES)}),
 }
 
 

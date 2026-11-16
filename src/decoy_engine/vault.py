@@ -114,7 +114,7 @@ _CHUNK_ROWS = 65536
 _INSTALL_HINT = "pip install 'decoy-engine[vault]'"
 
 
-_COLUMNS = ("namespace", "masked", "source")
+_SCHEMA = pa.schema([(n, pa.string()) for n in ("namespace", "masked", "source")])
 
 
 def _unreadable(message: str) -> VaultError:
@@ -587,7 +587,8 @@ def load_vault(
         rows = None  # the raise is outside the `except`, so no cause or context carries values
         try:
             chunk = pq.read_table(pa.BufferReader(payload))
-            rows = list(zip(*(chunk.column(c).to_pylist() for c in _COLUMNS), strict=True))
+            if chunk.schema.equals(_SCHEMA) and not any(c.null_count for c in chunk.columns):
+                rows = list(zip(*(c.to_pylist() for c in chunk.columns), strict=True))
         except (pa.ArrowException, KeyError, ValueError):
             pass
         if rows is None:
