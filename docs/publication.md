@@ -124,7 +124,7 @@ filename gives) is refused as `not_canonical` by the writer and the reader.
 | `unit` | `"immutable_directory/v1"` |
 | `operation_id` | the caller's id, `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}` |
 | `result_id` | 64 lowercase hex digits |
-| `artifacts` | array sorted by `path`, paths unique; each `{path, role, rows, sha256, size}` |
+| `artifacts` | array sorted by `path` in Unicode code point order, paths unique; each `{path, role, rows, sha256, size}` |
 | `vault` | `null`, or `{sha256, size, entry_count}` |
 | `engine_version` | the writing engine's version |
 
