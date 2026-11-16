@@ -505,6 +505,29 @@ this stack does not touch); `benchmark` and `codspeed` (manual performance lanes
 `compat-preflight` and `regression-proof` (pull-request checks that read the PR body or a
 `bugfix` label).
 
+## Main merge (2026-11-16, `ddd014a5`), carried forward
+
+`origin/feat/gen-inherit-e2` `92bee24e` merged into `5aa93830` as `9ecfa437`, without a
+conflict. It carries `origin/main` `ddd014a5` (release 0.27.0 and the twelve commits after
+`1c8e413c`: publication judge and bind, the sink state table, `publish_unit` through the sink and
+the isolated route, resume store records, the pre-scan model pass, lazy-input streaming, the
+scratch arena move and the frozen-surface map). Main does not touch the draw-site catalogue,
+`.importlinter`, `testflight/` or any of the files the 15 mutations anchor in, so the run on
+`a27a82c5` stands. Of this slice's files main touches `docs/proof-manifest.json` (the engine
+version), `CODEMAP.md` and the physical-seam sentry (its own run-stream entries); each merged
+beside this slice's lines. The release consumed main's changelog fragments; this chain's seven
+fragments are kept. gen-rel-e1 rewords two `generation/_streamed.py` comments to hold the module
+at 600 lines once main's `publication_receipt` field meets that slice's reference policy.
+
+Checks on `9ecfa437`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
+`tests/sentry` 5985 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with this chain's changed test files, the two draw-site catalogue tests and the fan-out sentry:
+5112 passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main
+ddd014a5`, `ratchet_check.py --base ddd014a5`, `check_fragment.py --base ddd014a5`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 597 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules. Not run on this
+head: the full T1 gate, mutations and the full suite.
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
