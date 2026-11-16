@@ -38,7 +38,7 @@ strategy the classifier does not recognise is treated as keyed.
 | KEY-02 | Same job with a different secret. | Every hashed value differs. |
 | KEY-03 | Same job, same secret, different `seed`. | Hashed and FPE values are unchanged. Only seed-driven columns move. |
 | KEY-04 | Two tables, the same value in columns sharing a namespace; then the same value under two namespaces. | First pair matches. Second pair differs. |
-| KEY-05 | `hash` column with no secret configured at all. | Refused with `runtime.keyed_strategy_requires_secret` before any source is read. |
+| KEY-05 | `hash` column, then a `date_shift` column, with no secret configured at all. | Refused with `runtime.keyed_strategy_requires_secret` before any source is read. |
 | KEY-06 | `mask_secret_ref: env:NAME` with the variable unset; then set to a 16-byte value. | `runtime.missing_mask_secret`; then `runtime.weak_mask_secret`. |
 | KEY-07 | `mask_secret_ref: ftp:something`; then a malformed `env:` reference containing a recognisable string. | `runtime.secret_provider_unknown`; then `runtime.bad_secret_ref`. The reference text is not repeated in the error. |
 | KEY-08 | Pass `SeedKeyProvider` as `key_provider` for a keyed job. | Refused with `runtime.keyed_strategy_requires_secret`. |
@@ -50,11 +50,6 @@ strategy the classifier does not recognise is treated as keyed.
 
 ## Open points
 
-- `docs/determinism.md` still says that with no provider configured `mask_key` falls
-  back to `job_seed`. `docs/security/key-derivation.md` and
-  `docs/security/secret-providers.md` say that fallback was removed and a keyed plan
-  with no secret is refused in every phase. KEY-05 assumes the second. Fix whichever doc
-  is stale.
 - `examples/runnable_demo.py` uses FPE and the token vault. Confirm it supplies a secret;
   if it relies on the removed fallback it no longer runs.
 - `docs/determinism.md` says deterministic `shuffle` needs a namespace and the default

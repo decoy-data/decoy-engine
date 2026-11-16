@@ -37,7 +37,8 @@
             "post_validation",
             "post_scan_integrity",
             "fidelity",
-            "native_post_run"
+            "native_post_run",
+            "scan_drift"
           ],
           "title": "Id",
           "type": "string"
