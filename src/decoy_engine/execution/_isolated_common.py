@@ -32,7 +32,7 @@ import signal
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import duckdb
 import pyarrow as pa
@@ -41,8 +41,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._isolated_memwatch import MemoryEvidence
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution._transactional_sink import StagedParquetWriter
-from decoy_engine.fileaccess import OutputTxn
-from decoy_engine.fileaccess._local import _LocalStageDir
+from decoy_engine.fileaccess import handed_stage_dir
 from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.validation_result import CODES
@@ -456,9 +455,9 @@ class StagingSink:
         os.makedirs(self._dir, exist_ok=True)
         # The parent made this stage (or names one in its own scratch); the child only adds
         # files to it, so it holds the stage by path rather than through an output capability.
-        self._stage = _LocalStageDir(self._dir, "isolated.staging", private=True)
+        self._stage = handed_stage_dir(self._dir, "isolated.staging")
         # The writer only creates, opens and removes stage files: the `StageDir` half.
-        self._writer = StagedParquetWriter(lambda: cast(OutputTxn, self._stage))
+        self._writer = StagedParquetWriter(lambda: self._stage)
         self.publication_evidence = self._writer.publication_evidence
 
     @property
