@@ -373,7 +373,7 @@ class TestUnmappedNerDetector:
         with pytest.raises(StrategyError) as exc:
             TextMaskHandler().run(df.copy(), "cell", seed, _FakeCtx())
         err = exc.value
-        assert err.code == "mask.text_mask_strategy_unsupported"
+        assert err.code == "unsupported_strategy"
         assert _UNKNOWN_MARKER not in str(err)
         assert err.__cause__ is None and err.__context__ is None
 

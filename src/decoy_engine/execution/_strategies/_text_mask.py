@@ -243,7 +243,7 @@ class TextMaskHandler:
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
             raise StrategyError(
-                code=reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED,
+                code=reasons.runtime.UNSUPPORTED_STRATEGY,
                 strategy="text_mask",
                 message=f"column {column!r}: a span's detector cannot take its strategy.",
             )

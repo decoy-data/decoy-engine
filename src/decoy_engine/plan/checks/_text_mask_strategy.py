@@ -13,6 +13,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.checks._generate_columns import _located
 from decoy_engine.transforms.text_mask import (
     SELECTABLE_TEXT_MASK_DETECTORS,
     TEXT_MASK_STRATEGY_DETECTORS,
@@ -22,9 +23,8 @@ from decoy_engine.transforms.text_mask import (
 __all__ = ["check_text_mask_strategies"]
 
 
-def _refuse(code: str, path: str, detail: str) -> PlanCompileError:
-    summary = reasons.lookup(code)[0].summary
-    return PlanCompileError(code=code, path=path, message=f"{summary} {detail}")
+def _refuse(code: Any, path: str, detail: str) -> PlanCompileError:
+    return _located(str(code), path, detail)
 
 
 def _shown(item: Any) -> str:
@@ -47,13 +47,13 @@ def check_text_mask_strategies(config: dict[str, Any]) -> None:
 
 
 def _check_column(pc: dict[str, Any], where: str, label: str) -> None:
-    code_unknown = str(reasons.config.MASK_TEXT_MASK_DETECTOR_UNKNOWN)
-    code_unsupported = str(reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED)
+    code_unknown = reasons.config.MASK_TEXT_MASK_DETECTOR_UNKNOWN
+    code_unsupported = reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED
     selectors = pc.get("detectors")
     for det in selectors if isinstance(selectors, (list, tuple)) else []:
         if not isinstance(det, str) or det not in SELECTABLE_TEXT_MASK_DETECTORS:
             raise _refuse(
-                code_unknown, f"{where}.provider_config.detectors", f"At {label}: {_shown(det)}."
+                code_unknown, f"{where}.provider_config.detectors", f"{label}: {_shown(det)}"
             )
     overrides = pc.get("per_detector_strategy")
     for det, strategy in (overrides if isinstance(overrides, dict) else {}).items():
@@ -61,10 +61,10 @@ def _check_column(pc: dict[str, Any], where: str, label: str) -> None:
             f"{where}.provider_config.per_detector_strategy.{det if isinstance(det, str) else '?'}"
         )
         if not isinstance(det, str) or det not in TEXT_MASK_STRATEGY_DETECTORS:
-            raise _refuse(code_unknown, path, f"At {label}: {_shown(det)}.")
+            raise _refuse(code_unknown, path, f"{label}: {_shown(det)}")
         if not isinstance(strategy, str) or not strategy_supported(det, strategy):
             raise _refuse(
                 code_unsupported,
                 path,
-                f"At {label}: detector {det!r}, strategy {_shown(strategy)}.",
+                f"{label}: detector {det!r}, strategy {_shown(strategy)}",
             )
