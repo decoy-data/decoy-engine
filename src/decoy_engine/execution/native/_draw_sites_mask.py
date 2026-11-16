@@ -131,7 +131,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.date_shift",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_date_shift.py:301",
+        call_site="execution/_strategies/_date_shift.py:303",
         entropy_root="mask_key",
         seed_derivation=(
             "min_days + (int.from_bytes(derive(mask_key, namespace, value)[:8], "
@@ -141,16 +141,16 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
         call_shape="per-value integer day offset in [min_days, max_days]",
         consumes_variable_draws=False,
         identity="source_value",
-        null_draw_behavior="unparseable/null dates returned unchanged; no draw",
+        null_draw_behavior="null dates unchanged; unparseable cells record a format_error row error; no draw",
         partitionable=True,
         config_fingerprint_source="namespace_registry(namespace)+min_days+max_days",
         provider_version=_V6,
         notes=(
             "Execution handler derives the offset via derive(mask_key, namespace, "
-            "value) (execution/_strategies/_date_shift.py:301). The mask key is the "
+            "value) (execution/_strategies/_date_shift.py:303). The mask key is the "
             "admitted secret; there is no key-free path."
         ),
-        mirror_call_sites=("execution/_strategies/_date_shift.py:198",),
+        mirror_call_sites=("execution/_strategies/_date_shift.py:303",),
     ),
     DrawSite(
         draw_site_id="mask.bucket_perturb",
