@@ -16,9 +16,8 @@ vaulted source value. A vault is never keyed on the public job seed:
 every key that writes, opens or is matched against a vault must be the
 32-byte mask root, checked at construction and again at every write,
 load and key-match, because an 8-byte public seed gives a KDF nothing to
-amplify. Store the vault and
-the config separately, with the handling the source data itself would
-get; never ship a vault alongside its masked output. The encryption is
+amplify. Store the vault and the config separately, with the handling the
+source data itself would get; never ship a vault alongside its masked output. The encryption is
 Fernet from the `cryptography` package (AES-128-CBC + HMAC-SHA256,
 encrypt-then-MAC, per the published Fernet spec) -- an audited AEAD
 construction rather than anything hand-rolled, per the engine's
@@ -43,18 +42,15 @@ another. The `decoy-vault/v2` file format stamps that version in its
 unencrypted header, so a cross-version load fails with a clear
 `vault_protocol_version_mismatch` rather than an opaque key error.
 
-File format (`decoy-vault/v2`). Magic, then a length-prefixed
-unencrypted JSON header (`format`, `seed_protocol_version`,
-`ambiguous_dropped`, chunk framing), then a sequence of length-prefixed
-Fernet tokens, one per bounded chunk of sorted entries. Each chunk is
-serialized + encrypted independently (F13), so the full plaintext table
-is never held as one serialized blob before encryption.
+File format (`decoy-vault/v2`). Magic, then a length-prefixed unencrypted JSON header (`format`,
+`seed_protocol_version`, `ambiguous_dropped`, chunk framing), then a sequence of length-prefixed
+Fernet tokens, one per bounded chunk of sorted entries. Each chunk is serialized + encrypted
+independently (F13), so the full plaintext table is never held as one serialized blob before
+encryption.
 
-Determinism boundary. Vault CONTENTS are a pure function of (config,
-sources): entries are sorted before serialization. The vault FILE is
-not byte-reproducible because Fernet embeds a random IV and a
-timestamp; reproducibility contracts apply to masked outputs, never to
-this artifact.
+Determinism boundary. Vault CONTENTS are a pure function of (config, sources): entries are sorted
+before serialization. The vault FILE is not byte-reproducible because Fernet embeds a random IV and
+a timestamp; reproducibility contracts apply to masked outputs, never to this artifact.
 
 Ambiguity. Pooled strategies may map two source values to one masked
 value (e.g. `cardinality_mode: reuse` faker with a small pool). A
@@ -588,11 +584,14 @@ def load_vault(
                     "of the run that wrote it."
                 ),
             ) from exc
+        rows = None  # the raise is outside the `except`, so no cause or context carries values
         try:
             chunk = pq.read_table(pa.BufferReader(payload))
             rows = list(zip(*(chunk.column(c).to_pylist() for c in _COLUMNS), strict=True))
         except (pa.ArrowException, KeyError, ValueError):
-            raise _unreadable("vault chunk is malformed") from None
+            pass
+        if rows is None:
+            raise _unreadable("vault chunk is malformed")
         known = len(mapping)
         mapping.update({(ns, m): src for ns, m, src in rows})
         if len(mapping) != known + len(rows):  # the writer folds duplicates, so one is corruption
