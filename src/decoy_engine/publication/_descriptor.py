@@ -10,8 +10,9 @@ as Git names an object by its bytes: a domain-separated SHA-256 of the canonical
 It leaves out ``operation_id`` (the retry handle, Delta Lake's transaction identifier) and the
 vault, which is judged by its rows, never by a digest of them.
 
-One declaration (``DESCRIPTOR_FIELDS`` and the two nested ones) drives both directions, so the
-writer cannot emit what the reader refuses. The reader is the persisted-reader contract: exact
+One declaration (``DESCRIPTOR_FIELDS`` and the two nested ones, built from the shared specs in
+``decoy_engine._canonical``) drives both directions, so the writer cannot emit what
+the reader refuses. The reader is the persisted-reader contract: exact
 version tag, every field present, no unknown field, exact built-in JSON types (``bool`` is never
 an ``int``), bounded counts, closed tokens, ``re.fullmatch`` shapes, relative paths through the
 engine's one component validator, no duplicate key, no non-finite number, canonical bytes, a
@@ -27,16 +28,26 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Any, Final, Literal, NoReturn, Protocol, cast
+from typing import Any, Final, Literal, NoReturn, cast
 
 from decoy_engine._canonical import (
     CanonicalJsonError,
-    StrictJsonError,
+    CountSpec,
+    ExactSpec,
+    ListSpec,
+    NullableSpec,
+    ObjectSpec,
+    OneOfSpec,
+    RelPathSpec,
+    ShapedSpec,
+    Spec,
+    attempt,
     canonical_json_bytes,
-    strict_json_loads,
+    parse_or_token,
 )
 from decoy_engine.fileaccess import is_valid_component
 from decoy_engine.publication._types import (
+    MAX_COUNT,
     OPERATION_ID_PATTERN,
     ROLES,
     UNIT_IMMUTABLE_DIRECTORY,
@@ -44,7 +55,6 @@ from decoy_engine.publication._types import (
     ArtifactSummary,
     Role,
     Unit,
-    is_count,
     is_hex64,
     is_operation_id,
 )
@@ -144,180 +154,49 @@ class Descriptor:
     engine_version: str
 
 
-class _Spec(Protocol):
-    def load(self, raw: Any) -> Any: ...
-    def dump(self, value: Any) -> Any: ...
-    def describe(self) -> str: ...
+def _load(spec: Spec, raw: Any) -> Any:
+    """``spec.load``; a spec's closed token becomes the descriptor refusal outside the handler."""
+    value, refused = attempt(spec.load, raw)
+    if refused is not None:
+        _refuse(refused)
+    return value
 
 
-@dataclass(frozen=True)
-class _Exact:
-    value: str
-
-    def load(self, raw: Any) -> str:
-        if type(raw) is not str or raw != self.value:
-            _refuse("schema_unknown")
-        return raw
-
-    def dump(self, value: Any) -> Any:
-        return value
-
-    def describe(self) -> str:
-        return f"exact:{self.value}"
+def _dump(spec: Spec, value: Any) -> Any:
+    """``spec.dump``, refused the same way as :func:`_load`."""
+    raw, refused = attempt(spec.dump, value)
+    if refused is not None:
+        _refuse(refused)
+    return raw
 
 
-@dataclass(frozen=True)
-class _OneOf:
-    values: tuple[str, ...]
+_HEX = ShapedSpec(_HEX_PATTERN, is_hex64)
+_COUNT = CountSpec(MAX_COUNT)
+_SCHEMA_TAG = ExactSpec(SCHEMA)
 
-    def load(self, raw: Any) -> str:
-        if type(raw) is not str:
-            _refuse("wrong_type")
-        if raw not in self.values:
-            _refuse("bad_token")
-        return raw
-
-    def dump(self, value: Any) -> Any:
-        return value
-
-    def describe(self) -> str:
-        return "one_of:" + "|".join(self.values)
-
-
-@dataclass(frozen=True)
-class _Shaped:
-    pattern: str
-    test: Any  # (object) -> bool, the one shape check for this kind of value
-
-    def load(self, raw: Any) -> str:
-        if type(raw) is not str:
-            _refuse("wrong_type")
-        if not self.test(raw):
-            _refuse("bad_token")
-        return raw
-
-    def dump(self, value: Any) -> Any:
-        return value
-
-    def describe(self) -> str:
-        return f"fullmatch:{self.pattern}"
-
-
-class _Count:
-    def load(self, raw: Any) -> int:
-        if type(raw) is not int:
-            _refuse("wrong_type")
-        if not is_count(raw):
-            _refuse("out_of_range")
-        return raw
-
-    def dump(self, value: Any) -> Any:
-        return value
-
-    def describe(self) -> str:
-        return "count"
-
-
-class _RelPath:
-    def load(self, raw: Any) -> str:
-        if type(raw) is not str:
-            _refuse("wrong_type")
-        # Each component through the engine's one validator: no empty, `.`, `..` or NUL part,
-        # so no absolute path and no escape from the unit.
-        if raw == DESCRIPTOR_NAME or not all(is_valid_component(p) for p in raw.split("/")):
-            _refuse("bad_path")
-        return raw
-
-    def dump(self, value: Any) -> Any:
-        return value
-
-    def describe(self) -> str:
-        return "rel_path"
-
-
-@dataclass(frozen=True)
-class _List:
-    item: _Spec
-
-    def load(self, raw: Any) -> tuple[Any, ...]:
-        if type(raw) is not list:
-            _refuse("wrong_type")
-        return tuple(self.item.load(entry) for entry in raw)
-
-    def dump(self, value: Any) -> Any:
-        if type(value) is not tuple:
-            _refuse("wrong_type")
-        return [self.item.dump(entry) for entry in value]
-
-    def describe(self) -> str:
-        return f"list:{self.item.describe()}"
-
-
-@dataclass(frozen=True)
-class _Nullable:
-    item: _Spec
-
-    def load(self, raw: Any) -> Any:
-        return None if raw is None else self.item.load(raw)
-
-    def dump(self, value: Any) -> Any:
-        return None if value is None else self.item.dump(value)
-
-    def describe(self) -> str:
-        return f"nullable:{self.item.describe()}"
-
-
-@dataclass(frozen=True)
-class _Object:
-    cls: type
-    fields: tuple[tuple[str, _Spec], ...]
-
-    def load(self, raw: Any) -> Any:
-        if type(raw) is not dict:
-            _refuse("wrong_type")
-        names = {name for name, _ in self.fields}
-        if not names <= raw.keys():
-            _refuse("missing_field")
-        if not raw.keys() <= names:
-            _refuse("unknown_field")
-        return self.cls(**{name: spec.load(raw[name]) for name, spec in self.fields})
-
-    def dump(self, value: Any) -> dict[str, Any]:
-        if type(value) is not self.cls:
-            _refuse("wrong_type")
-        return {name: spec.dump(getattr(value, name)) for name, spec in self.fields}
-
-    def describe(self) -> str:
-        inner = ",".join(f"{name}={spec.describe()}" for name, spec in self.fields)
-        return f"object:({inner})"
-
-
-_HEX = _Shaped(_HEX_PATTERN, is_hex64)
-_SCHEMA_TAG = _Exact(SCHEMA)
-
-ARTIFACT_FIELDS: Final[tuple[tuple[str, _Spec], ...]] = (
-    ("path", _RelPath()),
-    ("role", _OneOf(ROLES)),
-    ("rows", _Count()),
+ARTIFACT_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
+    ("path", RelPathSpec(is_valid_component, DESCRIPTOR_NAME)),
+    ("role", OneOfSpec(ROLES)),
+    ("rows", _COUNT),
     ("sha256", _HEX),
-    ("size", _Count()),
+    ("size", _COUNT),
 )
-VAULT_FIELDS: Final[tuple[tuple[str, _Spec], ...]] = (
+VAULT_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
     ("sha256", _HEX),
-    ("size", _Count()),
-    ("entry_count", _Count()),
+    ("size", _COUNT),
+    ("entry_count", _COUNT),
 )
-_ARTIFACT = _Object(Artifact, ARTIFACT_FIELDS)
-DESCRIPTOR_FIELDS: Final[tuple[tuple[str, _Spec], ...]] = (
+_ARTIFACT = ObjectSpec(Artifact, ARTIFACT_FIELDS)
+DESCRIPTOR_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
     ("schema", _SCHEMA_TAG),
-    ("unit", _OneOf(UNITS)),
-    ("operation_id", _Shaped(OPERATION_ID_PATTERN, is_operation_id)),
+    ("unit", OneOfSpec(UNITS)),
+    ("operation_id", ShapedSpec(OPERATION_ID_PATTERN, is_operation_id)),
     ("result_id", _HEX),
-    ("artifacts", _List(_ARTIFACT)),
-    ("vault", _Nullable(_Object(DescriptorVault, VAULT_FIELDS))),
-    ("engine_version", _Shaped(_VERSION_PATTERN, lambda v: _VERSION.fullmatch(v) is not None)),
+    ("artifacts", ListSpec(_ARTIFACT)),
+    ("vault", NullableSpec(ObjectSpec(DescriptorVault, VAULT_FIELDS))),
+    ("engine_version", ShapedSpec(_VERSION_PATTERN, lambda v: _VERSION.fullmatch(v) is not None)),
 )
-_DOCUMENT = _Object(Descriptor, DESCRIPTOR_FIELDS)
+_DOCUMENT = ObjectSpec(Descriptor, DESCRIPTOR_FIELDS)
 
 
 def describe_declaration() -> tuple[tuple[str, str], ...]:
@@ -344,7 +223,7 @@ def _ordered(artifacts: Iterable[Artifact]) -> tuple[Artifact, ...]:
 
 def compute_result_id(artifacts: Iterable[Artifact]) -> str:
     """The content identity of a unit: its artifacts in path order, nothing else."""
-    listed = [_ARTIFACT.dump(a) for a in _ordered(artifacts)]
+    listed = [_dump(_ARTIFACT, a) for a in _ordered(artifacts)]
     return hashlib.sha256(RESULT_DOMAIN + _canonical_or_refuse(listed)).hexdigest()
 
 
@@ -354,7 +233,7 @@ def descriptor_digest(data: bytes) -> str:
 
 def _check_document(raw: Any) -> Descriptor:
     """The declaration plus the document rules; the writer and the reader both end here."""
-    descriptor: Descriptor = _DOCUMENT.load(raw)
+    descriptor: Descriptor = _load(_DOCUMENT, raw)
     paths = [a.path for a in descriptor.artifacts]
     if any(a >= b for a, b in pairwise(paths)):
         _refuse("artifacts_order")
@@ -374,7 +253,7 @@ def build_descriptor(
     """A checked descriptor for measured ``artifacts``, sorted, with its ``result_id``."""
     listed = list(artifacts)
     for artifact in listed:
-        _ARTIFACT.load(_ARTIFACT.dump(artifact))
+        _load(_ARTIFACT, _dump(_ARTIFACT, artifact))
     ordered = _ordered(listed)
     descriptor = Descriptor(
         schema=SCHEMA,
@@ -385,12 +264,12 @@ def build_descriptor(
         vault=vault,
         engine_version=engine_version,
     )
-    return _check_document(_DOCUMENT.dump(descriptor))
+    return _check_document(_dump(_DOCUMENT, descriptor))
 
 
 def encode_descriptor(descriptor: Descriptor) -> bytes:
     """The canonical bytes of ``descriptor``, refused on the same rules the reader applies."""
-    document = _DOCUMENT.dump(descriptor)
+    document = _dump(_DOCUMENT, descriptor)
     _check_document(document)
     data = _canonical_or_refuse(document)
     if len(data) > MAX_DESCRIPTOR_BYTES:
@@ -400,14 +279,9 @@ def encode_descriptor(descriptor: Descriptor) -> bytes:
 
 def _parse(data: bytes) -> Any:
     """Strict JSON; the shared decoder's closed token is the refusal check."""
-    parsed: Any = None
-    refused: Check | None = None
-    try:
-        parsed = strict_json_loads(data, max_int_digits=_MAX_INT_DIGITS)
-    except StrictJsonError as error:
-        refused = cast(Check, error.token)
-    if refused is not None:
-        _refuse(refused)
+    parsed, token = parse_or_token(data, _MAX_INT_DIGITS)
+    if token is not None:
+        _refuse(cast(Check, token))
     return parsed
 
 
@@ -422,8 +296,8 @@ def decode_descriptor(data: bytes) -> Descriptor:
         _refuse("not_object")
     if "schema" not in raw:
         _refuse("schema_missing")
-    _SCHEMA_TAG.load(raw["schema"])
+    _load(_SCHEMA_TAG, raw["schema"])
     descriptor = _check_document(raw)
-    if _canonical_or_refuse(_DOCUMENT.dump(descriptor)) != data:
+    if _canonical_or_refuse(_dump(_DOCUMENT, descriptor)) != data:
         _refuse("not_canonical")
     return descriptor

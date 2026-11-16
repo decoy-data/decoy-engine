@@ -11,7 +11,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `plan/` | `compile_plan` -> frozen `Plan`, seed envelope, plan-time checks |
 | `execution/` | `run_pipeline` spine, routes (full-frame oracle, unified slice, chunked dispatcher, sequential and out-of-core FK), strategy handlers, native companion bridge, transactional sink, capacity |
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
-| `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form) |
+| `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form); `_strict_spec.py` holds the strict persisted-reader specs the publication descriptor and the resume records share |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
 | `publication/` | F22 output publication: the `decoy-publication/v1` descriptor codec and `result_id` (`_descriptor.py`), request and receipt types (`_types.py`), judge and bind (`_publish.py`), the sink state table (`_sink_state.py`); vault ordering arrives in a later slice |
 | `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome`, `_project.py` (`project_tables`, the per-table projection) |
@@ -36,7 +36,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `validation/`, `validation_result.py` | `validate_config` and the validation wire shape |
 | `relationships/` | Relationship graph, namespace registry, orphan policy |
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
-| `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to |
+| `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
