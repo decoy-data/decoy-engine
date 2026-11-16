@@ -1248,7 +1248,7 @@ are not affected.
 
 ## Generation strategies (generate mode)
 
-In `mode: generate`, each column declares a `type` instead of a `strategy`.
+In a generate table (one with `generate_columns`), each column declares a `type` instead of a `strategy`.
 
 `sequence`, `categorical`, `faker` and `reference` columns accept `unique: true`, and a table
 accepts `unique_together` for pairs of `reference` columns. See
