@@ -41,6 +41,9 @@ except ImportError:  # pragma: no cover - Windows has no flock; the lock is refu
     fcntl = None  # type: ignore[assignment]
 
 T = TypeVar("T")
+# A directory fsync failing with one of these means the filesystem cannot sync a directory, not
+# that the entry is lost (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal.
+_DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
 _POLL_S = 0.05
 _CHUNK = 1 << 16
 
@@ -93,7 +96,17 @@ def _sync_leaf_at(parent_fd: int, leaf: str) -> None:
 def _sync_fds(chain_fds: list[int]) -> None:
     """fsync held directories in the order given (deepest first)."""
     for dir_fd in chain_fds:
+        _fsync_dir(dir_fd)
+
+
+def _fsync_dir(dir_fd: int) -> None:
+    """fsync a directory; a filesystem that cannot sync one (`_DIR_FSYNC_UNSUPPORTED`) is not a
+    lost entry (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal."""
+    try:
         _call(os.fsync, dir_fd)
+    except OSError as exc:
+        if exc.errno not in _DIR_FSYNC_UNSUPPORTED:
+            raise
 
 
 def _rooted_chain(open_parent: Callable[..., int], at_leaf: Callable[[int], T]) -> T:
@@ -184,7 +197,7 @@ def _walk_up(
                 raise
             return
         try:
-            _call(os.fsync, fd)
+            _fsync_dir(fd)
         finally:
             _close(fd)
         above = os.path.dirname(current)
@@ -305,11 +318,6 @@ def _read_upto(member_fd: int, size: int) -> bytes:
         parts.append(chunk)
         got += len(chunk)
     return b"".join(parts)
-
-
-# A directory fsync failing with one of these means the filesystem cannot sync a directory, not
-# that the entry is lost (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal.
-_DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
 
 
 def discard_stage_at(dir_fd: int, name: str) -> None:

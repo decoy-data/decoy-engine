@@ -111,7 +111,9 @@ def test_bytes_handle_is_a_constant_display_read_only_handle() -> None:
     assert handle.display == "<vault>" and isinstance(handle, fileaccess.FileHandle)
     assert handle.read_all() == b"not a vault" and handle.read_all(3) == b"not"
     with handle.open_binary() as fh:
-        assert fh.read() == b"not a vault" and not fh.writable()
+        assert fh.read() == b"not a vault"
+        fh.write(b"XX")  # a copy: the handle's bytes cannot change
+    assert handle.read_all() == b"not a vault"
     with pytest.raises(VaultError) as caught:  # the one text that names the handle
         load_vault(None, KEY, vault=handle)
     assert "<vault>" in str(caught.value)
@@ -168,11 +170,13 @@ def test_vault_chain_fsync_eio_keeps_the_leaf(
                 state["armed"] = True
 
             monkeypatch.setattr(os, "link", link)
-        target = [key(leaf), key(base / "vaults"), key(base)][step]
+        chain = [leaf, base / "vaults", base]
         calls: list[Any] = []
         rec = Recorder(
             monkeypatch,
-            fail=lambda e: bool(state["armed"] and e == ("fsync", target) and not calls.append(1)),
+            fail=lambda e: bool(
+                state["armed"] and e == ("fsync", key(chain[step])) and not calls.append(1)
+            ),
         )
         probe = IssueProbe(monkeypatch, rec.synced)
         with pytest.raises(VaultError) as caught:
@@ -268,9 +272,18 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
         big.write_bytes(os.urandom(200_000))
         bigout, bigfd = vault_out(policy, base, "vaults/big.dcyvault")
         try:
+            decrypted: list[int] = []
+            real_reads = type(writer()).reads_as_own
+
+            def counting(self: Any, handle: Any) -> bool:
+                decrypted.append(1)
+                return real_reads(self, handle)
+
+            monkeypatch.setattr(type(writer()), "reads_as_own", counting)
             with pytest.raises(VaultError) as caught:  # over the cap: no decrypt attempted
                 _vault_order.adopt_vault(bigout, writer())
-            assert caught.value.code == CONFLICT
+            assert caught.value.code == CONFLICT and decrypted == []
+            monkeypatch.undo()
         finally:
             if bigfd >= 0:
                 os.close(bigfd)
