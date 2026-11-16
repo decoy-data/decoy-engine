@@ -224,16 +224,19 @@ def build_run_result(
 
     ``pre_checks`` are checks the caller ran before the engine did (the scan-drift check). They come
     first in ``checks``; a blocking one that failed makes the status ``findings``, as
-    ``blocking_failed`` does. A pre-check cannot claim to block unless it failed."""
+    ``blocking_failed`` does, but the engine checks keep the caller's own flag. Only ``scan_drift`` is
+    accepted. A pre-check cannot claim to block unless it failed."""
     if tables.run_failed != (failure is not None):
         raise ValueError("tables.run_failed disagrees with failure")
     pre = tuple(_pre_check(c) for c in pre_checks)
-    blocking_failed = blocking_failed or any(c.blocking for c in pre)
+    if any(c.id != "scan_drift" for c in pre):
+        raise ValueError("pre_checks may hold only the scan_drift check")
+    pre_blocked = any(c.blocking for c in pre)
     outcome = derive_outcome(
         category=None if failure is None else failure.category,
         delivery_mode=tables.delivery.mode,
         delivery_outcome=tables.delivery.outcome,
-        blocking_failed=blocking_failed,
+        blocking_failed=blocking_failed or pre_blocked,
         exit_map=exit_map,
     )
     kinds = {t.kind for t in tables.tables}
