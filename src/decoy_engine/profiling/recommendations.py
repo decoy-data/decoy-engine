@@ -63,11 +63,13 @@ class DetectorDescriptor:
 
     `default` is the platform's smart default (`DEFAULT_STRATEGY_BY_DETECTOR`); `starter` is
     the choice `decoy scan` writes into a starter pipeline. A detector may carry either or both.
+    `classifier_label` marks a detector the bundled classifier predicts, under that label.
     """
 
     detector_id: str
     default: StrategyDefault | None = None
     starter: StarterChoice | None = None
+    classifier_label: str | None = None
 
 
 # NOTE: param names here MUST match the engine strategy classes:
@@ -110,6 +112,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     ),
     DetectorDescriptor(
         detector_id="email",
+        classifier_label="email",
         default=("faker", {"faker_type": "email"}),
         starter=StarterChoice(
             strategy="faker",
@@ -137,6 +140,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     # ── government / national identifiers ───────────────────────────────
     DetectorDescriptor(
         detector_id="ssn",
+        classifier_label="ssn",
         default=("fpe", {"charset": "digits"}),
         starter=StarterChoice(
             strategy="hash",
@@ -150,6 +154,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     # ── dates ───────────────────────────────────────────────────────────
     DetectorDescriptor(
         detector_id="iso_date",
+        classifier_label="iso_date",
         default=("date_shift", {"jitter_days": 15}),
         starter=StarterChoice(
             strategy="date_shift",
@@ -210,6 +215,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     # ── healthcare identifiers ──────────────────────────────────────────
     DetectorDescriptor(
         detector_id="mrn",
+        classifier_label="mrn",
         default=("fpe", {"charset": "alphanum"}),
         starter=StarterChoice(
             strategy="hash",
@@ -221,6 +227,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     ),
     DetectorDescriptor(
         detector_id="npi",
+        classifier_label="npi",
         default=("fpe", {"charset": "digits"}),
         starter=StarterChoice(
             strategy="hash",
@@ -233,6 +240,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     # ── financial identifiers ───────────────────────────────────────────
     DetectorDescriptor(
         detector_id="pan",
+        classifier_label="pan",
         default=("fpe", {"charset": "digits", "validate_luhn": True}),
         starter=StarterChoice(
             strategy="fpe",
@@ -248,6 +256,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     ),
     DetectorDescriptor(
         detector_id="cvv",
+        classifier_label="cvv",
         default=("redact", {"redact_with": "XXX"}),
         starter=StarterChoice(
             strategy="redact",
@@ -259,6 +268,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     ),
     DetectorDescriptor(
         detector_id="iban",
+        classifier_label="iban",
         default=("fpe", {"charset": "ALPHANUM"}),
         starter=StarterChoice(
             strategy="hash",
@@ -280,6 +290,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     # mean a different disease).
     DetectorDescriptor(
         detector_id="icd10",
+        classifier_label="icd10",
         default=("redact", {"redact_with": "REDACTED"}),
         starter=StarterChoice(
             strategy="truncate",
@@ -300,6 +311,7 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
     ),
     DetectorDescriptor(
         detector_id="health_plan_id",
+        classifier_label="health_plan_id",
         default=("redact", {"redact_with": "REDACTED"}),
     ),
     DetectorDescriptor(
@@ -361,6 +373,19 @@ DEFAULT_STRATEGY_BY_DETECTOR: dict[str, StrategyDefault] = {
     for descriptor in _DESCRIPTORS
     if descriptor.default is not None
 }
+
+
+# The labels the bundled classifier predicts besides `none`, read from the descriptors so there is
+# no second literal set; a pack that adds a label fails the pack test instead of dropping hits.
+_CLASSIFIER_DETECTOR: Mapping[str, str] = MappingProxyType(
+    {d.classifier_label: d.detector_id for d in _DESCRIPTORS if d.classifier_label is not None}
+)
+CLASSIFIER_LABELS: frozenset[str] = frozenset(_CLASSIFIER_DETECTOR)
+
+
+def classifier_detector_id(label: str) -> str | None:
+    """The detector id a classifier label maps to, or None for a label with no descriptor."""
+    return _CLASSIFIER_DETECTOR.get(label)
 
 
 def starter_choice(detector_id: str) -> StarterChoice | None:
