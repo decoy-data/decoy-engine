@@ -97,6 +97,7 @@ _REASONS = {
         reasons.provider.NER_SPACY_NOT_INSTALLED,
         reasons.provider.NER_MODEL_NOT_INSTALLED,
         reasons.provider.NER_MODEL_INCOMPATIBLE,
+        reasons.provider.NER_MODEL_UNCALIBRATED,
         reasons.config.NER_MODEL_INVALID,
     )
 }
