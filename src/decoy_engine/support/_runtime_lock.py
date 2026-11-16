@@ -253,9 +253,9 @@ def _data_digest() -> str:
 
 
 def _providers_digest() -> str:
-    from decoy_engine.providers_v2 import _registry
+    from decoy_engine import providers_v2
 
-    registry = _registry.get_default_registry()
+    registry = providers_v2.get_default_registry()
     rows = []
     for name in sorted(registry.known_providers()):
         caps = registry.get_capabilities(name)
