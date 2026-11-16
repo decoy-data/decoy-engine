@@ -287,3 +287,20 @@ passed, 0 failed, 60 skipped; no branch-only failure. Script checks against `ori
 (`registry_renumber.py`, `ratchet_check.py`, `check_fragment.py`, `reason_release_pin.py
 --check`): each exit 0. `generation/synthesize.py` 600 lines; the engine root and `config/` hold
 25 modules (main's packages: `determinism/` 3, `fileaccess/` 17, `generation/composite/` 10).
+
+## Main merge (2026-11-16, `1c8e413c`)
+
+`origin/main` `1c8e413c` (#496, publication descriptor codec) merged into `1bccfb8a` as `ffadf9c1`, without a conflict. `origin/main` `1c8e413c` (#496) adds
+the `publication/` package (the `decoy-publication/v1` descriptor codec and receipt types),
+places it in the `execution` tier of `.importlinter` and the layer snapshot (this chain's
+`_capacity` entry in the bottom tier is unchanged), extends `_canonical` and adds a strict-JSON
+sentry. It touches no source or test file of this slice and not the draw-site catalogue.
+
+Checks on `ffadf9c1`, Python 3.10.20, `origin/main` `1c8e413c`: ruff and format on the changed
+files pass; mypy clean (889 files); `tests/sentry` 5782 passed, 0 failed, 2 skipped; layers 15 passed; this slice's test files (`tests/unit/config`, `tests/unit/generation/relational`, the probe-scale, pinned, streamed-entry, capacity, unique old-input-bytes and relationships tests, the phase-F witness and invariant files, `tests/unit/test_v2_generation.py`) with main's `tests/unit/publication` and `tests/unit/canonical` with the two
+draw-site catalogue tests: 1624 passed, 0 failed, 7 skipped. Script checks (`registry_renumber.py --check --main
+origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines; the
+engine root and `config/` hold 25 modules, `publication/` 2.
+
+Not run: the full T1 gate on this head, mutations and the full suite.

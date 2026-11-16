@@ -88,3 +88,20 @@ catalogue tests: 4568 passed, 0 failed, 40 skipped. Script checks (`registry_ren
 `generation/synthesize.py` 599 lines (the module-size cell passes); the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `1c8e413c`), carried forward
+
+`origin/feat/gen-rel-e3a` `ac2495e6` (holding `origin/main` `1c8e413c`) merged into `95797b8f` as `d6947279`, without a conflict. `origin/main` `1c8e413c` (#496) adds
+the `publication/` package (the `decoy-publication/v1` descriptor codec and receipt types),
+places it in the `execution` tier of `.importlinter` and the layer snapshot (this chain's
+`_capacity` entry in the bottom tier is unchanged), extends `_canonical` and adds a strict-JSON
+sentry. It touches no source or test file of this slice and not the draw-site catalogue.
+
+Checks on `d6947279`, Python 3.10.20, `origin/main` `1c8e413c`: ruff and format on the changed
+files pass; mypy clean (892 files); `tests/sentry` 5860 passed, 0 failed, 2 skipped (the module-size cell passes); layers 15 passed; this slice's test files and their neighbours (the numeric-typing parity files, `tests/unit/config`, `tests/unit/generation`, `tests/unit/plan`, `tests/unit/generators`, the derived and aggregate transforms, the definition-owners test) with the two
+draw-site catalogue tests: 4568 passed, 0 failed, 40 skipped. Script checks (`registry_renumber.py --check --main
+origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 599 lines; the
+engine root and `config/` hold 25 modules, `publication/` 2.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
