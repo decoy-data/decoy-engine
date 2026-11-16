@@ -255,13 +255,13 @@ def test_multi_parent_conflicting_policy_is_rejected() -> None:
     with pytest.raises(PlanCompileError) as ei:
         _build(rels, lookup)
     assert ei.value.code == "orphan_policy_conflict"
-    # Load-bearing fields, not just the code: `path` names the offending
-    # child tuple and `message` enumerates the actual conflicting policy
-    # VALUES (not just that a conflict happened) so an operator can act on
-    # the error without re-deriving it from the config.
+    # The refusal is value-free: `path` names the offending child tuple and
+    # the rendered error carries the reason code, never either policy.
     assert ei.value.path == "relationships[c.('pid',)]"
-    assert "c.('pid',)" in ei.value.message
-    assert "['fail', 'preserve']" in ei.value.message
+    assert str(ei.value).startswith("[orphan_policy_conflict] relationships[c.('pid',)]:")
+    assert ei.value.message.startswith("Orphan policy conflict.")
+    for token in ("fail", "preserve"):
+        assert token not in str(ei.value)
 
 
 def test_cycle_error_reports_exact_cycle_participants() -> None:
@@ -354,11 +354,11 @@ def test_invalid_policy_value_is_rejected() -> None:
         check_orphan_fk_policy_completeness(config, rels)
     assert ei.value.code == "orphan_fk_policy_invalid"
     assert ei.value.path == "relationships[0].orphan_policy"
-    # The offending value AND the enumerated valid options are both
-    # load-bearing: an operator needs to see what was declared and what
-    # was actually allowed.
-    assert "orphan_policy='sometimes'" in ei.value.message
-    assert "'preserve', 'remap', 'warn', 'fail'" in ei.value.message
+    # The refusal names the field, not the declared value: the rendered error
+    # carries the reason code and the `orphan_policy` field path.
+    assert str(ei.value).startswith("[orphan_fk_policy_invalid] relationships[0].orphan_policy:")
+    assert ei.value.message.startswith("Orphan FK policy invalid.")
+    assert "sometimes" not in str(ei.value)
 
 
 def test_relationship_absent_from_config_is_rejected() -> None:
@@ -393,10 +393,12 @@ def test_duplicate_conflicting_policy_is_rejected() -> None:
         check_orphan_fk_policy_completeness(config, rels)
     assert ei.value.code == "orphan_fk_policy_duplicate"
     assert ei.value.path == "relationships[1]"
-    assert "p.['id']" in ei.value.message
-    assert "c.['pid']" in ei.value.message
-    assert "orphan_policy='fail'" in ei.value.message
-    assert "declared 'preserve'" in ei.value.message
+    # The refusal names both ends and the reason code, neither policy.
+    assert "Parent p.id, child c.pid." in ei.value.message
+    assert str(ei.value).startswith("[orphan_fk_policy_duplicate] relationships[1]:")
+    assert ei.value.message.startswith("Orphan FK policy duplicate.")
+    for token in ("fail", "preserve"):
+        assert token not in str(ei.value)
 
 
 def test_build_raises_on_lookup_key_missing() -> None:

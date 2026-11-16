@@ -110,8 +110,29 @@ The release consumed main's changelog fragments; this chain's fragments are kept
 
 Checks on `e033c67c`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
 `tests/sentry` 5906 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
-with this slice's test files, the two draw-site catalogue tests and the fan-out sentry: 3799
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the fan-out sentry: 3799
 passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 596 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `13c95c7d`), carried forward
+
+`origin/feat/gen-rel-e1` `312c12ab` (holding `origin/main` `13c95c7d`) merged into `b235ec73` as `f494c72c`, without a
+conflict. Main's two commits after `ddd014a5` (run-stream E5b, the no-sink collector scratch
+opened on first spill, and F22 b1, the durable vault adopt and `VaultCommit`) do not touch the
+draw-site catalogue, `.importlinter`, `uv.lock` or `generation/`. Main touches none of this slice's files. Main's two changelog
+fragments arrive beside this chain's, which are kept. gen-rel-e1 narrows the three orphan-policy refusal
+tests in `tests/property/test_ri_graph_invariants.py` to the reason code and field (owner
+ruling A); the refusal source is unchanged.
+
+Checks on `f494c72c`, Python 3.10.20, `origin/main` `13c95c7d`: ruff, format and mypy pass;
+`tests/sentry` 5914 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3836 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
 `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
 `reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 596 lines,
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
