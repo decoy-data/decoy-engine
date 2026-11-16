@@ -179,7 +179,9 @@ TableOutcome = Literal["succeeded", "failed", "not_run"]
 RowsSource = Literal["outputs", "phase", "rate"]
 TableDeliveryState = Literal["delivered", "failed", "withheld", "dropped", "none"]
 OutputFormat = Literal["csv", "parquet", "fixed_width"]
-CheckId = Literal["post_validation", "post_scan_integrity", "fidelity", "native_post_run"]
+CheckId = Literal[
+    "post_validation", "post_scan_integrity", "fidelity", "native_post_run", "scan_drift"
+]
 CheckStatus = Literal["passed", "warned", "failed", "error", "not_run"]
 
 # --- reason payloads ----------------------------------------------------------------------------
