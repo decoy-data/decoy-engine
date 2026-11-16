@@ -17,6 +17,7 @@ mount boundary (5.0 rule D). The win32 arm keeps the plain path calls.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import logging
 import logging.handlers
@@ -103,10 +104,8 @@ class LocalHandle:
 
     def close(self) -> None:
         if self._fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(self._fd)
-            except OSError:
-                pass
             self._fd = None
 
     def __enter__(self) -> LocalHandle:
@@ -227,15 +226,10 @@ def _sync_dir(directory: Path) -> None:
         fd = os.open(directory, os.O_RDONLY | os.O_CLOEXEC)
     except OSError:
         return
-    try:
+    with contextlib.suppress(OSError):
         os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+    with contextlib.suppress(OSError):
+        os.close(fd)
 
 
 def _probe_dir(path: str) -> os.stat_result:
@@ -388,10 +382,8 @@ class LocalOutputTxn(_LocalStageDir):
     def _close_parent(self) -> None:
         if self._parent_fd >= 0:
             fd, self._parent_fd = self._parent_fd, -1
-            try:
+            with contextlib.suppress(OSError):
                 os.close(fd)
-            except OSError:
-                pass
 
     def _unlink_stage(self) -> None:
         if self._staged_file is not None and self._parent_fd >= 0:
@@ -456,10 +448,8 @@ class LocalOutputTxn(_LocalStageDir):
         except FileExistsError:
             occupied = True
         if occupied:  # raised outside the handler: the link error (both paths) never rides
-            try:
+            with contextlib.suppress(OSError):
                 staged.unlink(missing_ok=True)
-            except OSError:
-                pass
             self._finished = True
             raise FileExistsError(errno.EEXIST, "output exists")
         self._finished = True
@@ -498,10 +488,8 @@ class LocalOutputTxn(_LocalStageDir):
             self._close_parent()
             return
         if self._staged_file is not None and not self._direct:
-            try:
+            with contextlib.suppress(OSError):
                 self._staged_file.unlink(missing_ok=True)
-            except OSError:
-                pass
 
     def __enter__(self) -> LocalOutputTxn:
         return self
@@ -565,6 +553,14 @@ class LocalOutputDir:
         finally:
             _close(parent_fd)
         _sync_up(self._target.parent, 1)
+
+    def adopt_file(self, *, limit: int) -> bytes | None:
+        if sys.platform == "win32":
+            raise FileAccessUnavailable("adopting a file comes with the Windows arm")
+        parent = self._target.parent
+        return _durable._adopt_ambient(
+            self._parent_fd, self._target.name, limit, lambda: _sync_up(parent, 1)
+        )
 
 
 class LocalFileAccess:
