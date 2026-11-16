@@ -8,9 +8,11 @@ route, the ``RunFingerprint`` and the chunked tables in order. ``TableRecord`` i
 once per table, after its staged file is placed: the table's index and digests, the F22
 ``Artifact`` the file was measured as, the source digest taken before the table's chunk loop and
 the fingerprint digest of the run. Every field is a digest, a count, a token or a path relative
-to the run folder; no value, table name or key byte is stored.
+to the run folder (the target's placed path, the same trust class as the F22 descriptor the
+delivered run folder carries); no cell value or key byte is stored. ``RUN.json`` is capped at
+64 KiB, about 337 tables; a longer table list is refused with ``oversize``.
 
-One declaration per record drives both directions, built from ``decoy_engine._canonical._strict_spec``, so
+One declaration per record drives both directions, built from ``decoy_engine._canonical``, so
 the writer cannot emit what the reader refuses. The reader is the persisted-reader contract:
 exact version tag, every field, no unknown field, exact built-in JSON types, ``re.fullmatch``
 shapes (so ``"sha256:<hex>\\n"`` fails), relative paths through the engine's one component
@@ -27,8 +29,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Final, Literal, NoReturn, cast
 
-from decoy_engine._canonical import StrictJsonError, strict_json_loads
-from decoy_engine._canonical._strict_spec import (
+from decoy_engine._canonical import (
     CountSpec,
     ExactSpec,
     ListSpec,
@@ -36,8 +37,8 @@ from decoy_engine._canonical._strict_spec import (
     OneOfSpec,
     ShapedSpec,
     Spec,
-    SpecCheck,
-    SpecRefusedError,
+    attempt,
+    parse_or_token,
 )
 from decoy_engine.delivery.resume._fingerprint import RunFingerprint
 from decoy_engine.publication import (
@@ -194,24 +195,14 @@ def _refuse(check: Check) -> NoReturn:
 
 def _load(spec: Spec, raw: Any) -> Any:
     """``spec.load``; the spec's closed token becomes the record refusal outside the handler."""
-    refused: SpecCheck | None = None
-    value: Any = None
-    try:
-        value = spec.load(raw)
-    except SpecRefusedError as error:
-        refused = error.check
+    value, refused = attempt(spec.load, raw)
     if refused is not None:
         _refuse(refused)
     return value
 
 
 def _dump(spec: Spec, value: Any) -> Any:
-    refused: SpecCheck | None = None
-    raw: Any = None
-    try:
-        raw = spec.dump(value)
-    except SpecRefusedError as error:
-        refused = error.check
+    raw, refused = attempt(spec.dump, value)
     if refused is not None:
         _refuse(refused)
     return raw
@@ -234,14 +225,9 @@ def _check_run(record: RunRecord) -> RunRecord:
 
 def _parse(data: bytes) -> Any:
     """Strict JSON; the shared decoder's closed token is the refusal check."""
-    parsed: Any = None
-    refused: Check | None = None
-    try:
-        parsed = strict_json_loads(data, max_int_digits=_MAX_INT_DIGITS)
-    except StrictJsonError as error:
-        refused = cast(Check, error.token)
-    if refused is not None:
-        _refuse(refused)
+    parsed, token = parse_or_token(data, _MAX_INT_DIGITS)
+    if token is not None:
+        _refuse(cast(Check, token))
     return parsed
 
 

@@ -15,10 +15,11 @@ a spec needs (the component validator, the count limit) are handed in by the dec
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, NoReturn, Protocol
 
-from decoy_engine._canonical._json import CanonicalJsonError
+from decoy_engine._canonical._json import CanonicalJsonError, StrictJsonError, strict_json_loads
 
 __all__ = [
     "CountSpec",
@@ -32,6 +33,8 @@ __all__ = [
     "Spec",
     "SpecCheck",
     "SpecRefusedError",
+    "attempt",
+    "parse_or_token",
 ]
 
 SpecCheck = Literal[
@@ -218,3 +221,23 @@ class ObjectSpec:
     def describe(self) -> str:
         inner = ",".join(f"{name}={spec.describe()}" for name, spec in self.fields)
         return f"object:({inner})"
+
+
+def attempt(call: Callable[[Any], Any], arg: Any) -> tuple[Any, SpecCheck | None]:
+    """``call(arg)``; a spec refusal comes back as its closed token.
+
+    The caller raises its own refusal from the token, outside this handler, so no exception
+    context carries a byte of the record.
+    """
+    try:
+        return call(arg), None
+    except SpecRefusedError as error:
+        return None, error.check
+
+
+def parse_or_token(data: bytes, max_int_digits: int) -> tuple[Any, str | None]:
+    """Strict JSON of ``data``; a refusal comes back as the decoder's closed token."""
+    try:
+        return strict_json_loads(data, max_int_digits=max_int_digits), None
+    except StrictJsonError as error:
+        return None, error.token

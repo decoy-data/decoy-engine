@@ -225,7 +225,7 @@ dropped. A default export withholds such a record (its id goes in the header's `
 
 The `evidence` payload (`cli-local-1`) also accepts two additive optional keys, `path_base` (exactly `"project"`) and `project_manifest` (path text or `null`), both present or both absent (a reader refuses a half pair, a null `path_base` and any base other than `"project"`), as a run inside a `decoy.yaml` project writes them. Absent keys stay absent, and `project_manifest` is a path field in a default export.
 
-`decoy-resume-run/v1` and `decoy-resume-table/v1` are the two files of a `decoy run --resume` store (`decoy_engine.delivery.resume`: `RunRecord`, `TableRecord` and their encoders and decoders). They are canonical JSON read by the strict reader the publication descriptor uses: exact tag, every field, no unknown field, exact types (`False` is not a `0`, `"1"` is not a `1`), `re.fullmatch` shapes (a digest with a trailing newline is refused), relative artifact paths and at most 64 KiB. There is no tolerant read model: a change to either shape takes a new tag. They hold digests, counts, tokens and a path relative to the run folder, never a value or a table name. Corpus samples are in `tests/integration/compat_corpus/resume/`.
+`decoy-resume-run/v1` and `decoy-resume-table/v1` are the two files of a `decoy run --resume` store (`decoy_engine.delivery.resume`: `RunRecord`, `TableRecord` and their encoders and decoders). They are canonical JSON read by the strict reader the publication descriptor uses: exact tag, every field, no unknown field, exact types (`False` is not a `0`, `"1"` is not a `1`), `re.fullmatch` shapes (a digest with a trailing newline is refused), relative artifact paths and at most 64 KiB. There is no tolerant read model: a change to either shape takes a new tag. They hold digests, counts, tokens and one path relative to the run folder (the artifact's placed path, the same trust class as the F22 descriptor the delivered run folder carries), never a cell value or a key. `RUN.json` is capped at 64 KiB, which holds about 337 tables; `encode_run_record` refuses a longer table list with `oversize` and the caller treats that run as not resumable. Corpus samples are in `tests/integration/compat_corpus/resume/`.
 
 `scan-set/v1` is the record of one multi-table scan (`decoy_engine.scan_sources`). The engine
 owns its shape: `ScanSetCore` to write (unknown fields refused), `ScanSetCoreRead` to read
@@ -1085,7 +1085,7 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
   (`synthetic: false`) artifact of each read-back kind.
 - **`decoy-resume-run/v1` and `decoy-resume-table/v1` samples** (`tests/integration/compat_corpus/resume/`).
   Hand-authored canonical bytes with no `manifest.json` entry, like the run-result fixtures.
-  `tests/unit/delivery/resume/test_records.py` decodes each and re-encodes it to the same bytes.
+  `tests/unit/delivery/resume/test_records.py` decodes each and re-encodes it to the same bytes (the files end in one newline that the test strips).
 - **`decoy-run-result/v1` fixtures** (`tests/integration/compat_corpus/run_result/run-result-v1*.json`).
   They live in the corpus directory, in their own subfolder, so the frozen samples sit in one place.
   They are hand-authored reader samples, not artifacts minted by `regenerate.py`: there is no

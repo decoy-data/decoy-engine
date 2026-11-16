@@ -20,6 +20,7 @@ from decoy_engine.delivery.resume import (
     TableEntry,
     plan_resume,
 )
+from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.reasons.decoy import (
     RESUME_CHECKPOINT_INVALID,
     RESUME_FINGERPRINT_CHANGED,
@@ -215,3 +216,9 @@ def test_the_refusal_is_value_free_and_registered() -> None:
     for bad in ("Bindings", "bind ings", "a" * 40, "bindings\n", "/etc/passwd", ""):
         with pytest.raises(ValueError, match="invalid field"):
             ResumeRefusedError(RESUME_SOURCE_CHANGED, bad)
+
+
+def test_the_refusal_maps_to_its_registered_reason() -> None:
+    # The CLI reads the outcome through the adapter, never a copy of the code string.
+    record = reason_from_exception(ResumeRefusedError(RESUME_FINGERPRINT_CHANGED, "bindings"))
+    assert record.code == RESUME_FINGERPRINT_CHANGED
