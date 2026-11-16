@@ -189,7 +189,7 @@ As of this writing the tags include:
 distribution-snapshot/v1   decoy-vault/v2        vault-key/v1
 ff1-key/v1                 quality-report/v1     synth-report/v1
 quality-diagnostic/v1      quality-fidelity/v1   quality-policy/v1
-quality-shape-fidelity/v1  post-scan-integrity/v2    name-hints/v1
+quality-shape-fidelity/v1  post-scan-integrity/v3    name-hints/v1
 ssn/v1  npi/v1  pan/v1  iban/v1  ein/v1  mrn/v1  ndc/v1  icd10/v1
 cusip/v1  address/v1  locality/v1  person/v1  provider/v1
 composite/v1  custom/v1   ... (every disguise spec)
@@ -233,7 +233,7 @@ the guard cannot recognise (a person name, an address) is the stated limit. The 
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
 
-`post-scan-integrity/v2` is the report `run_post_mask` returns. Recorded pre-GA semantic change
+`post-scan-integrity/v3` is the report `run_post_mask` returns (v2 until SCAN-ML M4). Recorded pre-GA semantic change
 (POSTSCAN-STREAM PS-4, 2026-11-12): each `fk_preservation[]` finding now derives from the declared
 keys' facts (`verification/postmask/_keys.py`) and no longer from an orphan rate. `fail` means the run
 introduced orphans; `warning` means every output orphan was already in the source, or the key carries
@@ -253,7 +253,16 @@ float key column, NumPy or nullable `Float32`/`Float64`, with at least one non-n
 them whole numbers in the Int64 range (pandas' reading of a nullable integer column, such as a
 self-reference with a null root), is compared as an integer key. A column with any fraction stays
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
-The tag stays `v2`; the field set only grew.
+The tag stayed `v2` for that change; the field set only grew.
+
+`post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
+`quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
+`match_rate` can now be `null`. The engine's verdict reader accepts v2 and v3. Each `residual_pii` finding gains `source` (`regex`, `classifier` or `ner`), `model`
+(`{id, version}` of the model that ran, or `null`), `band` (the classifier's `high` or `review`),
+`dismissed` and `promoted`; `match_rate` is `null` for a classifier finding, so a reader that
+assumes a number needs a `null` case. The report gains `detectors` (the runs), `tables_checked`
+(every output table the residual-PII check read, clean tables included) and `config_sha256`
+(`null` unless the caller sets it). A regex-only report keeps every earlier key and value.
 
 **Rules:**
 
@@ -823,6 +832,21 @@ No `SEED_PROTOCOL_VERSION` change.
   `SequentialAdapter.run` and `OutOfCoreAdapter.run`); a caller that passed none must now pass
   it. `run_pipeline` is unchanged: its resident auto-chunk lane calls guard-free cores and runs the
   post-scan itself.
+  SCAN-ML M4 (2026-11) adds `PostScanBlockedError` and model findings in the post-scan.
+  `run_post_mask` takes a keyword `detectors` (a `DetectorSet`); `None`, the default and the
+  platform hook's call, runs the regex detectors as before. `run_pipeline` with
+  `post_scan.integrity` true loads its `post_scan.detectors` strictly at run start, so a model that
+  cannot run refuses the run with `ModelUnavailableError` before any row is masked, and runs each
+  model over every output table after the regex pass. Under `post_scan.ner_findings: fail` an NER
+  finding at `fail`, or an NER pass that raised, makes `run_pipeline` raise `PostScanBlockedError`
+  (`post_scan.ner_blocked`, registry unreleased) before it returns: `report` is the value-free
+  report, `verdict` the one decision, and the exception chain is empty; when NER alone blocks,
+  `str(error)` and `message` are the fixed registry summary. `post_scan_verdict` takes
+  `ner_findings` (`warn` by default) in place of `ner_blocked`; a model finding blocks only through
+  `ner_blocked`, which ranks last, and a classifier finding never blocks. A
+  `post_scan.dismissed` entry now lowers the `warning` it names to `info`. `classify_frame` gains a
+  keyword `subsample` (default `False`, so `classify_fields` is unchanged): `True` classifies a
+  seeded subsample of at most 60 non-null values per column.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and

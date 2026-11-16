@@ -281,12 +281,13 @@ def run_pipeline(
     `_provider_snapshot` (5a-faker) is a private, test/harness-only hook: an already-captured
     immutable custom-faker-provider view (`internal.faker_setup.snapshot_custom_faker_providers`)
     forwarded straight to the `generate_tables` call below, so the shadow-parity harness can pin
-    this oracle call to the SAME registry snapshot as its own coordinator-side call.
-    `None` (every real caller) resolves against the live registry.
+    this oracle call to the SAME registry snapshot as its own coordinator-side call. `None` (every
+    real caller) resolves against the live registry.
     `resident_fallback`: a plain `auto` run reads whole each lazy source it cannot keep lazy.
     """
     _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
     config, stage = resolve_subset(config, subset_request, source_loader)
+    detectors = _dispatch.load_post_scan_detectors(config, file_access)
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
@@ -351,6 +352,7 @@ def run_pipeline(
                 resident_fallback=resident_fallback,
             )
         ctx = _ctx.with_quarantine_path(ctx, quarantine_path, base_dir)
+        ctx = _dispatch.with_post_scan_detectors(ctx, detectors)
         with collect_refusals() as refusals:
             decision = _ctx.decide_route(ctx)
             _dispatch.emit_route(_progress, decision)
