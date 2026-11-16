@@ -21,8 +21,12 @@ from decoy_engine.execution._publication_observer import (
     observed_commit,
     project_sink_state,
 )
-from decoy_engine.publication import CommitReceipt, PublicationRefused, PublicationRequest
-from decoy_engine.publication._sink_state import SinkState
+from decoy_engine.publication import (
+    CommitReceipt,
+    PublicationRefused,
+    PublicationRequest,
+    SinkState,
+)
 from decoy_engine.reasons import CleanupState, PublicationState
 from tests.unit.execution.publication._sink_support import POLICIES, sink_factory, table
 

@@ -14,9 +14,10 @@ years after it ships. It has no network or auth surface of its own: it is a libr
 
 ## Install
 
-```
-pip install decoy-engine
-```
+In V1 the engine reaches users inside the `decoy` CLI bundle, which carries the
+matched engine, the native companion and the CLI. Install the CLI bundle from
+Decoy's download page; there is no separate engine install step. A public
+`decoy-engine` package comes later.
 
 Python 3.10, 3.11, and 3.12 are supported. Heavy dependencies (pandas,
 Polars, PyArrow) are pulled in automatically. See
@@ -135,8 +136,9 @@ is private and may change without a version bump.
 - `CONTRIBUTING.md` -- build, test, and contribution flow.
 - `CODEMAP.md` -- complete codebase navigation map.
 - `tests/integration/golden/` -- canonical end-to-end caller shapes.
-- `decoy-cli` (PyPI) -- the command-line driver. Recommended unless you
-  are embedding the engine inside your own Python tool.
+- `decoy-cli` -- the command-line driver, installed from the CLI bundle on
+  Decoy's download page. Recommended unless you are embedding the engine
+  inside your own Python tool.
 
 ## License
 
