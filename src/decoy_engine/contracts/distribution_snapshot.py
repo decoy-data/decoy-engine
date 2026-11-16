@@ -81,8 +81,11 @@ def encode_datetime_buckets(buckets: Sequence[DatetimeBucket]) -> list[dict[str,
     """The only v2 bucket writer. Validates through the stored model and the order rule."""
     failed = False
     try:
+        # model_validate, not the constructor: the strict model refuses a float count at run time.
         rows = [
-            DatetimeBucketV2(start_year=b.start_year, end_year=b.end_year, count=b.count)
+            DatetimeBucketV2.model_validate(
+                {"start_year": b.start_year, "end_year": b.end_year, "count": b.count}
+            )
             for b in buckets
         ]
     except ValidationError:
