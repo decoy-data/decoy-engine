@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
     ambient_forbidden,
@@ -45,6 +46,7 @@ from decoy_engine.fileaccess._scratch import ScratchArena
 from decoy_engine.fileaccess._scratch_reports import CleanupReport, QuotaReport
 from decoy_engine.fileaccess._types import (
     CONTRACT_VERSION,
+    CommitUncertain,
     DirHandle,
     FileAccess,
     FileAccessDenied,
@@ -53,6 +55,9 @@ from decoy_engine.fileaccess._types import (
     FileHandle,
     FileRequest,
     FileRole,
+    LeafTooLarge,
+    LockTimeout,
+    LockUnavailable,
     OutputDir,
     OutputTxn,
 )
@@ -91,6 +96,7 @@ ENTRY_POINTS: tuple[str, ...] = (
     "decoy_engine.profile._declared_columns.source_columns",
     "decoy_engine.profile._fixed_width_reader.read_fixed_width",
     "decoy_engine.profile._fixed_width_writer.write_fixed_width",
+    "decoy_engine.profile._lazy_build.build_lazy_source",
     "decoy_engine.profile._readers.build_declared_source",
     "decoy_engine.profile._readers.build_profile_source",
     "decoy_engine.profile._source.profile_source",
@@ -116,6 +122,7 @@ __all__ = [
     "CONTRACT_VERSION",
     "ENTRY_POINTS",
     "CleanupReport",
+    "CommitUncertain",
     "DirHandle",
     "FileAccess",
     "FileAccessDenied",
@@ -124,7 +131,10 @@ __all__ = [
     "FileHandle",
     "FileRequest",
     "FileRole",
+    "LeafTooLarge",
     "LocalFileAccess",
+    "LockTimeout",
+    "LockUnavailable",
     "OutputDir",
     "OutputTxn",
     "PreopenedFileAccess",
@@ -147,6 +157,7 @@ __all__ = [
     "forbid_ambient",
     "installed",
     "is_ambient",
+    "is_valid_component",
     "keeps_class",
     "map_in_context",
     "open_protected_dir",

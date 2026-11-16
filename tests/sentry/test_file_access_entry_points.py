@@ -11,6 +11,9 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import pkgutil
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -115,3 +118,127 @@ def test_every_internal_seam_exemption_is_real_and_not_also_an_entry_point(graph
 
 def test_the_out_of_core_driver_the_platform_calls_is_an_entry_point() -> None:
     assert "decoy_engine.execution.out_of_core._runner.run_fk_out_of_core" in ENTRY_POINTS
+
+
+def _collect(paths: list[str], prefix: str) -> tuple[list[types.ModuleType], dict[str, str]]:
+    """Walk `paths` and import every module. A module that cannot be imported, and every `.py`
+    under a package whose `__init__` cannot be (the walk never descends into it), goes into the
+    failed map (name to source file)."""
+    modules: list[types.ModuleType] = []
+    failed: dict[str, str] = {}
+    broken_packages: list[str] = []
+
+    def on_error(name: str) -> None:
+        if not issubclass(sys.exc_info()[0] or ImportError, ImportError):
+            raise  # a non-import error must still fail the walk, as it does without onerror
+        broken_packages.append(name)
+
+    for info in pkgutil.walk_packages(paths, prefix, onerror=on_error):
+        try:
+            modules.append(importlib.import_module(info.name))
+        except ImportError:
+            spec = info.module_finder.find_spec(info.name)  # type: ignore[call-arg,union-attr]
+            failed[info.name] = spec.origin or "" if spec else ""
+    for package in broken_packages:
+        rel = package.removeprefix(prefix).split(".")
+        for base in paths:
+            directory = Path(base).joinpath(*rel)
+            for source in sorted(directory.rglob("*.py")):
+                parts = source.relative_to(Path(base)).with_suffix("").parts
+                if parts[-1] == "__init__":
+                    parts = parts[:-1]
+                failed.setdefault(prefix + ".".join(parts), str(source))
+    return modules, failed
+
+
+def _engine_modules() -> tuple[list[types.ModuleType], dict[str, str]]:
+    """Every importable `decoy_engine` module, and the ones that could not be imported (name to
+    its source file). The walk imports each module, so a function wrapped by
+    `entry_point` under any alias, `functools` re-wrap or async form carries the runtime marker."""
+    import decoy_engine
+
+    return _collect(list(decoy_engine.__path__), "decoy_engine.")
+
+
+def marked_functions(modules: list[types.ModuleType]) -> set[tuple[str, str]]:
+    """(module, qualname) of every function that `entry_point` wrapped and the module defines
+    itself (`__module__` check, so a re-export is not counted twice)."""
+    found: set[tuple[str, str]] = set()
+    for module in modules:
+        for obj in vars(module).values():
+            if (
+                inspect.isfunction(obj)
+                and getattr(obj, "__decoy_entry_point__", False)
+                and obj.__module__ == module.__name__
+            ):
+                found.add((module.__name__, obj.__qualname__))
+    return found
+
+
+def _listed_pairs() -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for dotted in ENTRY_POINTS:
+        module, _, name = dotted.rpartition(".")
+        fn = getattr(importlib.import_module(module), name)
+        pairs.add((fn.__module__, fn.__qualname__))
+    return pairs
+
+
+def _failed_naming_entry_point(failed: dict[str, str]) -> list[str]:
+    return sorted(
+        name for name, origin in failed.items() if "entry_point" in Path(origin).read_text()
+    )
+
+
+def test_a_module_that_cannot_be_imported_defines_no_entry_point() -> None:
+    """A module needing an optional extra (mimesis, lightgbm) cannot be imported in every venv,
+    so the marker walk cannot see inside it. It is skipped only if its source never names
+    `entry_point`; one that does fails here instead of hiding a function."""
+    _, failed = _engine_modules()
+    assert _failed_naming_entry_point(failed) == []
+
+
+def test_every_function_marked_by_entry_point_is_listed() -> None:
+    """The call-graph walk cannot follow an indirect call (`entry.lazy(...)`), so a marked
+    function that is not in ENTRY_POINTS is found here from the marker `entry_point` sets."""
+    modules, _ = _engine_modules()
+    assert sorted(marked_functions(modules) - _listed_pairs()) == []
+
+
+def test_the_marker_walk_sees_every_listed_entry_point() -> None:
+    """The walk is not vacuous: it finds each listed function, so a renamed marker fails here."""
+    modules, _ = _engine_modules()
+    assert _listed_pairs() <= marked_functions(modules)
+
+
+def test_a_marked_function_that_is_not_listed_is_seen() -> None:
+    def seeded() -> None: ...
+
+    seeded.__decoy_entry_point__ = True  # type: ignore[attr-defined]
+    seeded.__module__ = "seeded_module"
+    module = types.ModuleType("seeded_module")
+    module.seeded = seeded  # type: ignore[attr-defined]
+    found = marked_functions([module])
+    assert found == {("seeded_module", seeded.__qualname__)}
+    assert found - _listed_pairs() == found
+    reexport = types.ModuleType("other")
+    reexport.seeded = seeded  # type: ignore[attr-defined]
+    assert marked_functions([reexport]) == set()
+
+
+def test_a_submodule_under_a_package_that_fails_to_import_is_seen(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The walk skips the subtree of a package whose `__init__` raises ImportError. Its
+    submodules are still collected as failed, so an `entry_point` in one is reported."""
+    package = tmp_path / "seeded_broken_pkg"
+    (package / "inner").mkdir(parents=True)
+    (package / "__init__.py").write_text("raise ImportError('missing extra')\n")
+    (package / "inner" / "__init__.py").write_text("")
+    (package / "inner" / "deep.py").write_text("@entry_point\ndef run(): ...\n")
+    (tmp_path / "healthy.py").write_text("X = 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    modules, failed = _collect([str(tmp_path)], "")
+    assert "healthy" in {m.__name__ for m in modules}
+    assert {"seeded_broken_pkg", "seeded_broken_pkg.inner", "seeded_broken_pkg.inner.deep"} <= set(
+        failed
+    )
+    assert _failed_naming_entry_point(failed) == ["seeded_broken_pkg.inner.deep"]

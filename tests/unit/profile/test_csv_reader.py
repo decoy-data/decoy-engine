@@ -286,20 +286,20 @@ def _headerless_config(path: Path, table: str, delimiter: str = ",") -> dict[str
 def test_profile_source_resolves_the_dialect_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from decoy_engine.profile import _readers
+    from decoy_engine.profile import _lazy_build
 
     path = tmp_path / "t.tsv"
     path.write_bytes(b"1\tAda\n2\tGrace\n")
     calls: list[dict[str, Any]] = []
     seen_kwargs: list[dict[str, Any]] = []
-    real = _readers.resolve_csv_dialect
+    real = _lazy_build.resolve_csv_dialect
 
     def spy(descriptor: Any, **kwargs: Any) -> CsvDialect:
         calls.append(dict(descriptor))
         seen_kwargs.append(kwargs)
         return real(descriptor, **kwargs)
 
-    monkeypatch.setattr(_readers, "resolve_csv_dialect", spy)
+    monkeypatch.setattr(_lazy_build, "resolve_csv_dialect", spy)
     profile = profile_source(_headerless_config(path, "events", "\t"), seed=1)
     assert len(calls) == 1
     assert seen_kwargs == [{"table": "events"}]
