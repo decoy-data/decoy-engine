@@ -484,8 +484,8 @@ class ParquetTransactionalSink:
             tables = self.staged_components()
             receipt = publish_unit(self._out, self._stage(), self._request, tables=tables)
         except BaseException as exc:
-            self._cleanup_staging()  # `publish_unit` aborted it; confirm where we can look
             try:
+                self._cleanup_staging()  # `publish_unit` aborted it; confirm where we can look
                 capture_publication_failure(exc, self, Operation.COMMIT)
             finally:
                 # Leave COMMITTING on every error exit, even if the capture itself raises.

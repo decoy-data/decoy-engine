@@ -51,9 +51,10 @@ def _refused(call: Any) -> str:
 class _ParkedWrite:
     """`write_batches` parked inside its batch stream, on another thread."""
 
-    def __init__(self, sink: Any) -> None:
+    def __init__(self, sink: Any, *, fail_after_release: bool = False) -> None:
         self.entered, self.release = threading.Event(), threading.Event()
         self.error: BaseException | None = None
+        self._fail = fail_after_release
         self._thread = threading.Thread(target=self._run, args=(sink,), daemon=True)
         self._thread.start()
         assert self.entered.wait(10)  # non-vacuity: the write is in flight
@@ -61,6 +62,8 @@ class _ParkedWrite:
     def _batches(self) -> Iterator[pa.RecordBatch]:
         self.entered.set()
         self.release.wait(10)
+        if self._fail:
+            raise RuntimeError("stream failed")
         yield from table("A").to_batches()
 
     def _run(self, sink: Any) -> None:
@@ -185,6 +188,36 @@ def test_sink_transition_cells_writing(policy: str, tmp_path: Path) -> None:
         assert _refused(lambda: sink.write("orders", table("B"))) == "publication_attempt_aborted"
         assert _refused(sink.commit) == "publication_attempt_aborted"
     assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("unconfirmable", [False, True], ids=["confirmed", "unconfirmable"])
+def test_sink_transition_cells_failed_write_with_a_pending_abort(
+    unconfirmable: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails while an abort is pending still applies the abort: the stage is
+    removed (or the failed confirmation is recorded) and the stream's own error propagates."""
+    real_exists = Path.exists
+
+    def exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name.startswith(STAGE_PREFIX):
+            raise PermissionError("cannot stat the stage")
+        return real_exists(self, *args, **kwargs)
+
+    with sink_factory("ambient", tmp_path) as make:
+        sink = make()
+        parked = _ParkedWrite(sink, fail_after_release=True)
+        sink.abort()  # pending while the write is parked
+        assert len(stages(tmp_path)) == 1
+        if unconfirmable:
+            monkeypatch.setattr(Path, "exists", exists)
+        parked.finish()
+        monkeypatch.undo()
+        assert isinstance(parked.error, RuntimeError)
+        assert str(parked.error) == "stream failed"
+        assert sink.state is S.ABORTED
+        assert stages(tmp_path) == []
+        expected = CleanupState.FAILED if unconfirmable else CleanupState.CONFIRMED
+        assert sink.publication_evidence.cleanup is expected
 
 
 @pytest.mark.parametrize("policy", POLICIES)
