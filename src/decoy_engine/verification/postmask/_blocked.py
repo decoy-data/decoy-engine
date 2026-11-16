@@ -23,7 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
 from decoy_engine.reasons import MAX_NAME_LEN, ReasonRef, reason_ref_payload
 from decoy_engine.verification.postmask import _keys
-from decoy_engine.verification.postmask.types import SCHEMA_VERSION
+from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS
 
 __all__ = [
     "PostScanBlockedError",
@@ -236,7 +236,7 @@ def post_scan_verdict(report: Mapping[str, Any], *, ner_findings: str = "warn") 
             (blocked if blocks else warned).add(ref)
     keyed = bool(blocked)
     version = report.get("schema_version")
-    if not isinstance(version, str) or version.split(".")[0] != SCHEMA_VERSION.split(".")[0]:
+    if version not in READABLE_SCHEMA_VERSIONS:
         blocked.add(_CHECK_ERROR)
     for section in ("residual_pii", "policy_validation"):
         for finding in _rows(report, section):

@@ -88,7 +88,7 @@ def run_post_mask(
             FK findings derive from these. None counts them here from the two frame dicts.
 
     Returns:
-        A post-scan-integrity/v2 report dict. JSON-serializable (every
+        A post-scan-integrity/v3 report dict. JSON-serializable (every
         field is a primitive or list of dataclass-asdict'd findings).
         Caller persists this to JobPostScanIntegrityReport.report_json.
 

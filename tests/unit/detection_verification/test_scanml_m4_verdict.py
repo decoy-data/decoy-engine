@@ -65,7 +65,7 @@ def _row(severity: Any, source: str | None, table: str = "t", column: str = "not
 
 def _report(*rows: Any) -> dict[str, Any]:
     return {
-        "schema_version": "post-scan-integrity/v2",
+        "schema_version": "post-scan-integrity/v3",
         "residual_pii": list(rows),
         "fk_preservation": [],
         "policy_validation": [],
@@ -94,6 +94,18 @@ def test_under_warn_no_ner_row_blocks(severity: str) -> None:
 def test_d_a_classifier_row_never_blocks(severity: str, mode: str) -> None:
     verdict = _verdict(_report(_row(severity, "classifier")), mode)
     assert (verdict.blocking, verdict.codes) == (False, ())
+
+
+@pytest.mark.parametrize("tag", ["post-scan-integrity/v2", "post-scan-integrity/v3"])
+def test_the_verdict_reader_accepts_v2_and_v3_reports(tag: str) -> None:
+    rep = {**_report(_row("info", None)), "schema_version": tag}
+    verdict = _verdict(rep, "warn")
+    assert (verdict.blocking, verdict.codes) == (False, ())
+
+
+def test_the_verdict_reader_refuses_an_unknown_tag() -> None:
+    rep = {**_report(), "schema_version": "post-scan-integrity/v4"}
+    assert _verdict(rep, "warn").blocking
 
 
 @pytest.mark.parametrize("mode", ["warn", "fail"])

@@ -116,6 +116,15 @@ def test_classifier_report_is_the_same_on_full_frame_and_chunked_routes(tmp_path
     assert full == chunked
 
 
+def test_classifier_finding_reports_v3_with_a_null_match_rate(tmp_path: Path) -> None:
+    table = _source()
+    cfg = _cfg(tmp_path, table, {"detectors": ["regex", "classifier"]})
+    full, _ = _routes(cfg, table)
+    assert full["schema_version"] == "post-scan-integrity/v3"
+    rows = s.rows(full, "classifier")
+    assert rows and all(r["match_rate"] is None and r["band"] for r in rows)
+
+
 @needs_ner
 def test_ner_report_is_the_same_on_full_frame_and_chunked_routes(tmp_path: Path) -> None:
     table = _source()
@@ -145,7 +154,7 @@ def test_an_ner_fail_finding_blocks_the_run(tmp_path: Path) -> None:
     err = caught.value
     (finding,) = s.rows(err.report, "ner", column="notes", detector_id="person_name")
     assert (finding["severity"], finding["promoted"]) == ("fail", True)
-    assert err.report["schema_version"] == "post-scan-integrity/v2"
+    assert err.report["schema_version"] == "post-scan-integrity/v3"
     _assert_safe(err)
 
 
