@@ -27,10 +27,10 @@ from decoy_engine.reasons.decoy import (
     RESUME_SOURCE_CHANGED,
 )
 
-OK = TableCheck(record_valid=True, artifact_ok=True, source_ok=True)
-NO_RECORD = TableCheck(record_valid=False, artifact_ok=False, source_ok=False)
-BAD_ARTIFACT = TableCheck(record_valid=True, artifact_ok=False, source_ok=True)
-SOURCE_CHANGED = TableCheck(record_valid=True, artifact_ok=True, source_ok=False)
+OK = TableCheck(record_valid=True, artifact_ok=True, source_ok=True, path_ok=True)
+NO_RECORD = TableCheck(record_valid=False, artifact_ok=False, source_ok=False, path_ok=False)
+BAD_ARTIFACT = TableCheck(record_valid=True, artifact_ok=False, source_ok=True, path_ok=True)
+SOURCE_CHANGED = TableCheck(record_valid=True, artifact_ok=True, source_ok=False, path_ok=True)
 
 
 def _digest(kind: str, index: int) -> str:
@@ -136,6 +136,22 @@ def test_binding_refusal() -> None:
     assert error.field == "bindings"
 
 
+def test_a_moved_placed_path_refuses_with_bindings() -> None:
+    """AT-P2: a stored table whose placed path differs from the current plan's refuses with
+    `bindings`, ahead of a source change on another table. M-P2c: ignore `path_ok`."""
+    moved = dataclasses.replace(OK, path_ok=False)
+    error = _refusal(_stored(), _fingerprint(), _entries(), {0: OK, 1: moved, 2: SOURCE_CHANGED})
+    assert error.code == RESUME_FINGERPRINT_CHANGED
+    assert error.field == "bindings"
+    # No record means no kept file, so there is no path to compare.
+    assert plan_resume(_stored(), _fingerprint(), _entries(), {0: OK, 1: NO_RECORD}).rerun == (
+        1,
+        2,
+        3,
+        4,
+    )
+
+
 def test_a_run_level_difference_wins_over_a_table_one() -> None:
     current = dataclasses.replace(_fingerprint(), chunk_size=1)
     changed = list(_entries())
@@ -151,7 +167,7 @@ def test_source_changed_refuses() -> None:
         error = _refusal(_stored(), _fingerprint(), _entries(), {index: SOURCE_CHANGED})
         assert error.code == RESUME_SOURCE_CHANGED
         assert error.field is None
-    both = TableCheck(record_valid=True, artifact_ok=False, source_ok=False)
+    both = TableCheck(record_valid=True, artifact_ok=False, source_ok=False, path_ok=True)
     assert _refusal(_stored(), _fingerprint(), _entries(), {0: both}).code == RESUME_SOURCE_CHANGED
 
 

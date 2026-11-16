@@ -111,6 +111,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("subset/_errors.py", "SubsetPreflightError.__init__"): _CTOR,
     ("vault.py", "VaultError.__init__"): _CTOR,
     ("publication/_types.py", "_CodedOutcome.__init__"): _CTOR,
+    ("delivery/resume/_plan.py", "ResumeRefusedError.__init__"): _CTOR,
     ("publication/_types.py", "raise_for_outcome"): (
         "re-raises a CommitReceipt's code; the receipt accepts only a registered `decoy` code"
     ),

@@ -41,17 +41,10 @@ class ResumeRefusedError(DecoyError):
             raise ValueError("invalid reason code")
         if field is not None and _FIELD.fullmatch(field) is None:
             raise ValueError("invalid field")
-        # `args` is what pickling rebuilds the error from, so the two values live only there.
+        # `args` is what pickling rebuilds the error from.
         super().__init__(str(code), field)
-
-    @property
-    def code(self) -> str:
-        return str(self.args[0])
-
-    @property
-    def field(self) -> str | None:
-        field: str | None = self.args[1]
-        return field
+        self.code = str(code)
+        self.field = field
 
     def __str__(self) -> str:
         where = "" if self.field is None else f" ({self.field})"
@@ -61,11 +54,13 @@ class ResumeRefusedError(DecoyError):
 @dataclass(frozen=True)
 class TableCheck:
     """What the caller verified for one table: its record read cleanly, its kept file is still
-    there with the recorded digest, and its source file still has the recorded digest."""
+    there with the recorded digest, its source file still has the recorded digest, and the
+    placed path the record names is the path the current plan would place it at."""
 
     record_valid: bool
     artifact_ok: bool
     source_ok: bool
+    path_ok: bool
 
 
 @dataclass(frozen=True)
@@ -87,7 +82,9 @@ class ResumePlan:
 
 
 # No record read for the table: it runs.
-_NO_RECORD: Final = TableCheck(record_valid=False, artifact_ok=False, source_ok=False)
+_NO_RECORD: Final = TableCheck(
+    record_valid=False, artifact_ok=False, source_ok=False, path_ok=False
+)
 
 
 def plan_resume(
@@ -110,6 +107,12 @@ def plan_resume(
         raise ResumeRefusedError(RESUME_FINGERPRINT_CHANGED, _FIELD_TABLES)
     if [t.binding_digest for t in stored.tables] != [t.binding_digest for t in tables]:
         raise ResumeRefusedError(RESUME_FINGERPRINT_CHANGED, _FIELD_BINDINGS)
+    # A kept file whose placed path moved would land somewhere the current plan does not: a
+    # binding difference, refused before any table is judged.
+    for entry in tables:
+        check = checks.get(entry.index, _NO_RECORD)
+        if check.record_valid and not check.path_ok:
+            raise ResumeRefusedError(RESUME_FINGERPRINT_CHANGED, _FIELD_BINDINGS)
     keep: list[int] = []
     rerun: list[int] = []
     warnings: list[ResumeWarning] = []
