@@ -10,10 +10,10 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 (2026-11-16), PLAN defines acceptance tests, develop correctly (registries and sizing), sentry
 over prose, dev-loop review 2026-11-11.
 
-Revision 2: resolves Dennis round 1 on `2fad04c9a` (H1, M1 to M9, L1 to L6).
+Revision 3: resolves Dennis round 2 on `d1479c3a8` (H1, M1 to M2, L1 to L6).
 
 Bases (2026-11-16): engine `origin/main` `13c95c7de` (release 0.27.0 is in); CLI `origin/main`
-`60cac678` (pins `decoy-engine==0.27.0`, CLI #290 `bcd025bd`). Plans read and sequenced
+`ba7b613e` (pins `decoy-engine==0.27.0`, CLI #290 `bcd025bd`). Plans read and sequenced
 against: engine `plan/date-shift-unkeyed-1116` (`dfb8a9453`, row 24zb), engine `plan/prop-batch`
 (`feeeccc01`, rows 24zi to 24zl), CLI `plan/certified-pin-cves` (`9bf16551`, the earlier 24zc
 plan, written on CLI `ac0cb686` and engine 0.22.0). Inputs: the duplication census
@@ -38,9 +38,9 @@ for their QA pass. Rows 24z, 24za and 24ze carry no QA hold. All four build now.
 Guarantee (V1 rules only):
 
 - (a) 24z: no engine or CLI document says deterministic `faker` maps distinct inputs to distinct
-  outputs, and a `--post-validate` run reports, per deterministic `faker` column, how many
-  distinct source values were lost to shared masked values. The report holds names and
-  counts only, never a value.
+  outputs, and a `--post-validate` run reports, per deterministic `faker` column that is not
+  `unique` and has no `when:`, how many distinct source values were lost to shared masked values.
+  The report holds names and counts only, never a value. A `when:`-gated column is excluded.
 - (b) 24za: `docs/strategies.md` has a section for every user-facing mask strategy in the handler
   registry, says what each `format_error` strategy does with an unparseable cell, and no engine
   document says a keyed strategy falls back to or keys off `job_seed`. A sentry keeps the
@@ -100,6 +100,10 @@ pool sampler, the cardinality scan or the collision text.
   `E:execution/_pipeline_finalize.py:349-351`. The CLI `--json` envelope carries
   `report.quality_summary` (`C:cli/run/_render.py:128-131`); the human renderer prints failed checks
   only (`C:ui/summary.py:308`).
+- `CARDINALITY_MATCH_DEVIATION` does not cover the collision fact. `_source_distinct` prefers the
+  profile count, and sampled profiles compute that count over `sample_series`
+  (`E:profile/_walk.py:169-170`), while the collision count must use the row-aligned source and
+  output in canonical form. The CLI human renderer also prints failed checks only, not warnings.
 
 **Scope (recommended answer to OQ-1 and OQ-2).** Correct the promise and report the count through
 the existing cardinality scan.
@@ -107,12 +111,12 @@ the existing cardinality scan.
 **V1 behavior.**
 
 - `run_cardinality` gains one rule. Which columns: seed `strategy == "faker"`, `deterministic`
-  true, `when` empty, and `cardinality_mode` not `unique` and not `match_source_cardinality`.
+  true, `when` empty, and `cardinality_mode` not `unique`.
   `PoolSampler.sample` sends every deterministic mode except `unique` (refused) to
   `_deterministic` (`E:generation/pool/_sampler.py:218-243`), so `reuse` and
-  `scale_source_cardinality` both get the keyed pick and both are covered.
-  `match_source_cardinality` is excluded because the same scan already warns
-  `CARDINALITY_MATCH_DEVIATION` for exactly this deviation in that mode; one fact, one warning.
+  `scale_source_cardinality` and `match_source_cardinality` all get the keyed pick and are covered.
+  In match mode the existing `CARDINALITY_MATCH_DEVIATION` remains a separate profile-based fact.
+  one column can emit both codes.
 - How it counts: over the row-aligned source and output (`ctx.sources`, the post-quarantine rows),
   `source_distinct` is the number of distinct non-null source values after the sampler's own
   canonical form (`_canonicalize_source`), `output_distinct` the number of distinct non-null
@@ -121,9 +125,12 @@ the existing cardinality scan.
   output; the docs and the CLI line say so. When `distinct_lost > 0` it emits a `QualityWarning`
   with the new warning code `cardinality_collisions` and detail `{table, source_distinct,
   output_distinct, distinct_lost, pool_size}`: names and counts only.
-- `pool_size` is the effective size from `resolve_faker_pool_identity` (`E:generation/pool/_identity.py`),
-  called with the column's provider, plan pool size and namespace, the same call the handler makes
-  (`E:execution/_strategies/_faker.py:90`). No second default is restated. There is no
+- `E:generation/pool/_identity.py` extracts its current pool-size coalesce into
+  `effective_pool_size(plan_pool_size, cfg)`. `resolve_faker_pool_identity` calls that helper, and
+  the collision rule calls it with `seed.pool_size` and
+  `provider_config_to_dict(seed.provider_config)`. This reuses the one `DEFAULT_POOL_SIZE` path
+  without requiring a builder, provider, namespace or `job_seed`. The seed is unchanged and no
+  registry is added. There is no
   `allow_collisions` key: the compiler folds it into `cardinality_mode` and `deterministic`
   (`E:plan/_seed_envelope.py:204-221`), so the seed does not carry it.
 - The new code is added to the `QualityWarning` code list in the `E:generation/pool/_events.py`
@@ -240,7 +247,7 @@ guarantee, exact-delta test against a pre-repin fixture, fingerprint and public-
 platform exception. This section records only what changed since it was written on CLI
 `ac0cb686`; the builder works from that plan with these corrections.
 
-| Then (CLI `ac0cb686`) | Now (CLI `60cac678`) |
+| Then (CLI `ac0cb686`) | Now (CLI `ba7b613e`) |
 |---|---|
 | 63 pins | 67 pins (SCAN-ML M2 added scikit-learn, lightgbm, joblib, threadpoolctl; `CT:unit/test_sbom_script.py:312` asserts 67) |
 | engine 0.22.0 | engine 0.27.0, fingerprint `789b1eae...` |
@@ -308,8 +315,10 @@ evasion is V2-LOG).
 
 - D2: one constructor tuple, `_CONSTRUCTORS` in `ET:sentry/defects/test_rng_construction.py`,
   is shared by the existing seed-form rule and the new census rule. It is extended with
-  `SystemRandom`, `seed` (as `np.random.seed`) and `Generator` (as `np.random.Generator(`). The
-  census counts every call to a name in it outside `E:determinism/` and
+  `SystemRandom` and `Generator`. The census separately resolves the qualified seed operations
+  `numpy.random.seed` and `faker.Faker.seed_instance`. It does not match a bare `.seed(` method.
+  Current `Faker.seed_instance` calls are recorded in the same shrink-only baseline. The census
+  counts every resolved constructor or seed operation outside `E:determinism/` and
   `E:generators/derivation.py`, resolved through
   `tests/sentry/_call_resolution.py` (module aliases, `from numpy.random import default_rng`,
   `import numpy.random as npr`). Baseline key `path::qualified_function::ordinal`, value the
@@ -352,11 +361,15 @@ evasion is V2-LOG).
   certified platform, moved here and imported back by the sentry) and a CLI-profile row from a given
   `requirements-certified.txt`, a CLI version and the engine version, both through public
   `compute_lock_fingerprint`. `scripts/release/stamp_release.py` calls it at release prep with
-  `--cli-pins PATH --cli-version X` (repeatable, for OQ-4's two rows) and inserts the rows at the top
+  required `--cli-pins-base PATH` naming the previous certified pin file, repeatable
+  `--cli-pins PATH` for OQ-4's two candidate rows, and `--cli-version X`. It inserts the rows at the top
   of their blocks in `_CERTIFIED_STACKS`, newest first, through the same plan-apply-check
   transaction it uses for the registry. Before computing, it refuses (exit 1, tree unchanged) a
-  pins file that `scripts/release/sbom_checks.py::pins` rejects, and one whose package-name set
-  differs from the source of the newest CLI-profile row beyond names given in `--allow-delta`.
+  base or candidate pins file for which
+  `scripts/release/sbom_checks.py::pin_violations(text, require_hashes=False,
+  allow_comments=True)` or `requirement_violations(text)` is non-empty. It derives the reference
+  package-name set from `--cli-pins-base`, not from an unrecoverable manifest fingerprint, and
+  refuses a candidate whose name set differs beyond names given in `--allow-delta`.
   `cut-release.sh` stays a tagger that changes no file. An
   unchanged `release_checks.sh` still proves the dev row admits the stamped version.
 
@@ -379,21 +392,21 @@ evidence. The builder records each fail-before result in the PR body.
 
 | Id | Slice | Test | Fails before because |
 |---|---|---|---|
-| AT-Z1 | Z-E1 | `ET:unit/validation/test_structural_scans.py`: a deterministic `faker` column, `pool_size: 10`, 200 distinct sources, post-validation on: `quality_warnings` holds `cardinality_collisions` with `distinct_lost == source_distinct - output_distinct > 0` and `pool_size == 10` | no such warning |
+| AT-Z1 | Z-E1 | `ET:unit/validation/test_structural_scans.py`: a deterministic `faker` column, `pool_size: 10`, 200 distinct sources, post-validation on: `quality_warnings` holds `cardinality_collisions` with `distinct_lost == source_distinct - output_distinct > 0` and `pool_size == 10`. A second column with no declared `pool_size` reports `pool_size == DEFAULT_POOL_SIZE` | no such warning |
 | AT-Z2 | Z-E1 | Same run with a marker source value: the marker is absent from the JSON of `quality_summary`, from `str()` of each warning and from the captured run log | no warning to check; written red with AT-Z1 |
 | AT-Z3 | Z-E1 | A `when:`-gated deterministic `faker` column: no `cardinality_collisions` entry; its `DistinctCount` is still recorded | the `DistinctCount` half is no-regression; the absence is pinned after Z-E1 (MZ2 turns it red) |
 | AT-Z4 | Z-E1 | Quarantine on, one row removed by another column's `format_error`: `source_distinct` counts the aligned rows only | no warning |
 | AT-Z5 | Z-E1 | An integer column: `source_distinct` equals the count over `_canonicalize_source` forms, compared with a direct call of the sampler's canonicalizer | no warning |
 | AT-Z6 | Z-E1 | `run_pipeline` with `execution_mode="full_frame"` and with `"out_of_core"` on the AT-Z1 config: equal warning detail | no warning on either route |
-| AT-Z6b | Z-E1 | A deterministic `faker` column with `cardinality_mode: scale_source_cardinality` and a small pool: the warning is emitted; a `match_source_cardinality` column gets `CARDINALITY_MATCH_DEVIATION` and no `cardinality_collisions` | rule absent |
-| AT-Z7 | Z-E1 | `ET:sentry/defects/test_strategy_docs_agree.py` case: the "Intentional collisions", `faker` and `hash` sections and `docs/security/token-vault.md` hold no "collision-free", no "one-to-one" for `hash` or `tokenize`, and no "distinct source values map to distinct" claim | `docs/strategies.md:1114` and `:1134`; `token-vault.md:105` |
+| AT-Z6b | Z-E1 | A deterministic `faker` column with `cardinality_mode: scale_source_cardinality` and a small pool emits `cardinality_collisions`. A `match_source_cardinality` column emits both `CARDINALITY_MATCH_DEVIATION` and `cardinality_collisions` | collision rule absent |
+| AT-Z7 | Z-E1 | `ET:sentry/defects/test_strategy_docs_agree.py` case: the "Intentional collisions", `faker` and `hash` sections and `docs/security/token-vault.md` hold no "collision-free" and no "distinct source values map to distinct" claim. Sentence-level rule: any sentence containing "one-to-one" must not name `hash` or `tokenize` | `docs/strategies.md:1114` and `:1134`, `token-vault.md:105` |
 | AT-Z8 | Z-C1 | `CT:e2e/test_run_flags.py`: `decoy run --post-validate` on a small deterministic `faker` config prints the collision line with `table.column` and counts and no source value; `--json` holds the code under `report.quality_summary.quality_warnings`; exit 0 | no line (engine pin lacks the code) |
-| AT-A1 | A-E1 | `test_strategy_docs_agree.py`: the user-facing strategy set is loaded from `scripts/gen_capability_matrix.py::_mask_strategies` the way `ET:sentry/test_capability_matrix.py::_load_generator` loads it; every name in it has a `### <name>` heading under "## Mask strategies" (read with `tests/sentry/layout/_layout.py::section`); a `###` heading equal to a registry handler name that is not user-facing fails; any other `###` heading is prose (for example "Intentional collisions") and is ignored, so there is no hand list; the intro holds no number word | five sections missing; "seventeen" |
+| AT-A1 | A-E1 | `test_strategy_docs_agree.py`: load the user-facing strategy set from `scripts/gen_capability_matrix.py::_mask_strategies`, as `ET:sentry/test_capability_matrix.py::_load_generator` does. Each name needs an exact `### <name>` heading or a heading that starts `### <name> `. Thus, `### passthrough and structural handlers` satisfies `passthrough`. A heading fails if its prefix names a registry handler that is not user-facing. Other headings, such as "Intentional collisions", are prose. The intro holds no number word | five sections missing, "seventeen" |
 | AT-A2 | A-E1 | Same file: for each user-facing strategy whose `capabilities_for(s).row_error_modes` (`E:execution/native/_capabilities.py`) holds `format_error`, its section names `format_error` and says no "pass through" or "left as-is" for unparseable cells | `bucketize` (`:276`), `date_shift` (`:149`) unless 24zb E1 merged first |
-| AT-A3 | A-E1 | Same file: no `job_seed` token at all inside the section of a strategy in `ALWAYS_KEYED_STRATEGIES`, nor inside `docs/determinism.md`'s keyed subsections ("Keyed masking: mask_key, not job_seed", "FPE key and tweak model", "Deterministic shuffle and column names"), except allowlisted sentences (exact text plus a reason each, in the sentry's baseline) | `strategies.md:167`, `:193`, `:196`, `:437`, `:619`, `:625`, `:695`, `:700`; `determinism.md:67`, `:125`, `:217` |
+| AT-A3 | A-E1 | Same file: no `job_seed` token at all inside the section of a strategy in `ALWAYS_KEYED_STRATEGIES`, nor inside `docs/determinism.md`'s keyed subsections ("Keyed masking: mask_key, not job_seed", "FPE key and tweak model", "Deterministic shuffle and column names"), except allowlisted sentences (exact text plus a reason each). The JSON is registered in `scripts/dev/sentry_registry.toml` as `id = "strategy-docs-agree"`, `baseline = "tests/sentry/baselines/strategy-docs-agree.json"`. A-E1 reads that JSON directly because it does not wait for prop E-G2b's `load_allowlist` | `strategies.md:167`, `:193`, `:196`, `:437`, `:619`, `:625`, `:695`, `:700`, `determinism.md:67`, `:125`, `:217` |
 | AT-C1 to AT-C6 | C-E1, C-C1 | The earlier plan's AT-1 to AT-6 with 67 pins, base fingerprint `789b1eae...` and the pre-repin fixture taken from CLI main at the C-C1 base | as in that plan |
 | AT-C7 | C-C1 | `CT:unit/test_sbom_script.py`: the operative header sentence ("together with decoy-engine X") and the `uv pip install decoy-engine==X` line name the `pyproject.toml` pin; history mentions of older versions are not pinned. `scripts/cert_smoke.py`'s docstring no longer carries a fingerprint and points to the header instead | lines 5 and 25 say 0.26.0; the docstring says `dceac0cd...` |
-| AT-G1 | G-E1 | D2 sentry: real tree equals the baseline; a scratch copy with `np.random.default_rng(1)` added to a non-catalogued function fails; a catalogued site whose baseline names another id fails | no census test |
+| AT-G1 | G-E1 | D2 sentry: the real tree equals the baseline. Scratch copies with `np.random.default_rng(1)` in a non-catalogued function and `Faker().seed_instance(1)` each fail. An unrelated object's `.seed(1)` does not match. A catalogued site fails if its baseline names another id | no census test |
 | AT-G2 | G-E1 | D4 sentry: real tree equals the baseline; `import hmac as h; h.new(...)` in a scratch module fails | no sentry |
 | AT-G3 | G-E2 | D5 sentry: real tree equals the baseline; one added `pa.types.is_large_string` in a baselined file fails (count grows) | no sentry |
 | AT-G4 | G-E2 | D6 engine: real tree equals the baseline; `from os import getenv as g; g("X")` in a scratch module fails | the flag test passes a non-flag read |
@@ -401,15 +414,17 @@ evidence. The builder records each fail-before result in the PR body.
 | AT-G6 | G-C1 | D10: scratch `raise typer.Exit(2)`, `raise SystemExit(3)`, `ctx.exit(1)`, `from typer import Exit; raise Exit(2)`, `import typer as t; raise t.Exit(2)`, builtin `exit(1)` and `os._exit(1)` each fail | the regex misses all of them |
 | AT-G7 | G-C1 | D11: a scratch `os.unlink(p)` in a file with no baseline entry fails | not watched |
 | AT-G8 | G-E3 | `ET:native/test_draw_site_inventory_coverage.py`, `ET:native/test_c5b_i_metadata_inventory.py` and `ET:native/test_draw_sites_catalogue_pinned.py`: in a scratch copy, insert a blank line above every catalogued draw: all three pass; rename one catalogued function: they fail. `_MAP_DIGESTS` and `ET:native/test_draw_site_providers_golden.py` are byte-identical before and after G-E3 | the line pin and the entry digests fail on the blank line |
-| AT-G9 | G-E4 | `ET:unit/scripts/test_dp_rows.py`: on a temp clone, `stamp_release.py --version X --cli-pins A --cli-pins B --cli-version Y` writes the dev row equal to what `test_dp_lock_row.py` computes and two CLI rows equal to `compute_lock_fingerprint` over A and B plus the engine and CLI versions; every row in HEAD's `_CERTIFIED_STACKS` is still present; a second run adds nothing. Refusal cells: a pins file that `sbom_checks.pins()` rejects, and one whose package-name set differs from the newest CLI-profile source beyond the declared `--allow-delta` names, each exit 1 and leave the tree unchanged | no script |
+| AT-G9 | G-E4 | `ET:unit/scripts/test_dp_rows.py`: on a temp clone, `stamp_release.py --version X --cli-pins-base BASE --cli-pins A --cli-pins B --cli-version Y` writes the expected dev row and two expected CLI rows. Every row in HEAD's `_CERTIFIED_STACKS` remains present. A second run adds nothing. Refusal cells each exit 1 and leave the tree unchanged: missing `--cli-pins-base`, malformed BASE, A or B caught by `pin_violations(..., require_hashes=False, allow_comments=True)`, a requirement caught by `requirement_violations`, and a candidate name set that differs from BASE beyond `--allow-delta` | no script |
 
 **Named mutations** (each must turn a test red on the slice head): MZ1 compute `distinct_lost` on
 the unaligned source (AT-Z4); MZ2 drop the `when` skip (AT-Z3); MZ3 put `out_non_null[:3]` into the
 detail (AT-Z2); MA1 delete the `tokenize` section (AT-A1); MA2 restore "Non-numeric and null values
 pass through" (AT-A2); MA3 restore the `code_set` "same job_seed" sentence at `:695` (AT-A3); the earlier 24zc plan's M1 to M5, plus MC6 leave line 5 at 0.26.0 (AT-C7);
 MG1 to MG7 the scratch violations above; MG8 revert one entry to `path:line` (AT-G8 shape check);
-MG9 have the script skip the second `--cli-pins` (AT-G9); MG10 drop the name-set check (AT-G9
-refusal cell); MZ4 key the rule on `reuse` only (AT-Z6b).
+MG9 has the script skip the second `--cli-pins` (AT-G9). MG10 compares a candidate's name set to
+itself instead of required `--cli-pins-base` (AT-G9 name-set refusal cell). MZ4 keys the rule on
+`reuse` only (AT-Z6b). MZ5 reads `seed.pool_size` directly, which yields `None` instead of the effective
+default (AT-Z1).
 
 ## 7. Class table
 
@@ -458,7 +473,8 @@ N/A: no slice reads or writes keys or foreign keys; 24z counts distinct values o
 - New warning code `cardinality_collisions` (`reasons.warning`, beside
   `E:reasons/warning/_part1.py:40`), detail keys `table`, `source_distinct`, `output_distinct`,
   `distinct_lost`, `pool_size`.
-- New `stamp_release.py` options `--cli-pins` (repeatable), `--cli-version` and `--allow-delta`.
+- New `stamp_release.py` options `--cli-pins-base` (required), `--cli-pins` (repeatable),
+  `--cli-version` and `--allow-delta`.
 - No config key is added or read anew.
 
 ### Output surfaces
@@ -480,9 +496,10 @@ N/A: no slice reads or writes keys or foreign keys; 24z counts distinct values o
 - 24za reuses `scripts/gen_capability_matrix.py::_mask_strategies` (loaded as
   `ET:sentry/test_capability_matrix.py::_load_generator` does), `capabilities_for(...).row_error_modes`,
   `ALWAYS_KEYED_STRATEGIES` and `tests/sentry/layout/_layout.py::section`. No new section helper.
-- 24zc reuses everything the earlier plan names: `scripts/release/sbom_checks.py::pins` and
-  `canonical_name`, public `compute_lock_fingerprint`, `Provenance`, `validate_recorded_provenance`,
-  `cert_smoke.py`, the certified-profile CI job, `scripts/dev/lock.sh`.
+- 24zc reuses everything the earlier plan names: `scripts/release/sbom_checks.py::pin_violations`,
+  `requirement_violations`, `pins` after validation, and `canonical_name`. It also reuses public
+  `compute_lock_fingerprint`, `Provenance`, `validate_recorded_provenance`, `cert_smoke.py`, the
+  certified-profile CI job and `scripts/dev/lock.sh`.
 - 24ze reuses `tests/sentry/_call_resolution.py`, `tests/sentry/defects/_defect_scan.py`, the CLI
   `_stdout_sites.py` and `_calls` helpers, the prop batch's `load_allowlist`, the ratchet,
   `E:_arrow_types.py`, `stamp_release.py`'s transaction, and the lock-row logic of
@@ -523,7 +540,9 @@ helpers, one release helper module. Each is smaller than any outside tool that w
   `stamp_release.py`; it holds one fact (how a certified row is computed), moved out of a test so
   the test and the release prep share one place.
 - One place per fact: the strategy list is in the registry; the docs page points to the
-  generated matrix for counts. The collision warning detail is built in one function.
+  generated matrix for counts. The collision warning detail is built in one function. Effective
+  faker pool size is computed only by `effective_pool_size` in `_identity.py`. The handler's
+  identity resolver and the collision scan both call it.
 - No flag arguments: the collision rule keys off the seed fields the plan already carries
   (`strategy`, `deterministic`, `cardinality_mode`, `when`).
 
@@ -556,9 +575,10 @@ Checked against engine and CLI CODEMAP "Where Things Go".
 | New or moved thing | Path | CODEMAP row | Beside |
 |---|---|---|---|
 | Collision rule | `E:validation/post/_checks/_cardinality.py` (about 60 lines added) | post-validation scans | `run_cardinality` |
+| Effective faker pool-size helper | `E:generation/pool/_identity.py` | generation pools | `resolve_faker_pool_identity` |
 | Warning code | `E:reasons/warning/_part1.py` (101 lines) | reason registry | `CARDINALITY_MATCH_DEVIATION` |
 | Collision tests | `ET:unit/validation/test_structural_scans.py` | unit tests for the owning surface | existing cardinality tests |
-| Docs agreement sentry | `ET:sentry/defects/test_strategy_docs_agree.py` | recurring-defect class rules | `test_canonical_json_choke_point.py` |
+| Docs agreement sentry | `ET:sentry/defects/test_strategy_docs_agree.py`, `ET:sentry/baselines/strategy-docs-agree.json`, registry id `strategy-docs-agree` | recurring-defect class rules | `test_canonical_json_choke_point.py` |
 | CLI collision line | `C:ui/summary.py` `render_post_validation` | UI rendering | the failed-check table |
 | CLI e2e | `CT:e2e/test_run_flags.py` | e2e for run flags | existing `--post-validate` cases |
 | 24zc tests and fixture | as in the earlier plan: `CT:unit/test_sbom_script.py`, `CT:fixtures/sbom_runtime/requirements-certified-pre-24zc.txt` | release scripts | `_RELEASE_PINS` |
@@ -582,7 +602,7 @@ count as production. Every slice is at or under 10 production files and 800 chan
 
 | Slice | Row | Repo | Scope | Prod files | Lines (est.) | Risk | Depends on |
 |---|---|---|---|---|---|---|---|
-| Z-E1 | 24z | engine | collision rule, warning code, `_events.py` docstring, `_tables.py` comment, docs (`faker`, `hash`, "Intentional collisions", `security/token-vault.md`), QA 06, changelog fragment, AT-Z1 to AT-Z7 | 4 | ~350 | R2 (report built from source values; frozen registry) | none |
+| Z-E1 | 24z | engine | collision rule, `effective_pool_size`, warning code, `_events.py` docstring, `_tables.py` comment, docs (`faker`, `hash`, "Intentional collisions", `security/token-vault.md`), QA 06, changelog fragment, AT-Z1 to AT-Z7 | 5 | ~375 | R2 (report built from source values and frozen registry) | none |
 | A-E1 | 24za | engine | strategies.md count, five sections, `format_error` text, `job_seed` text in both pages, AT-A1 to AT-A3 | 0 | ~450 docs, ~150 test | R1 | 24zb E1 merged, or the 2026-11-25 fallback in section 3 |
 | C-E1 | 24zc | engine | in release N prep: two CLI-profile rows for N; the prior-release rows test | 1 | ~30 | R1 | release N prep; uses G-E4 if merged |
 | G-E1 | 24ze | engine | D2 census, D4 | 0 | ~400 | R1 | prop E-G2b; G-E3 for the exact id join (else values are filled by function name and G-E3 rewrites them) |
@@ -653,14 +673,13 @@ see `code=` across lines.
 
 ## 17. Not verified
 
+The earlier pool-size access risk is closed by the section 2 decision: use
+`effective_pool_size` from `_identity.py`. Do not stamp a default onto the seed.
+
 - No test was run (devbox rule). Each fail-before claim comes from reading the code at the bases.
   The builder confirms each on the branch before changing source.
 - That `ScanContext.sources` is the row-aligned source for every route (read in
   `_pipeline_finalize.py`, not run).
-- That the post-validation `ScanContext` can reach the run's provider registry, which
-  `resolve_faker_pool_identity` needs. If it cannot, Z-E1 passes the resolved pool size through
-  the plan seed's existing `pool_size` at compile, not a restated default; the builder confirms
-  first.
 - That no current advisory exists for a fifth certified pin. The four come from the 2026-11-11
   scan; the row limits the change to them. A new advisory is a new row.
 - The counts behind each new baseline (12 engine environment-read lines, 11 `hmac.new` lines
@@ -675,6 +694,9 @@ see `code=` across lines.
   references can move to the function form.
 - V2-LOG, web lane: `decoy-web-docs` `concepts/keys-and-vault.mdx:90` repeats the collision-free
   claim; flag it to the web owner.
+- V2-LOG: `_cardinality.py` imports private generation modules `_canonicalize` and `_identity`.
+  Engine `./.importlinter` permits the direction because `validation` is above `generation` in the
+  declared layer stack, so this needs no ignore line. Public-facade cleanup is outside V1.
 
 - New V1 row for finding F-1 if OQ-6 is accepted.
 - The CLI `plan/certified-pin-cves` branch is superseded by section 4 for base numbers; its design
