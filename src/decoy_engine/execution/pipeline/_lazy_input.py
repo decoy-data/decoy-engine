@@ -21,10 +21,11 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine.execution._pipeline_sources import materialize_source
+from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
-    from decoy_engine.fileaccess import FileAccess
+    from decoy_engine.providers_v2 import ProviderRegistry
 
 
 def read_resident_fallback(
@@ -49,12 +50,14 @@ def resident_fallback_tables(
     fidelity_report: bool,
     post_validation: bool,
     vault_writer: Any,
-    file_access: FileAccess | None,
+    registry: ProviderRegistry | None = None,
+    source_loader_schemas: Mapping[str, Any] | None = None,
 ) -> frozenset[str]:
     """The caller `LazySource` names the run cannot keep lazy; a subset of the lazy `sources`.
 
-    Reads no data row beyond the bounded profile. The arguments are the run's own values, so the
-    plan compiled here is the plan the run compiles.
+    Reads no data row beyond the bounded profile. The arguments are the run's own values and the
+    routing facts come from the one function the run context calls, over every caller source, so
+    the job profiled and compiled here is the job the run executes.
     """
     from decoy_engine.config import classify_table_kinds, post_scan_gate_applies
     from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
@@ -76,16 +79,26 @@ def resident_fallback_tables(
         # A lazy transform-bearing table defers the gate to report-only.
         keep -= transform_bearing_mask_tables(config)
     if keep and config.get("relationships"):
-        eligible = _relationship_job_is_bounded(
+        from decoy_engine.providers_v2 import get_default_registry
+
+        resolved_registry = registry if registry is not None else get_default_registry()
+        facts = build_routing_facts(
             config,
-            candidates,
+            sources,
+            registry=resolved_registry,
+            source_loader_schemas=source_loader_schemas,
             engine_version=engine_version,
             base_dir=base_dir,
             instance_default_locale=instance_default_locale,
+        )
+        eligible = _relationship_job_is_bounded(
+            config,
+            facts,
+            sources,
+            registry=resolved_registry,
             fidelity_report=fidelity_report,
             post_validation=post_validation,
             has_generate_table="generate" in kinds.values(),
-            file_access=file_access,
         )
         if not eligible:
             return frozenset(candidates)
@@ -94,60 +107,24 @@ def resident_fallback_tables(
 
 def _relationship_job_is_bounded(
     config: dict[str, Any],
-    candidates: Mapping[str, LazySource],
+    facts: RoutingFacts,
+    sources: Mapping[str, pa.Table | LazySource],
     *,
-    engine_version: str,
-    base_dir: str | Path | None,
-    instance_default_locale: Any,
+    registry: ProviderRegistry,
     fidelity_report: bool,
     post_validation: bool,
     has_generate_table: bool,
-    file_access: FileAccess | None,
 ) -> bool:
     """Whether routing would take a bounded route for this job, from the engine's own owners."""
     from decoy_engine.execution import _pipeline_routing, _transforms_admission
     from decoy_engine.execution import _pipeline_routing_signals as signals
-    from decoy_engine.execution._guards import prepare_declared_execution_sources
     from decoy_engine.execution._pipeline_routing_fk_dtype import fk_out_of_core_dtype_hazard
     from decoy_engine.execution._transforms_gate import post_scan_resident_for
-    from decoy_engine.plan import compile_plan
-    from decoy_engine.plan._seed import _normalize_job_seed_int
-    from decoy_engine.profile import DeclarationRequest, profile_source
-    from decoy_engine.providers_v2 import get_default_registry
-    from decoy_engine.relationships import (
-        build_namespace_registry,
-        build_relationship_graph,
-        check_orphan_fk_policy_completeness,
-    )
 
-    registry = get_default_registry()
-    schemas = {name: source.schema for name, source in candidates.items()}
-    declared = prepare_declared_execution_sources(
-        DeclarationRequest.for_run(config, schemas, None), registry=registry
-    )
-    profile = profile_source(
-        config,
-        seed=_normalize_job_seed_int(config),
-        declared=declared,
-        supplied_sources=candidates,
-        file_access=file_access,
-    )
-    plan = compile_plan(
-        config,
-        profile,
-        decoy_engine_version=engine_version,
-        base_dir=base_dir,
-        instance_default_locale=instance_default_locale,
-    )
-    if not profile.relationships:
+    if not facts.profile.relationships:
         return True
-    graph = build_relationship_graph(
-        profile.relationships,
-        namespace_registry=build_namespace_registry(config, profile),
-        orphan_policy_lookup=check_orphan_fk_policy_completeness(config, profile.relationships),
-    )
     eligible, _reason = _pipeline_routing._sequential_eligible(
-        profile,
+        facts.profile,
         has_generate_table=has_generate_table,
         validators=config.get("validators") or [],
         fidelity_report=fidelity_report,
@@ -155,12 +132,15 @@ def _relationship_job_is_bounded(
         post_validation=post_validation,
         post_scan_resident=post_scan_resident_for(config),
     )
-    if not eligible or _pipeline_routing._has_cross_table_fk_cycle(graph):
+    if not eligible or _pipeline_routing._has_cross_table_fk_cycle(facts.graph):
         return False
     compatible, code = signals.out_of_core_admission(
-        plan, registry=registry, graph=graph, source_types=signals._source_arrow_types(candidates)
+        facts.plan,
+        registry=registry,
+        graph=facts.graph,
+        source_types=signals._source_arrow_types(sources),
     )
     compatible, _code = _transforms_admission.decline_out_of_core(config, compatible, code)
     return compatible and not fk_out_of_core_dtype_hazard(
-        plan, graph, caller_sources=dict(candidates)
+        facts.plan, facts.graph, caller_sources=dict(sources)
     )

@@ -60,7 +60,6 @@ def _names(
         "fidelity_report": False,
         "post_validation": False,
         "vault_writer": object() if over.pop("vault_active", False) else None,
-        "file_access": None,
     }
     args.update(over)
     return frozenset(candidates) - resident_fallback_tables(cfg, candidates, **args)
@@ -247,9 +246,9 @@ def test_a_transforming_relationship_job_is_left_to_the_owners(tmp_path: Path) -
 
 
 def test_the_pre_pass_copies_no_eligibility_rule() -> None:
-    from decoy_engine.execution.pipeline import _lazy_input
+    from decoy_engine.execution.pipeline import _lazy_input, _routing_facts
 
-    tree = ast.parse(inspect.getsource(_lazy_input))
+    tree = ast.parse(inspect.getsource(_lazy_input) + inspect.getsource(_routing_facts))
     called = {
         n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", "")
         for n in ast.walk(tree)
@@ -270,7 +269,7 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
         "build_relationship_graph",
     }
     assert owners <= imported | called
-    source = inspect.getsource(_lazy_input)
+    source = inspect.getsource(_lazy_input) + inspect.getsource(_routing_facts)
     for code in (
         "VALIDATORS_PRESENT",
         "FIDELITY_REPORT",
@@ -382,16 +381,16 @@ def test_the_default_runs_no_pre_pass(tmp_path: Path, monkeypatch: pytest.Monkey
     assert seen["sources"]["t"] is lazy
 
 
-def test_stream_skips_the_pre_pass_and_reads_nothing(
+def test_stream_skips_the_pre_pass_and_reads_no_whole_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # M-E5k: `stream` raises `streaming_unavailable` before any source is read.
+    # M-E5k: `stream` raises `streaming_unavailable` before any whole-table read.
     cfg, lazy, _path = _declared_cast_job(tmp_path)
     reads: list[str] = []
 
     def spy_read(self: LazySource, *a: Any, **k: Any) -> Any:
         reads.append("read")
-        raise AssertionError("no whole read may happen")
+        raise AssertionError("no whole-table read may happen")
 
     # The run context's bounded profile samples through `iter_batches`; only a whole read is the
     # pre-pass's `materialize_source`, and `stream` must refuse before that.
@@ -415,6 +414,98 @@ def test_an_explicit_route_skips_the_pre_pass(
     ):  # the lazy table may be refused later; only the call matters
         _run(cfg, {"t": lazy}, resident_fallback=True, execution_mode="full_frame")
     assert calls == []
+
+
+def _spy_declarations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[frozenset[str], Any]]:
+    """Record the (declared table names, registry) of each declaration the engine prepares."""
+    from decoy_engine.execution import _guards
+
+    calls: list[tuple[frozenset[str], Any]] = []
+    real = _guards.prepare_declared_execution_sources
+
+    def spy(request: Any, **kw: Any) -> Any:
+        names = frozenset(i.table for i in request._inputs if i.origin != "descriptor")
+        calls.append((names, kw.get("registry")))
+        return real(request, **kw)
+
+    monkeypatch.setattr(_guards, "prepare_declared_execution_sources", spy)
+    return calls
+
+
+def test_a_mixed_job_is_routed_over_every_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pre-pass sees the resident parent too, so it picks the route the run takes.
+    cfg, lazy = _fk(tmp_path)
+    sources = {"parent": lazy["parent"].to_table(), "child": lazy["child"]}
+    calls = _spy_declarations(monkeypatch)
+    from decoy_engine.execution.pipeline._lazy_input import resident_fallback_tables
+
+    rejected = resident_fallback_tables(
+        cfg,
+        sources,
+        engine_version=V,
+        base_dir=tmp_path,
+        instance_default_locale=None,
+        fidelity_report=False,
+        post_validation=False,
+        vault_writer=None,
+    )
+    assert calls == [(frozenset({"parent", "child"}), get_default_registry())]
+    assert rejected == frozenset()
+    seen = _spy_context(monkeypatch)
+    _run(cfg, sources, resident_fallback=True)
+    assert seen["sources"]["child"] is sources["child"]
+    assert seen["sources"]["parent"] is sources["parent"]
+    assert calls[-1][0] == calls[0][0]
+
+
+def test_the_pre_pass_uses_the_registry_the_run_was_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution import _pipeline_routing_signals as signals
+    from decoy_engine.execution.pipeline._lazy_input import resident_fallback_tables
+    from decoy_engine.providers_v2 import ProviderRegistry
+
+    cfg, candidates = _fk(tmp_path)
+    custom = ProviderRegistry(dict(get_default_registry()._bindings))
+    calls = _spy_declarations(monkeypatch)
+    admitted: list[Any] = []
+    real = signals.out_of_core_admission
+
+    def spy(plan: Any, **kw: Any) -> Any:
+        admitted.append(kw["registry"])
+        return real(plan, **kw)
+
+    monkeypatch.setattr(signals, "out_of_core_admission", spy)
+    resident_fallback_tables(
+        cfg,
+        candidates,
+        engine_version=V,
+        base_dir=tmp_path,
+        instance_default_locale=None,
+        fidelity_report=False,
+        post_validation=False,
+        vault_writer=None,
+        registry=custom,
+    )
+    assert [reg for _names, reg in calls] == [custom]
+    assert admitted == [custom]
+
+
+def test_the_run_context_and_the_pre_pass_share_one_routing_facts_function() -> None:
+    from decoy_engine.execution import _pipeline_context
+    from decoy_engine.execution.pipeline import _lazy_input
+
+    for module in (_pipeline_context, _lazy_input):
+        tree = ast.parse(inspect.getsource(module))
+        called = {
+            n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", "")
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+        }
+        assert "build_routing_facts" in called, module.__name__
+        assert not {"profile_source", "compile_plan", "build_relationship_graph"} & called
 
 
 def test_the_pre_pass_is_private() -> None:
