@@ -21,10 +21,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine.publication import PublicationRefused
-from decoy_engine.publication._sink_state import SinkState
+from decoy_engine.publication import PublicationRefused, SinkState
+from decoy_engine.reasons import CleanupState
 from tests.unit.execution.publication._sink_support import (
     POLICIES,
+    STAGE_PREFIX,
     sink_factory,
     stages,
     table,
@@ -222,6 +223,62 @@ def test_sink_transition_cells_committing_failure_with_a_pending_abort(
         assert sink.state is S.ABORTED  # FAILED plus the pending abort
         assert stages(tmp_path) == []
     assert tree(tmp_path / "out") == before
+
+
+class _CaptureBroke(BaseException):
+    """Stands in for an interrupt that lands while the failure evidence is captured."""
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_sink_transition_cells_commit_leaves_committing_when_capture_raises(
+    policy: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("occupant", encoding="utf-8")
+    before = tree(tmp_path / "out")
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise _CaptureBroke
+
+    monkeypatch.setattr(
+        "decoy_engine.execution._transactional_sink.capture_publication_failure", broken
+    )
+    with sink_factory(policy, tmp_path) as make:
+        sink = make()
+        sink.write("customers", table("A"))
+        parked = _ParkedCommit(sink, monkeypatch)
+        sink.abort()  # pending while the commit is in flight
+        parked.finish()
+        assert isinstance(parked.error, _CaptureBroke)
+        assert sink.state is S.ABORTED  # left COMMITTING, and the pending abort applied
+        assert stages(tmp_path) == []
+    assert tree(tmp_path / "out") == before
+
+
+def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_write_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("occupant", encoding="utf-8")
+    real_exists = Path.exists
+
+    def exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name.startswith(STAGE_PREFIX):
+            raise PermissionError("cannot stat the stage")
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    with sink_factory("ambient", tmp_path) as make:
+        sink = make()
+        sink.write("customers", table("A"))
+        parked = _ParkedCommit(sink, monkeypatch)
+        sink.abort()
+        parked.finish()
+        # The commit's own OSError (occupied target) propagates, not the stat error.
+        assert isinstance(parked.error, OSError)
+        assert not isinstance(parked.error, PermissionError)
+        assert sink.state is S.ABORTED
+        assert sink.publication_evidence.cleanup is CleanupState.FAILED
 
 
 @pytest.mark.parametrize("policy", POLICIES)
