@@ -1,3 +1,0 @@
-### Added (resident fallback and compiled-run evidence, RUN-STREAM E5, 2026-11-15)
-
-`run_pipeline` takes a keyword `resident_fallback` (default `False`). With `True` on a plain `auto` run, it reads whole, before routing, each caller `LazySource` it cannot keep lazy: vault runs, declared-casting tables, relationship jobs without a bounded route, and transform-bearing mask tables when the post-scan gate applies. `RouteSummary.native_executed` is true only when a column ran a compiled backend from the operator registry; an idle kernel or a Python-planned column reports false. The auto-chunk lane now collects a lazy source with no sink into one resident output.
