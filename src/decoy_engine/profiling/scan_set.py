@@ -284,9 +284,8 @@ def scan_sources(
     a protected directory under `spill_dir` (default: the system temp directory). The tables
     they name must be in `sources` but need not be selected. Nothing is inferred.
 
-    `pre_scan` names the detector sources to run beside the regex detectors; `None` is regex
-    only. Its models load strictly, once, before the first table: a model that cannot run raises
-    `ModelUnavailableError` and no table is read. Hits land in `TableScan.model_hits`.
+    `pre_scan` adds model detectors to the regex ones (`None`: regex only). They load strictly,
+    once, before the first table; an unavailable model raises `ModelUnavailableError` first.
     """
     from decoy_engine.release import __version__
 
@@ -538,7 +537,9 @@ def _field_core(
         pii_candidate=f.pii_score >= PII_CANDIDATE_THRESHOLD,
         detector_hits=[m.detector_id for m in (f.detector_matches or [])],
         leading_zero_count=zeros,
-        model_hits=[ModelHitCore.model_validate(asdict(h)) for h in hits],
+        model_hits=[
+            ModelHitCore(**{**asdict(h), "model": ModelRefCore(**asdict(h.model))}) for h in hits
+        ],
     )
 
 
