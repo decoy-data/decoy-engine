@@ -321,13 +321,15 @@ def test_symmetry_swap_preserves_shape_score() -> None:
     )
 
 
-def test_datetime_count_too_large_to_scale_is_malformed_not_a_crash() -> None:
-    def col(*counts: float) -> dict:
-        bins = [{"year": 2000 + i, "count": c} for i, c in enumerate(counts)]
+def test_datetime_count_too_large_to_split_is_malformed_not_a_crash() -> None:
+    # A v2 range count past float range cannot be split across years. (A huge v1 count scores as on
+    # main: see test_fidelity_datetime_ranges.)
+    def col(count: int) -> dict:
+        bins = [{"start_year": 2000, "end_year": 2001, "count": count}]
         return {"name": "d", "kind": "datetime", "stats": {"year_bins": bins}}
 
-    src = _snap({"d": col(1e308, 5.0)})
-    out = _snap({"d": col(3.0, 5.0)})
+    src = {**_snap({"d": col(10**400)}), "schema_version": "distribution-snapshot/v2"}
+    out = {**_snap({"d": col(3)}), "schema_version": "distribution-snapshot/v2"}
     entry = compute_shape_fidelity(src, out)["marginal"]["columns"][0]
     assert entry["comparable"] is False
     assert entry["method"] == "malformed_year_bins"

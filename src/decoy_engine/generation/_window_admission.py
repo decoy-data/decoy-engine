@@ -180,7 +180,7 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            f"sampled year(s) {bad[:3]} outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+            f"a sampled year is outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
         )
     parsed_bounds: dict[str, datetime] = {}
     for bound in ("min", "max"):
@@ -200,7 +200,7 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             col,
             CODE_DEGENERATE,
             "min",
-            f"datetime min {parsed_bounds['min']} is after max {parsed_bounds['max']}",
+            "datetime min is after max",
         )
     # A folded range has no per-year weights to check its edge against, so its outer year must be
     # the bound's year; otherwise the draw would pile up at the clamp.
