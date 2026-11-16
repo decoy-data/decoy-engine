@@ -31,6 +31,7 @@ from decoy_engine.config import (
     parse_relationship_config,
     post_scan_gate_applies,
     post_scan_integrity_requested,
+    post_scan_ner_findings,
     post_scan_output_readable,
     post_scan_sink_kind,
 )
@@ -57,6 +58,7 @@ from decoy_engine.verification.postmask import (
     key_columns,
     keys_report,
     post_scan_verdict,
+    raise_if_ner_blocked,
     run_post_mask,
     run_post_mask_tables,
     with_cast,
@@ -65,6 +67,7 @@ from decoy_engine.verification.postmask import (
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext
+    from decoy_engine.profiling.model_pack import DetectorSet
     from decoy_engine.verification.postmask import TableBatches
 
 __all__ = [
@@ -98,8 +101,12 @@ class PostScanGate:
         source_facts: Mapping[str, SourceFacts] | None = None,
         deferred: bool = False,
         sources: Mapping[str, pa.Table | LazySource] | None = None,
+        detectors: DetectorSet | None = None,
     ) -> None:
         self.required = post_scan_gate_applies(config)
+        # The post-scan models `run_pipeline` loaded strictly at run start; they read resident
+        # outputs only, so a model ask keeps its run resident (`post_scan_resident_reason`).
+        self._detectors = detectors
         # True on a route whose inputs or output the gate cannot read back yet: the run is then
         # checked report-only, as before the gate, and says so on its result.
         self.deferred = deferred and self.required
@@ -128,6 +135,15 @@ class PostScanGate:
         self._teed: dict[str, LazySource] = {}
         self._scratch = ExitStack()
         self._scratch_root: Path | None = None
+
+    @property
+    def enforces_ner(self) -> bool:
+        """A deferred gate whose report-only check still blocks on NER (`ner_findings: fail`)."""
+        return (
+            self.deferred
+            and post_scan_integrity_requested(self._config)
+            and post_scan_ner_findings(self._config) == "fail"
+        )
 
     @property
     def memory_limit(self) -> str:
@@ -190,7 +206,7 @@ class PostScanGate:
         report["keys"] = keys_report(keys)
         if failed:
             report["pass_failed_with"] = failed
-        verdict = post_scan_verdict(report)
+        verdict = post_scan_verdict(report, ner_findings=post_scan_ner_findings(self._config))
         report["verdict"] = verdict.as_dict()
         self.report, self.verdict, self.ran = report, verdict, True
         error = blocked_error(report, verdict)
@@ -252,7 +268,8 @@ class PostScanGate:
         table_kinds: Mapping[str, str],
     ) -> None:
         """The check a deferred route gets: the column suite over the mask tables the run still
-        holds, reported and never blocking. Declared keys alone get no check yet."""
+        holds, reported and blocking only through the NER predicate (`ner_findings: fail`, which
+        is never report-only). Declared keys alone get no check yet."""
         self.ran = True
         if not post_scan_integrity_requested(self._config):
             return
@@ -262,7 +279,9 @@ class PostScanGate:
                 {n: materialize_source(sources[n]).to_pandas() for n in masked},
                 {n: outputs[n].to_pandas() for n in masked},
                 config=dict(self._config),
+                detectors=self._detectors,
             )
+            raise_if_ner_blocked(self.report, ner_findings=post_scan_ner_findings(self._config))
 
     def note_quarantined(self, table: str, rows: pa.Table, removed: Collection[int]) -> None:
         """Record the declared parent keys of `rows` (a table before quarantine filtered it) at
@@ -410,6 +429,7 @@ class PostScanGate:
             {n: materialize_source(sources[n]).to_pandas() for n in masked},
             {n: outputs[n].to_pandas() for n in masked},
             config=dict(self._config),
+            detectors=self._detectors,
             keys=keys,
         )
 
@@ -487,6 +507,7 @@ def bind_gate(ctx: PipelineRunContext, route: str | None = None) -> Iterator[Pos
         source_facts=facts,
         deferred=deferred,
         sources=ctx.caller_sources,
+        detectors=ctx.post_scan_detectors,
     )
     token = _ACTIVE.set(gate)
     try:
@@ -526,7 +547,8 @@ def publish_after_gate(write: Callable[[], None]) -> None:
     """Run `write`, a publish that carries row values, once nothing can block the run: now when
     no gate will judge it, else in `settle` after the verdict passes. A blocked run drops it."""
     gate = active_gate()
-    if gate is None or not gate.required or gate.ran or gate.deferred:
+    # A deferred gate judges nothing, except the NER block its report-only check still enforces.
+    if gate is None or not gate.required or gate.ran or (gate.deferred and not gate.enforces_ner):
         write()
     else:
         gate._held.append(write)
