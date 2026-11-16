@@ -37,7 +37,6 @@ from tests.fileaccess.publication._vault_support import (
     LEAF,
     OTHER_KEY,
     OTHER_ROWS,
-    ROWS,
     IssueProbe,
     fingerprint,
     kill_child,
@@ -289,7 +288,9 @@ def test_adopt_io_failure_is_commit_failed(
     try:
         writer().publish(out)
         before = fingerprint(base / REL)
-        probe_rec = Recorder(monkeypatch, fail=lambda e: fault == "leaf_fsync" and e[1] == key(base / REL))
+        probe_rec = Recorder(
+            monkeypatch, fail=lambda e: fault == "leaf_fsync" and e[1] == key(base / REL)
+        )
         probe = IssueProbe(monkeypatch, probe_rec.synced)
         if fault == "leaf_open":
             real_open = os.open
@@ -312,9 +313,7 @@ def test_adopt_io_failure_is_commit_failed(
 
 
 @pytest.mark.parametrize("policy", POLICIES)
-def test_adopt_file_reads_one_fd_and_refuses_the_wrong_kinds(
-    base: Path, policy: str
-) -> None:
+def test_adopt_file_reads_one_fd_and_refuses_the_wrong_kinds(base: Path, policy: str) -> None:
     out, root_fd = vault_out(policy, base, REL)
     leaf = base / REL
     try:

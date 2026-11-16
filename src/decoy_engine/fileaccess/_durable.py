@@ -18,6 +18,7 @@ import os
 import stat
 import time
 from collections.abc import Callable, Iterator
+from typing import TypeVar
 
 from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
 from decoy_engine.fileaccess._output import (
@@ -39,6 +40,7 @@ try:
 except ImportError:  # pragma: no cover - Windows has no flock; the lock is refused there
     fcntl = None  # type: ignore[assignment]
 
+T = TypeVar("T")
 _POLL_S = 0.05
 _CHUNK = 1 << 16
 
@@ -94,17 +96,64 @@ def _sync_fds(chain_fds: list[int]) -> None:
         _call(os.fsync, dir_fd)
 
 
-def _sync_rooted_chain(open_parent: Callable[..., int], leaf: str) -> None:
-    """fsync a bound leaf, then its parent and every directory above it up to the root, all held
-    from one open of the chain (strict policy)."""
+def _rooted_chain(open_parent: Callable[..., int], at_leaf: Callable[[int], T]) -> T:
+    """Run `at_leaf` on the leaf's parent, then fsync that parent and every directory above it up
+    to the root, all held from one open of the chain (strict policy)."""
     chain: list[int] = []
     try:
         chain.append(open_parent(create=False, chain=chain))
-        _sync_leaf_at(chain[-1], leaf)
+        result = at_leaf(chain[-1])
         _sync_fds(chain[::-1])
+        return result
     finally:
         for fd in chain:
             _close(fd)
+
+
+def _sync_rooted_chain(open_parent: Callable[..., int], leaf: str) -> None:
+    """fsync a bound leaf, then its parent and every directory above it (strict policy)."""
+    _rooted_chain(open_parent, lambda parent_fd: _sync_leaf_at(parent_fd, leaf))
+
+
+def _adopt_rooted(open_parent: Callable[..., int], leaf: str, limit: int) -> bytes | None:
+    """`_adopt_at`, then the chain above the leaf (strict policy); `None` when absent."""
+    try:
+        return _rooted_chain(open_parent, lambda parent_fd: _adopt_at(parent_fd, leaf, limit))
+    except FileNotFoundError:
+        return None
+
+
+def _adopt_ambient(
+    open_parent: Callable[[], int], leaf: str, limit: int, sync_up: Callable[[], None]
+) -> bytes | None:
+    """`_adopt_at`, then `sync_up` over the chain above the leaf (ambient policy)."""
+    try:
+        parent_fd = open_parent()
+        try:
+            data = _adopt_at(parent_fd, leaf, limit)
+        finally:
+            _close(parent_fd)
+    except FileNotFoundError:
+        return None
+    sync_up()
+    return data
+
+
+def _adopt_at(parent_fd: int, leaf: str, limit: int) -> bytes:
+    """Read the regular file `leaf` beneath `parent_fd` (opened read-only, so a 0400 file opens,
+    and never through a link) and fsync that same descriptor before returning its bytes, so the
+    bytes handed back are the bytes made durable. Over `limit` raises `LeafTooLarge`."""
+    leaf_fd = _call(os.open, leaf, _leaf_flags(), dir_fd=parent_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(leaf_fd).st_mode):
+            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+        data = _read_upto(leaf_fd, limit + 1)
+        if len(data) > limit:
+            raise LeafTooLarge(errno.EFBIG)
+        _call(os.fsync, leaf_fd)
+    finally:
+        _close(leaf_fd)
+    return data
 
 
 def _walk_up(
