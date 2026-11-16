@@ -47,12 +47,17 @@ creates it.
   row there and changes the default.
 - The resident `--fidelity` report (engine `quality/`) stays as it is. Row 31 does not extend it: its
   snapshots hold raw top-K category values and it forces the resident route.
+- Row 24e (CLI `plan/cli-qa1-di-close`, `docs/plans/2026-11-16-cli-qa1-di-close.md`, slice E0) moves
+  the per-strategy distribution behaviour table (`execution/_distribution_behavior.py`
+  `_STATIC_BEHAVIOR`) to engine `contracts/distribution_behavior.py` as a pure move. Row 31 builds on
+  that one table and adds no second per-strategy table (section 4.1). DI-1a waits on E0.
 
 ## 3. Row 30 remainder: the run hashes its scan baseline into evidence
 
 ### 3.1 Scope
 
-When a pipeline YAML sets `scan_baseline`, `decoy run` reads the baseline file once at run start,
+When a pipeline YAML sets `scan_baseline` and the run either sets `scan_baseline.on_drift` or is
+given `--evidence-out`, `decoy run` reads the baseline file once at run start,
 computes its SHA-256 and writes it to the `--evidence-out` manifest as a new optional member
 `scan_baseline: {path, fingerprint, fingerprint_method, size_bytes}` (the existing `FileFingerprint`
 shape). `decoy report verify` re-hashes it like an input file. The engine `EvidencePayload` model gets
@@ -64,11 +69,19 @@ the member so the library (L3a) and the platform importer can read it.
   unchanged (same rule as `path_base` in `records/_payloads.py`).
 - With one: `path` is recorded the way input paths are (relative under a project marker, else
   absolute). `fingerprint` is `sha256:<hex>` of the bytes read at run start. Method `full`.
-- The bytes are read once. Row 32's drift check parses the same bytes, so the hash in the evidence is
-  the baseline the run compared against.
-- A baseline file that is missing or unreadable at run start: exit 1 with the existing missing-file
-  error naming the YAML key `scan_baseline.path`, before any source is read. S3b adds the same check
-  to `decoy validate preflight`; the run applies it whether or not preflight ran.
+- `starter_config` writes `scan_baseline` into every config it makes
+  (`profiling/_starter_config.py:141`). So a run with neither `on_drift` nor `--evidence-out` does not
+  read the file at all, and a missing baseline file does not affect it.
+- The bytes are read once, in `run/_prepare.py` before the `--duckdb-source` staging step
+  (`_prepare.py:332-383`). The hash is taken over those bytes, and row 32's drift check parses the same
+  bytes with `scan_set_from_data(json.loads(raw))` (CLI `io/_scan_set.py:78`), so the hash in the
+  evidence is the baseline the run compared against.
+- Missing or unreadable baseline file, one rule for rows 30 and 32:
+  - `on_drift` set: exit 1 (usage) with the `load_scan_set` message naming `scan_baseline.path`,
+    before any source is read or staged. Section 5.3 uses this same error.
+  - `on_drift` not set, `--evidence-out` given: the run continues. The manifest records the path with
+    `fingerprint: null` (`FileFingerprint.fingerprint` is already optional) and the CLI prints one
+    warning line naming `scan_baseline.path`.
 - `decoy report verify` reports a changed or missing baseline file the way it reports a changed input.
 
 ### 3.3 Failure modes
@@ -77,6 +90,7 @@ the member so the library (L3a) and the platform importer can read it.
 |---|---|
 | Baseline path is relative | Resolved from the YAML's folder, as sources are |
 | Baseline changes between run start and evidence write | Not observable: the hash comes from the bytes read at start |
+| Starter config points at a baseline the user deleted | No effect unless `on_drift` is set or `--evidence-out` is given (3.2) |
 | Baseline is a library envelope (after L2) or a bare `scan-set/v1` file | Both are hashed as bytes; the hash needs no parse |
 | A 0.27 engine reader meets a manifest with `scan_baseline` | It refuses it (extra keys forbidden). The CLI writes the key only after it pins the engine that reads it. A compatibility corpus sample covers the new shape |
 | Path text holds a control character | Refused by the existing `RelPath` pattern, as input paths are |
@@ -100,11 +114,26 @@ optional; the frozen-surface doc gets one line in B-2.
 
 Opt-in. Owner model (2026-11-05): the source shape is captured as the target shape, and the post-scan
 asks "is the data the same distribution within n% of the selected shape". The capture is value-free
-facts per column of the masking input. They are measured in the lockstep pass the post-scan column
-suite already makes over source and output (`verification/postmask/_column_facts.py`). That pass
-streams on every route since POSTSCAN-STREAM (row 60), so there is no new reader and no resident
-requirement. The "capture" is the source side of that pass. Nothing is kept beyond the value-free
-report.
+facts per column of the masking input. Nothing is kept beyond the value-free report.
+
+How the facts are measured:
+
+- `PostScanGate` reads the caller sources (`ctx.caller_sources`, `execution/pipeline/_post_scan.py`
+  around `:342` and `:557-561`), which is the map after any subset selection
+  (`execution/pipeline/_routing_facts.py:63-86`). It does not read the aligned sources that
+  `_align_sources_to_output` (`execution/_pipeline_finalize.py:193`) builds for post-validation.
+- The lockstep column-facts pass pairs source and output only when their row counts match
+  (`verification/postmask/_column_facts.py:184-195`). After quarantine they do not match.
+- So the source-side facts (null_rate, distinct_ratio, moments) come from a source-only pass over each
+  table, in the same way `column_distinct` reads one side. The output-side facts come from the output
+  pass that already runs. This is one new reader of the source per checked table. It is bounded by
+  the columns that have a checked fact.
+- `row_count` compares the output count with the source count minus the rows quarantine removed.
+  `note_quarantined` (`_post_scan.py:286`) gets a per-table removed-row count that it records whenever
+  `post_scan.distribution` is set.
+- Quarantined rows stay in the source-side null_rate, distinct_ratio and moments. The source pass does
+  not know which rows were removed on a streamed route. DI-T6 pins this: a small quarantine does not
+  breach, and the docs say that a large quarantine can move the source-side facts.
 
 Config (engine `PipelineConfig`, strict):
 
@@ -120,23 +149,49 @@ Facts per mask table and per configured column (counts and aggregates only, neve
 
 | Fact | Measured on | Breach when |
 |---|---|---|
-| `row_count` | every mask table | relative change `abs(out - src) / src` above n% (both 0 passes) |
-| `null_rate` | columns the strategy registry marks | absolute change above n percentage points |
-| `distinct_ratio` (distinct / non-null) | marked columns | absolute change above n percentage points |
-| `mean` | marked numeric columns, numeric on both sides | `abs(out - src) / src_std` above n% (relative change when `src_std` is 0; both 0 passes) |
-| `std` | marked numeric columns | relative change above n% |
+| `row_count` | every mask table | relative change `abs(out - (src - quarantined)) / (src - quarantined)` above n% (both 0 passes) |
+| `null_rate` | columns whose strategy keeps nulls | absolute change above n percentage points |
+| `distinct_ratio` (distinct / non-null) | columns whose behaviour keeps cardinality | absolute change above n percentage points |
+| `mean` | numeric columns whose behaviour keeps all, numeric on both sides | `abs(out - src) / src_std` above n% (relative change when `src_std` is 0; both 0 passes) |
+| `std` | same as `mean` | relative change above n% |
 
-Which facts a strategy is meant to keep comes from one new registry,
-`contracts/strategy_shape.py: PRESERVED_FACTS_BY_STRATEGY`, beside `strategy_requirements.py`. The
-strategy catalog (`execution/_strategies/__init__.py`, `strategy_catalog()`) refuses a handler with no
-entry, so a new strategy cannot skip the decision. Recommended entries (owner question Q5):
+Which facts apply is derived, not kept in a second per-strategy table:
 
-| Strategy | row_count | null_rate | distinct_ratio | mean, std |
-|---|---|---|---|---|
-| passthrough, shuffle | yes | yes | yes | yes |
-| hash, tokenize, fpe, group_key | yes | yes | yes | no |
-| faker, categorical, code_set, date_shift, windowed_date, truncate, text_mask, text_redact, geo_generalize, bucket_perturb, nested, joint_mask, bucketize, top_code | yes | yes | no | no |
-| redact, formula, derived, derived_aggregate, grouped_series | yes | no | no | no |
+- `distinct_ratio`, `mean` and `std` come from the one distribution behaviour table that 24e E0 moves
+  to `contracts/distribution_behavior.py`, through `distribution_behavior_for(strategy,
+  provider_config)`, so the dynamic `categorical` case stays correct. `preserves_all` gives
+  distinct_ratio and moments. `preserves_cardinality_only` gives distinct_ratio. Every other label
+  (`destroys_frequency`, `coarsens`, `collapses`, `varies_shape`, `mixed`, `inherits`) gives neither.
+- `null_rate` comes from one frozenset `NULLS_NOT_PRESERVED` in the same contract module as the
+  behaviour table (`contracts/distribution_behavior.py` after E0). A strategy is in it when an output
+  cell can be null, or not null, for a reason other than its own source cell being null. It sits with
+  the behaviour table because it is a property of the same per-strategy distribution behaviour, and it
+  avoids a one-line edit in each of the 25 handler modules (the handler list is
+  `execution/_strategies/__init__.py:21-45`, `:69-74`). A declared handler attribute in
+  `_CATALOG_FIELDS` was the other option; it would make DI-1a touch about 30 production files.
+- One function `preserved_facts(strategy, provider_config)` in
+  `verification/postmask/distribution.py` does the derivation. A test checks that it covers every
+  behaviour label and every strategy in `SCALAR_HANDLERS`, that every name in `NULLS_NOT_PRESERVED` is
+  a known strategy, and that the two do not disagree (a `preserves_all` or
+  `preserves_cardinality_only` strategy must not be in `NULLS_NOT_PRESERVED`).
+
+Resulting facts per strategy (owner question Q5):
+
+| Strategy | Behaviour label after E0 | Keeps nulls (not in `NULLS_NOT_PRESERVED`) | Facts checked |
+|---|---|---|---|
+| passthrough, shuffle | preserves_all | yes | row_count, null_rate, distinct_ratio, mean, std |
+| categorical (weighted or `from_profile`) | preserves_all (dynamic) | yes | same as above |
+| hash, fpe, tokenize | preserves_cardinality_only | yes | row_count, null_rate, distinct_ratio |
+| faker, categorical (plain), bucketize, truncate, joint_mask, geo_generalize, code_set, bucket_perturb, top_code, date_shift, text_mask, text_redact, nested | other labels | yes | row_count, null_rate |
+| group_key | mixed (fixed from preserves_cardinality_only, see below) | no: fills from `group_by` (`execution/_strategies/_group_key.py:13-17`) | row_count |
+| windowed_date | varies_shape | no: null where the anchor is null (`windowed_date.py:308`) | row_count |
+| grouped_series, derived, derived_aggregate, formula, redact | other labels | no | row_count |
+
+Fix to the existing table: `group_key` is labelled `preserves_cardinality_only` today, but its output
+cardinality is the cardinality of its `group_by` column, not of its own source column. DI-1a changes
+the label to `mixed` with a unit test (`distribution_behavior_for("group_key") == "mixed"`) unless
+E0 already made the change. The CHANGELOG records the label change, because the label also appears in
+the existing distribution manifest.
 
 Generate tables have no source and are skipped (generation has its own fidelity gate). Established
 practice this follows: Deequ `RelativeRateOfChangeStrategy` and Great Expectations
@@ -153,15 +208,30 @@ so batch boundaries do not change the result; the existing exact `column_distinc
   checked fact with `table`, `column` (null for `row_count`), `fact`, `severity`
   (`info`, `warning`, `fail`, `error`) and `delta_pct` rounded to 0.1. No source or output mean or std
   is written.
-- `on_breach: warn`: a breach is a `warning` row. The run delivers. The run-result
-  `post_scan_integrity` check is `warned`. The CLI prints one line per breach.
-- `on_breach: fail`: a breach is a `fail` row. `post_scan_verdict` adds the new blocking code
-  `post_scan.distribution_breach`. The gate blocks before commit, nothing is published, exit 4 (status
-  `findings`), and `block_location` names `table.column (fact)`.
-- A fact that cannot be computed (a column read fails) is an `error` row. It blocks under `fail`
-  (`check_error`) and warns under `warn`.
+- Severity is decided once, in `distribution_findings`, from `on_breach`, as NER findings are promoted
+  in `verification/postmask/_model_findings.py:244`. `warn` writes a breach as `warning`; `fail` writes
+  it as `fail`. `post_scan_verdict` blocks on any `fail` or `error` row in the section. It gets no new
+  argument, so its call sites (`_post_scan.py:209`, `:345`, `_blocked.py:302`, `:334`) do not change.
+- Between DI-1b and DI-2 the section is report-only: DI-1 writes `warning` rows only, whatever
+  `on_breach` says, and DI-2 turns on `fail` rows and the block.
+- `on_breach: warn`: the run delivers. The run-result `post_scan_integrity` check is `warned`. The
+  CLI prints one line per breach.
+- `on_breach: fail`: a breach blocks before commit with the new code `post_scan.distribution_breach`.
+  Nothing is published. Exit 4 (status `findings`). `block_location` names `table.column (fact)`.
+- A fact that cannot be computed (a column read fails) is an `error` row. Under `fail` it blocks with
+  `check_error`; under `warn` it is written as `warning`.
+- Deferred gate: a run is deferred when it has a `source_loader`, or a lazy table with transforms off
+  the teed sequential route (`_deferred`, `_post_scan.py:480-493`). A deferred gate only runs
+  `_report_only` (`:264-285`), which blocks through the NER check alone, and `before_commit` returns
+  early (`:325-326`). So `on_breach: fail` on a deferred run is refused in `bind_gate`, before any
+  source read, with a new `runtime.post_scan_distribution_deferred`. `on_breach: warn` on a deferred
+  run writes its rows through the report-only suite and does not block.
 - A sink the gate cannot read back: refused before the run starts by the existing
   `runtime.post_scan_integrity_sink_unreadable`, because integrity is required. A test pins it.
+- CLI: `decoy run --chunked` already refuses post-scan integrity before any source is opened
+  (`cli/run/_execute.py:156-178`). Distribution needs integrity, so the CLI refuses `--chunked` with
+  `distribution` too. On the CLI the check runs on the resident and out-of-core routes. DI-T12 and the
+  docs pin the refusal.
 - Plan hash: `post_scan` is already hashed. `distribution` is dropped from the dump when absent, so
   existing configs keep their hash.
 
@@ -169,11 +239,13 @@ so batch boundaries do not change the result; the existing exact `column_distinc
 
 | Failure | Behaviour |
 |---|---|
-| Quarantine removes rows | The gate's source is already aligned to the output (`_align_sources_to_output`); `row_count` compares aligned counts (test DI-T6) |
-| Subset on | The source side is the subset the run masked, not the raw file (test DI-T7; if the gate sees the raw source, the slice stops and reports) |
+| Quarantine removes rows | `row_count` compares with source minus quarantined. Source-side facts keep the quarantined rows (4.1). DI-T6 |
+| Subset on | `caller_sources` is already the subset (`_routing_facts.py:63-86`), so the source side is the subset rows. DI-T7 |
+| Deferred gate with `on_breach: fail` | Refused in `bind_gate` before any read (4.2). DI-T9 deferred cell |
+| `--chunked` from the CLI | Refused before any source is opened, as integrity is today. DI-T12 |
 | Float drift over 100M rows | Moments merged per batch with the Chan update in float64; no sum of raw squares |
-| Non-numeric column with a moments entry | `mean` and `std` skipped for that column, recorded as `info` with `delta_pct: null` |
-| A strategy that changes types (bucketize to labels) | Not marked for moments in the registry |
+| Non-numeric column where moments apply | `mean` and `std` skipped for that column, written as `info` with `delta_pct: null` |
+| Behaviour label and `preserves_nulls` disagree | The derivation test fails (4.1) |
 | Older reader of a stored report | Reads v3 and ignores the additive section; the verdict is computed in-run by the same engine |
 | Value in an error message | Errors keep the class name only, as the column suite does today |
 
@@ -181,16 +253,15 @@ so batch boundaries do not change the result; the existing exact `column_distinc
 
 | File | Repo | New or changed | Where Things Go line | Sits beside |
 |---|---|---|---|---|
-| `src/decoy_engine/contracts/strategy_shape.py` | engine | new (~80): `PRESERVED_FACTS_BY_STRATEGY`, `preserved_facts()` | versioned contracts (`contracts/<contract>.py`) | `strategy_requirements.py` |
-| `src/decoy_engine/execution/_strategies/__init__.py` | engine | changed: catalog refuses a handler with no shape entry | strategy catalog | `_CATALOG_FIELDS` check |
+| `src/decoy_engine/contracts/distribution_behavior.py` | engine | changed (after 24e E0 moves it): `group_key` label fix; `NULLS_NOT_PRESERVED` | versioned contracts | E0's moved table |
 | `src/decoy_engine/config/_post_scan.py` | engine | changed: `DistributionCheck` model, inactive rule, dump omission | config | `PostScanConfig` |
-| `src/decoy_engine/verification/postmask/_column_facts.py` | engine | changed: null counts and merged moments per side | verification (column facts) | `ColumnFacts` |
-| `src/decoy_engine/verification/postmask/distribution.py` | engine | new (~180): `distribution_findings(facts, config)`, pure | verification (post-mask checks) | `residual_pii.py` |
+| `src/decoy_engine/verification/postmask/_column_facts.py` | engine | changed: source-only pass for null counts, distinct and merged moments; output-side moments | verification (column facts) | `column_distinct` |
+| `src/decoy_engine/verification/postmask/distribution.py` | engine | new (~200): `preserved_facts()` (DI-1a), `distribution_findings(facts, config)` with severity (DI-1b, DI-2), pure | verification (post-mask checks) | `residual_pii.py` |
 | `src/decoy_engine/verification/postmask/types.py`, `runner.py` | engine | changed: `DistributionFinding`, report section and counts | verification | existing |
-| `src/decoy_engine/verification/postmask/_blocked.py` | engine | changed: verdict reads `distribution` with the mode; code order; `block_location` | verification (the one verdict) | NER block logic |
-| `src/decoy_engine/reasons/post_scan/_part2.py`, `reasons/_registry.py` | engine | changed: `distribution_breach`; registry minor | reasons | existing codes |
-| `src/decoy_engine/execution/pipeline/_post_scan.py` | engine | changed: passes the mode to the verdict (small; file is 583 lines) | execution | `ner_findings` call |
-| `src/decoy/cli/run/_render.py`, `src/decoy/cli/report.py` | CLI | changed: warn lines; `report integrity` bucket tuple (`report.py` near line 2064) | run package; report | existing buckets |
+| `src/decoy_engine/verification/postmask/_blocked.py` | engine | changed: verdict blocks on `fail` and `error` rows in the section; code order; `block_location` | verification (the one verdict) | NER block logic |
+| `src/decoy_engine/execution/pipeline/_post_scan.py` | engine | changed: removed-row count in `note_quarantined`; deferred refusal in `bind_gate` (small; file is 583 lines) | execution | `_deferred` |
+| `src/decoy_engine/reasons/post_scan/_part2.py`, `reasons/runtime/`, `reasons/_registry.py` | engine | changed: `distribution_breach`, `post_scan_distribution_deferred`; registry minor | reasons | existing codes |
+| `src/decoy/cli/run/_render.py`, `src/decoy/cli/report.py`, `cli/run/_execute.py` message | CLI | changed: warn lines; `report integrity` bucket tuple (`report.py:2064`); chunked refusal text names distribution | run package; report | existing buckets |
 
 ## 5. Row 32 DRIFT: opt-in drift check at run start
 
@@ -203,7 +274,11 @@ scan_baseline:
   on_drift: warn            # warn | fail; absent = no check (opt-in)
 ```
 
-At run start, before any masking read, `decoy run` rescans the config's sources with the per-table
+Two positions in CLI `run/_prepare.py`. The baseline bytes are read with row 30's read, before the
+`--duckdb-source` staging step (`_prepare.py:332-383`), so a missing baseline refuses before any
+database is opened. The rescan runs after staging and before `check_before_run` (`:395`), so a
+`--duckdb-source` table is rescanned from its staged Parquet as `decoy scan` would see it. Then
+`decoy run` rescans the config's sources with the per-table
 sampling the baseline recorded (S3b's `_scan_compare` helper, which calls the engine `scan_sources`
 through the CLI declared-read choke point). It diffs each table with `compute_scan_diff`. Drift means
 what `scan diff --strict` means today: a PII bucket went up, a new high-PII field, or a new
@@ -224,6 +299,7 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
   `scan_drift` `failed`, `blocking: true`, code `pre_scan.drift_blocked`.
 - No drift: check `passed`.
 - The baseline bytes are the ones row 30 hashed (one read).
+- `--duckdb-source` tables are rescanned from their staged Parquet (position above).
 - `--all` children each check their own YAML. `--sample` runs check too. `--rows` previews do not
   (they write nothing and no evidence).
 - Parity: for the same YAML and sources, the drift verdict equals
@@ -233,7 +309,7 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
 
 | Failure | Behaviour |
 |---|---|
-| Baseline missing, unreadable, or an unknown schema | Exit 1 with the `load_scan_set` messages (S3b, L2), before any source read |
+| Baseline missing, unreadable, or an unknown schema | Exit 1 (usage) with the `load_scan_set` message naming `scan_baseline.path`, before any source is read or staged. The same error as 3.2 |
 | Baseline lacks a table the config now has | Reported as drift kind `table_added`; counts as drift (data the baseline never classified) |
 | Config lacks a table the baseline has | Reported, not drift (the run masks less) |
 | Rescan of a source fails | The coded error propagates as in `decoy scan`; exit by its category |
@@ -293,6 +369,7 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
 
 | Failure | Behaviour |
 |---|---|
+| A config names `en_core_web_lg` or `en_core_web_trf` for `pre_scan` or `post_scan` | Refused at detector load with `provider.ner_model_uncalibrated` (Q10). Today these load and use sm's 0.211. Listed in failure modes here, in the CHANGELOG and in `docs/compatibility-contract.md`. `text_redact` with such a model is not refused: it redacts spans and uses no rate |
 | md not installed, NER asked | Existing `provider.ner_model_not_installed`; the hint names md |
 | Plan hash | `ner_model` is dropped from the dump at its default. Configs that never set it keep their hash and now run md (named in reports). Configs that set sm explicitly now dump it and change hash once. The CHANGELOG lists this; the hash-stability test's expected values move in the same slice with the reason recorded |
 | Frozen config schema | `tests/snapshots/frozen_schemas/pipeline-config.schema.json` default changes: a frozen-contract change, recorded in `docs/compatibility-contract.md` |
@@ -316,17 +393,25 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
 
 ### Routes
 
-- DI facts: resident, `--chunked` and out-of-core all reach `PostScanGate`
-  (`execution/pipeline/_post_scan.py:92`) and the one column-facts pass (`ColumnFacts`,
-  `verification/postmask/_column_facts.py:37`). The source side is aligned to the output by
-  `_align_sources_to_output` (`execution/_pipeline_finalize.py:193`). Generate tables: skipped.
-- Drift: one route, CLI `run/_prepare.py` before execution. `--rows` previews: not checked.
-- Baseline hash: one route, the same prepare step.
+- DI facts, engine: resident, chunked and out-of-core reach `PostScanGate`
+  (`execution/pipeline/_post_scan.py:92`). The output side uses the column-facts pass (`ColumnFacts`,
+  `verification/postmask/_column_facts.py:37`); the source side uses a new source-only pass over
+  `caller_sources` (4.1). `_align_sources_to_output` (`execution/_pipeline_finalize.py:193`) feeds
+  post-validation only and is not used. Generate tables: skipped.
+- DI facts, deferred gate (`_deferred`, `_post_scan.py:480-493`): `warn` runs through `_report_only`;
+  `fail` is refused in `bind_gate`.
+- DI facts, CLI: `--chunked` with integrity is refused (`cli/run/_execute.py:156-178`), so the CLI
+  runs DI on the resident and out-of-core routes only.
+- Drift: CLI `run/_prepare.py`, rescan after `--duckdb-source` staging and before
+  `check_before_run` (`_prepare.py:395`). `--rows` previews: not checked.
+- Baseline read and hash: CLI `run/_prepare.py` before staging (`_prepare.py:332-383`), only when
+  `on_drift` is set or `--evidence-out` is given.
 
 ### Fields
 
-- Strategy handlers that need a shape entry: the 25 names in `SCALAR_HANDLERS`
-  (`execution/_strategies/__init__.py:48`), checked by `strategy_catalog()` (`:120`).
+- Strategies that need a behaviour label and a null rule: the 25 handlers in `SCALAR_HANDLERS`
+  (`execution/_strategies/__init__.py:48`). Behaviour labels: `_STATIC_BEHAVIOR`
+  (`execution/_distribution_behavior.py:70`), moved by 24e E0. Null rule: `NULLS_NOT_PRESERVED`.
 - New config keys: `post_scan.distribution.tolerance_pct`, `post_scan.distribution.on_breach`,
   `scan_baseline.on_drift` (`ScanBaselineConfig`, `config/_scan_baseline.py:19`).
 - New payload member: `EvidencePayload.scan_baseline` (`records/_payloads.py:125`) of type
@@ -343,14 +428,18 @@ reason codes, a `scan_drift` check id on the run result, and a `pre_checks` inpu
   `blocking_failed`, so exit 4. No new exit path.
 - Drift `fail`: a new `findings` outcome from `run/_drift.py` through `pre_checks` into
   `build_run_result` (`run_result/_build.py:193`, `_checks` at `:127`); exit 4 by the same map.
-- Baseline missing: exit 1 (usage) before any source read.
+- Baseline missing with `on_drift` set: exit 1 (usage) before any source read or staging. With only
+  `--evidence-out`: a warning and `fingerprint: null`, no exit change.
+- Deferred gate with `on_breach: fail`: `runtime.post_scan_distribution_deferred` in `bind_gate`
+  (`_post_scan.py:496`), runtime exit, before any source read.
+- CLI `--chunked` with distribution: the existing chunked-integrity refusal, exit 1.
 - Uncalibrated NER model: `provider.ner_model_uncalibrated` at detector load, exit by the provider
   category, before any row is read.
 
 ### FK shapes
 
-N/A. No slice reads or writes keys across tables. DI checks per column; `row_count` compares aligned
-counts per table. Drift diffs per table.
+N/A. No slice reads or writes keys across tables. DI checks per column; `row_count` compares output
+with source minus quarantined rows per table. Drift diffs per table.
 
 ### Output surfaces
 
@@ -368,7 +457,10 @@ counts per table. Drift diffs per table.
 
 | Need | Reused | Not built |
 |---|---|---|
-| Source and output facts | `_column_facts.py` lockstep pass, `column_distinct` | a second reader |
+| Output facts | `_column_facts.py` output pass | a second output reader |
+| Source facts | the `column_distinct` one-side read pattern | a lockstep pairing that fails after quarantine |
+| Per-strategy behaviour | 24e E0's `contracts/distribution_behavior.py` and `distribution_behavior_for` | a second per-strategy table |
+| Severity decision | the NER promotion pattern (`_model_findings.py:244`) | a mode argument on `post_scan_verdict` |
 | Block and exit 4 | `post_scan_verdict`, `PostScanBlockedError`, CLI `_errors.py` mapping | a new error path |
 | Sink refusal | `post_scan_sink_refusal` | a DI-specific rule |
 | Drift rules | `compute_scan_diff` | new rules (row 80 moves them later) |
@@ -387,13 +479,18 @@ counts per table. Drift diffs per table.
 | Plan hash | new keys hashed only when set | B-T4, D-T1, DI-T1 guards |
 | `post-scan-integrity/v3` | optional `distribution` section | v3 readers ignore it |
 | `decoy-run-result/v1` | `CheckId` `scan_drift` | additive enum member; a 0.27 reader refuses it, so the CLI writes it only after the repin |
-| Reason registry | `post_scan.distribution_breach`, `pre_scan.drift_detected`, `pre_scan.drift_blocked`, `provider.ner_model_uncalibrated` | registry minor bumps with fixtures |
+| Reason registry | `post_scan.distribution_breach`, `runtime.post_scan_distribution_deferred`, `pre_scan.drift_detected`, `pre_scan.drift_blocked`, `provider.ner_model_uncalibrated` | registry minor bumps with fixtures |
+| Distribution behaviour label | `group_key` changes from `preserves_cardinality_only` to `mixed` | label appears in the distribution manifest; CHANGELOG line |
+| NER model names accepted for scans | `en_core_web_lg` and `en_core_web_trf` refused for `pre_scan` and `post_scan` | CHANGELOG and `docs/compatibility-contract.md` note (M-1) |
 
 ## 6d. Pre-mortem
 
-- DI breaches on correct runs because a strategy entry is wrong (for example `distinct_ratio` on a
-  hash that collides). Guard: the registry entries are owner-reviewed (Q5), and DI-1 ships report-only
-  before DI-2 can block.
+- DI breaches on correct runs because a fact is derived wrongly for a strategy (for example
+  `null_rate` on a strategy that fills nulls from another column). Guard: the 4.1 table is
+  owner-reviewed (Q5), DI-T5 has a case per row-count-only strategy, and DI-1a and DI-1b write
+  `warning` rows only before DI-2 can block.
+- A large quarantine moves the source-side facts, because quarantined rows stay in them. Guard: the
+  docs state it; DI-T6 pins the small case; `row_count` subtracts quarantined rows.
 - The md rule comes out above the stop value once clinical negatives join. Guard: the stop rule in
   6.1; M-1 ships the rate table with the default unchanged.
 - D-2 waits on S3b and RESULT C1 longer than the V1 date allows. Guard: B-2, DI-3 and M-3 do not
@@ -410,14 +507,14 @@ counts per table. Drift diffs per table.
 | 1 | Value-bearing output | DI report rows and warn lines; drift stderr and run-result codes; uncalibrated-model refusal | DI rows carry only `delta_pct` and names, built in one pure function; drift lines come from `ScanDiff` names only; errors keep the class name | DI-T4, D-T6 canary sweeps | MDI-12, MD-6 |
 | 2 | Cleanup missing on an exit path | drift `fail` stop; DI `fail` block | drift stops before any output is opened; DI uses the existing gate block-before-commit path, nothing new staged | D-T3 (no output written), DI-T9 (nothing published) | MD-3 |
 | 3 | State and concurrency | moment merge across batches | pure Chan merge over immutable per-batch tallies; no shared cache | DI-T3 | MDI-3 |
-| 4 | Route parity and silent fallback | DI on resident, chunked and out-of-core routes; drift rescan vs `scan --compare` | one column-facts pass for every route; one rescan helper shared with S3b | DI-T8, D-T5 | MDI-8, MD-5 |
-| 5 | Referential integrity | baseline tables vs config tables; quarantine and subset alignment | explicit `table_added` drift kind; DI compares the aligned source the gate already builds | D-T3 table cases, DI-T6, DI-T7 | MDI-6, MDI-7 |
+| 4 | Route parity and silent fallback | DI on resident, chunked, out-of-core and deferred gates; CLI `--chunked`; drift rescan vs `scan --compare`; `--duckdb-source` | one source-only pass and one output pass on every engine route; deferred `fail` refused, not skipped; CLI chunked refusal; one rescan helper shared with S3b, after staging | DI-T8, DI-T9 deferred cell, DI-T12, D-T5, D-T8 | MDI-8, MDI-13, MD-5, MD-8 |
+| 5 | Referential integrity | baseline tables vs config tables; quarantine and subset | explicit `table_added` drift kind; `row_count` subtracts quarantined rows recorded by `note_quarantined`; `caller_sources` is post-subset | D-T3 table cases, DI-T6, DI-T7 | MDI-6, MDI-7 |
 | 6 | Untrusted producer | hand-edited baseline file; config values | baseline read through `load_scan_set` (strict, versioned); strict config types (`tolerance_pct` bounds, enum `on_drift`, `on_breach`) | DI-T1, D-T1, B-T6 | MDI-1, MD-1 |
 | 7 | Check then use (TOCTOU) | baseline hashed for evidence and parsed for drift | one read at run start; hash and parse use the same bytes | B-T7 | MB-7 |
 | 8 | Weak tests | DI and NER threshold tests that pass vacuously | every DI test asserts both a breach case and a no-breach case; NER rate tests recompute the constant from digested corpora | DI-T4, M-T2, M-T3 | MDI-4, MM-2 |
 | 9 | Refactor drift | configs without the new keys; manifests without `scan_baseline` | omission when absent; old dumps, plan hashes and manifest hashes byte-equal | B-T2, B-T4, DI-T1, D-T1, M-T8 | MB-2, MB-4, MM-8 |
 | 10 | Frozen contract drift | `cli-local-1`, `EvidencePayload`, `post-scan-integrity/v3`, `decoy-run-result/v1`, reason registry, frozen config schema | additive optional members; registry minor with fixture; frozen-schema change recorded in `docs/compatibility-contract.md` (M-2) | B-T1, D-T2, M-T7, reason minor fixture test | MB-1, MD-2 |
-| 11 | Parallel tables kept by hand | strategy list vs shape facts; model list vs NER rates; sm literal in two places | catalog refuses a handler with no shape entry; detectors refuse a model with no rate; one default constant with a sentry | DI-T2, M-T5, M-T7 | MDI-2, MM-5, MM-7 |
+| 11 | Parallel tables kept by hand | per-strategy behaviour vs DI facts; model list vs NER rates; sm literal in two places | facts derived from the one behaviour contract module (label table and `NULLS_NOT_PRESERVED`), with a coverage and disagreement test over `SCALAR_HANDLERS`; detectors refuse a model with no rate; one default constant with a sentry | DI-T2, M-T5, M-T7 | MDI-2, MM-5, MM-7 |
 
 ## 7. Acceptance tests (written first; each fails on today's main)
 
@@ -433,25 +530,25 @@ must keep passing. Each test lists a mutation that must turn it red.
 | B-T3 | B-2 | `decoy run p.yaml --evidence-out e.json` with `scan_baseline` set writes `scan_baseline.fingerprint` equal to the SHA-256 of the file bytes, path relative under a marker | key absent | MB-3: hash the path text |
 | B-T4 | B-2 | without `scan_baseline` the manifest and its `manifest_hash` equal today's for the same run | guard | MB-4: always write the key |
 | B-T5 | B-2 | edit one byte of the baseline after the run: `decoy report verify e.json` reports it changed; delete it: reports it missing | verify ignores it | MB-5: drop the baseline from `_stored_files` |
-| B-T6 | B-2 | baseline path missing at run start: exit 1 naming `scan_baseline.path`, no source opened (read spy) | run ignores the key | MB-6: check after the masking read |
-| B-T7 | D-2 | the bytes the drift check parses are the bytes hashed (spy counts one open) | no read | MB-7: read twice |
+| B-T6 | B-2 | baseline file missing: (a) neither `on_drift` nor `--evidence-out`: the run passes and never opens the path (spy); (b) only `--evidence-out`: exit 0, one warning naming `scan_baseline.path`, manifest `fingerprint: null`; (c) `on_drift` set: exit 1 naming `scan_baseline.path`, no source opened or staged (read spy) | run ignores the key | MB-6: read the baseline on every run |
+| B-T7 | D-2 | the bytes `scan_set_from_data(json.loads(raw))` parses are the bytes hashed (spy counts one open) | no read | MB-7: read twice |
 
-### Row 31 (DI-1, DI-2 engine; DI-3 CLI)
+### Row 31 (DI-1a, DI-1b, DI-2 engine; DI-3 CLI)
 
 | Id | Slice | Asserts | Fails before | Mutation |
 |---|---|---|---|---|
-| DI-T1 | DI-1 | `distribution` without `integrity: true` refused with `post_scan_inactive`; `tolerance_pct` 0, 101, `True`, `"5"` refused; an omitted block keeps the old dump and plan hash | key unknown | MDI-1: lax float |
-| DI-T2 | DI-1 | `strategy_catalog()` raises for a handler with no shape entry; every handler has one | no registry | MDI-2: default unknown strategies to all facts |
-| DI-T3 | DI-1 | moments over batches cut at 1, 7 and 50 000 rows equal the whole-column mean and std to 1e-9 | no moments | MDI-3: average per-batch means |
-| DI-T4 | DI-1 | shuffle on a numeric column: no breach at 1%; a planted transform scaling values by 1.2 under passthrough: `mean` breach at 5% with `delta_pct` set; no cell value in the report (canary sweep) | no section | MDI-4: compare output with itself |
-| DI-T5 | DI-1 | hash column: `distinct_ratio` checked, `mean` not; faker column: only `row_count` and `null_rate` | no section | MDI-5: ignore the registry |
-| DI-T6 | DI-1 | quarantine drops 3 of 100 rows: `row_count` compares aligned counts, no breach | no section | MDI-6: use the unaligned source |
-| DI-T7 | DI-1 | with subset on, the source side is the subset rows | no section | MDI-7: read the raw source |
-| DI-T8 | DI-1 | `--chunked` and the out-of-core route give the same `distribution` rows as the resident route | no section | MDI-8: skip on streaming |
-| DI-T9 | DI-2 | `on_breach: fail` with a breach: the run raises `PostScanBlockedError` with `distribution_breach`, nothing published, exit 4 through the CLI; `warn`: the run delivers, check `warned` | never blocks | MDI-9: map fail rows to warnings |
+| DI-T1 | DI-1a | `distribution` without `integrity: true` refused with `post_scan_inactive`; `tolerance_pct` 0, 101, `True`, `"5"` refused; an omitted block keeps the old dump and plan hash | key unknown | MDI-1: lax float |
+| DI-T2 | DI-1a | `preserved_facts` covers every behaviour label and every strategy in `SCALAR_HANDLERS`; an unknown name in `NULLS_NOT_PRESERVED` fails; a `preserves_all` strategy placed in `NULLS_NOT_PRESERVED` fails the disagreement test; `distribution_behavior_for("group_key") == "mixed"` | no function | MDI-2: give an unknown strategy every fact |
+| DI-T3 | DI-1a | moments over batches cut at 1, 7 and 50 000 rows equal the whole-column mean and std to 1e-9 | no moments | MDI-3: average per-batch means |
+| DI-T4 | DI-1b | shuffle on a numeric column: no breach at 1%; a planted transform scaling values by 1.2 under passthrough: `mean` breach at 5% with `delta_pct` set; no cell value in the report (canary sweep) | no section | MDI-4: compare output with itself |
+| DI-T5 | DI-1b | hash column: `distinct_ratio` checked, `mean` not; faker column: only `row_count` and `null_rate`; `group_key`, `windowed_date` (null anchor rows), `grouped_series`, `derived` and `formula` columns: only `row_count`, and no breach when their nulls differ from the source | no section | MDI-5: ignore `preserves_nulls` |
+| DI-T6 | DI-1b | quarantine drops 3 of 100 rows at 5%: `row_count` compares 97 with 100 minus 3, no breach, and source-side `null_rate` still counts all 100 rows (pinned); a column fact is computed (not `error`) although source and output counts differ | no section | MDI-6: compare with the raw source count |
+| DI-T7 | DI-1b | with subset on, the source side is the subset rows (`caller_sources`) | no section | MDI-7: read the supplied sources |
+| DI-T8 | DI-1b | engine chunked and out-of-core routes give the same `distribution` rows as the resident route; a deferred gate (source loader) with `warn` writes the same rows through `_report_only` | no section | MDI-8: skip on streaming |
+| DI-T9 | DI-2 | `on_breach: fail` with a breach: the run raises `PostScanBlockedError` with `distribution_breach`, nothing published, exit 4 through the CLI; `warn`: the run delivers, check `warned`; deferred cell: a source-loader run with `fail` is refused with `post_scan_distribution_deferred` before any source read (read spy) | never blocks | MDI-9: map fail rows to warnings; MDI-13: let a deferred `fail` run report-only |
 | DI-T10 | DI-2 | a fact `error` row blocks under `fail` with `check_error` | no rows | MDI-10: drop error rows |
 | DI-T11 | DI-2 | unreadable sink with `distribution` set is refused before start | guard (existing integrity rule) | MDI-11: exempt distribution |
-| DI-T12 | DI-3 | e2e SCAN-10: warn prints one line per breach naming table, column and fact; fail exits 4 and names `table.column (fact)`; `report integrity` lists the section | no output | MDI-12: print the measured mean |
+| DI-T12 | DI-3 | e2e SCAN-10: warn prints one line per breach naming table, column and fact; fail exits 4 and names `table.column (fact)`; `report integrity` lists the section; `--chunked` with `distribution` is refused before any source is opened | no output | MDI-12: print the measured mean |
 
 ### Row 32 (D-1 engine, D-2 CLI)
 
@@ -464,6 +561,7 @@ must keep passing. Each test lists a mutation that must turn it red.
 | D-T5 | D-2 | parity: for five fixture pairs the run's drift verdict equals `scan --compare --strict` | no check | MD-5: own diff rules |
 | D-T6 | D-2 | stderr and run result hold table and field names, never a value (canary sweep) | no check | MD-6: echo a sample row |
 | D-T7 | D-2 | `--no-library` still checks; `--rows` does not | no check | MD-7: route through the library |
+| D-T8 | D-2 | `--duckdb-source`: the rescan reads the staged Parquet and gives the same verdict as `scan --compare` on that table; a missing baseline with `on_drift` refuses before the database is opened (spy) | no check | MD-8: rescan before staging |
 
 ### Row 32c (M-1, M-2 engine; M-3 CLI)
 
@@ -471,9 +569,9 @@ must keep passing. Each test lists a mutation that must turn it red.
 |---|---|---|---|---|
 | M-T1 | M-1 | clinical corpus digest equals the committed constant | file absent | MM-1: regenerate on load |
 | M-T2 | M-1 (ner) | recomputes the md rule over calibration plus clinical negatives and asserts it equals `NER_MIN_RATES["en_core_web_md"]`; sm still 0.211 | no md entry | MM-2: share one threshold |
-| M-T3 | M-1 (ner) | md flags the stripped 1-in-4 and 1-in-5 notes fixtures; the held-out corpus is not flagged | no md entry | MM-3: use 0.211 for md |
+| M-T3 | M-1 (ner) | md flags the stripped 1-in-4 and 1-in-5 notes fixtures; the held-out corpus is not flagged. This is a second stop condition: if it fails at the measured rate, the slice stops and goes back to the owner, as for the 0.2005 rule | no md entry | MM-3: use 0.211 for md |
 | M-T4 | M-1 | `NerRate` for md decides `hit` at the md rate (unit, no model) | one constant | MM-4: read the global constant |
-| M-T5 | M-1 | an uncalibrated model name for scan NER is refused at load with `provider.ner_model_uncalibrated`, before any row is read | loads | MM-5: fall back silently |
+| M-T5 | M-1 | an uncalibrated model name (`en_core_web_lg`) is refused at load with `provider.ner_model_uncalibrated` for `pre_scan` and for `post_scan`, before any row is read; the same name for `text_redact` is not refused | loads | MM-5: fall back silently; MM-5b: refuse in `text_redact` too |
 | M-T6 | M-1 (ner) | the md wheel row's hash and spaCy range match the wheel's `meta.json` | no row | MM-6: wrong range |
 | M-T7 | M-2 | default is md for `pre_scan`, `post_scan` and `text_redact`; no `"en_core_web_sm"` literal in `src/` outside `NER_MODEL_WHEELS` and `NER_MIN_RATES` (sentry) | default sm | MM-7: restore the literal in `_ner_config.py` |
 | M-T8 | M-2 | hash stability: configs without `ner_model` keep their hashes; the explicit-sm cases move, listed by name in the test | n/a | MM-8: dump the default |
@@ -487,8 +585,9 @@ At most 10 production files and 800 lines each (tests counted in lines). Risk pe
 | Slice | Repo | Rows | Content | Prod files | ~Lines | Risk | Waits on |
 |---|---|---|---|---|---|---|---|
 | B-1 + D-1 | engine | 30, 32 | evidence member and corpus sample; `on_drift` field and hash rule; `pre_scan.drift_*` codes; `scan_drift` check id and `pre_checks` | 7 | 450 | R2 (frozen payload, config schema, run-result wire) | none |
-| DI-1 | engine | 31 | config block, shape registry, catalog guard, facts and moments, `distribution.py`, report section (report-only) | 7 | 760 | R2 (config schema, report shape) | none |
-| DI-2 | engine | 31 | verdict, `distribution_breach`, `block_location`, gate mode, docs | 5 | 380 | R2 (blocking decision) | DI-1 |
+| DI-1a | engine | 31 | `NULLS_NOT_PRESERVED` and `group_key` label fix in the behaviour contract; `preserved_facts`; config block; source-only pass; moments with the Chan merge | 4 | 560 | R2 (config schema, catalog contract) | 24e E0 |
+| DI-1b | engine | 31 | `distribution.py` findings (`warning` severity only); report section; quarantine count in `note_quarantined`; route, deferred-warn and quarantine cells | 5 | 620 | R2 (report shape) | DI-1a |
+| DI-2 | engine | 31 | `fail` severity; verdict blocks on `fail` and `error` rows; `distribution_breach`; deferred refusal in `bind_gate`; `block_location`; docs | 5 | 400 | R2 (blocking decision) | DI-1b |
 | M-1 | engine | 32c | clinical corpus, per-model rates, md wheel, uncalibrated refusal, CI installs all wheels; default unchanged | 6 | 520 | R2 (detection threshold) | none |
 | M-2 | engine | 32c | default changes to md; `_ner_config` constant; frozen schema; hash tests; docs | 4 | 300 | R2 (frozen schema, default behaviour) | M-1; owner Q8 to Q10 |
 | Engine release, CLI repin | both | all | releases on the daily train; CLI repin checklist (memory engine-repin-checklist) | n/a | n/a | per train | the engine slices above |
@@ -497,7 +596,8 @@ At most 10 production files and 800 lines each (tests counted in lines). Risk pe
 | M-3 | CLI | 32c | hints from the engine constant, README | 3 | 120 | R1 | repin with M-2 |
 | D-2 | CLI | 32 | `run/_drift.py`, prepare call, `pre_checks` wiring, warn lines, SCAN-11 e2e | 5 | 600 | R2 (refuses runs, run-result content) | repin with D-1; B-2; S3b (row 29); RESULT C1a and C1b (row 62) |
 
-Order: the engine slices can build in parallel (different files). B-1 + D-1 and DI-2 both bump the
+Order: the engine slices can build in parallel (different files), except that DI-1a waits on 24e
+E0. B-1 + D-1 and DI-2 both bump the
 reason registry minor, so the second to merge rebases its bump. Each CLI slice follows its repin. D-2
 is last: it is the only slice that waits on other rows (S3b, which waits on L2 and L1c; RESULT C1).
 
@@ -511,8 +611,8 @@ library path also needs rows 36 and 37, which are their own rows.
 | Q1 | Where does `on_drift` go? | On `scan_baseline` (`scan_baseline.on_drift: warn \| fail`); absent means no check. It is a property of the baseline the YAML points at. `pre_scan` stays suggestion-only and unhashed |
 | Q2 | Exit code when drift fails a run | 4 (status `findings`), as `scan diff --strict` and a blocked post-scan |
 | Q3 | Plan hash | `scan_baseline.on_drift` and `post_scan.distribution` move the hash when set, because they decide what blocks (as `post_scan` already does). `scan_baseline.path` and `schema` stay out |
-| Q4 | What is the "selected shape" for DIST-INTEGRITY? | This run's own masking input, measured in the post-scan lockstep pass. A library scan record holds no moments and is sampled, so a comparison against it would need new scan-set fields (not in the row). Row 31's "After: SCAN-LIB" then no longer applies |
-| Q5 | Which facts must each strategy keep? | The table in 4.1, in one registry that the catalog enforces |
+| Q4 | What is the "selected shape" for DIST-INTEGRITY? | This run's own masking input, measured by the post-scan gate. A library scan record holds no moments and is sampled, so a comparison against it would need new scan-set fields (not in the row). Row 31's "After: SCAN-LIB" then no longer applies |
+| Q5 | Which facts must each strategy keep? | The table in 4.1, derived from the one distribution behaviour contract |
 | Q6 | What is "strict mode"? | The check's own `on_breach: fail`, default `warn`, like `ner_findings`. Not `delivery.mode`, which is strict by default and would make every opted-in breach block |
 | Q7 | Must `post_scan.integrity` be on? | Yes, refused otherwise: the facts come from the integrity column suite |
 | Q8 | md default for scans only, or also `text_redact`? | Both, one constant: one model to install and copy to offline hosts, and the duplicate literal goes. Alternative: scans only, keep sm for `text_redact` |
@@ -521,8 +621,33 @@ library path also needs rows 36 and 37, which are their own rows.
 | Q11 | Row 30: is L3a's `links.baseline` enough? | No. Also write the fingerprint into the `--evidence-out` manifest, so evidence carries it with the library off and for bare-file baselines |
 | Q12 | Row 80's strict-drift publication block | Reuses `on_drift: fail` from row 32. Row 80 keeps the bound-baseline object and the engine `scan-diff/v1` move |
 
-## 10. Roadmap edits when this plan passes
+## 10. V2-LOG
+
+- One shared `Literal["warn", "fail"]` for `ner_findings`, `on_breach` and `on_drift` (review round 1,
+  L5). Each config block keeps its own literal in V1.
+
+## 11. Roadmap edits when this plan passes
 
 Rows 30, 31, 32 and 32c: "Plan `E:plan/scan-checks` (`2026-11-16-scan-checks.md`)". Row 31's "After"
 drops SCAN-LIB if Q4 is answered as recommended. Row 80's text points at row 32 for the refusal if
 Q12 is answered as recommended.
+
+## 12. Review round 1 resolutions (Dennis, on `a3eca6826`)
+
+| Finding | Resolution | Section |
+|---|---|---|
+| H1 quarantine and lockstep pairing | source-only pass; `row_count` subtracts quarantined rows from `note_quarantined`; quarantined rows stay in source facts, pinned | 4.1, 4.3, 6a, DI-T6 |
+| H2 deferred gate never blocks | `on_breach: fail` refused in `bind_gate` when deferred; `warn` reports | 4.2, 4.3, 6a, DI-T8, DI-T9 |
+| H3 second per-strategy table | no `strategy_shape.py`; facts derived from 24e E0's behaviour contract module (labels plus `NULLS_NOT_PRESERVED`), with a coverage and disagreement test; DI-1a waits on E0 | 2, 4.1, 4.4, 6b, DI-T2 |
+| H4 group_key, windowed_date, grouped_series | row_count only; `group_key` label fix with test | 4.1, DI-T2, DI-T5 |
+| H5 starter_config writes `scan_baseline` everywhere | read only with `on_drift` or `--evidence-out` | 3.1, 3.2, 3.3, B-T6 |
+| M1 drift hook position and one error | read before staging, rescan after staging and before `check_before_run`; one missing-baseline error | 3.2, 5.1, 5.2, 5.3, D-T8 |
+| M2 CLI refuses `--chunked` with integrity | stated; pinned | 4.2, 4.3, 6a, DI-T12 |
+| M3 severity decided once | in `distribution_findings`; no new verdict argument | 4.2, 4.4, 6b |
+| M4 lg and trf configs break | failure mode, CHANGELOG, compatibility note; post_scan and text_redact cells | 6.3, 6c, M-T5 |
+| M5 DI-1 too large | split into DI-1a and DI-1b | 8 |
+| L1 | DI-1 writes `warning` rows only | 4.2 |
+| L2 | `_routing_facts.py:63-86` cited; contingency dropped | 4.1, 4.3, DI-T7 |
+| L3 | `scan_set_from_data(json.loads(raw))` named | 3.2, B-T7 |
+| L4 | M-T3 is a second stop condition | M-T3 |
+| L5 | V2-LOG | 10 |
