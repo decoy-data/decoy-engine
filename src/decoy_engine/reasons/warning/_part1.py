@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CARDINALITY_MATCH_DEVIATION",
@@ -24,6 +25,7 @@ __all__ = [
     "OUT_OF_CORE_CALLER_MANAGED_RESIDENCY",
     "POOL_DOMINATES_CACHE",
     "POST_SCAN_OUTPUT_UNREADABLE",
+    "SCAN_BASELINE_MISSING",
     "SCAN_CRASHED",
     "SCAN_HEADER_SUSPECT",
     "SCAN_KEY_TYPE_MISMATCH",
@@ -70,6 +72,13 @@ POST_SCAN_OUTPUT_UNREADABLE = _d(
     "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not "
     "checked on the output.",
     since="1.27.0",
+)
+# SCAN-CHECKS: `--evidence-out` asked to hash the pipeline's scan baseline and the file is gone. The
+# run continues and the manifest records the path with a null fingerprint. Fixed, value-free text.
+SCAN_BASELINE_MISSING = _catalog.warning("EvidenceManifest")(
+    "scan_baseline_missing",
+    "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
+    since=UNRELEASED,
 )
 SCAN_CRASHED = _d("scan_crashed", "Scan crashed.")
 SCAN_HEADER_SUSPECT = _d(
