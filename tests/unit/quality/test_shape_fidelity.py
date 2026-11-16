@@ -319,3 +319,15 @@ def test_symmetry_swap_preserves_shape_score() -> None:
     assert f_ab["marginal"]["columns"][0]["shape_similarity"] == pytest.approx(
         f_ba["marginal"]["columns"][0]["shape_similarity"]
     )
+
+
+def test_datetime_count_too_large_to_scale_is_malformed_not_a_crash() -> None:
+    def col(*counts: float) -> dict:
+        bins = [{"year": 2000 + i, "count": c} for i, c in enumerate(counts)]
+        return {"name": "d", "kind": "datetime", "stats": {"year_bins": bins}}
+
+    src = _snap({"d": col(1e308, 5.0)})
+    out = _snap({"d": col(3.0, 5.0)})
+    entry = compute_shape_fidelity(src, out)["marginal"]["columns"][0]
+    assert entry["comparable"] is False
+    assert entry["method"] == "malformed_year_bins"

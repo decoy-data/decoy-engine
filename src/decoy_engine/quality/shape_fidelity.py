@@ -53,6 +53,7 @@ Out of scope:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from decoy_engine.contracts.distribution_snapshot import with_year_weights
@@ -176,9 +177,11 @@ def _column_shape_similarity(
             return {"shape_similarity": None, "method": "malformed_year_bins", "comparable": False}
         # Milli-rows keep a range's fractional per-year share through `_shape_tvd`'s int(); the
         # scale cancels in the normalization, so one-year buckets score exactly as before.
-        src_counts = [round(w * 1000) for w in src_stats["year_weights"].values()]
-        out_counts = [round(w * 1000) for w in out_stats["year_weights"].values()]
-        return _shape_tvd(src_counts, out_counts, label="year_bins_sorted_tvd")
+        src_milli = _milli_rows(src_stats["year_weights"])
+        out_milli = _milli_rows(out_stats["year_weights"])
+        if src_milli is None or out_milli is None:
+            return {"shape_similarity": None, "method": "malformed_year_bins", "comparable": False}
+        return _shape_tvd(src_milli, out_milli, label="year_bins_sorted_tvd")
     if src_kind == "freetext":
         return _shape_tvd(
             src_stats.get("length_bin_counts", []),
@@ -190,6 +193,14 @@ def _column_shape_similarity(
         "method": f"unknown_kind:{src_kind}",
         "comparable": False,
     }
+
+
+def _milli_rows(weights: dict[Any, float]) -> list[int] | None:
+    """Per-year weights as integer milli-rows, or ``None`` when one is too large to scale."""
+    scaled = [w * 1000 for w in weights.values()]
+    if not all(math.isfinite(v) for v in scaled):
+        return None
+    return [round(v) for v in scaled]
 
 
 def _joint_shape_similarity(
