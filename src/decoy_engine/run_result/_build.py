@@ -124,6 +124,13 @@ def _fidelity_warned(report: Any) -> bool:
     return bool(report.get("warnings")) or report.get("grade") in ("F", "unavailable")
 
 
+def _pre_check(check: Check) -> Check:
+    c = check.counts
+    return _check(
+        check.id, check.status, check.blocking, (c.passed, c.warning, c.fail, c.error), check.codes
+    )
+
+
 def _checks(result: RunFacts | None, blocking: bool) -> tuple[Check, ...]:
     metrics = result.quality_metrics if result is not None else {}
     found: list[Check] = []
@@ -208,13 +215,20 @@ def build_run_result(
     finished_at: str,
     elapsed_s: float,
     phases: Sequence[tuple[str, float]],
+    pre_checks: Sequence[Check] = (),
 ) -> RunResult:
     """``producer`` is the CLI version; the engine and registry versions are the builder's own.
 
     ``route`` is ``route_summary(quality_metrics)``, read once by the caller; ``chunked`` is the
-    caller's own fact that the ``--chunked`` entry ran, which leaves no route in the metrics."""
+    caller's own fact that the ``--chunked`` entry ran, which leaves no route in the metrics.
+
+    ``pre_checks`` are checks the caller ran before the engine did (the scan-drift check). They come
+    first in ``checks``; a blocking one that failed makes the status ``findings``, as
+    ``blocking_failed`` does. A pre-check cannot claim to block unless it failed."""
     if tables.run_failed != (failure is not None):
         raise ValueError("tables.run_failed disagrees with failure")
+    pre = tuple(_pre_check(c) for c in pre_checks)
+    blocking_failed = blocking_failed or any(c.blocking for c in pre)
     outcome = derive_outcome(
         category=None if failure is None else failure.category,
         delivery_mode=tables.delivery.mode,
@@ -238,7 +252,7 @@ def build_run_result(
         route=_route(route, chunked, native),
         delivery=tables.delivery,
         tables=tables.tables,
-        checks=_checks(execution_result, blocking_failed),
+        checks=pre + _checks(execution_result, blocking_failed),
         warnings=_warnings(execution_result),
         failure=None
         if failure is None
