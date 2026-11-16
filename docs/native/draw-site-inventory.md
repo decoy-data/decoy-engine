@@ -146,7 +146,7 @@ A keyed bijection (reversible) under the deployable profile's domain floor
 Out-of-core mirror at `_mask_group_b.py:132`.
 
 ### mask.date_shift
-`execution/_strategies/_date_shift.py:301`.
+`execution/_strategies/_date_shift.py:303`.
 `min_days + (derive(mask_key, namespace, value)[:8] % range_size)`, an
 HKDF-then-HMAC-SHA256 keyed offset. The mask key is the admitted secret; there
 is no key-free path.
