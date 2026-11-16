@@ -4,8 +4,9 @@ How the engine creates, stages and binds an output directory, and what it promis
 result. This page grows with the F22 publication work (plan
 `docs/plans/2026-10-30-f22-publication-replan.md`); each section says what is in place today.
 The reference sink commits through `publish_unit` on every route that uses it, and so does
-the isolated route (`run_pipeline_isolated`, both modes; below). A later part adds
-vault-before-output ordering; until that section exists here, the engine does not claim it.
+the isolated route (`run_pipeline_isolated`, both modes; below). The vault half of
+vault-before-output ordering is in place (below); the rule inside `publish_unit` is a later part,
+and until it exists here the engine does not claim that an output is bound only after its vault.
 
 Platforms: Linux and macOS, on both the ambient policy (`LocalFileAccess`, the CLI default) and
 the strict policies (`RootedFileAccess`, `PreopenedFileAccess`). Windows keeps its plain path
@@ -100,12 +101,34 @@ parent and each directory up to the anchor), so state found on disk can be made 
 it is trusted. On the ambient policy only the leaf and its parent are strict here: nothing was
 created by this call.
 
-On the strict policies all three go through descriptors opened from the capability root, so a
+`OutputDir.adopt_file(limit=...)` reads a vault-style file leaf for adoption: it opens the leaf
+read-only (so a `0400` file opens) and never through a link, refuses anything but a regular file,
+reads at most `limit` bytes (`LeafTooLarge` beyond), fsyncs that same descriptor and then the
+chain, and only then returns the bytes, so the bytes returned are the bytes made durable. It
+returns `None` when the parent or the leaf is absent. A directory fsync that the filesystem
+reports as unsupported (`EINVAL`, `EBADF`, `ENOTSUP`) does not fail a chain walk.
+
+On the strict policies all of these go through descriptors opened from the capability root, so a
 symlink on the way to the leaf is refused, never followed out of the root. Windows has no arm yet:
-`lock` raises `LockUnavailable`, the other two raise `FileAccessUnavailable`, and a `publication`
+`lock` raises `LockUnavailable`, the others raise `FileAccessUnavailable`, and a `publication`
 publish there keeps the plain rename until the Windows arm is built.
 
 All errors these paths raise carry an errno name and no path, file name or operating-system text.
+
+## The vault commit
+
+`VaultWriter.publish(out)` writes the vault as `write` does (private stage, file fsync, exclusive
+`link`, directory fsync) and then fsyncs the vault's whole chain up to the anchor, with the same
+rules as the output chain. It returns a `VaultCommit(sha256, size, entry_count, adopted=False)`.
+Only the vault module issues one, so a holder knows the leaf and its chain were fsynced in that
+call. `write` fsyncs the chain too. When the leaf already exists (`vault_exists`),
+`publication._vault_order.adopt_vault(out, writer)` adopts it durably or refuses: `adopt_file`
+fsyncs the leaf and its chain, then `same_rows` opens the bytes under the writer's key
+(`BytesHandle`, constant display `<vault>`) and compares the rows and the dropped-key count.
+Equal rows give `VaultCommit(..., adopted=True)` and the leaf is never rewritten. A leaf that
+cannot be read or made durable raises `VaultError` with `vault_commit_failed`; other rows,
+another key's data or a leaf over twice this vault's size plus 64 KiB returns `None`, and the
+caller refuses with `publication_vault_conflict`. No error text carries a path, key or row.
 
 ## The `decoy-publication/v1` descriptor
 
