@@ -388,6 +388,27 @@ included. Script checks on `a27a82c5` against `origin/main` `64e9349b`:
 `generation/synthesize.py` 597 lines; `tests/unit/plan/checks/test_generate_columns.py` 856;
 the engine root and `config/` hold 25 modules, `profile/` 19.
 
+## Main merge (2026-11-16, `a7f278eb`), carried forward
+
+`origin/feat/gen-inherit-e2` `ef6198b7` merged into `16d54f90` as `cd1e129a`, without a
+conflict. It carries `origin/main` `a7f278eb` (#600, #582 one seed path for every seeded
+generator, #489 durable publication units) and slice 2's re-pin of the draw-site catalogue:
+`tests/native/test_draw_sites_catalogue_pinned.py` keeps both "Re-pinned for ..." lines and a
+`_CATALOGUE_DIGEST` recomputed by the file's procedure, and it passes on this tree. The merge
+touches none of the files the 15 mutations anchor in (`_inherit.py`,
+`config/_generate_relational/__init__.py`, `_generate_options.py`, `synthesize.py`,
+`_pinned_compile.py`, `_admission.py`, `_bounds.py`, `_numeric_typing.py`), so the mutation run
+on `a27a82c5` stands and was not repeated. Main's seed sentry
+(`tests/sentry/defects/test_rng_construction.py`) passes over this slice's code.
+
+Gate on `cd1e129a`, the same command over the 154 T1 paths, Python 3.10.20, baseline
+`origin/main` `a7f278eb`: ruff, format and mypy pass; sentry 5862 passed, 0 failed, 2 skipped;
+layers 15 passed; licenses 63 passed; tests 13826 passed, 0 failed, 351 skipped; no
+branch-only failure (the routing test included). Script checks against `origin/main`
+(`registry_renumber.py`, `ratchet_check.py`, `check_fragment.py`, `reason_release_pin.py
+--check`): each exit 0. `generation/synthesize.py` 597 lines; the engine root and `config/` hold
+25 modules (main's packages: `determinism/` 3, `fileaccess/` 17, `generation/composite/` 10).
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
