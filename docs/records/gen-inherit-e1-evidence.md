@@ -409,6 +409,102 @@ branch-only failure (the routing test included). Script checks against `origin/m
 --check`): each exit 0. `generation/synthesize.py` 597 lines; the engine root and `config/` hold
 25 modules (main's packages: `determinism/` 3, `fileaccess/` 17, `generation/composite/` 10).
 
+## Main merge (2026-11-16, `1c8e413c`), test-flight coverage and full suite
+
+### Merge
+
+`origin/feat/gen-inherit-e2` `21e827b6` merged into `66e1d352` as `c7e07e82`, without a
+conflict. It carries `origin/main` `1c8e413c` (#496: the `publication/` package with the
+`decoy-publication/v1` descriptor codec and receipt types, placed in the `execution` tier of
+`.importlinter` and the layer snapshot; `_canonical` gains strict JSON reading). The merge touches
+none of the files the 15 mutations anchor in, so the run on `a27a82c5` stands. The engine root
+and `config/` hold 25 modules, `publication/` 2; `generation/synthesize.py` 597 lines.
+
+### Test-flight covers `inherit` (`2aa2d027`)
+
+The orchestrator ruling replaces the allowlist entry of ruling 2 with a flight job.
+`testflight/_coverage.py` is main's file again (no `inherit` entry). Red first: with the entry
+removed and no job, `tests/unit/config/test_testflight_manifests_parse.py` failed 1 of 8 with
+"generate-column type(s) uncovered and not allowlisted: ['inherit']".
+
+No job had a generated parent and child table (Job D's `visits` is a standalone generate
+table), so Job D gains two: `clinics` (40 rows: `clinic_id` sequence, `clinic_tier`
+categorical) and `clinic_stays` (600 rows: `stay_id` sequence, `clinic_id` a `reference` to
+`clinics.clinic_id` with `null_probability: 0.1`, `clinic_tier` an `inherit` column via
+`clinic_id`). A new harness invariant, `inherited_columns` (`testflight/_inherited.py`, wired in
+`_evaluate.py`, spec `InheritedColumnSpec` in `_spec.py`), checks from the output tables alone
+that the parent key is unique, every child copy equals its parent row's value with the same
+type, every non-null key has a parent row, and a null key gives a null, with floors on null-key
+rows (20) and distinct copied values (3). `testflight/test_testflight_inherited.py` holds nine
+mutation controls (a copy from the wrong row, a value beside a null key, a key with no parent, a
+type change, a repeated parent key, both vacuity floors, the faithful case, and the
+`evaluate_invariants` wiring). `docs/acceptance-test-flight.md` describes the check. The engine
+is unchanged; `reference` stays in main's allowlist although Job D now also covers it.
+
+Job D's golden fingerprint moved by `python scripts/test_flight.py --update-fingerprints`:
+`a3e53cc7...` to `3fde329a...`. The run's other five goldens are unchanged, and the
+fingerprint of Job D's outputs without the two new tables is still `a3e53cc7...`, so only the
+added tables moved it. The suite run on `2aa2d027`: `python scripts/test_flight.py` 61 of 61
+checks passed (`inherited_columns verified: clinic_stays.clinic_tier(rows=600, null_keys=49,
+distinct=3)`), fingerprints 6 of 6 match; `pytest testflight -m testflight` 148 passed; the
+live-registry guard reports generate types live 15, covered 15, allowlisted 1.
+
+### Full suite (head `2aa2d027`, Python 3.10.20)
+
+`GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline --full` (the regression-gate
+selection: `pytest tests` without benchmark, packaging, codspeed and determinism_harness
+markers, plus env, ruff, format, mypy, sentry, layers and licenses), baseline `origin/main`
+`1c8e413c`:
+
+| Step | Branch | Main |
+| --- | --- | --- |
+| env, ruff, format, mypy | pass | not rerun |
+| sentry | 5880 passed, 0 failed, 2 skipped | not rerun |
+| layers | 15 passed | not rerun |
+| licenses | 63 passed | not rerun |
+| tests | 45509 passed, 3 failed, 93 errors, 5369 skipped | 44477 passed, 0 failed, 93 errors, 5369 skipped |
+
+- Shared with main (93 errors): `tests/fileaccess/scratch/test_private_creators.py` (56),
+  `tests/fileaccess/scratch/test_scratch_arena.py` (31) and
+  `tests/unit/execution/test_scratch_root_umask.py` (6) refuse to run as root ("root ignores
+  directory modes"); this container runs as root.
+- Branch-only (3), `tests/property/test_ri_graph_invariants.py`:
+  `test_multi_parent_conflicting_policy_is_rejected`, `test_invalid_policy_value_is_rejected`
+  and `test_duplicate_conflicting_policy_is_rejected` require the orphan-policy refusals to
+  echo the policy values and the column tuples (`"['fail', 'preserve']"`,
+  `"orphan_policy='sometimes'"`, `"p.['id']"`, `"c.('pid',)"`). Slice 1 (`55c73d28`) made those
+  messages value-free on purpose and pins that with its own tests
+  (`test_an_invalid_policy_is_refused_without_echoing_it`, `test_a_duplicate_names_neither_policy`,
+  `test_conflicting_policies_raise`). The same three fail on `feat/gen-rel-e1`. Not changed
+  here: making them pass means either dropping the value-free messages or narrowing the property
+  test's assertions, which is a ruling.
+
+Other CI lanes, run on the same head: `pytest -m ml` with `DECOY_REQUIRE_ML=1` 92 passed, 8
+skipped; the DP certified profile (`check_fit_environment` OK; `-m dp_certified` 79 passed and
+`junit_ran.py` passed=79, none skipped; license sentries strict 63 passed); the determinism
+harness 3 passed (`junit_ran.py` passed=3); packaging (`build==1.2.2`, sdist built with
+`hatchling-1.32.4`, `-m packaging` 137 passed, 10 skipped); NER (the pinned
+`en_core_web_sm-3.8.0` wheel, sha256 checked, `DECOY_REQUIRE_NER=1`, `-m ner` 39 passed, 10
+skipped); base install (no extras) `scripts/dev/base_install_smoke.py` OK; import smoke on
+Python 3.11.18 and 3.12.3 OK; test-flight on Python 3.11.18 with `dev geo` 146 passed, 2
+skipped, script 61 of 61 and fingerprints 6 of 6; `pip-audit==2.10.1` on 3.10, 3.11 and 3.12
+"No known vulnerabilities found"; `semgrep==1.183.0` on the secret-provider rules 0 findings.
+
+Python 3.12.3 (`gates.sh --steps ruff,mypy,sentry,tests --full`, no baseline): ruff pass; sentry
+5880 passed; tests 45424 passed, 3 failed, 93 errors, 5454 skipped (the same three branch-only
+failures and the same 93 root refusals); mypy stops on two environment errors (numpy's 3.12
+stubs under the configured `python_version = "3.10"`, and no `tomli` on 3.12), neither in this
+stack's files. CI runs mypy on 3.10 only.
+
+Docs: `sphinx-build -b html -W --keep-going docs` fails locally on main as well (209 "document
+isn't included in any toctree" warnings on `origin/main`); this stack adds 11 more of that kind,
+one per evidence record. No other warning.
+
+Not run: the native companion wheel workflows (`decoy-engine-native`, a Rust and maturin build
+this stack does not touch); `benchmark` and `codspeed` (manual performance lanes);
+`compat-preflight` and `regression-proof` (pull-request checks that read the PR body or a
+`bugfix` label).
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
@@ -607,5 +703,5 @@ discarded, as was a first direct T1 run without `tmp_path_retention_policy=faile
   sweep; keep it out of broad local runs.
 - The pre-existing `ratchet_check.py --base origin/main` finding (keys `origin/main` #577 removed
   from `f29-producer-inventory`, a file this stack does not touch) clears on the main merge.
-- A test-flight job case for `inherit` (a generated parent and child table); until then
-  `testflight/_coverage.py` allowlists the type with that reason.
+- (Done in `2aa2d027`: Job D covers `inherit`, and `_GENERATE_TYPE_ALLOWLIST` is main's again;
+  see "Main merge (2026-11-16, `1c8e413c`), test-flight coverage and full suite".)
