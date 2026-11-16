@@ -325,10 +325,63 @@ draw-site catalogue, `.importlinter`, `generation/synthesize.py` or
 
 Checks on `c7ccf051`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
 `tests/sentry` 5887 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
-this slice's test files and the two draw-site catalogue tests and the fan-out sentry: 3649
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3649
 passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main origin/main`,
 `ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
 `reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Owner ruling A: value-free orphan-policy refusals (2026-11-16, `4fb6762f`)
+
+Three tests in `tests/property/test_ri_graph_invariants.py` expected the orphan-policy refusals
+to echo the declared policies and the ends in their old list form:
+`test_multi_parent_conflicting_policy_is_rejected` (`"c.('pid',)"` and `"['fail', 'preserve']"`),
+`test_invalid_policy_value_is_rejected` (`"orphan_policy='sometimes'"` and the enumerated tokens)
+and `test_duplicate_conflicting_policy_is_rejected` (`"p.['id']"`, `"c.['pid']"`,
+`"orphan_policy='fail'"` and `"declared 'preserve'"`). This slice made the refusals value-free
+in `relationships/_graph.py` (`_policy_text`: the registered summary plus the end names), so the
+three failed on the stack: 3 failed, 32 passed.
+
+The owner ruled that the messages stay value-free and the tests narrow to the reason code and
+the field. No source changed. `4fb6762f` replaces each removed value check with a code or field
+check: the rendered error starts with `[code] path:` (for the invalid refusal,
+`[orphan_fk_policy_invalid] relationships[0].orphan_policy:`, which names the `orphan_policy`
+field), the message starts with the code's registered summary, and the duplicate refusal names
+both ends (`Parent p.id, child c.pid.`). The existing `code` and `path` asserts stay, and each
+test now also asserts that no declared policy appears in the error.
+
+Mutation evidence, each refusal made to pass through (`if False:`) and the three tests run:
+
+- before, source unmutated: 3 passed;
+- conflict check (`if len(policies) > 1:`) dropped: the conflict test fails (`DID NOT RAISE
+  PlanCompileError`), 1 failed, 2 passed;
+- invalid check dropped: the invalid test fails (`ValueError: 'sometimes' is not a valid
+  OrphanPolicy`, not a `PlanCompileError`), 1 failed, 2 passed;
+- duplicate check dropped: the duplicate test fails (`DID NOT RAISE PlanCompileError`), 1
+  failed, 2 passed;
+- all three dropped at once: 3 failed;
+- after restore: `git diff` on `src/` empty, 3 passed.
+
+## Main merge (2026-11-16, `13c95c7d`)
+
+`origin/main` `13c95c7d` (run-stream E5b, the no-sink collector scratch opened on first spill,
+and F22 b1, the durable vault adopt and `VaultCommit`) merged into `4fb6762f` as `4a49d1dd`,
+without a conflict. Main touches `CODEMAP.md` (merged beside this chain's rows), the
+secret-material census and the file-access registry (main's own entries), and adds its two
+changelog fragments; it does not touch the draw-site catalogue, `.importlinter`, `uv.lock`,
+`generation/` or `tests/property/test_ri_graph_invariants.py`. This slice's
+`changelog.d/gen-rel-e1.md` is kept.
+
+Checks on `4a49d1dd`, Python 3.10.20, `origin/main` `13c95c7d`: ruff, format and mypy pass;
+`tests/sentry` 5895 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations other than the three above and the full suite.

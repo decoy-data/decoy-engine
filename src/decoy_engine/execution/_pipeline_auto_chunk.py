@@ -385,14 +385,24 @@ def _run_streamed(
 
 
 def _collector(collected: dict[str, pa.Table], scope: ExitStack) -> TransactionalSink:
-    """E5a: the no-sink resident collector, with a private scratch arena (0700, reclaimed when
-    `scope` closes) as its `spill_scratch`, so a schema hold-back past one row group spills
-    there instead of refusing with `hold_back_spill_unavailable`. The arena is a policy-free
-    engine capability, so a strict file-access policy has no path to re-authorize."""
+    """E5a/E5b: the no-sink resident collector. Its `open_spill_scratch` makes a private scratch
+    arena (0700, reclaimed when `scope` closes) on the first spill only, so a schema hold-back
+    past one row group spills there instead of refusing with `hold_back_spill_unavailable`, and a
+    run that never spills creates no directory (and never meets the arena's win32 refusal). The
+    arena is a policy-free engine capability, so a strict file-access policy has no path to
+    re-authorize."""
     from decoy_engine.execution import _transactional_sink
 
-    arena = scope.enter_context(ScratchArena.fresh())
-    return _transactional_sink._CallableSinkAdapter(collected.__setitem__, spill_scratch=arena)
+    arenas: list[ScratchArena] = []  # one run, one thread: the memo needs no lock
+
+    def open_spill_scratch() -> ScratchArena:
+        if not arenas:
+            arenas.append(scope.enter_context(ScratchArena.fresh()))
+        return arenas[0]
+
+    return _transactional_sink._CallableSinkAdapter(
+        collected.__setitem__, open_spill_scratch=open_spill_scratch
+    )
 
 
 def run_auto_chunk(
