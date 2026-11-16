@@ -81,6 +81,7 @@ SENTRIES = (
     "tests/sentry/test_sentry_manifest.py",
     "tests/sentry/test_source_hygiene.py",
     "tests/sentry/test_staging_writer_choke_point.py",
+    "tests/sentry/test_strict_json_single_parser.py",
     "tests/sentry/test_subset_inputs.py",
     "tests/sentry/test_support_no_network.py",
     "tests/sentry/test_table_kind_classifier.py",

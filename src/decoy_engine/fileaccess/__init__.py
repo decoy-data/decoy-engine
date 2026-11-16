@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
     ambient_forbidden,
@@ -31,6 +32,7 @@ from decoy_engine.fileaccess._entry import (
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
 from decoy_engine.fileaccess._local import LocalFileAccess, engine_dir_handle, engine_handle
+from decoy_engine.fileaccess._output import DIRECTORY_PUBLISH_LABELS
 from decoy_engine.fileaccess._preopened import PreopenedFileAccess
 from decoy_engine.fileaccess._private import write_private
 from decoy_engine.fileaccess._protected_dir import (
@@ -119,6 +121,7 @@ ENTRY_POINTS: tuple[str, ...] = (
 
 __all__ = [
     "CONTRACT_VERSION",
+    "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
     "CleanupReport",
     "CommitUncertain",
@@ -156,6 +159,7 @@ __all__ = [
     "forbid_ambient",
     "installed",
     "is_ambient",
+    "is_valid_component",
     "keeps_class",
     "map_in_context",
     "open_protected_dir",
