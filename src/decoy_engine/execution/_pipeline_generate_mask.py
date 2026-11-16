@@ -224,7 +224,8 @@ def run_generate_and_mask_steps(
                 message=f"execution_mode='stream': the output would stay resident ({out_reason}).",
             )
         # B6b: a lazy table streams only when the output does and a lane takes it; every other
-        # one is materialized exactly once, here, before any lane runs.
+        # one is materialized exactly once, here, before any lane runs. E5a: a routed table whose
+        # output is resident only for want of a sink stays lazy and the lane collects it.
         modes = _chunked_input.input_modes(
             keep_lazy,
             out_mode=out_mode,
@@ -233,6 +234,12 @@ def run_generate_and_mask_steps(
             if route_chunked
             else None,
             split=split,
+            reason_with_sink=_reason_with_sink(
+                out_reason,
+                config=config,
+                fidelity_report=fidelity_report,
+                post_validation=publish.post_validation,
+            ),
         )
         for name, (mode, _why) in modes.items():
             if mode == "resident":
@@ -273,11 +280,13 @@ def run_generate_and_mask_steps(
             # tables, so merged_sources holds only that table's frame; the
             # planner's runtime gates already rejected anything else.
             mask_table_name = next(name for name, kind in table_kinds.items() if kind == "mask")
-            # A streaming run calls the lane directly with the sink; the resident delegate
+            # A lazy input (streamed output, or E5a's no-sink collector) calls the lane directly;
+            # only streamed output passes the sink. The resident delegate
             # `_route_exec.run_mask_chunked` stays as it was.
+            lazy_input = modes.get(mask_table_name, ("resident", ""))[0] == "lazy"
             lane = (
                 _pipeline_auto_chunk.run_auto_chunk
-                if out_mode == "streamed"
+                if out_mode == "streamed" or lazy_input
                 else _route_exec.run_mask_chunked
             )
             mask_outputs, mask_timings, mask_conversion_ms, mask_warnings, mask_quality_metrics = (
@@ -301,6 +310,8 @@ def run_generate_and_mask_steps(
                             "align_row_groups": stream is not None,
                         }
                         if out_mode == "streamed"
+                        else {"expected": keep_lazy.get(mask_table_name)}
+                        if lazy_input
                         else {}
                     ),
                 )
@@ -308,9 +319,10 @@ def run_generate_and_mask_steps(
             if out_mode == "resident":
                 lane_block = mask_quality_metrics.setdefault("auto_chunk", {})
                 lane_block["output"] = _output_sink.resident_block(out_reason)
-                lane_block["input"] = _chunked_input.resident_block(
-                    modes.get(mask_table_name, ("", _chunked_input.REASON_RESIDENT_SOURCE))[1]
-                )
+                if not lazy_input:  # the collector lane read in batches; its own block stands
+                    lane_block["input"] = _chunked_input.resident_block(
+                        modes.get(mask_table_name, ("", _chunked_input.REASON_RESIDENT_SOURCE))[1]
+                    )
         else:
             _pg = get_active_channel()
             _pg_started = _pg.phase_start(
@@ -392,3 +404,33 @@ def run_generate_and_mask_steps(
         inputs_streamed=bool(sources) and all(isinstance(v, LazySource) for v in sources.values()),
         generate_warnings=tuple(generate_warnings),
     )
+
+
+def _reason_with_sink(
+    out_reason: str,
+    *,
+    config: dict[str, Any],
+    fidelity_report: bool,
+    post_validation: bool,
+) -> str | None:
+    """E5a: the output reason the one owner gives the same routed run with a streaming sink, or
+    `None` when the output is not resident for want of a sink. `decide_output_mode` names the
+    missing sink before any later reason, so it is asked again with a stand-in sink that is
+    never written; the dispatcher stays on because the no-sink collector streams either way."""
+    if out_reason != reasons.route.NO_SINK:
+        return None
+    from decoy_engine.execution._transactional_sink import _CallableSinkAdapter
+
+    _mode, reason = _output_sink.decide_output_mode(
+        stream_chunked_output=True,
+        sink=_CallableSinkAdapter(_never_written),
+        dispatcher_enabled=True,
+        config=config,
+        fidelity_report=fidelity_report,
+        post_validation=post_validation,
+    )
+    return reason
+
+
+def _never_written(_table: str, _data: pa.Table) -> None:
+    raise RuntimeError("the stand-in sink is only classified, never written")
