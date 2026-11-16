@@ -7,7 +7,6 @@ envelope is returned untouched next to that view so a copy never drops a field.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -16,6 +15,7 @@ from uuid import UUID
 from pydantic import BaseModel, ValidationError
 
 from decoy_engine import reasons
+from decoy_engine._canonical import StrictJsonError, strict_json_loads
 from decoy_engine.records import _kinds  # noqa: F401  (registers the V1 kinds)
 from decoy_engine.records._canonical import canonical_bytes, payload_digest, record_id
 from decoy_engine.records._envelope import (
@@ -158,17 +158,6 @@ def encode(envelope: RecordEnvelope | Mapping[str, Any]) -> bytes:
     raise RecordError(reasons.runtime.RECORD_INVALID)
 
 
-def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    keys = [k for k, _ in pairs]
-    if len(set(keys)) != len(keys):
-        raise ValueError("duplicate key")
-    return dict(pairs)
-
-
-def _refuse_constant(_: str) -> Any:
-    raise ValueError("non-finite number")
-
-
 def json_object(data: bytes | str) -> dict[str, Any] | None:
     """The one strict JSON-object parse for records, export lines and job logs.
 
@@ -177,9 +166,8 @@ def json_object(data: bytes | str) -> dict[str, Any] | None:
     """
     raw: Any = None
     try:
-        text = data.decode("utf-8") if isinstance(data, bytes) else data
-        raw = json.loads(text, object_pairs_hook=_no_duplicates, parse_constant=_refuse_constant)
-    except (ValueError, RecursionError):
+        raw = strict_json_loads(data, max_int_digits=None)
+    except StrictJsonError:
         raw = None
     return raw if isinstance(raw, dict) else None
 

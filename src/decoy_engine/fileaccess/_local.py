@@ -261,11 +261,13 @@ class LocalOutputTxn(_LocalStageDir):
         kind: Literal["file", "dir"],
         mode: Literal["exclusive", "replace"],
         label: StageLabel,
+        owner: object = None,
     ) -> None:
         self._target = target
+        self.owner = owner
         self._kind = kind
         self._mode = mode
-        self._label = label
+        self._label = self.label = label
         self._staged_file: Path | None = None
         self._direct = False
         if label == "publication" and kind != "dir":
@@ -494,7 +496,7 @@ class LocalOutputDir:
     ) -> LocalOutputTxn:
         if label in DIRECTORY_PUBLISH_LABELS:
             validate_publication_leaf(self._target.name, self._field_key)
-        return LocalOutputTxn(self._target, kind, mode, label)
+        return LocalOutputTxn(self._target, kind, mode, label, self)
 
     def ensure_dir(self) -> None:
         if sys.platform == "win32":

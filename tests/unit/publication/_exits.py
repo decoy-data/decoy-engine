@@ -36,6 +36,7 @@ EXITS: dict[str, tuple[str, str | None, str]] = {
     "E3_nonempty_without_descriptor": ("refused", "publication_target_occupied", "untouched"),
     "E3_leaf_is_a_file": ("refused", "publication_target_occupied", "untouched"),
     "E4_already_committed": ("already_committed", None, "untouched"),
+    "E4_retry_other_operation": ("already_committed", None, "untouched"),
     "E4a_chain_fsync_fails": ("commit_uncertain", "publication_commit_uncertain", "untouched"),
     "E5_operation_conflict": ("operation_conflict", "publication_operation_conflict", "untouched"),
     "E6_different_operation": ("refused", "publication_target_occupied", "untouched"),
@@ -87,6 +88,7 @@ def run_exit(
     try:
         if case in {
             "E4_already_committed",
+            "E4_retry_other_operation",
             "E4a_chain_fsync_fails",
             "E5_operation_conflict",
             "E6_different_operation",
@@ -120,6 +122,8 @@ def run_exit(
         elif case == "E4a_chain_fsync_fails":
             parent_key = key(parent)
             Recorder(monkeypatch, fail=lambda e: e == ("fsync", parent_key))
+        elif case == "E4_retry_other_operation":  # same tables, a new operation id
+            request = PublicationRequest("op-2")
         elif case == "E5_operation_conflict":
             one = two
         elif case == "E6_different_operation":
