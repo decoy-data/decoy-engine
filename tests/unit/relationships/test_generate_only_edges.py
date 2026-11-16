@@ -107,7 +107,7 @@ def _registry(config: dict[str, Any]):
 def test_at_e1_1_compile_plan_accepts_a_generate_only_edge() -> None:
     config = _gen_config([_rel("patients", "visits")])
     plan = compile_plan(_normalized(config), _profile(config), decoy_engine_version=ENGINE)
-    assert len(plan.relationship_graph.edges) == 1
+    assert len(plan.relationships) == 1
 
 
 def test_at_e1_2_run_writes_the_same_bytes_as_without_the_block_on_full_frame() -> None:
@@ -185,7 +185,7 @@ def test_at_e1_5_derived_name_is_private_and_keyed_by_parent_key() -> None:
     assert registry.for_column("visits", ("patient_id",)) is None
     plan = compile_plan(_normalized(config), _profile(config), decoy_engine_version=ENGINE)
     assert derived not in {b.namespace for b in plan.namespaces}
-    assert derived not in repr(plan.seed_envelope)
+    assert derived not in repr(plan)
 
     # Fan-out: two child edges to one parent key share a name; another parent key differs.
     other = Relationship(
@@ -206,19 +206,27 @@ def test_at_e1_5_derived_name_is_private_and_keyed_by_parent_key() -> None:
     assert registry.for_relationship(other) != derived
 
 
-def test_at_e1_5_a_user_namespace_with_the_derived_text_masks_the_same_bytes() -> None:
+def test_at_e1_5_a_user_namespace_with_the_derived_text_masks_the_same_bytes(
+    tmp_path: Path,
+) -> None:
     gen = _gen_config([_rel("patients", "visits")])
     derived = _registry(gen).for_relationship(_profile(gen).relationships[0])
-    src = {
-        "parents": pa.table({"patient_id": [f"p{i}" for i in range(6)]}),
-        "kids": pa.table({"patient_id": [f"p{i % 6}" for i in range(12)]}),
+    frames = {
+        "parents": pd.DataFrame({"patient_id": [f"p{i}" for i in range(6)]}),
+        "kids": pd.DataFrame({"patient_id": [f"p{i % 6}" for i in range(12)]}),
     }
+    sources: dict[str, Any] = {}
+    for name, frame in frames.items():
+        path = tmp_path / f"{name}.csv"
+        frame.to_csv(path, index=False)
+        sources[name] = {"type": "file", "format": "csv", "has_header": True, "path": str(path)}
+    tables = {n: pa.Table.from_pandas(f, preserve_index=False) for n, f in frames.items()}
 
     def config(extra_gen_edge: bool) -> dict[str, Any]:
         cfg: dict[str, Any] = {
             "version": 2,
             "global_settings": {"seed": 3},
-            "sources": {},
+            "sources": sources,
             "tables": [_mask_table("parents", "patient_id"), _mask_table("kids", "patient_id")],
             "relationships": [_rel("parents", "kids", namespace=derived)],
         }
@@ -227,14 +235,15 @@ def test_at_e1_5_a_user_namespace_with_the_derived_text_masks_the_same_bytes() -
         if extra_gen_edge:
             cfg["tables"] += _gen_config(None)["tables"]
             cfg["relationships"].append(_rel("patients", "visits"))
+        cfg["targets"] = {
+            t["name"]: {"type": "file", "format": "csv", "path": str(tmp_path / f"{t['name']}_o")}
+            for t in cfg["tables"]
+        }
         return cfg
 
     def masked(extra_gen_edge: bool) -> dict[str, Any]:
         result = run_pipeline(
-            _normalized(config(extra_gen_edge)),
-            src,
-            engine_version=ENGINE,
-            derive_key=lambda *a, **k: b"k" * 32,
+            _normalized(config(extra_gen_edge)), sources=tables, engine_version=ENGINE
         )
         return {n: result.outputs[n].to_pylist() for n in ("parents", "kids")}
 
