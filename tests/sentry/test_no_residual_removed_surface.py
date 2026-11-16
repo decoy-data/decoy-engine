@@ -109,7 +109,12 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
         if not os.path.lexists(path):  # a tracked path that is not on disk must not hide a file
             hits.append(f"{rel}: missing")
             continue
-        if not path.is_file():
+        if path.is_symlink():  # git tracks the link text, not what it points at
+            if RETIRED_PATTERN.search(os.readlink(path)):
+                hits.append(f"{rel}: symlink target")
+            continue
+        if not path.is_file():  # a submodule or other non-regular entry has no text to read
+            hits.append(f"{rel}: not a regular file")
             continue
         try:
             data = path.read_bytes()
@@ -234,6 +239,19 @@ def test_a_non_ascii_tracked_file_is_scanned_not_skipped(tmp_path: pathlib.Path)
     rels = _tracked(tmp_path)
     assert rels == ["caf\u00e9.md"]
     assert scan(tmp_path, rels) == ["caf\u00e9.md: content"]
+
+
+def test_a_tracked_symlink_is_read_as_link_text_not_followed(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "ok.md").write_text(f"the {NAME} pass\n", encoding="utf-8")
+    (tmp_path / "benign").symlink_to("ok.md")  # the link text is clean; git tracks only that
+    (tmp_path / "dangling").symlink_to(f"gone_{NAME}.md")  # dangling, and its text spells the name
+    assert scan(tmp_path, ["benign"]) == []
+    assert scan(tmp_path, ["dangling"]) == ["dangling: symlink target"]
+
+
+def test_a_tracked_directory_entry_is_a_hit(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "sub").mkdir()  # how a submodule appears in a checkout
+    assert scan(tmp_path, ["sub"]) == ["sub: not a regular file"]
 
 
 def test_a_tracked_path_missing_from_disk_is_a_hit(tmp_path: pathlib.Path) -> None:
