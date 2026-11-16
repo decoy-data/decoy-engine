@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Final, Literal, get_args
 from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
 from decoy_engine.fileaccess._types import CommitUncertain
-from decoy_engine.reasons import is_registered
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir
@@ -143,11 +142,8 @@ class CommitReceipt:
     def __post_init__(self) -> None:
         _require(is_token(self.outcome, _OUTCOMES), "outcome")
         _require(is_operation_id(self.operation_id), "operation_id")
-        _require(
-            self.reason_code is None
-            or (type(self.reason_code) is str and is_registered(self.reason_code)),
-            "reason_code",
-        )
+        code = self.reason_code
+        _require(code is None or (type(code) is str and _is_decoy_code(code)), "reason_code")
         for name in ("result_id", "descriptor_digest", "vault_digest"):
             value = getattr(self, name)
             _require(value is None or is_hex64(value), name)
