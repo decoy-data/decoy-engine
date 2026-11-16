@@ -236,7 +236,7 @@ def post_scan_verdict(report: Mapping[str, Any], *, ner_findings: str = "warn") 
             (blocked if blocks else warned).add(ref)
     keyed = bool(blocked)
     version = report.get("schema_version")
-    if version not in READABLE_SCHEMA_VERSIONS:
+    if not isinstance(version, str) or version not in READABLE_SCHEMA_VERSIONS:
         blocked.add(_CHECK_ERROR)
     for section in ("residual_pii", "policy_validation"):
         for finding in _rows(report, section):
