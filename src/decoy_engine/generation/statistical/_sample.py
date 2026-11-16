@@ -438,8 +438,8 @@ def sample_column(
     if spec.kind == "categorical":
         values, weights = _categorical_tables(spec)
         # Drop zero-weight entries before drawing (see _positive_weight_only). sum(weights) > 0 keeps
-        # the marginal non-empty; each conditional table is non-empty because admission refuses a
-        # conditional row whose weights sum to <= 0.
+        # the marginal non-empty; each conditional table is non-empty because `check_degenerate`
+        # (called above) refuses a conditional row whose weights sum to <= 0.
         values, weights = _positive_weight_only(values, weights)
         conditional = _conditional_lookup(spec)
         out = []
@@ -479,7 +479,6 @@ def sample_column(
 
     if spec.kind == "freetext":
         edges, _, length_cum = freetext_tables(spec)
-        counts = [float(c) for c in spec.stats.get("length_bin_counts") or []]
         lo_len, hi_len = int(edges[0]), int(edges[-1])
         # blank_count <= non-null cells, so a positive count also means a positive denominator.
         blank_share = fmt.blank_count / fmt.non_null_cells if fmt and fmt.blank_count else 0.0

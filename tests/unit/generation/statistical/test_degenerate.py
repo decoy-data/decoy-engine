@@ -59,11 +59,11 @@ def _cat(top: list[tuple[str, Any]], other: Any = 0, **kw: Any) -> Any:
     return _spec("categorical", stats, dtype="object", **kw)
 
 
-def _years(bins: list[tuple[int, Any]]) -> Any:
+def _years(bins: list[tuple[int, Any]], lo: str = "2000-01-01", hi: str = "2005-01-01") -> Any:
     stats = {
         "year_bins": [{"year": y, "count": c} for y, c in bins],
-        "min": "2000-01-01",
-        "max": "2005-01-01",
+        "min": lo,
+        "max": hi,
     }
     return _spec("datetime", stats, dtype="datetime64[ns]")
 
@@ -110,6 +110,9 @@ CASES: dict[str, Any] = {
     "datetime-zero-total": _years([(2001, 0)]),
     "datetime-negative-count": _years([(2001, 5), (2002, -1)]),
     "datetime-nan-count": _years([(2001, 5), (2002, NAN)]),
+    "datetime-inverted-range": _years([(2001, 5)], lo="2005-01-01", hi="2000-01-01"),
+    "freetext-negative-edge": _free([-5, 10, 20], [4, 4]),
+    "freetext-descending-edge": _free([0, 100, 10], [4, 4]),
     "freetext-too-few-edges": _free([5.0], []),
     "freetext-zero-total": _free([0, 10], [0]),
     "freetext-negative-count": _free([0, 10, 20], [4, -1]),
@@ -230,6 +233,7 @@ COMPILE_CASES = {
     ),
     "numeric negative count": ("num", {"bin_counts": [30, -2]}),
     "datetime empty years": ("when", {"year_bins": []}),
+    "datetime inverted range": ("when", {"min": "2005-01-01", "max": "2000-01-01"}),
     "datetime negative count": (
         "when",
         {"year_bins": [{"year": 2001, "count": 30}, {"year": 2002, "count": -2}]},
@@ -260,3 +264,18 @@ def test_refusal_text_carries_no_snapshot_number(case: str) -> None:
     with pytest.raises(StatisticalSpecError) as exc:
         check_degenerate(CASES[case])
     assert not any(ch.isdigit() for ch in exc.value.message.replace("'c'", ""))
+
+
+def test_flag_token_that_is_not_canonical_is_a_coded_admission_refusal() -> None:
+    """A `flag` carrier token must be "true" or "false"; admission maps the sampler's coded
+    error to its own, with the `top_values` property."""
+    spec = _spec(
+        "categorical",
+        {"top_values": [{"value": "True", "count": 5}], "other_count": 0},
+        dtype="bool",
+        carrier="flag",
+    )
+    with pytest.raises(GenerationAdmissionError) as exc:
+        _admission(spec)
+    assert exc.value.code == "statistical_flag_token_invalid"
+    assert exc.value.prop == "top_values"

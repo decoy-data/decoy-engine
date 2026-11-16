@@ -86,3 +86,11 @@ def test_run_request_still_refuses_a_remote_source_before_any_row(
         prepare_declared_sources(DeclarationRequest.for_descriptors(_config({"a": S3}, "a")))
     assert exc.value.code == reasons.config.SOURCE_FILE_UNDECLARED_COLUMN
     assert rows == []
+
+
+def test_validate_request_names_an_unknown_source_type_as_unchecked(no_network: list[str]) -> None:
+    config = _config({"a": {"type": "sftp", "format": "csv"}}, "a")
+    request = DeclarationRequest.for_validate(config)
+    assert request.remote_sources == ("a",)
+    prepare_declared_sources(request)
+    assert no_network == []

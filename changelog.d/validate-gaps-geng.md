@@ -2,7 +2,7 @@ Breaking: a generate snapshot with a negative or non-finite weight or count is n
 
 ### Changed (one degenerate-snapshot rule for validate and run, QA-GATE G-eng, 2026-11-16)
 
-A statistical snapshot with a negative or non-finite weight or count is now refused with `statistical_stats_degenerate` by the sampler, window admission and the compile check alike. Before, the sampler only refused a total of zero or less, so a snapshot with one negative weight and a positive total was sampled at run. The compile check that `decoy validate` runs now applies the same rule, so a snapshot with an empty label set or all-zero counts is refused before the run, with the code the run gives.
+A statistical snapshot with a negative or non-finite weight or count is now refused with `statistical_stats_degenerate` by the sampler, window admission and the compile check alike. Before, the sampler only refused a total of zero or less, so a snapshot with one negative weight and a positive total was sampled at run. The compile check that `decoy validate` runs now applies the same rule, so a snapshot with an empty label set or all-zero counts is refused before the run, with the code the run gives. An inverted datetime range and negative or descending freetext length edges are now refused by the sampler and the compile check too, not only by window admission.
 
 #### Offline declared-column request
 

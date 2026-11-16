@@ -6,13 +6,15 @@ bin, counts or weights that are negative or not finite, or weights that add up t
 admission and the compile check `check_statistical_columns` all ask this module, so a
 config that `decoy validate` accepts is one `decoy run` accepts, with the same code.
 
-Messages name the column and the counts only, never a snapshot value.
+Messages name the column and the member only, never a snapshot value or count.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from datetime import datetime
+from itertools import pairwise
 from typing import TYPE_CHECKING, NoReturn
 
 from decoy_engine import reasons
@@ -61,6 +63,20 @@ def _histogram_finding(
     return None
 
 
+def _freetext_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
+    found = _histogram_finding(
+        spec.stats, "length_bin_edges", "length_bin_counts", "length histogram"
+    )
+    if found is not None:
+        return found
+    edges = [float(e) for e in spec.stats["length_bin_edges"]]
+    # A negative edge or any descending pair (endpoint or interior, e.g. [0, 100, 10]) makes the
+    # sampler clamp every cell to one length, silently collapsing the distribution. Ties are fine.
+    if edges[0] < 0 or any(b < a for a, b in pairwise(edges)):
+        return "length_bin_edges", "length edges are negative or not non-decreasing"
+    return None
+
+
 def _categorical_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     # Lazy: `_sample` imports this module.
     from decoy_engine.generation.statistical._sample import (
@@ -96,6 +112,16 @@ def _datetime_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
         return "year_bins", "snapshot has no year_bins"
     if _weights_unusable(weights):
         return "year_bins", "year_bins counts are negative, not finite or all zero"
+    # An inverted range passes the per-bound checks but makes the sampler clamp every row to
+    # `max` silently (a wrong value, not a crash). A missing, unparseable or mixed-timezone bound
+    # is not this rule's business: window admission refuses those as unbounded.
+    try:
+        lo = datetime.fromisoformat(str(spec.stats["min"]))
+        hi = datetime.fromisoformat(str(spec.stats["max"]))
+        if lo > hi:
+            return "min", "datetime min is after max"
+    except (KeyError, ValueError, TypeError):
+        pass
     return None
 
 
@@ -108,9 +134,7 @@ def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
     if spec.kind == "numeric":
         return _histogram_finding(spec.stats, "bin_edges", "bin_counts", "histogram")
     if spec.kind == "freetext":
-        return _histogram_finding(
-            spec.stats, "length_bin_edges", "length_bin_counts", "length histogram"
-        )
+        return _freetext_finding(spec)
     if spec.kind == "categorical":
         return _categorical_finding(spec)
     if spec.kind == "datetime":
