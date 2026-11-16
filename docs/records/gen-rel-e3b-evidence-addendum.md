@@ -118,9 +118,30 @@ The release consumed main's changelog fragments; this chain's fragments are kept
 
 Checks on `2217306a`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
 `tests/sentry` 5965 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
-with this slice's test files, the two draw-site catalogue tests and the fan-out sentry: 4835
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the fan-out sentry: 4835
 passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main ddd014a5`,
 `ratchet_check.py --base ddd014a5`, `check_fragment.py --base ddd014a5`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 599 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `13c95c7d`), carried forward
+
+`origin/feat/gen-rel-e3a` `2957f2ee` (holding `origin/main` `13c95c7d`) merged into `8faf6090` as `3c2cf553`, without a
+conflict. Main's two commits after `ddd014a5` (run-stream E5b, the no-sink collector scratch
+opened on first spill, and F22 b1, the durable vault adopt and `VaultCommit`) do not touch the
+draw-site catalogue, `.importlinter`, `uv.lock` or `generation/`. Of this slice's files main touches `CODEMAP.md` (the no-sink collector spill row and the `internal/` row); it merged beside this slice's lines. Main's two changelog
+fragments arrive beside this chain's, which are kept. gen-rel-e1 narrows the three orphan-policy refusal
+tests in `tests/property/test_ri_graph_invariants.py` to the reason code and field (owner
+ruling A); the refusal source is unchanged.
+
+Checks on `3c2cf553`, Python 3.10.20, `origin/main` `13c95c7d`: ruff, format and mypy pass;
+`tests/sentry` 5973 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 4872 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
 `reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 599 lines,
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
