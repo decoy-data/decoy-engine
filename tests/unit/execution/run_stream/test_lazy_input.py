@@ -182,7 +182,7 @@ def test_each_routing_owner_can_exclude_the_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str
 ) -> None:
     from decoy_engine.execution import _pipeline_routing, _pipeline_routing_fk_dtype
-    from decoy_engine.execution import _transforms_admission as admission
+    from decoy_engine.execution import _pipeline_routing_signals as signals
 
     cfg, candidates = _fk(tmp_path)
     assert _names(cfg, candidates, tmp_path) == {"parent", "child"}
@@ -190,7 +190,6 @@ def test_each_routing_owner_can_exclude_the_job(
     if owner == "_has_cross_table_fk_cycle":
         monkeypatch.setattr(_pipeline_routing, owner, lambda graph: seen.append(owner) or True)
     elif owner == "out_of_core_admission":
-        from decoy_engine.execution import _pipeline_routing_signals as signals
 
         def refuse(*_a: Any, **_k: Any) -> tuple[bool, str]:
             seen.append(owner)
@@ -204,7 +203,7 @@ def test_each_routing_owner_can_exclude_the_job(
             seen.append(owner)
             return False, "declined"
 
-        monkeypatch.setattr(admission, owner, decline)
+        monkeypatch.setattr(signals, owner, decline)
     else:
 
         def hazard(*_a: Any, **_k: Any) -> bool:
@@ -255,12 +254,9 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
         if isinstance(n, ast.Call)
     }
     imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
+    # The four routing rules are one function in the routing signals, not a copy here.
+    assert "bounded_admission" in called
     owners = {
-        "_sequential_eligible",
-        "_has_cross_table_fk_cycle",
-        "out_of_core_admission",
-        "decline_out_of_core",
-        "fk_out_of_core_dtype_hazard",
         "compile_declared_casting_contract",
         "post_scan_gate_applies",
         "transform_bearing_mask_tables",
@@ -270,6 +266,14 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
     }
     assert owners <= imported | called
     source = inspect.getsource(_lazy_input) + inspect.getsource(_routing_facts)
+    for rule in (
+        "_sequential_eligible",
+        "_has_cross_table_fk_cycle",
+        "out_of_core_admission",
+        "decline_out_of_core",
+        "fk_out_of_core_dtype_hazard",
+    ):
+        assert rule not in source, f"{rule} belongs to bounded_admission, not a copy here"
     for code in (
         "VALIDATORS_PRESENT",
         "FIDELITY_REPORT",
@@ -660,6 +664,94 @@ def test_a_relationship_post_scan_verdict_equals_the_resident_call(tmp_path: Pat
         assert got.equals(resident_out[name])
     assert lazy_gate.output_unreadable is resident_gate.output_unreadable is False
     assert lazy_gate.report == resident_gate.report and lazy_gate.report is not None
+
+
+# ------------------------------------------------ the predicate and the router agree
+
+
+def _parity_case(tmp_path: Path, name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """An FK job and the `run_pipeline` flags that shape its routing."""
+    cfg, _candidates = _fk(tmp_path)
+    flags: dict[str, Any] = {"fidelity_report": False, "post_validation": False}
+    if name == "fidelity":
+        flags["fidelity_report"] = True
+    elif name == "post_validation":
+        flags["post_validation"] = True
+    elif name == "validators":
+        cfg["validators"] = [{"type": "row_count", "table": "parent", "min": 1}]
+    elif name == "generate":
+        cfg["tables"].append(
+            {
+                "name": "extra",
+                "generate_columns": [{"name": "g", "provider": "uuid4"}],
+                "row_count": 5,
+            }
+        )
+    elif name == "model_post_scan":
+        cfg["post_scan"] = {"integrity": True, "detectors": ["ner"]}
+    return cfg, flags
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["eligible", "fidelity", "post_validation", "validators", "generate", "model_post_scan"],
+)
+def test_the_predicate_and_the_router_agree_on_bounded_admission(tmp_path: Path, name: str) -> None:
+    # The predicate and `resolve_execution_route` take one decision: a job the predicate admits
+    # routes out-of-core when large, and a job it declines does not.
+    from decoy_engine.config import classify_table_kinds
+    from decoy_engine.execution import _pipeline_routing as routing
+    from decoy_engine.execution import _pipeline_routing_signals as signals
+    from decoy_engine.execution._errors import ExecutionError
+    from decoy_engine.execution.pipeline._routing_facts import build_routing_facts
+    from decoy_engine.providers_v2 import get_default_registry
+
+    cfg, flags = _parity_case(tmp_path, name)
+    candidates = _lazy(cfg)
+    registry = get_default_registry()
+    facts = build_routing_facts(
+        cfg,
+        candidates,
+        registry=registry,
+        source_loader_schemas=None,
+        engine_version=V,
+        base_dir=tmp_path,
+        instance_default_locale=None,
+    )
+    profile, plan, graph = facts.profile, facts.plan, facts.graph
+    kinds = classify_table_kinds(cfg)
+    common: dict[str, Any] = {
+        "plan": plan,
+        "registry": registry,
+        "graph": graph,
+        "caller_sources": dict(candidates),
+        "has_generate_table": "generate" in kinds.values(),
+        "has_mask_table": True,
+        "table_kinds": kinds,
+        "validators": cfg.get("validators") or [],
+        "fidelity_report": flags["fidelity_report"],
+        "post_validation": flags["post_validation"],
+        "vault_writer": None,
+    }
+    admission = routing.bounded_admission(profile, config=cfg, **common)
+    try:
+        route, _reason = signals.resolve_execution_route(
+            profile,
+            execution_mode="auto",
+            resolved_substrate="pandas",
+            out_of_core_threshold_rows=1,
+            full_frame_reject_rows=10**9,
+            out_of_core_budget_bytes=None,
+            use_byte_estimate_routing=False,
+            use_probe_routing=False,
+            config=cfg,
+            engine_version=V,
+            **common,
+        )
+    except ExecutionError:
+        route = "rejected"
+    assert admission.admitted == (route == "out_of_core"), (name, admission, route)
+    assert admission.admitted == (name == "eligible")
 
 
 # ---------------------------------------------------- order against the config-only checks
