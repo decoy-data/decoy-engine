@@ -34,6 +34,7 @@ from decoy_engine.secret_providers._requirements import (
     MASK_ROOT,
     column_is_keyed,
 )
+from tests.sentry._call_resolution import resolved_calls
 
 # Strategies whose columns compile with only a name + strategy (no extra required config).
 SIMPLE = [
@@ -244,33 +245,44 @@ def test_every_always_keyed_handler_is_refused_without_a_secret():
         assert info.value.code == "keyed_strategy_requires_secret", name
 
 
-def _strategy_context_calls() -> list[tuple[str, int, ast.Call]]:
-    root = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
-    calls = []
-    for path in sorted(root.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                fn = node.func
-                called = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
-                if called == "StrategyContext":
-                    calls.append((path.relative_to(root).as_posix(), node.lineno, node))
-    return calls
-
-
-def test_every_strategy_context_gets_its_mask_key_from_require_mask_key():
-    """`StrategyContext.__post_init__` falls back to `job_seed` for an empty mask_key, so a
-    construction that leaves the keyword out would run keyed work off the visible seed."""
-    calls = _strategy_context_calls()
-    assert len(calls) >= 2, "the walk found fewer StrategyContext constructions than exist"
+def _unguarded_contexts(source: str) -> list[int]:
+    """Lines of `StrategyContext(...)` calls (any local spelling, via the shared resolver) whose
+    `mask_key=` is not a call of `require_mask_key`."""
     bad = []
-    for rel, line, node in calls:
-        kw = {k.arg: k.value for k in node.keywords}
-        value = kw.get("mask_key")
+    for node in resolved_calls(ast.parse(source), "StrategyContext"):
+        value = {k.arg: k.value for k in node.keywords}.get("mask_key")
         ok = isinstance(value, ast.Call) and (
             getattr(value.func, "id", None) == "require_mask_key"
             or getattr(value.func, "attr", None) == "require_mask_key"
         )
         if not ok:
-            bad.append(f"{rel}:{line}")
+            bad.append(node.lineno)
+    return bad
+
+
+def test_context_scan_flags_every_spelling():
+    """Seeded failing cases, so the scan cannot go blind to an alias or a re-binding."""
+    plain = "StrategyContext(mask_key=job_seed)\n"
+    aliased = "from m import StrategyContext as SC\nSC(mask_key=job_seed)\n"
+    rebound = "from m import StrategyContext\nmake = StrategyContext\nmake()\n"
+    attr = "import m\nm.StrategyContext(job_seed=1)\n"
+    for src in (plain, aliased, rebound, attr):
+        assert _unguarded_contexts(src), src
+    ok = "SC = StrategyContext\nSC(mask_key=require_mask_key(plan, kp))\n"
+    assert _unguarded_contexts(ok) == []
+
+
+def test_every_strategy_context_gets_its_mask_key_from_require_mask_key():
+    """`StrategyContext.__post_init__` falls back to `job_seed` for an empty mask_key, so a
+    construction that leaves the keyword out would run keyed work off the visible seed."""
+    root = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
+    total = 0
+    bad = []
+    for path in sorted(root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "StrategyContext" not in text:
+            continue
+        total += len(resolved_calls(ast.parse(text), "StrategyContext"))
+        bad += [f"{path.relative_to(root).as_posix()}:{n}" for n in _unguarded_contexts(text)]
+    assert total >= 2, "the walk found fewer StrategyContext constructions than exist"
     assert not bad, f"StrategyContext built without mask_key=require_mask_key(...): {bad}"
