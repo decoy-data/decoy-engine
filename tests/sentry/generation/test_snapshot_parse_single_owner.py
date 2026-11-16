@@ -49,14 +49,6 @@ ALLOWED = {
     ("plan/_serialize.py", "_generation_plan_from_dict"): 1,
     # tomllib/tomli load of the dependency lock file (a TOML reader, not JSON)
     ("quality/dp_provenance.py", "assert_lock_matches_installed"): 1,
-    # F22 publication descriptor; it names its schema-snapshot test, never snapshot bytes.
-    # the strict reader's one json.loads of a `_decoy_publication.json` record
-    ("publication/_descriptor.py", "_parse"): 1,
-    # the field declaration's own `.load(raw)` on an already-parsed document, not a JSON decode
-    ("publication/_descriptor.py", "_check_document"): 1,
-    ("publication/_descriptor.py", "build_descriptor"): 1,
-    ("publication/_descriptor.py", "decode_descriptor"): 1,
-    ("publication/_descriptor.py", "load"): 3,
 }
 
 

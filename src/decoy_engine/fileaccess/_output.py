@@ -363,6 +363,7 @@ class RootedOutputTxn(_StageDir):
         label: StageLabel,
         display: str,
         chain: tuple[int, ...] = (),
+        owner: object = None,
     ) -> None:
         if issuer is not _ISSUER:
             raise FileAccessUnavailable("an output transaction is issued by an OutputDir")
@@ -373,6 +374,7 @@ class RootedOutputTxn(_StageDir):
             raise FileAccessUnavailable("a publication stage is a directory")
         self._durable = label in DURABLE_LABELS
         self._durable_dir = label in DIRECTORY_PUBLISH_LABELS
+        self.label, self.owner = label, owner  # read by `publish_unit`
         self._leaf = leaf
         self._publish_mode = mode
         name = f"{STAGE_PREFIX[label]}{secrets.token_hex(6)}{STAGE_SUFFIX.get(label, '')}"
@@ -524,7 +526,7 @@ class RootedOutputDir:
                 raise deny(self._field_key) from None
             held = tuple(chain) if label in DIRECTORY_PUBLISH_LABELS else ()
             return RootedOutputTxn(
-                _ISSUER, parent, self._leaf, kind, mode, label, self.display, held
+                _ISSUER, parent, self._leaf, kind, mode, label, self.display, held, self
             )
         finally:
             for fd in (parent, *chain):

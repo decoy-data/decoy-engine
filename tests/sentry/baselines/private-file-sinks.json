@@ -50,9 +50,6 @@
   "entry::decoy_engine/execution/out_of_core/_scratch.py::open_private::os.open::0": {
    "reason": "the scratch private-file primitive itself: O_CREAT|O_NOFOLLOW 0600 plus fchmod in a 0700 scratch root"
   },
-  "entry::decoy_engine/execution/out_of_core/_stage.py::MaskedKeyStager.__init__::pyarrow.parquet.ParquetWriter::0": {
-   "reason": "writes into an open_private file (O_CREAT|O_NOFOLLOW 0600 plus fchmod) under a private_dir 0700 scratch root; the create is open_private, not this call"
-  },
   "entry::decoy_engine/fileaccess/_local.py::LocalOutputTxn.create_file::tempfile.mkstemp::0": {
    "reason": "the private stage implementation itself"
   }

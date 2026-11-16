@@ -1,13 +1,17 @@
 # Changelog
 
-All notable changes to the `decoy-engine` PyPI distribution land here.
+All notable changes to the `decoy-engine` package land here. The engine
+ships inside the signed `decoy` CLI bundle, not from PyPI.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Engine versions are independent of `decoy-cli`; the CLI declares the
-minimum engine version it was tested against via its
-`decoy-engine>=X.Y` dependency pin.
+Engine versions are independent of the CLI's version; each CLI release pins
+the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
+
+### Changed
+
+- The README install section now says the engine ships inside the `decoy` CLI bundle and that a public `decoy-engine` package comes later; it no longer offers `pip install decoy-engine`. A test pins the wording.
 
 ## [0.26.0] - 2026-11-14
 
