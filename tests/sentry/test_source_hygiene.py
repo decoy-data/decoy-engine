@@ -20,6 +20,8 @@ import ast
 import re
 from pathlib import Path
 
+from tests.sentry._call_resolution import resolved_calls
+
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 
 # ── 1. eval / exec / compile ──────────────────────────────────────────
@@ -237,44 +239,20 @@ def test_banned_glyph_sentry_flags_injected_em_dash(tmp_path: Path) -> None:
 
 
 def _md5_hits(source: str) -> list[int]:
-    """Line numbers of an MD5 call or an S324 waiver in `source`."""
+    """Line numbers of an MD5 call or an S324 waiver in `source`.
+
+    Spellings come from the shared resolver (`tests/sentry/_call_resolution.py`): the bare name,
+    an `as` alias, a plain re-binding and `mod.md5(...)`. `hashlib.new` counts when its first
+    positional argument or its `name=` keyword is the string "md5".
+    """
     tree = ast.parse(source)
-    hashlib_names: set[str] = set()
-    md5_names: set[str] = set()
-    new_names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            hashlib_names |= {a.asname or a.name for a in node.names if a.name == "hashlib"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "hashlib":
-            for a in node.names:
-                if a.name == "md5":
-                    md5_names.add(a.asname or a.name)
-                elif a.name == "new":
-                    new_names.add(a.asname or a.name)
     hits = {i for i, line in enumerate(source.splitlines(), 1) if "noqa: S324" in line}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        is_new = (isinstance(fn, ast.Name) and fn.id in new_names) or (
-            isinstance(fn, ast.Attribute)
-            and fn.attr == "new"
-            and isinstance(fn.value, ast.Name)
-            and fn.value.id in hashlib_names
-        )
-        if is_new and node.args:
-            first = node.args[0]
-            if isinstance(first, ast.Constant) and str(first.value).lower() == "md5":
-                hits.add(node.lineno)
-        if isinstance(fn, ast.Name) and fn.id in md5_names:
-            hits.add(node.lineno)
-        if (
-            isinstance(fn, ast.Attribute)
-            and fn.attr == "md5"
-            and isinstance(fn.value, ast.Name)
-            and fn.value.id in hashlib_names
-        ):
-            hits.add(node.lineno)
+    hits |= {call.lineno for call in resolved_calls(tree, "md5")}
+    for call in resolved_calls(tree, "new"):
+        named = [kw.value for kw in call.keywords if kw.arg == "name"]
+        first = call.args[0] if call.args else (named[0] if named else None)
+        if isinstance(first, ast.Constant) and str(first.value).lower() == "md5":
+            hits.add(call.lineno)
     return sorted(hits)
 
 
@@ -286,6 +264,8 @@ _MD5_SPELLINGS = {
     "new, double quotes": 'import hashlib\nhashlib.new("md5", b"x")\n',
     "new, single quotes": "import hashlib\nhashlib.new('md5', b'x')\n",
     "new via from import": "from hashlib import new\nnew('md5', b'x')\n",
+    "re-binding": "import hashlib\nf = hashlib.md5\nf(b'x')\n",
+    "new with name keyword": 'import hashlib\nhashlib.new(name="md5")\n',
     "waiver": "x = 1  # noqa: S324\n",
 }
 
