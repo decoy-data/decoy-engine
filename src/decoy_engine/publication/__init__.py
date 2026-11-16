@@ -20,7 +20,12 @@ from decoy_engine.publication._descriptor import (
     descriptor_digest,
     encode_descriptor,
 )
-from decoy_engine.publication._publish import publish_tables, publish_unit
+from decoy_engine.publication._publish import (
+    check_request,
+    failed_receipt,
+    publish_tables,
+    publish_unit,
+)
 from decoy_engine.publication._sink_state import (
     Act,
     Exit,
@@ -67,10 +72,12 @@ __all__ = [
     "SinkStateMachine",
     "VaultBinding",
     "build_descriptor",
+    "check_request",
     "compute_result_id",
     "decode_descriptor",
     "descriptor_digest",
     "encode_descriptor",
+    "failed_receipt",
     "is_hex64",
     "is_operation_id",
     "publish_tables",
