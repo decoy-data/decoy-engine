@@ -31,7 +31,13 @@ from decoy_engine.fileaccess._entry import (
     scope,
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
-from decoy_engine.fileaccess._local import LocalFileAccess, engine_dir_handle, engine_handle
+from decoy_engine.fileaccess._local import (
+    LocalFileAccess,
+    engine_dir_handle,
+    engine_handle,
+    handed_stage_dir,
+    own_entry,
+)
 from decoy_engine.fileaccess._output import DIRECTORY_PUBLISH_LABELS
 from decoy_engine.fileaccess._preopened import PreopenedFileAccess
 from decoy_engine.fileaccess._private import write_private
@@ -61,6 +67,7 @@ from decoy_engine.fileaccess._types import (
     LockUnavailable,
     OutputDir,
     OutputTxn,
+    StageDir,
 )
 
 # Public callables that install a policy for their call. A sentry fails on any public
@@ -146,6 +153,7 @@ __all__ = [
     "Root",
     "RootedFileAccess",
     "ScratchArena",
+    "StageDir",
     "ambient_forbidden",
     "at_position",
     "bind_iterator",
@@ -157,12 +165,14 @@ __all__ = [
     "engine_handle",
     "entry_point",
     "forbid_ambient",
+    "handed_stage_dir",
     "installed",
     "is_ambient",
     "is_valid_component",
     "keeps_class",
     "map_in_context",
     "open_protected_dir",
+    "own_entry",
     "position_key",
     "protected_scratch_dir",
     "read_all",
