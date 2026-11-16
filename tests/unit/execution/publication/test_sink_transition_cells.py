@@ -5,12 +5,17 @@ Red before c1a (probe P6): after a successful commit a second `commit()` returns
 `write` is accepted into a new stage, and its commit fails `OSError` 39; there is no SEALED
 state. In-flight calls are parked by a hook inside their I/O (a batch iterator for a write, the
 stage's `publish` for a commit), and the arriving call answers while the first is parked. The
-reconcile column is the machine's (`tests/unit/publication/test_sink_state.py`); the sink gains
-`reconcile()` with restart recovery.
+reconcile cells of the sink are in `test_restart_recovery.py`.
+
+Updated on purpose in c1b, where the commit goes through `publish_unit`: a commit returns its
+receipt, a unit listing holds the `_decoy_publication.json` descriptor, a target holding
+another result is REFUSED (`publication_target_occupied`, no longer an `OSError` and FAILED),
+and every exit but a bind removes the stage at once; FAILED is reached by a failing rename.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import threading
 from collections.abc import Iterator
@@ -21,9 +26,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine.publication import PublicationRefused, SinkState
+from decoy_engine.publication import PublicationFailed, PublicationRefused, SinkState
 from decoy_engine.reasons import CleanupState
 from tests.unit.execution.publication._sink_support import (
+    DESCRIPTOR,
     POLICIES,
     STAGE_PREFIX,
     sink_factory,
@@ -45,9 +51,10 @@ def _refused(call: Any) -> str:
 class _ParkedWrite:
     """`write_batches` parked inside its batch stream, on another thread."""
 
-    def __init__(self, sink: Any) -> None:
+    def __init__(self, sink: Any, *, fail_after_release: bool = False) -> None:
         self.entered, self.release = threading.Event(), threading.Event()
         self.error: BaseException | None = None
+        self._fail = fail_after_release
         self._thread = threading.Thread(target=self._run, args=(sink,), daemon=True)
         self._thread.start()
         assert self.entered.wait(10)  # non-vacuity: the write is in flight
@@ -55,6 +62,8 @@ class _ParkedWrite:
     def _batches(self) -> Iterator[pa.RecordBatch]:
         self.entered.set()
         self.release.wait(10)
+        if self._fail:
+            raise RuntimeError("stream failed")
         yield from table("A").to_batches()
 
     def _run(self, sink: Any) -> None:
@@ -72,18 +81,28 @@ class _ParkedWrite:
 class _ParkedCommit:
     """`commit()` parked inside the stage's publish, on another thread."""
 
-    def __init__(self, sink: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, sink: Any, monkeypatch: pytest.MonkeyPatch, *, at: str = "publish") -> None:
         self.entered, self.release = threading.Event(), threading.Event()
         self.error: BaseException | None = None
-        txn_type = type(sink._txn)
-        real = txn_type.publish
+        if at == "publish":
+            txn_type = type(sink._txn)
+            real = txn_type.publish
 
-        def parked(txn: Any) -> None:
-            self.entered.set()
-            self.release.wait(10)
-            real(txn)
+            def parked(txn: Any) -> None:
+                self.entered.set()
+                self.release.wait(10)
+                real(txn)
 
-        monkeypatch.setattr(txn_type, "publish", parked)
+            monkeypatch.setattr(txn_type, "publish", parked)
+        else:  # the judge's read of the destination, which every commit makes
+            read = sink._out.read_member
+
+            def parked_read(*args: Any, **kwargs: Any) -> Any:
+                self.entered.set()
+                self.release.wait(10)
+                return read(*args, **kwargs)
+
+            monkeypatch.setattr(sink._out, "read_member", parked_read)
         self._thread = threading.Thread(target=self._run, args=(sink,), daemon=True)
         self._thread.start()
         assert self.entered.wait(10)  # non-vacuity: the commit is in flight
@@ -109,7 +128,8 @@ def test_sink_transition_cells_sealed(policy: str, tmp_path: Path) -> None:
         assert sink.state is S.OPEN
         sink.write("customers", table("A"))
         assert sink.state is S.OPEN
-        assert sink.commit() is None
+        receipt = sink.commit()
+        assert receipt.outcome == "published"
         assert sink.state is S.SEALED
         before = tree(tmp_path / "out")
         assert _refused(lambda: sink.write("orders", table("B"))) == "publication_attempt_sealed"
@@ -118,7 +138,7 @@ def test_sink_transition_cells_sealed(policy: str, tmp_path: Path) -> None:
             == "publication_attempt_sealed"
         )
         assert stages(tmp_path) == []
-        assert sink.commit() is None
+        assert sink.commit() == receipt
         sink.abort()
         assert sink.state is S.SEALED
     assert tree(tmp_path / "out") == before
@@ -130,7 +150,7 @@ def test_sink_transition_cells_sealed_commit_does_no_io(
 ) -> None:
     with sink_factory(policy, tmp_path) as make:
         sink = make()
-        sink.commit()
+        receipt = sink.commit()
         assert sink.state is S.SEALED
         out = sink._out
         calls: list[str] = []
@@ -142,9 +162,9 @@ def test_sink_transition_cells_sealed_commit_does_no_io(
                 return _real(*args, **kw)
 
             monkeypatch.setattr(out, name, spy)
-        assert sink.commit() is None
+        assert sink.commit() == receipt
         assert calls == []
-    assert sorted(os.listdir(tmp_path / "out")) == []
+    assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR]
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -170,6 +190,36 @@ def test_sink_transition_cells_writing(policy: str, tmp_path: Path) -> None:
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize("unconfirmable", [False, True], ids=["confirmed", "unconfirmable"])
+def test_sink_transition_cells_failed_write_with_a_pending_abort(
+    unconfirmable: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails while an abort is pending still applies the abort: the stage is
+    removed (or the failed confirmation is recorded) and the stream's own error propagates."""
+    real_exists = Path.exists
+
+    def exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name.startswith(STAGE_PREFIX):
+            raise PermissionError("cannot stat the stage")
+        return real_exists(self, *args, **kwargs)
+
+    with sink_factory("ambient", tmp_path) as make:
+        sink = make()
+        parked = _ParkedWrite(sink, fail_after_release=True)
+        sink.abort()  # pending while the write is parked
+        assert len(stages(tmp_path)) == 1
+        if unconfirmable:
+            monkeypatch.setattr(Path, "exists", exists)
+        parked.finish()
+        monkeypatch.undo()
+        assert isinstance(parked.error, RuntimeError)
+        assert str(parked.error) == "stream failed"
+        assert sink.state is S.ABORTED
+        assert stages(tmp_path) == []
+        expected = CleanupState.FAILED if unconfirmable else CleanupState.CONFIRMED
+        assert sink.publication_evidence.cleanup is expected
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 def test_sink_transition_cells_writing_ok_returns_to_open(policy: str, tmp_path: Path) -> None:
     with sink_factory(policy, tmp_path) as make:
@@ -180,7 +230,11 @@ def test_sink_transition_cells_writing_ok_returns_to_open(policy: str, tmp_path:
         assert sink.state is S.OPEN
         sink.write("orders", table("B"))
         sink.commit()
-    assert sorted(os.listdir(tmp_path / "out")) == ["customers.parquet", "orders.parquet"]
+    assert sorted(os.listdir(tmp_path / "out")) == [
+        DESCRIPTOR,
+        "customers.parquet",
+        "orders.parquet",
+    ]
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -207,7 +261,7 @@ def test_sink_transition_cells_committing(
 
 
 @pytest.mark.parametrize("policy", POLICIES)
-def test_sink_transition_cells_committing_failure_with_a_pending_abort(
+def test_sink_transition_cells_committing_refused_with_a_pending_abort(
     policy: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "out").mkdir()
@@ -216,13 +270,30 @@ def test_sink_transition_cells_committing_failure_with_a_pending_abort(
     with sink_factory(policy, tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        parked = _ParkedCommit(sink, monkeypatch)
+        parked = _ParkedCommit(sink, monkeypatch, at="read")
         sink.abort()
         parked.finish()
-        assert isinstance(parked.error, OSError)
-        assert sink.state is S.ABORTED  # FAILED plus the pending abort
+        assert isinstance(parked.error, PublicationRefused)
+        assert parked.error.code == "publication_target_occupied"
+        assert sink.state is S.ABORTED  # REFUSED plus the pending abort
         assert stages(tmp_path) == []
     assert tree(tmp_path / "out") == before
+
+
+def _failing_rename(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """EIO on the stage's bind rename (both policies rename the pending stage onto the leaf)."""
+    seen: list[str] = []
+    for name in ("rename", "replace"):
+        real = getattr(os, name)
+
+        def move(src: Any, dst: Any, *a: Any, _real: Any = real, **kw: Any) -> None:
+            if "._decoy_publication_pending_" in os.fsdecode(src):
+                seen.append(os.fsdecode(dst))
+                raise OSError(errno.EIO, "injected")
+            _real(src, dst, *a, **kw)
+
+        monkeypatch.setattr(os, name, move)
+    return seen
 
 
 class _CaptureBroke(BaseException):
@@ -246,16 +317,38 @@ def test_sink_transition_cells_commit_leaves_committing_when_capture_raises(
     with sink_factory(policy, tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        parked = _ParkedCommit(sink, monkeypatch)
+        entered, release = threading.Event(), threading.Event()
+        error: list[BaseException] = []
+
+        def publish_that_raises(*_args: Any, **_kwargs: Any) -> None:
+            entered.set()
+            release.wait(10)
+            raise RuntimeError("publish_unit failed outright")
+
+        monkeypatch.setattr(
+            "decoy_engine.execution._transactional_sink.publish_unit", publish_that_raises
+        )
+
+        def run() -> None:
+            try:
+                sink.commit()
+            except BaseException as exc:
+                error.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        assert entered.wait(10)  # non-vacuity: the commit is in flight
         sink.abort()  # pending while the commit is in flight
-        parked.finish()
-        assert isinstance(parked.error, _CaptureBroke)
+        release.set()
+        thread.join(10)
+        assert not thread.is_alive()
+        assert isinstance(error[0], _CaptureBroke)
         assert sink.state is S.ABORTED  # left COMMITTING, and the pending abort applied
         assert stages(tmp_path) == []
     assert tree(tmp_path / "out") == before
 
 
-def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_write_error(
+def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_commit_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "out").mkdir()
@@ -271,38 +364,62 @@ def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_write_err
     with sink_factory("ambient", tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        parked = _ParkedCommit(sink, monkeypatch)
+        parked = _ParkedCommit(sink, monkeypatch, at="read")
         sink.abort()
         parked.finish()
-        # The commit's own OSError (occupied target) propagates, not the stat error.
-        assert isinstance(parked.error, OSError)
-        assert not isinstance(parked.error, PermissionError)
+        # The commit's own refusal (occupied target) propagates, not the stat error.
+        assert isinstance(parked.error, PublicationRefused)
         assert sink.state is S.ABORTED
         assert sink.publication_evidence.cleanup is CleanupState.FAILED
 
 
 @pytest.mark.parametrize("policy", POLICIES)
-def test_sink_transition_cells_failed_commit(policy: str, tmp_path: Path) -> None:
-    """COMMITTING, an error before the rename: FAILED; every call but abort is refused with the
-    code the attempt ended with, and abort removes the stage (ABORTED)."""
+def test_sink_transition_cells_refused_commit(policy: str, tmp_path: Path) -> None:
+    """COMMITTING, refused (the target holds something else): REFUSED; every call but abort is
+    refused with that code; the stage is already removed; abort is ABORTED."""
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "keep.txt").write_text("occupant", encoding="utf-8")
     before = tree(tmp_path / "out")
     with sink_factory(policy, tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        with pytest.raises(OSError):
+        with pytest.raises(PublicationRefused) as info:
             sink.commit()
+        assert info.value.code == "publication_target_occupied"
+        assert sink.state is S.REFUSED
+        assert stages(tmp_path) == []  # every exit but a bind aborts the stage
+        occupied = "publication_target_occupied"
+        assert _refused(lambda: sink.write("orders", table("B"))) == occupied
+        assert _refused(sink.commit) == occupied
+        sink.abort()
+        assert sink.state is S.ABORTED
+        sink.abort()
+        assert _refused(sink.commit) == "publication_attempt_aborted"
+    assert tree(tmp_path / "out") == before
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_sink_transition_cells_failed_commit(
+    policy: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """COMMITTING, an error before the rename completed: FAILED; every call but abort is
+    refused `publication_failed`, and abort is ABORTED. Nothing is bound."""
+    with sink_factory(policy, tmp_path) as make:
+        sink = make()
+        sink.write("customers", table("A"))
+        with monkeypatch.context() as patch:
+            seen = _failing_rename(patch)
+            with pytest.raises(PublicationFailed) as info:
+                sink.commit()
+        assert seen  # non-vacuity: the bind rename was attempted and failed
+        assert (info.value.code, info.value.receipt.os_error) == ("publication_failed", "EIO")
         assert sink.state is S.FAILED
-        assert len(stages(tmp_path)) == 1  # the failed rename leaves the stage for abort
+        assert stages(tmp_path) == []
         assert _refused(lambda: sink.write("orders", table("B"))) == "publication_failed"
         assert _refused(sink.commit) == "publication_failed"
         sink.abort()
         assert sink.state is S.ABORTED
-        assert stages(tmp_path) == []
-        sink.abort()
-        assert _refused(sink.commit) == "publication_attempt_aborted"
-    assert tree(tmp_path / "out") == before
+    assert not (tmp_path / "out").exists()
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -346,4 +463,4 @@ def test_sink_transition_cells_an_invalid_name_is_refused_before_the_state_moves
         assert sink.state is S.OPEN
         sink.write("customers", table("A"))
         sink.commit()
-    assert sorted(os.listdir(tmp_path / "out")) == ["customers.parquet"]
+    assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR, "customers.parquet"]
