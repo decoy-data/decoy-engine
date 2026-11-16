@@ -224,6 +224,32 @@ added, and today's reader reads the new files.
 | 9 | Refactor drift | `include_values=True`, flagged columns | those paths do not change | AT-10, existing flagged tests | apply the floor when `include_values=True` |
 | 10 | Frozen contract drift | `distribution_snapshot_document` output, `value_policy`, generated output 3.3 | `Breaking:` line, compat note, v1 still read | AT-7, section 9 | drop v1 from the accepted set |
 
+### 6.2 Enumerations
+
+- Exit paths: none added. The G5 refusal reuses `plan.statistical_snapshot_values_redacted`
+  (CLI exit 1).
+- Routes that write a plain snapshot: `decoy fit` (`cli/gen/_fit.py:164`), the engine API
+  `distribution_snapshot_document`, CLI `ui/summary.py:370-371` (reads null counts only, so the
+  floor does not change its result). `fit_dp_snapshot` is a separate DP route and is untouched.
+- FK shapes: none. `fanout` degree counts are out of scope (section 2).
+- Fields: snapshot kinds `numeric`, `categorical`, `datetime`, `freetext`, `empty` and the joint;
+  the keys each rule touches are in 4.1. No key is added.
+- Output surfaces: the snapshot file, `fit --json` (`value_policy`, `redacted_columns`), the
+  `fit` stderr list of withheld names, generated rows.
+
+## 7a. Reuse inventory
+
+| Need | Reused | Changed |
+|---|---|---|
+| Floor constant | `MIN_RELEASE_COUNT` | no |
+| Tiny-column fallback | `_coarse_range`, `_coarse_domain`, `_grid_edges` | no |
+| Clamped histogram | `numeric_stats(domain=...)` | no |
+| Fold into `other_count` | `_collapse_counted_items` | gains a `keep` predicate |
+| Free-text statistics | `_freetext_stats` | no; reached through the new keyword |
+| Year edges for small date columns | `_year_edge` | no |
+| Rule enum, registry, applier | `Rule`, `snapshot_rules`, `_apply` | one new table, six new members |
+| Refusal | `plan.statistical_snapshot_values_redacted`, `redacted_fix_hint` | message wording |
+
 ## 7. Acceptance tests, red first
 
 Engine (E1), in `tests/unit/profiling/test_snapshot_floor.py` (new) unless named. The fixture is
