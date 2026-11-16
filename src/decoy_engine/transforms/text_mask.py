@@ -461,10 +461,7 @@ def _mask_date_shift(
         fmt = _detect_date_format(matched_text)
         if fmt is None:
             return token
-        try:
-            dt = datetime.strptime(matched_text, fmt)
-        except ValueError:
-            return token
+        dt = datetime.strptime(matched_text, fmt)  # `_detect_date_format` found `fmt`, so it parses
         range_size = max_days - min_days + 1
         offset_seed = int.from_bytes(span_key[:8], "big")
         shift = min_days + (offset_seed % range_size)
