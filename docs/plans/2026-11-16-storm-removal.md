@@ -12,7 +12,7 @@ Go"), `docs/release/frozen-surfaces.md`, `docs/ROADMAP.md` (rows 16, 18, 56),
 `origin/claude/storm-split-cli` `a677d509`, engine `docs/plans/2026-10-09-storm-split-taxonomy.md`
 and `-survey.md`.
 
-Revision 2 (Dennis r1 fixes and owner calls; the revision map is section 17).
+Revision 3 (Dennis r2 fixes; the revision map is section 17).
 
 Bases (2026-11-16): engine `origin/main` `ddd014a5` (the `v0.27.0` release commit, registry
 `1.29.0`); CLI `origin/main` `307a189a` (pins `decoy-engine==0.26.0`, `pyproject.toml:136`; the
@@ -217,7 +217,7 @@ Options weighed:
   either code.
 
 What E1 must change, in one change, so every carrier agrees on one head. Items 1 to 7 are the hard
-delete; items 8 to 10 are the files that break or leak once the sentry drops its token entries.
+delete; items 8 to 11 are the files that break or leak once the sentry drops its token entries.
 
 1. `src/decoy_engine/reasons/route/_retired.py`: delete `RUN_STORM_REQUESTED`, `RUN_STORM`, their
    `__all__` entries, and the docstring line about the sentry exception. The third tombstone
@@ -255,6 +255,10 @@ delete; items 8 to 10 are the files that break or leak once the sentry drops its
     of `docs/v2/ml/packs/lgbm-v1` is untouched (the comment at `pyproject.toml:347` explains why it
     must stay in the sdist). The packaging gate (`pytest -m packaging`) proves the sdist still
     builds a wheel with the pack.
+11. `tests/sentry/test_physical_seam_disconnection.py:234`: replace the local `_RETIRED = "sto" +
+    "rm"` reconstruction with an import of `RETIRED_NAME as _RETIRED` from
+    `tests.sentry.test_no_residual_removed_surface`. The use at line 1000 and its behaviour stay
+    unchanged, while the residual sentry remains the one source of the name.
 
 Registry version. The branch rule forbids editing `REGISTRY_VERSION` (`CONTRIBUTING.md:57`), and the
 release stamp moves the version only for pending additions, deprecations and summary edits. E1 adds
@@ -351,10 +355,15 @@ fails instead of being skipped) and checks the output with the same `BANNED_USER
 and hit helper the banned-text sentry uses. In C1, before C2 registers the pattern, it checks with
 `RETIRED_PATTERN` itself, the same object C2 adds to the registry. No second scanner or matcher.
 
-AT-C7 (CLI, C1): no `src/decoy` module renders a decoded reason's `original_identity`. It is a
-source check in the residual sentry module: the string `original_identity` appears in no
-`src/decoy` file (measured: none at `307a189a`). A future renderer has to delete or narrow that
-test in review, which is where the "never show the old pair" decision is re-made.
+AT-C7 (CLI, C1) is a source-text proxy: no `src/decoy` module names a decoded reason's
+`original_identity`. The string `original_identity` appears in no `src/decoy` file (measured: none
+at `307a189a`). It does not prove that every rendering path drops the field. The library store calls
+`records.decode` (`decoy/cli/library/_store.py:239`), and a run-result record can pass through
+`RunResultRead.read_reason` (`run_result/_model.py:206`) and re-emit the original identity without
+spelling the field in CLI source. Only engine 0.15.1 and 0.16.0 wrote records with either retired
+identity, before any CLI release or the library store existed, so this gap is V2-LOG. A future
+source renderer still has to delete or narrow AT-C7 in review, which is where the "never show the
+old pair" decision is re-made.
 
 Mutations that must turn each guard red: add `x = "Storm"` to `src/decoy/cli/scan.py` (CLI sentry);
 add `x = "St" + "orm"` to `src/decoy/cli/scan.py` (split pattern); add `src/decoy/` to the CLI
@@ -523,6 +532,9 @@ CLI (C1 to C3).
   `tests/sentry/baselines/wave-b-string-target-exempt.json`: the `_REMOVED` row goes (4.2 item 8).
   The exempted negative test it named loses its token entries in the same change, so nothing that
   was exempt is now unguarded.
+- Engine `tests/sentry/test_physical_seam_disconnection.py`: replace its local split spelling with
+  the residual sentry's `RETIRED_NAME`; the exact-diff check keeps the same value and behaviour
+  (4.2 item 11).
 - CLI: the five `test_storm_*` files are renamed in C1b and their token-bearing names and
   docstrings edited (C1 edits only their imports of the renamed progress module);
   `test_explain_command.py:44`, `:78`, `:94` move from `storm` to `scan`; `test_release_smoke.py:207`
@@ -579,7 +591,7 @@ new sentries, and a fixed allowance for each rewritten block. Each builder recor
 
 | Slice | Repo | What | Production files | Changed lines (est.) | Risk | Depends on |
 |---|---|---|---|---|---|---|
-| E1 | engine | 4.2 items 1 to 10; sentry tightened to the final history list with the split pattern and the undecodable-file failure (AT-S1); AT-E2 to AT-E5 | 2 (`reasons/route/_retired.py`, `pyproject.toml` sdist exclude) | about 540: test file deleted 250, sentry 135, `test_reason_tombstones.py` 60, release pin 36, `_retired.py` 20, docs, fragment and `docs/conf.py` 22, string-target sentry and its two baselines 9, `pyproject.toml` 6 | R2 | Q1 (approved) |
+| E1 | engine | 4.2 items 1 to 11; sentry tightened to the final history list with the split pattern and the undecodable-file failure (AT-S1); AT-E2 to AT-E5 | 3 (`reasons/route/_retired.py`, `pyproject.toml` sdist exclude, `tests/sentry/test_physical_seam_disconnection.py`) | about 542: test file deleted 250, sentry 135, `test_reason_tombstones.py` 60, release pin 36, `_retired.py` 20, docs, fragment and `docs/conf.py` 22, string-target sentry and its two baselines 9, physical-seam sentry 2, `pyproject.toml` 6 | R2 | Q1 (approved) |
 | C1 | CLI | AT-S2 sentry with final `HISTORY` and `PENDING`; AT-C7; AT-C2 for scan and report-integrity output; scan, scan subcommands, explain (topic move, extras line, topic list), report integrity text, `scanning/_multi.py`, `ui/storm_animation.py` to `ui/scan_progress.py`, `ui/progress.py` docstring, `api.py` alias; the import lines of the e2e files that use the renamed module; explain, report, scan, api, profile, first-user, release-smoke and raw-value test edits | 7 | about 470: prod 110, tests 80, sentry with `PENDING` 200, AT-C2 part one 60, AT-C7 20 | R1 | none (may go before E1) |
 | C1b | CLI | the five `git mv` renames of 4.1 and their token-bearing test names, docstrings and strings (86 hit lines); `PENDING` lowered by five keys | 0 | about 180: renamed files 172, `PENDING` 10 | R1 | C1 |
 | C2 | CLI | `_init_inference.py` review strings, `init.py`, `demo.py`; comment-only `compile_explain.py`, `completers.py`, `exit_codes.py`, `extras.py`; `ci/contracts.py` description with the regenerated `docs/schemas/decoy-ci-v1.schema.json` (AT-C5); `_banned_text.py` (pattern added, token `DEAD_STRINGS` and `storm-reframe` removed, AT-C2b); AT-C2 part two (init, demo, schema); init, demo, scaffold, template, exit-code and comment-only test edits; AT-C6; `PENDING` lowered | 8 | about 300: prod 90, schema 2, tests 60, banned-text 30, AT-C2 part two 30, AT-C5 30, AT-C6 30, `PENDING` 30 | R2 | C1b |
@@ -641,6 +653,10 @@ get Codex only.
 - `docs/RECENTLY-SHIPPED.md` and `docs/roadmap/decisions.md` are whole-file history; a new entry could
   carry the token without failing. Both are internal; the residual risk is accepted.
 - The diagrams keep their old layout until the next routine `scripts/build_docs.py` run.
+- Add a rendered library-view test for a decoded pre-release run-result record. AT-C7 is only a
+  source-text proxy because the library decode path can re-emit `original_identity` without naming
+  it in CLI source. This is V2-LOG because only engine 0.15.1 and 0.16.0 wrote the affected records,
+  before any CLI release or the library store.
 - Retire `claude/storm-split-cli` and `claude/eager-clarke-14deh1` per the branch register after C3
   (normal branch hygiene; deleting a remote branch stays an owner call).
 
@@ -693,6 +709,13 @@ commit on engine branch `plan/` (the branch name holds the token, so cite the co
 `<plan sha>` is the revision 2 commit on the plan branch; the orchestrator fills it in.
 
 ## 17. Revision map
+
+Revision 3 answers Dennis r2 (GO-WITH-FIXES, 0 V1, 2 V2-LOG).
+
+| Finding | Fix | Where |
+|---|---|---|
+| V2-LOG: `SPLIT_PATTERN` catches the local split spelling in the physical-seam sentry | E1 imports the residual sentry's `RETIRED_NAME` there; the file is included in the changed-file count and size | 4.2 item 11, 7b, 10 |
+| V2-LOG: AT-C7 is a source-text proxy and misses the library decode path | 4.3 names the proxy limit and why it is V2-LOG; the rendered library-view test is logged for follow-up | 4.3, 13 |
 
 Revision 2 answers Dennis r1 (GO-WITH-FIXES, 0 HIGH, 4 MEDIUM, 4 LOW) and records the owner calls.
 
