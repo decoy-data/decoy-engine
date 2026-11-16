@@ -70,6 +70,7 @@ def _categorical_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
 
     try:
         values, weights = _categorical_tables(spec)
+        other = float(spec.stats.get("other_count") or 0)
         conditional = _conditional_tables(spec) if spec.condition_on else {}
     except (TypeError, ValueError, KeyError, OverflowError):
         return "top_values", "top_values entries are malformed"
@@ -77,6 +78,8 @@ def _categorical_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
         return "top_values", "snapshot has no top_values"
     if _weights_unusable(weights):
         return "top_values", "top_values counts are negative, not finite or all zero"
+    if other < 0 or not math.isfinite(other):  # a tail count that is never drawn is still a count
+        return "other_count", "other_count is negative or not finite"
     if any(_weights_unusable(w) for _, w in conditional.values()):
         return "joint", "a conditional row has no usable weight"
     return None

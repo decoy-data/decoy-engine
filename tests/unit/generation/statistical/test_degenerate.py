@@ -53,9 +53,10 @@ def _numeric(edges: list[Any], counts: list[Any]) -> Any:
     return _spec("numeric", {"bin_edges": edges, "bin_counts": counts})
 
 
-def _cat(top: list[tuple[str, Any]]) -> Any:
+def _cat(top: list[tuple[str, Any]], other: Any = 0, **kw: Any) -> Any:
     values = [{"value": v, "count": c} for v, c in top]
-    return _spec("categorical", {"top_values": values}, dtype="object")
+    stats = {"top_values": values, "other_count": other}
+    return _spec("categorical", stats, dtype="object", **kw)
 
 
 def _years(bins: list[tuple[int, Any]]) -> Any:
@@ -99,6 +100,10 @@ CASES: dict[str, Any] = {
     "categorical-negative-weight": _cat([("a", 10), ("b", -1)]),
     "categorical-nan-weight": _cat([("a", 10), ("b", NAN)]),
     "categorical-inf-total": _cat([("a", 1e308), ("b", 1e308)]),
+    "categorical-negative-other": _cat([("a", 10)], -3),
+    "categorical-nan-other": _cat([("a", 10)], NAN),
+    "categorical-inf-other": _cat([("a", 10)], INF),
+    "categorical-negative-other-emit": _cat([("a", 10)], -3, other_mode="emit"),
     "conditional-zero-row": _conditional({"u": [("a", 0)], "v": [("a", 3)]}),
     "conditional-negative-weight": _conditional({"u": [("a", 4), ("b", -1)]}),
     "datetime-empty": _years([]),
