@@ -385,6 +385,21 @@ class TestCardinalityCollisions:
         (w,) = [w for w in run_cardinality(ctx).warnings if w.code == "cardinality_collisions"]
         assert w.detail["source_distinct"] == len({canonicalize_derive_source(v) for v in ints})
 
+    def test_source_distinct_merges_values_the_sampler_canonicalizes_alike(self) -> None:
+        """AT-Z5: NFC-equal strings are two raw values and one canonical value, so only the
+        canonical count matches the keyed pick (raw counting would report 20 and 10 here)."""
+        composed = [f"caf\u00e9{i}" for i in range(10)]
+        decomposed = [f"cafe\u0301{i}" for i in range(10)]
+        ctx = _ctx(
+            outputs={"t": pa.table({"n": pa.array(["x"] * 20, type=pa.string())})},
+            profile_cols=(_cp("n", distinct=None),),
+            plan_cols=(("n", _pool_seed(pool_size=4)),),
+            sources={"t": pa.table({"n": pa.array(composed + decomposed, type=pa.string())})},
+        )
+        (w,) = [w for w in run_cardinality(ctx).warnings if w.code == "cardinality_collisions"]
+        assert w.detail["source_distinct"] == 10
+        assert w.detail["distinct_lost"] == 9
+
     def test_both_routes_report_equal_detail(self, tmp_path: Path) -> None:
         """AT-Z6: every route that can run post-validation reports the same detail.
 
