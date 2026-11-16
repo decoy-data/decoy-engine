@@ -68,9 +68,11 @@ namespace, unique-mode substitution).
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +91,8 @@ from decoy_engine.fileaccess import (
     OutputDir,
 )
 from decoy_engine.fileaccess.adapters import serial
+from decoy_engine.internal.vault_entries import collect_vault_entries as collect_vault_entries
+from decoy_engine.internal.vault_entries import iter_vault_columns as iter_vault_columns
 from decoy_engine.keyprovider import (
     KEY_REQUIRED_GUIDANCE,
     KeyedStrategyRequiresSecret,
@@ -195,57 +199,28 @@ def _fernet(mask_key: OpaqueBox, size: int) -> Any:
     )
 
 
-def iter_vault_columns(config: dict[str, Any]) -> list[tuple[str, str, str]]:
-    """List `(table, column, namespace)` for every `vault: true` mask column.
-
-    Pure config walk; the compile check `check_vault_columns` has
-    already guaranteed each vaulted column carries a namespace and a
-    one-way strategy.
-    """
-    out: list[tuple[str, str, str]] = []
-    for table_cfg in config.get("tables") or []:
-        if not isinstance(table_cfg, dict):
-            continue
-        table = table_cfg.get("name")
-        if not table:
-            continue
-        for col_cfg in table_cfg.get("columns") or []:
-            if not isinstance(col_cfg, dict) or not col_cfg.get("vault"):
-                continue
-            name = col_cfg.get("name")
-            namespace = col_cfg.get("namespace")
-            if name and namespace:
-                out.append((str(table), str(name), str(namespace)))
-    return out
+_ISSUER = object()
 
 
-def collect_vault_entries(
-    config: dict[str, Any],
-    sources: Mapping[str, pa.Table],
-    outputs: Mapping[str, pa.Table],
-) -> list[tuple[str, str, str]]:
-    """Pair source and masked values for every vaulted column.
+@dataclass(frozen=True)
+class VaultCommit:
+    """A vault whose bytes and directory chain are durable (F22 5.5); only `issue_commit` makes one."""
 
-    Returns `(namespace, masked, source)` string triples. Masking
-    preserves row count and order, so pairing is positional: source row
-    i maps to output row i. Rows where either side is null are skipped
-    (null is preserved by every strategy; there is nothing to recover).
-    """
-    entries: list[tuple[str, str, str]] = []
-    for table, column, namespace in iter_vault_columns(config):
-        src_tbl = sources.get(table)
-        out_tbl = outputs.get(table)
-        if src_tbl is None or out_tbl is None:
-            continue
-        if column not in src_tbl.schema.names or column not in out_tbl.schema.names:
-            continue
-        src_values = src_tbl.column(column).to_pylist()
-        out_values = out_tbl.column(column).to_pylist()
-        for src, masked in zip(src_values, out_values, strict=True):
-            if src is None or masked is None:
-                continue
-            entries.append((namespace, str(masked), str(src)))
-    return entries
+    sha256: str
+    size: int
+    entry_count: int
+    adopted: bool
+    _issuer: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._issuer is not _ISSUER:
+            raise FileAccessUnavailable("a vault commit is issued by the vault module")
+
+
+def issue_commit(blob: bytes, entry_count: int, *, adopted: bool) -> VaultCommit:
+    """The one issuer: for bytes just published, or a leaf adopted after its fsyncs."""
+    digest = hashlib.sha256(blob).hexdigest()
+    return VaultCommit(digest, len(blob), entry_count, adopted, _ISSUER)
 
 
 class VaultWriter:
@@ -332,6 +307,22 @@ class VaultWriter:
                 ``vault_exists`` when the target exists; ``vault_commit_failed`` when the
                 write, fsync or link failed.
         """
+        blob, entries = self.serialize()
+        out: OutputDir
+        if isinstance(path, (str, Path)):
+            if not fileaccess.is_ambient(self._access):
+                raise FileAccessUnavailable(
+                    "a vault path string is accepted only under the ambient policy; "
+                    "pass an OutputDir issued by the policy"
+                )
+            out = self._access.output_dir(FileRequest(FileRole.VAULT, "write", str(path), "vault"))
+        else:
+            out = path
+        _publish(out, blob)
+        return entries
+
+    def _fold(self) -> tuple[list[tuple[str, str, str]], int]:
+        """The sorted invertible rows and the count of keys dropped for conflicting sources."""
         by_key: dict[tuple[str, str], str | None] = {}
         for namespace, masked, source in self._entries:
             key = (namespace, masked)
@@ -343,15 +334,17 @@ class VaultWriter:
         rows = sorted(
             (ns, masked, source) for (ns, masked), source in by_key.items() if source is not None
         )
+        return rows, ambiguous
+
+    def serialize(self) -> tuple[bytes, int]:
+        """The vault file's bytes and its entry count; nothing is written."""
+        rows, ambiguous = self._fold()
         import pyarrow.parquet as pq
 
-        # Build the Fernet (and surface the crypto-absent error) before any
-        # chunk work, so the failure point matches the pre-streaming writer.
+        # Build the Fernet first: a missing `cryptography` fails before any chunk work.
         fernet = self._fernet()
-        # chunk_rows/chunk_count are forensic/debug metadata only. load_vault
-        # does NOT trust them: it self-terminates on the framed token stream
-        # (while offset < len(blob)), so a tampered count cannot make the
-        # reader over- or under-read.
+        # chunk_rows/chunk_count are debug metadata only: load_vault reads the framed token
+        # stream to its end, so a tampered count cannot make it over- or under-read.
         chunk_count = (len(rows) + _CHUNK_ROWS - 1) // _CHUNK_ROWS
         header = {
             "format": VAULT_FORMAT_VERSION,
@@ -374,18 +367,23 @@ class VaultWriter:
             pq.write_table(chunk_table, buf)
             # Encrypt this chunk and drop its plaintext before the next one.
             parts.append(_frame(fernet.encrypt(buf.getvalue().to_pybytes())))
-        out: OutputDir
-        if isinstance(path, (str, Path)):
-            if not fileaccess.is_ambient(self._access):
-                raise FileAccessUnavailable(
-                    "a vault path string is accepted only under the ambient policy; "
-                    "pass an OutputDir issued by the policy"
-                )
-            out = self._access.output_dir(FileRequest(FileRole.VAULT, "write", str(path), "vault"))
-        else:
-            out = path
-        _publish(out, b"".join(parts))
-        return len(rows)
+        return b"".join(parts), len(rows)
+
+    def publish(self, out: OutputDir) -> VaultCommit:
+        """`write` to a capability; the `VaultCommit` exists only once the leaf and its whole chain
+        were fsynced."""
+        blob, entries = self.serialize()
+        _publish(out, blob)
+        return issue_commit(blob, entries, adopted=False)
+
+    def reads_as_own(self, handle: FileHandle) -> bool:
+        """Whether `handle` opens under this key to exactly this writer's rows and dropped count."""
+        try:
+            mapping, ambiguous = load_vault(None, self._mask_key, vault=handle)
+        except VaultError:
+            return False
+        rows, own_ambiguous = self._fold()
+        return ambiguous == own_ambiguous and mapping == {(n, m): v for n, m, v in rows}
 
     def _fernet(self) -> Any:
         return _fernet(OpaqueBox(self._mask_key), _key_size(self._mask_key))
@@ -400,6 +398,7 @@ def _publish(out: OutputDir, data: bytes) -> None:
         try:
             serial.write_durable(fd, data)
             txn.publish()
+            out.sync_chain()  # the vault leaf's whole chain, before anything depends on it
         except FileExistsError:
             failure = "exists"
         except OSError:
