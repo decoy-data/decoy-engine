@@ -1,47 +1,24 @@
-"""The out-of-core runner's scratch root: engine-created, or one a caller names (ambient only)."""
+"""Private scratch helpers the out-of-core runner uses beneath its scratch arena, and the subset
+stage's per-run root and reader (`engine_scratch_root`, `scratch_access_for`) until that stage
+moves onto the arena."""
 
 from __future__ import annotations
 
 import os
-import weakref
-from contextlib import AbstractContextManager, ExitStack
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
-from decoy_engine.fileaccess import (
-    FileRequest,
-    FileRole,
-    Root,
-    RootedFileAccess,
-    open_protected_dir,
-    protected_scratch_dir,
-)
-from decoy_engine.fileaccess._rooted import lexical_ok
+from decoy_engine.fileaccess import ScratchArena, open_protected_dir, protected_scratch_dir
 
-_ISSUER = object()
-
-
-def scratch_root(temp_dir: Path | None, stack: ExitStack | None = None) -> Path:
-    """The private (0700) directory the runner spills into.
-
-    With no `temp_dir` the engine makes its own, owned by `stack` (required then) and removed
-    when the stack closes. A directory the caller names is a caller path, which only the ambient
-    policy follows, so any other policy is refused before any I/O. A root `engine_scratch_root`
-    or an earlier `scratch_root(None)` issued is the engine's own and is taken under every
-    policy."""
-    if temp_dir is not None:
-        return open_protected_dir(temp_dir, create=True, parents=True)
-    if stack is None:
-        raise TypeError("scratch_root needs an ExitStack to own an engine-made root")
-    return stack.enter_context(protected_scratch_dir(prefix="decoy-ooc-"))
+if TYPE_CHECKING:
+    from decoy_engine.fileaccess._scratch import ScratchAccess
 
 
 def engine_scratch_root(parent: Path | None) -> AbstractContextManager[Path]:
     """A private per-run root the engine creates, removed on every exit.
 
-    Under a caller-named `parent` (ambient policy only, as for `scratch_root`) or the system temp
-    directory. While open, `scratch_root` accepts it as the run's `temp_dir` under any policy, so
-    a staged copy and the route's spill share one root and one temp-disk budget."""
+    Under a caller-named `parent` (ambient policy only) or the system temp directory."""
     return protected_scratch_dir(parent, prefix="decoy-ooc-run-")
 
 
@@ -82,40 +59,23 @@ def precreate_private(path: Path) -> str:
     return str(path)
 
 
+def scratch_arena(where: ScratchArena | Path) -> ScratchArena:
+    """The arena a DuckDB connection spills into. A caller still on a path (transition arm (c))
+    has that directory adopted: missing levels made 0700, an existing one checked, nothing
+    owned, so its cleanup stays where it is."""
+    return where if isinstance(where, ScratchArena) else ScratchArena._adopt(where)
+
+
 def private_dir(path: Path) -> Path:
     """``mkdir -p`` in which every level it creates is 0700, whatever the umask."""
     return open_protected_dir(path, create=True, parents=True)
 
 
-class ScratchAccess(RootedFileAccess):
-    """Read-only access to files beneath ONE engine-created scratch directory.
-
-    Built only by `scratch_access_for` (the issuer token), over a descriptor the engine opened
-    on a directory it made itself, so a source over a staged file never reaches the file
-    system through an ambient path and cannot name anything outside that directory."""
-
-    def __init__(self, directory: Path, *, issuer: object) -> None:
-        if issuer is not _ISSUER:
-            raise TypeError("ScratchAccess is issued by scratch_access_for")
-        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        self._finalizer = weakref.finalize(self, os.close, fd)
-        self._prefix = os.path.abspath(directory).rstrip("/") + "/"
-        super().__init__(
-            [Root("scratch", fd, frozenset({FileRole.SOURCE}), frozenset({"read", "stat"}))],
-            allow_portable_fallback=True,
-        )
-
-    def select(self, req: FileRequest) -> tuple[Root, str]:
-        locator = req.locator
-        if lexical_ok(locator):
-            canonical = os.path.normpath(locator)
-            if canonical.startswith(self._prefix):
-                req = FileRequest(
-                    req.role, req.access, canonical[len(self._prefix) :], req.field_key
-                )
-        return super().select(req)
-
-
 def scratch_access_for(directory: Path) -> ScratchAccess:
-    """The reader for files the engine wrote under `directory`, a directory it created."""
-    return ScratchAccess(directory, issuer=_ISSUER)
+    """The reader for files the engine wrote under `directory`, a directory it created.
+
+    Transitional, for the Path arm of `stage_typed_sources` (the subset stage under
+    `engine_scratch_root`), which goes when that stage moves onto the arena; the reader itself is
+    issued only by `ScratchArena.reader`."""
+    with ScratchArena._adopt(directory) as adopted:  # non-owning: exit closes only its descriptor
+        return adopted.reader()
