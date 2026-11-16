@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any, cast
 
 import pyarrow as pa
@@ -34,6 +35,7 @@ from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._errors import DeclaredCastRouteError, ExecutionError
 from decoy_engine.execution._substrate import require_bool, require_positive_int
 from decoy_engine.execution.pipeline import native_thread_clamp
+from decoy_engine.fileaccess import ScratchArena
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
@@ -382,6 +384,17 @@ def _run_streamed(
     return stats.block(), inputs.block()
 
 
+def _collector(collected: dict[str, pa.Table], scope: ExitStack) -> TransactionalSink:
+    """E5a: the no-sink resident collector, with a private scratch arena (0700, reclaimed when
+    `scope` closes) as its `spill_scratch`, so a schema hold-back past one row group spills
+    there instead of refusing with `hold_back_spill_unavailable`. The arena is a policy-free
+    engine capability, so a strict file-access policy has no path to re-authorize."""
+    from decoy_engine.execution import _transactional_sink
+
+    arena = scope.enter_context(ScratchArena.fresh())
+    return _transactional_sink._CallableSinkAdapter(collected.__setitem__, spill_scratch=arena)
+
+
 def run_auto_chunk(
     config: dict[str, Any],
     source: pa.Table | LazySource,
@@ -430,14 +443,27 @@ def run_auto_chunk(
     from decoy_engine.execution.native._chunked_evidence import aggregate_chunked_route_evidence
 
     lane, lane_reason = select_lane(dispatcher_enabled)
-    if sink is None and isinstance(source, LazySource):
-        raise AssertionError("a LazySource reaches the auto-chunk lane only with a sink")
-    if sink is not None and cast_run is not None and table in cast_run.tables():
+    # No publication sink, so the lazy input is read in batches and the output comes back
+    # resident. The engine's callable adapter already materializes one table for a callable
+    # consumer; it is local to this call and never becomes the run's sink, so the post-scan
+    # gate sees the same resident output as on a resident-input run.
+    collected: dict[str, pa.Table] | None = (
+        {} if sink is None and isinstance(source, LazySource) else None
+    )
+    if (
+        (sink is not None or collected is not None)
+        and cast_run is not None
+        and table in cast_run.tables()
+    ):
         raise DeclaredCastRouteError(
             code=reasons.route.DECLARED_CAST_ROUTE_UNSUPPORTED,
             message="a declared table cannot stream its output through the chunked lane.",
         )
-    streamed_evidence = _output_sink.OutputEvidenceAccumulator() if sink is not None else None
+    streamed_evidence = (
+        _output_sink.OutputEvidenceAccumulator()
+        if sink is not None or collected is not None
+        else None
+    )
     chunk_results: list[ExecutionResult] = []
     common: dict[str, Any] = {
         "table": table,
@@ -453,42 +479,54 @@ def run_auto_chunk(
     output_block: dict[str, Any] | None = None
     input_block: dict[str, Any] | None = None
     masked: pa.Table | None = None
-    if sink is not None and streamed_evidence is not None:
-        output_block, input_block = _run_streamed(
-            config,
-            source,
-            sink=sink,
-            native_threads=native_threads,
-            expected=expected,
-            chunk_results=streamed_evidence,
-            align_row_groups=align_row_groups,
-            **common,
-        )
-        evidence = _without_elapsed(streamed_evidence.route_evidence())
-    elif lane == LANE_DISPATCHER:
-        masked = _run_dispatcher(
-            config, source, native_threads=native_threads, chunk_results=chunk_results, **common
-        )
-        evidence = _without_elapsed(aggregate_chunked_route_evidence(chunk_results))
-    else:
-        masked = _run_legacy(config, source, chunk_results=chunk_results, **common)
-        evidence = _legacy_route_evidence(
-            config,
-            source,
-            table=table,
-            engine_version=engine_version,
-            chunk_size_rows=chunk_size_rows,
-            chunk_count=len(chunk_results),
-            lane_reason=lane_reason,
-            registry=registry,
-        )
+    # E5a: the collector's spill scratch lives exactly as long as the lane; closing the scope
+    # removes it on success and on every exception, after the input and spill stage close.
+    with ExitStack() as scope:
+        if collected is not None:
+            sink = _collector(collected, scope)
+        if sink is not None and streamed_evidence is not None:
+            output_block, input_block = _run_streamed(
+                config,
+                source,
+                sink=sink,
+                native_threads=native_threads,
+                expected=expected,
+                chunk_results=streamed_evidence,
+                align_row_groups=align_row_groups,
+                **common,
+            )
+            evidence = _without_elapsed(streamed_evidence.route_evidence())
+            if collected is not None:
+                masked = collected[table]
+                output_block = _output_sink.resident_block(reasons.route.NO_SINK)
+        elif lane == LANE_DISPATCHER:
+            masked = _run_dispatcher(
+                config,
+                source,
+                native_threads=native_threads,
+                chunk_results=chunk_results,
+                **common,
+            )
+            evidence = _without_elapsed(aggregate_chunked_route_evidence(chunk_results))
+        else:
+            masked = _run_legacy(config, source, chunk_results=chunk_results, **common)
+            evidence = _legacy_route_evidence(
+                config,
+                source,
+                table=table,
+                engine_version=engine_version,
+                chunk_size_rows=chunk_size_rows,
+                chunk_count=len(chunk_results),
+                lane_reason=lane_reason,
+                registry=registry,
+            )
     _LOG.info(
         "auto-chunk table=%s lane=%s native_admitted=%s reroute_reason=%s%s",
         table,
         lane,
         evidence["native_admitted"],
         evidence["reroute_reason"],
-        " output=streamed" if output_block is not None else "",
+        " output=streamed" if output_block is not None and collected is None else "",
     )
     if streamed_evidence is not None:
         quality_metrics: dict[str, Any] = streamed_evidence.code_set_corpora()
