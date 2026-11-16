@@ -385,3 +385,26 @@ fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations other than the three above and the full suite.
+
+## Main merge (2026-11-16, `b886c61d`)
+
+`origin/main` moved during the checks above. `origin/main` `b886c61d` (#613, the scan-checks
+evidence baseline member and `on_drift` surface; #614, the README; #615, generate-only edges
+take a derived namespace in `relationships/_namespace.py`) merged into `312c12ab` as `3f26668f`.
+One registry conflict, `src/decoy_engine/reasons/warning/_part1.py`: main added
+`SCAN_BASELINE_MISSING` and this slice added `REFERENCE_PARENT_POOL_EMPTY` at the same place in
+`__all__` and in the definitions. Both are kept in name order, each with `since=UNRELEASED` as
+its side had it; nothing was renumbered. `docs/strategies.md` merged without a conflict. Main
+does not touch the draw-site catalogue, `.importlinter`, `uv.lock` or `generation/`. Main's three
+new changelog fragments arrive beside this slice's `changelog.d/gen-rel-e1.md`, which is kept.
+
+Checks on `3f26668f`, Python 3.10.20, `origin/main` `b886c61d`: ruff, format and mypy pass;
+`tests/sentry` 5895 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
