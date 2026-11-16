@@ -7,6 +7,7 @@ slices of the same package. Contract: ``docs/publication.md``.
 """
 
 from decoy_engine.publication._descriptor import (
+    ARTIFACT_FIELDS,
     DESCRIPTOR_NAME,
     MAX_DESCRIPTOR_BYTES,
     SCHEMA,
@@ -33,6 +34,8 @@ from decoy_engine.publication._sink_state import (
     recover,
 )
 from decoy_engine.publication._types import (
+    MAX_COUNT,
+    OPERATION_ID_PATTERN,
     UNIT_IMMUTABLE_DIRECTORY,
     ArtifactSummary,
     CommitReceipt,
@@ -41,12 +44,17 @@ from decoy_engine.publication._types import (
     PublicationRefused,
     PublicationRequest,
     VaultBinding,
+    is_hex64,
+    is_operation_id,
     raise_for_outcome,
 )
 
 __all__ = [
+    "ARTIFACT_FIELDS",
     "DESCRIPTOR_NAME",
+    "MAX_COUNT",
     "MAX_DESCRIPTOR_BYTES",
+    "OPERATION_ID_PATTERN",
     "SCHEMA",
     "UNIT_IMMUTABLE_DIRECTORY",
     "Act",
@@ -70,6 +78,8 @@ __all__ = [
     "descriptor_digest",
     "encode_descriptor",
     "failed_receipt",
+    "is_hex64",
+    "is_operation_id",
     "publish_tables",
     "publish_unit",
     "raise_for_outcome",

@@ -197,6 +197,7 @@ subset-manifest/v1         decoy-run-result/v1
 decoy-record/v1            sample-run/v1         decoy-library-export/v1
 decoy-job-log/v1
 scan-set/v1
+decoy-resume-run/v1    decoy-resume-table/v1
 ```
 
 A user runs `decoy fit`, keeps the `distribution-snapshot/v1` artifact, and
@@ -223,6 +224,8 @@ dropped. A default export withholds such a record (its id goes in the header's `
 `decoy-job-log/v1` the header of a job log. Corpus samples are in `tests/integration/compat_corpus/records/`.
 
 The `evidence` payload (`cli-local-1`) also accepts two additive optional keys, `path_base` (exactly `"project"`) and `project_manifest` (path text or `null`), both present or both absent (a reader refuses a half pair, a null `path_base` and any base other than `"project"`), as a run inside a `decoy.yaml` project writes them. Absent keys stay absent, and `project_manifest` is a path field in a default export.
+
+`decoy-resume-run/v1` and `decoy-resume-table/v1` are the two files of a `decoy run --resume` store (`decoy_engine.delivery.resume`: `RunRecord`, `TableRecord` and their encoders and decoders). They are canonical JSON read by the strict reader the publication descriptor uses: exact tag, every field, no unknown field, exact types (`False` is not a `0`, `"1"` is not a `1`), `re.fullmatch` shapes (a digest with a trailing newline is refused), relative artifact paths and at most 64 KiB. There is no tolerant read model: a change to either shape takes a new tag. They hold digests, counts, tokens and one path relative to the run folder (the artifact's placed path, the same trust class as the F22 descriptor the delivered run folder carries), never a cell value or a key. `RUN.json` is capped at 64 KiB, which holds about 337 tables; `encode_run_record` refuses a longer table list with `oversize` and the caller treats that run as not resumable. Corpus samples are in `tests/integration/compat_corpus/resume/`.
 
 `scan-set/v1` is the record of one multi-table scan (`decoy_engine.scan_sources`). The engine
 owns its shape: `ScanSetCore` to write (unknown fields refused), `ScanSetCoreRead` to read
@@ -315,8 +318,17 @@ open a v2 file was a legal pre-GA hard delete: seed-keyed vaults stopped opening
 
 Backed by `docs/determinism.md`, the `determinism/` module, the
 `validation/post/_checks/_determinism_sample.py` post-check, and the golden
-suites (`tests/snapshots/golden/mask_faker_seeded`,
-`tests/integration/golden/test_determinism_invariants.py`).
+tests that compare against stored values: `tests/unit/determinism/test_derive_vectors.py`
+(reference vectors), `tests/unit/determinism/test_hkdf.py` and
+`tests/native/test_draw_site_providers_golden.py` (a digest per draw-site provider), with
+`tests/native/test_determinism_goldens.py` checking that the shipped engine's output equals those
+providers for the sites it lists (byte for byte, `mask.fpe` by key). The other provider sites are
+pinned only at the provider (`RGF1-KL-2` in `docs/frozen-surfaces.md`).
+`tests/integration/golden/test_determinism_invariants.py` compares two runs of the current code,
+so it catches nondeterminism, not a changed derivation. The files under
+`tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact`
+have had no reader since the V1 graph runner was deleted; they are known limit
+`RGF1-KL-2` in [frozen surfaces](frozen-surfaces.md).
 
 The guarantee: **same input + same seed → byte-identical output, forever, within
 a major version.** A user who masked with one version and later masks *new rows*
@@ -981,11 +993,13 @@ collection. The requirements are `StrategyRequirement` descriptors in `decoy_eng
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,
-`disguises/schema.py`), with a drift-guard test. A config pins a disguise
-version so its output stays stable.
+`disguises/schema.py`). A config pins a disguise version so its output stays
+stable. No test yet refuses an edit to a released version (known limit `RGF1-KL-3` in
+[frozen surfaces](frozen-surfaces.md)); the loader tests pin only the dated version field and the
+bundle set.
 
 **Rule:** **never edit a released disguise version.** Add a new dated version.
-The drift-guard test enforces this; do not "fix" a shipped disguise in place.
+Review enforces this until a test does; do not "fix" a shipped disguise in place.
 
 ## 4. The rules for adding a feature without breaking anyone
 
@@ -1056,9 +1070,10 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
 
 ## 6. How the freeze is enforced (the machinery)
 
-- **Golden / determinism snapshots** (`tests/snapshots/golden`,
-  `tests/integration/golden/test_determinism_invariants.py`) catch **output
-  drift**. A baseline change is a red flag, not a refresh chore.
+- **Golden / determinism snapshots** (the `tests/snapshots/golden` baselines a test
+  reads, `tests/unit/determinism/test_derive_vectors.py`,
+  `tests/native/test_draw_site_providers_golden.py` with
+  `tests/native/test_determinism_goldens.py`) catch **output drift**. A baseline change is a red flag, not a refresh chore.
 - **The cross-version compatibility corpus** (`tests/integration/compat_corpus/`).
   Golden tests regenerate artifacts with *current* code, so they do **not** catch
   *format* drift. The corpus freezes synthetic artifacts produced at a known
@@ -1080,6 +1095,9 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
   The corpus is synthetic pre-GA: artifacts carry `synthetic: true` and
   `produced_by_engine_version: "0.1.0"`. At GA, replace or supplement with a real
   (`synthetic: false`) artifact of each read-back kind.
+- **`decoy-resume-run/v1` and `decoy-resume-table/v1` samples** (`tests/integration/compat_corpus/resume/`).
+  Hand-authored canonical bytes with no `manifest.json` entry, like the run-result fixtures.
+  `tests/unit/delivery/resume/test_records.py` decodes each and re-encodes it to the same bytes (the files end in one newline that the test strips).
 - **`decoy-run-result/v1` fixtures** (`tests/integration/compat_corpus/run_result/run-result-v1*.json`).
   They live in the corpus directory, in their own subfolder, so the frozen samples sit in one place.
   They are hand-authored reader samples, not artifacts minted by `regenerate.py`: there is no

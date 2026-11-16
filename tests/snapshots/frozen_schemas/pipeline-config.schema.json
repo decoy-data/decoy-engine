@@ -1,0 +1,2304 @@
+{
+  "$defs": {
+    "ColumnConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_collisions": {
+          "default": false,
+          "title": "Allow Collisions",
+          "type": "boolean"
+        },
+        "backend_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "faker",
+                "mimesis",
+                "pool",
+                "decoy_native"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Type"
+        },
+        "backend_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend Version"
+        },
+        "cardinality_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "reuse",
+                "unique",
+                "match_source_cardinality",
+                "scale_source_cardinality"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cardinality Mode"
+        },
+        "coherent_with": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coherent With",
+          "type": "array"
+        },
+        "deterministic": {
+          "default": false,
+          "title": "Deterministic",
+          "type": "boolean"
+        },
+        "dtype": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dtype"
+        },
+        "error_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Policy"
+        },
+        "logical_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logical Type"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "output_format": {
+          "default": null,
+          "title": "Output Format"
+        },
+        "parse_format": {
+          "default": null,
+          "title": "Parse Format"
+        },
+        "pool_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pool Size"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "provider_config": {
+          "additionalProperties": true,
+          "title": "Provider Config",
+          "type": "object"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        },
+        "sentinel_to_null": {
+          "default": null,
+          "title": "Sentinel To Null"
+        },
+        "strategy": {
+          "title": "Strategy",
+          "type": "string"
+        },
+        "vault": {
+          "default": false,
+          "title": "Vault",
+          "type": "boolean"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        }
+      },
+      "required": [
+        "name",
+        "strategy"
+      ],
+      "title": "ColumnConfig",
+      "type": "object"
+    },
+    "DedupeOp": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Columns"
+        },
+        "op": {
+          "const": "dedupe",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "DedupeOp",
+      "type": "object"
+    },
+    "DeliveryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "strict",
+          "enum": [
+            "strict",
+            "best_effort"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "DeliveryConfig",
+      "type": "object"
+    },
+    "DeriveOp": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "expression": {
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "op": {
+          "const": "derive",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "expression"
+      ],
+      "title": "DeriveOp",
+      "type": "object"
+    },
+    "Dismissal": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "detector_id": {
+          "title": "Detector Id",
+          "type": "string"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Version"
+        },
+        "source": {
+          "enum": [
+            "regex",
+            "classifier",
+            "ner"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Strategy"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "column",
+        "detector_id",
+        "source",
+        "strategy"
+      ],
+      "title": "Dismissal",
+      "type": "object"
+    },
+    "DpGenerateSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "delta": {
+          "default": 1e-06,
+          "exclusiveMaximum": 1,
+          "exclusiveMinimum": 0,
+          "title": "Delta",
+          "type": "number"
+        },
+        "epsilon": {
+          "exclusiveMinimum": 0,
+          "title": "Epsilon",
+          "type": "number"
+        }
+      },
+      "required": [
+        "epsilon"
+      ],
+      "title": "DpGenerateSettings",
+      "type": "object"
+    },
+    "DropColumnOp": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "op": {
+          "const": "drop_column",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "columns"
+      ],
+      "title": "DropColumnOp",
+      "type": "object"
+    },
+    "FileSource": {
+      "additionalProperties": false,
+      "properties": {
+        "column_names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Names"
+        },
+        "column_names_file": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column Names File",
+          "x-decoy-path": true
+        },
+        "delimiter": {
+          "default": ",",
+          "title": "Delimiter",
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet",
+            "fixed_width"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "has_header": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Has Header"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixedWidthLayout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "title": "Path",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "type": {
+          "const": "file",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "path"
+      ],
+      "title": "FileSource",
+      "type": "object"
+    },
+    "FileTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "csv",
+            "parquet",
+            "fixed_width"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixedWidthLayout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "const": "file",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "path"
+      ],
+      "title": "FileTarget",
+      "type": "object"
+    },
+    "FilterOp": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "op": {
+          "const": "filter",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "expression"
+      ],
+      "title": "FilterOp",
+      "type": "object"
+    },
+    "FixedWidthColumn": {
+      "additionalProperties": false,
+      "properties": {
+        "align": {
+          "default": "left",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "pad": {
+          "default": " ",
+          "maxLength": 1,
+          "minLength": 1,
+          "title": "Pad",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "type": {
+          "default": "str",
+          "enum": [
+            "str",
+            "int",
+            "float"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "start",
+        "width"
+      ],
+      "title": "FixedWidthColumn",
+      "type": "object"
+    },
+    "FixedWidthLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/FixedWidthColumn"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "exact_record_width": {
+          "default": false,
+          "title": "Exact Record Width",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "columns"
+      ],
+      "title": "FixedWidthLayout",
+      "type": "object"
+    },
+    "GCSSource": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string",
+          "x-decoy-locator": true
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentials Ref",
+          "x-decoy-locator": true
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "object": {
+          "minLength": 1,
+          "title": "Object",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "type": {
+          "const": "gcs",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "object"
+      ],
+      "title": "GCSSource",
+      "type": "object"
+    },
+    "GCSTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string"
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentials Ref"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "object": {
+          "minLength": 1,
+          "title": "Object",
+          "type": "string"
+        },
+        "type": {
+          "const": "gcs",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "object"
+      ],
+      "title": "GCSTarget",
+      "type": "object"
+    },
+    "GenerateColumnConfig": {
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "faker"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "faker_kwargs": {},
+              "faker_type": {},
+              "locale": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "faker_type"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sequence"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pad_length": {},
+              "pooled": {
+                "type": "null"
+              },
+              "prefix": {},
+              "start": {},
+              "step": {},
+              "suffix": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "start"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "categorical"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "categories": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "weights": {}
+            },
+            "required": [
+              "categories"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "formula"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "formula": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "references": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "formula"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "reference"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "distribution": {
+                      "const": "weighted"
+                    }
+                  },
+                  "required": [
+                    "distribution"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "weights"
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "determinism": {},
+              "distribution": {},
+              "max_per_parent": {},
+              "min_per_parent": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "reference_column": {},
+              "reference_table": {},
+              "snapshot_file": {},
+              "source_column": {},
+              "type": {},
+              "unique": {},
+              "weights": {}
+            },
+            "required": [
+              "reference_table",
+              "reference_column"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "statistical"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "allow_real_categories": {},
+              "condition_on": {},
+              "determinism": {},
+              "high_cardinality": {},
+              "name": {},
+              "null_probability": {},
+              "other_mode": {},
+              "pooled": {
+                "type": "null"
+              },
+              "snapshot_file": {},
+              "source_column": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "snapshot_file"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "derived"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "bounds": {},
+              "determinism": {},
+              "expression": {},
+              "name": {},
+              "null_probability": {},
+              "null_propagation": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "expression"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "derived_aggregate"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "column": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "op": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "op",
+              "column"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "grouped_series"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "generator": {},
+              "group_by": {},
+              "max_step": {},
+              "name": {},
+              "null_probability": {},
+              "order_by": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "start": {},
+              "step": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "group_by",
+              "order_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "windowed_date"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "anchor": {},
+              "determinism": {},
+              "distribution": {},
+              "max_days": {},
+              "min_days": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "anchor",
+              "max_days"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "group_key"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "group_by": {},
+              "length": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "prefix": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "group_by"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "constant"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "value": {}
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lookup"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "file"
+                ]
+              },
+              {
+                "required": [
+                  "codeset"
+                ]
+              }
+            ],
+            "properties": {
+              "codeset": {},
+              "determinism": {},
+              "file": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "value_column": {},
+              "weight_column": {}
+            },
+            "required": []
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "distribution"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "family": {
+                      "const": "uniform"
+                    }
+                  },
+                  "required": [
+                    "family"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "low",
+                    "high"
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "determinism": {},
+              "family": {},
+              "high": {},
+              "low": {},
+              "max": {},
+              "min": {},
+              "name": {},
+              "null_probability": {},
+              "output_type": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "family"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pooled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pooled"
+        },
+        "type": {
+          "enum": [
+            "faker",
+            "sequence",
+            "categorical",
+            "formula",
+            "reference",
+            "statistical",
+            "derived",
+            "derived_aggregate",
+            "grouped_series",
+            "windowed_date",
+            "group_key",
+            "constant",
+            "distribution",
+            "lookup"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "GenerateColumnConfig",
+      "type": "object"
+    },
+    "GlobalSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "categorical_retention_warn_threshold": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Categorical Retention Warn Threshold",
+          "type": "number"
+        },
+        "dp": {
+          "$ref": "#/$defs/DpGenerateSettings"
+        },
+        "fidelity_warn_threshold": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Fidelity Warn Threshold",
+          "type": "number"
+        },
+        "freetext_advisory_min_avg_length": {
+          "default": 40.0,
+          "title": "Freetext Advisory Min Avg Length",
+          "type": "number"
+        },
+        "freetext_advisory_min_distinctness": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Freetext Advisory Min Distinctness",
+          "type": "number"
+        },
+        "mask_secret_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mask Secret Ref"
+        },
+        "on_pool_exhaustion": {
+          "default": "scale_up",
+          "enum": [
+            "fail",
+            "scale_up",
+            "fall_back"
+          ],
+          "title": "On Pool Exhaustion",
+          "type": "string"
+        },
+        "post_validation": {
+          "default": false,
+          "title": "Post Validation",
+          "type": "boolean"
+        },
+        "reference_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Date"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "unconfigured_column_policy": {
+          "anyOf": [
+            {
+              "enum": [
+                "warn",
+                "error"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unconfigured Column Policy"
+        }
+      },
+      "required": [
+        "seed"
+      ],
+      "title": "GlobalSettings",
+      "type": "object"
+    },
+    "LimitOp": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "title": "N",
+          "type": "integer"
+        },
+        "op": {
+          "const": "limit",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "n"
+      ],
+      "title": "LimitOp",
+      "type": "object"
+    },
+    "NamespaceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Declared By",
+          "type": "array"
+        }
+      },
+      "title": "NamespaceConfig",
+      "type": "object"
+    },
+    "PostScanConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "detectors": {
+          "default": [
+            "regex"
+          ],
+          "items": {
+            "enum": [
+              "regex",
+              "classifier",
+              "ner"
+            ],
+            "type": "string"
+          },
+          "title": "Detectors",
+          "type": "array"
+        },
+        "dismissed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Dismissal"
+          },
+          "title": "Dismissed",
+          "type": "array"
+        },
+        "integrity": {
+          "default": false,
+          "title": "Integrity",
+          "type": "boolean"
+        },
+        "ner_findings": {
+          "default": "warn",
+          "enum": [
+            "warn",
+            "fail"
+          ],
+          "title": "Ner Findings",
+          "type": "string"
+        },
+        "ner_model": {
+          "default": "en_core_web_sm",
+          "title": "Ner Model",
+          "type": "string"
+        }
+      },
+      "title": "PostScanConfig",
+      "type": "object"
+    },
+    "PreScanConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "detectors": {
+          "default": [
+            "regex"
+          ],
+          "items": {
+            "enum": [
+              "regex",
+              "classifier",
+              "ner"
+            ],
+            "type": "string"
+          },
+          "title": "Detectors",
+          "type": "array"
+        },
+        "ner_model": {
+          "default": "en_core_web_sm",
+          "title": "Ner Model",
+          "type": "string"
+        }
+      },
+      "title": "PreScanConfig",
+      "type": "object"
+    },
+    "ProtectedQuarantineConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "access_policy": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:\\-]{0,63}$",
+          "title": "Access Policy",
+          "type": "string"
+        },
+        "max_bytes": {
+          "maximum": 1099511627776,
+          "minimum": 1,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "max_rows": {
+          "maximum": 100000000,
+          "minimum": 1,
+          "title": "Max Rows",
+          "type": "integer"
+        },
+        "required_protection": {
+          "const": "encrypted",
+          "title": "Required Protection",
+          "type": "string"
+        },
+        "retention_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Retention Seconds",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "access_policy",
+        "retention_seconds",
+        "max_rows",
+        "max_bytes",
+        "required_protection"
+      ],
+      "title": "ProtectedQuarantineConfig",
+      "type": "object"
+    },
+    "QuarantineConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "output_path": {
+          "default": "",
+          "title": "Output Path",
+          "type": "string"
+        },
+        "triggers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Triggers",
+          "type": "array"
+        }
+      },
+      "title": "QuarantineConfig",
+      "type": "object"
+    },
+    "RelationshipConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/$defs/RelationshipEnd"
+          },
+          "minItems": 1,
+          "title": "Children",
+          "type": "array"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "orphan_policy": {
+          "enum": [
+            "preserve",
+            "remap",
+            "warn",
+            "fail"
+          ],
+          "title": "Orphan Policy",
+          "type": "string"
+        },
+        "parent": {
+          "$ref": "#/$defs/RelationshipEnd"
+        }
+      },
+      "required": [
+        "parent",
+        "children",
+        "orphan_policy"
+      ],
+      "title": "RelationshipConfig",
+      "type": "object"
+    },
+    "RelationshipEnd": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Columns",
+          "type": "array"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "columns"
+      ],
+      "title": "RelationshipEnd",
+      "type": "object"
+    },
+    "S3Source": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string",
+          "x-decoy-locator": true
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentials Ref",
+          "x-decoy-locator": true
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint Url",
+          "x-decoy-locator": true
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string",
+          "x-decoy-path": true
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region",
+          "x-decoy-locator": true
+        },
+        "type": {
+          "const": "s3",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "key"
+      ],
+      "title": "S3Source",
+      "type": "object"
+    },
+    "S3Target": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Bucket",
+          "type": "string"
+        },
+        "credentials_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentials Ref"
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint Url"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "type": {
+          "const": "s3",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "format",
+        "bucket",
+        "key"
+      ],
+      "title": "S3Target",
+      "type": "object"
+    },
+    "ScanBaselineConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "schema": {
+          "const": "scan-set/v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "schema"
+      ],
+      "title": "ScanBaselineConfig",
+      "type": "object"
+    },
+    "SortOp": {
+      "additionalProperties": false,
+      "properties": {
+        "ascending": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "default": true,
+          "title": "Ascending"
+        },
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "By",
+          "type": "array"
+        },
+        "op": {
+          "const": "sort",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "by"
+      ],
+      "title": "SortOp",
+      "type": "object"
+    },
+    "SubsetBudgetConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "max_table_seed_multiple": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Table Seed Multiple"
+        },
+        "max_total_rows": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Total Rows"
+        }
+      },
+      "title": "SubsetBudgetConfig",
+      "type": "object"
+    },
+    "SubsetConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_dangling": {
+          "default": false,
+          "title": "Allow Dangling",
+          "type": "boolean"
+        },
+        "budget": {
+          "$ref": "#/$defs/SubsetBudgetConfig"
+        },
+        "edge_directions": {
+          "additionalProperties": {
+            "enum": [
+              "both",
+              "downward",
+              "upward",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Edge Directions",
+          "type": "object"
+        },
+        "seeds": {
+          "items": {
+            "$ref": "#/$defs/SubsetSeedConfig"
+          },
+          "minItems": 1,
+          "title": "Seeds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "seeds"
+      ],
+      "title": "SubsetConfig",
+      "type": "object"
+    },
+    "SubsetPredicateConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "is_not_null"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "column",
+        "op"
+      ],
+      "title": "SubsetPredicateConfig",
+      "type": "object"
+    },
+    "SubsetSeedConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Count"
+        },
+        "fraction": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fraction"
+        },
+        "key_columns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Key Columns",
+          "type": "array"
+        },
+        "keys": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "sample",
+            "filter",
+            "keys"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "predicates": {
+          "items": {
+            "$ref": "#/$defs/SubsetPredicateConfig"
+          },
+          "title": "Predicates",
+          "type": "array"
+        },
+        "table": {
+          "title": "Table",
+          "type": "string"
+        }
+      },
+      "required": [
+        "table",
+        "mode"
+      ],
+      "title": "SubsetSeedConfig",
+      "type": "object"
+    },
+    "TableConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/ColumnConfig"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "generate_columns": {
+          "items": {
+            "$ref": "#/$defs/GenerateColumnConfig"
+          },
+          "title": "Generate Columns",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "row_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Count"
+        },
+        "transforms": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "dedupe": "#/$defs/DedupeOp",
+                "derive": "#/$defs/DeriveOp",
+                "drop_column": "#/$defs/DropColumnOp",
+                "filter": "#/$defs/FilterOp",
+                "limit": "#/$defs/LimitOp",
+                "sort": "#/$defs/SortOp"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/FilterOp"
+              },
+              {
+                "$ref": "#/$defs/SortOp"
+              },
+              {
+                "$ref": "#/$defs/LimitOp"
+              },
+              {
+                "$ref": "#/$defs/DedupeOp"
+              },
+              {
+                "$ref": "#/$defs/DeriveOp"
+              },
+              {
+                "$ref": "#/$defs/DropColumnOp"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Transforms",
+          "type": "array"
+        },
+        "unique_together": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Unique Together",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TableConfig",
+      "type": "object"
+    },
+    "ValidatorEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ValidatorEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "delivery": {
+      "$ref": "#/$defs/DeliveryConfig"
+    },
+    "global_settings": {
+      "$ref": "#/$defs/GlobalSettings"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "namespaces": {
+      "additionalProperties": {
+        "$ref": "#/$defs/NamespaceConfig"
+      },
+      "title": "Namespaces",
+      "type": "object"
+    },
+    "post_scan": {
+      "$ref": "#/$defs/PostScanConfig"
+    },
+    "pre_scan": {
+      "$ref": "#/$defs/PreScanConfig"
+    },
+    "protected_quarantine": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtectedQuarantineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "quarantine": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QuarantineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/RelationshipConfig"
+      },
+      "title": "Relationships",
+      "type": "array"
+    },
+    "scan_baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScanBaselineConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sources": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "file": "#/$defs/FileSource",
+            "gcs": "#/$defs/GCSSource",
+            "s3": "#/$defs/S3Source"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FileSource"
+          },
+          {
+            "$ref": "#/$defs/S3Source"
+          },
+          {
+            "$ref": "#/$defs/GCSSource"
+          }
+        ]
+      },
+      "title": "Sources",
+      "type": "object"
+    },
+    "subset": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubsetConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tables": {
+      "items": {
+        "$ref": "#/$defs/TableConfig"
+      },
+      "minItems": 1,
+      "title": "Tables",
+      "type": "array"
+    },
+    "targets": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "file": "#/$defs/FileTarget",
+            "gcs": "#/$defs/GCSTarget",
+            "s3": "#/$defs/S3Target"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FileTarget"
+          },
+          {
+            "$ref": "#/$defs/S3Target"
+          },
+          {
+            "$ref": "#/$defs/GCSTarget"
+          }
+        ]
+      },
+      "minProperties": 1,
+      "title": "Targets",
+      "type": "object"
+    },
+    "validators": {
+      "items": {
+        "$ref": "#/$defs/ValidatorEntry"
+      },
+      "title": "Validators",
+      "type": "array"
+    },
+    "version": {
+      "const": 2,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "global_settings",
+    "tables",
+    "targets"
+  ],
+  "title": "PipelineConfig",
+  "type": "object"
+}
