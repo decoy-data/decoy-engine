@@ -31,8 +31,10 @@ from decoy_engine.execution.pipeline._post_scan import attach_cast_run, tee_read
 if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionResult
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
+    from decoy_engine.progress import ProgressChannel
 
 __all__ = [
+    "emit_route",
     "execute_mixed_route",
     "execute_out_of_core_route",
     "execute_route",
@@ -205,3 +207,15 @@ def _run_out_of_core(
 def execute_mixed_route(ctx: PipelineRunContext, decision: RouteDecision) -> ExecutionResult:
     """Run the production mixed (generate + mask) route."""
     return _route_exec.run_mixed_route(ctx, decision)
+
+
+def emit_route(channel: ProgressChannel, decision: Any) -> None:
+    """One route event per run: the layer-1 route and, when the planner picked a
+    lane below it, that lane's mode (identifiers only, no sizes or paths)."""
+    plan_decision = getattr(decision, "execution_plan_decision", None)
+    lane = getattr(plan_decision, "mode", None)
+    if getattr(decision, "route_chunked", False):
+        lane = "chunked"
+    channel.route(
+        str(getattr(decision, "route", "unknown")), lane=None if lane is None else str(lane)
+    )
