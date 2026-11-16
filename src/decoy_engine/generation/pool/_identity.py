@@ -10,6 +10,7 @@ oracle and native can never drift apart on it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from decoy_engine.generation.pool._builder import PoolBuilder
@@ -21,6 +22,16 @@ from decoy_engine.generation.pool._runtime_pool_size import resolve_runtime_pool
 DEFAULT_POOL_SCALE = 2.0
 
 PoolIdentity = tuple[str, str, str, bytes, int]
+
+
+def effective_pool_size(plan_pool_size: int | None, cfg: Mapping[str, Any]) -> int:
+    """The pool size a faker column builds: the compiled seed value, else the config value, else
+    `DEFAULT_POOL_SIZE`.
+
+    Compile keeps an omitted `pool_size` as `None` on the seed, so a consumer that needs the
+    size resolves it here instead of reading the seed directly.
+    """
+    return plan_pool_size if plan_pool_size is not None else resolve_runtime_pool_size(cfg)
 
 
 def resolve_faker_pool_identity(
@@ -42,7 +53,7 @@ def resolve_faker_pool_identity(
     kwargs, and must not leak into the config hash the other kwargs feed.
     """
     try:
-        pool_size = plan_pool_size if plan_pool_size is not None else resolve_runtime_pool_size(cfg)
+        pool_size = effective_pool_size(plan_pool_size, cfg)
         locale = cfg.get("locale")
         build_config = {k: v for k, v in cfg.items() if k not in ("pool_size", "locale")}
         identity = builder.identity_for(
@@ -59,4 +70,9 @@ def resolve_faker_pool_identity(
         raise
 
 
-__all__ = ["DEFAULT_POOL_SCALE", "PoolIdentity", "resolve_faker_pool_identity"]
+__all__ = [
+    "DEFAULT_POOL_SCALE",
+    "PoolIdentity",
+    "effective_pool_size",
+    "resolve_faker_pool_identity",
+]
