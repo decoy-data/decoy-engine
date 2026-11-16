@@ -245,6 +245,9 @@ class StageDir(Protocol):
 class OutputTxn(StageDir, Protocol):
     """An opaque, policy-issued stage capability: publishes once or aborts, never both."""
 
+    label: StageLabel
+    owner: object  # the `OutputDir` that issued this stage
+
     def publish(self) -> None: ...
 
     def abort(self) -> None: ...
