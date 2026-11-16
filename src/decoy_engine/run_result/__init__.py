@@ -12,6 +12,8 @@ from decoy_engine.run_result._collect import RunResultCollector
 from decoy_engine.run_result._model import (
     RUN_RESULT_SCHEMA,
     BaselineLink,
+    Check,
+    CheckCounts,
     ConfigRef,
     EvidenceLink,
     InvocationId,
@@ -40,6 +42,8 @@ from decoy_engine.run_result._project import (
 __all__ = [
     "RUN_RESULT_SCHEMA",
     "BaselineLink",
+    "Check",
+    "CheckCounts",
     "CollectedFacts",
     "ConfigRef",
     "DeliveryFacts",

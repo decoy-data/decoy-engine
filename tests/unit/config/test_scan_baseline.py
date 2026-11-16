@@ -163,3 +163,33 @@ def test_the_error_is_value_free() -> None:
         RelationshipConfig.model_validate(_relationship(value))
     assert CANARY not in str(rel.value)
     assert all(CANARY not in f"{e['type']}{e['msg']}{e['loc']}" for e in rel.value.errors())
+
+
+# SCAN-CHECKS D-1: `on_drift` is the opt-in drift check of a run.
+BASELINE_PTR = {"path": ".decoy/library/x.json", "schema": SCAN_SET_SCHEMA}
+
+
+@pytest.mark.parametrize("mode", ["warn", "fail"])
+def test_d_t1_on_drift_accepts_warn_and_fail(mode: str) -> None:
+    cfg = PipelineConfig.model_validate(_raw(scan_baseline={**BASELINE_PTR, "on_drift": mode}))
+    assert cfg.model_dump()["scan_baseline"]["on_drift"] == mode
+    again = PipelineConfig.model_validate(cfg.model_dump())
+    assert again.model_dump() == cfg.model_dump()
+
+
+@pytest.mark.parametrize("bad", ["block", "WARN", "", True, False, 1])
+def test_d_t1_on_drift_refuses_other_values(bad: object) -> None:
+    with pytest.raises(ValidationError):
+        PipelineConfig.model_validate(_raw(scan_baseline={**BASELINE_PTR, "on_drift": bad}))
+
+
+def test_d_t1_absent_on_drift_keeps_the_old_dump() -> None:
+    cfg = PipelineConfig.model_validate(_raw(scan_baseline=BASELINE_PTR))
+    assert cfg.model_dump()["scan_baseline"] == BASELINE_PTR
+    assert "on_drift" not in cfg.model_dump(by_alias=True)["scan_baseline"]
+    assert "on_drift" not in json.loads(cfg.model_dump_json())["scan_baseline"]
+
+
+def test_d_t1_an_explicit_null_on_drift_means_no_check_and_is_not_dumped() -> None:
+    cfg = PipelineConfig.model_validate(_raw(scan_baseline={**BASELINE_PTR, "on_drift": None}))
+    assert cfg.model_dump()["scan_baseline"] == BASELINE_PTR
