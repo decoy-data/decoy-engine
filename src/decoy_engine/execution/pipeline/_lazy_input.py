@@ -1,11 +1,12 @@
 """The caller `LazySource` inputs a run reads whole before routing (`resident_fallback`).
 
-`run_pipeline(resident_fallback=True)` calls this pre-pass on a plain `auto` run, after the subset
-and token-vault steps and before the run context is built. Every rule is an existing owner
+`run_pipeline(resident_fallback=True)` turns this pre-pass on for a plain `auto` run.
+`build_run_context` calls it after every config-only check and key admission, on the run's own
+post-subset routing facts, so a bad config fails before any whole read. Every rule is an existing owner
 answering, never a copy: the bounded profiler, the exact plan compiler, the relationship graph,
 `_sequential_eligible`, the cross-table cycle test, out-of-core admission and its dtype hazard
 check, the declared-casting contract and `post_scan_gate_applies`. The pre-pass is a step inside
-`run_pipeline`: it is not exported and not an entry point.
+the run: it is not exported and not an entry point.
 
 Why a relationship job needs the whole bounded-eligible answer: a lazy table gives the size
 estimator no sample, so a relationship job with no bounded route would be rejected before read
