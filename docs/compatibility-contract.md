@@ -850,6 +850,19 @@ No `SEED_PROTOCOL_VERSION` change.
   `post_scan.dismissed` entry now lowers the `warning` it names to `info`. `classify_frame` gains a
   keyword `subsample` (default `False`, so `classify_fields` is unchanged): `True` classifies a
   seeded subsample of at most 60 non-null values per column.
+  SCAN-ML M3a (2026-11) adds the keyword `pre_scan: PreScanConfig | None = None` to `scan_sources`,
+  `ModelHit` (exported from `decoy_engine` and `decoy_engine.profiling`), `TableScan.model_hits`
+  (column name to a tuple of `ModelHit`, empty by default) and `ScanSet.detectors` (a tuple of
+  `DetectorRun`, `regex` always first). `None` runs the regex detectors only, as before. The models
+  load strictly once before the first table, so an unavailable model raises
+  `ModelUnavailableError` and no table is read; any other model failure is a `ScanSourceError`
+  naming the table and the exception class. `decoy_engine.detection` exports `DetectorRun`,
+  `ModelRef`, `NerRate`, `ner_rates`, `log_detector_run` and `log_detector_models`. `scan-set/v1`
+  gains `detectors` on `ScanSetCore` and `model_hits` on each field, both additive with empty
+  defaults and strict models (`ModelHitCore`, `ModelRefCore`, a tagged detector-run union): a record
+  written before M3a still validates and reads back with empty lists, `ScanSetCoreRead` ignores
+  unknown keys, and no stored field can hold a cell value (a source, a detector id, a model id and
+  version, a band and a rate bucket). The starter config ignores model hits.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and
