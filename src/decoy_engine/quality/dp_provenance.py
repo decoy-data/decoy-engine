@@ -282,9 +282,9 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # 31ecf945.... 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine
             # moved); 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79...
             # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
-            # regenerated NOTICE. SCAN-ML M2 put the classifier stack in base deps: e738e729...
-            # (0.22.0), bdec8dd8... (0.23.0), 044f8c7b... (0.24.0), f921d069... (0.25.0),
-            # 883833b5... (0.26.0).
+            # regenerated NOTICE. Rows from SCAN-ML M2 (classifier stack in base deps) on are one
+            # per engine release, newest first.
+            "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
             "f921d069fb3cd5baebc6940de37076103ba6a663c977db346c81fd6cdcbfc326",
             "044f8c7b26dfaac7e0bc3973ee3a355e64379ede67a596410aceed74acf6c366",
@@ -306,9 +306,9 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
             # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change
             # just decoy-engine's version; 0.6.0 (and 0.5.0) were installed in a real 3.10.20 venv,
-            # later rows are computed from the pins. All stay. SCAN-ML M2 1db3e3da... (67 pins). Old
-            # d5898d1f...; 0.23.0 73acf493...; 0.24.0 620a48a5...; 0.25.0 c80550ef...; 0.26.0
-            # dceac0cd....
+            # later rows are computed from the pins. All stay, one per engine release, newest first;
+            # SCAN-ML M2 1db3e3da... (67 pins) and the older d5898d1f... follow them.
+            "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
             "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
             "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",
             "620a48a5b979d483aa3522900590c4fe5a376aeb9cedbd16a415639522c1204b",

@@ -29,7 +29,7 @@ def test_errno_only_error_has_a_registered_reason(name: str) -> None:
     code, pending = EXPECTED[name]
     spec = reasons.find("decoy", code)
     assert spec is not None
-    assert (spec.since == reasons.UNRELEASED) is pending
+    assert (spec.since == "1.29.0") is pending
     record = reason_from_exception(getattr(_types, name)(errno.EIO))
     assert (record.namespace, record.code) == ("decoy", code)
     assert name not in UNCLASSIFIED

@@ -32,6 +32,48 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.27.0", "`run_pipeline_isolated` publishes `output_dir` through `publ"): (
+        "the Breaking bullet on `run_pipeline_isolated` covers it"
+    ),
+    ("0.27.0", "Behaviour changes on the isolated route: a target that alrea"): (
+        "the Breaking bullet on `run_pipeline_isolated` covers it"
+    ),
+    ("0.27.0", "`decoy_engine.delivery.resume` gains the two persisted recor"): (
+        "new records; the refusals named are the new strict reader's own"
+    ),
+    ("0.27.0", "`ParquetTransactionalSink.commit()` now publishes through `p"): (
+        "the Breaking bullet on the reference sink covers it"
+    ),
+    ("0.27.0", "`run_fk_out_of_core(temp_dir=...)` now runs in a fresh priva"): (
+        "relaxation: a `temp_dir` holding other files is no longer refused"
+    ),
+    ("0.27.0", "The out-of-core masked-key stager now writes its narrow copy"): (
+        "internal staging path; output bytes unchanged, and a value-free error replaces a driver error on a failure path"
+    ),
+    ("0.27.0", "`connect_duckdb` now spills into a scratch arena directory: "): (
+        "internal scratch handling; an unsafe spill directory is refused where it was chmodded, output bytes unchanged"
+    ),
+    ("0.27.0", "`ParquetTransactionalSink` now moves every call through one "): (
+        "the Breaking bullet on the reference sink covers it"
+    ),
+    ("0.27.0", "The post-scan runs the classifier and spaCy NER detectors a "): (
+        "new opt-in detectors; a model that cannot load refuses only a run that names it"
+    ),
+    ("0.27.0", "`decoy_engine.publication.publish_unit(out, txn, request, ta"): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.27.0", "New package `decoy_engine.publication` with the `decoy-publi"): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.27.0", "The descriptor bytes and the `result_id` input use `decoy_en"): (
+        "new descriptor in this release; the refusal is its own"
+    ),
+    ("0.27.0", "`fileaccess` gains the `publication` stage label. On Linux a"): (
+        "new stage label; the failures named are its own"
+    ),
+    ("0.27.0", "`decoy_engine.profile.FixedWidthLazySource` reads a fixed-wi"): (
+        "new source, not on the run path yet; the refusal is its own"
+    ),
     ("0.26.0", "`PipelineConfig` validation refuses (`config/target_shared_d"): (
         "Breaking: a config where two declared tables share one target destination is refused"
     ),

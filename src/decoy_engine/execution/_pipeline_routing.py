@@ -12,6 +12,7 @@ Route decision order and rationale: docs/execution-backends.md, "Route decision 
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
@@ -36,13 +37,21 @@ from decoy_engine.execution._planner import (
     FULL_FRAME_REJECT_ROWS_DEFAULT,
     OUT_OF_CORE_THRESHOLD_ROWS_DEFAULT,
 )
+from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.reasons import ReasonCode
 
 if TYPE_CHECKING:
+    import pyarrow as pa
+
+    from decoy_engine.plan._types import Plan
+    from decoy_engine.profile._readers import LazySource
+    from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships import RelationshipGraph
 
 __all__ = [
+    "BoundedAdmission",
     "auto_chunk_stamp",
+    "bounded_admission",
     "byte_estimate_full_frame_fits",
     "decide_chunk_route",
     "decide_execution_route",
@@ -146,6 +155,76 @@ def _sequential_eligible(
     if resolved_substrate != "pandas":
         return False, reasons.route.NON_PANDAS_SUBSTRATE_REQUESTED
     return True, reasons.route.PURE_MASK_FK
+
+
+@dataclass(frozen=True)
+class BoundedAdmission:
+    """Whether a relationship mask job has a bounded route, and the signals behind the answer.
+
+    `admitted` is the one decision the resident-fallback pre-pass takes. Its signals come from the
+    router's own functions; a parity test holds it equal to `resolve_execution_route`."""
+
+    eligible: bool
+    cyclic: bool
+    ooc_compatible: bool
+    ooc_reject_code: str | None
+    dtype_hazard: bool
+
+    @property
+    def admitted(self) -> bool:
+        return self.eligible and not self.cyclic and self.ooc_compatible and not self.dtype_hazard
+
+
+def bounded_admission(
+    profile: Any,
+    *,
+    plan: Plan,
+    registry: ProviderRegistry,
+    graph: RelationshipGraph,
+    caller_sources: dict[str, pa.Table | LazySource],
+    config: dict[str, Any],
+    table_kinds: dict[str, str],
+    has_generate_table: bool,
+    has_mask_table: bool,
+    validators: list[Any],
+    fidelity_report: bool,
+    post_validation: bool,
+    vault_writer: Any,
+    resolved_substrate: str = "pandas",
+) -> BoundedAdmission:
+    """The bounded-route admission for one job: sequential eligibility, the cross-table cycle
+    test, out-of-core admission with the transform decline, and the FK dtype hazard, each from
+    its existing owner. Reads no data row (it may open a file footer for the row count).
+
+    Off the relationship-with-a-mask-table shape no bounded route applies, so the result is the
+    inert not-compatible one, as `out_of_core_routing_signals` reports."""
+    from decoy_engine.execution._pipeline_routing_fk_dtype import fk_out_of_core_dtype_hazard
+
+    eligible, _reason = _sequential_eligible(
+        profile,
+        has_generate_table=has_generate_table,
+        validators=validators,
+        fidelity_report=fidelity_report,
+        vault_writer=vault_writer,
+        post_validation=post_validation,
+        resolved_substrate=resolved_substrate,
+        post_scan_resident=post_scan_resident_for(config),
+    )
+    cyclic = _has_cross_table_fk_cycle(graph)
+    if not (getattr(profile, "relationships", None) and has_mask_table):
+        return BoundedAdmission(eligible, cyclic, False, None, False)
+    compatible, code, _rows, _exact = out_of_core_routing_signals(
+        profile,
+        plan=plan,
+        registry=registry,
+        graph=graph,
+        caller_sources=caller_sources,
+        table_kinds=table_kinds,
+        has_mask_table=has_mask_table,
+        config=config,
+    )
+    hazard = compatible and fk_out_of_core_dtype_hazard(plan, graph, caller_sources=caller_sources)
+    return BoundedAdmission(eligible, cyclic, compatible, code, hazard)
 
 
 def reject_explicit_sequential(

@@ -3,7 +3,7 @@
 `prepare_declared_sources` is the engine's pre-read boundary for config-origin sources. Two
 walks guard it:
 
-- (a) in `profile_source`, `build_run_context` and `run_pipeline_isolated`, a
+- (a) in `profile_source`, `build_routing_facts` (the run context's route) and `run_pipeline_isolated`, a
   `prepare_declared_sources(` call comes before every call that reads, profiles, stages or
   spawns on that route, in the same function body;
 - (b) every source-side call of `build_declared_source(`, `build_profile_source(` and
@@ -42,7 +42,7 @@ ROUTES: dict[tuple[str, str], frozenset[str]] = {
     ("profile/_source.py", "profile_source"): frozenset(
         {"build_declared_source", "_profile_one_source", "profile_descriptors"}
     ),
-    ("execution/_pipeline_context.py", "build_run_context"): frozenset(
+    ("execution/pipeline/_routing_facts.py", "build_routing_facts"): frozenset(
         {
             "build_declared_source",
             "_profile_one_source",
@@ -73,7 +73,7 @@ READER_NAMES = frozenset(
 # (file, enclosing function, reader) -> why this reader is not a bypass of the gate.
 READERS: dict[tuple[str, str, str], str] = {
     ("execution/_guards.py", "refuse_duplicate_run_sources", "build_declared_source"): (
-        "header or footer only, and after the gate in build_run_context"
+        "header or footer only, and after the gate in build_routing_facts"
     ),
     ("profile/_declared_columns.py", "source_columns", "read_csv_source"): (
         "the gate itself: a header read with nrows=0"
@@ -193,7 +193,7 @@ def test_the_gate_precedes_every_reader_on_each_route() -> None:
 
 def test_moving_the_gate_makes_the_walk_fail() -> None:
     """Seeded mutations: the walk sees a gate moved below the first reader."""
-    rel, func_name = "execution/_pipeline_context.py", "build_run_context"
+    rel, func_name = "execution/pipeline/_routing_facts.py", "build_routing_facts"
     tree = _parse(rel)
     func = _function(tree, func_name)
     gate_at = next(i for i, s in enumerate(func.body) if _contains_gate(s))

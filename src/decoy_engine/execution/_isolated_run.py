@@ -27,18 +27,15 @@ Isolation contract:
      real governor in a later sprint) can act on it while the run is still
      in flight; this module does not poll or kill on its own -- that is B4's
      job, deliberately out of Sprint 1a-part-1 scope.
-  4. Staging + commit (spec §12 ruling 3): the child writes its output
-     tables to a staging directory this driver chose, never the caller's
-     `output_dir`. Only when the child exits cleanly with a `completed`
-     envelope does this driver perform ONE atomic `os.replace` (the same
-     single-rename pattern `ParquetTransactionalSink.commit` uses) to
-     publish staging as `output_dir`. A SIGKILL at any point before that
-     rename leaves nothing at `output_dir` -- the staging directory is
-     simply discarded, orphaned or not. The rename is wrapped (dennis
-     review MED-1): a pre-existing non-empty target fails the commit
-     cleanly (a `crashed` result naming the target) with staging rmtree'd,
-     rather than a raw `OSError` that also orphans staging outside
-     `work_root`.
+  4. Staging + publication (spec §12 ruling 3, F22 plan 5.7): the child
+     writes its output tables into a `publication` stage this driver opened
+     beside `output_dir`, never into `output_dir` itself. Only when the child
+     exits cleanly with a `completed` envelope does this driver admit the
+     stage, measure it and bind it through `publish_unit` (`_isolated_commit`),
+     with one durable rename. A SIGKILL at any point before that leaves
+     nothing at `output_dir`; the stage is discarded. A target holding another
+     result, or a stage holding anything the envelope did not name, is a
+     classified `crashed` result with the receipt (MED-1), never a raw error.
   5. Graceful fallback (spec §12 ruling 2): `isolate=False` runs
      `run_pipeline` directly in this process. Explicit and logged (a WARNING
      naming the caveat), never silent: dev/SQLite/inline deployments that
@@ -47,9 +44,9 @@ Isolation contract:
      process's own contaminated high-water mark, not a clean per-job sample
      -- callers (the B5 telemetry loop, once wired) must not fold it into
      `k_path` recalibration. `output_dir` is honored in this mode too
-     (dennis review HIGH-2): the fallback stages then atomically commits
-     with the same rename discipline as the isolated path, so the two modes
-     are equivalent in what lands on disk, not just in `outcome`.
+     (dennis review HIGH-2): the fallback publishes through `publish_unit`
+     too, so the two modes are equivalent in what lands on disk, not just in
+     `outcome`.
 
 Deliberately NOT in Sprint 1a-part-1 scope: `sink`, `source_loader`,
 `vault_writer`, `registry`, and a non-None `derive_key` are all
@@ -74,18 +71,19 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._isolated_commit import (
-    CommitError,
-    atomic_commit,
+    COMMITTED,
+    Publication,
+    begin_publication,
+    collect,
+    failed_publication,
+    publish_resident,
     read_envelope,
-    read_staged_row_errors,
-    resolve_staging_output_dir,
-    sibling_staging_dir,
-    stage_tables,
+    row_errors_of,
+    stage_sources,
 )
 from decoy_engine.execution._isolated_commit import signal_name as _signal_name
 from decoy_engine.execution._isolated_common import (
@@ -97,20 +95,18 @@ from decoy_engine.execution._isolated_common import (
     IsolatedRunResult,
     abnormal_exit_text,
     classify_abnormal_exit,
-    commit_error_text,
     inside_isolated_worker,
     peak_rss_mb,
 )
 from decoy_engine.execution._isolated_memwatch import error_suffix, evidence_of, start_sampler
 from decoy_engine.execution._isolated_reason import (
-    commit_reason,
     envelope_failure,
     in_process_failure,
 )
 from decoy_engine.execution._pipeline import run_pipeline
-from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.fileaccess import FileAccess, FileRequest, FileRole, entry_point
 from decoy_engine.profile import DeclarationRequest
+from decoy_engine.publication import CommitReceipt, PublicationRequest, check_request
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.reasons import decoy as _decoy_reasons
 
@@ -157,6 +153,7 @@ def run_pipeline_isolated(
     on_spawn: Callable[[int], None] | None = None,
     timeout_s: float | None = _DEFAULT_TIMEOUT_S,
     file_access: FileAccess | None = None,
+    request: PublicationRequest | None = None,
     **run_pipeline_kwargs: Any,
 ) -> IsolatedRunResult:
     """Run one pipeline job in a fresh child process; return a clean result.
@@ -177,10 +174,10 @@ def run_pipeline_isolated(
             not given) staged outputs. A fresh protected directory when
             omitted, cleaned up on return; one you name is created or checked
             owner-only (a symlink or a foreign-owned directory is refused).
-        output_dir: if given, the final target directory staged outputs are
-            atomically committed to on a `completed` outcome only. Never
-            created or touched on any other outcome (the whole point of the
-            staging contract -- see module docstring point 4).
+        output_dir: if given, the target the staged outputs are published to
+            through `publish_unit` (F22) on a `completed` outcome only; the
+            receipt is `IsolatedRunResult.publication_receipt`. Never created or
+            touched on any other outcome (module docstring point 4).
         isolate: `True` (default) spawns the subprocess. `False` runs
             in-process (module docstring point 5); logs a warning naming
             the governor/telemetry gap.
@@ -200,6 +197,8 @@ def run_pipeline_isolated(
             the child's config-named reads cannot be listed in advance, so under any policy
             but the ambient CLI one the route runs in-process only and takes no
             `staging_dir` or `output_dir` path (see "Raises").
+        request: the publication request for `output_dir`; a retry passes the same
+            `operation_id`. Without one the run is its own attempt (a fresh id).
 
     Returns:
         An `IsolatedRunResult`. See its docstring for the field contract
@@ -213,10 +212,14 @@ def run_pipeline_isolated(
             known kind, or `config`/`run_pipeline_kwargs` is not
             JSON-serializable. Always raised BEFORE any subprocess is
             spawned.
+        TypeError, NotImplementedError: `request` is not a `PublicationRequest`, or carries a
+            vault (`publication.check_request`). Raised before any I/O.
     """
     _reject_unserializable_kwargs(run_pipeline_kwargs)
     if mem_cap_bytes is not None and rlimit_kind not in RLIMIT_KINDS:
         raise ValueError(f"rlimit_kind={rlimit_kind!r} is not one of {sorted(RLIMIT_KINDS)}")
+    if request is not None:
+        check_request(request)
     already_isolated = isolate and inside_isolated_worker()
     _require_ambient_for_paths(
         spawns=isolate and not already_isolated,
@@ -254,7 +257,7 @@ def run_pipeline_isolated(
                 "per-job sample; do not feed it into telemetry recalibration."
             )
         output_dir_path = Path(output_dir) if output_dir is not None else None
-        return _run_in_process(config, sources, run_pipeline_kwargs, output_dir_path)
+        return _run_in_process(config, sources, run_pipeline_kwargs, output_dir_path, request)
 
     return _run_isolated(
         config,
@@ -266,6 +269,7 @@ def run_pipeline_isolated(
         on_spawn=on_spawn,
         timeout_s=timeout_s,
         run_pipeline_kwargs=run_pipeline_kwargs,
+        request=request,
     )
 
 
@@ -307,37 +311,21 @@ def _run_in_process(
     sources: dict[str, pa.Table] | None,
     run_pipeline_kwargs: dict[str, Any],
     output_dir: Path | None,
+    request: PublicationRequest | None = None,
 ) -> IsolatedRunResult:
     try:
         result = run_pipeline(config, sources, **run_pipeline_kwargs)
     except BaseException as exc:
         return in_process_failure(exc)
 
-    committed_dir: str | None = None
+    receipt: CommitReceipt | None = None
     if output_dir is not None:
-        # HIGH-2: honor output_dir in the fallback too, with the same
-        # stage-then-atomic-rename discipline as the isolated path (MED-1)
-        # -- otherwise isolate=True/False silently diverge on what actually
-        # lands on disk despite reporting the same `completed` outcome.
-        staging_dir = sibling_staging_dir(output_dir)
-        try:
-            stage_tables(result.outputs, staging_dir)
-            atomic_commit(staging_dir, output_dir)
-        except CommitError as exc:
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            return IsolatedRunResult(
-                outcome="crashed",
-                peak_rss_mb=round(peak_rss_mb(), 1),
-                outputs=None,
-                quality_metrics={},
-                table_kinds={},
-                returncode=None,
-                signal_number=None,
-                error=commit_error_text(exc),
-                isolated=False,
-                reason=commit_reason(exc, staging_dir),
-            )
-        committed_dir = str(output_dir)
+        # HIGH-2: honor output_dir in the fallback too, through the same publication as the
+        # isolated path, so isolate=True/False never diverge on what lands on disk.
+        receipt, stage = publish_resident(output_dir, result.outputs, request)
+        if receipt.outcome not in COMMITTED:
+            fields = {"peak_rss_mb": round(peak_rss_mb(), 1), "returncode": None}
+            return failed_publication(receipt, stage, isolated=False, **fields)
 
     return IsolatedRunResult(
         outcome="completed",
@@ -349,8 +337,9 @@ def _run_in_process(
         signal_number=None,
         error=None,
         isolated=False,
-        committed_output_dir=committed_dir,
+        committed_output_dir=None if receipt is None else str(output_dir),
         row_errors=tuple(result.row_errors),
+        publication_receipt=receipt,
     )
 
 
@@ -365,6 +354,7 @@ def _run_isolated(
     on_spawn: Callable[[int], None] | None,
     timeout_s: float | None,
     run_pipeline_kwargs: dict[str, Any],
+    request: PublicationRequest | None = None,
 ) -> IsolatedRunResult:
     scratch = ExitStack()  # removes an engine-made work root; a caller-named one is left alone
     work_root = (
@@ -372,9 +362,13 @@ def _run_isolated(
         if staging_dir is not None
         else scratch.enter_context(fileaccess.protected_scratch_dir(prefix="decoy-isolated-run-"))
     )
+    pub: Publication | CommitReceipt | None = None
     try:
-        output_dir_path = Path(output_dir) if output_dir is not None else None
-        staging_output_dir = resolve_staging_output_dir(work_root, output_dir_path)
+        pub = begin_publication(Path(output_dir), request) if output_dir is not None else None
+        if isinstance(pub, CommitReceipt):
+            return failed_publication(pub, None, peak_rss_mb=None, returncode=None, isolated=True)
+        # The child stages into the publication stage beside `output_dir`, or into scratch.
+        staging_output_dir = pub.stage if pub is not None else work_root / "staging_output"
         payload_path = _write_payload(
             work_root,
             config,
@@ -387,13 +381,15 @@ def _run_isolated(
         return _spawn_and_classify(
             payload_path,
             staging_output_dir,
-            output_dir_path,
+            pub,
             on_spawn=on_spawn,
             timeout_s=timeout_s,
             mem_cap_bytes=mem_cap_bytes,
             rlimit_kind=rlimit_kind,
         )
     finally:
+        if isinstance(pub, Publication):
+            pub.txn.abort()  # a no-op once bound
         scratch.close()
 
 
@@ -406,13 +402,7 @@ def _write_payload(
     rlimit_kind: str,
     staging_output_dir: Path,
 ) -> Path:
-    sources_dir = work_root / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
-    sources_manifest: dict[str, str] = {}
-    for index, (name, table) in enumerate((sources or {}).items()):
-        dest = sources_dir / f"s{index:04d}.parquet"  # opaque: a name can hold "/" or ".."
-        pq.write_table(table, dest)  # type: ignore[no-untyped-call, unused-ignore]
-        sources_manifest[name] = str(dest)
+    sources_manifest = stage_sources(work_root, sources or {})
 
     payload = {
         "config": config,
@@ -441,7 +431,7 @@ def _write_payload(
 def _spawn_and_classify(
     payload_path: Path,
     staging_output_dir: Path,
-    output_dir: Path | None,
+    pub: Publication | None,
     *,
     on_spawn: Callable[[int], None] | None,
     timeout_s: float | None,
@@ -519,7 +509,7 @@ def _spawn_and_classify(
         and envelope is not None
         and envelope.get("outcome") in ISOLATED_OUTCOMES
     ):
-        result = _result_from_envelope(envelope, output_dir, proc.pid, staging_output_dir)
+        result = _result_from_envelope(envelope, pub, proc.pid, staging_output_dir)
         # A self-reported `crashed` names an exception, not its cause. Native code at the cap
         # can surface exhaustion as an unrelated type (an Arrow cancellation reaches Python as
         # KeyboardInterrupt), so a crash that sat at its cap carries the pressure suspicion.
@@ -565,7 +555,7 @@ def _spawn_and_classify(
 
 
 def _result_from_envelope(
-    envelope: dict[str, Any], output_dir: Path | None, pid: int, staging_output_dir: Path
+    envelope: dict[str, Any], pub: Publication | None, pid: int, staging_output_dir: Path
 ) -> IsolatedRunResult:
     outcome = envelope["outcome"]
     peak = envelope.get("peak_rss_mb")
@@ -574,25 +564,15 @@ def _result_from_envelope(
         shutil.rmtree(staging_output_dir, ignore_errors=True)
         return envelope_failure(envelope, pid=pid)
 
-    try:
-        outputs, committed_dir, row_errors = _commit(envelope, output_dir)
-    except CommitError as exc:
-        # MED-1: the rename failed (pre-existing non-empty target is the
-        # common case) -- a classified `crashed` result, not a driver-side
-        # exception; staging was already rmtree'd inside `_commit`.
-        return IsolatedRunResult(
-            outcome="crashed",
-            peak_rss_mb=peak,
-            outputs=None,
-            quality_metrics={},
-            table_kinds={},
-            returncode=0,
-            signal_number=None,
-            error=commit_error_text(exc),
-            isolated=True,
-            pid=pid,
-            reason=commit_reason(exc, staging_output_dir),
-        )
+    # Read back before publishing, so `outputs` is right with or without an `output_dir`.
+    collected = collect(envelope, staging_output_dir, pub)
+    if pub is None:
+        shutil.rmtree(staging_output_dir, ignore_errors=True)  # nothing to publish it to
+    if isinstance(collected, CommitReceipt):
+        # MED-1: a refused stage or a publication that did not commit is a classified result.
+        fields = {"peak_rss_mb": peak, "returncode": 0, "isolated": True, "pid": pid}
+        return failed_publication(collected, staging_output_dir, **fields)
+    outputs, receipt = collected
     return IsolatedRunResult(
         outcome="completed",
         peak_rss_mb=peak,
@@ -604,41 +584,7 @@ def _result_from_envelope(
         error=None,
         isolated=True,
         pid=pid,
-        committed_output_dir=committed_dir,
-        row_errors=row_errors,
+        committed_output_dir=None if pub is None else str(pub.target),
+        row_errors=row_errors_of(envelope),
+        publication_receipt=receipt,
     )
-
-
-def _commit(
-    envelope: dict[str, Any], output_dir: Path | None
-) -> tuple[dict[str, pa.Table], str | None, tuple[RowErrorRecord, ...]]:
-    """Read the child's staged tables + row_errors, then commit-or-discard
-    per §12 ruling 3.
-
-    Reading back BEFORE the rename (rather than after) means the returned
-    `outputs`/`row_errors` are correct even in the no-`output_dir` case,
-    where there is nothing to rename into and the staging directory is
-    simply discarded once read.
-
-    Raises:
-        CommitError: the atomic rename failed (MED-1). Staging is rmtree'd
-            here before re-raising so the caller never has to.
-    """
-    staging_output_dir = Path(envelope["staging_output_dir"])
-    outputs = {
-        table: pq.read_table(  # type: ignore[no-untyped-call, unused-ignore]
-            staging_output_dir / f"{table}.parquet"
-        )
-        for table in envelope.get("staged_tables", [])
-    }
-    row_errors = read_staged_row_errors(staging_output_dir)
-    if output_dir is None:
-        shutil.rmtree(staging_output_dir, ignore_errors=True)
-        return outputs, None, row_errors
-
-    try:
-        atomic_commit(staging_output_dir, output_dir)
-    except CommitError:
-        shutil.rmtree(staging_output_dir, ignore_errors=True)
-        raise
-    return outputs, str(output_dir), row_errors
