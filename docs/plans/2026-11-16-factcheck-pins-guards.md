@@ -10,7 +10,8 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 (2026-11-16), PLAN defines acceptance tests, develop correctly (registries and sizing), sentry
 over prose, dev-loop review 2026-11-11.
 
-Revision 3: resolves Dennis round 2 on `d1479c3a8` (H1, M1 to M2, L1 to L6).
+Revision 4: resolves the Codex review NO-GO on `c28daf62b` (V1 H1, DESIGN H2 and
+V2-LOG production-file count). Revision 3 resolved Dennis round 2 on `d1479c3a8`.
 
 Bases (2026-11-16): engine `origin/main` `13c95c7de` (release 0.27.0 is in); CLI `origin/main`
 `ba7b613e` (pins `decoy-engine==0.27.0`, CLI #290 `bcd025bd`). Plans read and sequenced
@@ -129,10 +130,17 @@ the existing cardinality scan.
   `effective_pool_size(plan_pool_size, cfg)`. `resolve_faker_pool_identity` calls that helper, and
   the collision rule calls it with `seed.pool_size` and
   `provider_config_to_dict(seed.provider_config)`. This reuses the one `DEFAULT_POOL_SIZE` path
-  without requiring a builder, provider, namespace or `job_seed`. The seed is unchanged and no
-  registry is added. There is no
+  without requiring a builder, provider, namespace or `job_seed`. The helper is exported from the
+  owning package as `decoy_engine.generation.pool.effective_pool_size`; neither caller imports
+  `_identity`. The seed is unchanged: compile preserves an omitted `pool_size` as
+  `ColumnSeed.pool_size is None`, and execution admission therefore remains false for that seed.
+  The effective default is resolved only when a consumer needs the pool size; compile never stamps
+  `DEFAULT_POOL_SIZE` onto the seed. No registry is added. There is no
   `allow_collisions` key: the compiler folds it into `cardinality_mode` and `deterministic`
   (`E:plan/_seed_envelope.py:204-221`), so the seed does not carry it.
+- The collision rule imports canonicalization through the existing public inter-package facade,
+  `decoy_engine.kernel.canonicalize_derive_source`, which is the same function the pool sampler
+  uses. It does not import `generation.pool._canonicalize` or `kernel._canonicalize`.
 - The new code is added to the `QualityWarning` code list in the `E:generation/pool/_events.py`
   docstring.
 - The existing `DistinctCount` entry for that column is unchanged (same keys, same profile-first
@@ -392,6 +400,7 @@ evidence. The builder records each fail-before result in the PR body.
 
 | Id | Slice | Test | Fails before because |
 |---|---|---|---|
+| AT-Z0 | Z-E1 | No-regression in `ET:unit/validation/test_structural_scans.py`: compile a deterministic `faker` column with no declared `pool_size`; assert its `ColumnSeed.pool_size is None` and `faker_pool_precondition_met_seed(seed) is False`. This pins the observed `origin/main` behavior at `13c95c7de` | no-regression: green before and after |
 | AT-Z1 | Z-E1 | `ET:unit/validation/test_structural_scans.py`: a deterministic `faker` column, `pool_size: 10`, 200 distinct sources, post-validation on: `quality_warnings` holds `cardinality_collisions` with `distinct_lost == source_distinct - output_distinct > 0` and `pool_size == 10`. A second column with no declared `pool_size` reports `pool_size == DEFAULT_POOL_SIZE` | no such warning |
 | AT-Z2 | Z-E1 | Same run with a marker source value: the marker is absent from the JSON of `quality_summary`, from `str()` of each warning and from the captured run log | no warning to check; written red with AT-Z1 |
 | AT-Z3 | Z-E1 | A `when:`-gated deterministic `faker` column: no `cardinality_collisions` entry; its `DistinctCount` is still recorded | the `DistinctCount` half is no-regression; the absence is pinned after Z-E1 (MZ2 turns it red) |
@@ -399,6 +408,7 @@ evidence. The builder records each fail-before result in the PR body.
 | AT-Z5 | Z-E1 | An integer column: `source_distinct` equals the count over `_canonicalize_source` forms, compared with a direct call of the sampler's canonicalizer | no warning |
 | AT-Z6 | Z-E1 | `run_pipeline` with `execution_mode="full_frame"` and with `"out_of_core"` on the AT-Z1 config: equal warning detail | no warning on either route |
 | AT-Z6b | Z-E1 | A deterministic `faker` column with `cardinality_mode: scale_source_cardinality` and a small pool emits `cardinality_collisions`. A `match_source_cardinality` column emits both `CARDINALITY_MATCH_DEVIATION` and `cardinality_collisions` | collision rule absent |
+| AT-Z6c | Z-E1 | Extend the existing class-6 private-import sentry in `ET:sentry/defects/test_exception_context.py` and `_defect_scan.py` for the new `validation.post` consumer. The real tree imports `canonicalize_derive_source` from `decoy_engine.kernel` and `effective_pool_size` from `decoy_engine.generation.pool`. Seeded copies that change either import to `decoy_engine.kernel._canonicalize` or `decoy_engine.generation.pool._identity` fail. The existing import-linter layer test stays green with no new `.importlinter` ignore | no `validation.post` consumer exists yet |
 | AT-Z7 | Z-E1 | `ET:sentry/defects/test_strategy_docs_agree.py` case: the "Intentional collisions", `faker` and `hash` sections and `docs/security/token-vault.md` hold no "collision-free" and no "distinct source values map to distinct" claim. Sentence-level rule: any sentence containing "one-to-one" must not name `hash` or `tokenize` | `docs/strategies.md:1114` and `:1134`, `token-vault.md:105` |
 | AT-Z8 | Z-C1 | `CT:e2e/test_run_flags.py`: `decoy run --post-validate` on a small deterministic `faker` config prints the collision line with `table.column` and counts and no source value; `--json` holds the code under `report.quality_summary.quality_warnings`; exit 0 | no line (engine pin lacks the code) |
 | AT-A1 | A-E1 | `test_strategy_docs_agree.py`: load the user-facing strategy set from `scripts/gen_capability_matrix.py::_mask_strategies`, as `ET:sentry/test_capability_matrix.py::_load_generator` does. Each name needs an exact `### <name>` heading or a heading that starts `### <name> `. Thus, `### passthrough and structural handlers` satisfies `passthrough`. A heading fails if its prefix names a registry handler that is not user-facing. Other headings, such as "Intentional collisions", are prose. The intro holds no number word | five sections missing, "seventeen" |
@@ -424,7 +434,9 @@ MG1 to MG7 the scratch violations above; MG8 revert one entry to `path:line` (AT
 MG9 has the script skip the second `--cli-pins` (AT-G9). MG10 compares a candidate's name set to
 itself instead of required `--cli-pins-base` (AT-G9 name-set refusal cell). MZ4 keys the rule on
 `reuse` only (AT-Z6b). MZ5 reads `seed.pool_size` directly, which yields `None` instead of the effective
-default (AT-Z1).
+default (AT-Z1). MZ6 changes compile to stamp `DEFAULT_POOL_SIZE` (`10_000`) onto an omitted
+`pool_size`; AT-Z0 must turn red. MZ7 changes either public facade import in `_cardinality.py` to
+its private implementation module; AT-Z6c must turn red.
 
 ## 7. Class table
 
@@ -489,10 +501,12 @@ N/A: no slice reads or writes keys or foreign keys; 24z counts distinct values o
 ## 9. Reuse inventory
 
 - 24z reuses the post-validation cardinality scan, its `ScanContext` (aligned sources),
-  `QualityWarning`, the sampler's `_canonicalize_source`, and the warning reason registry. No new
+  `QualityWarning`, `decoy_engine.kernel.canonicalize_derive_source`, and the warning reason registry. No new
   module, no new pass over the data on runs without `--post-validate`. The unwired
   `E:execution/native/_pool_quality.py` measurement spools cleartext pairs to DuckDB and serves a
-  different gate; it is not reused.
+  different gate; it is not reused. Effective pool-size resolution remains in `_identity.py` and
+  is re-exported through `decoy_engine.generation.pool`; the existing private-import sentry is
+  extended instead of adding a second import scanner.
 - 24za reuses `scripts/gen_capability_matrix.py::_mask_strategies` (loaded as
   `ET:sentry/test_capability_matrix.py::_load_generator` does), `capabilities_for(...).row_error_modes`,
   `ALWAYS_KEYED_STRATEGIES` and `tests/sentry/layout/_layout.py::section`. No new section helper.
@@ -541,8 +555,11 @@ helpers, one release helper module. Each is smaller than any outside tool that w
   the test and the release prep share one place.
 - One place per fact: the strategy list is in the registry; the docs page points to the
   generated matrix for counts. The collision warning detail is built in one function. Effective
-  faker pool size is computed only by `effective_pool_size` in `_identity.py`. The handler's
-  identity resolver and the collision scan both call it.
+  faker pool size is computed only by `effective_pool_size` in `_identity.py`, exported by
+  `generation.pool`. The handler's identity resolver and the collision scan both call it.
+- Cross-package access uses package facades: `validation.post` imports canonicalization from
+  `decoy_engine.kernel` and effective pool size from `decoy_engine.generation.pool`. The class-6
+  sentry guards both edges, and the layer contract remains green without an ignore.
 - No flag arguments: the collision rule keys off the seed fields the plan already carries
   (`strategy`, `deterministic`, `cardinality_mode`, `when`).
 
@@ -552,7 +569,12 @@ helpers, one release helper module. Each is smaller than any outside tool that w
   (REG-RELEASE rule). `ET:sentry/test_reason_registry.py` and the f29 fixtures move in Z-E1.
 - `quality_summary` shape: unchanged keys; a new code in an existing list.
 - DP certified rows: rows added, never removed (the 0.18.0 rule).
-- Public engine API: unchanged. `stamp_release.py` options are release tooling, not a public surface.
+- Root public engine API and `decoy_engine.__all__`: unchanged. The existing
+  `decoy_engine.kernel.canonicalize_derive_source` facade name and the new
+  `decoy_engine.generation.pool.effective_pool_size` facade name are internal inter-package APIs,
+  not frozen external surfaces. `effective_pool_size` is added only to
+  `decoy_engine.generation.pool.__all__`, not to the root `decoy_engine.__all__`.
+  `stamp_release.py` options are release tooling, not a public surface.
 - CLI `--json` envelope: unchanged shape. If the engine release adds a report shape,
   `CT:fixtures/release_freeze/json-shapes.json` moves in the repin slice as #290 did.
 
@@ -575,9 +597,11 @@ Checked against engine and CLI CODEMAP "Where Things Go".
 | New or moved thing | Path | CODEMAP row | Beside |
 |---|---|---|---|
 | Collision rule | `E:validation/post/_checks/_cardinality.py` (about 60 lines added) | post-validation scans | `run_cardinality` |
-| Effective faker pool-size helper | `E:generation/pool/_identity.py` | generation pools | `resolve_faker_pool_identity` |
+| Existing canonicalization facade used by collision rule | `E:kernel/__init__.py` exports `canonicalize_derive_source` (no source change) | backend-neutral deterministic masking kernel | existing `encode_int` export |
+| Effective faker pool-size helper and package facade export | `E:generation/pool/_identity.py`, `E:generation/pool/__init__.py` exports `effective_pool_size` | generation pools | `resolve_faker_pool_identity`, existing pool exports |
 | Warning code | `E:reasons/warning/_part1.py` (101 lines) | reason registry | `CARDINALITY_MATCH_DEVIATION` |
 | Collision tests | `ET:unit/validation/test_structural_scans.py` | unit tests for the owning surface | existing cardinality tests |
+| Public-facade import guard | `ET:sentry/defects/_defect_scan.py`, `ET:sentry/defects/test_exception_context.py` | recurring-defect class 6 sentry | existing public-facade import cases |
 | Docs agreement sentry | `ET:sentry/defects/test_strategy_docs_agree.py`, `ET:sentry/baselines/strategy-docs-agree.json`, registry id `strategy-docs-agree` | recurring-defect class rules | `test_canonical_json_choke_point.py` |
 | CLI collision line | `C:ui/summary.py` `render_post_validation` | UI rendering | the failed-check table |
 | CLI e2e | `CT:e2e/test_run_flags.py` | e2e for run flags | existing `--post-validate` cases |
@@ -602,14 +626,14 @@ count as production. Every slice is at or under 10 production files and 800 chan
 
 | Slice | Row | Repo | Scope | Prod files | Lines (est.) | Risk | Depends on |
 |---|---|---|---|---|---|---|---|
-| Z-E1 | 24z | engine | collision rule, `effective_pool_size`, warning code, `_events.py` docstring, `_tables.py` comment, docs (`faker`, `hash`, "Intentional collisions", `security/token-vault.md`), QA 06, changelog fragment, AT-Z1 to AT-Z7 | 5 | ~375 | R2 (report built from source values and frozen registry) | none |
+| Z-E1 | 24z | engine | collision rule, `effective_pool_size` package export, warning code, `_events.py` docstring, `_tables.py` comment, docs (`faker`, `hash`, "Intentional collisions", `security/token-vault.md`), QA 06, changelog fragment, AT-Z0 to AT-Z7 | 6 | ~400 | R2 (report built from source values and frozen registry) | none |
 | A-E1 | 24za | engine | strategies.md count, five sections, `format_error` text, `job_seed` text in both pages, AT-A1 to AT-A3 | 0 | ~450 docs, ~150 test | R1 | 24zb E1 merged, or the 2026-11-25 fallback in section 3 |
 | C-E1 | 24zc | engine | in release N prep: two CLI-profile rows for N; the prior-release rows test | 1 | ~30 | R1 | release N prep; uses G-E4 if merged |
 | G-E1 | 24ze | engine | D2 census, D4 | 0 | ~400 | R1 | prop E-G2b; G-E3 for the exact id join (else values are filled by function name and G-E3 rewrites them) |
 | G-E2 | 24ze | engine | D5, D6 engine | 0 | ~350 | R1 | prop E-G2b |
 | G-E3 | 24ze | engine | G1, catalogue metadata re-pin | 5 | ~350 | R1 | 24zb E1 merged (being built now) |
 | G-E4 | 24ze | engine | G2 | 2 | ~450 | R2 (writes the certified-stack set, a supply-chain trust input, at release) | none |
-| C-C1 | 24zc | CLI | repin to N, the four pins, header, AT-C1 to AT-C7 | 3 (`pyproject.toml`, `requirements-certified.txt`, `scripts/cert_smoke.py`) plus the #290 list | ~250 | R2 (dependency and crypto pins; full suite on triggers: dependency lock, version pin) | release N tagged |
+| C-C1 | 24zc | CLI | repin to N, the four pins, header, AT-C1 to AT-C7 | 7 (the exact production subset of CLI #290: `pyproject.toml`, `requirements-certified.txt`, `requirements-dev.lock`, `scripts/cert_smoke.py`, `scripts/dev/bootstrap.sh`, `scripts/dev/lock_version.sh`, `C:ci/rule_codes.py`) | ~250 | R2 (dependency and crypto pins; full suite on triggers: dependency lock, version pin) | release N tagged |
 | Z-C1 | 24z | CLI | collision line in `render_post_validation`, AT-Z8, CLI QA checklist id, roadmap row 24z | 1 | ~120 | R1 | C-C1 merged (or any repin to an engine with Z-E1) |
 | G-C1 | 24ze | CLI | D9, D10, D11 | 0 | ~450 | R1 | prop C-G1 |
 
@@ -673,8 +697,8 @@ see `code=` across lines.
 
 ## 17. Not verified
 
-The earlier pool-size access risk is closed by the section 2 decision: use
-`effective_pool_size` from `_identity.py`. Do not stamp a default onto the seed.
+The earlier pool-size access risk is closed by the section 2 decision: import
+`effective_pool_size` from `decoy_engine.generation.pool`. Do not stamp a default onto the seed.
 
 - No test was run (devbox rule). Each fail-before claim comes from reading the code at the bases.
   The builder confirms each on the branch before changing source.
@@ -694,10 +718,6 @@ The earlier pool-size access risk is closed by the section 2 decision: use
   references can move to the function form.
 - V2-LOG, web lane: `decoy-web-docs` `concepts/keys-and-vault.mdx:90` repeats the collision-free
   claim; flag it to the web owner.
-- V2-LOG: `_cardinality.py` imports private generation modules `_canonicalize` and `_identity`.
-  Engine `./.importlinter` permits the direction because `validation` is above `generation` in the
-  declared layer stack, so this needs no ignore line. Public-facade cleanup is outside V1.
-
 - New V1 row for finding F-1 if OQ-6 is accepted.
 - The CLI `plan/certified-pin-cves` branch is superseded by section 4 for base numbers; its design
   stays the reference. No merge of that branch is needed.
