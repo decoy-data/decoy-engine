@@ -30,7 +30,7 @@ form by mistake.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -41,8 +41,9 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
+from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
+from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.fileaccess import config_relative
-from decoy_engine.profile import DeclarationRequest
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
@@ -142,6 +143,7 @@ class PipelineRunContext:
     # F06: the resolved protected-quarantine runtime (sink + owner); None unless supplied.
     quarantine_runtime: Any = None
     out_of_core_threads: int | None = None
+    post_scan_detectors: Any = field(default=None, repr=False, compare=False)  # never printed
 
 
 @dataclass(frozen=True)
@@ -213,6 +215,7 @@ def build_run_context(
     out_of_core_threads: int | None = None,
     base_dir: str | Path | None = None,
     subset_stage: SubsetStageScope | None = None,
+    resident_fallback: bool = False,
 ) -> PipelineRunContext:
     """Resolve and validate every run input, in the order the inline code did.
 
@@ -229,16 +232,8 @@ def build_run_context(
         select_execution_adapter,
     )
     from decoy_engine.execution.out_of_core._route_policy import resolve_reorder_threshold_rows
-    from decoy_engine.plan import compile_plan
     from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
-    from decoy_engine.profile import profile_source
     from decoy_engine.providers_v2 import get_default_registry
-    from decoy_engine.relationships import (
-        RelationshipGraph,
-        build_namespace_registry,
-        build_relationship_graph,
-        check_orphan_fk_policy_completeness,
-    )
     from decoy_engine.secret_providers import admit_mask_key, assert_plan_requirements_admitted
 
     # F06 preflight: config-only, so a bad declared contract, an incapable explicit route or a
@@ -252,11 +247,10 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
-    # Adapter selection runs up front, before any profiling or plan
-    # compilation, so an invalid substrate or count knob fails at submit
-    # time with a typed error instead of after the expensive stages.
-    # Construction is cheap and side-effect free for both adapters, so
-    # pure-generate jobs (which never use it) lose nothing.
+    # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
+    # substrate or count knob fails at submit time with a typed error instead of after the expensive
+    # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
+    # (which never use it) lose nothing.
     resolved_substrate = SUBSTRATE
     adapter = select_execution_adapter(fpe_chunk_count=fpe_chunk_count)
     # Auto-chunk knobs share the substrate knobs' fail-early contract.
@@ -309,16 +303,6 @@ def build_run_context(
         name for name, kind in table_kinds.items() if kind == "generate"
     )
 
-    # F5 (2026-06-26): route the profile-path seed through the canonical
-    # int normalizer so a bool/float seed is rejected here, BEFORE
-    # profile_source seeds its RNG, rather than being silently coerced
-    # (`seed: true` -> random.Random(True) == Random(1)) and only caught
-    # later by compile_plan. Defaults absent seed to 0, matching the
-    # compiler so the profile and mask paths stay in lockstep.
-    from decoy_engine.plan._seed import _normalize_job_seed_int
-
-    job_seed = _normalize_job_seed_int(config)
-
     # F13: admit the keyed-mask secret from configuration alone BEFORE any source is read, so a
     # missing, inaccessible, expired or invalid secret fails closed while the source is untouched.
     # A programmatic `key_provider` wins over `global_settings.mask_secret_ref`. There is no
@@ -335,38 +319,45 @@ def build_run_context(
         )
     )
 
-    # Every source column must be declared, checked from headers, footers and schemas first.
     if (source_loader is None) != (source_loader_schemas is None):
         raise ValueError("run_pipeline: source_loader and source_loader_schemas go together.")
-    schemas = {n: s.schema for n, s in caller_sources.items()}
-    request = DeclarationRequest.for_run(config, schemas, source_loader_schemas)
-    declared = _guards.prepare_declared_execution_sources(request, registry=resolved_registry)
+
+    def facts_of(
+        run_sources: Mapping[str, pa.Table | LazySource], stage: SubsetStageScope | None
+    ) -> RoutingFacts:
+        return build_routing_facts(
+            config,
+            run_sources,
+            registry=resolved_registry,
+            source_loader_schemas=source_loader_schemas,
+            engine_version=engine_version,
+            base_dir=base_dir,
+            instance_default_locale=instance_default_locale,
+            subset_stage=stage,
+        )
+
+    facts = facts_of(caller_sources, subset_stage)
+    if resident_fallback and execution_mode == "auto" and not stream_required:
+        # After every config-only check and key admission above, so a refusal never follows a
+        # whole read. It reads the run's own post-subset sources, so only the kept rows load.
+        facts = read_resident_fallback(
+            config,
+            facts,
+            rebuild=None if subset_stage is not None and subset_stage.active else facts_of,
+            engine_version=engine_version,
+            base_dir=base_dir,
+            instance_default_locale=instance_default_locale,
+            fidelity_report=fidelity_report,
+            post_validation=post_validation,
+            vault_writer=vault_writer,
+            registry=resolved_registry,
+            source_loader_schemas=source_loader_schemas,
+        )
+    declared, profile, plan = facts.declared, facts.profile, facts.plan
+    caller_sources = facts.caller_sources
     if source_loader is not None and source_loader_schemas is not None:
         source_loader = declared.checked_loader(source_loader, source_loader_schemas)
-
-    # Duplicate field names are refused after the config-only admission and before profiling,
-    # routing and every pandas conversion: each looks columns up by name and would fail uncoded.
-    _guards.refuse_duplicate_run_sources(config, caller_sources)
-    _guards.refuse_undeclared_loader_tables(
-        table_kinds, config, caller_sources, source_loader_schemas
-    )
     source_loader = _guards.refusing_source_loader(source_loader)
-
-    supplied = caller_sources  # profiled whole: a subset run compiles from the full sources
-    if subset_stage is not None and subset_stage.active:
-        caller_sources, selection = subset_stage.apply(caller_sources, config)
-
-    profile = profile_source(config, seed=job_seed, declared=declared, supplied_sources=supplied)
-    if subset_stage is not None and subset_stage.active:
-        profile = subset_stage.restrict_profile(profile, selection, subset_stage.head_rows)
-
-    plan = compile_plan(
-        config,
-        profile,
-        decoy_engine_version=engine_version,
-        base_dir=base_dir,
-        instance_default_locale=instance_default_locale,
-    )
 
     _guards.refuse_dropped_declared_tables(
         table_kinds,
@@ -388,16 +379,7 @@ def build_run_context(
             mask_key_from_provider(resolved_key_provider, plan.seed_envelope.job_seed),
         )
 
-    ns_registry = build_namespace_registry(config, profile)
-    if profile.relationships:
-        lookup = check_orphan_fk_policy_completeness(config, profile.relationships)
-        graph = build_relationship_graph(
-            profile.relationships,
-            namespace_registry=ns_registry,
-            orphan_policy_lookup=lookup,
-        )
-    else:
-        graph = RelationshipGraph(edges=(), ordering=())
+    graph = facts.graph
 
     # Resident transform-bearing tables are transformed once, here, so routing prices
     # the data that will run; the raw tables are no longer referenced from `caller_sources`.
@@ -421,7 +403,7 @@ def build_run_context(
         plan=plan,
         profile=profile,
         graph=graph,
-        namespace_registry=ns_registry,
+        namespace_registry=facts.namespace_registry,
         registry=resolved_registry,
         key_provider=resolved_key_provider,
         adapter=adapter,

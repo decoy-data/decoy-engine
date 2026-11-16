@@ -199,6 +199,7 @@ from decoy_engine.profile._fixed_width_writer import write_fixed_width
 from decoy_engine.profiling import (
     ColumnProfile,
     FieldStats,
+    ModelHit,
     ScanSet,
     ScanSetCore,
     SentinelFlag,
@@ -329,14 +330,10 @@ from decoy_engine.validation.post import (
     PostValidationRunner,
     QualitySummary,
 )
-from decoy_engine.validation_result import (
-    CODES as VALIDATION_CODES,
-)
-from decoy_engine.validation_result import (
-    ValidationMessage,
-    ValidationResult,
-)
+from decoy_engine.validation_result import CODES as VALIDATION_CODES
+from decoy_engine.validation_result import ValidationMessage, ValidationResult
 from decoy_engine.vault import VaultError, VaultWriter, load_vault, vault_writer_for_config
+from decoy_engine.verification.postmask._blocked import PostScanBlockedError
 from decoy_engine.verification.postmask._route_guard import PostScanRouteError
 
 # F9: names trimmed from __all__ but kept as module bindings so attribute access
@@ -438,6 +435,7 @@ __all__ = [
     "Logger",
     "MaskSecretError",
     "MissingMaskSecret",
+    "ModelHit",
     "ModelRef",
     "ModelStatus",
     "ModelUnavailableError",
@@ -459,6 +457,7 @@ __all__ = [
     "PoolBuilder",
     "PoolCapacityError",
     "PoolSampler",
+    "PostScanBlockedError",
     "PostScanRouteError",
     "PostValidationRunner",
     "PreScanConfig",

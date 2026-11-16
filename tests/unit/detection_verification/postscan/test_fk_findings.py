@@ -185,7 +185,7 @@ def test_an_fk_fail_is_the_orphan_code_and_the_tag_stays_v2() -> None:
         frames(p={"id": ["a"]}, c={"pid": [CANARY]}),
         config=CONFIG,
     )
-    assert report["schema_version"] == SCHEMA_VERSION == "post-scan-integrity/v2"
+    assert report["schema_version"] == SCHEMA_VERSION == "post-scan-integrity/v3"
     assert report["fk_preservation"][0]["severity"] == "fail"
     assert CANARY not in repr(report)
     assert [c.code for c in post_scan_verdict(report).codes] == ["foreign_key_orphans_introduced"]
