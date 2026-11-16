@@ -31,8 +31,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import reasons
-from decoy_engine.fileaccess._output import DIRECTORY_PUBLISH_LABELS
-from decoy_engine.fileaccess._types import (
+from decoy_engine.fileaccess import (
+    DIRECTORY_PUBLISH_LABELS,
     CommitUncertain,
     FileAccessDenied,
     LeafTooLarge,
