@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
+    "CARDINALITY_COLLISIONS",
     "CARDINALITY_MATCH_DEVIATION",
     "FIT_JOINT_CELLS_TRUNCATED",
     "FORMAT_RULE_VIOLATION",
@@ -37,6 +39,7 @@ __all__ = [
 
 _d = _catalog.warning("QualityWarning")
 
+CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since=UNRELEASED)
 CARDINALITY_MATCH_DEVIATION = _d("cardinality_match_deviation", "Cardinality match deviation.")
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
