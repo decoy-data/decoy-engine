@@ -23,7 +23,7 @@ from decoy_engine.profiling import (
     scan_set_to_dict,
     scan_sources,
 )
-from decoy_engine.profiling.scan_set import DetectorRunCore, ModelHitCore, ModelRefCore
+from decoy_engine.profiling.scan_set import ModelHitCore, ModelRefCore, _DetectorRunCore
 from tests.unit.profiling import _scanml_m3a_support as s
 
 MODEL = {"id": "lgbm-v1", "version": "0.1.0"}
@@ -155,7 +155,7 @@ def test_a_hit_and_a_run_validate_in_both_forms(tmp_path: Path) -> None:
 def test_the_stored_forms_are_the_strict_core_types() -> None:
     ModelRefCore.model_validate(MODEL)
     assert ModelHitCore.model_validate(HIT).band == "high"
-    assert DetectorRunCore is not None
+    assert _DetectorRunCore is not None
     with pytest.raises(ValidationError):
         ModelRefCore.model_validate({"id": "x", "version": "1", "path": "/x"})
 

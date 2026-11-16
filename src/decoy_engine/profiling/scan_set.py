@@ -39,8 +39,10 @@ from pydantic import ValidationError as _PydanticValidationError
 
 from decoy_engine import reason_adapter, reasons
 from decoy_engine._field_names import repeated_names
-from decoy_engine.config import PipelineConfigError, PreScanConfig, SourceDescriptor
-from decoy_engine.detection import DetectorRun, RateBucket, log_detector_run
+from decoy_engine.config import PipelineConfigError, SourceDescriptor
+from decoy_engine.config._pre_scan import PreScanConfig
+from decoy_engine.detection._ner_rate import RateBucket
+from decoy_engine.detection.types import DetectorRun
 from decoy_engine.errors import DecoyError, PipelineValidationError
 from decoy_engine.fileaccess import (
     FileAccess,
@@ -50,16 +52,21 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
-from decoy_engine.profiling._model_pass import Band, ModelHit, ModelPass
+from decoy_engine.profiling._model_pass import (
+    REGEX_ONLY,
+    Band,
+    ModelHit,
+    ModelPass,
+    load_pre_scan,
+    log_pre_scan,
+)
 from decoy_engine.profiling._scan_integrity import RelationshipFacts, Status
 from decoy_engine.profiling._scan_text_checks import count_leading_zeros, header_looks_like_data
-from decoy_engine.profiling.model_pack import load_detectors
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.types import ColumnProfile, FieldStats
 from decoy_engine.progress import safe_error_class
 
 SCAN_SET_SCHEMA: Final = "scan-set/v1"
-_REGEX_ONLY: Final[tuple[DetectorRun, ...]] = (DetectorRun("regex", None),)
 Strategy = Literal["head", "random", "full"]
 
 # Matches the CLI's long-standing cut-off for "this field is a PII candidate".
@@ -134,8 +141,8 @@ class ModelRunCore(_Core):
 
 
 # Tagged on `source`, so a regex run cannot carry a model and a model run cannot lack one.
-DetectorRunCore = Annotated[Union[RegexRunCore, ModelRunCore], Field(discriminator="source")]  # noqa: UP007
-_RUN_CORE: TypeAdapter[Any] = TypeAdapter(DetectorRunCore)
+_DetectorRunCore = Annotated[Union[RegexRunCore, ModelRunCore], Field(discriminator="source")]  # noqa: UP007
+_RUN_CORE: TypeAdapter[Any] = TypeAdapter(_DetectorRunCore)
 
 
 class FieldCore(_Core):
@@ -194,7 +201,7 @@ class ScanSetCore(_Core):
     scanned_at: str
     tables: list[TableCore]
     relationships: list[RelationshipFactsCore]
-    detectors: list[DetectorRunCore] = Field(default_factory=list)
+    detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
 def _relaxed(model: type[BaseModel]) -> type[BaseModel]:
@@ -250,7 +257,7 @@ class ScanSet:
     scan_schema: str
     engine_version: str
     scanned_at: str
-    detectors: tuple[DetectorRun, ...] = _REGEX_ONLY
+    detectors: tuple[DetectorRun, ...] = REGEX_ONLY
 
 
 # ---------------------------------------------------------------------------
@@ -305,13 +312,7 @@ def scan_sources(
 
     declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
 
-    models: ModelPass | None = None
-    runs = _REGEX_ONLY
-    if pre_scan is not None:
-        loaded = load_detectors(
-            pre_scan.detectors, ner_model=pre_scan.ner_model, file_access=file_access
-        )
-        models, runs = ModelPass(loaded, pre_scan.ner_model), loaded.runs()
+    models, runs = load_pre_scan(pre_scan, file_access)
 
     scans = []
     for position, name in enumerate(selected, 1):
@@ -326,9 +327,8 @@ def scan_sources(
             time.monotonic() - started,
         )
         scans.append(scan)
-    if pre_scan is not None:
-        columns = sum(len(t.profile.fields) for t in scans)
-        log_detector_run("pre_scan", runs, {"tables": len(scans), "columns": columns})
+    if models is not None:
+        log_pre_scan(runs, scans)
     return ScanSet(
         tables=tuple(scans),
         relationships=_integrity_facts(descriptors, declared, spill_dir),

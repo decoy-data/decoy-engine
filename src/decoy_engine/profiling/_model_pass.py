@@ -15,16 +15,27 @@ ref, a band and a rate bucket, and the log line holds counts. Spans are counted 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 import pandas as pd
 
-from decoy_engine.detection import ModelRef, RateBucket, log_detector_models, ner_rates
-from decoy_engine.profiling.model_pack import DetectorSet, classify_frame
+from decoy_engine.config import PreScanConfig
+from decoy_engine.detection import (
+    DetectorRun,
+    ModelRef,
+    RateBucket,
+    log_detector_models,
+    log_detector_run,
+    ner_rates,
+)
+from decoy_engine.fileaccess import FileAccess
+from decoy_engine.profiling.model_pack import DetectorSet, classify_frame, load_detectors
 from decoy_engine.profiling.recommendations import classifier_detector_id
 
 Band = Literal["high", "review"]
+REGEX_ONLY: Final[tuple[DetectorRun, ...]] = (DetectorRun("regex", None),)
 
 
 @dataclass(frozen=True)
@@ -116,3 +127,21 @@ def _classifier_hits(
         out.append((column, ModelHit("classifier", detector_id, ref, cast(Band, band), None)))
         counts.classifier_hits += 1
     return out
+
+
+def load_pre_scan(
+    pre_scan: PreScanConfig | None, file_access: FileAccess | None
+) -> tuple[ModelPass | None, tuple[DetectorRun, ...]]:
+    """Load the model detectors once, strictly, before the first table; `None` is regex only."""
+    if pre_scan is None:
+        return None, REGEX_ONLY
+    loaded = load_detectors(
+        pre_scan.detectors, ner_model=pre_scan.ner_model, file_access=file_access
+    )
+    return ModelPass(loaded, pre_scan.ner_model), loaded.runs()
+
+
+def log_pre_scan(runs: tuple[DetectorRun, ...], scans: Sequence[Any]) -> None:
+    """The scan-level detector line: what ran and how many tables and columns it covered."""
+    columns = sum(len(t.profile.fields) for t in scans)
+    log_detector_run("pre_scan", runs, {"tables": len(scans), "columns": columns})
