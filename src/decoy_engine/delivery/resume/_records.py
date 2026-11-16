@@ -40,10 +40,11 @@ from decoy_engine._canonical._strict_spec import (
     SpecRefusedError,
 )
 from decoy_engine.delivery.resume._fingerprint import RunFingerprint
-from decoy_engine.publication._descriptor import ARTIFACT_FIELDS, Artifact
-from decoy_engine.publication._types import (
+from decoy_engine.publication import (
+    ARTIFACT_FIELDS,
     MAX_COUNT,
     OPERATION_ID_PATTERN,
+    Artifact,
     is_hex64,
     is_operation_id,
 )
