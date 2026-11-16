@@ -118,6 +118,13 @@ _CHUNK_ROWS = 65536
 _INSTALL_HINT = "pip install 'decoy-engine[vault]'"
 
 
+_COLUMNS = ("namespace", "masked", "source")
+
+
+def _unreadable(message: str) -> VaultError:
+    return VaultError(code=reasons.runtime.VAULT_UNREADABLE, message=message)
+
+
 def _frame(block: bytes) -> bytes:
     """Length-prefix a block: 4-byte big-endian length || block."""
     return len(block).to_bytes(4, "big") + block
@@ -130,16 +137,12 @@ def _read_frame(blob: bytes, offset: int) -> tuple[bytes, int]:
     fails cleanly instead of slicing past the end.
     """
     if offset + 4 > len(blob):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE, message="vault file truncated (length prefix)"
-        )
+        raise _unreadable("vault file truncated (length prefix)")
     length = int.from_bytes(blob[offset : offset + 4], "big")
     start = offset + 4
     end = start + length
     if end > len(blob):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE, message="vault file truncated (block body)"
-        )
+        raise _unreadable("vault file truncated (block body)")
     return blob[start:end], end
 
 
@@ -536,10 +539,7 @@ def load_vault(
         if vault is None:
             handle.close()
     if not blob.startswith(_MAGIC):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE,
-            message=f"{shown!r} is not a decoy vault file (bad magic header).",
-        )
+        raise _unreadable(f"{shown!r} is not a decoy vault file (bad magic header).")
 
     # Parse + validate the UNENCRYPTED header before any decrypt: a version mismatch then
     # gets a clear typed error, not an opaque InvalidToken (it does not restore compatibility).
@@ -549,10 +549,7 @@ def load_vault(
         if type(header.get("ambiguous_dropped", 0)) is not int:  # also bool, str, null
             raise ValueError("ambiguous_dropped")
     except (ValueError, UnicodeDecodeError, AttributeError) as exc:  # AttributeError: not a dict
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE,
-            message=f"vault {shown!r} has an unreadable header",
-        ) from exc
+        raise _unreadable(f"vault {shown!r} has an unreadable header") from exc
     fmt = header.get("format")
     if fmt != VAULT_FORMAT_VERSION:
         raise VaultError(
@@ -591,9 +588,13 @@ def load_vault(
                     "of the run that wrote it."
                 ),
             ) from exc
-        chunk = pq.read_table(pa.BufferReader(payload))
-        namespaces = chunk.column("namespace").to_pylist()
-        masked = chunk.column("masked").to_pylist()
-        sources = chunk.column("source").to_pylist()
-        mapping.update({(ns, m): s for ns, m, s in zip(namespaces, masked, sources, strict=True)})
+        try:
+            chunk = pq.read_table(pa.BufferReader(payload))
+            rows = list(zip(*(chunk.column(c).to_pylist() for c in _COLUMNS), strict=True))
+        except (pa.ArrowException, KeyError, ValueError):
+            raise _unreadable("vault chunk is malformed") from None
+        known = len(mapping)
+        mapping.update({(ns, m): src for ns, m, src in rows})
+        if len(mapping) != known + len(rows):  # the writer folds duplicates, so one is corruption
+            raise _unreadable("vault holds a duplicate entry")
     return mapping, ambiguous

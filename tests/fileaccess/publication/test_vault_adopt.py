@@ -553,3 +553,75 @@ def test_adopt_refuses_a_character_device_leaf_before_reading(
         monkeypatch.undo()
         if root_fd >= 0:
             os.close(root_fd)
+
+
+def _vault_blob_with_chunks(*payloads: bytes) -> bytes:
+    """A real header followed by one correctly encrypted frame per payload."""
+    blob, _ = writer().serialize()
+    magic = vault_module._MAGIC
+    _, rest = vault_module._read_frame(blob, len(magic))
+    fernet = writer()._fernet()
+    frames = b"".join(vault_module._frame(fernet.encrypt(p)) for p in payloads)
+    return blob[:rest] + frames
+
+
+def _parquet(rows: Any, names: Any = ("namespace", "masked", "source")) -> bytes:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    table = pa.table(
+        {n: pa.array([r[i] for r in rows], type=pa.string()) for i, n in enumerate(names)}
+    )
+    buf = pa.BufferOutputStream()
+    pq.write_table(table, buf)
+    return buf.getvalue().to_pybytes()
+
+
+_SAME = (("ns", "m1", "s1"), ("ns", "m2", "s2"))
+_DUPLICATE_VAULTS = {
+    "one chunk": [_parquet((("ns", "m1", "wrong"), *_SAME))],
+    "two chunks": [_parquet(_SAME), _parquet((("ns", "m1", "wrong"),))],
+    "same value twice": [_parquet((*_SAME, ("ns", "m1", "s1")))],
+}
+
+
+@pytest.mark.parametrize("name", list(_DUPLICATE_VAULTS))
+def test_a_vault_with_a_duplicate_key_is_unreadable_and_never_adopted(
+    base: Path, name: str
+) -> None:
+    """The writer folds duplicates away, so a stored duplicate `(namespace, masked)` is corruption:
+    it must not read as the writer's rows even when the last value equals the writer's."""
+    blob = _vault_blob_with_chunks(*_DUPLICATE_VAULTS[name])
+    with pytest.raises(VaultError) as caught:
+        load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
+    assert caught.value.code == reasons.runtime.VAULT_UNREADABLE
+    assert "wrong" not in str(caught.value) and "s1" not in str(caught.value)
+    assert _vault_order.same_rows(blob, writer()) is False
+    (base / REL).write_bytes(blob)
+    out, root_fd = vault_out("strict", base, REL)
+    try:
+        assert isinstance(_vault_order.adopt_vault(out, writer()), _vault_order.VaultConflict)
+    finally:
+        os.close(root_fd)
+
+
+def test_the_control_vault_built_from_chunks_reads_as_own() -> None:
+    blob = _vault_blob_with_chunks(_parquet(_SAME))
+    assert _vault_order.same_rows(blob, writer()) is True
+
+
+_MALFORMED_PAYLOADS = {
+    "not parquet": b"not a parquet file",
+    "wrong schema": _parquet(_SAME, names=("namespace", "masked", "other")),
+    "missing columns": _parquet([("a",)], names=("namespace",)),
+}
+
+
+@pytest.mark.parametrize("name", list(_MALFORMED_PAYLOADS))
+def test_an_authenticated_malformed_payload_is_unreadable_not_a_crash(name: str) -> None:
+    blob = _vault_blob_with_chunks(_MALFORMED_PAYLOADS[name])
+    with pytest.raises(VaultError) as caught:
+        load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
+    assert caught.value.code == reasons.runtime.VAULT_UNREADABLE
+    assert caught.value.__cause__ is None
+    assert writer().reads_as_own(_vault_order.BytesHandle(blob)) is False
