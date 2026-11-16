@@ -248,3 +248,10 @@ def test_compile_refuses_what_run_refuses(tmp_path: Path, name: str) -> None:
 def test_compile_accepts_a_real_snapshot(tmp_path: Path) -> None:
     path = _snapshot_file(tmp_path, "cat", {})
     assert len(check_statistical_columns(_config(path, "cat"))) == 1
+
+
+@pytest.mark.parametrize("case", IDS)
+def test_refusal_text_carries_no_snapshot_number(case: str) -> None:
+    with pytest.raises(StatisticalSpecError) as exc:
+        check_degenerate(CASES[case])
+    assert not any(ch.isdigit() for ch in exc.value.message.replace("'c'", ""))

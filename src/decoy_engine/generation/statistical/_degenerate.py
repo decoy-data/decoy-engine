@@ -55,10 +55,7 @@ def _histogram_finding(
     except (TypeError, ValueError, OverflowError):
         return edges_key, f"{edges_key} or {counts_key} is not numeric"
     if len(edges) < 2 or len(counts) != len(edges) - 1:
-        return (
-            edges_key,
-            f"snapshot {what} is degenerate (edges={len(edges)}, counts={len(counts)})",
-        )
+        return edges_key, f"snapshot {what} needs two edges and one count per bin"
     if _weights_unusable(counts):
         return counts_key, f"snapshot {what} counts are negative, not finite or add up to zero"
     return None
