@@ -1,7 +1,7 @@
 # F-1 bucket_perturb format errors, and the unplanned V1 rows
 
 Status: plan
-Repo: decoy-engine (most slices), with CLI slices named per row. Branch `plan/f1-bucket-perturb-and-unplanned`, cut from engine origin/main `13c95c7de` (#607). CLI read at origin/main `ba7b613e` (#294).
+Repo: decoy-engine (most slices), with CLI slices named per row. Branch `plan/f1-bucket-perturb-and-unplanned`, cut from engine origin/main `13c95c7de` (#607). CLI read at origin/main `e4c7f387` (#302).
 Author: Opus planner, 2026-11-16. Risk tiers per slice: R1 = Codex review only; R2 = Dennis then Codex.
 Rules consulted: /home/cam/dev-rules/00-universal.md, /home/cam/dev-rules/risk-and-exceptions.md, /home/cam/dev-rules/development-loop.md, /home/cam/dev-rules/profiles/local-operations.md, /home/cam/dev-rules/workspace-and-vcs.md, /home/cam/dev-rules/reuse-first.md, /home/cam/dev-rules/exploration.md, /home/cam/dev-rules/scope-discipline.md, /home/cam/dev-rules/proportionality.md, /home/cam/dev-rules/verification.md, /home/cam/dev-rules/code-review.md, /home/cam/dev-rules/testing.md, /home/cam/dev-rules/architecture.md, /home/cam/dev-rules/cross-cutting-concerns.md, /home/cam/dev-rules/bugfix.md, /home/cam/dev-rules/api-and-compatibility.md, /home/cam/dev-rules/observability-and-resilience.md, /home/cam/dev-rules/documentation.md, /home/cam/dev-rules/catalogs/recurring-defects.md; memory v1-bar-blocking-criteria, v1-scope-no-new-features, plan-defines-acceptance-tests, develop-correctly-registries-and-sizing, best-practice-becomes-a-sentry.
 
@@ -14,7 +14,7 @@ Not in scope: engine `plan/prop-batch` (docs/plans/2026-11-16-prop-batch.md, sli
 
 Guarantee (F-1): after F1b, no route writes a non-null bucket_perturb source cell that did not parse under the column's resolved date format; each such cell is a `format_error` row error, handled by the D8 rule. After F1c, out-of-core configs whose quarantine covers `format_error` take the resident route. Non-goals: changing `date_shift`'s own format detection, `text_mask` spans (E-F0), changing the Rust kernel ABI, new quarantine triggers.
 
-Revision 3 (2026-11-16) resolves Dennis round 2 on `50568d034` (2 HIGH, 4 MEDIUM, 2 LOW). It keeps the round 1 owner answers and the majority-format decision. The finding maps are in sections 13 and 14.
+Revision 4 (2026-11-16) resolves the Codex NO-GO on `4770c18bc` (2 DESIGN, 1 V2-LOG). It keeps the earlier owner answers and the majority-format decision. The finding maps are in sections 13 to 15.
 
 ## 1. F-1 verdict
 
@@ -50,9 +50,7 @@ bucket_perturb is the only handler-level member of the class that is left. The c
 
 ## 2. Established solutions
 
-Search run: in-codebase first (`git grep` over engine origin/main for `format_error`, `row_errors`, `errors="coerce"`, `FORMAT_ERROR_REASON`), then the reject-row patterns of established data tools from known documentation: Spark's `badRecordsPath` and `mode=FAILFAST|PERMISSIVE`, and the reject file of ETL tools. No web search was run: the engine already has a reviewed, shipped implementation of this exact pattern (date_shift's `format_error` row errors plus the D8 quarantine rule), which is itself the reject-row pattern (fail fast by default, route bad rows to a side output on opt-in).
-
-Design follows: `execution/_strategies/_date_shift.py` (handler) and `native/_date_shift_ext.py` (`native_date_shift` returning `(out, positions)`). Custom code is only the bucket_perturb call sites and one reason lookup.
+Search run online and in the codebase before this revision: pandas documents `to_datetime(errors="coerce")` as marking each invalid parse as `NaT` ([pandas](https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html)); dateutil raises `ParserError` for an invalid or unknown date string ([dateutil](https://dateutil.readthedocs.io/en/stable/parser.html)); and Great Expectations exposes unexpected row indexes or complete failing rows so callers can quarantine them ([GX result format](https://docs.greatexpectations.io/docs/core/trigger_actions_based_on_results/choose_a_result_format/)). `git grep` on engine `13c95c7de` for `format_error`, `RowError`, `errors="coerce"`, and inline reason literals found the shipped local pattern in `execution/_strategies/_date_shift.py` plus direct producers in `_bucketize.py`, `_top_code.py`, `_nested.py`, and `_code_set.py` (`mask_error` only). The design follows pandas' per-row invalid mask, the engine's date_shift result shape, and D8's existing fail-or-quarantine handling; custom code remains limited to bucket_perturb call sites and the central reason lookup.
 
 ## 3. F-1 design
 
@@ -60,7 +58,7 @@ The fix mirrors date_shift and is made by construction: the kernels return posit
 
 1. `apply_bucket_perturb(...)` returns `BucketPerturbResult(series, format_error_positions)`, a NamedTuple. `format_error_positions` is an int64 array of the non-null rows that do not parse under the resolved format. `native_bucket_perturb(...)` returns `(out, format_error_positions)` like `native_date_shift`; the preserved path rebases through `selected`.
 2. Format resolution (owner Q2 decision, review M5). An explicit `date_format` is used as given. Without one, only the resident pandas handler runs a new `_detect_majority_format(series)` in `transforms/bucket_perturb.py`. It takes `dropna().astype(str).head(200)`, strips each string, counts how many values each format in `transforms/date_shift._COMMON_FORMATS` parses, and picks the highest count. Ties go to the earlier format in `_COMMON_FORMATS`. A format that parses no sample value is not a candidate. If no format parses any value, every non-null cell is a format error. The detector sees only the rows passed to the handler and, for `preserve`, only the rows passed to the kernel. `when:` selection occurs before the handler. Preserve filtering occurs before detection. The sequential-native leg declines at `_sequential_native.py:392` and falls through to pandas. Every other non-pandas leg already refuses autodetect at `_chunked_bucket_perturb.py:84`, `out_of_core/_compat.py:427`, `out_of_core/_mask_group_c.py:473`, and `physical/_shadow_bindings.py:364`. The plan does not add a second detector or pass a detected format into those legs. `date_shift._detect_format` is not changed. The old warning log in `transforms/bucket_perturb.py:168` is removed.
-3. One reason registry: `execution/_row_errors.py` gets `format_error_reason(strategy) -> str` backed by a closed dict (`date_shift`, `bucket_perturb`); an unknown strategy raises `KeyError`. The four hard-coded copies of the date_shift reason read from it: `execution/_strategies/_date_shift.py:240`, `execution/_sequential_native_ops.py:491`, `execution/native/_chunked_row_errors.py:32`, `execution/physical/_shadow_operators.py:429`. `native/_date_shift_ext.py:68` `FORMAT_ERROR_REASON` stays as an alias for one release. The bucket_perturb reason is `"value is not a parseable date under bucket_perturb"` (value-free, trap T3). 24zb E1 is building now and edits `_strategies/_date_shift.py`; slice F1-0 rebases after it merges.
+3. One reason registry: `execution/_row_errors.py` gets a closed `(strategy, trigger)` reason table, `row_error_reason(strategy, trigger) -> str`, and `format_error_reason(strategy) -> str` as its `format_error` view; an unknown pair raises `KeyError`. The format-error keys are exactly `date_shift`, `bucket_perturb`, `bucketize`, `top_code`, and `nested`. Exact-base verification found that `code_set` records `mask_error`, not `format_error`, at `execution/_strategies/_code_set.py:232`; its existing reason template therefore occupies the `("code_set", "mask_error")` entry instead of a false format-error entry, and its call site formats the checked `exc.code` into that registry-owned template. Every direct producer uses the registry: F1-0 changes date_shift at `execution/_strategies/_date_shift.py:240` and the generic carriers at `execution/_sequential_native_ops.py:491`, `execution/native/_chunked_row_errors.py:32`, and `execution/physical/_shadow_operators.py:429`; behavior-neutral F1-0b changes `execution/_strategies/_bucketize.py:139`, `_top_code.py:200`, `:321`, and `:334`, `_nested.py:341`, and `_code_set.py:233`; F1b adds the bucket_perturb lookup in `execution/_strategies/_bucket_perturb.py`. `native/_date_shift_ext.py:68` `FORMAT_ERROR_REASON` stays as an alias for one release and delegates to the registry. The bucket_perturb reason is `"value is not a parseable date under bucket_perturb"` (value-free, trap T3). 24zb E1 is building now and edits `_strategies/_date_shift.py`; slice F1-0 rebases after it merges.
 4. The handler appends one `RowError(column, row_index, "format_error", reason)` per position. With `preserve` set, positions are rebased to the full frame by a new `apply_excluding_preserved_with_errors` in `transforms/date_preserve.py` that returns `(series, preserved_count, positions_in_full_frame)`. A `when:` gate rebases through the existing `_when_gate.py:85` path (pandas) and the `run_kernel_step_masked` rebase through `selected` (native); both are covered by acceptance tests.
 5. Native callers are prepared generically in F1-0 and turn errors on together in F1b:
    - F1-0 changes `_sequential_native.py:88` to import the generic `format_error_row_errors` name and changes the call at `:553`. Its net line change stays zero or less, and its 700-line ceiling is not raised. F1-0 also changes `native/_chunked_entry.py:311` to the strategy-generic error carrier type and `:348` to the generic record builder. F1b then supplies bucket_perturb positions to these prepared carriers;
@@ -68,7 +66,7 @@ The fix mirrors date_shift and is made by construction: the kernels return posit
    - `run_kernel_step` (`execution/native/_operator_step.py:458` and `:471`) returns the positions in `StepResult`;
    - the chunked native route (`execution/native/_chunk_masking.py:275`) and the unified shadow route (`execution/physical/_shadow_operators.py:425`) are made strategy-generic in F1-0 (they carry any `StepResult` positions with the operator's strategy, and the "needs a target column" guard at `:288` covers every operator whose spec routes `reduce_row_error:format_error`), so F1b needs no edit there;
    - out-of-core native: `out_of_core/_bucket_native.py:271` unpacks the new return in F1a.
-6. Registries: `_capabilities.py:211` gains `row_error_modes=("format_error",)`, and the operator spec at `_operator_registry.py:227` gains `routed_diagnostics={"reduce_row_error:format_error"}`. The `config/_validators.py` QuarantineConfig docstring lists bucket_perturb as a format_error producer. The per-trigger pins in `tests/native/test_capabilities.py:102` to `:111` stay and gain bucket_perturb.
+6. Registries: `_capabilities.py:211` gains `row_error_modes=("format_error",)`, and the operator spec at `_operator_registry.py:227` gains `routed_diagnostics={"reduce_row_error:format_error"}`. F1a updates the `config/_validators.py` QuarantineConfig docstring to list bucket_perturb as a format_error producer while that slice is still below ten production files. The per-trigger pins in `tests/native/test_capabilities.py:102` to `:111` stay and gain bucket_perturb.
 7. Row indexes on chunked legs stay chunk-local. That is the existing contract (`execution/native/_chunked_row_errors.py:10` to `:11`): the oracle chunked leg never adds the chunk offset to `row_index` (`_row_errors.drain_row_errors`), and the offset is carried only by the summary from `chunk_row_error_summary` (`execution/_row_error_summary.py:147`, fields `chunk_index` and `chunk_row_offset`; used at `execution/_chunked_oracle.py:486` to `:495`). bucket_perturb follows it on every chunked leg. Slice F1a2 is behavior-neutral. It adds `chunk_index` and `chunk_row_offset` to `out_of_core/_mask.py:369` `mask_batch`, enumerates batches and advances the offset in both `_stream_driver.py:324` and `_rewrite_pass.py:190`, and adds one dormant row-error raise helper inside `mask_batch`. F1b makes the bucket result carry positions and invokes that helper. Both out-of-core drivers then use one raise path and one chunk-summary builder.
 8. Out-of-core has no quarantine channel.
    - F1b: `out_of_core/_mask_group_c.py` and `_bucket_native.py` return bucket positions through the existing mask dispatch. The one helper in `out_of_core/_mask.py:369` raises `RowErrorsFailedError` with a `chunk_row_error_summary` on the first bad chunk, before publish. Records are chunk-local. The summary carries the threaded `chunk_index` and `chunk_row_offset`. Raise after the `except` block closes (recurring defect 3). Between F1b and F1c an out-of-core config with quarantine on `format_error` fails closed; that is safe.
@@ -80,8 +78,8 @@ The fix mirrors date_shift and is made by construction: the kernels return posit
 - Choke point: the kernel return type. Every caller must unpack positions. F1a adds the unpack at every caller and discards positions on purpose with a `# F1b turns these into RowErrors` comment; F1b removes every discard. Guard: S1 walks `SCALAR_HANDLERS` (the real registry, not a hand list). Mutation: drop the `ctx.row_errors.extend` in the bucket_perturb handler; S1 goes red.
 - Quarantine-routing choke point: `compile_plan` owns the one `quarantine_covers_format_error` fact, and `check_out_of_core_compatibility` consumes it. Every route, estimate, explain path and public caller already passes the Plan. A13b is the guard. Mutation: ignore the Plan bool in `_compat.py`; every A13b reporting assertion goes red.
 - Out-of-core row-error choke point: both batch drivers call `mask_batch`, and only its helper builds and raises the chunk summary. P3 covers both drivers. A6 and A12 cover the Python and native bucket kernels. Mutation: return the failing batch instead of calling the helper; the no-publish assertions go red.
-- Parallel tables: `_capabilities` `row_error_modes`, `_operator_registry` `routed_diagnostics` and the format-error reason table must agree. S2 checks them against S1's observed (strategy, trigger) pairs.
-- No new structure: two functions (`format_error_reason`, `format_error_row_errors`), one helper variant in `date_preserve.py`, one detection function. No new module except the S1 sentry test file.
+- Parallel tables: `_capabilities` `row_error_modes`, `_operator_registry` `routed_diagnostics`, and the central reason table must agree with observed behavior. S2 checks the capability and operator declarations against S1's observed `(strategy, trigger)` pairs, and separately checks that the `format_error_reason` view keys equal exactly the observed `(strategy, "format_error")` strategies. A producer-reachability check also fails if a direct format-error producer supplies an inline reason instead of calling `format_error_reason`; `code_set` is checked against its truthful `mask_error` table entry.
+- No new module structure: three small functions (`row_error_reason`, `format_error_reason`, `format_error_row_errors`), one helper variant in `date_preserve.py`, and one detection function. No new module except the S1 sentry test file.
 
 ## 4. Enumerations
 
@@ -133,11 +131,12 @@ Every route that runs bucket_perturb, with the file that must handle positions:
 
 ## 5. Acceptance tests, red first
 
-Each behavior test fails on `13c95c7de` and passes after its slice. F1-0, F1a and F1a2 change no behavior, so P1 to P3 are refactor pins. They pass before and after, and their named mutations show that they can fail. Builders write the F1b and F1c behavior tests first and record them red. Every resident-route test runs twice, with the native companion installed and without it, so both the pandas leg and the sequential native seam are covered.
+Each behavior test fails on `13c95c7de` and passes after its slice. F1-0, F1-0b, F1a and F1a2 change no behavior, so P1, P1b, P2 and P3 are refactor pins. They pass before and after, and their named mutations show that they can fail. Builders write the F1b and F1c behavior tests first and record them red. Every resident-route test runs twice, with the native companion installed and without it, so both the pandas leg and the sequential native seam are covered.
 
 | Id | Test | Fails before because | Slice |
 |---|---|---|---|
-| P1 | Reason registry: every date_shift record on every leg carries the registry text; the date_shift reason literal appears only in `_row_errors.py` (grep sentry); an unknown strategy raises | four literal copies | F1-0 |
+| P1 | Reason registry: every date_shift record on every leg carries the registry text; all registered reason literals appear only in `_row_errors.py`; an unknown `(strategy, trigger)` raises | inline copies | F1-0 |
+| P1b | Direct producers `bucketize`, `top_code`, `nested`, and `code_set` obtain their reason from the central registry; outputs, triggers, records, and exception behavior are byte-for-byte unchanged | inline reason literals | F1-0b |
 | P2 | Kernel shape: `apply_bucket_perturb` and `native_bucket_perturb` return positions equal to the non-null rows that fail to parse; every existing output is unchanged | no positions | F1a |
 | P3 | Out-of-core context: spies on `mask_batch` show `_stream_driver.py` and `_rewrite_pass.py` pass chunk indexes `0, 1, ...` and cumulative row offsets for uneven batches; output and route evidence stay byte-identical | no chunk context reaches `mask_batch` | F1a2 |
 | A1 | Handler: `["2020-01-05", "not a date", None]`, explicit format, no quarantine: raises `RowErrorsFailedError` with one record, row 1, `format_error` | the run succeeds and row 1 is `"not a date"` in the output | F1b |
@@ -160,10 +159,10 @@ Each behavior test fails on `13c95c7de` and passes after its slice. F1-0, F1a an
 | A13b | For one quarantine config, capacity, `_job_estimate`, `--explain`, and the executed route all report the resident route and the same new route reason. Without coverage, all four keep the out-of-core decision. Direct `check_out_of_core_compatibility(plan, ...)` and its public export keep the old signature. After the engine repin, the platform `estimate_child` contract test calls root `decoy_engine.estimate_job` and reports the same resident estimate | callers can disagree when quarantine is threaded selectively | F1c |
 | A18 | A chunk-eligible bucket_perturb column with quarantine covering `format_error` either finishes resident with the bad row quarantined, or fails before output with `reasons.decoy.ROW_ERRORS_FAILED`; it never succeeds on a chunked route with the source value present | no bucket_perturb row error today | F1b |
 | S1 | Sentry `tests/sentry/test_no_silent_passthrough.py`: for each strategy in `SCALAR_HANDLERS`, one adversarial non-null case per declared trigger (and one plain case for a strategy with none). The case passes if the output differs from the source after normalization (`str(v).strip()` on both), or a RowError with the declared trigger is recorded, or the run raises. A strategy with no case and no allowlist entry fails. The allowlist holds `passthrough`, `shuffle`, `text_redact` (non-match) and `geo_generalize` (short zip), each with a written reason | bucket_perturb fails it | F1b |
-| S2 | Sentry (same file): the set of (strategy, trigger) pairs observed in S1 equals the pairs declared in `_capabilities` `row_error_modes`; for strategies that have an `OperatorSpec` (`_operator_registry.py:188`, `:257`, `:277`), it equals the `reduce_row_error:<trigger>` entries in `routed_diagnostics` | bucket_perturb undeclared | F1b |
+| S2 | Sentry (same file): the set of `(strategy, trigger)` pairs observed in S1 equals the pairs declared in `_capabilities` `row_error_modes`; for strategies that have an `OperatorSpec` (`_operator_registry.py:188`, `:257`, `:277`), it equals the `reduce_row_error:<trigger>` entries in `routed_diagnostics`; the `format_error_reason` view keys equal exactly the strategies in the observed `(strategy, "format_error")` pairs; and an AST walk rejects an inline reason at a direct registered producer | bucket_perturb is undeclared and the reason table is incomplete | F1b |
 | G-ZIP | geo_generalize: an input zip with 3 or more digits never equals the normalized source | guards the allowlist entry | F1b |
 
-S1 and S2 are registered in `SENTRY_PATHS` so `scripts/dev/gates.sh` runs them, and `tests/sentry/test_sentry_manifest.py` stays green. Seeded-bypass proof for S1 (cross-cutting rule): in a scratch copy, register a test strategy that returns its input; S1 must go red. Record it.
+S1 and S2 are registered in `SENTRY_PATHS` so `scripts/dev/gates.sh` runs them, and `tests/sentry/test_sentry_manifest.py` stays green. Seeded-bypass proofs: in a scratch copy, register a test strategy that returns its input and show S1 red; delete the `top_code` reason entry while leaving its producer and show S2 red; restore both before committing. Record both mutations on the final head.
 
 Existing tests that use unparseable bucket_perturb fixtures (about 30 files, among them `tests/unit/execution/test_bucket_perturb.py`, `tests/physical/test_shadow_bucket_perturb.py`, `tests/native/test_chunked_bucket_perturb_parity.py`, `tests/parity/test_phase_d_d1b1_bucket_*.py`, `tests/parity/test_phase_d_d2c_iii_bucket_*.py`): in F1a kernel callers unpack the new tuple; in F1b route and parity tests that asserted passthrough flip, in the same commit, to assert the same `RowErrorsFailedError` on both legs. The gate diff-checks every test edit for weakened assertions (memory builders-route-around-divergence).
 
@@ -172,7 +171,7 @@ Existing tests that use unparseable bucket_perturb fixtures (about 30 files, amo
 - `RowError`, `drain_row_errors`, `RowErrorsFailedError`, the D8 quarantine rule: reused as-is.
 - `native_date_shift` return shape and the `run_kernel_step_masked` rebase through `selected`: the pattern for `native_bucket_perturb`.
 - `date_shift_row_errors` (`_sequential_native_ops.py`): generalized to `format_error_row_errors(strategy, ...)`, not copied.
-- `format_error_records` (`native/_chunked_row_errors.py`): reused with the strategy key.
+- `format_error_records` (`native/_chunked_row_errors.py`): reused with the strategy key and central reason lookup.
 - `chunk_row_error_summary` (`_row_error_summary.py:147`): reused for every chunked raise.
 - `_DEFERRED_GROUP_B` pattern in `out_of_core/_compat.py`: reused for the quarantine reroute.
 - `_COMMON_FORMATS` and the 200-row sample of `transforms/date_shift._detect_format`: reused by the majority detector.
@@ -190,7 +189,7 @@ Existing tests that use unparseable bucket_perturb fixtures (about 30 files, amo
 | 6 | untrusted input | the bad cell is untrusted text; it never reaches a reason, log or exception context | P1 value-free reason check; `__context__ is None` on the raise | put the value in the reason; P1 goes red |
 | 7 | TOCTOU / check-then-use | N/A: there is no separate check step; the kernel reports what it parsed in the same pass |  |  |
 | 8 | weak tests | route tests flipped to assert equal errors on both legs, never deleted | gate diff-check of test edits | change a test to `pytest.raises(Exception)`; the gate rejects it |
-| 9 | refactor drift (reason string copies) | one `format_error_reason` registry | P1 grep sentry: the date_shift reason literal only in the registry | re-add a literal copy; P1 goes red |
+| 9 | refactor drift (reason string copies) | one `(strategy, trigger)` registry with `format_error_reason` as its format-error view | P1, P1b, and S2: literals live only in the registry, direct producers call it, and format-error keys equal observed pairs | re-add a literal at any direct producer; P1b or S2 goes red |
 | 10 | frozen contract change | `RowErrorRecord` shape unchanged; `FORMAT_ERROR_REASON` kept as alias; behaviour change in CHANGELOG | compatibility contract tests unchanged and green | remove the alias; the import test goes red |
 
 ## 8. Frozen contracts
@@ -203,17 +202,18 @@ Existing tests that use unparseable bucket_perturb fixtures (about 30 files, amo
 
 ## 9. Slices
 
-Each slice is green on its own head. F1-0, F1a and F1a2 change no behaviour. F1b turns errors on for every leg in one slice, with the parity and route test flips. F1c adds the reroute.
+Each slice is green on its own head. F1-0, F1-0b, F1a and F1a2 change no behaviour. F1b turns errors on for every leg in one slice, with the parity and route test flips. F1c adds the reroute.
 
 | Slice | Repo | Risk | Production files (max 10, 800 lines) | Tests |
 |---|---|---|---|---|
 | F1-0 reason registry, generic chunked and shadow carriers (after 24zb E1 merges) | engine | R1 | `execution/_row_errors.py`, `execution/native/_date_shift_ext.py`, `execution/_strategies/_date_shift.py`, `execution/_sequential_native_ops.py`, `execution/_sequential_native.py` (rename import at `:88` and call at `:553`, net lines 0 or less), `execution/native/_chunked_row_errors.py`, `execution/native/_chunk_masking.py`, `execution/native/_chunked_entry.py` (generic type at `:311`, generic call at `:348`), `execution/physical/_shadow_operators.py` | P1; existing date_shift route tests unchanged and green |
-| F1a kernel return shape, every caller unpacks | engine | R1 | `transforms/bucket_perturb.py`, `transforms/date_preserve.py`, `execution/native/_bucket_perturb_ext.py`, `execution/_strategies/_bucket_perturb.py`, `execution/_sequential_native_ops.py`, `execution/native/_operator_step.py`, `execution/out_of_core/_mask_group_c.py`, `execution/out_of_core/_bucket_native.py` | P2; kernel-caller unpacking in existing tests; all outputs unchanged |
+| F1-0b complete producer reason migration | engine | R1 | `execution/_strategies/_bucketize.py`, `execution/_strategies/_top_code.py`, `execution/_strategies/_nested.py`, `execution/_strategies/_code_set.py` | P1b; existing strategy tests prove byte-for-byte behavior and trigger parity |
+| F1a kernel return shape, every caller unpacks | engine | R1 | `transforms/bucket_perturb.py`, `transforms/date_preserve.py`, `execution/native/_bucket_perturb_ext.py`, `execution/_strategies/_bucket_perturb.py`, `execution/_sequential_native_ops.py`, `execution/native/_operator_step.py`, `execution/out_of_core/_mask_group_c.py`, `execution/out_of_core/_bucket_native.py`, `config/_validators.py` (QuarantineConfig docstring only) | P2; kernel-caller unpacking in existing tests; all outputs unchanged |
 | F1a2 out-of-core chunk context, behavior-neutral | engine | R1 | `execution/out_of_core/_mask.py`, `execution/out_of_core/_stream_driver.py`, `execution/out_of_core/_rewrite_pass.py` | P3; existing output and route parity; no raise is enabled |
-| F1b errors on, every leg | engine | R2 | `transforms/bucket_perturb.py` (resident-pandas majority detector, docstrings), `execution/_strategies/_bucket_perturb.py`, `execution/_sequential_native.py` (net lines 0 or less), `execution/_sequential_native_ops.py`, `execution/native/_operator_step.py`, `execution/_operator_registry.py`, `execution/native/_capabilities.py`, `execution/out_of_core/_mask.py`, `execution/out_of_core/_mask_group_c.py`, `execution/out_of_core/_bucket_native.py`; docs: `config/_validators.py` docstring, `docs/qa/07-mask-dates-and-numbers.md`, `docs/strategies.md`, CHANGELOG | A1 to A12, A14 to A18, S1, S2, G-ZIP, `test_capabilities.py` pins, parity and route test flips |
+| F1b errors on, every leg | engine | R2 | `transforms/bucket_perturb.py` (resident-pandas majority detector, docstrings), `execution/_strategies/_bucket_perturb.py`, `execution/_sequential_native.py` (net lines 0 or less), `execution/_sequential_native_ops.py`, `execution/native/_operator_step.py`, `execution/_operator_registry.py`, `execution/native/_capabilities.py`, `execution/out_of_core/_mask.py`, `execution/out_of_core/_mask_group_c.py`, `execution/out_of_core/_bucket_native.py`; docs: `docs/qa/07-mask-dates-and-numbers.md`, `docs/strategies.md`, CHANGELOG | A1 to A12, A14 to A18, S1, S2, G-ZIP, `test_capabilities.py` pins, parity and route test flips |
 | F1c out-of-core quarantine reroute | engine | R2 | `plan/_types.py`, `plan/_compile.py`, `plan/_serialize.py`, `execution/out_of_core/_compat.py`, one `reasons/route/` catalog file (one new code, `since=UNRELEASED`) | A13a, A13b; plan-version and frozen-surface contract tests |
 
-Expected size: F1-0 about 120 lines of source, F1a about 150, F1a2 about 45, F1b about 300, F1c about 100, plus tests. Every slice has at most 10 production files. No new public names in `decoy_engine.__all__`.
+Expected size: F1-0 about 120 lines of source, F1-0b about 30, F1a about 150, F1a2 about 45, F1b about 300, F1c about 100, plus tests. Every slice has at most 10 production files. No new public names in `decoy_engine.__all__`.
 
 Size census: `execution/_sequential_native_ops.py` is 594 lines on `13c95c7de` and gets a new census entry in F1-0. `execution/out_of_core/_compat.py` is 586 lines and gets a new census entry in F1c. Each entry in `tests/sentry/test_module_size.py` has at most 20 lines of headroom and a decomposition note. These are new census entries, not raised pins. `_sequential_native.py` keeps its existing 700 ceiling, with a net line change of zero or less. `native/_chunked_entry.py` keeps its existing ceiling.
 
@@ -221,7 +221,7 @@ Size census: `execution/_sequential_native_ops.py` is 594 lines on `13c95c7de` a
 
 | New thing | Where | CODEMAP reason | Sits beside |
 |---|---|---|---|
-| `format_error_reason()` | `execution/_row_errors.py` (existing file) | the module that owns `RowError` | `drain_row_errors` |
+| central reason table, `row_error_reason()`, and `format_error_reason()` | `execution/_row_errors.py` (existing file) | the module that owns `RowError` | `drain_row_errors` |
 | `format_error_row_errors()` | `execution/_sequential_native_ops.py` (existing file) | replaces `date_shift_row_errors` there | `_bucket_apply` |
 | `apply_excluding_preserved_with_errors()` | `transforms/date_preserve.py` (existing file) | preserve helpers live there | `apply_excluding_preserved` |
 | `_detect_majority_format()` | `transforms/bucket_perturb.py` (existing file) | bucket_perturb's own transform module | `apply_bucket_perturb` |
@@ -232,9 +232,9 @@ No new production file or directory. `_shadow_operators.py` and `_operator_step.
 
 ### 9.2 Order, release and repin
 
-- Order: 24zb E1, then F1-0, then F1a, then F1a2, then F1b, then F1c.
+- Order: 24zb E1, then F1-0, then F1-0b, then F1a, then F1a2, then F1b, then F1c.
 - Reason-fixture merge order: prop-batch E-F0, then F1c. WF-R1 does not edit a manifest fixture and is not in this chain. On a conflict in the working reason manifest fixture, keep both additions. New codes use `since=UNRELEASED`; release prep stamps the version. Nobody edits the release pin `tests/fixtures/f29/reason-registry-release.json`.
-- Release: F1-0, F1a and F1a2 may ship in any engine tag because they do not change behavior. F1b may ship alone: out-of-core with quarantine fails closed until F1c, which is safe. F1c follows in the next tag.
+- Release: F1-0, F1-0b, F1a and F1a2 may ship in any engine tag because they do not change behavior. F1b may ship alone: out-of-core with quarantine fails closed until F1c, which is safe. F1c follows in the next tag.
 - CLI repin (row 77 train) after F1b's tag. The CLI needs no source change. One CLI e2e test goes in with the repin: a bad date in a bucket_perturb column, no quarantine. It asserts the named exit constant the CLI gives for an engine `DecoyError` today (expected `EXIT_RUNTIME`, 3; the builder confirms from `src/decoy/cli/run/_errors.py` and pins the constant by name), that stderr names the column and `format_error`, and that stderr does not contain the cell text.
 
 ## 10. Pre-mortem
@@ -254,7 +254,7 @@ No new production file or directory. `_shadow_operators.py` and `_operator_step.
 
 ## 12. Roadmap row for F-1 (ready to paste)
 
-| 24zn | F1-BUCKET-FMT (finding F-1, 2026-11-16): `bucket_perturb` records a `format_error` row error for every unparseable date cell, on every route, as `date_shift` does. Without `date_format` the resident pandas handler uses the format that parses the most sample values, so one bad date is one error. Other legs refuse autodetect. Out-of-core fails closed, or goes to the resident route when the compiled Plan says quarantine covers `format_error`. A sentry checks that no mask strategy passes non-null input through silently | engine | PLANNED. Plan: engine `plan/f1-bucket-perturb-and-unplanned` (docs/plans/2026-11-16-f1-bucket-perturb-and-unplanned.md, rev 3), slices F1-0, F1a, F1a2, F1b, F1c | finding F-1; 24zb E1 | none |
+| 24zn | F1-BUCKET-FMT (finding F-1, 2026-11-16): `bucket_perturb` records a `format_error` row error for every unparseable date cell, on every route, as `date_shift` does. Without `date_format` the resident pandas handler uses the format that parses the most sample values, so one bad date is one error. Other legs refuse autodetect. Out-of-core fails closed, or goes to the resident route when the compiled Plan says quarantine covers `format_error`. A sentry checks that no mask strategy passes non-null input through silently | engine | PLANNED. Plan: engine `plan/f1-bucket-perturb-and-unplanned` (docs/plans/2026-11-16-f1-bucket-perturb-and-unplanned.md, rev 4), slices F1-0, F1-0b, F1a, F1a2, F1b, F1c | finding F-1; 24zb E1 | none |
 
 ## 13. Review round 1 map (Dennis on `56cbc8901`)
 
@@ -289,9 +289,17 @@ No new production file or directory. `_shadow_operators.py` and `_operator_step.
 | L1 `V2-LOG`, size census wording | section 9 size census. The two files get new entries with at most 20 lines of headroom, not raised pins |
 | L2 `V2-LOG`, missing predicate name and placements | B1.2 names `_degenerate.py`; B1.4 places G-eng, G-cli, GC1 and GC2 |
 
+## 15. Review round 3 map (Codex on `4770c18bc`)
+
+| Finding | Where resolved |
+|---|---|
+| DESIGN 1, incomplete format-error reason registry and no reason-table guard | section 3 item 3 names every exact-base producer and call site; F1-0b keeps the migration behavior-neutral and below ten production files; S2 equates the format-error view with observed `(strategy, "format_error")` pairs and rejects inline producer reasons |
+| DESIGN 2, missing WF-R1 placement | B1.4 places `reasons/platform/_retired.py` under the CODEMAP reason-code row and names `reasons/route/_retired.py` as its sibling pattern |
+| V2-LOG, F1b file count, established-solution search, CLI base and anchors | F1a owns the `config/_validators.py` docstring and has nine production files; section 2 records the online and codebase search; the header and Part B use CLI `e4c7f387`, with shifted CLI citations re-anchored |
+
 # Part B. Unplanned rows
 
-Method: every row in ROADMAP section 5 (CLI origin/main) that is not DONE, MERGED or deferred, minus the excluded sets (Windows chain 6 and 89; feat/v1plus-* and V2; remote-owned LIB, GEN-REL, GEN-INHERIT, SCAN-ML CLI, F22, F25, F26), minus rows with a plan branch, a plan file on main, or a plan cited in the row. Plan branches were read with `git ls-remote origin 'refs/heads/plan/*'` on both repos.
+Method: every row in ROADMAP section 5 at CLI `e4c7f387` that is not DONE, MERGED or deferred, minus the excluded sets (Windows chain 6 and 89; feat/v1plus-* and V2; remote-owned LIB, GEN-REL, GEN-INHERIT, SCAN-ML CLI, F22, F25, F26), minus rows with a plan branch, a plan file on main, or a plan cited in the row. Plan branches were read with `git ls-remote origin 'refs/heads/plan/*'` on both repos.
 
 Already planned today and excluded: 24e, 24zb, 24zi to 24zl, 30, 31, 32, 32c, 24z, 24za, 24zc, 24ze, release rows 46, 47, 76, 78, 88, 90, 90a, 91, and the fit rows. Planned elsewhere: 3 (ci-e2), 16 and 56 (storm-removal), 24p, 24q, 24zf, 27, 29, 32a, 32b, 61 to 64, 66, 68 to 70, 72, 79, 85.
 
@@ -318,7 +326,7 @@ Slice WF-R1: engine, R1, files `reasons/platform/_part1.py`, `reasons/platform/_
 Verdicts per check:
 
 - GATE-06 (`fpe` with no namespace, exit 1 at validate): likely DONE. Engine #569 (`e6eeea105`) added `plan/checks/_required_settings.py`; `contracts/strategy_requirements.py:62` requires a namespace for fpe; `plan/_compile.py:250` calls `check_required_strategy_settings`; `decoy validate` runs the compile layer. Close with acceptance test G6 only.
-- GATE-05 (a declared column missing from the source, exit 1 at validate): NOT DONE. CLI #255 (`b272beb8`) checks declared columns before any row on `run`, `api`, `demo` and `subset` through `_sources.prepared_sources`, but the gate preflight layer (`src/decoy/cli/gate/_layers.py:325`) only checks that files exist (`_check_source_files`). So validate exits 0 and run refuses.
+- GATE-05 (a declared column missing from the source, exit 1 at validate): NOT DONE. CLI #255 (`b272beb8`) checks declared columns before any row on `run`, `api`, `demo` and `subset` through `_sources.prepared_sources`, but the gate preflight layer (`src/decoy/cli/gate/_layers.py:366` on `e4c7f387`) only checks that files exist (`_check_source_files`). So validate exits 0 and run refuses.
 - GATE-07 (a DP release with no labels for a sampled column, refused at validate): NOT DONE. The compile check `plan/_checks.py:286` `check_statistical_columns` runs `load_spec`, which does not test for a degenerate sample. The run-time predicate is `generation/_window_admission.py:241` `_check_statistical` with `CODE_DEGENERATE` (`_window_admission.py:42`).
 
 V1 behaviour: validate refuses what run refuses, with the same code and exit 1.
@@ -348,7 +356,7 @@ Release: G-eng goes in the next engine release; after the CLI repin G7 runs end 
 
 ### B1.3 Row 24s GEN-CATALOG (QA check GEN-14)
 
-Verdict: NOT DONE. Pieces exist: `decoy list providers` reads `providers_v2.get_default_registry()` (`src/decoy/cli/cockpit.py:181`); `decoy explain generation` renders `generate_option_catalog()` (`src/decoy/cli/gen/_topic.py:60`); `decoy_engine.list_generate_faker_providers()` exists (`internal/faker_setup.py:608`). There is no list kind for generate types and options, no list of faker types, and one generate template only (`src/decoy/templates/generate.yaml`).
+Verdict: NOT DONE. Pieces exist: `decoy list providers` reads `providers_v2.get_default_registry()` (`src/decoy/cli/cockpit.py:198` to `:200` on `e4c7f387`); `decoy explain generation` renders `generate_option_catalog()` (`src/decoy/cli/gen/_topic.py:60`); `decoy_engine.list_generate_faker_providers()` exists (`internal/faker_setup.py:608`). There is no list kind for generate types and options, no list of faker types, and one generate template only (`src/decoy/templates/generate.yaml`).
 
 V1 behaviour:
 
@@ -377,6 +385,7 @@ Failure modes: templates use faker output only, no real-looking seeds; the disgu
 
 | Slice | New or changed thing | Where | CODEMAP "Where Things Go" row | Sits beside or uses |
 |---|---|---|---|---|
+| WF-R1 | new platform tombstone catalog | `src/decoy_engine/reasons/platform/_retired.py` | engine CODEMAP line 265 places reason codes in `src/decoy_engine/reasons/`, one catalog package per namespace | `src/decoy_engine/reasons/route/_retired.py` as the tombstone sibling pattern |
 | G-eng | new `_degenerate.py` and its public export | `src/decoy_engine/generation/statistical/_degenerate.py`; export from `generation/statistical/__init__.py` | engine CODEMAP line 63 places statistical-generation modules in `generation/statistical/`; line 259 places generation code in `generation/` | `_numeric_shape.py`; callers import the package API, not the private module |
 | G-cli | existing preflight layer and optional existing finding helper | `src/decoy/cli/gate/_layers.py`; `src/decoy/cli/preflight.py` only if its existing helper owns the finding | CLI CODEMAP line 52 places the pre-run gate in `src/decoy/cli/gate/`; no new flat CLI module | `_run.py` and the existing preflight finding type |
 | GC1 | existing list registries and readers | `src/decoy/cli/reference.py`, `src/decoy/cli/cockpit.py` | CLI CODEMAP line 48 records current command modules in the frozen flat folder; this slice adds no module | `_LIST_READERS`, `_SINGULAR_TO_PLURAL`, and the existing list command readers |
@@ -419,7 +428,8 @@ No open owner question is left in this plan.
 | Slice | Row | Repo | Risk | Depends on | Release point |
 |---|---|---|---|---|---|
 | F1-0 | 24zn (F-1) | engine | R1 | 24zb E1 merged | any tag (no behaviour change) |
-| F1a | 24zn | engine | R1 | F1-0 | any tag (no behaviour change) |
+| F1-0b | 24zn | engine | R1 | F1-0 | any tag (no behaviour change) |
+| F1a | 24zn | engine | R1 | F1-0b | any tag (no behaviour change) |
 | F1a2 | 24zn | engine | R1 | F1a | any tag (no behaviour change) |
 | F1b | 24zn | engine | R2 | F1a2 | next tag, then CLI repin with e2e test |
 | F1c | 24zn | engine | R2 | F1b and E-F0 reason changes merged | next tag |
@@ -441,7 +451,7 @@ No open owner question is left in this plan.
 
 ## Done when
 
-- F1-0, F1a, F1a2, F1b and F1c are merged with P1 to P3, A1 to A18, S1, S2 and G-ZIP green; F1b is released and the CLI is repinned with its e2e test; F1c is released. Row 24zn is DONE.
+- F1-0, F1-0b, F1a, F1a2, F1b and F1c are merged with P1, P1b, P2, P3, A1 to A18, S1, S2 and G-ZIP green; F1b is released and the CLI is repinned with its e2e test; F1c is released. Row 24zn is DONE.
 - WF-R1 is merged and released; W3 is green after the repin; row 17 is DONE.
 - G-cli and G-eng are merged; G5, G5b, G5c, G6, G7, G7b and G7c are green; row 24b is DONE.
 - GC1 and GC2 are merged; C1 to C5 are green; row 24s is DONE.
