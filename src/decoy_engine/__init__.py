@@ -199,6 +199,7 @@ from decoy_engine.profile._fixed_width_writer import write_fixed_width
 from decoy_engine.profiling import (
     ColumnProfile,
     FieldStats,
+    ModelHit,
     ScanSet,
     ScanSetCore,
     SentinelFlag,
@@ -434,6 +435,7 @@ __all__ = [
     "Logger",
     "MaskSecretError",
     "MissingMaskSecret",
+    "ModelHit",
     "ModelRef",
     "ModelStatus",
     "ModelUnavailableError",
