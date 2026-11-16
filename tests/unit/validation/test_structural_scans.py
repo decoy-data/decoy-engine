@@ -390,7 +390,7 @@ class TestCardinalityCollisions:
 
         `out_of_core` is refused when post-validation is on (`post_validation_requested`), because
         the scans need resident output. The streamed and chunked routes fall back to the resident
-        path, so the cells are full_frame, sequential and the auto-chunk lane.
+        path, so the cells are full_frame and the auto-chunk lane. `sequential` is refused the same way.
         """
         n = 200
         parent = pa.table(
@@ -445,7 +445,6 @@ class TestCardinalityCollisions:
         seen = []
         for kwargs in (
             {"execution_mode": "full_frame"},
-            {"execution_mode": "sequential"},
             {"auto_chunk_threshold_rows": 1, "chunk_size_rows": 64},
         ):
             r = run_pipeline(
@@ -457,7 +456,7 @@ class TestCardinalityCollisions:
             )
             (w,) = _collisions(r)
             seen.append(_detail(w))
-        assert seen[0] == seen[1] == seen[2]
+        assert seen[0] == seen[1]
         assert seen[0]["pool_size"] == 10 and seen[0]["distinct_lost"] > 0
 
     def test_scale_and_match_modes_are_covered(self, tmp_path: Path) -> None:
