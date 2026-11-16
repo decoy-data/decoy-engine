@@ -14,7 +14,7 @@ from decoy_engine.detection._model_status import (
     qualified,
     refuse,
 )
-from decoy_engine.detection._ner_rate import NerRate, ner_rates
+from decoy_engine.detection._ner_rate import NerRate, RateBucket, ner_rates
 from decoy_engine.detection.detectors import REGISTERED_DETECTORS, Span
 from decoy_engine.detection.domains import DOMAIN_BY_DETECTOR, Domain, domain_for
 from decoy_engine.detection.name_hints.loader import load_name_hint_terms
@@ -40,6 +40,7 @@ __all__ = [
     "ModelUnavailableError",
     "NerRate",
     "NerUnavailableError",
+    "RateBucket",
     "Span",
     "domain_for",
     "load_name_hint_terms",

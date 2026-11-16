@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from decoy_engine.detection.ner import NER_ENTITY_MAP
-from decoy_engine.profiling import DETECTOR_DESCRIPTORS, DEFAULT_STRATEGY_BY_DETECTOR
+from decoy_engine.profiling import DEFAULT_STRATEGY_BY_DETECTOR, DETECTOR_DESCRIPTORS
 from decoy_engine.profiling import recommendations as rec
 from tests._ml import require_ml_stack
 

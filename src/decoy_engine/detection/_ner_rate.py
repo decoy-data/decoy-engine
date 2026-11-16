@@ -47,8 +47,11 @@ from __future__ import annotations
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from decoy_engine.detection.ner import DEFAULT_NER_MODEL, NER_ENTITY_MAP, iter_ner_spans_batch
+
+RateBucket = Literal["<10%", "10-50%", ">=50%"]
 
 NER_SCAN_CELLS = 2_000
 # A column is free text when the median whitespace-token count of its sampled cells reaches this.
@@ -77,7 +80,7 @@ class NerRate:
         return self.scanned_cells > 0 and self.rate >= NER_MIN_RATE
 
     @property
-    def bucket(self) -> str:
+    def bucket(self) -> RateBucket:
         return rate_bucket(self.rate)
 
 
@@ -123,7 +126,7 @@ def ner_rates(values: Iterable[object], *, model: str = DEFAULT_NER_MODEL) -> di
     return {i: NerRate(i, hits[i], len(cells)) for i in detector_ids}
 
 
-def rate_bucket(rate: float) -> str:
+def rate_bucket(rate: float) -> RateBucket:
     """`<10%`, `10-50%` or `>=50%`: the only form a rate takes in a record."""
     if rate < 0.10:
         return "<10%"

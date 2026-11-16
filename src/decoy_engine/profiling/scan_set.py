@@ -40,7 +40,7 @@ from pydantic import ValidationError as _PydanticValidationError
 from decoy_engine import reason_adapter, reasons
 from decoy_engine._field_names import repeated_names
 from decoy_engine.config import PipelineConfigError, PreScanConfig, SourceDescriptor
-from decoy_engine.detection import DetectorRun, log_detector_run
+from decoy_engine.detection import DetectorRun, RateBucket, log_detector_run
 from decoy_engine.errors import DecoyError, PipelineValidationError
 from decoy_engine.fileaccess import (
     FileAccess,
@@ -50,7 +50,7 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
-from decoy_engine.profiling._model_pass import ModelHit, ModelPass
+from decoy_engine.profiling._model_pass import Band, ModelHit, ModelPass
 from decoy_engine.profiling._scan_integrity import RelationshipFacts, Status
 from decoy_engine.profiling._scan_text_checks import count_leading_zeros, header_looks_like_data
 from decoy_engine.profiling.model_pack import load_detectors
@@ -59,7 +59,7 @@ from decoy_engine.profiling.types import ColumnProfile, FieldStats
 from decoy_engine.progress import safe_error_class
 
 SCAN_SET_SCHEMA: Final = "scan-set/v1"
-_REGEX_ONLY: Final = (DetectorRun("regex", None),)
+_REGEX_ONLY: Final[tuple[DetectorRun, ...]] = (DetectorRun("regex", None),)
 Strategy = Literal["head", "random", "full"]
 
 # Matches the CLI's long-standing cut-off for "this field is a PII candidate".
@@ -119,8 +119,8 @@ class ModelHitCore(_Core):
     source: Literal["classifier", "ner"]
     detector_id: str
     model: ModelRefCore
-    band: Literal["high", "review"] | None
-    rate_bucket: Literal["<10%", "10-50%", ">=50%"] | None
+    band: Band | None
+    rate_bucket: RateBucket | None
 
 
 class RegexRunCore(_Core):
@@ -250,7 +250,7 @@ class ScanSet:
     scan_schema: str
     engine_version: str
     scanned_at: str
-    detectors: tuple[DetectorRun, ...] = (DetectorRun("regex", None),)
+    detectors: tuple[DetectorRun, ...] = _REGEX_ONLY
 
 
 # ---------------------------------------------------------------------------
