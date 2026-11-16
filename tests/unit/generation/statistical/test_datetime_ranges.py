@@ -118,9 +118,16 @@ def _verdict(spec: Any) -> Any:
 
 
 def test_admission_accepts_v2_ranges_and_refuses_a_range_outside_the_supported_years() -> None:
+    # A stored file with such a range is refused at load (see the load_spec test below), so the
+    # admission refusal is reached through a pinned spec that carries the range.
     assert _verdict(_spec()).is_class_a
+    spec = _spec()
+    pinned = spec_to_dict(spec)
+    out_of_range = [{"start_year": 2000, "end_year": 9999, "count": 5}]
+    pinned["stats"] = {**pinned["stats"], "year_bins": out_of_range}
+    pinned["datetime_buckets"] = out_of_range
     with pytest.raises(GenerationAdmissionError) as exc:
-        _verdict(_spec(bins=[{"start_year": 2000, "end_year": 9999, "count": 5}]))
+        _verdict(spec_from_dict(pinned))
     assert exc.value.code == "generation_unbounded_column"
 
 
