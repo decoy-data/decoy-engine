@@ -627,7 +627,7 @@ _MALFORMED_PAYLOADS = {
     "missing columns": _parquet([("a",)], names=("namespace",)),
     "int64 columns": _arrow_payload({n: pa.array([1, 2], type=pa.int64()) for n in _NAMES}),
     "null-typed column": _arrow_payload(
-        {"namespace": pa.array(["ns", "ns"]), "masked": pa.nulls(2), "source": pa.array(["a", "b"])}
+        {"namespace": pa.array(["n1", "n2"]), "masked": pa.nulls(2), "source": pa.array(["a", "b"])}
     ),
     "null values": _arrow_payload(
         {
