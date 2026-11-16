@@ -146,11 +146,10 @@ A keyed bijection (reversible) under the deployable profile's domain floor
 Out-of-core mirror at `_mask_group_b.py:132`.
 
 ### mask.date_shift
-`transforms/date_shift.py:120`. Keyed path:
-`min_days + (HMAC-SHA256(column_key, value)[:8] % range_size)`. The execution
-handler derives the column key via `derive(mask_key, namespace, value)`
-(`execution/_strategies/_date_shift.py:198`). Legacy no-key configs fall back to
-`md5(value)` (`transforms/date_shift.py:108`), preserved for reproducibility.
+`execution/_strategies/_date_shift.py:303`.
+`min_days + (derive(mask_key, namespace, value)[:8] % range_size)`, an
+HKDF-then-HMAC-SHA256 keyed offset. The mask key is the admitted secret; there
+is no key-free path.
 
 ### mask.bucket_perturb
 `transforms/bucket_perturb.py:119`. `derive(job_seed, namespace, _canonicalize_source(value_str))`
