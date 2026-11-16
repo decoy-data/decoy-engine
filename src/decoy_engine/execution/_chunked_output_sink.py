@@ -46,7 +46,7 @@ from decoy_engine.execution.native._chunked_evidence import (
     copy_strategy_branch_calls,
     merge_executed_backend,
 )
-from decoy_engine.fileaccess import FileRequest, FileRole, OutputTxn
+from decoy_engine.fileaccess import FileRequest, FileRole, OutputTxn, ScratchArena
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 
 if TYPE_CHECKING:
@@ -450,13 +450,14 @@ class _Spill:
     """Held-back chunks beyond one row group, one Arrow IPC file each in a private scratch
     stage beside the sink's own staging directory. The stage is a policy-issued output
     transaction, so a strict policy decides where spilled rows may land and `TMPDIR` is never
-    consulted. Read back through the stage, not a memory map, so pages do not stay resident."""
+    consulted. Read back through the stage, not a memory map, so pages do not stay resident.
+    A sink holding a `spill_scratch` capability (the no-sink collector) gets a child of it."""
 
     def __init__(self, stats: StreamStats, sink: Any, table: str) -> None:
         self.stats = stats
         self.sink = sink
         self.table = table
-        self.txn: OutputTxn | None = None
+        self.txn: OutputTxn | ScratchArena | None = None
         self.names: list[str] = []
 
     @property
@@ -472,9 +473,11 @@ class _Spill:
         self.names.append(name)
         self.stats.spilled_chunks += 1
 
-    def _make_stage(self) -> OutputTxn:
-        """Create the private spill stage beside the sink's own staging directory, on the
-        output's filesystem."""
+    def _make_stage(self) -> OutputTxn | ScratchArena:
+        """Create the private spill stage: under the sink's scratch capability when it has one,
+        else beside the sink's own staging directory, on the output's filesystem."""
+        if (scratch := getattr(self.sink, "spill_scratch", None)) is not None:
+            return scratch.create_dir("hold")
         parent = getattr(self.sink, "spill_parent", None)
         if parent is None:
             raise ExecutionError(
@@ -500,9 +503,9 @@ class _Spill:
             yield table
 
     def close(self) -> None:
-        if self.txn is not None:
-            self.txn.abort()
-            self.txn = None
+        txn, self.txn = self.txn, None
+        if txn is not None and not isinstance(txn, ScratchArena):  # that one dies with its arena
+            txn.abort()
 
 
 def _hold_back(
