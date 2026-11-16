@@ -23,6 +23,7 @@ import logging.handlers
 import os
 import secrets
 import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
@@ -55,6 +56,7 @@ from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileRequest,
     LockUnavailable,
+    StageDir,
     StageLabel,
 )
 
@@ -249,6 +251,36 @@ def _sync_up(directory: Path, strict_levels: int) -> None:
     _durable._walk_up(
         os.path.realpath(directory), strict_levels, _probe_dir, lambda path: _open_dir(Path(path))
     )
+
+
+def handed_stage_dir(path: Path, display: str) -> StageDir:
+    """A private stage over a directory this process was handed by the one that made it: the
+    isolated child adds files to the parent's stage and the parent writes its work root. Owner-only
+    files, replace on rewrite, names refused if they would leave the stage. It issues no publish
+    or abort: whoever made the directory decides its fate. Ambient policy only: the path is the
+    caller's word, so any other policy raises `FileAccessUnavailable`."""
+    from decoy_engine.fileaccess._entry import require_ambient  # _entry imports this module
+
+    require_ambient("a handed stage directory")
+    return _LocalStageDir(path, display, private=True)
+
+
+def own_entry(path: Path, mode: int, *, directory: bool = False) -> None:
+    """Set `mode` on an existing file (or directory) through its own descriptor, opened read-only
+    without following a link: the repair a narrowing umask makes necessary for what a child
+    wrote. Anything but the expected kind, or an entry its owner cannot read, raises with the
+    errno only. Ambient policy only: any other policy raises `FileAccessUnavailable`."""
+    from decoy_engine.fileaccess._entry import require_ambient  # _entry imports this module
+
+    require_ambient("repairing a handed entry")
+    fd = _call(os.open, path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        kind = os.fstat(fd).st_mode
+        if not (stat.S_ISDIR(kind) if directory else stat.S_ISREG(kind)):
+            raise OSError(errno.EINVAL, os.strerror(errno.EINVAL))
+        os.fchmod(fd, mode)
+    finally:
+        _close(fd)
 
 
 class LocalOutputTxn(_LocalStageDir):
