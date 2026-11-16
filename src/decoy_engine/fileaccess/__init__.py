@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
     ambient_forbidden,
@@ -31,6 +32,7 @@ from decoy_engine.fileaccess._entry import (
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
 from decoy_engine.fileaccess._local import LocalFileAccess, engine_dir_handle, engine_handle
+from decoy_engine.fileaccess._output import DIRECTORY_PUBLISH_LABELS
 from decoy_engine.fileaccess._preopened import PreopenedFileAccess
 from decoy_engine.fileaccess._private import write_private
 from decoy_engine.fileaccess._protected_dir import (
@@ -41,10 +43,11 @@ from decoy_engine.fileaccess._protected_dir import (
 )
 from decoy_engine.fileaccess._read import keeps_class, read_all, read_checked, read_text, shown
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess
-from decoy_engine.fileaccess._scratch import ScratchArena
+from decoy_engine.fileaccess._scratch import ScratchArena, scratch_native, scratch_native_iter
 from decoy_engine.fileaccess._scratch_reports import CleanupReport, QuotaReport
 from decoy_engine.fileaccess._types import (
     CONTRACT_VERSION,
+    CommitUncertain,
     DirHandle,
     FileAccess,
     FileAccessDenied,
@@ -53,6 +56,9 @@ from decoy_engine.fileaccess._types import (
     FileHandle,
     FileRequest,
     FileRole,
+    LeafTooLarge,
+    LockTimeout,
+    LockUnavailable,
     OutputDir,
     OutputTxn,
 )
@@ -115,8 +121,10 @@ ENTRY_POINTS: tuple[str, ...] = (
 
 __all__ = [
     "CONTRACT_VERSION",
+    "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
     "CleanupReport",
+    "CommitUncertain",
     "DirHandle",
     "FileAccess",
     "FileAccessDenied",
@@ -125,7 +133,10 @@ __all__ = [
     "FileHandle",
     "FileRequest",
     "FileRole",
+    "LeafTooLarge",
     "LocalFileAccess",
+    "LockTimeout",
+    "LockUnavailable",
     "OutputDir",
     "OutputTxn",
     "PreopenedFileAccess",
@@ -148,6 +159,7 @@ __all__ = [
     "forbid_ambient",
     "installed",
     "is_ambient",
+    "is_valid_component",
     "keeps_class",
     "map_in_context",
     "open_protected_dir",
@@ -161,6 +173,8 @@ __all__ = [
     "reset_for_tests",
     "run_in_context",
     "scope",
+    "scratch_native",
+    "scratch_native_iter",
     "scrub",
     "shown",
     "write_private",

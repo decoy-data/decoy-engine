@@ -4,12 +4,15 @@ Paths are plain paths relative to the CWD, symlinks are followed, `display` is t
 every open is lazy so a missing file fails inside the library call with the same text it
 always had. Output transactions use ordinary path calls (a stage directory in the target's
 parent, one `os.replace`), which is exactly what the sinks did before the policy existed.
-This module is the one place ambient opens of caller or config paths are allowed.
+This module (with its output-chain openers in `_local_chain.py`) is the one place ambient
+opens of caller or config paths are allowed.
 
 On POSIX, directories on an output chain come from the creators in `_output.py` (F22 5.0
-rule 1): the deepest existing ancestor is opened by path, links followed as before, and each
-missing component is made under it by `make_parent_dir_at`; stage directories come from
-`make_stage_dir_at`. The win32 arm keeps the plain path calls.
+rule 1, through `_local_chain.py`): the deepest existing ancestor is opened by path, links
+followed as before, and each missing component is made under it by `make_parent_dir_at`; stage
+directories come from `make_stage_dir_at`. A `DIRECTORY_PUBLISH_LABELS` publish (F22 5.1)
+fsyncs the stage tree, renames, then fsyncs the parent and each directory above it up to the
+mount boundary (5.0 rule D). The win32 arm keeps the plain path calls.
 """
 
 from __future__ import annotations
@@ -23,13 +26,21 @@ import shutil
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import BinaryIO, Literal, TextIO
 
-from decoy_engine.fileaccess._component import validate_component
+from decoy_engine.fileaccess import _durable
+from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
+from decoy_engine.fileaccess._local_chain import (
+    _ensure_dirs,
+    _make_stage_dir,
+    _open_dir,
+)
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
+    DIRECTORY_PUBLISH_LABELS,
     DURABLE_LABELS,
     PRIVATE_LABELS,
     STAGE_PREFIX,
@@ -37,14 +48,13 @@ from decoy_engine.fileaccess._output import (
     _call,
     _close,
     create_private_at,
-    discard_stage_at,
-    make_parent_dir_at,
+    create_private_child_at,
     make_stage_dir_at,
-    publish_exclusive_durable,
 )
 from decoy_engine.fileaccess._types import (
     FileAccessUnavailable,
     FileRequest,
+    LockUnavailable,
     StageLabel,
 )
 
@@ -150,11 +160,12 @@ class _LocalStageDir:
 
     strict = False
 
-    def __init__(self, path: Path, display: str) -> None:
+    def __init__(self, path: Path, display: str, *, private: bool = False) -> None:
         self._dir = path
         self.display = display
         self._display = display
         self._finished = False
+        self._private = private  # files 0600 with the owner bits restored (F22 Q8)
 
     def _check(self, *components: str) -> None:
         """Refuse a name that would leave the stage. Length and NUL are left to the operating
@@ -167,6 +178,12 @@ class _LocalStageDir:
 
     def create_file(self, component: str) -> int:
         self._check(component)
+        if self._private and sys.platform != "win32":
+            parent = _open_dir(self._dir)
+            try:
+                return create_private_child_at(parent, component)
+            finally:
+                _close(parent)
         return os.open(self._dir / component, _CREATE, 0o666)
 
     def open_file(self, component: str) -> int:
@@ -183,7 +200,7 @@ class _LocalStageDir:
                 _close(make_stage_dir_at(parent, component))
             finally:
                 _close(parent)
-        return _LocalStageDir(self._dir / component, self._display)
+        return _LocalStageDir(self._dir / component, self._display, private=self._private)
 
     def remove(self, component: str) -> None:
         self._check(component)
@@ -219,51 +236,19 @@ def _sync_dir(directory: Path) -> None:
             pass
 
 
-def _open_dir(directory: Path) -> int:
-    """Open an existing directory by path, following links as the ambient policy always has.
-    A failure keeps only its errno: the stock text names the path."""
-    return _call(os.open, directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+def _probe_dir(path: str) -> os.stat_result:
+    """`lstat` of a directory on a durable chain, for its device (the mount boundary) and its
+    owner; it needs search permission on the directory above, not read permission on this one.
+    A failure keeps only its errno, like every other call on the chain."""
+    return _call(os.stat, path, follow_symlinks=False)
 
 
-def _open_dir_creating(directory: Path) -> int:
-    """Open `directory`, making each missing component under the open descriptor of the one
-    above it; the replacement for `mkdir(parents=True, exist_ok=True)` (F22 5.0 rule 1). Nothing
-    is created unless the deepest existing ancestor opened."""
-    missing: list[str] = []
-    current = directory
-    while True:
-        try:
-            fd = _open_dir(current)
-            break
-        except FileNotFoundError:
-            if current.parent == current:
-                raise
-            missing.append(current.name)
-            current = current.parent
-    try:
-        for name in reversed(missing):
-            child = make_parent_dir_at(fd, name)
-            _close(fd)
-            fd = child
-    except BaseException:
-        _close(fd)
-        raise
-    return fd
-
-
-def _ensure_dirs(directory: Path) -> None:
-    _close(_open_dir_creating(directory))
-
-
-def _make_stage_dir(parent: Path, prefix: str, *, create_parents: bool) -> Path:
-    """A new private stage directory beside the target, made by `make_stage_dir_at`."""
-    parent_fd = _open_dir_creating(parent) if create_parents else _open_dir(parent)
-    name = f"{prefix}{secrets.token_hex(6)}"
-    try:
-        _close(make_stage_dir_at(parent_fd, name))
-    finally:
-        _close(parent_fd)
-    return parent / name
+def _sync_up(directory: Path, strict_levels: int) -> None:
+    """The ambient durable walk (`_durable._walk_up`) over the physical chain: links in the caller
+    path are resolved first, and each directory is probed and opened by path here."""
+    _durable._walk_up(
+        os.path.realpath(directory), strict_levels, _probe_dir, lambda path: _open_dir(Path(path))
+    )
 
 
 class LocalOutputTxn(_LocalStageDir):
@@ -276,13 +261,19 @@ class LocalOutputTxn(_LocalStageDir):
         kind: Literal["file", "dir"],
         mode: Literal["exclusive", "replace"],
         label: StageLabel,
+        owner: object = None,
     ) -> None:
         self._target = target
+        self.owner = owner
         self._kind = kind
         self._mode = mode
-        self._label = label
+        self._label = self.label = label
         self._staged_file: Path | None = None
         self._direct = False
+        if label == "publication" and kind != "dir":
+            raise FileAccessUnavailable("a publication stage is a directory")
+        self._durable_dir = label in DIRECTORY_PUBLISH_LABELS and sys.platform != "win32"
+        self._created: list[str] = []
         # A durable stage is created and published through its parent's descriptor, opened
         # before the stage exists, so no step after the link can fail for want of one.
         self._parent_fd = -1
@@ -294,9 +285,15 @@ class LocalOutputTxn(_LocalStageDir):
                 stage = Path(tempfile.mkdtemp(prefix=STAGE_PREFIX[label], dir=target.parent))
             else:
                 stage = _make_stage_dir(
-                    target.parent, STAGE_PREFIX[label], create_parents=label in CREATES_PARENTS
+                    target.parent,
+                    STAGE_PREFIX[label],
+                    create_parents=label in CREATES_PARENTS,
+                    created=self._created,
                 )
-        super().__init__(stage if stage is not None else target.parent, str(target))
+        # Other private labels keep main's 0666 here; only a durable unit is owner-only (Q8).
+        super().__init__(
+            stage if stage is not None else target.parent, str(target), private=self._durable_dir
+        )
         self._stage = stage
 
     def create_file(self, component: str) -> int:
@@ -366,7 +363,7 @@ class LocalOutputTxn(_LocalStageDir):
 
     def _unlink_stage(self) -> None:
         if self._staged_file is not None and self._parent_fd >= 0:
-            discard_stage_at(self._parent_fd, self._staged_file.name)
+            _durable.discard_stage_at(self._parent_fd, self._staged_file.name)
 
     def _publish_durable(self) -> None:
         """Publish through the shared durable helper; only the path-shaped step 1 is ambient."""
@@ -375,7 +372,7 @@ class LocalOutputTxn(_LocalStageDir):
             raise FileAccessUnavailable("nothing was staged")
         self._finished = True
         try:
-            publish_exclusive_durable(self._parent_fd, staged.name, self._target.name)
+            _durable.publish_exclusive_durable(self._parent_fd, staged.name, self._target.name)
         finally:
             self._close_parent()
 
@@ -396,6 +393,9 @@ class LocalOutputTxn(_LocalStageDir):
         if self._kind == "dir":
             if self._stage is None:  # pragma: no cover - a dir stage always has one
                 raise FileAccessUnavailable("output transaction is finished")
+            if self._durable_dir:
+                self._publish_durable_dir(self._stage)
+                return
             if sys.platform == "win32":
                 self._target.parent.mkdir(parents=True, exist_ok=True)
             else:
@@ -440,6 +440,20 @@ class LocalOutputTxn(_LocalStageDir):
                 type(exc).__name__,
             )
 
+    def _publish_durable_dir(self, stage: Path) -> None:
+        """Fsync the stage tree, rename it onto the leaf, then fsync the parent (the commit point)
+        and the chain above it. Before the rename a failure keeps the stage for `abort()`."""
+        stage_fd = _open_dir(stage)
+        try:
+            _durable._sync_tree(stage_fd)
+        finally:
+            _close(stage_fd)
+        _call(os.replace, stage, self._target)
+        self._stage = None
+        self._finished = True
+        strict = len(self._created) + 1
+        _durable._sync_bound(lambda: _sync_up(self._target.parent, strict))
+
     def abort(self) -> None:
         if self._finished:
             return
@@ -471,6 +485,7 @@ class LocalOutputDir:
         self._target = Path(req.locator)
         self.display = req.locator
         self.locator = req.locator
+        self._field_key = req.field_key
 
     def begin(
         self,
@@ -479,7 +494,9 @@ class LocalOutputDir:
         *,
         label: StageLabel,
     ) -> LocalOutputTxn:
-        return LocalOutputTxn(self._target, kind, mode, label)
+        if label in DIRECTORY_PUBLISH_LABELS:
+            validate_publication_leaf(self._target.name, self._field_key)
+        return LocalOutputTxn(self._target, kind, mode, label, self)
 
     def ensure_dir(self) -> None:
         if sys.platform == "win32":
@@ -490,6 +507,32 @@ class LocalOutputDir:
 
     def is_empty_or_absent(self) -> bool:
         return not self._target.exists() or not any(self._target.iterdir())
+
+    def _parent_fd(self) -> int:
+        return _open_dir(self._target.parent)
+
+    def lock(self, timeout_s: float) -> AbstractContextManager[None]:
+        validate_publication_leaf(self._target.name, self._field_key)
+        if sys.platform == "win32":  # the msvcrt lock is the Windows arm (F22 5.8); no fallback
+            raise LockUnavailable(errno.ENOSYS)
+        return _durable._held_lock(self._parent_fd, self._target.name, timeout_s)
+
+    def read_member(self, component: str, *, limit: int) -> bytes | None:
+        if not component or component in (".", "..") or "/" in component:
+            raise deny(self._field_key)
+        if sys.platform == "win32":
+            raise FileAccessUnavailable("member reads come with the Windows arm")
+        return _durable._read_member(self._parent_fd, self._target.name, component, limit)
+
+    def sync_chain(self) -> None:
+        if sys.platform == "win32":
+            raise FileAccessUnavailable("the durable chain comes with the Windows arm")
+        parent_fd = self._parent_fd()
+        try:
+            _durable._sync_leaf_at(parent_fd, self._target.name)
+        finally:
+            _close(parent_fd)
+        _sync_up(self._target.parent, 1)
 
 
 class LocalFileAccess:

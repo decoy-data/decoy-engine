@@ -251,7 +251,9 @@ def teed_files(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, int]]:
 
     def spy(self: Any, name: str, table: pa.Table, columns: tuple[str, ...]) -> None:
         real(self, name, table, columns)
-        path = self._teed[name].path
+        # The stager's source locates the file by its component under the tee's scratch root, so
+        # join it; an absolute path would pass through unchanged.
+        path = self._scratch_root / self._teed[name].path
         seen.append((path, path.stat().st_mode & 0o777))
 
     monkeypatch.setattr(_post_scan.PostScanGate, "_tee", spy)

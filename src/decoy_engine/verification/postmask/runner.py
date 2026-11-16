@@ -22,15 +22,17 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import fileaccess
+from decoy_engine.detection.types import DetectorRun
 from decoy_engine.internal.memory_limit import parse_megabytes
 from decoy_engine.internal.pandas_missing import is_null_cell
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
+from decoy_engine.verification.postmask import _model_findings
 from decoy_engine.verification.postmask._blocked import severity_counts
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, column_facts
 from decoy_engine.verification.postmask._keys import KeyResult
@@ -52,12 +54,16 @@ from decoy_engine.verification.postmask.types import (
     ResidualPIIFinding,
 )
 
+if TYPE_CHECKING:
+    from decoy_engine.profiling.model_pack import DetectorSet
+
 
 def run_post_mask(
     source_frames: dict[str, pd.DataFrame],
     output_frames: dict[str, pd.DataFrame],
     *,
     config: dict[str, Any],
+    detectors: DetectorSet | None = None,
     keys: Sequence[KeyResult] | None = None,
 ) -> dict[str, Any]:
     """Run all three post-mask check categories + assemble the report.
@@ -70,12 +76,19 @@ def run_post_mask(
             for all three checks.
         config: the validated pipeline config dict (from
             ``PipelineConfig.model_validate(yaml).model_dump()``).
-            Used to look up configured masks + relationships.
+            Used to look up configured masks + relationships, and the
+            ``post_scan`` dismissals and ``ner_findings`` mode.
+        detectors: the strictly loaded detector set (``load_detectors``).
+            ``None`` (the platform hook) runs the regex detectors only,
+            as before. With a set, each model it holds runs over every
+            output frame after the regex pass, each in its own
+            try/except, and the ``post_scan.detectors`` log lines are
+            written.
         keys: the declared keys' facts (`check_keys`) when the caller has counted them; the
             FK findings derive from these. None counts them here from the two frame dicts.
 
     Returns:
-        A post-scan-integrity/v2 report dict. JSON-serializable (every
+        A post-scan-integrity/v3 report dict. JSON-serializable (every
         field is a primitive or list of dataclass-asdict'd findings).
         Caller persists this to JobPostScanIntegrityReport.report_json.
 
@@ -101,6 +114,8 @@ def run_post_mask(
             lambda: fk_findings(config, source_frames, output_frames, keys),
             scratch=scratch,
             memory_limit=MEMORY_LIMIT,
+            tables_checked=tuple(str(name) for name in output_frames),
+            models=(output_frames, detectors) if detectors is not None else None,
         )
 
 
@@ -114,7 +129,8 @@ def run_post_mask_tables(
     memory_limit: str,
 ) -> dict[str, Any]:
     """`run_post_mask` over tables the run holds as batches. The caller counted the declared keys
-    (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches."""
+    (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches. Regex
+    detectors only: a model ask keeps its run resident (`post_scan_resident_reason`)."""
     if _megabytes(memory_limit) > _megabytes(MEMORY_LIMIT):
         raise ValueError("run_post_mask_tables: memory_limit is above the post-scan cap")
     return _assemble(
@@ -123,6 +139,7 @@ def run_post_mask_tables(
         lambda: fk_findings(config, {}, {}, keys),
         scratch=scratch,
         memory_limit=memory_limit,
+        tables_checked=tuple(str(name) for name in output_tables),
     )
 
 
@@ -220,6 +237,8 @@ def _assemble(
     *,
     scratch: Path,
     memory_limit: str,
+    tables_checked: tuple[str, ...],
+    models: tuple[Mapping[str, pd.DataFrame], DetectorSet] | None = None,
 ) -> dict[str, Any]:
     residual_pii: list[ResidualPIIFinding] = []
     fk_preservation: list[FKPreservationFinding] = []
@@ -261,6 +280,15 @@ def _assemble(
                 message=f"residual_pii check raised {type(exc).__name__} (see job log for details)",
             )
         ]
+
+    # Model passes sit outside the wrapper above: it would replace every regex finding with one
+    # error row, and hide that the error came from a model.
+    if models is not None:
+        frames, detectors = models
+        residual_pii = [*residual_pii, *_model_findings.model_findings(frames, config, detectors)]
+    residual_pii, stale = _model_findings.review(residual_pii, config)
+    if models is not None:
+        _model_findings.log_post_scan(frames, config, detectors, residual_pii, stale)
 
     try:
         fk_preservation = get_fk()
@@ -321,6 +349,8 @@ def _assemble(
         error_count=error_count,
         pass_failed_with=pass_failed_with,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        detectors=models[1].runs() if models is not None else (DetectorRun("regex", None),),
+        tables_checked=tables_checked,
     )
     return _report_to_dict(report)
 
@@ -370,4 +400,7 @@ def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
         "fail_count": report.fail_count,
         "error_count": report.error_count,
         "pass_failed_with": report.pass_failed_with,
+        "detectors": [asdict(run) for run in report.detectors],
+        "tables_checked": list(report.tables_checked),
+        "config_sha256": report.config_sha256,
     }
