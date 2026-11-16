@@ -21,8 +21,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.detection import ModelStatus, ner_model_state, qualified, refuse
-from decoy_engine.detection._ner_rate import NER_MIN_RATES
+from decoy_engine.detection import ModelStatus, ner_min_rate, ner_model_state, qualified, refuse
 from decoy_engine.detection.types import (
     DETECTOR_ORDER,
     DetectorRun,
@@ -115,7 +114,7 @@ def load_detectors(
 
     An NER model is checked in two steps, both at load and so before any row is read: it must be
     usable (not installed, incompatible and similar refusals come first), then it must have a
-    calibrated hit rate in `NER_MIN_RATES` (`provider.ner_model_uncalibrated`).
+    calibrated hit rate (`ner_min_rate`) (`provider.ner_model_uncalibrated`).
     """
     if any(source not in DETECTOR_ORDER for source in sources):
         raise ValueError("unknown detector source")
@@ -131,7 +130,7 @@ def load_detectors(
         status, ref = ner_model_state(ner_model)
         if not status.available:
             refuse(status)
-        if ner_model not in NER_MIN_RATES:
+        if ner_min_rate(ner_model) is None:
             # A scan scores a column at the model's own rate; with none, a hit would be a guess.
             refuse(replace(status, reason=qualified(reasons.provider.NER_MODEL_UNCALIBRATED)))
     return DetectorSet(wanted, pack, ref)

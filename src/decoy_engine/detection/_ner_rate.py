@@ -73,6 +73,13 @@ NER_MIN_RATES: Mapping[str, float] = MappingProxyType(
         "en_core_web_md": 0.122,
     }
 )
+
+
+def ner_min_rate(model: str) -> float | None:
+    """The calibrated hit threshold of `model`, or None when it has none: the one lookup."""
+    return NER_MIN_RATES.get(model)
+
+
 # The rate of the default model; callers move to `NER_MIN_RATES` when the default changes.
 NER_MIN_RATE = NER_MIN_RATES[DEFAULT_NER_MODEL]
 # Bounds the span lists held at once; far below the pipe window in `ner.py`.
@@ -86,7 +93,7 @@ class NerRate:
     detector_id: str
     hit_cells: int
     scanned_cells: int
-    min_rate: float = NER_MIN_RATE
+    min_rate: float
 
     @property
     def rate(self) -> float:
@@ -133,7 +140,7 @@ def ner_rates(values: Iterable[object], *, model: str = DEFAULT_NER_MODEL) -> di
     spaCy and every rate is over zero scanned cells. Each rate carries `model`'s own hit threshold;
     a model with no calibrated rate is not scored.
     """
-    min_rate = NER_MIN_RATES.get(model)
+    min_rate = ner_min_rate(model)
     if min_rate is None:
         raise ValueError("no calibrated NER hit rate for this model")
     cells = sample_cells(values)

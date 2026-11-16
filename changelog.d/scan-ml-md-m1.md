@@ -1,4 +1,4 @@
-Breaking: a `pre_scan` or `post_scan` config that names an NER model other than en_core_web_sm or en_core_web_md (for example en_core_web_lg) now refuses at load with `provider/ner_model_uncalibrated`; `text_redact` is unaffected.
+Breaking: a `pre_scan` or `post_scan` config that names an NER model other than en_core_web_sm or en_core_web_md (for example en_core_web_lg) now refuses at load with `provider.ner_model_uncalibrated`; `text_redact` is unaffected.
 
 ### Added (per-model NER hit rates and the md wheel, SCAN-ML-MD M-1, 2026-11-16)
 

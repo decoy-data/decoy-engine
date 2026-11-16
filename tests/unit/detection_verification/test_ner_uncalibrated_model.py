@@ -23,8 +23,9 @@ from decoy_engine.config import PreScanConfig
 from decoy_engine.detection import ModelRef, ModelStatus, ModelUnavailableError, ner
 from decoy_engine.detection import _model_status as ms
 from decoy_engine.detection._ner_rate import NER_MIN_RATES
+from decoy_engine.detection.ner import NER_MODEL_WHEELS
 from decoy_engine.plan._checks import check_text_redact_ner_available
-from decoy_engine.profiling import scan_sources
+from decoy_engine.profiling import scan_set, scan_sources
 from decoy_engine.profiling.model_pack import _detectors
 from decoy_engine.profiling.model_pack._detectors import load_detectors
 from decoy_engine.verification.postmask._model_findings import post_scan_detectors
@@ -89,14 +90,22 @@ def test_pre_scan_refuses_before_the_first_table_is_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def read(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("a row was read before the model was refused")
+        raise AssertionError("a table was read before the model was refused")
 
+    # `_scan_one` is the per-table read: loading the models after it turns this red (MM-7).
+    monkeypatch.setattr(scan_set, "_scan_one", read)
     monkeypatch.setattr(ner, "iter_ner_spans_batch", read)
     monkeypatch.setattr(ner, "_pipeline", read)
     pre_scan = PreScanConfig(detectors=("regex", "ner"), ner_model="en_core_web_lg")
     with pytest.raises(ModelUnavailableError) as refused:
         scan_sources(s.source(tmp_path, "customers", s.customers()), pre_scan=pre_scan)
     assert refused.value.reason == UNCALIBRATED
+
+
+def test_every_calibrated_model_has_a_pinned_wheel_and_the_reverse() -> None:
+    """The rate table and the wheel table name the same models (one cannot drift from the other)."""
+    wheel_models = {model for model, _version in NER_MODEL_WHEELS}
+    assert wheel_models == set(NER_MIN_RATES)
 
 
 @needs_ner
