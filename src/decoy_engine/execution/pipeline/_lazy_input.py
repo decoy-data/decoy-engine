@@ -1,11 +1,11 @@
-"""Which mask tables may reach a run as a `LazySource`.
+"""The caller `LazySource` inputs a run reads whole before routing (`resident_fallback`).
 
-A caller that wants bounded memory builds row-free lazy candidates and asks this module which of
-them the engine will take lazily. Every rule is an existing routing owner answering, never a copy:
-the bounded profiler, the exact plan compiler, the relationship graph, `_sequential_eligible`,
-the cross-table cycle test, out-of-core admission and its dtype hazard check, the
-declared-casting contract and `post_scan_gate_applies`. A table that is not named keeps the
-caller's resident read, which `run_pipeline` already accepts beside lazy ones.
+`run_pipeline(resident_fallback=True)` calls this pre-pass on a plain `auto` run, after the subset
+and token-vault steps and before the run context is built. Every rule is an existing owner
+answering, never a copy: the bounded profiler, the exact plan compiler, the relationship graph,
+`_sequential_eligible`, the cross-table cycle test, out-of-core admission and its dtype hazard
+check, the declared-casting contract and `post_scan_gate_applies`. The pre-pass is a step inside
+`run_pipeline`: it is not exported and not an entry point.
 
 Why a relationship job needs the whole bounded-eligible answer: a lazy table gives the size
 estimator no sample, so a relationship job with no bounded route would be rejected before read
@@ -18,53 +18,64 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from decoy_engine.fileaccess import entry_point
+import pyarrow as pa
+
+from decoy_engine.execution._pipeline_sources import materialize_source
+from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import FileAccess
-    from decoy_engine.profile._readers import LazySource
-
-__all__ = ["lazy_input_tables"]
 
 
-@entry_point
-def lazy_input_tables(
+def read_resident_fallback(
     config: dict[str, Any],
-    candidates: Mapping[str, LazySource],
+    sources: Mapping[str, pa.Table | LazySource] | None,
+    **run_values: Any,
+) -> Mapping[str, pa.Table | LazySource] | None:
+    """`sources` with each lazy table the run cannot keep lazy read whole."""
+    if not sources:
+        return sources
+    rejected = resident_fallback_tables(config, sources, **run_values)
+    return {n: materialize_source(v) if n in rejected else v for n, v in sources.items()}
+
+
+def resident_fallback_tables(
+    config: dict[str, Any],
+    sources: Mapping[str, pa.Table | LazySource],
     *,
     engine_version: str,
     base_dir: str | Path | None,
     instance_default_locale: Any,
     fidelity_report: bool,
     post_validation: bool,
-    vault_active: bool,
-    file_access: FileAccess | None = None,
+    vault_writer: Any,
+    file_access: FileAccess | None,
 ) -> frozenset[str]:
-    """The candidate names that may arrive lazy; always a subset of `candidates`.
+    """The caller `LazySource` names the run cannot keep lazy; a subset of the lazy `sources`.
 
-    `engine_version`, `base_dir` and `instance_default_locale` are the values the later
-    `run_pipeline` call receives, so the plan compiled here is the plan that run compiles.
-    Reads no data row beyond the bounded profile; candidate construction reads none.
-    Pass the same `file_access` policy as the later `run_pipeline` call: the profile reads the
-    descriptor files under it.
+    Reads no data row beyond the bounded profile. The arguments are the run's own values, so the
+    plan compiled here is the plan the run compiles.
     """
     from decoy_engine.config import classify_table_kinds, post_scan_gate_applies
     from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
     from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 
-    if vault_active:
+    candidates = {name: src for name, src in sources.items() if isinstance(src, LazySource)}
+    if not candidates:
+        return frozenset()
+    if vault_writer is not None:
         # The chunked lane refuses a vault, and a lazy table gives routing no fit estimate to
         # lift it onto out-of-core.
-        return frozenset()
+        return frozenset(candidates)
     kinds = classify_table_kinds(config)
-    names = {name for name in candidates if kinds.get(name) == "mask"}
+    keep = {name for name in candidates if kinds.get(name) == "mask"}
     declared = compile_declared_casting_contract(config)
     if declared is not None:
-        names -= {column.table for column in declared.columns}
+        keep -= {column.table for column in declared.columns}
     if post_scan_gate_applies(config):
         # A lazy transform-bearing table defers the gate to report-only.
-        names -= transform_bearing_mask_tables(config)
-    if names and config.get("relationships"):
+        keep -= transform_bearing_mask_tables(config)
+    if keep and config.get("relationships"):
         eligible = _relationship_job_is_bounded(
             config,
             candidates,
@@ -74,10 +85,11 @@ def lazy_input_tables(
             fidelity_report=fidelity_report,
             post_validation=post_validation,
             has_generate_table="generate" in kinds.values(),
+            file_access=file_access,
         )
         if not eligible:
-            return frozenset()
-    return frozenset(names)
+            return frozenset(candidates)
+    return frozenset(candidates) - keep
 
 
 def _relationship_job_is_bounded(
@@ -90,6 +102,7 @@ def _relationship_job_is_bounded(
     fidelity_report: bool,
     post_validation: bool,
     has_generate_table: bool,
+    file_access: FileAccess | None,
 ) -> bool:
     """Whether routing would take a bounded route for this job, from the engine's own owners."""
     from decoy_engine.execution import _pipeline_routing, _transforms_admission
@@ -117,6 +130,7 @@ def _relationship_job_is_bounded(
         seed=_normalize_job_seed_int(config),
         declared=declared,
         supplied_sources=candidates,
+        file_access=file_access,
     )
     plan = compile_plan(
         config,

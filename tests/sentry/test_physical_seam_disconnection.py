@@ -93,7 +93,7 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/pipeline/_stream.py",
     # RUN-STREAM E3: the route summary only reads recorded metrics; no physical import.
     "execution/pipeline/_route_summary.py",
-    # RUN-STREAM E5: the lazy-input eligibility check reads config, profile and plan owners
+    # RUN-STREAM E5: the resident-fallback pre-pass reads config, profile and plan owners
     # only; no physical import.
     "execution/pipeline/_lazy_input.py",
     # B6a (incremental output sink): the streamed lane's row-group assembly and publish
@@ -417,7 +417,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # RUN-STREAM E3: `route_summary` reads recorded quality_metrics blocks and imports
             # nothing from `execution.physical`.
             "src/decoy_engine/execution/pipeline/_route_summary.py",
-            # RUN-STREAM E5: `lazy_input_tables` decides lazy eligibility from config, profile
+            # RUN-STREAM E5: the resident-fallback pre-pass decides from config, profile
             # and plan owners and imports nothing from `execution.physical`.
             "src/decoy_engine/execution/pipeline/_lazy_input.py",
             # Dcomp-OOC (composite FK strict parity): the out-of-core joiners raise the one
