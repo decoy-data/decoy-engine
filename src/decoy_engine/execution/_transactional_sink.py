@@ -28,7 +28,7 @@ See GNU Coreutils mv(1), POSIX.1-2008 rename(2), and Python os.replace docs.
 
 The sink is two parts: `StagedParquetWriter`, the write half that only stages Parquet files, and
 the sink itself, which owns the stage and moves every call through the publication sink state
-table (`decoy_engine.publication._sink_state`).
+table (`decoy_engine.publication`).
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from decoy_engine.fileaccess import (
 )
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.progress import get_active_channel
-from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine
+from decoy_engine.publication import Act, Exit, SinkState, SinkStateMachine
 from decoy_engine.reasons import CleanupState, Operation, PublicationState
 
 
@@ -491,8 +491,11 @@ class ParquetTransactionalSink:
             # The rename is atomic: a failure leaves nothing published and staging intact.
             evidence.state = PublicationState.NOT_PUBLISHED
             evidence.cleanup = CleanupState.NOT_NEEDED
-            capture_publication_failure(exc, self, Operation.COMMIT)
-            self._leave(Exit.ERROR)
+            try:
+                capture_publication_failure(exc, self, Operation.COMMIT)
+            finally:
+                # Leave COMMITTING on every error exit, even if the capture itself raises.
+                self._leave(Exit.ERROR)
             raise
         if self._txn is not None:
             # Rename succeeded: staging is now the target directory; clear state.
@@ -531,7 +534,11 @@ class ParquetTransactionalSink:
             return
         if stage is None:
             evidence.cleanup = CleanupState.ATTEMPTED
-        else:
-            evidence.cleanup = (
-                CleanupState.FAILED if Path(stage).exists() else CleanupState.CONFIRMED
-            )
+            return
+        try:
+            still_there = Path(stage).exists()
+        except OSError:
+            # The check cannot confirm the removal; never let it hide the original error.
+            evidence.cleanup = CleanupState.FAILED
+            return
+        evidence.cleanup = CleanupState.FAILED if still_there else CleanupState.CONFIRMED

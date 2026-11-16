@@ -271,7 +271,8 @@ nothing. `abort()` never raises. A table name that is not one path component is 
 What the sink does today: a commit still publishes the stage with the plain `table_sink` rename
 (the published unit holds only the Parquet files), so it ends sealed or failed, and a second
 `commit()` on a sealed sink returns without any I/O. After a failed write or commit every call
-but `abort()` is refused, and after an abort every call is. Routing the sink's commit through
+but `abort()` is refused, and after an abort every call but a second `abort()` is. That
+`abort()` does nothing. Routing the sink's commit through
 `publish_unit` (receipts, `already_committed` on a restart), `reconcile()` on the sink and
 the routes' receipts are a later part; until this section says so, the sink does not claim them.
 
