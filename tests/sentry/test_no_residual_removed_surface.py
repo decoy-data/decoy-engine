@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import os
 import pathlib
 import re
 import shutil
@@ -75,13 +76,18 @@ def _history(rel: str) -> bool:
     return any(fnmatch.fnmatch(rel, h.glob) for h in HISTORY)
 
 
-def _unreleased_text(changelog: str) -> str:
-    """The `[Unreleased]` section: the only part of CHANGELOG.md that is not history."""
+# A released section has a version and a date in its heading. Everything else in CHANGELOG.md (the
+# preamble, `[Unreleased]`, an undated or oddly spelled heading) is scanned.
+_RELEASED_HEADING = re.compile(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\s*$")
+
+
+def _non_history_text(changelog: str) -> str:
+    """CHANGELOG.md without its dated release sections, which are history."""
     keep: list[str] = []
-    inside = False
+    inside = True  # the preamble before the first heading is not history
     for line in changelog.splitlines():
         if line.startswith("## "):
-            inside = line.lower().startswith("## [unreleased]")
+            inside = not _RELEASED_HEADING.match(line)
         if inside:
             keep.append(line)
     return "\n".join(keep)
@@ -100,6 +106,9 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
         if RETIRED_PATTERN.search(rel):
             hits.append(f"{rel}: path")
         path = root / rel
+        if not os.path.lexists(path):  # a tracked path that is not on disk must not hide a file
+            hits.append(f"{rel}: missing")
+            continue
         if not path.is_file():
             continue
         try:
@@ -115,7 +124,7 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
             hits.append(f"{rel}: undecodable")
             continue
         if rel == "CHANGELOG.md":
-            text = _unreleased_text(text)
+            text = _non_history_text(text)
         if RETIRED_PATTERN.search(text):
             hits.append(f"{rel}: content")
         if rel != SENTRY_REL and any(
@@ -128,15 +137,16 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
     return hits
 
 
-def _tracked() -> list[str]:
+def _tracked(root: pathlib.Path = ROOT) -> list[str]:
+    """Tracked paths, NUL-separated so a non-ASCII name is not C-quoted into a path that does not
+    exist on disk."""
     out = subprocess.run(  # noqa: S603 - fixed argv, no user input
-        [shutil.which("git") or "git", "ls-files"],
-        cwd=ROOT,
+        [shutil.which("git") or "git", "ls-files", "-z"],
+        cwd=root,
         check=True,
         capture_output=True,
-        text=True,
     ).stdout
-    return out.splitlines()
+    return [os.fsdecode(raw) for raw in out.split(b"\0") if raw]
 
 
 def test_no_residual_retired_name_in_tracked_files() -> None:
@@ -158,35 +168,76 @@ NAME = RETIRED_NAME
 SPLIT_TITLE = f'"{NAME[:2].title()}" + "{NAME[2:]}"'
 SPLIT_ADJACENT = f"'{NAME[:1]}' '{NAME[1:]}'"
 
+# surface -> (path, body, the exact hit the sentry must report)
 SEEDS = {
-    "path": (f"src/pkg/{NAME}_helper.py", "x = 1\n"),
-    "python-identifier": ("src/pkg/mod.py", f"def compute_{NAME}_postmask():\n    pass\n"),
-    "help-string": ("src/pkg/cli.py", f'HELP = "Path to a {NAME.upper()} scan JSON"\n'),
-    "yaml-comment": ("examples/p.yaml", f"version: 2\n# REVIEW: {NAME.title()} detected a key\n"),
+    "path": (f"src/pkg/{NAME}_helper.py", "x = 1\n", "path"),
+    "python-identifier": (
+        "src/pkg/mod.py",
+        f"def compute_{NAME}_postmask():\n    pass\n",
+        "content",
+    ),
+    "help-string": ("src/pkg/cli.py", f'HELP = "Path to a {NAME.upper()} scan JSON"\n', "content"),
+    "yaml-comment": (
+        "examples/p.yaml",
+        f"version: 2\n# REVIEW: {NAME.title()} detected a key\n",
+        "content",
+    ),
     "json-schema-description": (
         "docs/schemas/s.json",
         f'{{"description": "Compare two {NAME} files"}}\n',
+        "content",
     ),
-    "test-file-name": (f"tests/e2e/test_{NAME}_animation.py", "x = 1\n"),
-    "doc-page": ("docs/ref.md", f"The {NAME} pass runs first.\n"),
+    "test-file-name": (f"tests/e2e/test_{NAME}_animation.py", "x = 1\n", "path"),
+    "doc-page": ("docs/ref.md", f"The {NAME} pass runs first.\n", "content"),
     "changelog-unreleased": (
         "CHANGELOG.md",
         f"## [Unreleased]\n\n- the {NAME} flag\n\n## [0.1.0] - 2026-01-01\n",
+        "content",
     ),
-    "changelog-fragment": ("changelog.d/x.md", f"### Added (the {NAME} option)\n"),
-    "split-literal-title": ("src/pkg/mod.py", f"x = {SPLIT_TITLE}\n"),
-    "split-literal-adjacent": ("src/pkg/mod.py", f"x = {SPLIT_ADJACENT}\n"),
-    "removed-canary": ("docs/api.md", "POST /canary-check returns CanaryReport\n"),
+    "changelog-preamble": (
+        "CHANGELOG.md",
+        f"# Changelog\n\nThe {NAME} notes.\n\n## [0.1.0] - 2026-01-01\n",
+        "content",
+    ),
+    "changelog-undated-heading": (
+        "CHANGELOG.md",
+        f"## Unreleased\n\n- the {NAME} flag\n\n## [0.1.0] - 2026-01-01\n",
+        "content",
+    ),
+    "changelog-fragment": ("changelog.d/x.md", f"### Added (the {NAME} option)\n", "content"),
+    "split-literal-title": ("src/pkg/mod.py", f"x = {SPLIT_TITLE}\n", "split literal"),
+    "split-literal-adjacent": ("src/pkg/mod.py", f"x = {SPLIT_ADJACENT}\n", "split literal"),
+    "non-ascii-path": (f"docs/caf\u00e9_{NAME}.md", "x\n", "path"),
+    "removed-canary": (
+        "docs/api.md",
+        "the report type is CanaryReport\n",
+        "forbidden token 'CanaryReport'",
+    ),
 }
 
 
 @pytest.mark.parametrize("surface", sorted(SEEDS))
 def test_sentry_catches_seeded_violation(tmp_path: pathlib.Path, surface: str) -> None:
-    rel, body = SEEDS[surface]
+    rel, body, reason = SEEDS[surface]
     target = tmp_path / rel
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(body)
-    assert scan(tmp_path, [rel]) != []
+    target.write_text(body, encoding="utf-8")
+    assert scan(tmp_path, [rel]) == [f"{rel}: {reason}"]
+
+
+def test_a_non_ascii_tracked_file_is_scanned_not_skipped(tmp_path: pathlib.Path) -> None:
+    """`git ls-files` C-quotes a non-ASCII name; the sentry must still open that file."""
+    git = shutil.which("git") or "git"
+    subprocess.run([git, "init", "-q"], cwd=tmp_path, check=True)  # noqa: S603
+    (tmp_path / "caf\u00e9.md").write_text(f"the {NAME} pass\n", encoding="utf-8")
+    subprocess.run([git, "add", "."], cwd=tmp_path, check=True)  # noqa: S603
+    rels = _tracked(tmp_path)
+    assert rels == ["caf\u00e9.md"]
+    assert scan(tmp_path, rels) == ["caf\u00e9.md: content"]
+
+
+def test_a_tracked_path_missing_from_disk_is_a_hit(tmp_path: pathlib.Path) -> None:
+    assert scan(tmp_path, ["docs/gone.md"]) == ["docs/gone.md: missing"]
 
 
 def test_an_undecodable_text_file_fails_instead_of_being_skipped(tmp_path: pathlib.Path) -> None:
