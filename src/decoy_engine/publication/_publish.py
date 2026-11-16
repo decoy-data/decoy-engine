@@ -10,8 +10,9 @@ identifier and treats a repeat as already committed; here equality of content de
 ``operation_id`` alone never does). State found on disk is fsynced along its whole chain before
 it is reported, as PostgreSQL's ``SyncDataDirectory`` does at startup (F22 rule D, D2).
 
-Every exit is a ``CommitReceipt`` (plan 4.1): only a bind can leave anything new at the
-destination, and every other exit aborts the stage. Receipts hold closed tokens, digests, counts
+Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1); an argument error
+raises. Only a bind can leave anything new at the destination, and every other exit aborts the
+stage. Receipts hold closed tokens, digests, counts
 and errno names; an exception text is never read. Contract: ``docs/publication.md``.
 """
 
@@ -30,7 +31,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import reasons
-from decoy_engine.fileaccess._types import (
+from decoy_engine.fileaccess import (
+    DIRECTORY_PUBLISH_LABELS,
     CommitUncertain,
     FileAccessDenied,
     LeafTooLarge,
@@ -175,6 +177,16 @@ def _check_request(request: PublicationRequest, tables: Sequence[str]) -> list[s
     return names
 
 
+def _check_stage(out: OutputDir, txn: OutputTxn) -> None:
+    """Refuse a stage that is not a publication directory of ``out``: any other label is
+    published without the directory fsync chain, and another destination's stage would be bound
+    outside the lock held here."""
+    if txn.label not in DIRECTORY_PUBLISH_LABELS:
+        raise ValueError("txn is not a publication directory stage")
+    if txn.owner is not out:
+        raise ValueError("txn belongs to another OutputDir")
+
+
 def publish_unit(
     out: OutputDir,
     txn: OutputTxn,
@@ -186,6 +198,7 @@ def publish_unit(
     files are exactly the Parquet tables named in ``tables``, or judge it against what the
     destination already holds. The stage is aborted on every exit but a bind."""
     try:
+        _check_stage(out, txn)
         names = _check_request(request, tables)
         return _locked(out, txn, request, names)
     finally:

@@ -67,6 +67,9 @@ class ProjectIndex:
 
     package: str
     modules: dict[str, dict[str, str]] = field(default_factory=dict)  # module -> name -> target
+    # The parsed trees, so a sentry that needs the whole tree reads them here instead of parsing
+    # the source a second time and building a second index.
+    trees: dict[str, tuple[ast.Module, bool]] = field(default_factory=dict, repr=False)
 
     def add(self, name: str, tree: ast.Module, is_package: bool) -> None:
         bound = build_import_map(tree.body, name, is_package)
@@ -81,6 +84,7 @@ class ProjectIndex:
                         if base is not None:
                             bound[target.id] = f"{base}.{rest}" if rest else base
         self.modules[name] = bound
+        self.trees[name] = (tree, is_package)
 
     def normalize(self, canonical: str) -> str:
         seen: set[str] = set()

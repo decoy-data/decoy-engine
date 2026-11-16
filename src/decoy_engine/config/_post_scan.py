@@ -159,6 +159,13 @@ def post_scan_model_setting(config: Mapping[str, Any]) -> str | None:
     return "post_scan.ner_findings" if block.get("ner_findings") == "fail" else None
 
 
+def post_scan_ner_findings(config: Mapping[str, Any]) -> str:
+    """The run's `post_scan.ner_findings` mode, `warn` when unset: what the NER predicate of the
+    verdict and the promotion of NER warnings read."""
+    block = config.get("post_scan")
+    return str(block.get("ner_findings") or "warn") if isinstance(block, Mapping) else "warn"
+
+
 NO_SINK_KIND = "None"
 # The one sink class whose staged output the gate may read back. Any other class, including a
 # subclass, is a foreign producer: its files are never trusted, so it keeps its route and the gate is deferred.

@@ -18,7 +18,7 @@ See POSIX.1-2008 rename(2) and `docs/publication.md`.
 
 The sink is two parts: `StagedParquetWriter`, the write half that only stages Parquet files, and
 the sink itself, which owns the stage and moves every call through the publication sink state
-table (`decoy_engine.publication._sink_state`).
+table (`decoy_engine.publication`).
 """
 
 from __future__ import annotations
@@ -50,12 +50,16 @@ from decoy_engine.fileaccess import (
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.progress import get_active_channel
 from decoy_engine.publication import (
+    Act,
     CommitReceipt,
+    Exit,
     PublicationRequest,
+    SinkState,
+    SinkStateMachine,
     publish_unit,
     raise_for_outcome,
+    recover,
 )
-from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine, recover
 from decoy_engine.reasons import CleanupState, Operation, PublicationState
 
 if TYPE_CHECKING:
@@ -480,9 +484,12 @@ class ParquetTransactionalSink:
             tables = self.staged_components()
             receipt = publish_unit(self._out, self._stage(), self._request, tables=tables)
         except BaseException as exc:
-            self._cleanup_staging()  # `publish_unit` aborted it; confirm where we can look
-            capture_publication_failure(exc, self, Operation.COMMIT)
-            self._leave(Exit.ERROR)
+            try:
+                self._cleanup_staging()  # `publish_unit` aborted it; confirm where we can look
+                capture_publication_failure(exc, self, Operation.COMMIT)
+            finally:
+                # Leave COMMITTING on every error exit, even if the capture itself raises.
+                self._leave(Exit.ERROR)
             raise
         self.receipt = receipt
         if receipt.outcome in _BOUND:
@@ -541,8 +548,13 @@ class ParquetTransactionalSink:
         if self._stage_dir is None:
             evidence.cleanup = CleanupState.ATTEMPTED
         else:
-            failed = Path(self._stage_dir).exists()
-            evidence.cleanup = CleanupState.FAILED if failed else CleanupState.CONFIRMED
+            try:
+                still_there = Path(self._stage_dir).exists()
+            except OSError:
+                # The check cannot confirm the removal; never let it hide the original error.
+                evidence.cleanup = CleanupState.FAILED
+                return
+            evidence.cleanup = CleanupState.FAILED if still_there else CleanupState.CONFIRMED
 
 
 _BOUND = frozenset({"published", "already_committed", "commit_uncertain"})

@@ -26,11 +26,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine.publication import PublicationFailed, PublicationRefused
-from decoy_engine.publication._sink_state import SinkState
+from decoy_engine.publication import PublicationFailed, PublicationRefused, SinkState
+from decoy_engine.reasons import CleanupState
 from tests.unit.execution.publication._sink_support import (
     DESCRIPTOR,
     POLICIES,
+    STAGE_PREFIX,
     sink_factory,
     stages,
     table,
@@ -50,9 +51,10 @@ def _refused(call: Any) -> str:
 class _ParkedWrite:
     """`write_batches` parked inside its batch stream, on another thread."""
 
-    def __init__(self, sink: Any) -> None:
+    def __init__(self, sink: Any, *, fail_after_release: bool = False) -> None:
         self.entered, self.release = threading.Event(), threading.Event()
         self.error: BaseException | None = None
+        self._fail = fail_after_release
         self._thread = threading.Thread(target=self._run, args=(sink,), daemon=True)
         self._thread.start()
         assert self.entered.wait(10)  # non-vacuity: the write is in flight
@@ -60,6 +62,8 @@ class _ParkedWrite:
     def _batches(self) -> Iterator[pa.RecordBatch]:
         self.entered.set()
         self.release.wait(10)
+        if self._fail:
+            raise RuntimeError("stream failed")
         yield from table("A").to_batches()
 
     def _run(self, sink: Any) -> None:
@@ -186,6 +190,36 @@ def test_sink_transition_cells_writing(policy: str, tmp_path: Path) -> None:
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize("unconfirmable", [False, True], ids=["confirmed", "unconfirmable"])
+def test_sink_transition_cells_failed_write_with_a_pending_abort(
+    unconfirmable: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that fails while an abort is pending still applies the abort: the stage is
+    removed (or the failed confirmation is recorded) and the stream's own error propagates."""
+    real_exists = Path.exists
+
+    def exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name.startswith(STAGE_PREFIX):
+            raise PermissionError("cannot stat the stage")
+        return real_exists(self, *args, **kwargs)
+
+    with sink_factory("ambient", tmp_path) as make:
+        sink = make()
+        parked = _ParkedWrite(sink, fail_after_release=True)
+        sink.abort()  # pending while the write is parked
+        assert len(stages(tmp_path)) == 1
+        if unconfirmable:
+            monkeypatch.setattr(Path, "exists", exists)
+        parked.finish()
+        monkeypatch.undo()
+        assert isinstance(parked.error, RuntimeError)
+        assert str(parked.error) == "stream failed"
+        assert sink.state is S.ABORTED
+        assert stages(tmp_path) == []
+        expected = CleanupState.FAILED if unconfirmable else CleanupState.CONFIRMED
+        assert sink.publication_evidence.cleanup is expected
+
+
 @pytest.mark.parametrize("policy", POLICIES)
 def test_sink_transition_cells_writing_ok_returns_to_open(policy: str, tmp_path: Path) -> None:
     with sink_factory(policy, tmp_path) as make:
@@ -260,6 +294,83 @@ def _failing_rename(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
         monkeypatch.setattr(os, name, move)
     return seen
+
+
+class _CaptureBroke(BaseException):
+    """Stands in for an interrupt that lands while the failure evidence is captured."""
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_sink_transition_cells_commit_leaves_committing_when_capture_raises(
+    policy: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("occupant", encoding="utf-8")
+    before = tree(tmp_path / "out")
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise _CaptureBroke
+
+    monkeypatch.setattr(
+        "decoy_engine.execution._transactional_sink.capture_publication_failure", broken
+    )
+    with sink_factory(policy, tmp_path) as make:
+        sink = make()
+        sink.write("customers", table("A"))
+        entered, release = threading.Event(), threading.Event()
+        error: list[BaseException] = []
+
+        def publish_that_raises(*_args: Any, **_kwargs: Any) -> None:
+            entered.set()
+            release.wait(10)
+            raise RuntimeError("publish_unit failed outright")
+
+        monkeypatch.setattr(
+            "decoy_engine.execution._transactional_sink.publish_unit", publish_that_raises
+        )
+
+        def run() -> None:
+            try:
+                sink.commit()
+            except BaseException as exc:
+                error.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        assert entered.wait(10)  # non-vacuity: the commit is in flight
+        sink.abort()  # pending while the commit is in flight
+        release.set()
+        thread.join(10)
+        assert not thread.is_alive()
+        assert isinstance(error[0], _CaptureBroke)
+        assert sink.state is S.ABORTED  # left COMMITTING, and the pending abort applied
+        assert stages(tmp_path) == []
+    assert tree(tmp_path / "out") == before
+
+
+def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_commit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("occupant", encoding="utf-8")
+    real_exists = Path.exists
+
+    def exists(self: Path, *args: Any, **kwargs: Any) -> bool:
+        if self.name.startswith(STAGE_PREFIX):
+            raise PermissionError("cannot stat the stage")
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    with sink_factory("ambient", tmp_path) as make:
+        sink = make()
+        sink.write("customers", table("A"))
+        parked = _ParkedCommit(sink, monkeypatch, at="read")
+        sink.abort()
+        parked.finish()
+        # The commit's own refusal (occupied target) propagates, not the stat error.
+        assert isinstance(parked.error, PublicationRefused)
+        assert sink.state is S.ABORTED
+        assert sink.publication_evidence.cleanup is CleanupState.FAILED
 
 
 @pytest.mark.parametrize("policy", POLICIES)

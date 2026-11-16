@@ -430,8 +430,16 @@ def run_auto_chunk(
     from decoy_engine.execution.native._chunked_evidence import aggregate_chunked_route_evidence
 
     lane, lane_reason = select_lane(dispatcher_enabled)
+    collected: dict[str, pa.Table] | None = None
     if sink is None and isinstance(source, LazySource):
-        raise AssertionError("a LazySource reaches the auto-chunk lane only with a sink")
+        # No publication sink, so the lazy input is read in batches and the output comes back
+        # resident. The engine's callable adapter already materializes one table for a callable
+        # consumer; it is local to this call and never becomes the run's sink, so the post-scan
+        # gate sees the same resident output as on a resident-input run.
+        from decoy_engine.execution import _transactional_sink
+
+        collected = {}
+        sink = _transactional_sink._CallableSinkAdapter(collected.__setitem__)
     if sink is not None and cast_run is not None and table in cast_run.tables():
         raise DeclaredCastRouteError(
             code=reasons.route.DECLARED_CAST_ROUTE_UNSUPPORTED,
@@ -465,6 +473,9 @@ def run_auto_chunk(
             **common,
         )
         evidence = _without_elapsed(streamed_evidence.route_evidence())
+        if collected is not None:
+            masked = collected[table]
+            output_block = _output_sink.resident_block(reasons.route.NO_SINK)
     elif lane == LANE_DISPATCHER:
         masked = _run_dispatcher(
             config, source, native_threads=native_threads, chunk_results=chunk_results, **common
@@ -488,7 +499,7 @@ def run_auto_chunk(
         lane,
         evidence["native_admitted"],
         evidence["reroute_reason"],
-        " output=streamed" if output_block is not None else "",
+        " output=streamed" if output_block is not None and collected is None else "",
     )
     if streamed_evidence is not None:
         quality_metrics: dict[str, Any] = streamed_evidence.code_set_corpora()
