@@ -22,11 +22,9 @@ every capped run fail on import instead of on the job it is meant to bound).
 from __future__ import annotations
 
 import json
-import os
 import sys
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -34,15 +32,14 @@ import pyarrow.parquet as pq
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._isolated_common import (
     RESULT_FILENAME,
+    StagingSink,
     apply_mem_cap,
     exception_error_text,
     is_memory_failure,
     peak_rss_mb,
 )
 from decoy_engine.execution._pipeline import run_pipeline
-from decoy_engine.execution._transactional_sink import StagedParquetWriter
-from decoy_engine.fileaccess import FileRequest, FileRole, OutputTxn, write_private
-from decoy_engine.fileaccess._local import _LocalStageDir
+from decoy_engine.fileaccess import FileRequest, FileRole, write_private
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.verification.postmask import PostScanBlockedError
@@ -116,52 +113,7 @@ def _load_sources(
     }
 
 
-class _StagingSink:
-    """The child's sink: stages each table into the parent's stage and publishes nothing.
-
-    The write half is `StagedParquetWriter` (owner-only files, replace on rewrite, stored-size
-    evidence); there is no lock, descriptor or rename here. `commit` and `abort` do nothing:
-    the parent admits, measures, describes and binds the stage, or discards it (plan 5.7)."""
-
-    bounded_write_batches = True
-
-    def __init__(self, staging_output_dir: str) -> None:
-        self._dir = Path(staging_output_dir)
-        os.makedirs(self._dir, exist_ok=True)
-        # The parent made this stage (or names one in its own scratch); the child only adds
-        # files to it, so it holds the stage by path rather than through an output capability.
-        stage = _LocalStageDir(self._dir, "isolated.staging", private=True)
-        # The writer only creates, opens and removes stage files: the `StageDir` half.
-        self._writer = StagedParquetWriter(lambda: cast(OutputTxn, stage))
-        self.publication_evidence = self._writer.publication_evidence
-
-    @property
-    def spill_parent(self) -> Path:
-        """A streamed run's hold-back spills beside the stage, on the same filesystem."""
-        return self._dir.parent
-
-    def committed_table_path(self, table: str) -> Path:
-        return self._dir / f"{table}.parquet"
-
-    def write(self, table: str, data: pa.Table) -> None:
-        self._writer.write(table, data)
-
-    def write_batches(
-        self, table: str, batches: Iterable[pa.RecordBatch], *, schema: pa.Schema
-    ) -> None:
-        self._writer.write_batches(table, batches, schema=schema)
-
-    def staged_tables(self) -> list[str]:
-        return [component.removesuffix(".parquet") for component in self._writer.staged]
-
-    def commit(self) -> None:
-        return None
-
-    def abort(self) -> None:
-        return None
-
-
-def _finalize_outputs(result: ExecutionResult, sink: _StagingSink) -> list[str]:
+def _finalize_outputs(result: ExecutionResult, sink: StagingSink) -> list[str]:
     """Stage `result.outputs` for the parent's publication (TB-1 fix #2); return what is staged.
 
     Two shapes, distinguished by `execution_telemetry`'s `outputs_streamed` stamp
@@ -181,7 +133,7 @@ def _finalize_outputs(result: ExecutionResult, sink: _StagingSink) -> list[str]:
     if result.outputs or not execution.get("outputs_streamed"):
         for table, data in result.outputs.items():
             sink.write(table, data)
-    return sink.staged_tables()
+    return sink.staged_names()
 
 
 def _row_errors(row_errors: tuple[Any, ...]) -> list[dict[str, Any]]:
@@ -215,7 +167,7 @@ def _run(payload: dict[str, Any]) -> dict[str, Any]:
         # TB-1 fix #2: always hand run_pipeline a sink on the parent's stage. A route that
         # streams writes bounded batches straight through it; full_frame never touches it
         # (see `_finalize_outputs`). The worker does not know the route in advance.
-        sink = _StagingSink(staging_output_dir)
+        sink = StagingSink(staging_output_dir)
         result = run_pipeline(payload["config"], sources, sink=sink, **payload["kwargs"])
         # Staging allocates too, so a memory failure here must self-report as well.
         staged_tables = _finalize_outputs(result, sink)

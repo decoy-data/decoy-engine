@@ -1762,8 +1762,8 @@ reason = "the subprocess and scratch route cannot carry a strict policy (D6 fail
 ambient_only = true
 
 [[entry]]
-module = "decoy_engine/execution/_isolated_worker.py"
-function = "_StagingSink.__init__"
+module = "decoy_engine/execution/_isolated_common.py"
+function = "StagingSink.__init__"
 sink = "os.makedirs"
 ordinal = 0
 dir_category = "protected_child"

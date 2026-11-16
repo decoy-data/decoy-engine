@@ -130,7 +130,7 @@ def test_no_protected_root_row_is_pending() -> None:
 
 def test_the_other_rows_have_their_expected_categories() -> None:
     expect = {
-        "decoy_engine/execution/_isolated_worker.py::_StagingSink.__init__::os.makedirs::0": "protected_child",
+        "decoy_engine/execution/_isolated_common.py::StagingSink.__init__::os.makedirs::0": "protected_child",
         "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::Path.mkdir::0": "output_parent",
         "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::Path.mkdir::1": "published_output",
         "decoy_engine/fileaccess/_local.py::_LocalStageDir.create_dir::Path.mkdir::0": "published_output",
