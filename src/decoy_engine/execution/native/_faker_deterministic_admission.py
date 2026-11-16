@@ -22,13 +22,13 @@ a decline, never a raised error.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
 import pyarrow as pa
 
+from decoy_engine._canonical import StrictJsonError, strict_json_loads
 from decoy_engine.execution._operator_registry import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
     OPERATORS,
@@ -150,23 +150,9 @@ def _strict_json_object(raw: bytes) -> dict[str, Any] | None:
     object keys, malformed JSON, non-UTF-8 bytes and nonstandard numeric constants
     (NaN/Infinity). Returns the object, or ``None`` on any failure or a non-object top level."""
 
-    def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        seen: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in seen:
-                raise ValueError("duplicate object key")
-            seen[key] = value
-        return seen
-
-    def _reject_constant(_token: str) -> Any:
-        raise ValueError("nonstandard JSON constant")
-
     try:
-        text = raw.decode("utf-8")
-        decoded = json.loads(
-            text, object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_constant
-        )
-    except (UnicodeDecodeError, ValueError):
+        decoded = strict_json_loads(raw, max_int_digits=None)
+    except StrictJsonError:
         return None
     return decoded if isinstance(decoded, dict) else None
 
