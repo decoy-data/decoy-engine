@@ -120,14 +120,17 @@ class _CallableSinkAdapter:
     callable immediately (so partial output on abort is the documented
     behavior). commit() and abort() are no-ops.
 
-    `spill_scratch` (RUN-STREAM E5a): the scratch capability a streamed hold-back may spill into.
-    Only the engine's own no-sink collector passes one, a private arena it removes on every exit;
+    `open_spill_scratch` (RUN-STREAM E5a/E5b): the capability to open the scratch arena a streamed
+    hold-back may spill into, called at the first spill so a run that never spills makes none.
+    Only the engine's own no-sink collector passes one, and its arena is removed on every exit;
     every other caller keeps `None`, so a hold-back that must spill still refuses as before.
     """
 
-    def __init__(self, fn: object, *, spill_scratch: ScratchArena | None = None) -> None:
+    def __init__(
+        self, fn: object, *, open_spill_scratch: Callable[[], ScratchArena] | None = None
+    ) -> None:
         self._fn = fn
-        self.spill_scratch = spill_scratch
+        self.open_spill_scratch = open_spill_scratch
         # The callable publishes as it goes, so a failure leaves the output state unknowable.
         self.publication_evidence = PublicationEvidence()
 
