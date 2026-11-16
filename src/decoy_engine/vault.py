@@ -356,12 +356,8 @@ class VaultWriter:
         parts: list[bytes] = [_MAGIC, _frame(json.dumps(header, sort_keys=True).encode("utf-8"))]
         for start in range(0, len(rows), _CHUNK_ROWS):
             window = rows[start : start + _CHUNK_ROWS]
-            chunk_table = pa.table(
-                {
-                    "namespace": pa.array([r[0] for r in window], type=pa.string()),
-                    "masked": pa.array([r[1] for r in window], type=pa.string()),
-                    "source": pa.array([r[2] for r in window], type=pa.string()),
-                }
+            chunk_table = pa.Table.from_pylist(
+                [dict(zip(_SCHEMA.names, r, strict=True)) for r in window], schema=_SCHEMA
             )
             buf = pa.BufferOutputStream()
             pq.write_table(chunk_table, buf)
