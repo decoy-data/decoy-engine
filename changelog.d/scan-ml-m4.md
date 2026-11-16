@@ -1,5 +1,3 @@
-Changed: the post-scan report is now `post-scan-integrity/v3`; v3 allows `match_rate: null` for a classifier finding (its band is in its own field); readers of v2 are unaffected
-
 ### Added (model findings in the post-scan, SCAN-ML M4, 2026-11-12)
 
 The post-scan runs the classifier and spaCy NER detectors a pipeline names in
@@ -19,6 +17,6 @@ it returns, so no output is published. The post-scan gate decides that block wit
 and a deferred gate, whose column suite is otherwise report-only, still raises it and drops the run's quarantine file. `post_scan_verdict` takes the `ner_findings` mode in place
 of `ner_blocked`: a model finding blocks only through new reason code `post_scan/ner_blocked`,
 which ranks after every other code, and a classifier finding never blocks. The report gains
-`detectors`, `tables_checked` and `config_sha256`; the tag is `post-scan-integrity/v3`.
+`detectors`, `tables_checked` and `config_sha256`; the tag is `post-scan-integrity/v3`. The post-scan report is now `post-scan-integrity/v3`: v3 allows `match_rate: null` for a classifier finding, whose band is in its own field, and readers of v2 are unaffected (the engine's verdict reader accepts both).
 The regex-only hook, `run_post_mask` with `detectors=None`, now honours `post_scan.dismissed`: a
 matching regex `warning` is reported as `info` with `dismissed: true`.
