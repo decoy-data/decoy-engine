@@ -20,7 +20,13 @@ from decoy_engine.publication._descriptor import (
     encode_descriptor,
 )
 from decoy_engine.publication._publish import publish_tables, publish_unit
-from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine
+from decoy_engine.publication._sink_state import (
+    Act,
+    Exit,
+    SinkState,
+    SinkStateMachine,
+    recover,
+)
 from decoy_engine.publication._types import (
     UNIT_IMMUTABLE_DIRECTORY,
     ArtifactSummary,
@@ -60,4 +66,5 @@ __all__ = [
     "publish_tables",
     "publish_unit",
     "raise_for_outcome",
+    "recover",
 ]
