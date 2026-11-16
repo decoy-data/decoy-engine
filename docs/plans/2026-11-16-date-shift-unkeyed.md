@@ -178,16 +178,17 @@ Engine (E1):
 | AT-E6 | `tests/secret_providers/test_admission_before_read.py`: `PandasExecutionAdapter` and the sequential route on a compiled `date_shift` plan, with `key_provider=None` and with a 32-byte `SeedKeyProvider` | refused by `require_mask_key` with the code before the handler runs | passes today; the missing-provider cells are red under M1 and the 32-byte seed cells are red under M3 |
 | AT-E7 | `tests/unit/transforms/test_date_shift_key_failure.py` (shrunk in place) | `DateShiftStrategy`, `_shift_for_value_md5`, `_shift_for_value_keyed` and `_parse_date` are absent from `decoy_engine.transforms.date_shift`; `_detect_format` and `_COMMON_FORMATS` import and keep their existing oracles | red today (the names exist) |
 | AT-E8 | `tests/sentry/test_source_hygiene.py`: AST check that resolves import aliases | no MD5 call or `noqa: S324` under `src/decoy_engine/`. Seed one failing case for each normal spelling: `hashlib.md5(...)`; `import hashlib as h` then `h.md5(...)`; `from hashlib import md5` then `md5(...)`; `from hashlib import md5 as m` then `m(...)`; `hashlib.new("md5", ...)`; and `hashlib.new('md5', ...)` | red today at the legacy site; deleting support for any spelling makes its seeded case fail |
-| AT-E9 | `tests/secret_providers/test_classifier_equivalence.py`: the keyed-strategy sentry, three parts. (a) For each `SCALAR_HANDLERS` entry, parse the handler class's module (`inspect.getsourcefile`, then `ast`); if it reads `mask_key` (attribute `.mask_key`, a `mask_key=` keyword, or a `mask_key` name passed to `derive` or `DeriveContext`), the strategy must be in `ALWAYS_KEYED_STRATEGIES` or in a shrink-only `CONDITIONALLY_KEYED` allowlist (`faker`, `categorical`, each with its reason: keyed only when `deterministic` or `vault`), and each allowlisted strategy must be keyed by `column_is_keyed` when `deterministic=True`. (b) For every member of `ALWAYS_KEYED_STRATEGIES` that is a handler name, a minimal raw config `{"tables": [{"name": "t", "columns": [{"name": "c", "strategy": s}]}]}` makes `admit_mask_key` raise the code; the list comes from the frozenset, never a hand list. (c) An `ast` walk of `src/decoy_engine/` finds every `StrategyContext(` call and requires a `mask_key=` keyword whose value calls `require_mask_key`. Wire this sentry outside `tests/sentry/` exactly like `tests/secret_providers/test_leak_sentry.py`: add its path to `SENTRY_PATHS` and `DOC_WALK_GUARDS` in `scripts/dev/gates.sh`, and to `SENTRIES` in `tests/sentry/test_sentry_manifest.py`. | (a) red under M1 and under "add a handler that reads `ctx.mask_key` to `KNOWN_UNKEYED_STRATEGIES`"; (c) red under M5; (b) red if the walk drops a member; removing the path from any gate/manifest registry makes the existing manifest guards red |
+| AT-E9 | `tests/secret_providers/test_classifier_equivalence.py`: the keyed-strategy sentry, three parts. (a) For each `SCALAR_HANDLERS` entry, parse the handler class's module (`inspect.getsourcefile`, then `ast`); if it reads `mask_key` (attribute `.mask_key`, a `mask_key=` keyword, or a `mask_key` name passed to `derive` or `DeriveContext`), query `column_is_keyed` for the same strategy with three shapes: default (`deterministic=False, vault=False`), deterministic (`True, False`) and vault (`False, True`). A default-keyed result passes. A default-unkeyed result passes only when the handler's live `wizard_options` advertises the `deterministic` column option and both the deterministic and vault shapes classify keyed. Derive the option name from the handler descriptor and every keyed result from `column_is_keyed`; keep no test-local strategy set or keyedness table. Under M1, `date_shift` still reads `ctx.mask_key`, its default shape changes to unkeyed, and its handler advertises no `deterministic` option, so part (a) goes red. (b) For every member of `ALWAYS_KEYED_STRATEGIES` that is a handler name, a minimal raw config `{"tables": [{"name": "t", "columns": [{"name": "c", "strategy": s}]}]}` makes `admit_mask_key` raise the code; the list comes from the frozenset, never a hand list. (c) An `ast` walk of `src/decoy_engine/` finds every `StrategyContext(` call and requires a `mask_key=` keyword whose value calls `require_mask_key`. Wire this sentry outside `tests/sentry/` exactly like `tests/secret_providers/test_leak_sentry.py`: add its path to `SENTRY_PATHS` and `DOC_WALK_GUARDS` in `scripts/dev/gates.sh`, and to `SENTRIES` in `tests/sentry/test_sentry_manifest.py`. | (a) red under M1 and under "add a handler that reads `ctx.mask_key` to `KNOWN_UNKEYED_STRATEGIES` without a classifier-backed conditional shape"; (c) red under M5; (b) red if the walk drops a member; removing the path from any gate/manifest registry makes the existing manifest guards red |
 | AT-E10 | existing `tests/native/test_draw_sites_catalogue_pinned.py`, `tests/native/test_draw_site_providers_golden.py`, `tests/unit/execution/test_date_shift_oracle_identity.py`, `tests/native/test_determinism_goldens.py` and `tests/physical/test_shadow_date_shift.py` | only the `mask.date_shift` `_ENTRY_DIGESTS` element and `_CATALOGUE_DIGEST` move for metadata. `_MAP_DIGESTS`, `test_draw_site_providers_golden.py`, oracle identity, determinism goldens and KATs are byte-identical and green | regression guard plus the class-10 metadata-only re-pin |
 | AT-E11 | existing `test_unkeyed_work_needs_no_secret` | an all-unkeyed config still runs with no secret (engine QA KEY-09) | regression guard |
-| AT-E12 | AT-E1 extended | the message contains the constant guidance; a marker placed in the source cells appears in no message, log record, `__cause__` or `__context__` (catalog class 3) | passes today; pin |
+| AT-E12 | AT-E1 extended | the message contains the constant guidance; a marker placed in the source cells appears in no message or log record; the raised exception has `__cause__ is None` and `__context__ is None` (catalog class 3) | passes today; pin |
 
 Scanner scope for AT-E8 and AT-E9 (catalog class 5): the AST-normalized spellings listed above
 only. Deliberate evasion (`getattr(ctx, "mask" + "_key")`, `importlib`) is V2-LOG. AT-E8 resolves
 the imported binding before matching the call and has one seeded case per listed spelling. AT-E9
-derives its handler list from `SCALAR_HANDLERS` and its keyed list from the frozenset, so neither is
-a hand-kept table.
+derives its handler list from `SCALAR_HANDLERS`, the conditional capability from each handler's
+`wizard_options`, and all three keyed results from `column_is_keyed`, so it keeps no strategy-name
+or keyedness table.
 
 CLI (C1):
 
@@ -200,13 +201,13 @@ CLI (C1):
 | AT-C5 | New positive-control test only, in `tests/e2e/test_keyed_secret_guidance.py`: run the top-level `date_shift` shape with `--mask-secret env:...` | exit 0; each non-null output date differs from its source by an offset in `[min_days, max_days]` | positive control |
 | AT-C6 | `tests/e2e/test_explain_command.py` | the `date_shift` one-liner says the offset is keyed and needs a mask secret | red today ("Move dates by a random number of days") |
 | AT-C7 | Existing validate tests in `tests/e2e/`: use `_mask_secret_guidance.config_is_keyed` as the one classifier call and carry its boolean into rendering. A keyed config with no `mask_secret_ref` gets `_mask_secret_guidance.INIT_HINT` once on human output only | exit 0; `--json` byte-equal to before; `--quiet` unchanged; `--fail-on-warning` still exits 0; no warning/finding is created and rendering does not call the classifier again | red today (no hint) |
+| AT-E14 | C1, unconditionally, after E2 is present in the CLI's engine dependency: extend the existing `decoy validate` compile-error parametrization with the same degenerate-range config as AT-E13 | exit 1 with `plan.date_shift_range_degenerate` | red before E2 |
 
 E2:
 
 | Id | Test | Asserts | Fail-before |
 |---|---|---|---|
 | AT-E13 | beside the existing `date_shift` compile tests | `min_days == max_days` is refused at compile with `plan.date_shift_range_degenerate`, whether written in normal or reversed-bound test shapes; the value-free message names table and column only; `min_days: 0, max_days: 1` compiles | red today |
-| AT-E14 | `decoy validate` on the same config (folded into C1 when E2 is released first) | exit 1 with the code | red today |
 
 ## 6a. Class table
 
@@ -263,6 +264,9 @@ Read at engine `origin/main` `13c95c7de`.
 - `admit_mask_key`, `require_mask_key`, `KEY_REQUIRED_GUIDANCE`: reused as is; no new refusal path.
 - `tests/secret_providers/_helpers.py::keyed_config`, `TouchedSource`, `profile_spy` fixtures in `test_admission_before_read.py`: reused by AT-E1 to AT-E3.
 - `test_strategy_universe_is_fully_classified`: AT-E9 sits beside it and derives from the same `SCALAR_HANDLERS`.
+- `column_is_keyed` and each handler's `wizard_options`: AT-E9 derives the default,
+  deterministic and vault classification and the conditional capability from these owners; it
+  adds no strategy-name exception table.
 - `tests/sentry/test_source_hygiene.py`: AT-E8 joins it instead of a new sentry module.
 - `scripts/dev/gates.sh` `SENTRY_PATHS` and `DOC_WALK_GUARDS`, plus
   `tests/sentry/test_sentry_manifest.py` `SENTRIES`: AT-E9 reuses the exact named-sentry wiring
@@ -288,7 +292,9 @@ Read at engine `origin/main` `13c95c7de`.
 - A gate reviewer finds a route that builds `StrategyContext` without `require_mask_key`: AT-E9 (c) walks every construction, so the build fails first.
 - The class deletion breaks a hidden importer: `grep` at planning found only `_detect_format` and `_COMMON_FORMATS` importers; the builder reruns it on the branch head and AT-E7 imports both.
 - A sentry baseline or the draw-site inventory still names a deleted symbol: F8 and F9 list every known file; the T1 selection includes `tests/sentry/` and `tests/native/`.
-- AT-E9 (a) flags `faker` or `categorical`: they are on the shrink-only allowlist with a reason, and part (a) checks they are keyed when `deterministic=True`.
+- AT-E9 (a) sees default-unkeyed `faker` and `categorical`: their live handler descriptors
+  advertise the `deterministic` column option, and `column_is_keyed` classifies both the
+  deterministic and vault shapes keyed. No exception names are copied into the test.
 - E2 rejects a real customer config: Q3 explicitly accepts that break because a one-day range is
   a constant shift a config reader can reverse.
 
@@ -302,7 +308,8 @@ Read at engine `origin/main` `13c95c7de`.
   invalid both-kinds raw table dicts, which it now classifies conservatively instead of skipping.
   Schema-valid inputs do not change. `changelog.d/date-shift-unkeyed.md` records the removal and
   the public-classifier hardening; E1 does not edit `CHANGELOG.md` directly.
-- CLI: no code imports the class. C1's tests pass on 0.27.0, so C1 needs no pin change.
+- CLI: no code imports the class. C1's run-refusal tests pass on 0.27.0. C1 starts only after E2
+  is present in the CLI's engine dependency so its unconditional AT-E14 validate cell can pass.
 - Examples: no engine example or doc YAML block uses `date_shift`. The `mask.date_shift` entry in
   `docs/proof-manifest.json` is generated with a throwaway 32-byte secret
   (`scripts/gen_proof_manifest.py` `_PROOF_SECRET`) and does not change. CLI templates already
@@ -416,7 +423,7 @@ https://csrc.nist.gov/pubs/sp/800/188/final
 | E1 | engine | Delete the MD5 class; walk fix; draw-site metadata re-pin; AT-E1 to AT-E12; sentry wiring; baseline shrinks; docs and QA sections 05 and 07; changelog fragment | 8 `src/` files (section 9); no new code/test module | about 650 to 750 changed, about two thirds deletions | R2 | Dennis then Codex; M1, M2, M3 and M5 rerun on the final head and recorded |
 | E2 | engine | One-day range refused at compile, reason `plan.date_shift_range_degenerate`, AT-E13, reason fixtures, docs and changelog fragment | 2 production files, 2 frozen fixtures | about 100 | R2 | Dennis then Codex; reason and producer sentries run on the final head |
 | release | engine | Rides the daily engine release train (owner D4). No separate release work. | n/a | n/a | n/a | n/a |
-| C1 | CLI | Extend existing AT-C1 to AT-C4 parametrizations, add only the AT-C5 positive control, AT-C6 and AT-C7, explain text, validate human-only hint, checklist ids, roadmap row and shipped log | 2 production files, existing E2E tests only | about 150 to 200 | R1 | Codex; M4 on the final head |
+| C1 | CLI | After E2 is present in the CLI's engine dependency, extend existing AT-C1 to AT-C4 parametrizations, add only the AT-C5 positive control, AT-C6, AT-C7 and AT-E14, explain text, validate human-only hint, checklist ids, roadmap row and shipped log | 2 production files, existing E2E tests only | about 150 to 200 | R1 | Codex; M4 on the final head |
 
 Test depth: T0 per edit. E1 T1 includes `tests/secret_providers/`, `tests/sentry/`, transform and
 handler tests, native inventory tests, `tests/unit/execution/test_date_shift_oracle_identity.py`,
@@ -425,11 +432,12 @@ handler tests, native inventory tests, `tests/unit/execution/test_date_shift_ora
 gate reruns T1 on the exact head. E1 changes a secret-admission walk and a frozen catalogue, so one
 full suite runs on the merge head or merge-train batch head against the stored main baseline. E2
 runs plan checks plus all reason/producer fixture sentries. C1 runs
-`tests/e2e/test_keyed_secret_guidance.py` and the affected validate/explain tests; it needs no full
-suite.
+`tests/e2e/test_keyed_secret_guidance.py`, AT-E14 and the affected validate/explain tests; it needs
+no full suite.
 
 Build timing: build E1 now. This supersedes the 2026-11-11 instruction to wait for the section-07
-QA pass. That later pass runs DATE-13 against the already-guarded code.
+QA pass. That later pass runs DATE-13 against the already-guarded code. Build C1 only after E2 is
+present in the CLI's engine dependency because C1 owns AT-E14 unconditionally.
 
 ## 12. Owner questions, decided 2026-11-16
 
