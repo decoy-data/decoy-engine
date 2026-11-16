@@ -307,7 +307,7 @@ def test_a_section_or_row_the_verdict_cannot_read_blocks_on_check_error(
     assert "check_error" in [c.code for c in verdict.codes]
 
 
-@pytest.mark.parametrize("version", ["post-scan-integrity/v3", "post-scan-integrity/v1", None, 2])
+@pytest.mark.parametrize("version", ["post-scan-integrity/v4", "post-scan-integrity/v1", None, 2])
 def test_a_report_of_another_schema_major_blocks_on_check_error(version: Any) -> None:
     rep = report()
     if version is None:
