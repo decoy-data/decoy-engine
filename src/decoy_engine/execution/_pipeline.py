@@ -86,7 +86,6 @@ from decoy_engine.execution._planner import (
 )
 from decoy_engine.execution._substrate import require_optional_nonempty_str
 from decoy_engine.execution._transforms_prepare import prepare_transform_sources
-from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
 from decoy_engine.execution.pipeline._subset_stage import resolve_subset
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
@@ -303,19 +302,6 @@ def run_pipeline(
         stage,
     ):
         with _progress.phase("resolve"):
-            if resident_fallback and execution_mode == "auto" and not stream_required:
-                sources = read_resident_fallback(
-                    config,
-                    sources,
-                    engine_version=engine_version,
-                    base_dir=base_dir,
-                    instance_default_locale=instance_default_locale,
-                    fidelity_report=fidelity_report,
-                    post_validation=post_validation,
-                    vault_writer=vault_writer,
-                    registry=registry,
-                    source_loader_schemas=source_loader_schemas,
-                )
             ctx = _ctx.build_run_context(
                 config,
                 sources,
@@ -362,6 +348,7 @@ def run_pipeline(
                 secret_cache_policy=secret_cache_policy,
                 base_dir=base_dir,
                 subset_stage=stage,
+                resident_fallback=resident_fallback,
             )
         ctx = _ctx.with_quarantine_path(ctx, quarantine_path, base_dir)
         with collect_refusals() as refusals:

@@ -14,7 +14,8 @@ where the resident run fits and runs full frame.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,19 +26,33 @@ from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_r
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
+    from decoy_engine.execution.pipeline._subset_stage import SubsetStageScope
     from decoy_engine.providers_v2 import ProviderRegistry
 
 
 def read_resident_fallback(
     config: dict[str, Any],
-    sources: Mapping[str, pa.Table | LazySource] | None,
+    facts: RoutingFacts,
+    *,
+    rebuild: Callable[[Mapping[str, pa.Table | LazySource], SubsetStageScope | None], RoutingFacts]
+    | None,
     **run_values: Any,
-) -> Mapping[str, pa.Table | LazySource] | None:
-    """`sources` with each lazy table the run cannot keep lazy read whole."""
-    if not sources:
-        return sources
-    rejected = resident_fallback_tables(config, sources, **run_values)
-    return {n: materialize_source(v) if n in rejected else v for n, v in sources.items()}
+) -> RoutingFacts:
+    """`facts` with each lazy table the run cannot keep lazy read whole.
+
+    `facts.caller_sources` is the map the run executes, after any subset selection, so a whole
+    read covers only the rows the run keeps. A subset run keeps its facts and swaps the tables in,
+    because the selection already staged them. Without a subset, `rebuild` makes the facts again
+    over the resident tables, as a run handed those tables would.
+    """
+    sources = facts.caller_sources
+    rejected = resident_fallback_tables(config, sources, facts=facts, **run_values)
+    if not rejected:
+        return facts
+    resident = {n: materialize_source(v) if n in rejected else v for n, v in sources.items()}
+    if rebuild is None:
+        return replace(facts, caller_sources=resident)
+    return rebuild(resident, None)
 
 
 def resident_fallback_tables(
@@ -52,6 +67,7 @@ def resident_fallback_tables(
     vault_writer: Any,
     registry: ProviderRegistry | None = None,
     source_loader_schemas: Mapping[str, Any] | None = None,
+    facts: RoutingFacts | None = None,
 ) -> frozenset[str]:
     """The caller `LazySource` names the run cannot keep lazy; a subset of the lazy `sources`.
 
@@ -82,7 +98,7 @@ def resident_fallback_tables(
         from decoy_engine.providers_v2 import get_default_registry
 
         resolved_registry = registry if registry is not None else get_default_registry()
-        facts = build_routing_facts(
+        facts = facts or build_routing_facts(
             config,
             sources,
             registry=resolved_registry,

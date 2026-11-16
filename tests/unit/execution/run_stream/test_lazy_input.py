@@ -283,17 +283,26 @@ def test_the_pre_pass_copies_no_eligibility_rule() -> None:
 
 
 def _spy_context(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Record the `sources` mapping `build_run_context` receives."""
+    """Record the sources the run context carries once the fallback has read what it rejects."""
     from decoy_engine.execution import _pipeline_context
 
     seen: dict[str, Any] = {}
     real = _pipeline_context.build_run_context
+    real_fallback = _pipeline_context.read_resident_fallback
 
     def spy(config: Any, sources: Any, **kw: Any) -> Any:
-        seen["sources"] = sources
-        return real(config, sources, **kw)
+        ctx = real(config, sources, **kw)
+        seen["sources"] = ctx.caller_sources
+        return ctx
+
+    def spy_fallback(config: Any, facts: Any, **kw: Any) -> Any:
+        # Recorded here too: a run the later steps refuse never returns a context.
+        out = real_fallback(config, facts, **kw)
+        seen["sources"] = out.caller_sources
+        return out
 
     monkeypatch.setattr(_pipeline_context, "build_run_context", spy)
+    monkeypatch.setattr(_pipeline_context, "read_resident_fallback", spy_fallback)
     return seen
 
 
@@ -651,3 +660,111 @@ def test_a_relationship_post_scan_verdict_equals_the_resident_call(tmp_path: Pat
         assert got.equals(resident_out[name])
     assert lazy_gate.output_unreadable is resident_gate.output_unreadable is False
     assert lazy_gate.report == resident_gate.report and lazy_gate.report is not None
+
+
+# ---------------------------------------------------- order against the config-only checks
+
+
+def _no_whole_read(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    reads: list[str] = []
+
+    def spy(self: LazySource, *a: Any, **k: Any) -> Any:
+        reads.append("to_table")
+        raise AssertionError("a config-only refusal must come before any whole read")
+
+    monkeypatch.setattr(LazySource, "to_table", spy)
+    return reads
+
+
+def _code_of(excinfo: pytest.ExceptionInfo[BaseException]) -> Any:
+    return getattr(excinfo.value, "code", type(excinfo.value).__name__)
+
+
+def test_a_bad_chunk_knob_is_refused_before_a_whole_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, lazy, _path = _declared_cast_job(tmp_path)
+    with pytest.raises(Exception) as off:
+        _run(cfg, {"t": lazy}, chunk_size_rows=0)
+    reads = _no_whole_read(monkeypatch)
+    with pytest.raises(Exception) as on:
+        _run(cfg, {"t": lazy}, resident_fallback=True, chunk_size_rows=0)
+    assert reads == []
+    assert type(on.value) is type(off.value) and _code_of(on) == _code_of(off)
+    assert _code_of(on) == reasons.runtime.INVALID_EXECUTION_KNOB
+
+
+def test_a_missing_mask_secret_is_refused_before_a_whole_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.unit.execution import _sample_run_support as sup
+
+    monkeypatch.delenv(sup.VAR, raising=False)
+    cfg, _data, lazy = sup.chain_job(tmp_path)
+    with pytest.raises(Exception) as off:
+        _run(cfg, lazy, fidelity_report=True)
+    reads = _no_whole_read(monkeypatch)
+    with pytest.raises(Exception) as on:
+        _run(cfg, lazy, resident_fallback=True, fidelity_report=True)
+    assert reads == []
+    assert type(on.value) is type(off.value) and _code_of(on) == _code_of(off)
+
+
+# ------------------------------------------------------ the pre-pass sees the run's own inputs
+
+
+def test_a_subset_run_reads_whole_only_the_rows_it_keeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.pipeline import _lazy_input
+    from decoy_engine.execution.pipeline._subset_stage import SubsetStageScope
+    from decoy_engine.subset import sample_request
+    from tests.unit.execution import _sample_run_support as sup
+
+    monkeypatch.setenv(sup.VAR, "ab" * 32)
+    cfg, data, lazy = sup.chain_job(tmp_path)
+    request = sample_request(cfg, rows=5)
+    read_rows: list[int] = []
+    real_read = _lazy_input.materialize_source
+
+    def spy_read(source: Any) -> Any:
+        table = real_read(source)
+        read_rows.append(table.num_rows)
+        return table
+
+    applied: list[int] = []
+    real_apply = SubsetStageScope.apply
+
+    def spy_apply(self: SubsetStageScope, *a: Any, **k: Any) -> Any:
+        applied.append(1)
+        return real_apply(self, *a, **k)
+
+    seen: dict[str, Any] = {}
+    real_tables = _lazy_input.resident_fallback_tables
+
+    def spy_tables(config: Any, sources: Any, **kw: Any) -> Any:
+        seen["facts_sources"] = kw["facts"].caller_sources
+        seen["sources"] = sources
+        return real_tables(config, sources, **kw)
+
+    monkeypatch.setattr(_lazy_input, "materialize_source", spy_read)
+    monkeypatch.setattr(SubsetStageScope, "apply", spy_apply)
+    monkeypatch.setattr(_lazy_input, "resident_fallback_tables", spy_tables)
+
+    class _Vault:
+        pass
+
+    # The vault rule makes every lazy table read whole; the run may refuse the writer afterwards.
+    with contextlib.suppress(Exception):
+        _run(
+            cfg,
+            lazy,
+            resident_fallback=True,
+            vault_writer=_Vault(),
+            subset_request=request,
+        )
+    full = max(t.num_rows for t in data.values())
+    assert read_rows, "the vault rule must read the lazy tables"
+    assert max(read_rows) <= 5 < full
+    assert seen["sources"] is seen["facts_sources"]
+    assert applied == [1]
