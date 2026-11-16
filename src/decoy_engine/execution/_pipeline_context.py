@@ -30,7 +30,7 @@ form by mistake.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -143,6 +143,7 @@ class PipelineRunContext:
     # F06: the resolved protected-quarantine runtime (sink + owner); None unless supplied.
     quarantine_runtime: Any = None
     out_of_core_threads: int | None = None
+    post_scan_detectors: Any = field(default=None, repr=False, compare=False)  # never printed
 
 
 @dataclass(frozen=True)
@@ -246,11 +247,10 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
-    # Adapter selection runs up front, before any profiling or plan
-    # compilation, so an invalid substrate or count knob fails at submit
-    # time with a typed error instead of after the expensive stages.
-    # Construction is cheap and side-effect free for both adapters, so
-    # pure-generate jobs (which never use it) lose nothing.
+    # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
+    # substrate or count knob fails at submit time with a typed error instead of after the expensive
+    # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
+    # (which never use it) lose nothing.
     resolved_substrate = SUBSTRATE
     adapter = select_execution_adapter(fpe_chunk_count=fpe_chunk_count)
     # Auto-chunk knobs share the substrate knobs' fail-early contract.

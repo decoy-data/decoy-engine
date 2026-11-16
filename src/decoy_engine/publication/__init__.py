@@ -20,6 +20,7 @@ from decoy_engine.publication._descriptor import (
     encode_descriptor,
 )
 from decoy_engine.publication._publish import publish_tables, publish_unit
+from decoy_engine.publication._sink_state import Act, Exit, SinkState, SinkStateMachine
 from decoy_engine.publication._types import (
     UNIT_IMMUTABLE_DIRECTORY,
     ArtifactSummary,
@@ -37,15 +38,19 @@ __all__ = [
     "MAX_DESCRIPTOR_BYTES",
     "SCHEMA",
     "UNIT_IMMUTABLE_DIRECTORY",
+    "Act",
     "Artifact",
     "ArtifactSummary",
     "CommitReceipt",
     "Descriptor",
     "DescriptorVault",
+    "Exit",
     "Outcome",
     "PublicationFailed",
     "PublicationRefused",
     "PublicationRequest",
+    "SinkState",
+    "SinkStateMachine",
     "VaultBinding",
     "build_descriptor",
     "compute_result_id",

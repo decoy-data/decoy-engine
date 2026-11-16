@@ -12,12 +12,13 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess, reasons
@@ -94,7 +95,7 @@ def _assert_marker(arena: ScratchArena) -> None:
 @pytest.mark.parametrize("mask", [0o000, 0o002, 0o022, 0o077, 0o777], ids="{:03o}".format)
 def test_modes_under_umask(tmp_path: Path, umask: Callable[[int], int], mask: int) -> None:
     umask(mask)
-    with ScratchArena.open() as arena, ScratchArena.open(under=tmp_path / "a" / "b") as under:
+    with ScratchArena.fresh() as arena, ScratchArena.fresh(under=tmp_path / "a" / "b") as under:
         child = arena.create_dir("c")
         os.close(child.create_file("f"))
         os.close(arena.create_file("g"))
@@ -125,7 +126,7 @@ def _reporting(mode: int, real: Callable[[int], os.stat_result] = os.fstat) -> o
 def test_arena_refuses_a_mode_it_cannot_set(
     temp_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         os.close(arena.create_file("kept"))
         arena.create_dir("kept_dir")
         with monkeypatch.context() as patch:
@@ -139,13 +140,13 @@ def test_arena_refuses_a_mode_it_cannot_set(
         assert [_mode(arena.local_path(n)) for n in ("kept", "kept_dir")] == [0o600, 0o700]
     monkeypatch.setattr(os, "mkdir", Mock(side_effect=OSError(errno.ENOSPC, "no space")))
     with pytest.raises(OSError) as info:
-        ScratchArena.open()
+        ScratchArena.fresh()
     assert info.value.errno == errno.ENOSPC and not isinstance(info.value, ProtectedDirUnsafe)
 
 
 def test_arena_root_is_an_issued_root(strict: Strict) -> None:
     with strict():
-        arena = ScratchArena.open()
+        arena = ScratchArena.fresh()
         inside = arena.local_path("x")
         assert open_protected_dir(inside, create=True) == Path(inside)
         assert arena.reclaim().disposition is Disposition.REMOVED
@@ -161,10 +162,10 @@ def test_marker_mode_under_umask(
     if cell.endswith("wrong_mode"):
         monkeypatch.setattr(os, "fchmod", lambda fd, _m, real=os.fchmod: real(fd, 0o644))
         with pytest.raises(ProtectedDirUnsafe):
-            ScratchArena.open()
+            ScratchArena.fresh()
         assert list(temp_root.iterdir()) == []  # no final-name arena, no pending directory
         return
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         _assert_marker(arena)
 
 
@@ -181,7 +182,7 @@ def test_refuses_unsafe_root(temp_root: Path, monkeypatch: pytest.MonkeyPatch, c
     before = sorted((p.name, os.lstat(p).st_mode) for p in temp_root.iterdir())
     monkeypatch.setattr(fileaccess._scratch, "_allocate", lambda base, prefix: str(planted))
     with pytest.raises(ProtectedDirUnsafe) as info:
-        ScratchArena.open()
+        ScratchArena.fresh()
     assert info.value.code == reasons.runtime.SCRATCH_UNSAFE
     assert sorted((p.name, os.lstat(p).st_mode) for p in temp_root.iterdir()) == before
 
@@ -199,7 +200,7 @@ def test_open_leaves_nothing_behind(
         real = tmp_path / "real"
         real.mkdir()
         (tmp_path / "link").symlink_to(real)
-        with ScratchArena.open(under=tmp_path / "link") as arena:
+        with ScratchArena.fresh(under=tmp_path / "link") as arena:
             os.close(arena.create_file("f"))
         assert list(real.iterdir()) == []
     elif cell == "base_open_fails":
@@ -212,20 +213,20 @@ def test_open_leaves_nothing_behind(
 
         monkeypatch.setattr(os, "open", refuse_base)
         with pytest.raises(PermissionError):
-            ScratchArena.open()
+            ScratchArena.fresh()
         assert list(temp_root.iterdir()) == []
     else:
         failure = OSError(errno.EIO, os.strerror(errno.EIO))
         monkeypatch.setattr(fileaccess._scratch, "_exact", Mock(side_effect=failure))
         with pytest.raises(OSError) as info:
-            ScratchArena.open()
+            ScratchArena.fresh()
         assert info.value.errno == errno.EIO
         assert [p for p in temp_root.iterdir() if p.name.startswith("decoy-arena-v1-")] == []
     assert _open_fds() == before
 
 
 def test_a_child_keeps_its_opener_alive(temp_root: Path) -> None:
-    child = ScratchArena.open().create_dir("d")
+    child = ScratchArena.fresh().create_dir("d")
     gc.collect()
     os.close(child.create_dir("e").create_file("f"))
     assert os.path.isfile(os.path.join(child.local_path("e"), "f"))
@@ -235,7 +236,7 @@ def test_a_child_keeps_its_opener_alive(temp_root: Path) -> None:
 
 
 def test_remove_takes_a_file_or_an_empty_directory() -> None:
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         os.close(arena.create_file("f"))
         arena.create_dir("d")
         os.close(arena.create_dir("full").create_file("x"))
@@ -252,7 +253,7 @@ _EXITS = ["reclaim_twice", "error_in_with", "failed_reclaim", "collection", "ado
 
 @pytest.mark.parametrize("cell", _EXITS)
 def test_exit_paths(temp_root: Path, tmp_path: Path, cell: str) -> None:
-    arena = ScratchArena.open()
+    arena = ScratchArena.fresh()
     if cell == "reclaim_twice":
         os.close(arena.create_dir("d").create_file("f"))
         first = arena.reclaim()
@@ -291,7 +292,7 @@ def test_exit_paths(temp_root: Path, tmp_path: Path, cell: str) -> None:
         assert (tmp_path / "adopted").is_dir()
     else:
         arena.reclaim()
-        code = "from decoy_engine.fileaccess import ScratchArena as A; a = A.open(); "
+        code = "from decoy_engine.fileaccess import ScratchArena as A; a = A.fresh(); "
         code += "print(a.local_path(), flush=True); input()"
         env = {**os.environ, "TMPDIR": str(temp_root)}
         argv, pipe = [sys.executable, "-c", code], subprocess.PIPE
@@ -312,7 +313,7 @@ def test_exit_paths(temp_root: Path, tmp_path: Path, cell: str) -> None:
 
 def test_arena_is_stagedir(umask: Callable[[int], int]) -> None:
     umask(0o000)
-    with ScratchArena.open() as arena:
+    with ScratchArena.fresh() as arena:
         assert isinstance(arena, StageDir) and arena.strict and arena.display == "engine.scratch"
         schema = pa.schema([("a", pa.int64())])
         with arrow.parquet_writer(arena, "t.parquet", schema) as writer:
@@ -334,15 +335,15 @@ def test_arena_is_stagedir(umask: Callable[[int], int]) -> None:
 
 
 def test_local_path_policy(tmp_path: Path, strict: Strict) -> None:
-    with ScratchArena.open() as engine, ScratchArena.open(under=tmp_path / "u") as caller:
+    with ScratchArena.fresh() as engine, ScratchArena.fresh(under=tmp_path / "u") as caller:
         name = os.path.basename(caller.local_path())
         assert caller.local_path("x") == str(tmp_path / "u" / name / "x")
         assert engine.local_path().startswith(tempfile.gettempdir())
         with strict():
             assert engine.local_path("x") == os.path.join(engine.local_path(), "x")
             with pytest.raises(FileAccessUnavailable):
-                ScratchArena.open(under=tmp_path / "v")
-            with ScratchArena.open(under=engine.local_path()) as strict_under:
+                ScratchArena.fresh(under=tmp_path / "v")
+            with ScratchArena.fresh(under=engine.local_path()) as strict_under:
                 with pytest.raises(FileAccessUnavailable):
                     strict_under.local_path()
 
@@ -375,7 +376,7 @@ def test_report_text_is_value_free(
             lambda: CleanupReport(disposition=Disposition.REMOVED, retained_bytes=SENTINELS[3]),  # type: ignore[arg-type]
         )
     else:
-        with ScratchArena.open(under=secret) as arena:
+        with ScratchArena.fresh(under=secret) as arena:
             texts += _raised(
                 lambda: arena.create_file("ssn_col/123-45-6789"),
                 lambda: arena.create_file(".decoy-arena"),
@@ -385,8 +386,8 @@ def test_report_text_is_value_free(
             with monkeypatch.context() as patch:
                 patch.setattr(os, "fstat", _reporting(0o777))
                 texts += _raised(lambda: arena.create_dir("patients_tbl"))
-            with strict(), ScratchArena.open(under=arena.local_path()) as inner:
-                texts += _raised(lambda: ScratchArena.open(under=secret), inner.local_path)
+            with strict(), ScratchArena.fresh(under=arena.local_path()) as inner:
+                texts += _raised(lambda: ScratchArena.fresh(under=secret), inner.local_path)
         texts += _raised(lambda: arena.local_path("ssn_col"))
         names = "Denied Denied FileNotFound FileNotFound ProtectedDirUnsafe" + " Unavailable" * 3
         assert [
@@ -396,3 +397,82 @@ def test_report_text_is_value_free(
         assert not any(s in f"{each!s} {each!r}" for s in SENTINELS), repr(each)
         if isinstance(each, BaseException):
             assert each.__context__ is None and each.__cause__ is None
+
+
+# -- the transitional Path arm under a strict policy, and the arena's reader (S2a-1b-i) --------
+
+
+@pytest.mark.parametrize("cell", ["under_live_root", "outside_refused", "dotdot_refused"])
+def test_adopt_under_a_strict_policy(tmp_path: Path, strict: Strict, cell: str) -> None:
+    """A path at or below a live issued root is adopted under every policy, by the rule
+    `open_protected_dir` applies; any other path still needs the ambient policy."""
+    with ScratchArena.fresh() as arena:
+        inside = Path(arena.local_path()) / "staged" / "t0000"
+        with strict():
+            if cell == "under_live_root":
+                with ScratchArena._adopt(inside) as adopted:
+                    os.close(adopted.create_file("masked_keys.parquet"))
+                assert _mode(inside.parent) == _mode(inside) == 0o700
+                assert (inside / "masked_keys.parquet").is_file()
+            elif cell == "outside_refused":
+                outside = tmp_path / "outside" / "x"
+                with pytest.raises(FileAccessUnavailable):
+                    ScratchArena._adopt(outside)
+                assert not (tmp_path / "outside").exists(), "refused before anything is made"
+            else:  # `..` that stays inside is refused by `_vet_live`; one that leaves is outside
+                within = f"{arena.local_path()}/staged/../staged/t0000"
+                with pytest.raises(ProtectedDirUnsafe):
+                    ScratchArena._adopt(within)
+                assert not inside.parent.exists()
+                escape = f"{arena.local_path()}/staged/../../escape"
+                with pytest.raises(FileAccessUnavailable):
+                    ScratchArena._adopt(escape)
+                assert not os.path.exists(os.path.normpath(escape))
+    if cell == "under_live_root":
+        with strict(), pytest.raises(FileAccessUnavailable):
+            ScratchArena._adopt(inside)  # the root is no longer live once reclaimed
+
+
+def _staged(arena: ScratchArena, name: str) -> pa.Table:
+    table = pa.table({"k": [1, 2, 3]})
+    with arrow.parquet_writer(arena, name, table.schema) as writer:
+        writer.write_table(table)
+    return table
+
+
+def test_reader_reads_only_beneath_its_directory(tmp_path: Path, strict: Strict) -> None:
+    from decoy_engine.profile._readers import LazySource
+
+    outside = tmp_path / "outside.parquet"
+    pq.write_table(pa.table({"k": [9]}), outside)
+    with ScratchArena.fresh() as arena:
+        os.close(arena.create_file("top.parquet"))
+        child = arena.create_dir("staged")
+        table = _staged(child, "k.parquet")
+        reader = child.reader()
+        released = Path(child.local_path("k.parquet"))
+        for scope in (nullcontext, strict):  # the reader is its own policy, whatever is ambient
+            with scope():
+                # T02 holds the bare component; T18 the absolute released path (prefix stripped).
+                assert LazySource(Path("k.parquet"), access=reader).to_table() == table
+                assert LazySource(released, access=reader).to_table() == table
+                for denied in (outside, Path("../top.parquet"), released.parent / ".." / "x"):
+                    with pytest.raises(FileAccessDenied):
+                        LazySource(denied, access=reader).to_table()
+    with pytest.raises(FileAccessUnavailable):
+        arena.reader()  # reclaimed
+
+
+def test_reader_holds_its_own_descriptor() -> None:
+    """The reader outlives the arena object it came from (its own descriptor), never the disk."""
+    from decoy_engine.profile._readers import LazySource
+
+    with ScratchArena.fresh() as arena:
+        child = arena.create_dir("staged")
+        table = _staged(child, "k.parquet")
+        reader = child.reader()
+        del child
+        gc.collect()  # the child's finalizer closes the child's descriptor
+        assert LazySource(Path("k.parquet"), access=reader).to_table() == table
+    with pytest.raises(FileAccessDenied):  # reclaimed: the file is gone beneath the descriptor
+        LazySource(Path("k.parquet"), access=reader).to_table()

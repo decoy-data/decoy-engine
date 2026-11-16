@@ -7,12 +7,15 @@ executors keep their signature (existing tests and `physical` drivers call them 
 patch them by module attribute; the calls below go through that attribute on purpose).
 
 Nothing here decides or re-decides a route: the decision arrives finished in `RouteDecision`.
+The run's post-scan models are loaded at run start (`load_post_scan_detectors`) and ride on the
+context (`with_post_scan_detectors`) to the gate `execute_route` binds.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import nullcontext
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
@@ -36,7 +39,21 @@ __all__ = [
     "execute_out_of_core_route",
     "execute_route",
     "execute_sequential_route",
+    "load_post_scan_detectors",
+    "with_post_scan_detectors",
 ]
+
+
+def load_post_scan_detectors(config: Mapping[str, Any], file_access: Any) -> Any:
+    """The run's post-scan models, loaded strictly: one that cannot run refuses before any read."""
+    from decoy_engine.verification.postmask._model_findings import post_scan_detectors
+
+    return post_scan_detectors(config, file_access=file_access)
+
+
+def with_post_scan_detectors(ctx: PipelineRunContext, detectors: Any) -> PipelineRunContext:
+    """`ctx` carrying the detector set loaded at run start, for the post-scan gate to use."""
+    return replace(ctx, post_scan_detectors=detectors)
 
 
 def execute_route(
