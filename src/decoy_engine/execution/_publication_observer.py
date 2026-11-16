@@ -29,8 +29,7 @@ from types import MappingProxyType
 from typing import Any, Final
 
 from decoy_engine import reasons
-from decoy_engine.publication import CommitReceipt
-from decoy_engine.publication._sink_state import SinkState
+from decoy_engine.publication import CommitReceipt, SinkState
 from decoy_engine.reason_adapter import amend_failure, capture_failure
 from decoy_engine.reasons import (
     CleanupState,

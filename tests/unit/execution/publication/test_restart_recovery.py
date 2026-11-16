@@ -19,8 +19,7 @@ from typing import Any
 import pytest
 
 from decoy_engine.fileaccess import CommitUncertain
-from decoy_engine.publication import PublicationRefused, PublicationRequest
-from decoy_engine.publication._sink_state import SinkState
+from decoy_engine.publication import PublicationRefused, PublicationRequest, SinkState
 from decoy_engine.reasons import PublicationState
 from tests.fileaccess.publication._chain_support import Recorder, anchor_at, key
 from tests.unit.execution.publication._sink_support import (

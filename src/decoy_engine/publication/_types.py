@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Final, Literal, get_args
 
 from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
-from decoy_engine.fileaccess._types import CommitUncertain
+from decoy_engine.fileaccess import CommitUncertain
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir

@@ -306,3 +306,198 @@ def test_a_rename_may_not_raise_a_numeric_max(
     assert (res.returncode == 1) is red, res.stdout + res.stderr
     if red:
         assert "replacement or split of a raised or dropped max for key(s): m::f" in res.stderr
+
+
+# --- re-homing a ``<file>.py::<qualname>::<name>`` key whose site left the source -----------
+
+C_ID, C = "secret-material-census", "tests/sentry/baselines/c.json"
+OLD = "p/old.py::f::seed"
+NEW = "p/new.py::g::seed"
+NEW2 = "p/new.py::h::seed"
+
+
+def _census(repo: Path, entries: dict[str, dict[str, object]]) -> None:
+    _write(repo, REG, _registry({"a": A, C_ID: C}))
+    body = {k: {"reason": REASON, **v} for k, v in entries.items()}
+    _write(repo, C, json.dumps({"sentry_id": C_ID, "created_in": "S0", "entries": body}))
+
+
+def _commit_census(repo: Path, old_src: str, keys: list[str], new_src: str = "X = 1\n") -> None:
+    _write(repo, "src/p/old.py", old_src)
+    _write(repo, "src/p/new.py", new_src)
+    _census(repo, {k: {} for k in keys})
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "census")
+
+
+MOVED = {"moved_from": OLD}
+WITH_F = "def f(seed):\n    return seed\n"
+WITH_G = "def g(seed):\n    return seed\n"
+
+
+def test_declared_one_to_one_rehome_with_the_old_site_gone_passes(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"re-homed {OLD} -> {NEW}" in res.stdout
+
+
+def test_a_deleted_old_file_is_proof_when_it_existed_at_the_base(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD])
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    assert _run(repo).returncode == 0
+
+
+def test_rehome_that_also_grows_the_count_fails(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G + "\ndef h(seed):\n    pass\n")
+    _census(repo, {NEW: MOVED, NEW2: {}})
+    _assert_red(repo, NEW2)
+
+
+def test_rehome_while_the_old_site_still_exists_fails(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_a_brand_new_key_still_fails(repo: Path) -> None:
+    _commit_census(repo, "X = 1\n", [OLD], WITH_G)
+    _census(repo, {OLD: {}, NEW: {}})
+    _assert_red(repo, NEW)
+
+
+def test_an_undeclared_move_fails(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {}})
+    _assert_red(repo, NEW)
+
+
+def test_moved_from_naming_a_key_still_in_the_baseline_fails(repo: Path) -> None:
+    other = "p/old.py::k::seed"
+    _commit_census(repo, WITH_F + "\ndef k(seed):\n    pass\n", [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {OLD: {}, other: {}, NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_moved_from_reused_twice_fails(repo: Path) -> None:
+    _commit_census(repo, WITH_F, [OLD, "p/old.py::z::seed"])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G + "\ndef h(seed):\n    pass\n")
+    _census(repo, {NEW: MOVED, NEW2: MOVED})
+    _assert_red(repo, "baseline gained")
+
+
+def test_moved_from_on_a_lost_key_with_a_numeric_max_fails(repo: Path) -> None:
+    _write(repo, "src/p/old.py", WITH_F)
+    _write(repo, "src/p/new.py", "X = 1\n")
+    _census(repo, {OLD: {"max": 3}})
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "census")
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_a_sentry_not_on_the_allowlist_cannot_rehome(repo: Path) -> None:
+    _write(repo, "src/p/old.py", WITH_F)
+    _write(repo, A, _baseline("a", [OLD]))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a")
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    entries = {NEW: {"reason": REASON, "moved_from": OLD}}
+    _write(repo, A, json.dumps({"sentry_id": "a", "created_in": "S0", "entries": entries}))
+    _assert_red(repo, NEW)
+
+
+def test_an_unresolvable_path_is_not_proven_gone(repo: Path) -> None:
+    ghost = "p/ghost.py::f::seed"
+    _commit_census(repo, WITH_F, [ghost])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {"moved_from": ghost}})
+    _assert_red(repo, NEW)
+
+
+def test_an_ordinal_last_segment_cannot_rehome(repo: Path) -> None:
+    old, new = "p/old.py::f::0", "p/new.py::g::0"
+    _commit_census(repo, WITH_F, [old])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {new: {"moved_from": old}})
+    _assert_red(repo, new)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    try:\n        pass\n    except OSError as seed:\n        pass\n",
+        "    import seed\n",
+        "    import x as seed\n",
+        "    from m import y as seed\n",
+        "    match 1:\n        case [*seed]:\n            pass\n",
+        "    match 1:\n        case {**seed}:\n            pass\n",
+        "    match 1:\n        case 1 as seed:\n            pass\n",
+        "    self.seed = 1\n",
+        "    with open('p') as seed:\n        pass\n",
+    ],
+)
+def test_every_binding_form_keeps_the_site_present(repo: Path, body: str) -> None:
+    _commit_census(repo, "def f(a):\n" + body, [OLD])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_a_def_under_a_conditional_block_is_found(repo: Path) -> None:
+    src = "if TYPE_CHECKING:\n    def f(seed):\n        return seed\n"
+    _commit_census(repo, src, [OLD])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_a_closure_that_only_reads_the_name_is_not_gone(repo: Path) -> None:
+    key = "p/old.py::f.inner::seed"
+    src = "def f(seed):\n    def inner():\n        return seed\n    return inner\n"
+    _commit_census(repo, src, [key])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {"moved_from": key}})
+    _assert_red(repo, NEW)
+
+
+def test_a_lambda_qualname_is_never_proven_gone(repo: Path) -> None:
+    key = "p/old.py::f.<lambda>::seed"
+    _commit_census(repo, "X = 1\n", [key])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: {"moved_from": key}})
+    _assert_red(repo, NEW)
+
+
+def test_every_same_named_def_is_checked(repo: Path) -> None:
+    src = "try:\n    def f():\n        pass\nexcept OSError:\n    def f(seed):\n        pass\n"
+    _commit_census(repo, src, [OLD])
+    _write(repo, "src/p/new.py", WITH_G)
+    _census(repo, {NEW: MOVED})
+    _assert_red(repo, NEW)
+
+
+def test_moved_from_must_keep_the_bound_name(repo: Path) -> None:
+    new = "p/new.py::g::signing_key"
+    _commit_census(repo, WITH_F, [OLD])
+    _write(repo, "src/p/old.py", "X = 1\n")
+    _write(repo, "src/p/new.py", "def g(signing_key):\n    pass\n")
+    _census(repo, {new: MOVED})
+    _assert_red(repo, new)
