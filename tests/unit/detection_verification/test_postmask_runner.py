@@ -19,7 +19,7 @@ from decoy_engine.verification.postmask import (
 
 class TestSchemaVersion:
     def test_schema_version_constant(self):
-        assert SCHEMA_VERSION == "post-scan-integrity/v2"
+        assert SCHEMA_VERSION == "post-scan-integrity/v3"
 
 
 class TestRunPostMask:

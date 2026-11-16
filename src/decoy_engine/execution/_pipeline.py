@@ -237,9 +237,8 @@ def run_pipeline(
     RECOVERY for a job the static estimate over-downgrades. See `decide_execution_route` and
     `_pipeline_routing_signals.resolve_probe_recovery`.
 
-    Execution-substrate knobs (mask-kind tables only; generate tables
-    always run the synthesize path; the sequential route is pandas-only
-    regardless of this knob -- see `_pipeline_routing`):
+    Execution-substrate knobs (mask-kind tables only; generate tables always run the synthesize
+    path; the sequential route is pandas-only regardless of this knob -- see `_pipeline_routing`):
 
     - `fpe_chunk_count`: FPE per-value chunk parallelism on the pandas adapter.
     - `progress` / `progress_interval_s`: an optional `decoy_engine.progress.ProgressSink`
@@ -278,15 +277,15 @@ def run_pipeline(
     `unified_slice_enabled` (default True since 2026-09-20; admission is the safety
     gate, pass False for legacy): see `_unified_slice.maybe_run_unified_slice`.
 
-    `_provider_snapshot` (5a-faker) is a private, test/harness-only hook: an
-    already-captured immutable custom-faker-provider view
-    (`internal.faker_setup.snapshot_custom_faker_providers`) forwarded straight to
-    the `generate_tables` call below, so the shadow-parity harness can pin this
-    oracle call to the SAME registry snapshot as its own coordinator-side call.
-    `None` (every real caller) resolves against the live registry.
+    `_provider_snapshot` (5a-faker) is a private, test/harness-only hook: an already-captured
+    immutable custom-faker-provider view (`internal.faker_setup.snapshot_custom_faker_providers`)
+    forwarded straight to the `generate_tables` call below, so the shadow-parity harness can pin
+    this oracle call to the SAME registry snapshot as its own coordinator-side call. `None` (every
+    real caller) resolves against the live registry.
     """
     _ctx.refuse_vault_with_sink(sink, vault_writer)  # B0, before any config read
     config, stage = resolve_subset(config, subset_request, source_loader)
+    detectors = _dispatch.load_post_scan_detectors(config, file_access)
     stream_required = execution_mode == "stream"
     execution_mode = "auto" if stream_required else execution_mode
     require_optional_nonempty_str("quarantine_path", quarantine_path)
@@ -352,6 +351,7 @@ def run_pipeline(
                 subset_stage=stage,
             )
         ctx = _ctx.with_quarantine_path(ctx, quarantine_path, base_dir)
+        ctx = _dispatch.with_post_scan_detectors(ctx, detectors)
         with collect_refusals() as refusals:
             decision = _ctx.decide_route(ctx)
             _emit_route(_progress, decision)

@@ -51,7 +51,7 @@ def _code(reason: Any) -> str | None:
 def _failing_suite(table: str, column: str) -> Any:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
         finding = {"table": table, "column": column, "detector_id": "email"}
-        return {"schema_version": "post-scan-integrity/v2", "residual_pii": [finding | FAIL]}
+        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
 
     return failing
 
@@ -184,7 +184,12 @@ def test_stream_mode_no_longer_refuses_regex_integrity(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("ask", MODEL_ASKS.values(), ids=MODEL_ASKS)
-def test_stream_mode_still_refuses_a_model_ask(tmp_path: Path, ask: dict[str, Any]) -> None:
+def test_stream_mode_still_refuses_a_model_ask(
+    tmp_path: Path, ask: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.unit.detection_verification._scanml_m4_support import stub_post_scan_models
+
+    stub_post_scan_models(monkeypatch)
     cfg, lazy = rs.single_table_job(tmp_path, rs.two_column_table(30))
     cfg["post_scan"] = ask["post_scan"]
     sink, target = rs.engine_sink(tmp_path)
@@ -286,7 +291,7 @@ def test_a_blocking_gate_leaves_no_seal(monkeypatch: pytest.MonkeyPatch) -> None
     gate = _post_scan.PostScanGate({"post_scan": {"integrity": True}})
 
     def block(*args: Any, **kwargs: Any) -> None:
-        raise PostScanBlockedError({"schema_version": "post-scan-integrity/v2"})
+        raise PostScanBlockedError({"schema_version": "post-scan-integrity/v3"})
 
     monkeypatch.setattr(gate, "run_resident", block, raising=False)
     token = _post_scan._ACTIVE.set(gate)
