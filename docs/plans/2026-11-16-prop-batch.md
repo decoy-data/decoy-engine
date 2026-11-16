@@ -12,8 +12,9 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 owner memory rules: V1 bar, process by risk (2026-11-10), sentry over prose, pre-release no
 locking, no new features (2026-11-16).
 
-Revision 3: Dennis round 2 (verdict `68d581ba243c`, NO-GO, 0 blocker, 1 high, 9 medium,
-7 low) remediated; section 15 maps each finding to its fix. OQ-1 through OQ-7 stay decided.
+Revision 4: the Codex NO-GO after revision 3 (one `V1`, one `V2-LOG`) is remediated;
+section 16 maps both findings to their fixes. Dennis round 2 remains mapped in section 15.
+OQ-1 through OQ-7 stay decided.
 
 Bases (2026-11-16): engine `origin/main` `13c95c7de` (includes 0.27.0, RUN-STREAM E5a #604 and
 E5b #605); CLI `origin/main` `ba7b613e` (pins `decoy-engine==0.27.0`); platform `origin/main`
@@ -93,8 +94,9 @@ compile check:
 - `strategy_supported(detector_id: str, strategy: str) -> bool` in `E:transforms/text_mask.py`.
   `faker` needs a `_FAKER_METHOD` entry, `fpe` an `_FPE_CONFIG` entry, `date_shift` a date
   detector (the detectors whose `DETECTOR_DEFAULTS` value is `date_shift`: `iso_date`, `us_date`,
-  `eu_date`), and `redact` and `passthrough` accept any known detector. Any other strategy name is
-  unsupported. The private tables stay private: only this module reads them.
+  `eu_date`), and `redact` and `passthrough` accept any id in
+  `TEXT_MASK_STRATEGY_DETECTORS`. Any other strategy name is unsupported. The private strategy
+  tables stay private: only this module reads them.
 - `_mask_span` calls the predicate first and raises a coded error for an unsupported pair (it is
   reached only by a caller that skipped compile, such as a direct `mask_cell_with_spans` call).
   The runtime type is the existing `ConfigError`, tagged with
@@ -111,13 +113,25 @@ compile check:
   raise would break runs, and the token is safe.
 - The compile check `check_text_mask_strategies` in `E:plan/checks/_text_mask_strategy.py`,
   wired in `E:plan/_compile.py` beside `check_text_mask_ner_available` in both the full and the
-  config-only check lists. For each `text_mask` column it refuses (1) an id in `detectors:` that is
-  not a known detector, (2) a key in `per_detector_strategy` that is not a known detector, (3) a
-  pair for which `strategy_supported` is False. Both arguments must be strings; non-string ids and
-  strategies are refused rather than coerced. Known detectors are one exported frozenset,
-  `KNOWN_TEXT_MASK_DETECTORS = frozenset(DETECTOR_DEFAULTS)`, in `E:transforms/text_mask.py`.
-  A guard asserts that the `_SPAN_DETECTORS` keys (`E:detection/detectors.py:842`) and the NER ids
-  `person_name` and `location` are subsets, so detector growth cannot bypass the one defaults table.
+  config-only check lists. It uses two derived inventories, not one hand-written list:
+  `SELECTABLE_TEXT_MASK_DETECTORS` is the public `SPAN_DETECTOR_IDS` derived directly from
+  `_SPAN_DETECTORS` in `E:detection/detectors.py`, and is the exact set permitted in `detectors:`.
+  `TEXT_MASK_STRATEGY_DETECTORS` is the union of that set, the values of the existing
+  `NER_ENTITY_MAP` in `E:detection/ner.py`, and the keys of `DETECTOR_DEFAULTS`. The last source is
+  the existing Tier 2 library `extra_spans` dispatch inventory documented beside
+  `DETECTOR_DEFAULTS`: library callers may inject those ids even when config cannot select them as
+  built-in detectors. For each `text_mask` column the check refuses (1) an id in `detectors:` that
+  is not in `SELECTABLE_TEXT_MASK_DETECTORS`, (2) a key in `per_detector_strategy` that is not in
+  `TEXT_MASK_STRATEGY_DETECTORS`, and (3) a pair for which `strategy_supported` is False. Both
+  arguments must be strings; non-string ids and strategies are refused rather than coerced.
+  `config.mask.text_mask_detector_unknown` is used for both inventory failures because in both
+  cases the id is unknown to that config field; the field path distinguishes `detectors` from
+  `per_detector_strategy`. No separate reason code is needed.
+- The inventory guard proves equality and derivation, not a subset: `SPAN_DETECTOR_IDS` equals
+  `frozenset(_SPAN_DETECTORS)` in its owning module,
+  `SELECTABLE_TEXT_MASK_DETECTORS == SPAN_DETECTOR_IDS`, and
+  `TEXT_MASK_STRATEGY_DETECTORS` equals the union above. Its realistic mutation replaces the
+  selector inventory with `frozenset(DETECTOR_DEFAULTS)`, which must make AT-A1g fail.
 - Two new engine reason codes, both value-free (they name the column, detector id and strategy):
   `config.mask.text_mask_strategy_unsupported` (cases 3 and an unknown strategy name) and
   `config.mask.text_mask_detector_unknown` (cases 1 and 2). They are added `UNRELEASED` and
@@ -143,6 +157,13 @@ compile check:
   `ET:acceptance/test_f06_declared_casting.py`'s `plan_yaml_at_baseline`; add a changelog fragment
   that records the plan YAML addition and the new refusal.
 
+Shipped-surface inventory at the pinned bases found no migration. Engine `docs/strategies.md`,
+`docs/proof-manifest.json`, and the two `text_mask` testflight manifests select only `ssn`,
+`email`, `us_zip`, or `us_phone`, all keys of `_SPAN_DETECTORS`. CLI `ba7b613e` bundled templates,
+examples, and `decoy init` scaffold sources emit no `text_mask.detectors` list. Therefore E-F0
+changes the detector-contract wording and adds refusal tests, but changes no shipped template,
+init output, testflight manifest, proof manifest, or existing docs example config.
+
 Test fixtures that use unsupported pairs today move to supported ones (section 8, AT-A1f).
 
 ### 2.2 Items
@@ -164,8 +185,10 @@ Test fixtures that use unsupported pairs today move to supported ones (section 8
 Failure modes:
 
 - E-F0: a config that runs today with `faker` on email, `date_shift` on ssn, a misspelled
-  strategy or an unknown detector id now fails compile with exit 1. This is the intended change.
-  `decoy validate` refuses it too.
+  strategy, an unknown detector id, or a library-only id such as `iso_date` or `person_name` in
+  `detectors:` now fails compile with exit 1. This is the intended change. The same library-only
+  ids remain valid keys in `per_detector_strategy`. `decoy validate` refuses the invalid selector
+  forms too.
 - E-F0: an unparseable date-like span supplied through library `extra_spans` now becomes the token
   instead of the real text. Default config, NER, native chunked, out-of-core native and SEQ routes
   cannot produce such spans from config at this base.
@@ -371,11 +394,14 @@ Failure modes for package E:
 - New structure: one predicate and one compile check (E-F0), one private dispatch helper (emit),
   one post-engine check function (A8b), one loader (E2), one scanner module (comment history).
   Each replaces copies or a gap; none adds a variant expected to grow.
-- One place per fact: the detector and strategy rule (`strategy_supported` and
-  `KNOWN_TEXT_MASK_DETECTORS`, read by dispatch and compile), the allowlist (the source the
-  registry row names), the comment patterns (the engine module, vendored by pin). Unknown target
-  keys are owned only by `PipelineConfig._targets_distinct`; the CLI consumes that validation and
-  does not add a second validator.
+- One place per fact: `_SPAN_DETECTORS` owns runnable regex span ids and exports its derived
+  `SPAN_DETECTOR_IDS`; `NER_ENTITY_MAP` owns NER-produced ids; `DETECTOR_DEFAULTS` owns ids the
+  library `extra_spans` dispatch contract supports. `SELECTABLE_TEXT_MASK_DETECTORS` and
+  `TEXT_MASK_STRATEGY_DETECTORS` are derived views of those sources, and `strategy_supported`
+  owns pair compatibility for dispatch and compile. The allowlist is the source its registry row
+  names, and the comment patterns live in the engine module vendored by pin. Unknown target keys
+  are owned only by `PipelineConfig._targets_distinct`; the CLI consumes that validation and does
+  not add a second validator.
 - Pattern followed: E2 copies the engine's `env_flags.FLAGS` pattern (one registry a sentry
   derives its inventory from). The E-F0 check follows `check_text_mask_ner_available` (row 30), a
   check in `plan/` wired into all three reported check lists of `_compile.py`.
@@ -384,7 +410,8 @@ Failure modes for package E:
 
 | Class | Choke point | Guard test | Mutation that must turn the guard red |
 |---|---|---|---|
-| Detector and strategy pairs (E-F0) | `strategy_supported` in `E:transforms/text_mask.py`, read by `_mask_span` and by `check_text_mask_strategies` | `ET:unit/plan/test_text_mask_strategy_check.py`; a parity case asserts that for every (known detector, strategy) pair the check refuses exactly when `_mask_span` raises | Make `date_shift` accept any detector: AT-A1a's `ssn: date_shift` refusal goes red because it compiles. The safe parse fallback means this mutation no longer returns the real SSN. |
+| Text-mask detector inventories (E-F0) | `_SPAN_DETECTORS`, `NER_ENTITY_MAP`, and `DETECTOR_DEFAULTS` are the sources; `SELECTABLE_TEXT_MASK_DETECTORS` and `TEXT_MASK_STRATEGY_DETECTORS` are derived in `E:transforms/text_mask.py` and read by `check_text_mask_strategies` | `ET:unit/plan/test_text_mask_strategy_check.py` proves exact derivation and distinguishes selector ids from override-only ids | Replace `SELECTABLE_TEXT_MASK_DETECTORS` with `frozenset(DETECTOR_DEFAULTS)`: AT-A1g compiles `iso_date` and `person_name` selectors and fails. |
+| Detector and strategy pairs (E-F0) | `strategy_supported` in `E:transforms/text_mask.py`, read by `_mask_span` and by `check_text_mask_strategies` | `ET:unit/plan/test_text_mask_strategy_check.py`; a parity case asserts that for every (strategy-detector id, strategy) pair the check refuses exactly when `_mask_span` raises | Make `date_shift` accept any detector: AT-A1a's `ssn: date_shift` refusal goes red because it compiles. The safe parse fallback means this mutation no longer returns the real SSN. |
 | Unparseable date span (E-F0) | `_mask_date_shift` | `ET:unit/transforms/test_text_mask_date_shift.py` | Return `matched_text` again: the unparseable-date case shows the input. |
 | Unknown target key (A8a) | `PipelineConfig._targets_distinct`, using the target-name helper beside `duplicate_target_groups` in `E:config/_targets.py` | Engine config tests plus `CT:unit/cli_fmt/test_target_table_unknown.py`; the CLI test asserts gate location `targets.custmers` | Drop the validator call: the typo config exits 0. |
 | Declared table not produced (A8b) | `missing_target_tables`, called first in both `seal_result` and `write_targets`; demo reaches it through `write_targets` | `CT:unit/cli_fmt/test_write_targets_missing_table.py` plus tokenize, API and demo caller cells | Skip the call in either writer: that writer's cell sees exit 0 and a written file. |
@@ -407,9 +434,10 @@ row says it pins a no-regression fact.
 | AT-A1a | Compile `text_mask` with `per_detector_strategy` set to each of `{ssn: date_shift}`, `{email: date_shift}`, `{email: fpe}`, `{email: faker}`: `PlanCompileError` with `config.mask.text_mask_strategy_unsupported`, the detector id and strategy in the message, and a marker cell value absent from `str(exc)`, `exc.args`, `__cause__` and `__context__`. Run the same configs on base: the `date_shift` cells' outputs contain the real SSN and email. | Compiles; `ssn: date_shift` and `email: date_shift` write the real value. |
 | AT-A1b | `{person_name: fakr}`: `text_mask_strategy_unsupported`. | Compiles; the span becomes the token. |
 | AT-A1c | `detectors: [emial]` and `per_detector_strategy: {emial: redact}`: `config.mask.text_mask_detector_unknown`. | Skipped silently. |
-| AT-A1d | Every pair `strategy_supported` accepts, over every known detector, compiles; the default config and each supported override give byte-identical output to the base on the golden text corpus. Direct `mask_cell_with_spans` and native `mask_cell_hybrid` calls inject supported spans and report more than zero calls through each of `fpe`, `faker` and `date_shift`; those direct calls are the source of the faker and date-shift counts. Route cells do not claim those two strategies: after E-F0, config cannot send faker or date-shift spans to native chunked, out-of-core native or SEQ because NER declines native, no built-in date detector exists, and those routes accept no `extra_spans`. | Passes before; pins no regression and uses direct kernel calls so the counts are non-vacuous. |
+| AT-A1d | Parametrize selectors over `SELECTABLE_TEXT_MASK_DETECTORS` and override keys over `TEXT_MASK_STRATEGY_DETECTORS`. Every selector id compiles, every override-only id is refused when moved into `detectors:`, and every pair `strategy_supported` accepts compiles as an override. Direct `mask_cell_with_spans` and native `mask_cell_hybrid` calls inject supported spans and report more than zero calls through each of `fpe`, `faker` and `date_shift`; those direct calls are the source of the faker and date-shift counts. Route cells do not claim those two strategies: after E-F0, config cannot send faker or date-shift spans to native chunked, out-of-core native or SEQ because NER declines native, no built-in date detector exists, and those routes accept no `extra_spans`. | The base collapses selector and override inventories, so override-only ids compile in `detectors:`. The direct kernel counts keep the strategy coverage non-vacuous. |
 | AT-A1e | Direct `_mask_span` with an unsupported pair raises tagged `ConfigError` (bypassing compile), maps to CLI exit 1, and a marker value is absent from `str(exc)`, `exc.args`, `exc.__cause__` and `exc.__context__`; `_mask_date_shift` on an injected `iso_date` span `2024-02-30` returns the token. | Returns the token for the unknown strategy and the real text for the bad date. |
-| AT-A1f | Before editing fixtures, run `rg -n -U 'detectors_unknown_noop|per_detector[^\n]*(ssn|email|us_phone)[^\n]*(faker|date_shift)|strategy_map[^\n]*email[^\n]*faker|"(email|ssn)"\s*:\s*"(faker|date_shift)"' tests/native tests/parity tests/unit/transforms` and classify every hit with `strategy_supported`; the changed-file list must equal the grep's refused-pair and unknown-id hits. It includes `tests/parity/test_c6b_ii_text_mask_seq.py`, `tests/parity/test_ooc_text_mask_native.py`, `tests/native/test_c6b_i_text_mask_chunked.py`, `tests/native/test_c6b_ii_b_text_mask_splice.py:224-225`, `tests/native/test_c6b_ii_a_text_mask_detection.py:145-147` (not `tests/parity/`), `tests/unit/transforms/test_text_mask_faker_reuse.py:140`, and `tests/native/_c6b_i_support.py:67,80`. Refused `ssn: faker`, `email: faker`, `us_phone: faker` and `ssn: date_shift` fixtures become supported direct `person_name: faker` or `iso_date: date_shift` spans where kernel coverage is intended; `detectors: [no_such_detector]` becomes an explicit refusal test. Each direct replacement asserts its faker or date-shift call count is above zero. | On base the old fixtures pass; after E-F0 they would fail compile. This row pins that every grep hit is classified and coverage is moved, not dropped. |
+| AT-A1f | Before editing fixtures, run `rg -n -U 'detectors_unknown_noop|per_detector[^\n]*(ssn|email|us_phone)[^\n]*(faker|date_shift)|strategy_map[^\n]*email[^\n]*faker|"(email|ssn)"\s*:\s*"(faker|date_shift)"' tests/` and classify every hit with `strategy_supported`; the changed-file list must equal the grep's refused-pair and unknown-id hits. It includes `tests/parity/test_c6b_ii_text_mask_seq.py`, `tests/parity/test_ooc_text_mask_native.py`, `tests/native/test_c6b_i_text_mask_chunked.py`, `tests/native/test_c6b_ii_b_text_mask_splice.py:224-225`, `tests/native/test_c6b_ii_a_text_mask_detection.py:145-147` (not `tests/parity/`), `tests/unit/transforms/test_text_mask_faker_reuse.py:140`, and `tests/native/_c6b_i_support.py:67,80`. Refused `ssn: faker`, `email: faker`, `us_phone: faker` and `ssn: date_shift` fixtures become supported direct `person_name: faker` or `iso_date: date_shift` spans where kernel coverage is intended; `detectors: [no_such_detector]` becomes an explicit refusal test. Each direct replacement asserts its faker or date-shift call count is above zero. | On base the old fixtures pass; after E-F0 they would fail compile. This row pins that every matching test fixture anywhere under `tests/` is classified and coverage is moved, not dropped. |
+| AT-A1g | Compile separate configs with `detectors: [iso_date]` and `detectors: [person_name]`. Both raise `PlanCompileError` with `config.mask.text_mask_detector_unknown`; the same ids remain accepted as keys in a supported `per_detector_strategy` pair. Apply the named mutation `SELECTABLE_TEXT_MASK_DETECTORS = frozenset(DETECTOR_DEFAULTS)` and rerun this cell; both invalid selectors compile, so the mutation is red. | Both selector configs compile, but `iter_spans` skips them because neither id is a key of `_SPAN_DETECTORS`; the default unmatched policy redacts the whole cell and passthrough leaves it unchanged. |
 | AT-A2 | Monkeypatch `load_table` to raise `FileNotFoundError`: `geo_generalize` with the state fallback raises it. | Returns `""` states with a warning. |
 | AT-A3, A4, A6 | No behavior test (unreachable). An ordering test, `ET:unit/plan/test_compile_check_order.py`, pins that `check_unknown_provider` runs before `_build_seed_envelope` and `_check_parse_rules` before `_check_forward_references`. | Passes before; it pins why each catch is dead. |
 | AT-A5 | Inject a `RuntimeError` into `reconstruct_source_shaped_output`: `run_pipeline` raises it, and no `_REROUTE_LOG` record is emitted. | Reroutes and returns success. |
@@ -437,11 +465,11 @@ row says it pins a no-regression fact.
 | 1 | Value-bearing output | E-F0 closes a live value leak: `date_shift` on a non-date detector and on an unparseable date returned the real text. All new refusals (E-F0 codes, A8a, A8b, D6) name the column, detector id, strategy, table name or path only. | AT-A1a (real value on base, marker absent from the error after), AT-A1e, AT-A8a, AT-A8b. | Return `matched_text` in `_mask_date_shift`: AT-A1e fails. Format a sample row into the A8b message: its marker check fails. |
 | 2 | Cleanup missing on an exit path | A8a refuses before any read; A8b refuses before the first write, so no staged file is left. | AT-A8a and AT-A8b assert the target directory holds no new file. | Move the A8b check after the first write: one file remains. |
 | 3 | State machine and concurrency | N/A: no state or thread is added. The emit dispatch helper keeps today's swallow rule. | | |
-| 4 | Route parity and silent fallback | The batch's main class. The E-F0 check runs at compile, before route choice, so every route sees the same refusal. Direct `mask_cell_with_spans` and `mask_cell_hybrid` cells cover the otherwise unreachable faker and date-shift kernel branches. A5 removes a silent route switch. A8b is proved per engine route and per retained CLI writer. | AT-A1a; direct AT-A1d kernel cells; AT-A1f fixture inventory; AT-A5, AT-A5b; AT-A8b route and writer matrix. | Wire the check into only one check list: the `decoy validate` cell of AT-A1c fails. Widen the A5 catch: AT-A5 fails. |
+| 4 | Route parity and silent fallback | The batch's main class. The E-F0 check runs at compile, before route choice, so every route sees the same refusal. It also distinguishes built-in selector ids from override-only ids before `iter_spans` can skip the latter. Direct `mask_cell_with_spans` and `mask_cell_hybrid` cells cover the otherwise unreachable faker and date-shift kernel branches. A5 removes a silent route switch. A8b is proved per engine route and per retained CLI writer. | AT-A1a; AT-A1g; direct AT-A1d kernel cells; AT-A1f fixture inventory; AT-A5, AT-A5b; AT-A8b route and writer matrix. | Replace the selector inventory with all `DETECTOR_DEFAULTS` keys: AT-A1g fails. Wire the check into only one check list: the `decoy validate` cell of AT-A1c fails. Widen the A5 catch: AT-A5 fails. |
 | 5 | Referential integrity | N/A: no key, FK or join behavior changes. The FK dtype catches are kept (section 1). | | |
-| 6 | Untrusted producer | The config is the untrusted input for E-F0 and A8a; each is validated once by engine compilation or `PipelineConfig`. Inside, `_mask_span` raises on a pair the compile check should have refused. | AT-A1b, AT-A1c, AT-A1e, AT-A8a. | Drop the predicate call in `_mask_span`: AT-A1e fails. |
+| 6 | Untrusted producer | The config is the untrusted input for E-F0 and A8a; each is validated once by engine compilation or `PipelineConfig`. Inside, `_mask_span` raises on a pair the compile check should have refused. | AT-A1b, AT-A1c, AT-A1e, AT-A1g, AT-A8a. | Drop the predicate call in `_mask_span`: AT-A1e fails. |
 | 7 | TOCTOU on a path | N/A: A8b reads the in-memory outputs and the sink's engine-written set, not the file system. | | |
-| 8 | Weak tests and overclaimed evidence | Each acceptance test is labeled fail-before or no-regression pin (AT-A1d, AT-A1f, AT-A3/A4/A6, AT-A5b, AT-A9). AT-A1d requires non-zero span counts per strategy so it cannot pass vacuously. The A5 flight is void with zero activations. Every new walk is shown red on a seeded violation. | The builder records the base-commit result of each fail-before test in the PR body. | Remove the span-count assertion from AT-A1d: the faker branch can go uncovered unnoticed, which the gate checks for. |
+| 8 | Weak tests and overclaimed evidence | Each acceptance test is labeled fail-before or no-regression pin. AT-A1d now fails on the base inventory collapse and requires non-zero span counts per strategy. AT-A1g names the realistic inventory mutation. AT-A1f, AT-A3/A4/A6, AT-A5b and AT-A9 state their exact role. The A5 flight is void with zero activations. Every new walk is shown red on a seeded violation. | The builder records the base-commit result of each fail-before test in the PR body. | Remove the span-count assertion from AT-A1d: the faker branch can go uncovered unnoticed. Restore `frozenset(DETECTOR_DEFAULTS)` as the selector set: AT-A1g fails. |
 | 9 | Refactor drift | The D shim deletions and the emit helper collapse must not change behavior. D11 folds an always-true predicate, so the oracle branch it guarded runs as today. | Existing unit and parity tests for each moved importer stay green on T1; AT-D; `test_context_emit_dispatch.py` asserts each `emit_*` still calls the matching logger method once and a raising method does not fail the run. | Make D11's folded constant False: the chunked oracle tests fail. Swap two method names in the dispatch: the emit test fails. |
 | 10 | Frozen contract drift | B1 to B8 and D9 remove public names on purpose, recorded in `docs/frozen-surfaces.md`, `docs/compatibility-contract.md`, `test_public_api.py`, the r3 signature freeze and `CHANGELOG.md` in the same slice. The plan YAML `checks_passed` list changes for every config and its three pin sites move. Reason codes are append-only: `fk.self_reference` stays; the engine adds the two E-F0 codes and `config.target_table_unknown`; the CLI adds `io.target_table_missing`, `scan.saved_scan_schema_unsupported`, `io.manifest_format_missing`. | AT-B, AT-B7, E-F0 plan YAML pins, `test_frozen_surface_map.py`, `test_reason_registry.py`, `test_reason_baseline_frozen`. | Remove a name from `__all__` without editing the page: `test_frozen_surface_map.py` fails. Delete `fk.self_reference` with the alias: `test_reason_registry.py` fails. |
 
@@ -453,11 +481,12 @@ row says it pins a no-regression fact.
   out-of-core group C path (`E:execution/out_of_core/_mask_group_c.py:259`), the out-of-core
   native path (`E:execution/out_of_core/_text_mask_native.py:75`) and the native operator path
   (`E:execution/native/_operator_params.py:243`), whose FPE eligibility is derived from
-  `_FPE_CONFIG` (`E:execution/native/_text_mask_native_fpe.py:41-49`). E-F0 refuses at compile,
-  before route choice, so all four see it. After that refusal, config cannot make faker or
-  date-shift spans reach native chunked, out-of-core native or SEQ: NER declines native, no
-  built-in date detector exists, and the route APIs accept no `extra_spans`. Direct
-  `mask_cell_with_spans` and `mask_cell_hybrid` cells cover those kernels.
+  `_FPE_CONFIG` (`E:execution/native/_text_mask_native_fpe.py:41-49`). E-F0 validates
+  `detectors:` against the exact built-in selector inventory at compile, before route choice, so
+  all four routes refuse `iso_date`, `person_name`, and every other non-runnable selector. After
+  that refusal, config cannot make faker or date-shift spans reach native chunked, out-of-core
+  native or SEQ: NER declines native, no built-in date detector exists, and the route APIs accept
+  no `extra_spans`. Direct `mask_cell_with_spans` and `mask_cell_hybrid` cells cover those kernels.
 - A5 is the unified-slice route only (`E:execution/_unified_slice.py:359`).
 - A8b: the engine routes in section 2.4.
 
@@ -484,15 +513,24 @@ row says it pins a no-regression fact.
 ### Output surfaces
 
 - Masked output bytes: unchanged for every parseable span of every config that compiles after
-  E-F0 (AT-A1d). An unparseable date-like span becomes the token instead of the real text.
+  E-F0 and uses a runnable selector. An unparseable date-like span becomes the token instead of
+  the real text. A config that selected a library-only id such as `iso_date` or `person_name` no
+  longer produces the base's whole-cell redaction or passthrough output because it is refused at
+  compile.
 - Files on disk: A8a and A8b now refuse runs that exited 0 with a missing file; neither writes a
   partial set.
 - Logs: A5 removes the `_REROUTE_LOG` line for non-coded exceptions; A2 removes one warning.
-- Public API: the B and D9 removals.
+- Public API: the B and D9 removals. E-F0 adds only the public-in-package
+  `detection.detectors.SPAN_DETECTOR_IDS` derived view; it is not exported from the engine root.
 
 ### Lists
 
 - Strategy names: `fpe`, `faker`, `date_shift`, `redact`, `passthrough`.
+- Selector inventory: `SELECTABLE_TEXT_MASK_DETECTORS`, derived exactly from
+  `SPAN_DETECTOR_IDS`, which is derived from `_SPAN_DETECTORS` keys.
+- Per-detector strategy-key inventory: `TEXT_MASK_STRATEGY_DETECTORS`, derived from the selector
+  inventory, `NER_ENTITY_MAP` values, and `DETECTOR_DEFAULTS` keys. `DETECTOR_DEFAULTS` is the
+  existing source for ids accepted from the library `extra_spans` API.
 - `_FAKER_METHOD` keys: `person_name`, `first_name`, `last_name`, `address`, `location`.
 - `_FPE_CONFIG` keys: `ssn`, `us_phone`, `us_zip`, `pan`, `fax_number`, `npi`.
 - Date detectors: `iso_date`, `us_date`, `eu_date`.
@@ -510,7 +548,9 @@ row says it pins a no-regression fact.
 
 ## 8c. Reuse inventory and frozen contracts
 
-- Reuse: the `plan/_compile.py` check lists that already carry `check_text_mask_ner_available`;
+- Reuse: `_SPAN_DETECTORS`, `NER_ENTITY_MAP`, and `DETECTOR_DEFAULTS` as the three existing
+  detector-id sources; the `plan/_compile.py` check lists that already carry
+  `check_text_mask_ner_available`;
   the engine's `PipelineConfig._targets_distinct` validator and `duplicate_target_groups` helper;
   the ratchet and
   `test_baseline_registry.py` in both repos; the CLI vendoring pin `ci/vendored.toml`;
@@ -544,7 +584,8 @@ Checked against the engine and CLI CODEMAP "Where Things Go".
 
 | New or moved thing | Path | CODEMAP row | Beside |
 |---|---|---|---|
-| `strategy_supported`, `KNOWN_TEXT_MASK_DETECTORS` | `E:transforms/text_mask.py` | transforms (owning module) | `_FAKER_METHOD`, `_FPE_CONFIG` |
+| `SPAN_DETECTOR_IDS` | `E:detection/detectors.py`, derived from `_SPAN_DETECTORS` | Detectors, profiling | `_SPAN_DETECTORS` |
+| `strategy_supported`, `SELECTABLE_TEXT_MASK_DETECTORS`, `TEXT_MASK_STRATEGY_DETECTORS` | `E:transforms/text_mask.py` | transforms (owning module) | `DETECTOR_DEFAULTS`, `_FAKER_METHOD`, `_FPE_CONFIG` |
 | E-F0 compile check | `E:plan/checks/_text_mask_strategy.py` | plan checks | `plan/checks/_generate_columns.py` |
 | E-F0 reason codes | `E:reasons/config/` (the part file that holds `mask.*` codes) | reason registry | `MASK_UNKNOWN_STRATEGY` |
 | E-F0 tests | `ET:unit/plan/test_text_mask_strategy_check.py`, `ET:unit/transforms/test_text_mask_date_shift.py`, and existing native/parity files from AT-A1f | unit tests for the owning surface plus named existing route suites | existing `plan`, `transforms`, native and parity tests |
@@ -569,7 +610,9 @@ slice.
 defaults before adding the predicate and guard, and the finished file must stay at or below 670.
 The ceiling is never raised. `transforms/` already has 26 direct entries and its CODEMAP says the
 next module requires a named sub-package, so E-F0 adds no sibling transform module merely to evade
-the cap.
+the cap. `E:detection/detectors.py` is pre-existing oversize code; adding only the derived
+`SPAN_DETECTOR_IDS` beside its owning map is a `V2-LOG` size follow-up, not a change-created design
+blocker. E-F0 does not add a module or another detector list.
 
 ## 10. Slices
 
@@ -579,7 +622,7 @@ row names.
 
 | Slice | Repo | Items | Prod files (est.) | Lines (est.) | Risk | Depends on |
 |---|---|---|---|---|---|---|
-| E-F0 | engine | Section 2.1 (leak fix, predicate, compile check, detector-id refusal, runtime error boundary, draw-site wording and pin), AT-A1d direct kernel cells, AT-A1f fixture moves, plan YAML pins, changelog, `docs/strategies.md` | 8 (`transforms/text_mask.py`, `_strategies/_text_mask.py`, `native/_text_mask_native_fpe.py`, `native/_draw_sites_mask.py`, `out_of_core/_mask_group_c.py`, new `plan/checks/_text_mask_strategy.py`, `plan/_compile.py`, the `reasons/config` part file) | <=800 total changed lines, currently estimated ~650 including tests and docs | R2 (live value leak; output and serialized-plan change; new compile refusal) | none; first in the batch; `text_mask.py` stays at or below its 670-line pin without raising it; split before review if either cap is exceeded |
+| E-F0 | engine | Section 2.1 (leak fix, two derived detector inventories, predicate, compile check, detector-id refusal, runtime error boundary, draw-site wording and pin), AT-A1d and AT-A1g inventory and direct-kernel cells, AT-A1f fixture moves, plan YAML pins, changelog, `docs/strategies.md` | 9 (`detection/detectors.py`, `transforms/text_mask.py`, `_strategies/_text_mask.py`, `native/_text_mask_native_fpe.py`, `native/_draw_sites_mask.py`, `out_of_core/_mask_group_c.py`, new `plan/checks/_text_mask_strategy.py`, `plan/_compile.py`, the `reasons/config` part file) | <=800 total changed lines, currently estimated ~680 including tests and docs | R2 (live value leak; wrong output from accepted non-runnable selectors; output and serialized-plan change; new compile refusal) | none; first in the batch; `text_mask.py` stays at or below its 670-line pin without raising it; split before review if either cap is exceeded |
 | E-F0 release | engine | Daily train containing E-F0 alone; changelog names the masking refusal, safe date fallback and plan YAML `checks_passed` addition | | | R2 | E-F0 |
 | E-F0 repin | CLI | Pin the E-F0 engine release before any surface-lane release | | | R1 | E-F0 release |
 | E-G1 | engine | E3, E1, E7, `ci.yml` comment | 0 | -800 / +80 | R1 | none |
@@ -617,10 +660,12 @@ Ordering:
 
 Expected size: 18 build slices plus two engine releases and two CLI repins, so 22 PRs. Production
 code is net negative; the B, D and E deletions remove about 2,500 lines, most of them the E3 allowlist and
-the shims. New public names: none. New private names: `strategy_supported`,
-`KNOWN_TEXT_MASK_DETECTORS`, `check_text_mask_strategies`, `_dispatch_sink`, `_REROUTABLE` (only
-if a coded decline exists), `missing_target_tables`, `TargetTableMissingError`,
-`load_allowlist`. New reason codes: engine `config.mask.text_mask_strategy_unsupported`,
+the shims. New root public names: none. New public-in-package name: `SPAN_DETECTOR_IDS` in
+`detection.detectors`. New private names: `strategy_supported`,
+`SELECTABLE_TEXT_MASK_DETECTORS`, `TEXT_MASK_STRATEGY_DETECTORS`,
+`check_text_mask_strategies`, `_dispatch_sink`, `_REROUTABLE` (only if a coded decline exists),
+`missing_target_tables`, `TargetTableMissingError`, `load_allowlist`. New reason codes: engine
+`config.mask.text_mask_strategy_unsupported`,
 `config.mask.text_mask_detector_unknown`, `config.target_table_unknown`; CLI
 `io.target_table_missing`, `scan.saved_scan_schema_unsupported`, `io.manifest_format_missing`.
 
@@ -649,7 +694,10 @@ logic).
 - OQ-1. Scope split: do all nine A items in this batch, although the CLI post-1.0 plan (#284)
   lists A2, A5, A6, A7 and A9 as 1.x patch. Decided: yes. E-F0 (the leak) is V1 under any reading.
 - OQ-2. Refuse at compile every detector and strategy pair the code cannot carry out, unknown
-  strategy names and unknown detector ids. Decided: yes, with the two new codes of section 2.1.
+  strategy names and unknown detector ids. For `detectors:`, "carry out" means exactly a key of
+  `_SPAN_DETECTORS`; the broader derived inventory remains available only to
+  `per_detector_strategy` and library-injected spans. Decided: yes, with the two new codes of
+  section 2.1.
 - OQ-3. Let an unexpected native-lane exception fail the run instead of rerunning on pandas.
   Decided: yes, after the section 2.3 flight shows no reroute from a non-coded exception with a
   non-zero activation count.
@@ -716,6 +764,16 @@ items are `V2-LOG` plan and coverage corrections and do not independently decide
 | L2 both `_FPE_CONFIG` defaults | V2-LOG | Section 2.1 runtime paragraph |
 | L3 section 7 mutation effect | V2-LOG | Section 7 detector-and-strategy mutation |
 | L4 strict predicate inputs | V2-LOG | Section 2.1 predicate and compile-check paragraph |
-| L5 detector set derivation | V2-LOG | Section 2.1 `KNOWN_TEXT_MASK_DETECTORS` paragraph and subset guard |
+| L5 detector set derivation | V2-LOG | Superseded by revision 4's two exact derived inventories in section 2.1 and their equality guard |
 | L6 E-F0 estimate | V2-LOG | Section 10 E-F0 row, at most 10 production files and 800 total changed lines |
 | L7 AT-A5 placement | V2-LOG | Section 7 A5 guard, AT-A5b and section 9 Placement |
+
+## 16. Codex review after revision 3
+
+Verdict received: NO-GO, one `V1` and one `V2-LOG`. No `DESIGN` finding was raised. The `V1`
+decides the verdict; the `V2-LOG` scope correction does not.
+
+| Finding | Label | Where resolved |
+|---|---|---|
+| E-F0 accepted detector selectors that `iter_spans` cannot execute because the plan derived one inventory from every `DETECTOR_DEFAULTS` key | V1 | Section 2.1 defines exact selector and override inventories from `_SPAN_DETECTORS`, `NER_ENTITY_MAP`, and the documented `DETECTOR_DEFAULTS` library-extra-span source; section 6 names one fact source per inventory; section 7 adds the equality guard and named mutation; AT-A1d distinguishes the inventories; fail-before AT-A1g refuses `iso_date` and `person_name`; sections 8b, 9 and 10 carry the route, placement and slice effects. The shipped-surface paragraph records that no template, init output, testflight manifest, proof manifest or docs example requires migration. |
+| AT-A1f grep covered only three test subtrees | V2-LOG | AT-A1f widens the same inventory command to all of `tests/`. |
