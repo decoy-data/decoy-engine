@@ -82,7 +82,7 @@ def report(
     failed: str | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "schema_version": "post-scan-integrity/v2",
+        "schema_version": "post-scan-integrity/v3",
         "residual_pii": list(res),
         "fk_preservation": list(fks),
         "policy_validation": list(pol),

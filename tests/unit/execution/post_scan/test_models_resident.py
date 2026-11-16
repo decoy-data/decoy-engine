@@ -51,7 +51,7 @@ def _code(reason: Any) -> str | None:
 def _failing_suite(table: str, column: str) -> Any:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
         finding = {"table": table, "column": column, "detector_id": "email"}
-        return {"schema_version": "post-scan-integrity/v2", "residual_pii": [finding | FAIL]}
+        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
 
     return failing
 
@@ -291,7 +291,7 @@ def test_a_blocking_gate_leaves_no_seal(monkeypatch: pytest.MonkeyPatch) -> None
     gate = _post_scan.PostScanGate({"post_scan": {"integrity": True}})
 
     def block(*args: Any, **kwargs: Any) -> None:
-        raise PostScanBlockedError({"schema_version": "post-scan-integrity/v2"})
+        raise PostScanBlockedError({"schema_version": "post-scan-integrity/v3"})
 
     monkeypatch.setattr(gate, "run_resident", block, raising=False)
     token = _post_scan._ACTIVE.set(gate)

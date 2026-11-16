@@ -565,7 +565,7 @@ def test_scanml_m4_post_scan_block_is_registered_as_pending() -> None:
 
 def _blocked_report(**parts: object) -> dict[str, object]:
     return {
-        "schema_version": "post-scan-integrity/v2",
+        "schema_version": "post-scan-integrity/v3",
         "residual_pii": [],
         "fk_preservation": [],
         "policy_validation": [],

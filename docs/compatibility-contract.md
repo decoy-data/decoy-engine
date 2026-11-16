@@ -178,7 +178,7 @@ As of this writing the tags include:
 distribution-snapshot/v1   decoy-vault/v2        vault-key/v1
 ff1-key/v1                 quality-report/v1     synth-report/v1
 quality-diagnostic/v1      quality-fidelity/v1   quality-policy/v1
-quality-shape-fidelity/v1  post-scan-integrity/v2    name-hints/v1
+quality-shape-fidelity/v1  post-scan-integrity/v3    name-hints/v1
 ssn/v1  npi/v1  pan/v1  iban/v1  ein/v1  mrn/v1  ndc/v1  icd10/v1
 cusip/v1  address/v1  locality/v1  person/v1  provider/v1
 composite/v1  custom/v1   ... (every disguise spec)
@@ -222,7 +222,7 @@ the guard cannot recognise (a person name, an address) is the stated limit. The 
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
 
-`post-scan-integrity/v2` is the report `run_post_mask` returns. Recorded pre-GA semantic change
+`post-scan-integrity/v3` is the report `run_post_mask` returns (v2 until SCAN-ML M4). Recorded pre-GA semantic change
 (POSTSCAN-STREAM PS-4, 2026-11-12): each `fk_preservation[]` finding now derives from the declared
 keys' facts (`verification/postmask/_keys.py`) and no longer from an orphan rate. `fail` means the run
 introduced orphans; `warning` means every output orphan was already in the source, or the key carries
@@ -242,11 +242,11 @@ float key column, NumPy or nullable `Float32`/`Float64`, with at least one non-n
 them whole numbers in the Int64 range (pandas' reading of a nullable integer column, such as a
 self-reference with a null root), is compared as an integer key. A column with any fraction stays
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
-The tag stays `v2`; the field set only grew.
+The tag stayed `v2` for that change; the field set only grew.
 
-`post-scan-integrity/v2` (the dict `run_post_mask` returns and `run_pipeline` stamps under
-`quality_metrics["post_scan_integrity"]`) gained additive keys in SCAN-ML M4 (2026-11), so the tag
-stays `/v2`. Each `residual_pii` finding gains `source` (`regex`, `classifier` or `ner`), `model`
+`post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
+`quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
+`match_rate` can now be `null`. The engine's verdict reader accepts v2 and v3. Each `residual_pii` finding gains `source` (`regex`, `classifier` or `ner`), `model`
 (`{id, version}` of the model that ran, or `null`), `band` (the classifier's `high` or `review`),
 `dismissed` and `promoted`; `match_rate` is `null` for a classifier finding, so a reader that
 assumes a number needs a `null` case. The report gains `detectors` (the runs), `tables_checked`

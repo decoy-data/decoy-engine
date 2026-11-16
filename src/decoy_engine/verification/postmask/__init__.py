@@ -34,8 +34,9 @@ relationships failures are captured as findings with severity
 ``error``; they do NOT fail the mask job. This matches the Quality
 hook precedent.
 
-Schema version: ``post-scan-integrity/v2``. Bump when the report dict
-shape changes in a non-backward-compatible way.
+Schema version: ``post-scan-integrity/v3`` (v3 allows ``match_rate: null`` on a
+classifier finding). Bump when the report dict shape changes in a
+non-backward-compatible way. The verdict reader still accepts v2.
 """
 
 from __future__ import annotations

@@ -16,7 +16,9 @@ from decoy_engine.detection.types import DetectorRun, DetectorSource, ModelRef
 # Bump when the report dict shape changes in a non-backward-compatible
 # way. The platform persists this on the JobPostScanIntegrityReport row so reads of
 # old rows can render correctly. Mirrors the Quality report's versioning.
-SCHEMA_VERSION = "post-scan-integrity/v2"
+SCHEMA_VERSION = "post-scan-integrity/v3"
+# Tags the verdict reader accepts: v2 reports (match_rate is always a number) stay readable.
+READABLE_SCHEMA_VERSIONS = frozenset({"post-scan-integrity/v2", SCHEMA_VERSION})
 
 
 Severity = Literal["info", "warning", "fail", "error"]
@@ -55,7 +57,7 @@ class ResidualPIIFinding:
     sample_match_count: int = 0  # how many rows still match
     message: str = ""
     # Source-comparison evidence (audit C1 fix). Additive with defaults
-    # so post-scan-integrity/v2 payload consumers are unaffected.
+    # so post-scan-integrity/v3 payload consumers are unaffected.
     # Positional out==src rate over comparable non-null rows; None when
     # the source was unavailable or the column was not comparable.
     source_identity_rate: float | None = None
