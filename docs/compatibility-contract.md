@@ -845,7 +845,7 @@ No `SEED_PROTOCOL_VERSION` change.
   naming the table and the exception class. `decoy_engine.detection` exports `DetectorRun`,
   `ModelRef`, `NerRate`, `ner_rates`, `log_detector_run` and `log_detector_models`. `scan-set/v1`
   gains `detectors` on `ScanSetCore` and `model_hits` on each field, both additive with empty
-  defaults and strict models (`ModelHitCore`, `ModelRefCore`, a tagged `DetectorRunCore`): a record
+  defaults and strict models (`ModelHitCore`, `ModelRefCore`, a tagged detector-run union): a record
   written before M3a still validates and reads back with empty lists, `ScanSetCoreRead` ignores
   unknown keys, and no stored field can hold a cell value (a source, a detector id, a model id and
   version, a band and a rate bucket). The starter config ignores model hits.
