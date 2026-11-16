@@ -1,6 +1,6 @@
 ### Added (deterministic faker collision report, Z-E1)
 
-A `--post-validate` run now reports, for each deterministic `faker` column that is not `unique` and has no `when:`, how many distinct source values merged into shared masked values. The warning code is `cardinality_collisions`. Its detail holds `table`, `source_distinct`, `output_distinct`, `distinct_lost` and `pool_size`: names and counts only. `decoy_engine.generation.pool.effective_pool_size` is a new public name.
+A `--post-validate` run now reports, for each deterministic `faker` column that is not `unique` and has no `when:`, how many distinct source values merged into shared masked values. The warning code is `cardinality_collisions` (`warning/cardinality_collisions`). Its detail holds `table`, `source_distinct`, `output_distinct`, `distinct_lost` and `pool_size`: names and counts only. `decoy_engine.generation.pool.effective_pool_size` is a new public name.
 
 ### Changed (faker and hash collision docs, Z-E1)
 
