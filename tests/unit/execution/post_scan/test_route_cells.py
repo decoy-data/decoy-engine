@@ -112,6 +112,23 @@ def _isolated(tmp: Path) -> tuple[Any, str]:
     return out, "isolated"  # the child ran `run_pipeline`; its report rides the envelope
 
 
+def _isolated_child(tmp: Path) -> tuple[Any, str]:
+    parent, child = _parent_child_tables()
+    config = copy.deepcopy(_config(tmp, integrity=True))
+    config["global_settings"]["mask_secret_ref"] = f"env:{subset_sup.VAR}"
+    out = run_pipeline_isolated(
+        config,
+        {"parent": parent, "child": child},
+        isolate=True,
+        output_dir=tmp / "committed",
+        engine_version=V,
+        execution_mode="sequential",
+    )
+    assert out.isolated is True
+    assert out.outcome == "completed", (out.error, out.reason)
+    return out, "isolated_child"  # the gate ran in a real child, over its staging sink
+
+
 CELLS: dict[str, tuple[Cell, bool]] = {
     # route name -> (cell, whether the cell declares keys, so the report must list them)
     "full_frame": (_full_frame, True),
@@ -122,6 +139,7 @@ CELLS: dict[str, tuple[Cell, bool]] = {
     "unified_slice": (_unified, False),
     "stream": (_stream, True),
     "isolated": (_isolated, True),
+    "isolated_child": (_isolated_child, True),
 }
 
 
