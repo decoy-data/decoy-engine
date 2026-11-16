@@ -14,6 +14,12 @@ from decoy_engine.delivery.resume._fingerprint import (
     binding_digest,
     build_fingerprint,
 )
+from decoy_engine.delivery.resume._plan import (
+    ResumePlan,
+    ResumeRefusedError,
+    TableCheck,
+    plan_resume,
+)
 from decoy_engine.delivery.resume._records import (
     RunRecord,
     TableEntry,
@@ -25,8 +31,11 @@ from decoy_engine.delivery.resume._records import (
 )
 
 __all__ = [
+    "ResumePlan",
+    "ResumeRefusedError",
     "RunFingerprint",
     "RunRecord",
+    "TableCheck",
     "TableEntry",
     "TableRecord",
     "binding_digest",
@@ -35,4 +44,5 @@ __all__ = [
     "decode_table_record",
     "encode_run_record",
     "encode_table_record",
+    "plan_resume",
 ]

@@ -103,6 +103,7 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.execution.physical._shadow_diff_codes", "ShadowDifference", "physical"),
     ("decoy_engine.publication._types", "PublicationRefused", "decoy"),
     ("decoy_engine.publication._types", "PublicationFailed", "decoy"),
+    ("decoy_engine.delivery.resume._plan", "ResumeRefusedError", "decoy"),
 )
 # Engine exceptions that carry no code but have one fixed meaning: (module, class, reason).
 _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
