@@ -8,8 +8,7 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 PR #291, which reopens it), CLI `docs/records/2026-11-10-cli-qa-generation-distribution-models.md`
 findings H6 and H7.
 
-Revision 2, after Dennis r1 (GO-WITH-FIXES: 1 HIGH, 3 MEDIUM, 4 LOW). Every finding is taken;
-the change map is in section 14.
+Revision 3, after Dennis r2. Every finding is taken; the change map is in section 14.
 
 Bases (2026-11-16): engine `origin/main` `ddd014a5` (release 0.27.0), CLI `origin/main`
 `307a189a`. Line numbers are read at these bases.
@@ -47,10 +46,11 @@ one row (`_joint_snapshot`).
 ### 1.2 Root cause
 
 The plain-snapshot policy has one switch per column: flagged (withhold all) or not flagged (keep
-all). Detection is a heuristic, so a column it misses keeps every cell. The fix is a second,
-weaker rule for every column the first rule does not cover: no released label, year or bound may
-be a fact about fewer than K source rows. K is the existing `MIN_RELEASE_COUNT` (10,
-`_value_redaction.py:58`), which the numeric shape blocks already use
+all). Detection is a heuristic, so a column it misses keeps every cell. The flagged rule also
+classifies datetime `year_bins` as value-free (`_value_redaction.py:150`), so it keeps raw years
+with counts below K. The fix applies one floor to every released label, year bucket or bound,
+including datetime columns flagged by the profiler or by G5. K is the existing
+`MIN_RELEASE_COUNT` (10, `_value_redaction.py:58`), which the numeric shape blocks already use
 (`generation/statistical/_numeric_shape.py`). One constant sets one floor.
 
 ## 2. Guarantee
@@ -67,19 +67,21 @@ column the profiler does not flag ("unflagged") gets the floor:
   bounds and edges are points on a 1, 2 or 5 times 10^k grid; a grid point, a kept `p50` or an
   interior `quantile_grid` point can still equal a real cell by coincidence, as today
   (`_numeric_shape.py:18-22`). `mean` and `std` are aggregates and are kept.
-- G3. Every `year_bins` count of a datetime column is at least K, and `min` and `max` are the
-  first and last instant of the first and last kept year.
+- G3. Every released datetime year bucket is a contiguous range held by at least K rows, for
+  unflagged, G5 and profiler-flagged columns. `min` and `max` are the first and last instant of
+  the first and last bucket.
 - G4. A short string column whose labels read as sentences is written as `freetext` (length
   statistics only), never as categorical.
 - G5. When the floor would leave a column nothing to release, the column gets the flagged
-  treatment (`_redact_column`, unchanged) and is listed in `redacted_columns`. "Nothing to
+  treatment (`_redact_column`) and is listed in `redacted_columns`. "Nothing to
   release" is, per kind: numeric with fewer than 2K finite cells; categorical (not bool) with
-  every label under K; datetime with no year held by K rows. The flagged numeric rule
+  every label under K; datetime with no single year held by K rows. The flagged numeric rule
   (`_coarse_range`) derives its power-of-ten bounds from the true extremes, so a G5 numeric column
-  releases the order of magnitude of its range, exactly as a flagged one does today.
+  releases the order of magnitude of its range, exactly as a flagged one does today. A G5
+  datetime column still releases folded multi-year buckets, never its raw `year_bins`.
 - G6. `include_values=True` output is byte-identical to today.
-- G7. Flagged columns are treated exactly as today: the free-text pass skips them, and their
-  joints are withheld as today.
+- G7. The free-text pass skips flagged columns and their joints are withheld as today. Their
+  datetime `year_bins` get the G3 fold before release.
 
 Non-goals (V1): interior histogram bins with a small count (a count on a public grid, not a
 value); fan-out degree counts; freetext length statistics; reconstruction across several
@@ -140,29 +142,32 @@ The same file gains `REDACTED_POLICIES = frozenset({"flagged-redacted/v1", POLIC
 Every reader that asks "is this a redacted document" uses the set: `snapshot_joint_warnings`
 (`_snapshot_values.py:188`) and `_spec.py:273`.
 
-### 4.2 Rules (all in `_snapshot_values.py`, applied by one `_floor_column`)
+### 4.2 Rules (all in `_snapshot_values.py`; the datetime fold is shared by both treatments)
 
 - `TOP_CODED_RANGE`: n finite cells, n at least 2K (G5 takes the rest). `a` = K-th smallest,
-  `b` = K-th largest. Step = the Heckbert nice number (1, 2 or 5 times a power of ten) at or
-  above `(b - a) / numeric_bins`, or the `_grid_edges` step when `a == b`. Domain
+  `b` = K-th largest. Step = the largest Heckbert nice number (1, 2 or 5 times a power of ten)
+  at or below `(b - a) / numeric_bins`, or the `_grid_edges` step when `a == b`. Domain
   `lo = floor(a / step) * step` and `hi = lo + step * m`, where `m` is the smallest whole number
   with `lo + step * m >= b`, at least 1; computed in `Decimal` as `_grid_edges` does. Then
   `numeric_stats(non_null, bins=m, domain=(lo, hi))`, so every edge is a grid point. `lo <= a`
   puts `a` in the first bin and `b <= hi` puts `b` in the last, and clamping moves every cell
-  beyond them into those bins, so each end bin holds at least K rows. `m` is between
-  `numeric_bins` and `numeric_bins + 2`; the sampler and the shape decoder read the edge list,
-  not its length. Everything depends only on `a`, `b`, n and the clamped counts, which gives G2.
+  beyond them into those bins, so each end bin holds at least K rows. Because `step` is at most
+  `(b - a) / numeric_bins`, `m >= numeric_bins`. Consecutive nice steps differ by at most 2.5,
+  and `a - lo < step`, so `m <= ceil(5 * numeric_bins / 2) + 1`. The sampler and the shape
+  decoder read the edge list, not its length. Everything depends only on `a`, `b`, n and the
+  clamped counts, which gives G2.
 - `K_TAIL_QUANTILES`: keep `pXX` only when `p * n >= K` and `(1 - p) * n >= K`; drop the rest.
   Type-7 interpolation at such a `p` reads order statistics K and above from each end, so a kept
   entry is unchanged by the tail swap in G2.
-- `FOLD_YEARS_UNDER_K`: the kept years are the years with a count of at least K. Each other
-  year's count moves to the nearest kept year (the earlier one on a tie). Years before the first
-  kept year therefore land in it, and years after the last kept year land in that one. The total
-  count does not change.
-- `KEPT_YEAR_START` / `KEPT_YEAR_END`: `min` is `YYYY-01-01T00:00:00` of the first kept year,
-  `max` is `YYYY-12-31T23:59:59` of the last kept year. The sampler draws a year from `year_bins`
-  and a uniform instant in it, then clamps to `[min, max]` (`_sample.py:480-510`). With whole-year
-  bounds the clamp never moves a draw, so no draw piles up at a bound.
+- `FOLD_YEARS_UNDER_K`: walk years from earliest to latest and merge adjacent years until the
+  running count reaches K. Emit that contiguous multi-year bucket and start the next one. If the
+  final bucket has fewer than K rows, merge it into the preceding bucket. This one fold is used
+  by `_floor_column` and `_redact_column`, so unflagged, G5 and profiler-flagged datetime columns
+  cannot release raw short years. The total count does not change.
+- `KEPT_YEAR_START` / `KEPT_YEAR_END`: `min` is `YYYY-01-01T00:00:00` at the first bucket's
+  lower edge, and `max` is `YYYY-12-31T23:59:59` at the last bucket's upper edge. The sampler
+  draws uniformly inside the selected bucket and clamps to `[min, max]` (`_sample.py:480-510`).
+  With whole-year bucket edges the clamp never moves a draw, so no draw piles up at a bound.
 - `FOLD_UNDER_K`: `_collapse_counted_items` gains a `keep` predicate. Items with `count < K` move
   into `other_count`; the rest stay in order. Bool dtype columns skip it. A joint is folded the
   same way.
@@ -173,7 +178,9 @@ Order inside `distribution_snapshot_document` (plain mode):
 2. Pick the free-text columns (4.3) among the unflagged string columns.
 3. Compute the raw snapshot, then convert the free-text columns (4.3).
 4. For each unflagged column, test G5. A G5 column joins the flagged set.
-5. Apply `_redact_column` to the flagged set, `_floor_column` to every other column.
+5. Fold datetime year bins into contiguous buckets for every column, then apply
+   `_redact_column` to the flagged set and `_floor_column` to every other column. Both paths use
+   the same fold.
 6. Withhold every joint that names a flagged or free-text column; fold every other joint.
 7. Stamp the policy with the flagged set (flagged by the profiler plus G5) as
    `redacted_columns`.
@@ -231,8 +238,10 @@ becomes "(a sensitive column, or one with too few rows to release values)". The 
   each label under 10%. A column with fewer than 10 rows per label is withheld.
 - Free text: short sentence columns become length-matched filler. A phrase vocabulary of 3 or
   more words (for example `Type 2 diabetes`) is caught too; `--include-values` restores it.
-- Datetime: years with under 10 rows vanish and their mass moves to the nearest kept year; draws
-  spread over whole first and last years instead of stopping at the exact ends.
+- Datetime: adjacent years become contiguous buckets of at least 10 rows. A final short bucket
+  joins the preceding bucket. This also applies to G5 and profiler-flagged columns. Draws spread
+  across the selected bucket instead of preserving each year's weight, and the outer buckets use
+  whole-year edges instead of the exact ends.
 
 ## 6. Failure modes
 
@@ -322,12 +331,12 @@ the QA frame rebuilt in the test (1,000 rows, seed 31), plus small frames.
 
 | # | Test | Fail before |
 |---|---|---|
-| AT-1 | unflagged salary (canary 987,654 present in the raw snapshot): `max` is not 987,654. Invariance: replace the 9 largest cells with other values above the 10th largest and the 9 smallest with other values below the 10th smallest; `min`, `max`, `bin_edges`, `bin_counts` and every kept `quantiles` entry are equal before and after the swap. Each end bin holds at least K | `max == 987654`; the swap moves `max` |
+| AT-1 | unflagged salary (canary 987,654 present in the raw snapshot): `max` is not 987,654. Invariance: replace the 9 largest cells with other values above the 10th largest and the 9 smallest with other values below the 10th smallest; `min`, `max`, `bin_edges`, `bin_counts` and every kept `quantiles` entry are equal before and after the swap. Each end bin holds at least K, and `len(bin_counts) >= numeric_bins` | `max == 987654`; the swap moves `max` |
 | AT-2 | the document's JSON text does not contain `RARE-HIV-B20`; `other_count` grew by 1; every kept label count is at least K | label stored with count 1 |
 | AT-3 | joint of two unflagged columns: every kept cell count is at least K; folded mass is in `other_count` | count-1 cell stored |
 | AT-4 | the 30-string note column is `kind: freetext` with a `cell_format` blank count; no note string is in the JSON | categorical, all 30 stored |
-| AT-5 | datetime with one 1921 row and the rest 2015 to 2024: every `year_bins` count is at least K, no 1921 bin, the total count is unchanged, `min` is `2015-01-01T00:00:00`, `max` is `2024-12-31T23:59:59`; a 5,000-row draw has no value at a clamped bound more often than any other instant | `{"year": 1921, "count": 1}` and exact bounds stored |
-| AT-6 | 15-row frame with a categorical `state` (3 to 6 rows per label), a numeric `amount` and a joint `(state, tier)`: both columns are in `redacted_columns`; `state` has empty `top_values`; `amount` has one coarse bin; the joint has no cells; `load_spec` refuses `state` with `plan.statistical_snapshot_values_redacted` | labels and joint cells stored, spec loads |
+| AT-5 | three datetime columns with the same years: one unflagged, one forced into G5 because no single year has K rows, and one profiler-flagged. For each, adjacent years are folded from the earliest, every released year bucket count is at least K, a short tail joins the last bucket, the total count is unchanged, and `min` and `max` are the outer bucket edges. A 5,000-row draw has no value at a clamped bound more often than any other instant | raw short `year_bins` and exact bounds stored |
+| AT-6 | 15-row frame with a categorical `state` (3 to 6 rows per label), a numeric `amount`, a G5 datetime spread across years, and a joint `(state, tier)`: all three columns are in `redacted_columns`; `state` has empty `top_values`; `amount` has one coarse bin; every datetime year bucket count is at least K; the joint has no cells; `load_spec` refuses `state` with `plan.statistical_snapshot_values_redacted` | labels, raw short year bins and joint cells stored; spec loads |
 | AT-7 | `value_policy == "flagged-redacted/v2"`; `load_spec` accepts v1 and v2 and refuses v3 (`tests/unit/generation/test_statistical_redacted.py`); `snapshot_joint_warnings` exempts a withheld joint for a v1 and a v2 document | marker is v1; v2 refused |
 | AT-8 | property (hypothesis, as `test_snapshot_values.py` already uses): for random numeric, string, datetime and bool frames, the G1 to G3 floors hold for every unflagged column, and the AT-1 swap leaves numeric bounds unchanged | fails on the first count-1 label, rare year or moved bound |
 | AT-9 | round trip: fit the QA frame, generate 5,000 rows; the numeric shape decodes, no generated label is a folded label, and the per-column marginal similarity from `quality.fidelity` is at least 0.95 for `salary`, `state` and `visit_date` | not fail-before: the fidelity budget |
@@ -336,9 +345,10 @@ the QA frame rebuilt in the test (1,000 rows, seed 31), plus small frames.
 | AT-12 | a forced-flagged column of 3-word strings is withheld as a flagged categorical (`kind: categorical`, empty `top_values`), not converted to freetext | the pass ran before the profile and converted it |
 
 Mutations that must turn a test red: drop `FOLD_UNDER_K` from the table (AT-2, AT-3, AT-8,
-AT-11); take `a` and `b` as the min and max (AT-1, AT-8); bin with `numeric_bins` instead of `m`
-(AT-1 end-bin check); leave `year_bins` unfolded (AT-5, AT-8); set `min` to the month of the K-th
-earliest value (AT-5 pile-up check); run the joint loop before the G5 test (AT-6); skip the
+AT-11); take `a` and `b` as the min and max (AT-1, AT-8); bin with fewer than `m` bins
+(AT-1 end-bin and minimum checks); leave unflagged `year_bins` unfolded (AT-5, AT-8); leave
+flagged `year_bins` unfolded (AT-5, AT-6); set `min` to the month of the K-th earliest value
+(AT-5 pile-up check); run the joint loop before the G5 test (AT-6); skip the
 free-text pass (AT-4); run it on flagged names (AT-12); keep v1 (AT-7); compare
 `== POLICY_REDACTED` in `snapshot_joint_warnings` (AT-7); fold bool columns (AT-10).
 
@@ -346,7 +356,7 @@ CLI (C1), after the engine release that carries E1:
 
 | # | Test | Fail before |
 |---|---|---|
-| AT-C1 | `decoy fit` on the QA frame: no canary (`RARE-HIV-B20`, `987654`, any note string, `1921`) in the file; `fit --json` shows `value_policy: flagged-redacted/v2` (`tests/e2e/first_user/test_items_privacy.py`) | canaries present on the old pin |
+| AT-C1 | `decoy fit --numeric-bins 17` on the QA frame: no canary (`RARE-HIV-B20`, `987654`, any note string, `1921`) in the file; the salary has at least 17 `bin_counts`; `fit --json` shows `value_policy: flagged-redacted/v2` (`tests/e2e/first_user/test_items_privacy.py`) | canaries present on the old pin; the request is not pinned as a minimum |
 | AT-C2 | a 15-row fit, then `decoy validate` on a statistical categorical column: exit 1 with the redacted code and the `--include-values` hint | validate passes |
 
 ### 7b. Existing tests that change
@@ -357,6 +367,9 @@ rewritten to the floor. `tests/unit/generation/test_statistical_redacted.py::tes
 lists `flagged-redacted/v2` as unknown; it moves to v3.
 `tests/sentry/profiling/test_snapshot_value_registry.py::test_the_four_snapshot_rules_join_the_one_rule_enum`
 and `::test_every_visited_key_is_classified_and_every_entry_is_visited` learn the second table.
+The same file's `test_a_sixth_kind_literal_is_seen_by_the_source_read` at lines 152 to 154 changes
+because its source-text witness matches `return "freetext", _freetext_stats`, and that helper is
+renamed to `freetext_stats`.
 `tests/unit/quality/test_snapshot_joint_cap.py`,
 `tests/unit/generation/statistical/test_numeric_grid.py`, `test_numeric_exact.py`,
 `tests/unit/profiling/test_snapshot_cell_format.py` and `test_snapshot_values_numeric_shape.py`
@@ -465,3 +478,11 @@ rule; `profile_document` moves to row 24zm.
 | 6 | LOW: `snapshot_joint_warnings` compares `== POLICY_REDACTED` | `REDACTED_POLICIES` used there and in `_spec.py`; AT-7 |
 | 7 | LOW: G2 overclaimed | G2 states grid, `p50` and grid-point coincidence and the `_coarse_range` magnitude release |
 | 8 | LOW: G5 columns must join the flagged set before the joint loop | step order in 4.2; AT-6 joint assertion; class 5 |
+
+### Revision 3 (Dennis r2)
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | V1: G5 and profiler-flagged datetime columns kept raw short `year_bins` | one shared contiguous bucket fold now covers unflagged, G5 and profiler-flagged datetime columns; G3, G5, 1.2, 4.2 steps, 5.1, AT-5, AT-6 and mutations pin it |
+| 2 | V1: the claimed upper bound on numeric bin count was false | the largest nice step at or below the requested width makes `numeric_bins` a minimum; 4.2 proves `m <= ceil(5 * numeric_bins / 2) + 1`, and AT-1 and AT-C1 pin engine and CLI behavior |
+| 3 | V2-LOG: the freetext helper rename would break a source-text sentry | 7b names `test_a_sixth_kind_literal_is_seen_by_the_source_read` and its old `_freetext_stats` witness |
