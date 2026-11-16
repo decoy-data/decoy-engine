@@ -63,6 +63,7 @@ from decoy_engine.publication import (
 from decoy_engine.reasons import CleanupState, Operation, PublicationState
 
 if TYPE_CHECKING:
+    from decoy_engine.fileaccess import ScratchArena
     from decoy_engine.reasons import ReasonCode
 
 
@@ -119,12 +120,12 @@ class _CallableSinkAdapter:
     callable immediately (so partial output on abort is the documented
     behavior). commit() and abort() are no-ops.
 
-    `open_spill_scratch` (RUN-STREAM E5b): opens, at the first spill only, the `ScratchArena` a
-    streamed hold-back spills into. Only the engine's no-sink collector passes one (its arena is
-    removed on every exit); every other caller keeps `None`, so a spilling hold-back still refuses.
-    """
+    `open_spill_scratch` (E5b): opens the `ScratchArena` a hold-back spills into, at the first
+    spill. Only the no-sink collector passes one; others keep `None` and refuse."""
 
-    def __init__(self, fn: object, *, open_spill_scratch: Callable[[], Any] | None = None) -> None:
+    def __init__(
+        self, fn: object, *, open_spill_scratch: Callable[[], ScratchArena] | None = None
+    ) -> None:
         self._fn = fn
         self.open_spill_scratch = open_spill_scratch
         # The callable publishes as it goes, so a failure leaves the output state unknowable.

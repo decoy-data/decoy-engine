@@ -450,8 +450,9 @@ class _Spill:
     """Held-back chunks beyond one row group, one Arrow IPC file each in a private scratch
     stage beside the sink's own staging directory. The stage is a policy-issued output
     transaction, so a strict policy decides where spilled rows may land (`TMPDIR` only for the
-    no-sink collector's scratch). Read back through the stage, not a memory map. A sink with
-    `open_spill_scratch` (no-sink collector) gets a child of the arena it opens on first spill."""
+    no-sink collector's scratch). Read back through the stage, not a memory map, so pages do
+    not stay resident. A sink with `open_spill_scratch` (no-sink collector) gets a child of the
+    arena it opens on first spill."""
 
     def __init__(self, stats: StreamStats, sink: Any, table: str) -> None:
         self.stats = stats

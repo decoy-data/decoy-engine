@@ -393,7 +393,7 @@ def _collector(collected: dict[str, pa.Table], scope: ExitStack) -> Transactiona
     re-authorize."""
     from decoy_engine.execution import _transactional_sink
 
-    arenas: list[ScratchArena] = []
+    arenas: list[ScratchArena] = []  # one run, one thread: the memo needs no lock
 
     def open_spill_scratch() -> ScratchArena:
         if not arenas:
