@@ -529,7 +529,7 @@ def test_f22_publication_codes_are_registered_pending() -> None:
         spec = reasons.find("decoy", code)
         assert spec is not None
         owner = "decoy_engine.fileaccess" if code in fileaccess else "decoy_engine.publication"
-        assert (spec.owner, spec.since) == (owner, reasons.UNRELEASED)
+        assert (spec.owner, spec.since) == (owner, "1.29.0")
         assert not re.search(r"[{}%]", spec.summary)
         assert getattr(reasons.decoy, code.upper()) == code
 
@@ -580,15 +580,13 @@ def test_scanml_m5_route_refusal_is_registered_as_pending() -> None:
     assert reasons.route.POST_SCAN_MODELS_UNSUPPORTED == "post_scan_models_unsupported"
 
 
-def test_scanml_m4_post_scan_block_is_registered_as_pending() -> None:
-    """SCAN-ML M4: one post-scan block owned by PostScanBlockedError, pending its release stamp."""
-    from decoy_engine.reasons._types import UNRELEASED
-
+def test_scanml_m4_post_scan_block_is_registered_in_1_29() -> None:
+    """SCAN-ML M4: one post-scan block owned by PostScanBlockedError, stamped at 1.29.0."""
     spec = reasons.find("post_scan", "ner_blocked")
     assert spec is not None
     assert (spec.owner, spec.since, spec.kind.value) == (
         "PostScanBlockedError",
-        UNRELEASED,
+        "1.29.0",
         "failure",
     )
     assert not re.search(r"[{}%]", spec.summary)
