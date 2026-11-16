@@ -284,16 +284,38 @@ def test_sink_transition_cells_commit_leaves_committing_when_capture_raises(
     with sink_factory(policy, tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        parked = _ParkedCommit(sink, monkeypatch)
+        entered, release = threading.Event(), threading.Event()
+        error: list[BaseException] = []
+
+        def publish_that_raises(*_args: Any, **_kwargs: Any) -> None:
+            entered.set()
+            release.wait(10)
+            raise RuntimeError("publish_unit failed outright")
+
+        monkeypatch.setattr(
+            "decoy_engine.execution._transactional_sink.publish_unit", publish_that_raises
+        )
+
+        def run() -> None:
+            try:
+                sink.commit()
+            except BaseException as exc:
+                error.append(exc)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        assert entered.wait(10)  # non-vacuity: the commit is in flight
         sink.abort()  # pending while the commit is in flight
-        parked.finish()
-        assert isinstance(parked.error, _CaptureBroke)
+        release.set()
+        thread.join(10)
+        assert not thread.is_alive()
+        assert isinstance(error[0], _CaptureBroke)
         assert sink.state is S.ABORTED  # left COMMITTING, and the pending abort applied
         assert stages(tmp_path) == []
     assert tree(tmp_path / "out") == before
 
 
-def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_write_error(
+def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_commit_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "out").mkdir()
@@ -309,12 +331,11 @@ def test_sink_transition_cells_unconfirmable_cleanup_does_not_hide_the_write_err
     with sink_factory("ambient", tmp_path) as make:
         sink = make()
         sink.write("customers", table("A"))
-        parked = _ParkedCommit(sink, monkeypatch)
+        parked = _ParkedCommit(sink, monkeypatch, at="read")
         sink.abort()
         parked.finish()
-        # The commit's own OSError (occupied target) propagates, not the stat error.
-        assert isinstance(parked.error, OSError)
-        assert not isinstance(parked.error, PermissionError)
+        # The commit's own refusal (occupied target) propagates, not the stat error.
+        assert isinstance(parked.error, PublicationRefused)
         assert sink.state is S.ABORTED
         assert sink.publication_evidence.cleanup is CleanupState.FAILED
 
