@@ -1,6 +1,6 @@
 # The exact modules a sink call may live in without a registry entry (plan D9). Being inside
-# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` (whose
-# ambient opens each carry their own registry entry), is judged call by call.
+# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` and
+# `_local_chain.py` (whose ambient opens each carry their own registry entry), is judged call by call.
 
 # Rule 1: adapters hand a third-party library only a capability's descriptor or library path.
 adapter_modules = [
@@ -17,6 +17,7 @@ capability_modules = [
   "decoy_engine/fileaccess/_output.py",
   "decoy_engine/fileaccess/_preopened.py",
   "decoy_engine/fileaccess/_openat2.py",
+  "decoy_engine/fileaccess/_durable.py",
 ]
 
 # Public functions in a capability module that take a held descriptor. They are the named creation
@@ -25,8 +26,8 @@ capability_modules = [
 capability_creators = [
   "decoy_engine/fileaccess/_output.py::make_stage_dir_at",
   "decoy_engine/fileaccess/_output.py::create_output_file_at",
-  "decoy_engine/fileaccess/_output.py::discard_stage_at",
-  "decoy_engine/fileaccess/_output.py::publish_exclusive_durable",
+  "decoy_engine/fileaccess/_durable.py::discard_stage_at",
+  "decoy_engine/fileaccess/_durable.py::publish_exclusive_durable",
 ]
 
 # The only module that may construct `LocalFileAccess`.
