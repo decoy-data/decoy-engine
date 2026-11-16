@@ -17,10 +17,12 @@ from decoy_engine.delivery.resume._fingerprint import (
 from decoy_engine.delivery.resume._plan import (
     ResumePlan,
     ResumeRefusedError,
+    ResumeWarning,
     TableCheck,
     plan_resume,
 )
 from decoy_engine.delivery.resume._records import (
+    ROUTE_CHUNKED,
     RunRecord,
     TableEntry,
     TableRecord,
@@ -31,8 +33,10 @@ from decoy_engine.delivery.resume._records import (
 )
 
 __all__ = [
+    "ROUTE_CHUNKED",
     "ResumePlan",
     "ResumeRefusedError",
+    "ResumeWarning",
     "RunFingerprint",
     "RunRecord",
     "TableCheck",

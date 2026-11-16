@@ -11,7 +11,7 @@ It leaves out ``operation_id`` (the retry handle, Delta Lake's transaction ident
 vault, which is judged by its rows, never by a digest of them.
 
 One declaration (``DESCRIPTOR_FIELDS`` and the two nested ones, built from the shared specs in
-``decoy_engine._canonical._strict_spec``) drives both directions, so the writer cannot emit what
+``decoy_engine._canonical``) drives both directions, so the writer cannot emit what
 the reader refuses. The reader is the persisted-reader contract: exact
 version tag, every field present, no unknown field, exact built-in JSON types (``bool`` is never
 an ``int``), bounded counts, closed tokens, ``re.fullmatch`` shapes, relative paths through the
@@ -32,11 +32,6 @@ from typing import Any, Final, Literal, NoReturn, cast
 
 from decoy_engine._canonical import (
     CanonicalJsonError,
-    StrictJsonError,
-    canonical_json_bytes,
-    strict_json_loads,
-)
-from decoy_engine._canonical._strict_spec import (
     CountSpec,
     ExactSpec,
     ListSpec,
@@ -46,8 +41,9 @@ from decoy_engine._canonical._strict_spec import (
     RelPathSpec,
     ShapedSpec,
     Spec,
-    SpecCheck,
-    SpecRefusedError,
+    attempt,
+    canonical_json_bytes,
+    parse_or_token,
 )
 from decoy_engine.fileaccess import is_valid_component
 from decoy_engine.publication._types import (
@@ -160,12 +156,7 @@ class Descriptor:
 
 def _load(spec: Spec, raw: Any) -> Any:
     """``spec.load``; a spec's closed token becomes the descriptor refusal outside the handler."""
-    refused: SpecCheck | None = None
-    value: Any = None
-    try:
-        value = spec.load(raw)
-    except SpecRefusedError as error:
-        refused = error.check
+    value, refused = attempt(spec.load, raw)
     if refused is not None:
         _refuse(refused)
     return value
@@ -173,12 +164,7 @@ def _load(spec: Spec, raw: Any) -> Any:
 
 def _dump(spec: Spec, value: Any) -> Any:
     """``spec.dump``, refused the same way as :func:`_load`."""
-    refused: SpecCheck | None = None
-    raw: Any = None
-    try:
-        raw = spec.dump(value)
-    except SpecRefusedError as error:
-        refused = error.check
+    raw, refused = attempt(spec.dump, value)
     if refused is not None:
         _refuse(refused)
     return raw
@@ -293,14 +279,9 @@ def encode_descriptor(descriptor: Descriptor) -> bytes:
 
 def _parse(data: bytes) -> Any:
     """Strict JSON; the shared decoder's closed token is the refusal check."""
-    parsed: Any = None
-    refused: Check | None = None
-    try:
-        parsed = strict_json_loads(data, max_int_digits=_MAX_INT_DIGITS)
-    except StrictJsonError as error:
-        refused = cast(Check, error.token)
-    if refused is not None:
-        _refuse(refused)
+    parsed, token = parse_or_token(data, _MAX_INT_DIGITS)
+    if token is not None:
+        _refuse(cast(Check, token))
     return parsed
 
 

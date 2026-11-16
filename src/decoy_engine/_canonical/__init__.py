@@ -22,6 +22,8 @@ from decoy_engine._canonical._strict_spec import (
     Spec,
     SpecCheck,
     SpecRefusedError,
+    attempt,
+    parse_or_token,
 )
 
 __all__ = [
@@ -39,7 +41,9 @@ __all__ = [
     "SpecCheck",
     "SpecRefusedError",
     "StrictJsonError",
+    "attempt",
     "canonical_json_bytes",
+    "parse_or_token",
     "seed_fingerprint_bytes",
     "strict_json_loads",
 ]
