@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import Any, TypeGuard
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.errors import DecoyError
@@ -243,7 +242,7 @@ def collect(
     outputs: dict[str, pa.Table] | None = None
     try:
         if _names_ok(names) and _admit(staging, names):
-            outputs = {n: pq.read_table(staging / f"{n}.parquet") for n in names}  # type: ignore[no-untyped-call, unused-ignore]
+            outputs = {n: _read_staged(staging, n) for n in names}
     except (OSError, pa.ArrowException) as exc:
         code = exc.errno if isinstance(exc, OSError) else None
     if outputs is None:
@@ -255,6 +254,13 @@ def collect(
     components = [f"{name}.parquet" for name in outputs]
     receipt = publish_unit(pub.out, pub.txn, request, tables=components)
     return (outputs, receipt) if receipt.outcome in COMMITTED else receipt
+
+
+def _read_staged(staging: Path, name: str) -> pa.Table:
+    """One admitted staged table, read through the file-access choke point."""
+    req = FileRequest(FileRole.TARGET_OUTPUT, "read", str(staging / f"{name}.parquet"), _FIELD_KEY)
+    with fileaccess.capture().open_read(req) as handle:
+        return arrow_adapter.read_table(handle)
 
 
 def _typed_error(receipt: CommitReceipt) -> BaseException:
