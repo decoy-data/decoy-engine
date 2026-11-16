@@ -132,6 +132,8 @@ def publish_resident(
     """The fallback's publication: `publish_tables` into a `publication` stage beside
     `output_dir`, each table as `<table>.parquet`. Returns the receipt and the stage path, so a
     refusal's cleanup is confirmed by looking (the stage is already discarded unless bound)."""
+    if not _names_ok(list(outputs)):  # the isolated route's refusal, so both modes agree
+        return failed_receipt(_request(request)), None
     stages: list[str] = []
     receipt = publish_tables(
         _output(output_dir), outputs, _request(request), suffix=".parquet", on_stage=stages.append
