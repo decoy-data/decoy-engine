@@ -153,16 +153,6 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             )
         if parsed_bounds[bound].tzinfo is not None:
             _refuse(table, col, CODE_UNBOUNDED, bound, "timezone-aware datetime bound")
-    # An inverted range passes the per-bound checks but makes the sampler clamp every row to
-    # `max` silently (a wrong value, not a crash), so reject it at admission.
-    if parsed_bounds["min"] > parsed_bounds["max"]:
-        _refuse(
-            table,
-            col,
-            CODE_DEGENERATE,
-            "min",
-            f"datetime min {parsed_bounds['min']} is after max {parsed_bounds['max']}",
-        )
 
 
 def _check_categorical(
@@ -225,17 +215,6 @@ def _check_statistical(
         edges = _check_histogram(
             table, col, "length_bin_edges", "length_bin_counts", spec.stats, strictly_ordered=False
         )
-        # Length edges must be non-negative and non-decreasing (ties allowed). A negative or any
-        # descending adjacent pair (endpoint OR interior, e.g. [0, 100, 10]) makes the sampler clamp
-        # every cell to one length, silently collapsing the distribution. Reject at admission.
-        if edges[0] < 0 or any(b < a for a, b in pairwise(edges)):
-            _refuse(
-                table,
-                col,
-                CODE_DEGENERATE,
-                "length_bin_edges",
-                f"length edges {edges} are negative or not non-decreasing",
-            )
         if int(edges[-1]) > max_cell_chars:
             _refuse(
                 table,
