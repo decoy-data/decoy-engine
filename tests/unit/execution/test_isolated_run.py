@@ -472,6 +472,42 @@ class TestInProcessFallbackHonorsOutputDir:
         # No leftover staging directory next to the committed target.
         assert not list(output_dir.parent.glob("._decoy_publication_pending_*"))
 
+    def test_isolate_false_with_an_invalid_table_name_fails_and_commits_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """The isolated route refuses a name that is not one path component with a failed
+        receipt; the fallback returns that same result instead of raising after the run."""
+        from types import SimpleNamespace
+
+        from decoy_engine.execution import _isolated_run
+
+        table = pa.table({"x": [1]})
+        fake = SimpleNamespace(outputs={"a/b": table}, quality_metrics={}, table_kinds={})
+        monkeypatch.setattr(_isolated_run, "run_pipeline", lambda *a, **k: fake)
+        output_dir = tmp_path / "final_target"
+
+        result = run_pipeline_isolated(
+            {}, None, engine_version=_ENGINE_VERSION, isolate=False, output_dir=output_dir
+        )
+
+        assert result.outcome == "crashed"
+        assert result.isolated is False
+        assert result.publication_receipt is not None
+        assert result.publication_receipt.outcome == "failed"
+        assert not output_dir.exists()
+        assert not list(tmp_path.glob("._decoy_publication_pending_*"))
+
+    def test_publish_resident_refuses_an_invalid_table_name_with_a_failed_receipt(self, tmp_path):
+        from decoy_engine.execution._isolated_commit import publish_resident
+
+        receipt, stage = publish_resident(
+            tmp_path / "final_target", {"a/b": pa.table({"x": [1]})}, None
+        )
+
+        assert receipt.outcome == "failed"
+        assert stage is None
+        assert not (tmp_path / "final_target").exists()
+
 
 # --------------------------------------------------------------------------
 # HIGH-1: the result envelope is a known FILE, not stdout's last line -- a
