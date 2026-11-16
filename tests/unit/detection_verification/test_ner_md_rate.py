@@ -79,7 +79,7 @@ def test_the_md_rate_is_the_calibrated_threshold() -> None:
         "threshold": threshold,
         "NER_MIN_RATES[md]": expected,
     }
-    path = os.environ.get("DECOY_NER_RATE_EVIDENCE")
+    path = os.environ.get("DECOY_NER_MD_RATE_EVIDENCE")
     if path:
         Path(path).write_text(json.dumps(evidence, indent=1))
     print(json.dumps(evidence, indent=1))
