@@ -18,7 +18,7 @@ import importlib.metadata as _md
 import importlib.resources
 import re
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any, Final, NoReturn
@@ -142,6 +142,15 @@ _FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
 )
 
 
+def _round_trip(spec: Spec) -> Callable[[Any], Any]:
+    """A check that writes a value with ``spec`` and reads it back, so write holds the read rules."""
+
+    def check(value: Any) -> Any:
+        return spec.load(spec.dump(value))
+
+    return check
+
+
 @dataclass(frozen=True)
 class RuntimeLock:
     """One host's runtime lock. A value that breaks the ``lock/v1`` rules is refused at construction."""
@@ -169,7 +178,7 @@ class RuntimeLock:
             )
         refused = None
         for name, spec in _FIELDS:
-            _, refused = attempt(lambda v, s=spec: s.load(s.dump(v)), getattr(self, name))
+            _, refused = attempt(_round_trip(spec), getattr(self, name))
             if refused is not None:
                 break
         if refused is not None:
@@ -194,7 +203,7 @@ class RuntimeLock:
         lock, refused = attempt(ObjectSpec(cls, _FIELDS).load, known)
         if refused is not None:
             _refuse(refused)
-        return lock  # type: ignore[no-any-return]
+        return lock
 
 
 @dataclass(frozen=True)
