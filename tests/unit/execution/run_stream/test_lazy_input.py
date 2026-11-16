@@ -322,10 +322,11 @@ def test_a_rejected_lazy_table_reaches_the_context_resident(
     fallback = _run(cfg, {"t": lazy}, resident_fallback=True)
     assert isinstance(seen["sources"]["t"], pa.Table)
     resident = _run(cfg, {"t": lazy.to_table()})
+    from decoy_engine.execution.pipeline import route_summary
+
     assert fallback.outputs["t"].equals(resident.outputs["t"])
-    assert (
-        fallback.quality_metrics["execution"]["route"]
-        == (resident.quality_metrics["execution"]["route"])
+    assert route_summary(fallback.quality_metrics).route == (
+        route_summary(resident.quality_metrics).route
     )
 
 
@@ -390,10 +391,11 @@ def test_stream_skips_the_pre_pass_and_reads_nothing(
 
     def spy_read(self: LazySource, *a: Any, **k: Any) -> Any:
         reads.append("read")
-        raise AssertionError("no source may be read")
+        raise AssertionError("no whole read may happen")
 
-    for name in ("to_table", "iter_batches", "open_batches"):
-        monkeypatch.setattr(LazySource, name, spy_read)
+    # The run context's bounded profile samples through `iter_batches`; only a whole read is the
+    # pre-pass's `materialize_source`, and `stream` must refuse before that.
+    monkeypatch.setattr(LazySource, "to_table", spy_read)
     calls = _forbid_pre_pass(monkeypatch)
     with pytest.raises(Exception) as excinfo:
         _run(cfg, {"t": lazy}, resident_fallback=True, execution_mode="stream")
