@@ -67,3 +67,18 @@ def test_shape_fidelity_accepts_a_v2_range_against_v1() -> None:
     assert col["comparable"] is True
     bad = compute_shape_fidelity(_snap(V2, [{"year": 1, "count": 1}]), _snap(V1, V1_BINS))
     assert bad["marginal"]["columns"][0]["comparable"] is False
+
+
+def test_v1_fractional_counts_score_as_main_did_with_int_counts() -> None:
+    src = _snap(V1, [{"year": 2020, "count": 2.5}, {"year": 2021, "count": 1.5}])
+    out = _snap(V1, [{"year": 2020, "count": 1.5}, {"year": 2021, "count": 2.5}])
+    # int() first: [2, 1] against [1, 2], the value origin/main produced.
+    assert _col(compute_fidelity(src, out))["similarity"] == 0.666667
+
+
+def test_v1_huge_finite_count_scores_in_both_scorers() -> None:
+    big = _snap(V1, [{"year": 2020, "count": 1e308}, {"year": 2021, "count": 1e308}])
+    small = _snap(V1, [{"year": 2020, "count": 1}, {"year": 2021, "count": 1}])
+    assert _col(compute_fidelity(big, small))["similarity"] == 1.0
+    shape = compute_shape_fidelity(big, small)["marginal"]["columns"][0]
+    assert shape["comparable"] is True and shape["shape_similarity"] == 1.0

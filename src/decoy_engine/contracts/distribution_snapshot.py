@@ -79,10 +79,17 @@ _PINNED_LIST = TypeAdapter(list[_PinnedBucket])
 
 def encode_datetime_buckets(buckets: Sequence[DatetimeBucket]) -> list[dict[str, int]]:
     """The only v2 bucket writer. Validates through the stored model and the order rule."""
-    rows = [
-        DatetimeBucketV2(start_year=b.start_year, end_year=b.end_year, count=int(b.count))
-        for b in buckets
-    ]
+    failed = False
+    try:
+        rows = [
+            DatetimeBucketV2(start_year=b.start_year, end_year=b.end_year, count=b.count)
+            for b in buckets
+        ]
+    except ValidationError:
+        failed = True
+    if failed:
+        # Outside the handler: Pydantic's text quotes the input, and a float count is refused, not truncated.
+        raise ValueError("a bucket to store has wrong fields or types")
     _check_order([DatetimeBucket(r.start_year, r.end_year, r.count) for r in rows])
     return [r.model_dump() for r in rows]
 
@@ -171,14 +178,14 @@ def pinned_buckets(
     return decoded_or_none(SCHEMA_VERSION_V1, stats) if kind == "datetime" else None
 
 
-def year_weights(buckets: Sequence[DatetimeBucket]) -> dict[int, float]:
+def year_weights(buckets: Sequence[DatetimeBucket]) -> dict[int, int | float]:
     """Expected rows per calendar year. A range's count is split across its years in proportion to
     the seconds each year holds, which is how the sampler spreads a draw inside the range. A
     one-year bucket returns its count unchanged."""
-    out: dict[int, float] = {}
+    out: dict[int, int | float] = {}
     for b in buckets:
         if b.start_year == b.end_year:
-            out[b.start_year] = float(b.count)
+            out[b.start_year] = b.count  # exact: a huge v1 int count must not overflow a float
             continue
         seconds = {
             y: (datetime(y + 1, 1, 1) - datetime(y, 1, 1)).total_seconds()
@@ -211,6 +218,20 @@ def names_unsupported_year(stats: Mapping[str, Any]) -> bool:
     return False
 
 
+def _scoring_weights(
+    schema_version: Any, buckets: Sequence[DatetimeBucket]
+) -> dict[int, int | float] | None:
+    """``year_weights`` for the scorers. A v1 count is truncated with ``int()`` first, which is what
+    the scorers did before v2, so v1 scores do not move. ``None`` when a v2 count is too large to
+    split as a float."""
+    if schema_version == SCHEMA_VERSION_V1:
+        buckets = [DatetimeBucket(b.start_year, b.end_year, int(b.count)) for b in buckets]
+    try:
+        return year_weights(buckets)
+    except OverflowError:
+        return None
+
+
 def with_year_weights(document: Mapping[str, Any]) -> dict[str, Any]:
     """The document's ``columns`` with each datetime column's stats gaining ``year_weights``
     (``{year: expected rows}``) read through this decoder, or ``None`` when the buckets do not
@@ -223,6 +244,6 @@ def with_year_weights(document: Mapping[str, Any]) -> dict[str, Any]:
             continue
         stats = dict(col.get("stats") or {})
         buckets = decoded_or_none(version, stats)
-        stats["year_weights"] = None if buckets is None else year_weights(buckets)
+        stats["year_weights"] = None if buckets is None else _scoring_weights(version, buckets)
         out[name] = {**col, "stats": stats}
     return out

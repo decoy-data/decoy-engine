@@ -195,10 +195,10 @@ def _column_shape_similarity(
     }
 
 
-def _milli_rows(weights: dict[Any, float]) -> list[int] | None:
+def _milli_rows(weights: dict[Any, int | float]) -> list[int] | None:
     """Per-year weights as integer milli-rows, or ``None`` when one is too large to scale."""
     scaled = [w * 1000 for w in weights.values()]
-    if not all(math.isfinite(v) for v in scaled):
+    if not all(isinstance(v, int) or math.isfinite(v) for v in scaled):
         return None
     return [round(v) for v in scaled]
 

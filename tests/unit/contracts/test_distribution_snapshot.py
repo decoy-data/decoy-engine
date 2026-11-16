@@ -150,3 +150,10 @@ def test_pinned_v2_list_outside_supported_years_is_refused() -> None:
 
     bad = [{"start_year": -(10**9), "end_year": 10**9, "count": 1}]
     assert pinned_buckets("datetime", {}, bad) is None
+
+
+@pytest.mark.parametrize("count", [2.5, 3.0, True])
+def test_encoder_refuses_a_non_integer_count_instead_of_truncating(count: object) -> None:
+    with pytest.raises(ValueError) as exc:
+        encode_datetime_buckets([DatetimeBucket(2000, 2001, count)])  # type: ignore[arg-type]
+    assert "2.5" not in str(exc.value)
