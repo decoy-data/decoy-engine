@@ -12,6 +12,8 @@ import collections
 import re
 from pathlib import Path
 
+from scripts.release.frozen_map import rows
+
 import decoy_engine
 import decoy_engine.sdk
 from tests.sentry.layout import map_paths, section
@@ -43,12 +45,6 @@ def contract_tags(contract: str) -> list[str]:
         "```"
     )[1]
     return _TAG.findall(block)
-
-
-def rows(table: str) -> list[list[str]]:
-    """Body rows of the first Markdown table in ``table`` as stripped cells."""
-    body = [line for line in table.splitlines() if line.startswith("|")][2:]
-    return [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in body]
 
 
 def surface_counts(table: str) -> collections.Counter[str]:
