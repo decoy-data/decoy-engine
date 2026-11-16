@@ -16,6 +16,10 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - `run_pipeline_isolated` with an `output_dir` now binds a unit holding `_decoy_publication.json` (lock file `.<leaf>.decoy-lock` beside it), returns `already_committed` for a retry of the same result instead of failing, refuses a stage holding anything the child did not name, and reports a failed publication with the receipt's code (`publication_target_occupied` for a target holding something else) instead of `publication_failed`; the isolated `atomic_commit`, `stage_tables` and `sibling_staging_dir` helpers are removed
 - every directory the engine's reference sink publishes now holds `_decoy_publication.json`, its parent holds `.<leaf>.decoy-lock`, and a commit onto a target holding another result raises `PublicationRefused` instead of `OSError`
 - `joint_mask` output changes for null `key_by` values and for `mode: gen`, and `apply_joint_mask` takes a required `table` keyword
+- `ScratchArena.open(under=...)` is removed with no alias; call `ScratchArena.fresh(under=...)`
+- `decoy_engine.verification.postmask.post_scan_verdict` no longer takes `ner_blocked`; pass the run's `ner_findings` mode (`warn` or `fail`, default `warn`) instead, and expect the new reason code `post_scan/ner_blocked` for a blocking model finding
+- `run_pipeline_isolated` no longer writes `row_errors.json` into `output_dir`; read row errors from `IsolatedRunResult.row_errors`
+- the post-scan report is emitted as `post-scan-integrity/v3` (it was `post-scan-integrity/v2`) and allows `match_rate: null` for a classifier finding; a reader that checks the tag must accept v3, and the engine's own verdict reader still accepts v2 and v3
 
 ### Changed (isolated route publishes through publish_unit, F22 c2, 2026-11-12)
 
