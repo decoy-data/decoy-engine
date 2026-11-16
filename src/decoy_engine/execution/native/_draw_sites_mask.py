@@ -150,7 +150,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "value) (execution/_strategies/_date_shift.py:303). The mask key is the "
             "admitted secret; there is no key-free path."
         ),
-        mirror_call_sites=("execution/_strategies/_date_shift.py:303",),
+        mirror_call_sites=("execution/_strategies/_date_shift.py:198",),
     ),
     DrawSite(
         draw_site_id="mask.bucket_perturb",
