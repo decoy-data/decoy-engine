@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
     ambient_forbidden,
@@ -156,6 +157,7 @@ __all__ = [
     "forbid_ambient",
     "installed",
     "is_ambient",
+    "is_valid_component",
     "keeps_class",
     "map_in_context",
     "open_protected_dir",
