@@ -42,7 +42,8 @@ except ImportError:  # pragma: no cover - Windows has no flock; the lock is refu
 
 T = TypeVar("T")
 # A directory fsync failing with one of these means the filesystem cannot sync a directory, not
-# that the entry is lost (PostgreSQL `fsync_fname_ext` makes the same call). Any other errno is fatal.
+# that the entry is lost (PostgreSQL `fsync_fname_ext` tolerates EBADF and EINVAL; ENOTSUP is added
+# because FUSE and Darwin report it for a directory fsync). Any other errno is fatal.
 _DIR_FSYNC_UNSUPPORTED = frozenset({errno.EINVAL, errno.EBADF, errno.ENOTSUP})
 _POLL_S = 0.05
 _CHUNK = 1 << 16

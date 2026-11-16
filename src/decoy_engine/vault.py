@@ -305,7 +305,8 @@ class VaultWriter:
             VaultError: ``code='vault_crypto_not_installed'`` when the `cryptography` package is
                 missing; ``weak_mask_secret`` when the key is not the mask root's size;
                 ``vault_exists`` when the target exists; ``vault_commit_failed`` when the
-                write, fsync or link failed.
+                write, fsync or link failed, or a chain fsync failed after the link (the leaf is
+                kept, so a retry through `write` gets ``vault_exists``; only `publish_unit` adopts).
         """
         blob, entries = self.serialize()
         out: OutputDir
@@ -540,15 +541,14 @@ def load_vault(
             message=f"{shown!r} is not a decoy vault file (bad magic header).",
         )
 
-    # Parse + validate the UNENCRYPTED header before any decrypt, so a
-    # format/protocol-version mismatch yields a clear typed error instead of
-    # an opaque InvalidToken (the version byte is mixed into the vault key, so
-    # a cross-version vault is also undecryptable -- this makes the error
-    # diagnosable, it does not restore cross-version compatibility).
+    # Parse + validate the UNENCRYPTED header before any decrypt: a version mismatch then
+    # gets a clear typed error, not an opaque InvalidToken (it does not restore compatibility).
     header_bytes, offset = _read_frame(blob, len(_MAGIC))
     try:
         header = json.loads(header_bytes)
-    except (ValueError, UnicodeDecodeError) as exc:
+        if type(header.get("ambiguous_dropped", 0)) is not int:  # also bool, str, null
+            raise ValueError("ambiguous_dropped")
+    except (ValueError, UnicodeDecodeError, AttributeError) as exc:  # AttributeError: not a dict
         raise VaultError(
             code=reasons.runtime.VAULT_UNREADABLE,
             message=f"vault {shown!r} has an unreadable header",
@@ -573,7 +573,7 @@ def load_vault(
                 f"or use an engine at protocol version {vault_version!r}."
             ),
         )
-    ambiguous = int(header.get("ambiguous_dropped", 0))
+    ambiguous: int = header.get("ambiguous_dropped", 0)
 
     import pyarrow.parquet as pq
     from cryptography.fernet import InvalidToken

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import json
 import os
 import signal
 import stat
@@ -21,6 +22,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine import vault as vault_module
 from decoy_engine.publication import _vault_order
 from decoy_engine.vault import VaultCommit, VaultError, load_vault
 from tests.fileaccess.publication._chain_support import (
@@ -249,8 +251,17 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
             return real_open(path, fl, *args, **kw)
 
         monkeypatch.setattr(os, "open", spy_open)
+        seen_at_compare: list[list[Any]] = []
+        real_own = type(writer()).reads_as_own
+
+        def spied(self: Any, handle: Any) -> bool:
+            seen_at_compare.append(rec.synced())  # what was durable when the rows were compared
+            return real_own(self, handle)
+
+        monkeypatch.setattr(type(writer()), "reads_as_own", spied)
         commit = _vault_order.adopt_vault(out, writer())
         monkeypatch.undo()
+        assert len(seen_at_compare) == 1 and seen_at_compare[0][-3:] == _chain(base)
         data = leaf.read_bytes()
         assert commit.adopted is True and commit.size == len(data) and commit.entry_count == 2
         assert flags and all(f & os.O_ACCMODE == os.O_RDONLY for f in flags)
@@ -258,7 +269,7 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
         assert fingerprint(leaf) == before
 
         for other in (writer(OTHER_ROWS), writer(key=OTHER_KEY)):  # different rows; another key
-            assert _vault_order.adopt_vault(out, other) is None  # the conflict: no commit
+            assert isinstance(_vault_order.adopt_vault(out, other), _vault_order.VaultConflict)
             assert fingerprint(leaf) == before
         big = base / "vaults" / "big.dcyvault"
         big.write_bytes(os.urandom(200_000))
@@ -273,7 +284,10 @@ def test_vault_adopt_or_conflict(base: Path, policy: str, monkeypatch: pytest.Mo
 
             monkeypatch.setattr(type(writer()), "reads_as_own", counting)
             # over the cap: a conflict, and no decrypt attempted
-            assert _vault_order.adopt_vault(bigout, writer()) is None and decrypted == []
+            assert isinstance(
+                _vault_order.adopt_vault(bigout, writer()), _vault_order.VaultConflict
+            )
+            assert decrypted == []
             monkeypatch.undo()
         finally:
             if bigfd >= 0:
@@ -411,3 +425,131 @@ def test_unreadable_ancestor_foreign_owner_stops_the_vault_walk(
     commit = writer().publish(out)
     assert seen and probe.issued == [commit]  # non-vacuity: the walk met the unreadable `h`
     assert stat.S_ISREG(os.lstat(h / "vaults" / LEAF).st_mode)
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_write_chain_fsync_eio_keeps_the_leaf_and_a_retry_is_vault_exists(
+    base: Path, policy: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`VaultWriter.write` has no adoption: an ancestor fsync EIO after the link is
+    `vault_commit_failed` with the leaf kept, and the retry through `write` is `vault_exists`."""
+    if policy == "ambient":
+        anchor_at(monkeypatch, base)
+    out, root_fd = vault_out(policy, base, REL)
+    state = {"armed": False}
+    real_link = os.link
+
+    def link(*args: Any, **kwargs: Any) -> None:
+        real_link(*args, **kwargs)
+        state["armed"] = True
+
+    monkeypatch.setattr(os, "link", link)
+    calls: list[int] = []
+    Recorder(
+        monkeypatch,
+        fail=lambda e: bool(
+            state["armed"] and e == ("fsync", key(base / "vaults")) and not calls.append(1)
+        ),
+    )
+    try:
+        with pytest.raises(VaultError) as caught:
+            writer().write(out)
+        assert caught.value.code == COMMIT_FAILED and calls  # non-vacuity: the fault fired
+        assert (base / REL).exists()
+        monkeypatch.undo()
+        _recorder_after_clear(policy, base, monkeypatch)
+        out2, fd2 = vault_out(policy, base, REL)
+        try:
+            with pytest.raises(VaultError) as retry:
+                writer().write(out2)
+            assert retry.value.code == reasons.runtime.VAULT_EXISTS
+        finally:
+            if fd2 >= 0:
+                os.close(fd2)
+    finally:
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def _vault_blob_with_header(header: Any) -> bytes:
+    """A real vault whose unencrypted header is replaced by `header`."""
+    blob, _ = writer().serialize()
+    magic = vault_module._MAGIC
+    _, rest = vault_module._read_frame(blob, len(magic))
+    return magic + vault_module._frame(json.dumps(header).encode()) + blob[rest:]
+
+
+_GOOD_HEADER = {
+    "format": vault_module.VAULT_FORMAT_VERSION,
+    "seed_protocol_version": vault_module.SEED_PROTOCOL_VERSION,
+}
+_BAD_HEADERS = [
+    [1],
+    "x",
+    None,
+    7,
+    {**_GOOD_HEADER, "ambiguous_dropped": "5"},
+    {**_GOOD_HEADER, "ambiguous_dropped": 1.5},
+    {**_GOOD_HEADER, "ambiguous_dropped": None},
+    {**_GOOD_HEADER, "ambiguous_dropped": True},
+]
+
+
+@pytest.mark.parametrize("header", _BAD_HEADERS, ids=repr)
+def test_a_malformed_vault_header_is_vault_unreadable_and_not_the_same_rows(header: Any) -> None:
+    """A non-dict header or a non-int `ambiguous_dropped` is `vault_unreadable` from `load_vault`
+    (not an AttributeError, ValueError or TypeError), so `same_rows` answers False."""
+    blob = _vault_blob_with_header(header)
+    with pytest.raises(VaultError) as caught:
+        load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
+    assert caught.value.code == reasons.runtime.VAULT_UNREADABLE
+    assert _vault_order.same_rows(blob, writer()) is False
+
+
+def test_a_well_formed_replaced_header_still_reads_as_own() -> None:
+    """Non-vacuity for the forgery helper: with a valid header the same blob is the same rows."""
+    blob = _vault_blob_with_header({**_GOOD_HEADER, "ambiguous_dropped": 0})
+    assert _vault_order.same_rows(blob, writer()) is True
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_adopt_refuses_a_character_device_leaf_before_reading(
+    base: Path, policy: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `S_ISREG` check runs on the opened descriptor: a leaf fd that reports a character
+    device is an OSError and `os.read` never touches it."""
+    out, root_fd = vault_out(policy, base, REL)
+    (base / REL).write_bytes(b"abcdef")
+    leaf_fds: set[int] = set()
+    reads: list[int] = []
+    real_open, real_fstat, real_read = os.open, os.fstat, os.read
+
+    def spy_open(path: Any, fl: int, *args: Any, **kw: Any) -> int:
+        fd = real_open(path, fl, *args, **kw)
+        if os.fsdecode(path).endswith(LEAF):
+            leaf_fds.add(fd)
+        return fd
+
+    def fake_fstat(fd: int) -> Any:
+        st = real_fstat(fd)
+        if fd not in leaf_fds:
+            return st
+        fields = list(st)
+        fields[0] = stat.S_IFCHR | 0o600
+        return os.stat_result(fields)
+
+    def spy_read(fd: int, n: int) -> bytes:
+        reads.append(fd)
+        return real_read(fd, n)
+
+    monkeypatch.setattr(os, "open", spy_open)
+    monkeypatch.setattr(os, "fstat", fake_fstat)
+    monkeypatch.setattr(os, "read", spy_read)
+    try:
+        with pytest.raises(OSError):
+            out.adopt_file(limit=100)
+        assert leaf_fds and not set(reads) & leaf_fds  # non-vacuity: the leaf was opened
+    finally:
+        monkeypatch.undo()
+        if root_fd >= 0:
+            os.close(root_fd)
