@@ -58,9 +58,7 @@ def test_a1a_unsupported_pair_refused(detector: str, strategy: str) -> None:
     assert err.__cause__ is None and err.__context__ is None
 
 
-@pytest.mark.parametrize(
-    ("detector", "strategy"), [("ssn", "date_shift"), ("email", "faker")]
-)
+@pytest.mark.parametrize(("detector", "strategy"), [("ssn", "date_shift"), ("email", "faker")])
 def test_a1a_compile_plan_refuses_the_same_pair(
     simple_profile: Profile, detector: str, strategy: str
 ) -> None:
@@ -78,6 +76,7 @@ def test_a1b_misspelled_strategy_name_refused() -> None:
 
 
 def test_a1c_unknown_detector_id_refused_in_both_fields() -> None:
+    assert _refusal({"detectors": ["no_such_detector"]}).code == _UNKNOWN
     selector = _refusal({"detectors": ["emial"]})
     assert selector.code == _UNKNOWN
     assert selector.path is not None and selector.path.endswith("detectors")
@@ -138,11 +137,11 @@ def test_a1g_library_only_ids_are_not_selectors() -> None:
 def test_inventories_are_derived_not_listed() -> None:
     from decoy_engine.detection.detectors import SPAN_DETECTOR_IDS
 
-    assert SPAN_DETECTOR_IDS == frozenset(_SPAN_DETECTORS)
+    assert frozenset(_SPAN_DETECTORS) == SPAN_DETECTOR_IDS
     assert tm.SELECTABLE_TEXT_MASK_DETECTORS == SPAN_DETECTOR_IDS
-    assert tm.TEXT_MASK_STRATEGY_DETECTORS == (
+    assert (
         SPAN_DETECTOR_IDS | frozenset(NER_ENTITY_MAP.values()) | frozenset(tm.DETECTOR_DEFAULTS)
-    )
+    ) == tm.TEXT_MASK_STRATEGY_DETECTORS
     assert "iso_date" in tm.TEXT_MASK_STRATEGY_DETECTORS - tm.SELECTABLE_TEXT_MASK_DETECTORS
 
 
@@ -189,3 +188,82 @@ def test_checks_passed_lists_the_new_check(simple_profile: Profile) -> None:
     plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
     assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
     assert "text_mask_strategies" in run_config_only_checks(cfg)
+
+
+# AT-A1d direct kernel cells. After E-F0 no config can send a person_name or date span to the
+# native chunked, out-of-core native or SEQ routes, so these cells are the only place the faker
+# and date_shift branches of `_mask_span` run on the library `extra_spans` path.
+
+_TEXT = "ssn 123-45-6789, Alice Jones, 2024-02-20, 2024-02-30"
+
+
+def _spans() -> list[Span]:
+    def at(det: str, real: str) -> Span:
+        start = _TEXT.index(real)
+        return Span(det, start, start + len(real), real)
+
+    return [
+        at("ssn", "123-45-6789"),
+        at("person_name", "Alice Jones"),
+        at("iso_date", "2024-02-20"),
+        Span("iso_date", _TEXT.rindex("2024-02-30"), len(_TEXT), "2024-02-30"),
+    ]
+
+
+@pytest.fixture
+def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    seen = {"fpe": 0, "faker": 0, "date_shift": 0}
+    for name, attr in (
+        ("fpe", "_mask_fpe"),
+        ("faker", "_mask_faker"),
+        ("date_shift", "_mask_date_shift"),
+    ):
+        real = getattr(tm, attr)
+
+        def counted(*a: Any, _real: Any = real, _name: str = name, **k: Any) -> str:
+            seen[_name] += 1
+            return str(_real(*a, **k))
+
+        monkeypatch.setattr(tm, attr, counted)
+    return seen
+
+
+def _assert_masked(out: str) -> None:
+    for real in ("123-45-6789", "Alice Jones", "2024-02-20", "2024-02-30"):
+        assert real not in out
+    assert out.endswith("[REDACTED]")  # the unparseable date span
+
+
+def test_a1d_mask_cell_with_spans_runs_every_strategy(calls: dict[str, int]) -> None:
+    out = tm.mask_cell_with_spans(
+        _TEXT, _spans(), _KEY, unmatched_span_policy="passthrough", sub_floor_span_policy="redact"
+    )
+    _assert_masked(out)
+    assert calls["fpe"] > 0 and calls["faker"] > 0 and calls["date_shift"] > 0
+
+
+def test_a1d_mask_cell_hybrid_runs_every_strategy(calls: dict[str, int]) -> None:
+    from decoy_engine.execution.native._text_mask_native_fpe import mask_cell_hybrid
+
+    out = mask_cell_hybrid(
+        _TEXT,
+        _spans(),
+        {},
+        _KEY,
+        strategy_map=None,
+        unmatched_span_policy="passthrough",
+        token="[REDACTED]",
+        cfg=None,
+        sub_floor_span_policy="redact",
+        sub_floor_notices=None,
+    )
+    _assert_masked(out)
+    assert calls["fpe"] > 0 and calls["faker"] > 0 and calls["date_shift"] > 0
+
+
+def test_a1d_faker_is_keyed_on_the_value_not_the_position() -> None:
+    repeated = "Alice Jones and Alice Jones"
+    spans = [Span("person_name", 0, 11, "Alice Jones"), Span("person_name", 16, 27, "Alice Jones")]
+    out = tm.mask_cell_with_spans(repeated, spans, _KEY, unmatched_span_policy="passthrough")
+    first, _, second = out.partition(" and ")
+    assert first == second and first != "Alice Jones"

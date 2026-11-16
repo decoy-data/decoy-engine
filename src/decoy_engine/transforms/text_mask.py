@@ -90,16 +90,9 @@ Methodology: reuses Pre-scan ``iter_spans`` (single detector source),
 stdlib HMAC for the faker/date_shift per-span key derivation. Per-detector
 defaults documented in ``DETECTOR_DEFAULTS``.
 
-TX-2 (2026-07-20): the ``text_mask`` strategy handler (``execution/_strategies/
-_text_mask.py``) and its out-of-core twin (``execution/out_of_core/
-_mask_group_c.py``) opt-in NER the same way ``text_redact`` does (WS2): resolve
-``detection.ner.iter_ner_spans`` and pass the result as this module's ``extra_spans``.
-No new methodology here -- it reuses the spaCy NER pattern already registered for
-``detection/ner.py`` and this module's own already-registered HMAC-SHA256 keyed span
-determinism. The one addition specific to this module is a ``location`` entry in
-``DETECTOR_DEFAULTS`` (below): NER emits ``location`` spans (GPE/LOC/FAC) but the
-table had no default for them, so they silently fell to ``redact`` instead of
-synthesizing like the other Tier-2 NER detectors.
+Opt-in NER (TX-2): the ``text_mask`` handlers pass ``detection.ner.iter_ner_spans`` results as
+``extra_spans``. No new methodology: it reuses the spaCy NER pattern registered for
+``detection/ner.py`` and this module's HMAC-SHA256 keyed span determinism.
 """
 
 from __future__ import annotations
@@ -113,9 +106,10 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._opaque import OpaqueBox
-from decoy_engine.detection.detectors import Span, iter_spans
+from decoy_engine.detection.detectors import SPAN_DETECTOR_IDS, Span, iter_spans
+from decoy_engine.detection.ner import NER_ENTITY_MAP
 from decoy_engine.determinism import derive
-from decoy_engine.errors import FpeChecksumError, FpeUnencryptableError
+from decoy_engine.errors import FpeChecksumError, FpeUnencryptableError, PipelineValidationError
 from decoy_engine.transforms._faker_span import shared_faker
 from decoy_engine.transforms._text_mask_splice import splice_spans, warn_passthrough_unmatched
 from decoy_engine.transforms._text_mask_synthetic import _synthetic_span_value
@@ -236,6 +230,30 @@ _FAKER_METHOD: dict[str, str] = {
 }
 
 
+# Ids `detectors:` may list (the built-in span detectors), and ids a `per_detector_strategy` key
+# may name (those, the NER ids and the library `extra_spans` ids). Derived, never listed by hand.
+SELECTABLE_TEXT_MASK_DETECTORS: frozenset[str] = SPAN_DETECTOR_IDS
+TEXT_MASK_STRATEGY_DETECTORS: frozenset[str] = (
+    SPAN_DETECTOR_IDS | frozenset(NER_ENTITY_MAP.values()) | frozenset(DETECTOR_DEFAULTS)
+)
+_DATE_DETECTORS = frozenset(
+    d for d, strategy in DETECTOR_DEFAULTS.items() if strategy == "date_shift"
+)
+
+
+def strategy_supported(detector_id: str, strategy: str) -> bool:
+    """Whether `strategy` can mask a span of `detector_id` (the compile check and `_mask_span`)."""
+    if detector_id not in TEXT_MASK_STRATEGY_DETECTORS or not isinstance(strategy, str):
+        return False
+    if strategy == "fpe":
+        return detector_id in _FPE_CONFIG
+    if strategy == "faker":
+        return detector_id in _FAKER_METHOD
+    if strategy == "date_shift":
+        return detector_id in _DATE_DETECTORS
+    return strategy in ("redact", "passthrough")
+
+
 # ── Core primitives ───────────────────────────────────────────────────────────
 
 
@@ -305,7 +323,7 @@ def _apply_sub_floor_span_policy(
         )
         if sub_floor_span_policy == "redact":
             return token
-        charset_name, checksum = _FPE_CONFIG.get(detector_id, ("digits", None))
+        charset_name, checksum = _FPE_CONFIG[detector_id]
         charset = _CHARSETS.get(charset_name, charset_name)
         return _synthetic_span_value(seed_key, matched_text, charset, checksum)
     except BaseException:
@@ -346,8 +364,7 @@ def _mask_fpe(
     catch-all `except -> static token` fallback.
     """
     try:
-        cfg = _FPE_CONFIG.get(detector_id, ("digits", None))
-        charset_name, checksum = cfg
+        charset_name, checksum = _FPE_CONFIG[detector_id]
         charset = _CHARSETS.get(charset_name, charset_name)
         span_namespace = f"text.{detector_id}"
         key_box = OpaqueBox(derive(mask_key, span_namespace, FF1_KEY_LABEL))
@@ -403,18 +420,10 @@ def _mask_faker(matched_text: str, span_key: bytes, detector_id: str) -> str:
     ``shared_faker`` is reseeded per span (byte-identical; seed_instance resets).
     """
     try:
-        method_name = _FAKER_METHOD.get(detector_id, "name")
         seed = int.from_bytes(span_key[:4], "big")
         fake = shared_faker()
         fake.seed_instance(seed)
-        method = getattr(fake, method_name, None)
-        if callable(method):
-            try:
-                return str(method())
-            except Exception:
-                pass
-        # Fallback: generic name if the specific method is unavailable
-        return str(fake.name())
+        return str(getattr(fake, _FAKER_METHOD[detector_id])())
     except BaseException:
         del span_key
         raise
@@ -436,6 +445,7 @@ def _mask_date_shift(
     span_key: bytes,
     min_days: int,
     max_days: int,
+    token: str = _DEFAULT_TOKEN,
 ) -> str:
     """Shift a date span by a keyed deterministic offset in [min_days, max_days].
 
@@ -444,17 +454,17 @@ def _mask_date_shift(
     days. The detected format string is preserved: "1990-01-15" reformats to
     "YYYY-MM-DD"; "01/15/1990" reformats to "MM/DD/YYYY".
 
-    If the date cannot be parsed (unrecognised format), the original text is
-    returned unchanged rather than failing.
+    A span that does not parse (an unrecognised format, or a date such as 2024-02-30) comes
+    back as ``token``, never as its real text.
     """
     try:
         fmt = _detect_date_format(matched_text)
         if fmt is None:
-            return matched_text
+            return token
         try:
             dt = datetime.strptime(matched_text, fmt)
         except ValueError:
-            return matched_text
+            return token
         range_size = max_days - min_days + 1
         offset_seed = int.from_bytes(span_key[:8], "big")
         shift = min_days + (offset_seed % range_size)
@@ -486,6 +496,13 @@ def _mask_span(
     is computed; ``faker``/``date_shift`` still use it, unchanged.
     """
     try:
+        if not strategy_supported(span.detector_id, strategy):
+            # Reached only past the compile check; the text never carries the span.
+            raise PipelineValidationError(
+                f"text_mask: strategy {strategy!r} cannot be applied to detector "
+                f"{span.detector_id!r}.",
+                code=reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED,
+            )
         if strategy == "fpe":
             return _mask_fpe(
                 span.matched_text,
@@ -501,11 +518,13 @@ def _mask_span(
         if strategy == "date_shift":
             min_days = int(cfg.get("min_days", -365))
             max_days = int(cfg.get("max_days", 365))
-            return _mask_date_shift(span.matched_text, span_key_box.open()[0], min_days, max_days)
+            token = str(cfg.get("token", _DEFAULT_TOKEN))
+            return _mask_date_shift(
+                span.matched_text, span_key_box.open()[0], min_days, max_days, token
+            )
         if strategy == "passthrough":
             return span.matched_text
-        # "redact" and any unknown strategy: replace with token (fail-safe).
-        return str(cfg.get("token", _DEFAULT_TOKEN))
+        return str(cfg.get("token", _DEFAULT_TOKEN))  # redact
     except BaseException:
         del mask_key
         raise

@@ -221,8 +221,6 @@ def test_b1_non_ascii_and_control_cells_fall_back_and_match(name: str, paths: _P
     [
         {},  # defaults put ssn/us_phone/pan on fpe
         {"per_detector_strategy": {**_strategies("redact"), "us_phone": "fpe"}},
-        {"per_detector_strategy": {**_strategies("redact"), "email": "faker"}},
-        {"per_detector_strategy": {**_strategies("redact"), "ssn": "date_shift"}},
         {
             "per_detector_strategy": _strategies("redact"),
             "unmatched_span_policy": "replace_with_token",
@@ -232,8 +230,6 @@ def test_b1_non_ascii_and_control_cells_fall_back_and_match(name: str, paths: _P
     ids=[
         "default-fpe",
         "one-fpe",
-        "one-faker",
-        "one-date-shift",
         "replace-with-token",
         "bogus-policy",
     ],

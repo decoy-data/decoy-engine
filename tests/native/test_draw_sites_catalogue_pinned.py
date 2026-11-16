@@ -58,7 +58,9 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for DUP-FREEZE E2: two joint_mask stream sites after mask.joint_mask_keyed_row, and the
 # gen.composite_build_pool seed text names resolve_seed. MASK_STRATEGY_TO_SITE maps each strategy to
 # one site, so its digest does not move.
-_CATALOGUE_DIGEST = "cfaa8fd8f7efd3d2290b0f829df1760007b37bb4a5e1f1de93df0dc5156f5e92"
+# Re-pinned for E-F0: only the mask.text_mask_date_shift entry moves (an unparseable span now becomes
+# the redaction token, not its real text), and with it the catalogue digest. No other entry moves.
+_CATALOGUE_DIGEST = "5955ea722e21a954dd89ecb3c62f3f8a5b3fb66d1a31179b17e56bc094511c17"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -121,7 +123,8 @@ _ENTRY_DIGESTS = [
     # mask.joint_mask_null_fallback and mask.joint_mask_gen_row added for DUP-FREEZE E2.
     "1e34bdac3c40cdd212874769967e021946b764b492c5c65774b26f92299ba580",
     "5b53a0e6c5f233ae2b0d37166404395d19840b9169be29d3e8c50b30e65939ed",
-    "85be9f4b05fadf9b441f28ce151d9f820c48d99112fe21d799c4a759bc9f9bcd",
+    # mask.text_mask_date_shift re-pinned for E-F0: the unparseable-span contract changed.
+    "0e43fd5b8ca7aee9361a95947f02a257fc9956d250f483f86443f77b686b7d77",
     "474ab1f76ab596a309f6b3f4b6a1e4995555c6f07473a831af12862a22283a60",
     "d30d45fdcacb74a57114f50fb09d3557bfe838db4afa0b1910f59816dc18b90b",
     "f01f96cde92e4a13757bc0724ba4eda31b1178bbb420edb144e676a144444b3c",

@@ -222,7 +222,7 @@ def _text_mask_array(
     resolution (detectors, per_detector_strategy, unmatched_span_policy, token,
     min_days/max_days, sub_floor_span, TX-2 `ner`), same non-string -> str
     coercion, and the same reused `mask_cell` primitive. An unparseable date
-    still passes through unchanged; an fpe span whose domain FF1 cannot cover
+    span becomes the redaction token; an fpe span whose domain FF1 cannot cover
     (or whose checksum fails validation) now fails closed via
     `FpeUnencryptableError` when no `sub_floor_span` policy is configured
     (Task 5.2 plan P3-final removed the old catch-all token fallback), so this

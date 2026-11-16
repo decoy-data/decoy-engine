@@ -104,6 +104,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
 )
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
+from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
@@ -204,6 +205,7 @@ def compile_plan(
     # spacy extra + model on THIS host. Config + installed packages only;
     # both branches + run_config_only_checks.
     check_text_mask_ner_available(config)
+    check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
     # Row 14 (deferred follow-up 1, 2026-06-12): vault: true needs a
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
@@ -342,6 +344,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
+            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
+            "text_mask_strategies",
         )
         checks_skipped: tuple[str, ...] = (
             "basic_uniqueness_pre_flight",
@@ -422,6 +426,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
+            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
+            "text_mask_strategies",
         )
         checks_skipped = ()
 
@@ -525,6 +531,7 @@ def run_config_only_checks(
     # Row 30 (TX-2, 2026-07-20): text_mask `ner` opt-in needs the same
     # spacy + model check. Config-only.
     check_text_mask_ner_available(config)
+    check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
     # Row 14 (vault): vault: true needs a namespace + a one-way strategy.
     check_vault_columns(config)
     # Row 15 (SP-04): reject unknown or structurally unsupported FPE checksum schemes.
@@ -596,6 +603,7 @@ def run_config_only_checks(
         # Row 26 (DE-03 sibling): faker-without-provider rejection.
         "faker_requires_provider",
         *declared,
+        "text_mask_strategies",  # E-F0, tail-appended
     )
 
 

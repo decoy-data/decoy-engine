@@ -853,6 +853,9 @@ _SPAN_DETECTORS: dict[str, tuple[re.Pattern[str], Callable[[str], bool] | None]]
     "street_address": (_STREET_ADDRESS_RE, None),
 }
 
+# The ids a `text_mask` config may list under `detectors:`; derived, so it cannot drift from the map.
+SPAN_DETECTOR_IDS: frozenset[str] = frozenset(_SPAN_DETECTORS)
+
 
 def iter_spans(
     text: str,

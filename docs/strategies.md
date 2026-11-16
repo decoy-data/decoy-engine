@@ -377,11 +377,23 @@ so the output is more useful than blanket redaction for columns such as
 clinical notes or support tickets.
 
 - `detectors` (list or null): detector IDs to run. Null or absent runs all
-  built-in span detectors. Unknown IDs are skipped silently.
+  built-in span detectors. Only the built-in span detector IDs are accepted
+  (`email`, `ssn`, `us_phone`, `us_zip`, `pan`, `iban`, `ipv4`, `icd10`, `npi`,
+  `url`, `street_address`). Any other ID is refused at compile and in
+  `decoy validate` with `mask.text_mask_detector_unknown`.
 - `per_detector_strategy` (dict): per-detector strategy overrides. Keys are
   detector IDs; values are `fpe`, `faker`, `date_shift`, `redact`, or
   `passthrough`. Unspecified detectors fall back to the built-in
-  `DETECTOR_DEFAULTS` table.
+  `DETECTOR_DEFAULTS` table. A key that is not a known detector ID, and a
+  detector and strategy pair that cannot run, are refused at compile with
+  `mask.text_mask_detector_unknown` or `mask.text_mask_strategy_unsupported`.
+  The supported pairs are:
+  `fpe` on `ssn`, `us_phone`, `us_zip`, `pan`, `npi`, `fax_number`;
+  `faker` on `person_name`, `first_name`, `last_name`, `address`, `location`;
+  `date_shift` on `iso_date`, `us_date`, `eu_date`;
+  `redact` and `passthrough` on any known detector ID.
+  A date span that does not parse (for example `2024-02-30`) is replaced by
+  `token`, never written through.
 - `unmatched_span_policy` (str, default `redact`): controls text in each cell
   not covered by any detector match. See the policy table below.
 - `token` (str, default `[REDACTED]`): replacement token for the `redact`
