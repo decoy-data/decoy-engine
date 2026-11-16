@@ -59,7 +59,9 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for DUP-FREEZE E2: two joint_mask stream sites after mask.joint_mask_keyed_row, and the
 # gen.composite_build_pool seed text names resolve_seed. MASK_STRATEGY_TO_SITE maps each strategy to
 # one site, so its digest does not move.
-_CATALOGUE_DIGEST = "895b26ce1ec46fd966328ded0ffaf163e415cc2591ac75e72b3a7822fd5fc4d6"
+# Re-pinned for row 24zb: mask.date_shift metadata (call site, seed text, notes) only.
+# Re-pinned at the GEN-REL E1 main merge: carries row 24zb's mask.date_shift and gen.reference.
+_CATALOGUE_DIGEST = "4ace19dff006054964e71a229d0b690377e99184d5fe178c5e747a3fc639ce00"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -114,7 +116,8 @@ _ENTRY_DIGESTS = [
     "33858d620973b39724613d7569dc732db3707e729236eeef8754518c1dfcf87a",
     "8ba3e20fb12b8a29cf52e18ef4d41d6c691bad77c6ac10a4651620d351f2a0c1",
     "6a3cc55998341cb8f0b3934d624c84e58a87555c701981ad8ee7d8030261221c",
-    "8371d2808d3c97ce91ab93522edfa7459cb67b6f928e0cbfc6527d07e5e4a339",
+    # mask.date_shift re-pinned for row 24zb: metadata names the live handler, no MD5 text.
+    "b31ab8c57e7a335977196b23af0f8b5d018750be38ed589b59456d1bd204b350",
     "d07b906a5a666ef5ae4239b27ee2a2bc3097872e1198f29716377d36d8be8ba3",
     "acb11366c3ae3b8fa817660874102ad3a6f377c92ba35ed73cbc007b80056bb5",
     "eb568e1842f6b938756adb3e6bb841b3633d04587dd9c8473a7312aa586d53ef",

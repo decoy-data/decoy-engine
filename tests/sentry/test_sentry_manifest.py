@@ -124,6 +124,7 @@ SENTRIES = (
     "tests/sentry/tooling/test_pytest_timeout.py",
     # Named sentries that live outside tests/sentry/.
     "tests/secret_providers/test_leak_sentry.py",
+    "tests/secret_providers/test_classifier_equivalence.py",
 )
 
 
