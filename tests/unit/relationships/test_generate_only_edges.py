@@ -125,9 +125,9 @@ def test_at_e1_2_run_writes_the_same_bytes_as_without_the_block_on_full_frame() 
 
 
 MIXED_PARENT_MASK = {
-    "mask_only": lambda: _mask_config("parents", "kids", _mask_table, _mask_table),
-    "mask_parent_gen_child": lambda: _mask_config("parents", "kids", _mask_table, None),
-    "gen_parent_mask_child": lambda: _mask_config("parents", "kids", None, _mask_table),
+    "mask_only": lambda: _mask_config("patients", "visits", _mask_table, _mask_table),
+    "mask_parent_gen_child": lambda: _mask_config("patients", "visits", _mask_table, None),
+    "gen_parent_mask_child": lambda: _mask_config("patients", "visits", None, _mask_table),
 }
 
 
