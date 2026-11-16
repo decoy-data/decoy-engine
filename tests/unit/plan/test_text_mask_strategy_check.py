@@ -183,11 +183,17 @@ def test_check_and_mask_span_agree_on_every_pair() -> None:
             assert refused == raised, (det, strategy)
 
 
-def test_checks_passed_lists_the_new_check(simple_profile: Profile) -> None:
-    cfg = _config({"per_detector_strategy": {"ssn": "fpe"}})
-    plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+def test_checks_passed_lists_the_new_check(simple_config: dict, simple_profile: Profile) -> None:
+    simple_config["tables"][0]["columns"] = [
+        {
+            "name": "name",
+            "strategy": "text_mask",
+            "provider_config": {"per_detector_strategy": {"ssn": "fpe"}},
+        }
+    ]
+    plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
     assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
-    assert "text_mask_strategies" in run_config_only_checks(cfg)
+    assert run_config_only_checks(simple_config)[-1] == "text_mask_strategies"
 
 
 # AT-A1d direct kernel cells. After E-F0 no config can send a person_name or date span to the
