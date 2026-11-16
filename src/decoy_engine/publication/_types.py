@@ -5,6 +5,12 @@ closed token, a hex digest, a count, a bool or a shape-checked caller id, checke
 is built; artifact names and the destination never appear in one. A failed check raises a
 ``ValueError`` naming the field, never its value.
 
+A caller that wants an exception instead of an outcome passes the receipt to
+``raise_for_outcome``: ``PublicationRefused`` (refused, ``operation_conflict``),
+``PublicationFailed`` (failed) or the file-access ``CommitUncertain``. Each carries a registered
+``decoy`` code and fixed text (RFC 9457: a stable identity apart from the occurrence; never the
+raw error text).
+
 Identity: Delta Lake records a caller-chosen transaction identifier with each write and treats a
 repeat as a retry; here ``operation_id`` names one intended result for one destination, and a
 matching ``operation_id`` is never taken as evidence of an equal result (``result_id`` decides).
@@ -18,7 +24,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal, get_args
 
-from decoy_engine.reasons import is_registered
+from decoy_engine import reasons
+from decoy_engine._error_base import DecoyError
+from decoy_engine.fileaccess import CommitUncertain
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir
@@ -34,6 +42,8 @@ __all__ = [
     "ArtifactSummary",
     "CommitReceipt",
     "Outcome",
+    "PublicationFailed",
+    "PublicationRefused",
     "PublicationRequest",
     "Role",
     "Unit",
@@ -42,6 +52,7 @@ __all__ = [
     "is_hex64",
     "is_operation_id",
     "is_token",
+    "raise_for_outcome",
 ]
 
 Outcome = Literal[
@@ -87,6 +98,11 @@ def is_token(value: object, allowed: tuple[str, ...]) -> bool:
     return type(value) is str and value in allowed
 
 
+def _is_decoy_code(value: object) -> bool:
+    # Registry membership, not character shape: a well-formed string is not a known reason.
+    return isinstance(value, str) and reasons.find("decoy", value) is not None
+
+
 def _require(ok: bool, field: str) -> None:
     if not ok:
         raise ValueError(f"invalid {field}")
@@ -126,11 +142,8 @@ class CommitReceipt:
     def __post_init__(self) -> None:
         _require(is_token(self.outcome, _OUTCOMES), "outcome")
         _require(is_operation_id(self.operation_id), "operation_id")
-        _require(
-            self.reason_code is None
-            or (type(self.reason_code) is str and is_registered(self.reason_code)),
-            "reason_code",
-        )
+        code = self.reason_code
+        _require(code is None or (type(code) is str and _is_decoy_code(code)), "reason_code")
         for name in ("result_id", "descriptor_digest", "vault_digest"):
             value = getattr(self, name)
             _require(value is None or is_hex64(value), name)
@@ -175,3 +188,48 @@ class PublicationRequest:
             type(timeout) in (int, float) and math.isfinite(timeout) and timeout >= 0,
             "lock_timeout_s",
         )
+
+
+class _CodedOutcome:
+    """Mixin for the publication errors: a registered ``decoy`` code, the receipt, and fixed
+    text. Not an exception itself, so each error below is its own ``DecoyError`` family."""
+
+    summary = "publication did not complete"
+
+    def __init__(self, code: str, receipt: CommitReceipt) -> None:
+        if not _is_decoy_code(code):
+            raise ValueError("invalid reason code")
+        self.code = str(code)
+        self.receipt = receipt
+        super().__init__(f"{self.summary}: {code}")  # type: ignore[call-arg]
+
+    def __reduce__(self) -> tuple[object, tuple[str, CommitReceipt]]:
+        return (type(self), (self.code, self.receipt))
+
+
+class PublicationRefused(_CodedOutcome, DecoyError):  # noqa: N818 - the plan's name
+    """The destination refused this result (``refused`` or ``operation_conflict``); nothing of
+    this attempt is bound. ``str()`` is a fixed summary and the code, never a path or value."""
+
+    summary = "publication refused"
+
+
+class PublicationFailed(_CodedOutcome, DecoyError):  # noqa: N818 - the plan's name
+    """Staging, measuring or binding failed before the unit was bound; the stage was aborted."""
+
+    summary = "publication failed"
+
+
+def raise_for_outcome(receipt: CommitReceipt) -> CommitReceipt:
+    """Return ``receipt`` when it is ``published`` or ``already_committed``; otherwise raise the
+    typed error for its outcome (raised here, outside any handler, so no OS text rides along)."""
+    outcome, code = receipt.outcome, receipt.reason_code
+    if outcome in ("published", "already_committed"):
+        return receipt
+    if outcome == "commit_uncertain":
+        raise CommitUncertain(getattr(errno, receipt.os_error or "EIO", errno.EIO))
+    if code is None:
+        raise ValueError("invalid reason_code")
+    if outcome == "failed":
+        raise PublicationFailed(code, receipt)
+    raise PublicationRefused(code, receipt)

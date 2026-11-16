@@ -502,6 +502,38 @@ def test_gen_types_e2_codes_are_registered_with_a_pinned_fixture() -> None:
     assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 23, 0)
 
 
+def test_f22_publication_codes_are_registered_pending() -> None:
+    """F22 publication: the thirteen `decoy` publication outcome codes, pending release."""
+    codes = (
+        "publication_attempt_aborted",
+        "publication_attempt_sealed",
+        "publication_commit_in_progress",
+        "publication_commit_not_visible",
+        "publication_commit_uncertain",
+        "publication_lock_timeout",
+        "publication_lock_unavailable",
+        "publication_operation_conflict",
+        "publication_recovery_in_progress",
+        "publication_target_occupied",
+        "publication_vault_conflict",
+        "publication_vault_mismatch",
+        "publication_write_in_progress",
+    )
+    # The file-access errors raise the lock and durability codes, so `fileaccess` owns them.
+    fileaccess = {
+        "publication_commit_uncertain",
+        "publication_lock_timeout",
+        "publication_lock_unavailable",
+    }
+    for code in codes:
+        spec = reasons.find("decoy", code)
+        assert spec is not None
+        owner = "decoy_engine.fileaccess" if code in fileaccess else "decoy_engine.publication"
+        assert (spec.owner, spec.since) == (owner, reasons.UNRELEASED)
+        assert not re.search(r"[{}%]", spec.summary)
+        assert getattr(reasons.decoy, code.upper()) == code
+
+
 FPE_FALLBACKS_FIXTURE = "reason-manifest-v1.24-fpe-fallbacks.json"
 
 
