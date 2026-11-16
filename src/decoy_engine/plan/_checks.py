@@ -379,8 +379,6 @@ def check_statistical_columns(
                         dp_verified=dp_verified,
                         snapshot_digest=read.sha256 if read is not None else None,
                     )
-                    # The same rule the sampler and window admission apply, so a snapshot
-                    # `decoy run` would refuse as degenerate is refused here first.
                     check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     raise PlanCompileError(
