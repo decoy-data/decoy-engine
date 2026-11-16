@@ -105,3 +105,23 @@ origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base o
 engine root and `config/` hold 25 modules, `publication/` 2.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `ddd014a5`), carried forward
+
+`origin/feat/gen-rel-e3a` `7d6502bb` (holding `origin/main` `ddd014a5`, release 0.27.0) merged into `ce151c92`
+as `2217306a`, without a conflict. Main's twelve commits after `1c8e413c` (publication judge and
+bind, the sink state table, `publish_unit` through the sink and the isolated route, resume
+store records, the pre-scan model pass, lazy-input streaming, the scratch arena move and the
+frozen-surface map) do not touch the draw-site catalogue. Of this slice's files main touches `config/__init__.py` (the `post_scan_ner_findings` export) and `docs/reasons.md` (the thirteen F22 output-publication additions paragraph); each merged beside this slice's lines.
+The release consumed main's changelog fragments; this chain's fragments are kept. The
+`generation/_streamed.py` comment rewording that holds it at 600 lines arrives from gen-rel-e1.
+
+Checks on `2217306a`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
+`tests/sentry` 5965 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with this slice's test files, the two draw-site catalogue tests and the fan-out sentry: 4835
+passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main ddd014a5`,
+`ratchet_check.py --base ddd014a5`, `check_fragment.py --base ddd014a5`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 599 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
