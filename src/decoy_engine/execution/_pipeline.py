@@ -239,9 +239,8 @@ def run_pipeline(
     RECOVERY for a job the static estimate over-downgrades. See `decide_execution_route` and
     `_pipeline_routing_signals.resolve_probe_recovery`.
 
-    Execution-substrate knobs (mask-kind tables only; generate tables
-    always run the synthesize path; the sequential route is pandas-only
-    regardless of this knob -- see `_pipeline_routing`):
+    Execution-substrate knobs (mask-kind tables only; generate tables always run the synthesize
+    path; the sequential route is pandas-only regardless of this knob -- see `_pipeline_routing`):
 
     - `fpe_chunk_count`: FPE per-value chunk parallelism on the pandas adapter.
     - `progress` / `progress_interval_s`: an optional `decoy_engine.progress.ProgressSink`
@@ -314,7 +313,8 @@ def run_pipeline(
                     fidelity_report=fidelity_report,
                     post_validation=post_validation,
                     vault_writer=vault_writer,
-                    file_access=file_access,
+                    registry=registry,
+                    source_loader_schemas=source_loader_schemas,
                 )
             ctx = _ctx.build_run_context(
                 config,
