@@ -4,9 +4,9 @@
 `build_run_context` calls it after every config-only check and key admission, on the run's own
 post-subset routing facts, so a bad config fails before any whole read. Every rule is an existing owner
 answering, never a copy: the bounded profiler, the exact plan compiler, the relationship graph,
-`_sequential_eligible`, the cross-table cycle test, out-of-core admission and its dtype hazard
-check, the declared-casting contract and `post_scan_gate_applies`. The pre-pass is a step inside
-the run: it is not exported and not an entry point.
+the router's own `bounded_admission` (sequential eligibility, cycle test, out-of-core admission
+and its dtype hazard check), the declared-casting contract and `post_scan_gate_applies`. The
+pre-pass is a step inside the run: it is not exported and not an entry point.
 
 Why a relationship job needs the whole bounded-eligible answer: a lazy table gives the size
 estimator no sample, so a relationship job with no bounded route would be rejected before read
@@ -115,7 +115,7 @@ def resident_fallback_tables(
             registry=resolved_registry,
             fidelity_report=fidelity_report,
             post_validation=post_validation,
-            has_generate_table="generate" in kinds.values(),
+            table_kinds=kinds,
         )
         if not eligible:
             return frozenset(candidates)
@@ -130,34 +130,25 @@ def _relationship_job_is_bounded(
     registry: ProviderRegistry,
     fidelity_report: bool,
     post_validation: bool,
-    has_generate_table: bool,
+    table_kinds: dict[str, str],
 ) -> bool:
-    """Whether routing would take a bounded route for this job, from the engine's own owners."""
-    from decoy_engine.execution import _pipeline_routing, _transforms_admission
-    from decoy_engine.execution import _pipeline_routing_signals as signals
-    from decoy_engine.execution._pipeline_routing_fk_dtype import fk_out_of_core_dtype_hazard
-    from decoy_engine.execution._transforms_gate import post_scan_resident_for
+    """Whether routing would take a bounded route for this job, from the router's own answer."""
+    from decoy_engine.execution import _pipeline_routing as routing
 
     if not facts.profile.relationships:
         return True
-    eligible, _reason = _pipeline_routing._sequential_eligible(
+    return routing.bounded_admission(
         facts.profile,
-        has_generate_table=has_generate_table,
-        validators=config.get("validators") or [],
-        fidelity_report=fidelity_report,
-        vault_writer=None,
-        post_validation=post_validation,
-        post_scan_resident=post_scan_resident_for(config),
-    )
-    if not eligible or _pipeline_routing._has_cross_table_fk_cycle(facts.graph):
-        return False
-    compatible, code = signals.out_of_core_admission(
-        facts.plan,
+        plan=facts.plan,
         registry=registry,
         graph=facts.graph,
-        source_types=signals._source_arrow_types(sources),
-    )
-    compatible, _code = _transforms_admission.decline_out_of_core(config, compatible, code)
-    return compatible and not fk_out_of_core_dtype_hazard(
-        facts.plan, facts.graph, caller_sources=dict(sources)
-    )
+        caller_sources=dict(sources),
+        config=config,
+        table_kinds=table_kinds,
+        has_generate_table="generate" in table_kinds.values(),
+        has_mask_table=True,
+        validators=config.get("validators") or [],
+        fidelity_report=fidelity_report,
+        post_validation=post_validation,
+        vault_writer=None,
+    ).admitted
