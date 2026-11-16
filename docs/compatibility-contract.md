@@ -111,6 +111,13 @@ on purpose; after GA any further addition is a breaking change.
 with `config.subset_run_unsupported` (registry 1.6.0). Before, the block validated and the run silently masked
 the full sources. `plan_subset` and `run_subset` are unchanged; run them first and point `sources:` at their output.
 
+**Pre-GA correction (DATE-SHIFT-UNKEYED E1, 2026-11-16).** `keyed_columns_for_config` and
+`secret_requirements_for_config` now walk a raw table dict's mask `columns` even when the same dict holds a
+non-empty `generate_columns`. Before, such a dict was skipped, so a keyed column could hide. A validated config
+(`PipelineConfig.model_validate(...).model_dump()`) cannot have both kinds, so its output and ordering do not
+move. The unexported V1 class `transforms.date_shift.DateShiftStrategy` and its three private helpers are
+deleted; `_detect_format` and `_COMMON_FORMATS` stay.
+
 **Pre-GA correction (CONFIG-EXPLICIT E1, 2026-11-08).** A csv file source must set `has_header` (registry
 1.15.0). An old config without it fails validation with `source_file.has_header_required` and the fix line
 "add `has_header: true` if the first row names the columns (the old default)". `column_names_file`, a path to a
