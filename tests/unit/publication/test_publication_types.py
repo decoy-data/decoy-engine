@@ -82,7 +82,7 @@ def test_a_valid_receipt_builds() -> None:
 
 
 def test_receipt_reason_code_must_be_registered() -> None:
-    assert _receipt(reason_code="canary_binding_absent").reason_code == "canary_binding_absent"
+    assert _receipt(reason_code="publication_failed").reason_code == "publication_failed"
     with pytest.raises(ValueError) as caught:
         _receipt(reason_code="well_shaped_but_unregistered")
     assert str(caught.value) == "invalid reason_code"
