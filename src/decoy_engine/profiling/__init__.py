@@ -18,6 +18,7 @@ Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 `ColumnProfile`. Depends on `decoy_engine.detection`.
 """
 
+from decoy_engine.profiling._model_pass import ModelHit
 from decoy_engine.profiling._scan_integrity import (
     KEY_BATCH_ROWS,
     MEMORY_LIMIT,
@@ -97,6 +98,7 @@ __all__ = [
     "FieldStats",
     "KeyBatches",
     "KeyFacts",
+    "ModelHit",
     "RelationshipFacts",
     "ScanSet",
     "ScanSetCore",

@@ -271,9 +271,11 @@ def test_all_lists_every_public_name():
         "CapacityVerdict",
         # Optional ML detectors (model status, loading, config blocks).
         "Dismissal",
+        "ModelHit",
         "ModelRef",
         "ModelStatus",
         "ModelUnavailableError",
+        "PostScanBlockedError",
         "PostScanRouteError",
         "PreScanConfig",
         "classifier_status",

@@ -21,6 +21,7 @@ from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
+from tests.fileaccess.support import fd_path
 from tests.parity.test_out_of_core_fk_parity import _plan, _seed_for
 
 _REG = get_default_registry()
@@ -45,7 +46,7 @@ def test_the_pool_spool_name_is_opaque_and_the_site_ran(
 
     monkeypatch.setattr(module.pq, "write_table", spy)
     work = tmp_path / "scratch"
-    work.mkdir()
+    work.mkdir(mode=0o700)
     for column in WEIRD:
         _measure(column, ["a", "b"], ["x", "y"], _pool(size=10, distinct_count=10), work)
     assert len(seen) == len(WEIRD), "the spool site did not execute for every column"
@@ -110,14 +111,6 @@ def _weird_names(base: str) -> tuple[str, ...]:
     return (base, f"{base}1", f"{base}2", f"{base}k1", f"{base}k2", f"{base}f1", f"{base}f2")
 
 
-def _fd_path(fd: int) -> str:
-    if os.path.isdir("/proc/self/fd"):
-        return os.readlink(f"/proc/self/fd/{fd}")
-    import fcntl
-
-    return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0"))  # type: ignore[attr-defined]
-
-
 class _Probe:
     """Records every directory or file the job creates through the Python calls the scratch
     code uses, so a path outside the scratch root can be named."""
@@ -145,7 +138,7 @@ class _Probe:
         def os_mkdir(path: Any, *a: Any, **k: Any) -> None:
             # A descriptor-relative mkdir names its directory by fd; judge where it really lands.
             fd = k.get("dir_fd")
-            record(path if fd is None else os.path.join(_fd_path(fd), os.fsdecode(path)))
+            record(path if fd is None else os.path.join(fd_path(fd), os.fsdecode(path)))
             return real_os_mkdir(path, *a, **k)
 
         def write_table(table: Any, where: Any, *a: Any, **k: Any) -> None:
@@ -206,8 +199,10 @@ def test_scratch_stays_inside_its_root_and_the_output_is_unchanged(
     # Nothing was created beside the scratch root, and every probed path is beneath it.
     assert {p for p in _listing(tmp_path) - before if not p.startswith("outer/work")} == set()
     for path in probe.paths:
-        resolved = Path(os.path.abspath(path))
-        assert str(resolved).startswith(str(work)), f"{path} is outside the scratch root"
+        resolved = Path(os.path.realpath(path))
+        assert str(resolved).startswith(os.path.realpath(work)), (
+            f"{path} is outside the scratch root"
+        )
     # No scratch name is derived from a logical name.
     for entry in _listing(work):
         for name in weird:
@@ -242,9 +237,9 @@ def test_the_reorder_driver_names_nothing_from_a_column_or_edge(
     outer = tmp_path / "outer"
     outer.mkdir()
     work = outer / "work"
-    # The sink stages beside its target (`_decoy_stage_*` plus a `target.parent.mkdir`), which is
-    # legitimate output staging, not scratch. Nest the target so that staging lands under `out/`,
-    # the prefix the confinement assertion already allows.
+    # The sink stages beside its target (`._decoy_publication_pending_*` and its lock file, plus
+    # a `target.parent.mkdir`), which is legitimate output staging, not scratch. Nest the target
+    # so that staging lands under `out/`, the prefix the confinement assertion already allows.
     out = tmp_path / "out"
     out.mkdir()
     before = _listing(tmp_path)
@@ -265,8 +260,10 @@ def test_the_reorder_driver_names_nothing_from_a_column_or_edge(
     created = {p for p in _listing(tmp_path) - before if not p.startswith(("outer/work", "out"))}
     assert created == set()
     for path in probe.paths:
-        resolved = Path(os.path.abspath(path))
-        assert str(resolved).startswith((str(work), str(tmp_path / "out"))), path
+        resolved = Path(os.path.realpath(path))
+        assert str(resolved).startswith(tuple(map(os.path.realpath, (work, tmp_path / "out")))), (
+            path
+        )
     for entry in _listing(work):
         for name in names[3:]:
             assert name not in entry, entry
@@ -297,7 +294,9 @@ def test_the_isolated_source_scratch_names_are_opaque(tmp_path: Path) -> None:
         rlimit_kind="data",
         staging_output_dir=staging,
     )
-    files = sorted(p.name for p in (work / "sources").iterdir())
+    # The source copies sit directly in the private work root, owner-only from creation.
+    files = sorted(p.name for p in work.iterdir() if p.name != "payload.json")
+    assert len(files) == 2  # non-vacuity: both sources were written
     assert all(name.startswith("s") and name.endswith(".parquet") for name in files)
     assert not (tmp_path / "x.parquet").exists()
 

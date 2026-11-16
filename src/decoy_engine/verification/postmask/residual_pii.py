@@ -194,6 +194,31 @@ def _frame_column_facts(
     )
 
 
+def configured_columns(
+    config: Mapping[str, Any],
+) -> dict[tuple[str, str], Mapping[str, Any]]:
+    """The column entry per (table, column) that names a strategy; the model passes read it too.
+
+    Per-table strategy = column-level "strategy" key in tables[].columns[].
+    """
+    entries: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for table_cfg in config.get("tables") or []:
+        table_name = table_cfg.get("name")
+        if not isinstance(table_name, str):
+            continue
+        for col_cfg in table_cfg.get("columns") or []:
+            col_name = col_cfg.get("name")
+            if isinstance(col_name, str) and isinstance(col_cfg.get("strategy"), str):
+                entries[(table_name, col_name)] = col_cfg
+    return entries
+
+
+def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
+    """A regex finding raised from positional output==source evidence; a dismissal never lowers it."""
+    rate = finding.source_identity_rate
+    return finding.source == "regex" and rate is not None and rate >= _LEAK_WARN_RATE
+
+
 def _source_identity(
     source_frames: dict[str, pd.DataFrame],
     table_name: str,
@@ -385,13 +410,7 @@ def residual_pii_findings(
 ) -> list[ResidualPIIFinding]:
     """`check_residual_pii` from column facts: `{table: {column: ColumnFacts}}` over the output,
     in column order. The decision tables are the ones the frame check uses."""
-    strategy_by_col = {
-        (table_cfg["name"], col_cfg["name"]): col_cfg["strategy"]
-        for table_cfg in config.get("tables") or []
-        if isinstance(table_cfg.get("name"), str)
-        for col_cfg in table_cfg.get("columns") or []
-        if isinstance(col_cfg.get("name"), str) and isinstance(col_cfg.get("strategy"), str)
-    }
+    strategy_by_col = {key: entry["strategy"] for key, entry in configured_columns(config).items()}
     findings: list[ResidualPIIFinding] = [
         ResidualPIIFinding(
             table=table,

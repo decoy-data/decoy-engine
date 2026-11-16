@@ -304,3 +304,31 @@ origin/main`, `ratchet_check.py --base origin/main`, `check_fragment.py --base o
 engine root and `config/` hold 25 modules, `publication/` 2.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `ddd014a5`)
+
+`origin/main` `ddd014a5` (release 0.27.0 and the twelve commits after `1c8e413c`: publication
+judge and bind, the sink state table, `publish_unit` through the sink and the isolated route,
+resume store records, the pre-scan model pass, lazy-input streaming, the scratch arena move and
+the frozen-surface map) merged into `a71617b6` as `03322a2e`. Two documentation conflicts, both
+resolved to main's text with this chain's `_capacity/` rows kept: `CODEMAP.md` (main's
+`_canonical/` row with `_strict_spec.py` and its `tests/sentry/release/` sentry row, beside this
+chain's `_capacity/` and capacity-foundation rows) and `src/decoy_engine/_MAP.md` (main's
+`_canonical/` row, beside this chain's `_capacity/` row). The release consumed main's five
+changelog fragments; this slice's `changelog.d/gen-rel-e1.md` is kept.
+
+`generation/_streamed.py` merged without a conflict: main's `publication_receipt` field and this
+slice's reference policy each add four lines, which took the module to 602. `c7ccf051` rewords
+two comments to hold it at 600, with no code change and no census entry. Main does not touch the
+draw-site catalogue, `.importlinter`, `generation/synthesize.py` or
+`tests/property/test_ri_graph_invariants.py`.
+
+Checks on `c7ccf051`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
+`tests/sentry` 5887 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+this slice's test files and the two draw-site catalogue tests and the fan-out sentry: 3649
+passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
