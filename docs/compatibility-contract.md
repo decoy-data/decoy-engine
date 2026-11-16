@@ -145,7 +145,7 @@ output for it). Loader tables with a `sources:` entry are unchanged.
 gains the optional `scan_baseline: {path: str, schema: "scan-set/v1"}` block, default absent and omitted from
 `model_dump()` while unset, so a config without it hashes as before. The block is a pointer no run reads, so it
 is left out of `pipeline_config_hash` (with `sources`, `targets`, `pre_scan` and `name`): two configs that differ
-only in `scan_baseline` hash the same. (SCAN-CHECKS D-1 adds the optional `scan_baseline.on_drift: warn | fail`, omitted from the dump while unset. When set it is hashed, because it decides whether a run is refused; `path` and `schema` stay out. `decoy-run-result/v1` gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`. Both are additive, and a reader from before this change refuses the new key and the new id.) `ColumnConfig.namespace` and
+only in `scan_baseline` hash the same. (SCAN-CHECKS D-1 adds the optional `scan_baseline.on_drift: warn | fail`, omitted from the dump while unset. When set it is hashed, because it decides whether a run is refused; `path` and `schema` stay out. `decoy-run-result/v1` gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`. Both are additive. A reader from before this change refuses the new config key, and a tolerant `RunResultRead` reads the new check id as a plain token.) `ColumnConfig.namespace` and
 `RelationshipConfig.namespace` refuse any value starting `decoy-set-namespace-` with `config/namespace_placeholder_unset`
 (new, `since` unreleased), naming the field location and never the value. No shipped config used the prefix. No
 artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profiling.DETECTOR_DESCRIPTORS` with its
