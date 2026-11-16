@@ -78,10 +78,6 @@ def same_rows(blob: bytes, writer: VaultWriter) -> bool:
     return writer.reads_as_own(BytesHandle(blob))
 
 
-def _refused(family: str, code: str) -> VaultError:
-    return VaultError(code=code, message=reasons.get(family, code).summary)
-
-
 def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit:
     """Adopt the vault at `out` for `writer`, durably.
 
@@ -100,7 +96,13 @@ def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit:
     except OSError:
         failed = True
     if failed or (blob is None and not too_big):  # absent after `vault_exists`: deleted out of band
-        raise _refused("runtime", reasons.runtime.VAULT_COMMIT_FAILED)
+        raise VaultError(
+            code=reasons.runtime.VAULT_COMMIT_FAILED,
+            message=reasons.get("runtime", reasons.runtime.VAULT_COMMIT_FAILED).summary,
+        )
     if blob is None or not same_rows(blob, writer):
-        raise _refused("decoy", reasons.decoy.PUBLICATION_VAULT_CONFLICT)
+        raise VaultError(
+            code=reasons.decoy.PUBLICATION_VAULT_CONFLICT,
+            message=reasons.get("decoy", reasons.decoy.PUBLICATION_VAULT_CONFLICT).summary,
+        )
     return vault.issue_commit(blob, entries, adopted=True)
