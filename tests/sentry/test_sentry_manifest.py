@@ -94,6 +94,7 @@ SENTRIES = (
     "tests/sentry/layout/test_package_fanout.py",
     "tests/sentry/layout/test_vendored_files.py",
     "tests/sentry/protected_dir/test_protected_dir.py",
+    "tests/sentry/scratch/test_scratch_arena_prefix.py",
     "tests/sentry/dependencies/test_dependency_floors.py",
     "tests/sentry/defects/test_anchored_regex.py",
     "tests/sentry/defects/test_canonical_json_choke_point.py",
