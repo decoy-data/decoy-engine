@@ -12,7 +12,7 @@ Go"), `docs/release/frozen-surfaces.md`, `docs/ROADMAP.md` (rows 16, 18, 56),
 `origin/claude/storm-split-cli` `a677d509`, engine `docs/plans/2026-10-09-storm-split-taxonomy.md`
 and `-survey.md`.
 
-Revision 1.
+Revision 2 (Dennis r1 fixes and owner calls; the revision map is section 17).
 
 Bases (2026-11-16): engine `origin/main` `ddd014a5` (the `v0.27.0` release commit, registry
 `1.29.0`); CLI `origin/main` `307a189a` (pins `decoy-engine==0.26.0`, `pyproject.toml:136`; the
@@ -20,14 +20,16 @@ Bases (2026-11-16): engine `origin/main` `ddd014a5` (the `v0.27.0` release commi
 `git grep -I -i storm`.
 
 Owner decisions used: the owner goal of 2026-11-16 (no V1 user meets the word in the CLI or the
-engine); pre-GA hard delete (engine `docs/compatibility-contract.md` section 1); Q11 version B of the
-old plan (no engine code for the parked platform); the CLI verbs `scan`, `report integrity` and
+engine); pre-GA hard delete (engine `docs/compatibility-contract.md` section 1); Q1 yes (the
+one-time registry exception, 2026-11-16); Q2 yes (release gate B-3 owns decoy-web, 2026-11-16);
+Q11 version B of the old plan (no engine code for the parked platform, confirmed 2026-11-16); the CLI verbs `scan`, `report integrity` and
 `report fidelity` keep their names (out of scope); "Renames after 1.0 are 2.0" (CLI
 `docs/roadmap/post-1.0-plan.md:59`), which is why this lands before V1.
 
 Risk: E1 (engine) is R2: it removes two identities from the frozen reason registry under a recorded
-exception (Q1). C1 and C3 (CLI) are R1: text, names and docs. C2 (CLI) is R2 because it touches the
-frozen `decoy-ci/v1` schema (annotation only) and the text `decoy init` writes into user YAML.
+exception (Q1) and changes what the sdist ships. C1, C1b and C3 (CLI) are R1: text, names, test
+file names and docs. C2 (CLI) is R2 because it touches the frozen `decoy-ci/v1` schema (annotation
+only) and the text `decoy init` writes into user YAML.
 
 ## 1. Frame
 
@@ -46,8 +48,18 @@ tracked paths whose name contains it. Occurrences (`git grep -o`) are given for 
 Engine non-history files: `src/decoy_engine/reasons/route/_retired.py` (8),
 `tests/fixtures/f29/reason-manifest-v1.json` (2), `tests/fixtures/f29/reason-registry-release.json`
 (2), `tests/unit/test_shipped_reason_identities.py` (4), `tests/sentry/test_no_residual_removed_surface.py` (30).
-Nothing else in engine `src/`, `README.md`, `CODEMAP.md`, the guides or the published Sphinx pages
-(`docs/conf.py` excludes `plans/**`, `decisions/**`, `archive/**`) carries it.
+Nothing else in engine `src/`, `README.md`, `CODEMAP.md` or the guides carries it.
+
+The published Sphinx site is not clean today. `docs/conf.py:404` to `:434` excludes `archive/**`,
+`plans/**` and `decisions/**`, but not `records/**`, so the 22 token-bearing files under
+`docs/records/` become pages and search entries. Two published pages link into `records/`
+(`docs/execution-backends.md:9`, `docs/security/file-access-policy.md:10`); the docs build runs
+with `-W` (`.github/workflows/docs.yml:50`), so excluding the folder also needs those two links
+turned into plain path text, the form `docs/compatibility-contract.md:494` already uses.
+
+Packaging: both sdists keep hatchling's default file selection (engine `pyproject.toml:359`
+excludes only `.claude`, `.hypothesis`, `tests`; CLI `pyproject.toml:247` only `tests`), so every
+history file under `docs/` ships to PyPI. Wheels hold no `docs/`.
 
 CLI non-history files: src `api.py` 2, `ci/adapters.py` 1, `ci/contracts.py` 1,
 `cli/_init_inference.py` 24, `cli/compile_explain.py` 1, `cli/completers.py` 1, `cli/demo.py` 6,
@@ -82,6 +94,13 @@ notes), `CODEMAP.md` 3, `README.md` 3, `SECURITY.md` 2, `docs/ROADMAP.md` 17, `d
 - Docs: README, SECURITY.md, CODEMAP (which still points at a deleted `src/decoy/cli/storm.py`,
   `CODEMAP.md:95`), the onboarding tour, `docs/cli-reference.md`, `docs/ci-contracts.md:31`, the
   diagrams, and the `[Unreleased]` CHANGELOG section.
+- Engine docs site: 22 `docs/records/` pages (1.1). Both sdists on PyPI: the dated history under
+  `docs/` (1.1).
+- Decoded old records: none today. No CLI code decodes a persisted reason or renders
+  `original_identity` (`git grep` at `307a189a`; the one reason emitter, `src/decoy/cli/run/_errors.py:79`,
+  builds from a live exception, where that field is always empty). The engine path that could carry
+  it is `run_result/_model.py:211` (`read_reason` re-emits `to_payload()`, context included), which
+  the CLI does not call.
 
 ### 1.3 Interactions
 
@@ -95,8 +114,8 @@ notes), `CODEMAP.md` 3, `README.md` 3, `SECURITY.md` 2, `docs/ROADMAP.md` 17, `d
 - Public docs live in a third repo, decoy-web (`origin/main` `5137913`: 87 occurrences in 21 files,
   among them `docs-src/components/marketing/storm.tsx` and the vendored
   `docs-src/content/docs/reference/cli/_source/cli-reference.md`, 16 lines). CLI release gate B-3
-  (`docs/roadmap/release-gates.md:13`) already owns taking `docs-src/` off this branding. This plan
-  does not edit decoy-web; Q2 asks how B-3 closes.
+  (`docs/roadmap/release-gates.md:13`) owns taking `docs-src/` off this branding (owner Q2, decided
+  yes). This plan does not edit decoy-web.
 - Busy CLI files: `scan.py`, `report.py`, `init.py` and `explain.py` are touched by other V1 rows.
   C1 and C2 are text edits and rebase cheaply; they do not move code between modules.
 - The old CLI branch `claude/storm-split-cli` (`a677d509`) is the 0.17.0 import migration, already
@@ -114,15 +133,21 @@ After the last slice of each repo merges:
    allowlist.
 3. No CLI help page, `explain` topic, human or `--json` output, error line, scaffolded YAML from
    `init` or `demo`, or schema text that a CLI command renders contains the token, checked by
-   rendering them with the pinned engine.
+   rendering them with the pinned engine. No CLI code renders a decoded reason's
+   `original_identity`, so a record that names a removed code never puts the old name on screen
+   (AT-C7). The engine docs site and both sdists carry no history folder (AT-S1, 4.4).
 4. Behaviour is unchanged apart from the text: same verbs, same flags, same exit codes, same `--json`
    keys, same `decoy-ci/v1` validation, same generated and masked output. The only removed
    behaviours are `decoy explain storm` (now a usage error, its body moves to `decoy explain scan`)
    and the resolution of the two retired route codes (a record naming one decodes as
-   `decoy.unknown_reason_from_future`).
+   `decoy.unknown_reason_from_future`; its context keeps `original_identity`, the old pair, which
+   only engine diagnostics read). Two known effects of not moving the registry version: engine
+   0.27.0 and the first release with E1 both report registry `1.29.0` with different catalogs, and
+   an engine branch forked before E1 sees the two codes as `stale-since` in its registry checks
+   until it rebases (4.2).
 
 Non-goals: renaming the verbs `scan`, `report integrity`, `report fidelity`; the platform; decoy-web
-(Q2, B-3); rewriting dated history; the scan progress animation's look (the cloud art stays, only
+(B-3, owner Q2); rewriting dated history; the scan progress animation's look (the cloud art stays, only
 its names change); a registry version mechanism for removals (section 4.2).
 
 ## 3. Established solutions
@@ -153,8 +178,9 @@ and the ratchet and allowlist pattern).
   measure that directly, and vendoring two scripts plus a JSON slice file would add more lines than
   the CLI edits they measure.
 
-Custom code that remains: the two sentries (about 150 lines each, one already exists) and one CLI
-test that renders the user surfaces. No production machinery is added.
+Custom code that remains: the two sentries (about 150 lines each, one already exists), one CLI
+test that renders the runtime outputs the banned-text sentry cannot reach, and one pattern added to
+the CLI's existing banned-text registry. No production machinery is added.
 
 ## 4. Design
 
@@ -172,7 +198,7 @@ test that renders the user surfaces. No production machinery is added.
 | `_storm_infer_format` (private import alias) | the imported name `_infer_format`, no alias | `src/decoy/api.py:54`, `:703` |
 | `tests/e2e/test_storm_animation.py`, `_command.py`, `_diff.py`, `_explore.py`, `_sp16.py` | `tests/e2e/test_scan_progress.py`, `test_scan_default.py`, `test_scan_diff.py`, `test_scan_fields_show.py`, `test_scan_formats.py` | `git mv`, then edit |
 | `ml` extra: "The STORM field-classifier" | "The field classifier `decoy scan` uses" | `explain.py:571`, `README.md:45` |
-| comments "storm-reframe-C", "storm.py", "`storm` group" | the plain history ("the V1 recommender was removed", "moved from the old scan group") | 7 comment-only modules |
+| comments "storm-reframe-C", "storm.py", "`storm` group" | the plain history ("the V1 recommender was removed", "moved from the old scan group") | 7 comment-only modules (C2: 5; C3: `templates/__init__.py`, `ci/adapters.py`) |
 | engine `route.run_storm`, `route.run_storm_requested` (tombstones) | removed, no replacement name (4.2) | `_retired.py:20`, `:27` |
 
 ### 4.2 The two retired engine codes: hard delete
@@ -190,7 +216,8 @@ Options weighed:
   release has shipped (`CHANGELOG.md` has only `[0.1.0]` below `[Unreleased]`), and no CLI code names
   either code.
 
-What hard delete must change, all in E1 (one change, so every carrier agrees on one head):
+What E1 must change, in one change, so every carrier agrees on one head. Items 1 to 7 are the hard
+delete; items 8 to 10 are the files that break or leak once the sentry drops its token entries.
 
 1. `src/decoy_engine/reasons/route/_retired.py`: delete `RUN_STORM_REQUESTED`, `RUN_STORM`, their
    `__all__` entries, and the docstring line about the sentry exception. The third tombstone
@@ -211,6 +238,23 @@ What hard delete must change, all in E1 (one change, so every carrier agrees on 
 7. `changelog.d/reason-tombstone-removal.md`: `Breaking:` line plus `### Removed`. Neither text spells
    the token: they name the replacements (`route/post_scan_integrity_requested`,
    `route/post_scan_integrity`) and "the two v0.16.0 route tombstones they replaced".
+8. The string-target sentry. `tests/sentry/test_engine_string_targets.py:31` sets
+   `_REMOVED = next(token for token in FORBIDDEN_TOKENS if _DOTTED.match(token))`; the only dotted
+   entry is a token-bearing module path that 4.3 deletes, so the module raises `StopIteration` at
+   collection. E1 deletes `_REMOVED`, its `EXEMPT` row (`:42`) and the `FORBIDDEN_TOKENS` import if
+   nothing else uses it; the `("_REMOVED",)` masks argument at `tests/sentry/_baseline_sources.py:227`;
+   and the `tests/sentry/test_no_residual_removed_surface.py::<removed-surface>` entry at
+   `tests/sentry/baselines/wave-b-string-target-exempt.json:11`. These are shrinks (section 11).
+9. `docs/conf.py` `exclude_patterns`: add `"records/**"` beside `"plans/**"`, with the comment the
+   other working buckets carry. `docs/execution-backends.md:9` and
+   `docs/security/file-access-policy.md:10` change their links into `records/` to plain path text
+   (the `-W` build would fail on a link to an excluded page). AT-S1 asserts every engine
+   `HISTORY_ROOTS` entry is excluded.
+10. `pyproject.toml` `[tool.hatch.build.targets.sdist] exclude`: add `"docs/plans"`,
+    `"docs/records"`, `"docs/archive"`, `"docs/decisions"`, one entry each. The wheel force-include
+    of `docs/v2/ml/packs/lgbm-v1` is untouched (the comment at `pyproject.toml:347` explains why it
+    must stay in the sdist). The packaging gate (`pytest -m packaging`) proves the sdist still
+    builds a wheel with the pack.
 
 Registry version. The branch rule forbids editing `REGISTRY_VERSION` (`CONTRIBUTING.md:57`), and the
 release stamp moves the version only for pending additions, deprecations and summary edits. E1 adds
@@ -222,10 +266,25 @@ signal. Recorded in the compatibility contract paragraph.
 
 Exception record (risk-and-exceptions): policy domain "reason registry append-only rule"
 (`docs/reasons.md:23`, `CONTRIBUTING.md:58`); scope exactly the two identities above, one time, E1
-only; risk R2; rationale as above; compensating controls AT-E2 to AT-E5 and the unchanged tolerant
-reader; residual risk: a pre-release record naming a removed code reads as an unknown reason
-instead of its tombstone summary; approver: the owner (Q1), before E1 starts; expiry: closes when E1
-merges. `python scripts/dev/registry_renumber.py --check --main origin/main` (a manual pre-merge
+only; risk R2; rationale as above; compensating controls AT-E2 to AT-E5, AT-C7 and the unchanged
+tolerant reader; approver: the owner (Q1, approved 2026-11-16); expiry: closes when E1 merges.
+Residual risks, all accepted:
+
+- A pre-release record naming a removed code reads as an unknown reason instead of its tombstone
+  summary. Only engine 0.15.1 and 0.16.0 emitted the two codes, before any CLI release a V1 user
+  installs.
+- The decoded record keeps `original_identity = ("route", <old code>)` in its context, and that
+  pair spells the old name. It stays: it is the engine's diagnostic for an unknown reason and the
+  same field a record from a newer engine uses. What stops a V1 user from reading it is the CLI
+  side: no CLI output renders `original_identity` (measured, 1.2), and AT-C7 keeps it so.
+- Registry `1.29.0` names two catalogs: the one in engine 0.27.0 (with the two codes) and the one
+  in the first release with E1 (without them), until a later addition moves the version. A
+  consumer that keys a cache on the registry version alone would hold a stale catalog; no consumer
+  does (the CLI reads `manifest()` live).
+- An engine branch forked before E1 still has the two codes in its catalog while main's pin and
+  manifest fixture do not, so its registry checks report them as `stale-since` (and
+  `registry_renumber.py --check` as extra identities) until it rebases onto E1. Rebasing clears it;
+  no code change. `python scripts/dev/registry_renumber.py --check --main origin/main` (a manual pre-merge
 check, not in CI) is expected to print exactly two lines, `deleted-existing route.run_storm` and
 `deleted-existing route.run_storm_requested`; any other line stops the merge.
 
@@ -243,15 +302,26 @@ the real artifact: `git ls-files` paths and contents. One sentry per repo:
 
 Both:
 
-- Spell the token in two parts, `RETIRED_NAME = "st" + "orm"`, matched case-insensitive. The sentry
-  file then holds no literal, scans itself, and needs no allowlist entry. Seeds and the other tests
-  that need the string import `RETIRED_NAME` from the sentry module (one place per fact).
+- Spell the token in two parts, `RETIRED_NAME = "st" + "orm"`, and compile it once as
+  `RETIRED_PATTERN` (case-insensitive substring). Seeds and every other test that needs the string
+  import `RETIRED_NAME` or `RETIRED_PATTERN` from the sentry module (one place per fact).
+- Also compile `SPLIT_PATTERN`: the five letters with `[\s'"+]*` between each pair,
+  case-insensitive, counted as a hit only when the matched span holds at least one `'` or `"`. It
+  catches the name rebuilt from string pieces (`"st" + "orm"`, `"St" "orm"`, `'s' 'torm'`). The
+  sentry module is the one file exempt from `SPLIT_PATTERN`, by exact path in code, not by a
+  `HISTORY` row; `RETIRED_PATTERN` still scans it, and it holds no plain literal.
 - Check the path and the content of every tracked file not matched by `HISTORY`.
+- A tracked file is binary when its first 8000 bytes hold a NUL (git's own rule); binary files get
+  the path check only. A tracked file that is not binary and does not decode as UTF-8 is a failure
+  (`<path>: undecodable`), not a skip. Today's engine `scan()` does `continue` on
+  `UnicodeDecodeError` (`tests/sentry/test_no_residual_removed_surface.py:114`), so a file saved in
+  another encoding hides the token; E1 changes that.
 - Carry `HISTORY` as `Allowed(glob, purpose)` rows and a fixed `HISTORY_ROOTS` tuple; a test fails if
   any `HISTORY` glob is not under one of the roots, so a non-history exception cannot be added
   without editing the roots in review.
 - Keep seeded violations per surface: a path under `src/`, a Python identifier, a help string, a YAML
-  comment, a JSON schema description, a test file name, a doc page, a CHANGELOG `[Unreleased]` line.
+  comment, a JSON schema description, a test file name, a doc page, a CHANGELOG `[Unreleased]` line,
+  a quote-split literal in a `src/` file, and a Latin-1 file holding the name (fails as undecodable).
 - The engine sentry keeps its non-token forbidden list (the removed canary-check surface); its 16
   token-bearing entries go, since the case-insensitive scan already covers them.
 - Engine only: `CHANGELOG.md` is history for released sections only. A line under `## [Unreleased]`
@@ -262,21 +332,37 @@ migrated, measured at each slice head. A file with hits that is not in `HISTORY`
 a `PENDING` count that differs from the live count in either direction fails, so every slice lowers
 it. C3 deletes `PENDING` and the sentry becomes absolute.
 
-`tests/sentry/cli_text/_banned_text.py` loses its eight token-bearing `DEAD_STRINGS` entries and the
-`storm-reframe` pattern in C2: the residual sentry covers the same source text more strictly, and
-`_banned_text.py` stays the one registry for the other banned strings.
+The CLI's one banned-text registry. `tests/sentry/cli_text/_banned_text.py` is where the CLI keeps
+text a user must never read, and `tests/sentry/cli_text/test_user_text_internal_names.py` already
+applies `BANNED_USER_TEXT` to the command tree, rendered help, usage lines, `explain` topics, AST
+string constants and bundled templates. C2 appends `RETIRED_PATTERN` (imported from the residual
+sentry, so the name is spelled once) to `BANNED_USER_TEXT` (`_banned_text.py:72`), and in the same
+edit deletes the eight token-bearing `DEAD_STRINGS` entries and the `storm-reframe` pattern, which
+the residual sentry and the new pattern cover more strictly. It lands in C2, not C1, because the
+AST-constant check would fail on the `# REVIEW:` strings in `_init_inference.py` until C2 rewrites
+them; C1's `explain` and help edits are pinned until then by AT-C3 and the residual sentry.
 
-The rendered-surface test (CLI, C1): `tests/sentry/cli_text/test_no_retired_name_in_output.py`. It
-walks the live command tree (`tests/command_tree.py`) and renders `--help` for every visible command,
-`decoy explain` and every topic (human and `--json`), `decoy scan` and `decoy report integrity` on a
-synthetic fixture (human and `--json`), `decoy init <csv>` (the scaffold YAML), `decoy demo`, and
-`decoy schema` / the `decoy-ci/v1` schema text, then asserts no token. It sees text the source scan
-cannot: anything the installed engine contributes.
+The runtime-output test (CLI): `tests/sentry/cli_text/test_no_retired_name_in_output.py`. It covers
+only what the banned-text sentry does not reach, which is text produced by running a command:
+`decoy scan` and the report-integrity output on a synthetic fixture, human and `--json` (C1); the
+`decoy init <csv>` scaffold YAML, `decoy demo` output and `decoy schema` text (added in C2). It
+finds each command path through the existing walker (`tests/command_tree.py`, so a renamed path
+fails instead of being skipped) and checks the output with the same `BANNED_USER_TEXT` patterns
+and hit helper the banned-text sentry uses. In C1, before C2 registers the pattern, it checks with
+`RETIRED_PATTERN` itself, the same object C2 adds to the registry. No second scanner or matcher.
+
+AT-C7 (CLI, C1): no `src/decoy` module renders a decoded reason's `original_identity`. It is a
+source check in the residual sentry module: the string `original_identity` appears in no
+`src/decoy` file (measured: none at `307a189a`). A future renderer has to delete or narrow that
+test in review, which is where the "never show the old pair" decision is re-made.
 
 Mutations that must turn each guard red: add `x = "Storm"` to `src/decoy/cli/scan.py` (CLI sentry);
-add `src/decoy/` to the CLI `HISTORY` (roots test); put the token in a `changelog.d/` fragment
-(engine sentry); restore one `# REVIEW:` string in `_init_inference.py` (rendered test via `init`);
-restore `RUN_STORM` in `_retired.py` (engine sentry and AT-E2).
+add `x = "St" + "orm"` to `src/decoy/cli/scan.py` (split pattern); add `src/decoy/` to the CLI
+`HISTORY` (roots test); put the token in a `changelog.d/` fragment (engine sentry); save a doc
+page with the token as Latin-1 (undecodable); drop `"records/**"` from `docs/conf.py` (AT-S1
+exclusion check); restore one `# REVIEW:` string in `_init_inference.py` (banned-text sentry and
+the runtime-output test via `init`); add `print(ctx.original_identity)` to a `src/decoy` module
+(AT-C7); restore `RUN_STORM` in `_retired.py` (engine sentry and AT-E2).
 
 ### 4.4 The history allowlist (final state)
 
@@ -294,6 +380,10 @@ the CHANGELOG rule):
 Removed from today's engine list (they are not history): `src/decoy_engine/reasons/route/_retired.py`,
 the two f29 fixtures, `tests/unit/test_shipped_reason_identities.py`, and the sentry itself.
 
+Every engine `HISTORY_ROOTS` folder is also kept out of what the engine publishes: the Sphinx site
+(`docs/conf.py` `exclude_patterns`, E1 item 9, asserted by AT-S1) and the sdist (`pyproject.toml`
+sdist `exclude`, E1 item 10).
+
 CLI (`HISTORY_ROOTS` = `docs/plans/`, `docs/records/`, `docs/archive/`, `docs/superpowers/plans/`,
 `docs/overnight-dev/findings/`, `docs/handoffs/`, and the two named logs):
 
@@ -310,6 +400,11 @@ CLI (`HISTORY_ROOTS` = `docs/plans/`, `docs/records/`, `docs/archive/`, `docs/su
 
 Not history, so cleaned: CLI `CHANGELOG.md` (every hit is under `[Unreleased]`, which becomes the V1
 notes), `docs/ROADMAP.md`, the living `docs/roadmap/` pages, `docs/qa/`, generated docs and diagrams.
+
+The CLI has no published docs site of its own (decoy-web vendors its reference). Its sdist gets the
+same treatment as the engine's in C3: `pyproject.toml:247` `exclude` adds `"docs/plans"`,
+`"docs/records"`, `"docs/archive"`, `"docs/superpowers"`, `"docs/overnight-dev"`, `"docs/handoffs"`,
+`"docs/roadmap/decisions.md"` and `"docs/RECENTLY-SHIPPED.md"`, one entry each.
 
 The allowlist is written in its final form when each sentry lands and never grows: E1 lands the
 engine list above; C1 lands the CLI list above. Adding a row needs a change to `HISTORY_ROOTS`, which
@@ -343,14 +438,14 @@ back in a suggestion list.
 
 | # | Class | Structure that closes it | Proof | Mutation that turns it red |
 |---|---|---|---|---|
-| 1 | Value-bearing output | the reworded strings are fixed text; `init.py:378` keeps `type(exc).__name__` only; no new interpolation; the unknown-topic path echoes no user text beyond the topic word it already echoes | AT-C2 renders the init and demo paths with a sentinel cell value and asserts the value is absent; existing `test_profile_raw_value_isolation.py` and `test_report_raw_value_isolation.py` stay green | interpolate `str(exc)` into the init failure line |
+| 1 | Value-bearing output | the reworded strings are fixed text; `init.py:378` keeps `type(exc).__name__` only; no new interpolation; the unknown-topic path echoes no user text beyond the topic word it already echoes; no CLI output renders a decoded reason's `original_identity` | AT-C2 renders the init and demo paths with a sentinel cell value and asserts the value is absent; AT-C7; existing `test_profile_raw_value_isolation.py` and `test_report_raw_value_isolation.py` stay green | interpolate `str(exc)` into the init failure line |
 | 2 | Cleanup missing on an exit path | N/A: no file, lock or scratch state is added; the renamed progress module keeps its `with` block exactly | `tests/e2e/test_scan_progress.py` (renamed) keeps the Live-stop assertions | drop the `finally` in `scan_multistage` |
 | 3 | State and concurrency | N/A: no shared state; the removal of two registry entries is import-time data | AT-E2, `reasons.check_integrity()` in AT-E4 | keep one entry in `__all__` without its declaration |
 | 4 | Route parity and silent fallback | the two codes were never emitted on any route (`_pipeline_routing` and the output sink emit their replacements); a record naming one takes the existing tolerant-reader branch, never a silent default | AT-E3 (decodes to `unknown_reason_from_future` with the identity kept); engine route tests unchanged | make `parse_payload` return `None` for an unknown identity |
 | 5 | Referential integrity | each tombstone's `replaced_by` link goes away with it; the remaining tombstone still links to a live identity | AT-E5 (moved chain test); `append_only_violations` replacement check | point the remaining tombstone at a deleted code |
 | 6 | Untrusted producer | persisted reason records are untrusted input; `parse_payload` already validates identity shape before keeping it as context (`_SAFE_IDENTITY`) | AT-E3 with a malformed identity next to the removed one | drop the `_SAFE_IDENTITY` check |
 | 7 | Check then use (TOCTOU) | N/A: no check-then-use; the release pin and the live catalog are read in one process by one command | AT-E4 | none applies |
-| 8 | Weak tests and overclaimed evidence | sentries scan the real artifact (`git ls-files`); seeds per surface; AT-C2 renders through the live command tree, not a hand list; the deleted engine test is named with its reason, and the one general check it held moves intact | AT-S1, AT-S2 seeds; reviewers rerun the 4.3 mutations | narrow the CLI sentry to `src/` only (the docs seed goes green) |
+| 8 | Weak tests and overclaimed evidence | sentries scan the real artifact (`git ls-files`); an undecodable text file fails instead of being skipped; the quote-split pattern catches the name rebuilt from pieces; seeds per surface; help, `explain`, AST strings and templates go through the existing banned-text sentry, and AT-C2 only adds the runtime outputs it cannot reach, found through the live command tree; the deleted engine test is named with its reason, and the one general check it held moves intact | AT-S1, AT-S2 seeds; reviewers rerun the 4.3 mutations | narrow the CLI sentry to `src/` only (the docs seed goes green); restore `continue` on `UnicodeDecodeError` (the Latin-1 seed goes green) |
 | 9 | Behaviour-preserving refactor drift | renames are `git mv` plus import edits; the progress module keeps its frames; `api.scan` keeps its signature; `--json` shapes are pinned | `tests/e2e/release_freeze/test_json_shapes.py`, `tests/unit/test_api.py` signature tests, `tests/unit/test_cli_surface.py` green with `docs/cli-reference.md` regenerated | change a frame in `scan_progress.py` (the progress test goes red) |
 | 10 | Frozen contract drift | reason registry: a recorded one-time exception, every carrier edited in E1, pin checks green; `decoy-ci/v1`: description only, validation projection pinned; explain topic name: pre-GA, CHANGELOG line | AT-E4, AT-C5, `shape-changelog` CI job | change a `type` keyword in the schema (AT-C5 red); delete a third registry identity (AT-E4 append-only red) |
 
@@ -400,7 +495,7 @@ Engine (E1). Each is red on `ddd014a5` except where marked.
 
 | Id | Test | Red on base | Place |
 |---|---|---|---|
-| AT-S1 | engine residual sentry: no token outside `HISTORY`; `_retired.py`, the f29 fixtures and the sentry itself are scanned; a token in `CHANGELOG.md` `[Unreleased]` or a `changelog.d/` fragment fails; every `HISTORY` glob is under `HISTORY_ROOTS`; seeds per 4.3 | yes (the five non-history files) | `tests/sentry/test_no_residual_removed_surface.py` |
+| AT-S1 | engine residual sentry: no token outside `HISTORY`, plain or quote-split; `_retired.py`, the f29 fixtures and the sentry itself are scanned; a token in `CHANGELOG.md` `[Unreleased]` or a `changelog.d/` fragment fails; a non-binary tracked file that does not decode fails; every `HISTORY` glob is under `HISTORY_ROOTS`; every `HISTORY_ROOTS` folder `docs/<x>/` has `"<x>/**"` in `docs/conf.py` `exclude_patterns` (read with `ast`, not imported) and a matching sdist `exclude` entry in `pyproject.toml` (read with `tomllib`); seeds per 4.3 | yes (the five non-history files; `records/**` not excluded; sdist excludes none) | `tests/sentry/test_no_residual_removed_surface.py` |
 | AT-E2 | `reasons.find("route", code)` is `None` for both removed codes (built from `RETIRED_NAME`); no `reasons.manifest()` entry has the token in `code`, `summary`, `owner` or `symbol` | yes | `tests/unit/test_reason_registry.py` |
 | AT-E3 | `ReasonRecord.parse_payload` on a 1.29.0 record naming each removed code returns `decoy.unknown_reason_from_future`, never raises, keeps `original_identity`; a malformed identity beside it is dropped | yes (today it resolves to the tombstone) | the same file |
 | AT-E4 | `reason_release_pin.py --check` and `--release-ready` exit 0; `test_v1_manifest_is_append_only` and `reasons.check_integrity()` green against the edited fixtures; a rehearsal `stamp_release.py --version 0.28.0` in a throwaway worktree succeeds (not committed) | control | CLI of the scripts, `tests/unit/test_reason_release_pin.py` |
@@ -410,19 +505,26 @@ CLI (C1 to C3).
 
 | Id | Test | Red on base | Slice | Place |
 |---|---|---|---|---|
-| AT-S2 | CLI residual sentry with `HISTORY` (4.4) and `PENDING`; seeds per 4.3; roots test | yes without `PENDING`; green with `PENDING` at the C1 head | C1 (C3 deletes `PENDING`) | `tests/sentry/release/test_retired_name_residual.py` |
-| AT-C2 | rendered surfaces (4.3) hold no token; sentinel value absent from init and demo output | yes (`explain storm`, `scan --help`) | C1 (init and demo parts turn green in C2; marked `xfail(strict=True)` in C1 with the C2 reason, removed in C2) | `tests/sentry/cli_text/test_no_retired_name_in_output.py` |
+| AT-S2 | CLI residual sentry with `HISTORY` (4.4) and `PENDING`, plain and quote-split patterns, undecodable files fail; seeds per 4.3; roots test | yes without `PENDING`; green with `PENDING` at the C1 head | C1 (C1b and C2 lower `PENDING`, C3 deletes it) | `tests/sentry/release/test_retired_name_residual.py` |
+| AT-C2 | runtime outputs the banned-text sentry cannot reach hold no token: scan and report-integrity output, human and `--json` (C1); init scaffold, demo and `decoy schema` with a sentinel cell value that must also be absent (C2) | yes (scan card footnote, "Storm integrity" title; then the scaffold) | C1, extended in C2; no `xfail` | `tests/sentry/cli_text/test_no_retired_name_in_output.py` |
+| AT-C2b | `RETIRED_PATTERN` is in `BANNED_USER_TEXT`, so `test_user_text_internal_names.py` checks help, usage, `explain`, AST string constants and templates for it; its existing bite tests gain one case with the name in a help string | yes | C2 | `tests/sentry/cli_text/_banned_text.py`, `test_user_text_internal_names.py` |
 | AT-C3 | `decoy explain scan` prints the moved body; `decoy explain storm` exits `EXIT_USAGE` and its stderr suggestion list does not contain the token | yes | C1 | `tests/e2e/test_explain_command.py` |
 | AT-C4 | the installed engine's `reasons.manifest()` and `decoy.ci.rule_codes._engine_registry_codes()` hold no token | yes until the repin to the release with E1 | C3 | `tests/sentry/release/test_retired_name_residual.py` |
-| AT-C5 | `decoy-ci/v1`: the schema with every `description`, `title` and `examples` key removed, canonical JSON, has the SHA-256 captured at `307a189a`; `$id` and `schema_version` unchanged; the existing docstring-equals-schema check (`tests/unit/test_ci_manifest.py:282`) green | control (proves C2 changes annotation only) | C2 | `tests/unit/test_ci_manifest.py` |
+| AT-C5 | `decoy-ci/v1` validation projection: walk the schema and drop `description`, `title` and `examples` only where they are schema keywords (keys of a schema object); a key with one of those names under `properties`, `patternProperties`, `$defs` or `definitions` is a property or definition name and stays; dump as canonical JSON (sorted keys, no spaces); its SHA-256 equals the value the builder computes at the C2 merge base (`git merge-base origin/main HEAD`) and records in the test with that sha; `$id` and `schema_version` unchanged; the existing docstring-equals-schema check (`tests/unit/test_ci_manifest.py:282`) green | control (proves C2 changes annotation only) | C2 | `tests/unit/test_ci_manifest.py` |
 | AT-C6 | every `decoy init <file>` `# REVIEW:` line for the 17 detector rows plus the fallback and multi-signal rows reads "The scan found ..." or its fallback text; the scaffold round-trips through `validate` | yes | C2 | `tests/unit/test_init_inference.py`, `tests/e2e/test_init_scaffold_roundtrip.py` |
+| AT-C7 | no `src/decoy` file contains `original_identity`, so no CLI output renders the old pair from a decoded record | control (measured none at `307a189a`) | C1 | `tests/sentry/release/test_retired_name_residual.py` |
 
 ### 7b. Existing tests that change
 
 - Engine `tests/unit/test_shipped_reason_identities.py`: deleted (4.2 item 4); its tag re-derivation
   needs the old literals and its purpose is withdrawn. Escalation trigger "moved or deleted tests":
   E1 takes a full suite on its merge head.
-- CLI: the five `test_storm_*` files are renamed and their token-bearing names and docstrings edited;
+- Engine `tests/sentry/test_engine_string_targets.py`, `tests/sentry/_baseline_sources.py` and
+  `tests/sentry/baselines/wave-b-string-target-exempt.json`: the `_REMOVED` row goes (4.2 item 8).
+  The exempted negative test it named loses its token entries in the same change, so nothing that
+  was exempt is now unguarded.
+- CLI: the five `test_storm_*` files are renamed in C1b and their token-bearing names and
+  docstrings edited (C1 edits only their imports of the renamed progress module);
   `test_explain_command.py:44`, `:78`, `:94` move from `storm` to `scan`; `test_release_smoke.py:207`
   topic list; `_banned_text.py` entries (4.3); comment-only edits in `test_s1_deletions.py`,
   `test_s4b_consolidation.py`, `test_no_dead_command_strings.py`, `test_surface_docs_consistency.py`,
@@ -447,7 +549,7 @@ CLI (C1 to C3).
 | File | Directory | Map line that places it | Beside |
 |---|---|---|---|
 | `tests/sentry/release/test_retired_name_residual.py` (new) | `tests/sentry/release/` | CLI CODEMAP "Sentry test": "release-gate sentries in `tests/sentry/release/`" | `tests/sentry/release/test_frozen_surface_map.py` |
-| `tests/sentry/cli_text/test_no_retired_name_in_output.py` (new) | `tests/sentry/cli_text/` | CLI CODEMAP "User-facing CLI text and crash handling": new sentries go here | `test_user_text_internal_names.py` |
+| `tests/sentry/cli_text/test_no_retired_name_in_output.py` (new; runtime outputs only, 4.3) | `tests/sentry/cli_text/` | CLI CODEMAP "User-facing CLI text and crash handling": new sentries go here | `test_user_text_internal_names.py`, whose `_banned_text.py` registry it reuses |
 | `src/decoy/ui/scan_progress.py` (renamed) | `src/decoy/ui/` | CLI CODEMAP "Terminal output": `src/decoy/ui/<concern>.py` | `ui/progress.py`; no fan-out change |
 | `tests/e2e/test_scan_*.py` (five renamed) | `tests/e2e/` | CLI CODEMAP "Command module": `tests/e2e/test_<command>*.py` | `test_scan_command.py`; renames, no new module in the flat folder |
 | `tests/unit/test_reason_tombstones.py` (new) | engine `tests/unit/` | engine CODEMAP tests by area; reason tests sit flat in `tests/unit/` | `tests/unit/test_reason_registry.py` |
@@ -477,28 +579,39 @@ new sentries, and a fixed allowance for each rewritten block. Each builder recor
 
 | Slice | Repo | What | Production files | Changed lines (est.) | Risk | Depends on |
 |---|---|---|---|---|---|---|
-| E1 | engine | 4.2 items 1 to 7; sentry tightened to the final history list (AT-S1); AT-E2 to AT-E5 | 1 (`reasons/route/_retired.py`) | about 460: test file deleted 250, sentry 90, `test_reason_tombstones.py` 60, release pin 36, `_retired.py` 20, docs and fragment 15 | R2 | Q1 approved |
-| C1 | CLI | AT-S2 sentry with final `HISTORY` and `PENDING`; AT-C2 rendered test; scan, scan subcommands, explain (topic move, extras line, topic list), report integrity text, `scanning/_multi.py`, `ui/storm_animation.py` to `ui/scan_progress.py`, `ui/progress.py` docstring, `api.py` alias; the five test renames and their edits; explain, report, scan, api, profile, first-user and raw-value test edits | 7 | about 600: prod 110, tests 220, sentry with `PENDING` 200, rendered test 70 | R1 | none (may go before E1) |
-| C2 | CLI | `_init_inference.py` review strings, `init.py`, `demo.py`; comment-only `compile_explain.py`, `completers.py`, `exit_codes.py`, `extras.py`, `templates/__init__.py`, `ci/adapters.py`; `ci/contracts.py` description with the regenerated `docs/schemas/decoy-ci-v1.schema.json` (AT-C5); `_banned_text.py`; init, demo, scaffold, template, exit-code and comment-only test edits; AT-C6; `PENDING` lowered | 10 | about 270: prod 90, schema 2, tests 110, AT-C5 30, `PENDING` 30 | R2 | C1 |
-| C3 | CLI | docs: README, SECURITY, CODEMAP (also fixes the dead `storm.py` row), `.tours`, `docs/ci-contracts.md`, `docs/cli-reference.md` regenerated, diagram labels renamed in place (node ids and titles; layout unchanged since only the name changed), CHANGELOG `[Unreleased]` reworded plus one line for this wave, `docs/ROADMAP.md` non-row lines, living `docs/roadmap/` pages and `docs/qa/cli-v1-checklist.md`; `PENDING` deleted; AT-C4 | 0 | about 270: docs 210, sentry minus 30, AT-C4 30, CHANGELOG line 5 | R1 | C2 and the CLI repin to the engine release with E1 |
+| E1 | engine | 4.2 items 1 to 10; sentry tightened to the final history list with the split pattern and the undecodable-file failure (AT-S1); AT-E2 to AT-E5 | 2 (`reasons/route/_retired.py`, `pyproject.toml` sdist exclude) | about 540: test file deleted 250, sentry 135, `test_reason_tombstones.py` 60, release pin 36, `_retired.py` 20, docs, fragment and `docs/conf.py` 22, string-target sentry and its two baselines 9, `pyproject.toml` 6 | R2 | Q1 (approved) |
+| C1 | CLI | AT-S2 sentry with final `HISTORY` and `PENDING`; AT-C7; AT-C2 for scan and report-integrity output; scan, scan subcommands, explain (topic move, extras line, topic list), report integrity text, `scanning/_multi.py`, `ui/storm_animation.py` to `ui/scan_progress.py`, `ui/progress.py` docstring, `api.py` alias; the import lines of the e2e files that use the renamed module; explain, report, scan, api, profile, first-user, release-smoke and raw-value test edits | 7 | about 470: prod 110, tests 80, sentry with `PENDING` 200, AT-C2 part one 60, AT-C7 20 | R1 | none (may go before E1) |
+| C1b | CLI | the five `git mv` renames of 4.1 and their token-bearing test names, docstrings and strings (86 hit lines); `PENDING` lowered by five keys | 0 | about 180: renamed files 172, `PENDING` 10 | R1 | C1 |
+| C2 | CLI | `_init_inference.py` review strings, `init.py`, `demo.py`; comment-only `compile_explain.py`, `completers.py`, `exit_codes.py`, `extras.py`; `ci/contracts.py` description with the regenerated `docs/schemas/decoy-ci-v1.schema.json` (AT-C5); `_banned_text.py` (pattern added, token `DEAD_STRINGS` and `storm-reframe` removed, AT-C2b); AT-C2 part two (init, demo, schema); init, demo, scaffold, template, exit-code and comment-only test edits; AT-C6; `PENDING` lowered | 8 | about 300: prod 90, schema 2, tests 60, banned-text 30, AT-C2 part two 30, AT-C5 30, AT-C6 30, `PENDING` 30 | R2 | C1b |
+| C3 | CLI | comment-only `templates/__init__.py` and `ci/adapters.py`; CLI sdist `exclude` (4.4); docs: README, SECURITY, CODEMAP (also fixes the dead `storm.py` row), `.tours`, `docs/ci-contracts.md`, `docs/cli-reference.md` regenerated, diagram labels renamed in place (node ids and titles; layout unchanged since only the name changed), CHANGELOG `[Unreleased]` reworded plus one line for this wave, `docs/ROADMAP.md` non-row lines, living `docs/roadmap/` pages and `docs/qa/cli-v1-checklist.md`; `PENDING` deleted; AT-C4 | 3 (two comment-only modules, `pyproject.toml`) | about 290: docs 210, comment-only modules 4, `pyproject.toml` 10, sentry minus 30, AT-C4 30, CHANGELOG line 5 | R1 | C2 and the CLI repin to the engine release with E1 |
 
 Order: E1 (engine) merges, the next engine release carries it, the CLI repins to that release
-(its own PR on the engine repin checklist), then C3. C1 and C2 do not wait: they share no file
+(its own PR on the engine repin checklist), then C3. C1, C1b and C2 do not wait: they share no file
 with E1, do not read the engine registry, and their tests pass on the current pin, so they run in
-parallel with E1 and may merge first. Only C3 needs the repin, because AT-C4 reads the installed
+parallel with E1 and may merge first. Inside the CLI they go in order C1, C1b, C2, C3, because each
+lowers `PENDING` in the one sentry file and C1b's renamed files import the module C1 renames. Only C3 needs the repin, because AT-C4 reads the installed
 engine and the CLI's SARIF allowlist is derived from it.
 
 Test depth: T0 per edit, T1 impact-selected per commit, T2 at each gate on the exact head. Full
-suite triggers: E1 (deleted test file; frozen reason registry), C2 (frozen `decoy-ci/v1` contract).
-C1 and C3 take T1 plus the sentry set. No tests run on the devbox (Mac first, then the VM pool).
+suite triggers: E1 (deleted test file; frozen reason registry; sdist contents, so the packaging
+gate too), C1b (moved tests), C2 (frozen `decoy-ci/v1` contract). C1 and C3 take T1 plus the
+sentry set; C3 also builds the CLI sdist and checks the excluded folders are absent. No tests run on the devbox (Mac first, then the VM pool).
 
-Review: E1 and C2 get two independent reviewers in sequence (Dennis, then Codex); C1 and C3 get
-Codex only.
+Review: E1 and C2 get two independent reviewers in sequence (Dennis, then Codex); C1, C1b and C3
+get Codex only.
 
 ## 11. Stop lines for builders
 
 - A `HISTORY_ROOTS` or `HISTORY` change, in any slice: stop and ask.
 - A `PENDING` key added or a count raised: stop.
+- Allowed baseline shrinks, E1 only: the `_REMOVED` entry of `test_engine_string_targets.py`
+  `EXEMPT`, the `("_REMOVED",)` masks argument in `tests/sentry/_baseline_sources.py:227`, and the
+  `<removed-surface>` entry in `tests/sentry/baselines/wave-b-string-target-exempt.json:11`. Any
+  other baseline or allowlist edit in E1: stop. In C2, the banned-text registry changes only as 4.3
+  says (one pattern in, nine token entries out).
+- A `src/decoy` change that renders `original_identity`, or a request to drop AT-C7: stop and ask.
+- A sdist exclude that removes anything outside the history folders, or touches the engine wheel
+  force-include: stop.
 - Any change to engine `REGISTRY_VERSION`, a minor fixture, `consumer-contract.json` or
   `reason-baseline.json`: stop. E1 edits only `reason-manifest-v1.json` and `reason-registry-release.json`.
 - `registry_renumber.py --check` printing anything beyond the two expected `deleted-existing` lines: stop.
@@ -506,16 +619,20 @@ Codex only.
 - Renaming a verb, flag or `--json` key: out of scope, stop.
 - Rewriting a file under a `HISTORY` glob: not needed, do not.
 - A slice past 800 changed lines or 10 production files: stop and split along the table above.
+  The splits are already named: the e2e renames are C1b; the two comment-only modules are in C3.
 
-## 12. Owner questions
+## 12. Owner decisions (all answered 2026-11-16, go-with-recommended)
 
-- Q1 (blocks E1). Approve the one-time pre-GA exception to the reason registry's append-only rule:
+- Q1, decided yes. The one-time pre-GA exception to the reason registry's append-only rule:
   hard-delete `route.run_storm` and `route.run_storm_requested`; a record naming either decodes as
-  `decoy.unknown_reason_from_future`; `REGISTRY_VERSION` does not move for it. Recommended: yes.
-- Q2 (does not block this plan). Public docs are in decoy-web (87 occurrences in 21 files at
-  `5137913`, including the marketing component `storm.tsx` and the vendored CLI reference). Release
-  gate B-3 owns them. Recommended: B-3 copies the CLI residual sentry shape into decoy-web and
-  re-syncs the vendored `cli-reference.md` after C3, and B-3 closes before V1.
+  `decoy.unknown_reason_from_future`; `REGISTRY_VERSION` does not move for it. The residual risks in
+  the exception record (4.2) are part of what was approved.
+- Q2, decided yes. Release gate B-3 owns decoy-web (87 occurrences in 21 files at `5137913`,
+  including the marketing component `storm.tsx` and the vendored CLI reference): B-3 copies the
+  CLI residual sentry shape into decoy-web, re-syncs the vendored `cli-reference.md` after C3, and
+  closes before V1.
+- Q11, decided version B. No engine code for the parked platform; row 16 drops
+  `config.post_scan_owned_by_platform`.
 
 ## 13. V2-LOG and follow-ups
 
@@ -537,14 +654,21 @@ Codex only.
   Text-only edits; rebase, rerun T1, re-measure `PENDING`.
 - The CLI repin to the E1 release slips, so C3 waits and V1 notes still carry the token. C3 is the
   only slice gated on it; track it on row 56.
-- A reviewer reads AT-C2's C1 `xfail` as a weakened test. It is strict and named; C2 must remove it,
-  and C2's review checks that.
-- decoy-web is forgotten and a V1 user meets the name on the public site. Q2 and B-3.
+- A builder adds a second matcher for the name in the runtime-output test. 4.3 says it reuses the
+  banned-text registry; Codex checks the import at C1 and C2.
+- Someone later adds a CLI renderer for reason context and the old pair from a stored record
+  reaches a user. AT-C7 fails first and the decision goes back to review.
+- An engine branch forked before E1 fails its registry checks on the two codes. Expected; it
+  rebases (4.2 residual risks).
+- decoy-web is forgotten and a V1 user meets the name on the public site. B-3 owns it (Q2 decided).
 
 ## 15. Verification status
 
 Planning only. Measured at the bases with `git grep` and `git show`; no test run, no build. The
-size estimates are not measured diffs.
+size estimates are not measured diffs. Revision 2 re-read `docs/conf.py`, both `pyproject.toml`
+sdist sections, `tests/sentry/test_engine_string_targets.py`, `_baseline_sources.py`, the
+string-target baseline, `_banned_text.py`, `run_result/_model.py` and the CLI sources for
+`original_identity` (none) at the same bases.
 
 ## 16. Roadmap row text (for the orchestrator; this plan does not edit `docs/ROADMAP.md`)
 
@@ -552,12 +676,35 @@ The rows must not spell the token, since `docs/ROADMAP.md` is not history; refer
 commit on engine branch `plan/` (the branch name holds the token, so cite the commit sha).
 
 - Row 16 (engine half): "Retired product name, engine half (E1): hard-delete the two retired route
-  tombstones from the reason registry under a one-time pre-GA exception (owner Q1), tighten the
-  engine residual sentry to history paths only. Registry version unchanged. Drops the parked
-  platform's `config.post_scan_owned_by_platform` (Q11 version B). Ships in the next engine release
-  after merge. | engine | NOT STARTED; plan at engine `<plan sha>` | depends on owner Q1 |".
-- Row 56 (CLI half): "Retired product name, CLI half (C1 to C3): residual sentry and rendered-output
-  test, scan, explain and report text, the progress module and five test files renamed, init and
-  demo text, the `decoy-ci/v1` description, then docs and the V1 notes. C1 and C2 can merge before
-  the engine half; C3 needs the CLI repin to the engine release carrying row 16. | CLI | NOT STARTED;
-  plan at engine `<plan sha>` | row 16 release and repin (C3 only) |".
+  tombstones from the reason registry under a one-time pre-GA exception (owner Q1, approved),
+  tighten the engine residual sentry to history paths only (split-literal and undecodable-file
+  checks included), keep the history folders out of the docs site and the sdist. Registry version
+  unchanged. Drops the parked platform's `config.post_scan_owned_by_platform` (Q11 version B).
+  Ships in the next engine release after merge. | engine | NOT STARTED; plan at engine `<plan sha>`
+  (revision 2) | none |".
+- Row 56 (CLI half): "Retired product name, CLI half (C1, C1b, C2, C3): residual sentry, runtime
+  output test and the name added to the banned-text registry; scan, explain and report text and
+  the progress module renamed (C1); five scan test files renamed (C1b); init and demo text and the
+  `decoy-ci/v1` description (C2); docs, the V1 notes, the sdist history exclude and two comment-only
+  modules (C3). C1 to C2 can merge before the engine half; C3 needs the CLI repin to the engine
+  release carrying row 16. | CLI | NOT STARTED; plan at engine `<plan sha>` (revision 2) | row 16
+  release and repin (C3 only) |".
+
+`<plan sha>` is the revision 2 commit on the plan branch; the orchestrator fills it in.
+
+## 17. Revision map
+
+Revision 2 answers Dennis r1 (GO-WITH-FIXES, 0 HIGH, 4 MEDIUM, 4 LOW) and records the owner calls.
+
+| Finding | Fix | Where |
+|---|---|---|
+| 1 MEDIUM: `test_engine_string_targets.py` raises at collection once the dotted token goes | E1 deletes `_REMOVED`, its `EXEMPT` row, the masks argument and the baseline entry; listed as the only allowed baseline shrinks | 4.2 item 8, 7b, 11 |
+| 2 MEDIUM: Sphinx publishes `docs/records/**` | E1 adds `"records/**"` to `exclude_patterns` and turns the two published links into path text; AT-S1 asserts every `HISTORY_ROOTS` folder is excluded; 1.1 corrected | 1.1, 1.2, 4.2 item 9, 4.4, 7 AT-S1 |
+| 3 MEDIUM: a second scanner beside the banned-text registry | the name goes into `BANNED_USER_TEXT` (C2, AT-C2b); AT-C2 shrinks to runtime outputs, reuses the walker and the registry patterns; the C1 `xfail` is gone | 4.3, 6.1 row 8, 7, 10, 14 |
+| 4 MEDIUM: split literals and undecodable files | `SPLIT_PATTERN` with a quote required, the sentry module its only exemption; non-binary undecodable files fail; seeds and mutations for both | 4.3, 6.1 row 8, 7 AT-S1 and AT-S2 |
+| 5 LOW: AT-C5 base and keyword stripping | SHA captured at the C2 merge base; keywords stripped only at schema-object positions, never under `properties` and the other name maps | 7 AT-C5 |
+| 6 LOW: two catalogs at 1.29.0, stale-since on old branches, `original_identity` | all three are in the exception record and Guarantee 4; decision: the engine keeps `original_identity` as a diagnostic, the CLI never renders it (measured none today), pinned by AT-C7 in C1 | 1.2, 2, 4.2, 4.3, 7, 11, 14 |
+| 7 LOW: name the splits | C1b holds the five e2e renames; `templates/__init__.py` and `ci/adapters.py` move to C3 | 4.1, 10, 11 |
+| 8 LOW: sdists ship `docs/` history | excluded, one line each: engine `docs/plans`, `records`, `archive`, `decisions` in E1; the CLI history folders and two logs in C3; AT-S1 checks the engine side | 1.1, 1.2, 4.2 item 10, 4.4, 7, 10 |
+| Owner calls | Q1 yes, Q2 yes (B-3 owns decoy-web), Q11 B, recorded as decided | header, 1.3, 12 |
+| Row text | rows 16 and 56 updated for C1b, the moved modules, the docs-site and sdist work | 16 |
