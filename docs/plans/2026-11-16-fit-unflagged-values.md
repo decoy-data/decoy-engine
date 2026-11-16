@@ -226,16 +226,31 @@ added, and today's reader reads the new files.
 
 ### 6.2 Enumerations
 
-- Exit paths: none added. The G5 refusal reuses `plan.statistical_snapshot_values_redacted`
-  (CLI exit 1).
-- Routes that write a plain snapshot: `decoy fit` (`cli/gen/_fit.py:164`), the engine API
-  `distribution_snapshot_document`, CLI `ui/summary.py:370-371` (reads null counts only, so the
-  floor does not change its result). `fit_dp_snapshot` is a separate DP route and is untouched.
-- FK shapes: none. `fanout` degree counts are out of scope (section 2).
-- Fields: snapshot kinds `numeric`, `categorical`, `datetime`, `freetext`, `empty` and the joint;
-  the keys each rule touches are in 4.1. No key is added.
-- Output surfaces: the snapshot file, `fit --json` (`value_policy`, `redacted_columns`), the
-  `fit` stderr list of withheld names, generated rows.
+#### Exit paths
+
+None added. The G5 refusal reuses `plan.statistical_snapshot_values_redacted`, raised at
+`generation/statistical/_spec.py:292-298` (CLI exit 1).
+
+#### Routes
+
+Routes that write a plain snapshot: `decoy fit` (CLI `cli/gen/_fit.py:164`), the engine API
+`distribution_snapshot_document` (`profiling/_snapshot_values.py:222`), and CLI
+`ui/summary.py:370-371`, which reads null counts only, so the floor does not change its result.
+`fit_dp_snapshot` is a separate DP route and is not touched.
+
+#### FK shapes
+
+None. `fanout` degree counts are out of scope (section 2).
+
+#### Fields
+
+Snapshot kinds `numeric`, `categorical`, `datetime`, `freetext`, `empty` and the joint
+(`profiling/_value_redaction.py:115-156`). The keys each rule touches are in 4.1. No key is added.
+
+#### Output surfaces
+
+The snapshot file, `fit --json` (`value_policy`, `redacted_columns`), the `fit` stderr list of
+withheld names, and generated rows.
 
 ## 7a. Reuse inventory
 
