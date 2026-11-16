@@ -16,9 +16,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from decoy_engine.config import PreScanConfig
 from decoy_engine.detection import DetectorRun, ModelRef, ModelUnavailableError, ner
-from decoy_engine.profiling import scan_set_to_dict, scan_sources, starter_config
+from decoy_engine.profiling import ScanSourceError, scan_set_to_dict, scan_sources, starter_config
 from tests._ml import require_ml_stack
 from tests._ner import needs_ner
 from tests.unit.detection_verification import _scanml_m4_support as m4
@@ -68,7 +67,10 @@ def test_detectors_name_each_source_with_its_model(tmp_path: Path) -> None:
     scan = scan_sources(
         s.source(tmp_path, "customers", s.customers()), pre_scan=s.pre_scan("classifier")
     )
-    assert scan.detectors == (DetectorRun("regex", None), DetectorRun("classifier", _classifier_ref()))
+    assert scan.detectors == (
+        DetectorRun("regex", None),
+        DetectorRun("classifier", _classifier_ref()),
+    )
     doc = scan_set_to_dict(scan, detail=False)
     ref = _classifier_ref()
     assert doc["detectors"] == [
@@ -76,7 +78,9 @@ def test_detectors_name_each_source_with_its_model(tmp_path: Path) -> None:
         {"source": "classifier", "model": {"id": ref.id, "version": ref.version}},
     ]
     email = next(f for f in doc["tables"][0]["fields"] if f["name"] == "email")
-    assert [(h["source"], h["detector_id"]) for h in email["model_hits"]] == [("classifier", "email")]
+    assert [(h["source"], h["detector_id"]) for h in email["model_hits"]] == [
+        ("classifier", "email")
+    ]
     assert set(email["model_hits"][0]) == {"source", "detector_id", "model", "band", "rate_bucket"}
 
 
@@ -97,7 +101,8 @@ def test_the_starter_config_ignores_model_hits(tmp_path: Path) -> None:
     sources = s.source(tmp_path, "customers", s.customers())
     plain = starter_config(scan_sources(sources))
     with_models = scan_sources(sources, pre_scan=s.pre_scan("classifier"))
-    assert s.hits(with_models, "customers", "email"), "the pass produced no hit to ignore"
+    email_hits = s.hits(with_models, "customers", "email")
+    assert any(h.band == "high" for h in email_hits), "no `high` hit for M-M3a2 to act on"
     got = starter_config(with_models)
     assert got.config == plain.config
     assert got.notes == plain.notes
@@ -175,7 +180,9 @@ def test_a_missing_model_is_refused_and_never_downloaded(
     assert info.value.reason == "provider.ner_model_not_installed"
 
 
-def _tiled_scan(tmp_path: Path, rows: int, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[int]]:
+def _tiled_scan(
+    tmp_path: Path, rows: int, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, list[int]]:
     base = pd.DataFrame(
         {
             "id": range(60),
@@ -203,7 +210,63 @@ def test_a_tiled_fixture_gets_the_labels_of_its_60_row_source(
     (tmp_path / "b").mkdir()
     small, small_lengths = _tiled_scan(tmp_path / "a", 60, monkeypatch)
     big, big_lengths = _tiled_scan(tmp_path / "b", 10_000, monkeypatch)
-    assert {t.name: t.model_hits for t in small.tables} == {t.name: t.model_hits for t in big.tables}
+    assert {t.name: t.model_hits for t in small.tables} == {
+        t.name: t.model_hits for t in big.tables
+    }
     assert s.hits(big, "t", "ssn"), "no hit to compare"
     assert max(small_lengths) == 60
     assert max(big_lengths) == 60, big_lengths  # M-M3g: the full sample would read 10,000
+
+
+def test_a_model_failure_becomes_a_value_free_scan_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Plan 13.1: an unclassified model failure carries the table name and the class, no message.
+    from decoy_engine.profiling import _model_pass
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("CANARY-NAME-7781")
+
+    monkeypatch.setattr(_model_pass, "classify_frame", boom)
+    with pytest.raises(ScanSourceError) as err:
+        scan_sources(
+            s.source(tmp_path, "customers", s.customers()), pre_scan=s.pre_scan("classifier")
+        )
+    assert (err.value.table, err.value.cause_class) == ("customers", "RuntimeError")
+    assert "CANARY-NAME-7781" not in str(err.value)
+    assert err.value.__cause__ is None and err.value.__context__ is None
+
+
+@needs_ner
+def test_an_engine_error_inside_the_pass_keeps_its_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine import reasons
+    from decoy_engine.detection import NerUnavailableError
+    from decoy_engine.profiling import _model_pass
+
+    def gone(*_a: Any, **_k: Any) -> Any:
+        raise NerUnavailableError(
+            code=reasons.provider.NER_MODEL_NOT_INSTALLED, message="not installed"
+        )
+
+    monkeypatch.setattr(_model_pass, "classify_frame", lambda *_a, **_k: {})
+    monkeypatch.setattr(_model_pass, "ner_rates", gone)
+    sources = s.source(tmp_path, "customers", s.customers())
+    with pytest.raises(NerUnavailableError):
+        scan_sources(sources, pre_scan=s.pre_scan("classifier", "ner"))
+
+
+def test_a_classifier_engine_error_inside_the_pass_keeps_its_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.profiling import _model_pass
+
+    def gone(*_a: Any, **_k: Any) -> Any:
+        raise ModelUnavailableError("classifier_unavailable", cause="pack")
+
+    monkeypatch.setattr(_model_pass, "classify_frame", gone)
+    sources = s.source(tmp_path, "customers", s.customers())
+    with pytest.raises(ModelUnavailableError) as err:
+        scan_sources(sources, pre_scan=s.pre_scan("classifier"))
+    assert err.value.reason == "provider.classifier_unavailable"

@@ -8,5 +8,5 @@ hit carries a rate bucket (`<10%`, `10-50%`, `>=50%`). `ScanSet.detectors` lists
 ran with its model id and version, and `scan-set/v1` gains `detectors` and a per-field `model_hits`,
 both additive: a record written earlier still validates and reads back with empty lists. The scan
 logs `pre_scan.detectors` and one `pre_scan.models` line per table on `decoy_engine.detectors`,
-counts only. `starter_config` ignores model hits until the suggestions land in a later slice.
+counts only. The starter config ignores model hits until the suggestions land in a later slice.
 `pre_scan=None`, the default, runs the regex detectors as before.

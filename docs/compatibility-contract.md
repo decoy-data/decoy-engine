@@ -848,7 +848,7 @@ No `SEED_PROTOCOL_VERSION` change.
   defaults and strict models (`ModelHitCore`, `ModelRefCore`, a tagged `DetectorRunCore`): a record
   written before M3a still validates and reads back with empty lists, `ScanSetCoreRead` ignores
   unknown keys, and no stored field can hold a cell value (a source, a detector id, a model id and
-  version, a band and a rate bucket). `starter_config` ignores model hits.
+  version, a band and a rate bucket). The starter config ignores model hits.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and

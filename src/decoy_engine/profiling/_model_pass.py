@@ -20,12 +20,11 @@ from typing import Any, Literal, cast
 
 import pandas as pd
 
-from decoy_engine.detection import ModelRef, log_detector_models, ner_rates
+from decoy_engine.detection import ModelRef, RateBucket, log_detector_models, ner_rates
 from decoy_engine.profiling.model_pack import DetectorSet, classify_frame
 from decoy_engine.profiling.recommendations import classifier_detector_id
 
 Band = Literal["high", "review"]
-RateBucket = Literal["<10%", "10-50%", ">=50%"]
 
 
 @dataclass(frozen=True)
@@ -93,7 +92,7 @@ class ModelPass:
             counts.ner_cells += max((r.scanned_cells for r in rates.values()), default=0)
             for detector_id, rate in sorted(rates.items()):
                 if rate.hit:
-                    hit = ModelHit("ner", detector_id, ref, None, cast(RateBucket, rate.bucket))
+                    hit = ModelHit("ner", detector_id, ref, None, rate.bucket)
                     out.append((str(column), hit))
                     counts.ner_hits += 1
         return out
