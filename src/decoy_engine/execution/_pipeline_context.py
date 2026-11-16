@@ -41,7 +41,8 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
-from decoy_engine.execution.pipeline._routing_facts import build_routing_facts
+from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
+from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.fileaccess import config_relative
 from decoy_engine.profile._readers import LazySource
 
@@ -213,6 +214,7 @@ def build_run_context(
     out_of_core_threads: int | None = None,
     base_dir: str | Path | None = None,
     subset_stage: SubsetStageScope | None = None,
+    resident_fallback: bool = False,
 ) -> PipelineRunContext:
     """Resolve and validate every run input, in the order the inline code did.
 
@@ -319,16 +321,38 @@ def build_run_context(
 
     if (source_loader is None) != (source_loader_schemas is None):
         raise ValueError("run_pipeline: source_loader and source_loader_schemas go together.")
-    facts = build_routing_facts(
-        config,
-        caller_sources,
-        registry=resolved_registry,
-        source_loader_schemas=source_loader_schemas,
-        engine_version=engine_version,
-        base_dir=base_dir,
-        instance_default_locale=instance_default_locale,
-        subset_stage=subset_stage,
-    )
+
+    def facts_of(
+        run_sources: Mapping[str, pa.Table | LazySource], stage: SubsetStageScope | None
+    ) -> RoutingFacts:
+        return build_routing_facts(
+            config,
+            run_sources,
+            registry=resolved_registry,
+            source_loader_schemas=source_loader_schemas,
+            engine_version=engine_version,
+            base_dir=base_dir,
+            instance_default_locale=instance_default_locale,
+            subset_stage=stage,
+        )
+
+    facts = facts_of(caller_sources, subset_stage)
+    if resident_fallback and execution_mode == "auto" and not stream_required:
+        # After every config-only check and key admission above, so a refusal never follows a
+        # whole read. It reads the run's own post-subset sources, so only the kept rows load.
+        facts = read_resident_fallback(
+            config,
+            facts,
+            rebuild=None if subset_stage is not None and subset_stage.active else facts_of,
+            engine_version=engine_version,
+            base_dir=base_dir,
+            instance_default_locale=instance_default_locale,
+            fidelity_report=fidelity_report,
+            post_validation=post_validation,
+            vault_writer=vault_writer,
+            registry=resolved_registry,
+            source_loader_schemas=source_loader_schemas,
+        )
     declared, profile, plan = facts.declared, facts.profile, facts.plan
     caller_sources = facts.caller_sources
     if source_loader is not None and source_loader_schemas is not None:
