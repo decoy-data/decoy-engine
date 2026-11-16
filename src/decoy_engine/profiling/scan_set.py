@@ -28,18 +28,19 @@ import math
 import time
 import types
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, Literal, Union, cast, get_args, get_origin
+from typing import Annotated, Any, Final, Literal, Union, cast, get_args, get_origin
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, TypeAdapter, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, model_validator
 from pydantic import ValidationError as _PydanticValidationError
 
 from decoy_engine import reason_adapter, reasons
 from decoy_engine._field_names import repeated_names
-from decoy_engine.config import PipelineConfigError, SourceDescriptor
+from decoy_engine.config import PipelineConfigError, PreScanConfig, SourceDescriptor
+from decoy_engine.detection import DetectorRun, log_detector_run
 from decoy_engine.errors import DecoyError, PipelineValidationError
 from decoy_engine.fileaccess import (
     FileAccess,
@@ -49,13 +50,16 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
+from decoy_engine.profiling._model_pass import ModelHit, ModelPass
 from decoy_engine.profiling._scan_integrity import RelationshipFacts, Status
 from decoy_engine.profiling._scan_text_checks import count_leading_zeros, header_looks_like_data
+from decoy_engine.profiling.model_pack import load_detectors
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.types import ColumnProfile, FieldStats
 from decoy_engine.progress import safe_error_class
 
 SCAN_SET_SCHEMA: Final = "scan-set/v1"
+_REGEX_ONLY: Final = (DetectorRun("regex", None),)
 Strategy = Literal["head", "random", "full"]
 
 # Matches the CLI's long-standing cut-off for "this field is a PII candidate".
@@ -106,6 +110,34 @@ class WarningRefCore(_Core):
         return self
 
 
+class ModelRefCore(_Core):
+    id: str
+    version: str
+
+
+class ModelHitCore(_Core):
+    source: Literal["classifier", "ner"]
+    detector_id: str
+    model: ModelRefCore
+    band: Literal["high", "review"] | None
+    rate_bucket: Literal["<10%", "10-50%", ">=50%"] | None
+
+
+class RegexRunCore(_Core):
+    source: Literal["regex"]
+    model: None
+
+
+class ModelRunCore(_Core):
+    source: Literal["classifier", "ner"]
+    model: ModelRefCore
+
+
+# Tagged on `source`, so a regex run cannot carry a model and a model run cannot lack one.
+DetectorRunCore = Annotated[Union[RegexRunCore, ModelRunCore], Field(discriminator="source")]  # noqa: UP007
+_RUN_CORE: TypeAdapter[Any] = TypeAdapter(DetectorRunCore)
+
+
 class FieldCore(_Core):
     name: str
     dtype: str
@@ -116,6 +148,8 @@ class FieldCore(_Core):
     pii_candidate: bool
     detector_hits: list[str]
     leading_zero_count: int | None
+    # Defaults keep a record written before M3a readable and valid.
+    model_hits: list[ModelHitCore] = Field(default_factory=list)
 
 
 class TableCore(_Core):
@@ -160,6 +194,7 @@ class ScanSetCore(_Core):
     scanned_at: str
     tables: list[TableCore]
     relationships: list[RelationshipFactsCore]
+    detectors: list[DetectorRunCore] = Field(default_factory=list)
 
 
 def _relaxed(model: type[BaseModel]) -> type[BaseModel]:
@@ -205,6 +240,7 @@ class TableScan:
     key_candidates: tuple[str, ...]
     null_counts: dict[str, int]
     leading_zero_counts: dict[str, int | None]
+    model_hits: Mapping[str, tuple[ModelHit, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -214,6 +250,7 @@ class ScanSet:
     scan_schema: str
     engine_version: str
     scanned_at: str
+    detectors: tuple[DetectorRun, ...] = (DetectorRun("regex", None),)
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +269,7 @@ def scan_sources(
     integrity: bool = True,
     spill_dir: Path | None = None,
     file_access: FileAccess | None = None,
+    pre_scan: PreScanConfig | None = None,
 ) -> ScanSet:
     """Scan the selected tables of `sources` and return one `ScanSet`.
 
@@ -245,6 +283,10 @@ def scan_sources(
     key, null and orphan counts (`RelationshipFacts`), read from key columns only and spilled to
     a protected directory under `spill_dir` (default: the system temp directory). The tables
     they name must be in `sources` but need not be selected. Nothing is inferred.
+
+    `pre_scan` names the detector sources to run beside the regex detectors; `None` is regex
+    only. Its models load strictly, once, before the first table: a model that cannot run raises
+    `ModelUnavailableError` and no table is read. Hits land in `TableScan.model_hits`.
     """
     from decoy_engine.release import __version__
 
@@ -264,10 +306,20 @@ def scan_sources(
 
     declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
 
+    models: ModelPass | None = None
+    runs = _REGEX_ONLY
+    if pre_scan is not None:
+        loaded = load_detectors(
+            pre_scan.detectors, ner_model=pre_scan.ner_model, file_access=file_access
+        )
+        models, runs = ModelPass(loaded, pre_scan.ner_model), loaded.runs()
+
     scans = []
-    for name in selected:
+    for position, name in enumerate(selected, 1):
         started = time.monotonic()
-        scan = _scan_one(name, descriptors[name], sample_rows, strategy, file_access)
+        scan = _scan_one(
+            name, descriptors[name], sample_rows, strategy, file_access, (models, position)
+        )
         _LOG.info(
             "scanned table=%s rows=%d seconds=%.2f",
             name,
@@ -275,12 +327,16 @@ def scan_sources(
             time.monotonic() - started,
         )
         scans.append(scan)
+    if pre_scan is not None:
+        columns = sum(len(t.profile.fields) for t in scans)
+        log_detector_run("pre_scan", runs, {"tables": len(scans), "columns": columns})
     return ScanSet(
         tables=tuple(scans),
         relationships=_integrity_facts(descriptors, declared, spill_dir),
         scan_schema=SCAN_SET_SCHEMA,
         engine_version=__version__,
         scanned_at=datetime.now(timezone.utc).isoformat(),
+        detectors=runs,
     )
 
 
@@ -322,10 +378,11 @@ def _scan_one(
     sample_rows: int | None,
     strategy: Strategy,
     file_access: FileAccess | None,
+    model_pass: tuple[ModelPass | None, int],
 ) -> TableScan:
     cause: str | None = None
     try:
-        return _read_and_profile(name, descriptor, sample_rows, strategy, file_access)
+        return _read_and_profile(name, descriptor, sample_rows, strategy, file_access, model_pass)
     except Exception as exc:
         if passes_through(exc):
             raise
@@ -346,6 +403,7 @@ def _read_and_profile(
     sample_rows: int | None,
     strategy: Strategy,
     file_access: FileAccess | None,
+    model_pass: tuple[ModelPass | None, int],
 ) -> TableScan:
     # Imported here because decoy_engine.profile imports this package.
     from decoy_engine import profile as src
@@ -390,8 +448,10 @@ def _read_and_profile(
         sample_row_cap=row_cap,
         file_access=file_access,
     )
+    models, position = model_pass
+    hits = {} if models is None else models.run(frame, name, position)
     del frame
-    return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts)
+    return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts, hits)
 
 
 def _text_frames(
@@ -427,6 +487,7 @@ def _table_scan(
     total: int,
     exact: bool,
     zero_counts: dict[str, int] | None,
+    hits: Mapping[str, tuple[ModelHit, ...]],
 ) -> TableScan:
     scanned = profile.row_count
     keys = tuple(
@@ -446,6 +507,7 @@ def _table_scan(
         leading_zero_counts={
             f.name: None if zero_counts is None else zero_counts.get(f.name) for f in profile.fields
         },
+        model_hits=hits,
     )
 
 
@@ -461,7 +523,9 @@ def _finite(value: float | None) -> float | None:
     return float(value)
 
 
-def _field_core(f: FieldStats, name: str, scanned: int, zeros: int | None) -> FieldCore:
+def _field_core(
+    f: FieldStats, name: str, scanned: int, zeros: int | None, hits: Sequence[ModelHit]
+) -> FieldCore:
     # Only these attributes of FieldStats are read: top_values, mode, min and max can hold
     # cell text and must not reach the core.
     return FieldCore(
@@ -474,6 +538,7 @@ def _field_core(f: FieldStats, name: str, scanned: int, zeros: int | None) -> Fi
         pii_candidate=f.pii_score >= PII_CANDIDATE_THRESHOLD,
         detector_hits=[m.detector_id for m in (f.detector_matches or [])],
         leading_zero_count=zeros,
+        model_hits=[ModelHitCore.model_validate(asdict(h)) for h in hits],
     )
 
 
@@ -492,7 +557,13 @@ def _table_core(t: TableScan) -> TableCore:
     p = t.profile
     core_name = _core_names(t)
     fields = [
-        _field_core(f, core_name[f.name], p.row_count, t.leading_zero_counts.get(f.name))
+        _field_core(
+            f,
+            core_name[f.name],
+            p.row_count,
+            t.leading_zero_counts.get(f.name),
+            t.model_hits.get(f.name, ()),
+        )
         for f in p.fields
     ]
     return TableCore(
@@ -519,6 +590,7 @@ def scan_set_to_dict(s: ScanSet, *, detail: bool) -> dict[str, Any]:
         scanned_at=s.scanned_at,
         tables=[_table_core(t) for t in s.tables],
         relationships=[RelationshipFactsCore.model_validate(r.to_dict()) for r in s.relationships],
+        detectors=[_RUN_CORE.validate_python(asdict(r)) for r in s.detectors],
     )
     doc: dict[str, Any] = core.model_dump()
     if detail:
