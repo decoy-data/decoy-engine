@@ -107,10 +107,7 @@ class TransactionalSink(Protocol):
         ...
 
     def abort(self) -> None:
-        """Discard all written tables; called on any exception during the run.
-
-        Must be best-effort and must not raise.
-        """
+        """Discard all written tables on any run exception; best-effort, must not raise."""
         ...
 
 
