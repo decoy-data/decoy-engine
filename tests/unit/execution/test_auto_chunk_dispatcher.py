@@ -871,6 +871,8 @@ def test_each_job_gate_keeps_a_multi_table_job_out_of_the_new_module(
 def test_a_large_lazy_source_routes_chunked_like_its_resident_twin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """AT-E5a: with no sink a routed lazy table stays lazy, so the lane is handed the
+    `LazySource` itself, and the route and output still equal the resident twin's."""
     import pyarrow.parquet as pq
 
     from decoy_engine.profile._readers import LazySource
@@ -887,7 +889,7 @@ def test_a_large_lazy_source_routes_chunked_like_its_resident_twin(
     assert result.quality_metrics["auto_chunk"]["mode"] == "chunked"
     assert len(spies["auto_chunk.run_auto_chunk"]) == 1
     handed = spies["auto_chunk.run_auto_chunk"][0][0][1]
-    assert isinstance(handed, pa.Table)
+    assert isinstance(handed, LazySource)
     assert len(spies["entry.run_mask_chunked"]) == 1
     assert result.outputs[support.TABLE].equals(twin.outputs[support.TABLE], check_metadata=True)
 
