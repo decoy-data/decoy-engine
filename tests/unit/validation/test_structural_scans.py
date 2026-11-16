@@ -386,7 +386,12 @@ class TestCardinalityCollisions:
         assert w.detail["source_distinct"] == len({canonicalize_derive_source(v) for v in ints})
 
     def test_both_routes_report_equal_detail(self, tmp_path: Path) -> None:
-        """AT-Z6: full_frame and out_of_core (which needs an FK shape) report the same detail."""
+        """AT-Z6: every route that can run post-validation reports the same detail.
+
+        `out_of_core` is refused when post-validation is on (`post_validation_requested`), because
+        the scans need resident output. The streamed and chunked routes fall back to the resident
+        path, so the cells are full_frame, sequential and the auto-chunk lane.
+        """
         n = 200
         parent = pa.table(
             {
@@ -438,17 +443,21 @@ class TestCardinalityCollisions:
         }
         cfg = PipelineConfig.model_validate(declare_rest(raw)).model_dump()
         seen = []
-        for mode in ("full_frame", "out_of_core"):
+        for kwargs in (
+            {"execution_mode": "full_frame"},
+            {"execution_mode": "sequential"},
+            {"auto_chunk_threshold_rows": 1, "chunk_size_rows": 64},
+        ):
             r = run_pipeline(
                 cfg,
                 sources={"parent": parent, "child": child},
                 engine_version=_VERSION,
                 post_validation=True,
-                execution_mode=mode,  # type: ignore[arg-type]
+                **kwargs,  # type: ignore[arg-type]
             )
             (w,) = _collisions(r)
             seen.append(_detail(w))
-        assert seen[0] == seen[1]
+        assert seen[0] == seen[1] == seen[2]
         assert seen[0]["pool_size"] == 10 and seen[0]["distinct_lost"] > 0
 
     def test_scale_and_match_modes_are_covered(self, tmp_path: Path) -> None:
