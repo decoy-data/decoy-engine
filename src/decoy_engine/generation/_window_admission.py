@@ -163,15 +163,15 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             )
         if parsed_bounds[bound].tzinfo is not None:
             _refuse(table, col, CODE_UNBOUNDED, bound, "timezone-aware datetime bound")
-    # A folded range has no per-year weights to check its edge against, so its outer year must be
-    # the bound's year; otherwise the draw would pile up at the clamp.
+    # A folded range has no per-year weights to check its edge against, so a bound may not fall
+    # inside the outer range (the draw would pile up at the clamp). A bound outside it, as a
+    # flagged column's year-around bound is, never moves a draw.
     live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
-    for bound, year, edge in (
-        ("min", live[0].start_year, live[0]),
-        ("max", live[-1].end_year, live[-1]),
-    ):
-        if edge.start_year != edge.end_year and parsed_bounds[bound].year != year:
-            _refuse(table, col, CODE_DEGENERATE, bound, f"datetime {bound} is outside its range")
+    first, last = live[0], live[-1]
+    if first.start_year != first.end_year and parsed_bounds["min"].year > first.start_year:
+        _refuse(table, col, CODE_DEGENERATE, "min", "datetime min is inside its range")
+    if last.start_year != last.end_year and parsed_bounds["max"].year < last.end_year:
+        _refuse(table, col, CODE_DEGENERATE, "max", "datetime max is inside its range")
 
 
 def _check_categorical(

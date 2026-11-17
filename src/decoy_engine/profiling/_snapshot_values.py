@@ -181,8 +181,7 @@ def fold_ranges_under_k(
 
     A short last range joins the one before it, so only a column with fewer than K rows in all can
     end with a short range. The total count never changes. Statistical disclosure control global
-    recoding (Hundepool et al., 2012, section 3.4.2). The one fold for year buckets; a scan
-    document's decade buckets call it too.
+    recoding (Hundepool et al., 2012, section 3.4.2). The one fold for year buckets.
     """
     out: list[tuple[int, int, int | float]] = []
     start: int | None = None
@@ -475,7 +474,7 @@ def snapshot_joint_warnings(doc: dict[str, Any], *, contingency_top_k: int) -> l
     """
     withheld = (
         set(doc.get(REDACTED_COLUMNS_KEY, ()))
-        if doc.get(VALUE_POLICY_KEY) in REDACTED_POLICIES
+        if isinstance(doc.get(VALUE_POLICY_KEY), str) and doc[VALUE_POLICY_KEY] in REDACTED_POLICIES
         else set()
     )
     check_contingency_top_k(contingency_top_k)

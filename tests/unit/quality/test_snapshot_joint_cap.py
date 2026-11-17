@@ -19,19 +19,20 @@ from decoy_engine.quality.snapshot import (
 )
 
 _WEIGHTS = (20, 15, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2)
+_ORIGINAL_WEIGHTS = (20, 15, 12, 10, 9, 8, 7, 6, 5, 4, 3, 1)
 _PAIR = [("parent", "kid")]
-# Digests of both writers at the default cap. The compute digest was recorded at origin/main
-# 1a5b36e5 and re-recorded when the smallest cell grew to K rows (the document writer floors cells
-# under 10 rows); the document digest is re-recorded for `distribution-snapshot/v2` (fit E1).
-_DIGEST_COMPUTE = "b8091e209645fcd3fc042c9a60e059c3107e9fc05208d9e29df901151ece3dc6"
+# The raw writer's digest on the original fixture, recorded at origin/main 1a5b36e5 (AT-1). The
+# document writer floors cells under 10 rows, so its digest is taken on a fixture whose smallest
+# cell holds 12 rows, and is re-recorded for `distribution-snapshot/v2` (fit E1).
+_DIGEST_COMPUTE = "796fa21ab05e1f3024eefd6b9523d18e55e76561c9510cb5ead91e4e66d8e3be"
 _DIGEST_DOCUMENT = "7ca961c0882dbbeb2dea430fd4f267e2f3d2e5623c9171780eac76bb17e32073"
 
 
-def _cond_frame() -> pd.DataFrame:
+def _cond_frame(weights: tuple[int, ...] = _WEIGHTS) -> pd.DataFrame:
     """6,060 rows, 36 parent/kid pairs; built without an RNG."""
     parents: list[str] = []
     kids: list[str] = []
-    for i, w in enumerate(_WEIGHTS):
+    for i, w in enumerate(weights):
         for j, share in enumerate((6, 3, 1)):
             n = w * 6 * share
             parents += [f"SENTP{i + 1:02d}"] * n
@@ -50,8 +51,9 @@ def _scan(texts: list[str]) -> None:
 
 
 def test_at1_default_bytes_unchanged() -> None:
+    original = _cond_frame(_ORIGINAL_WEIGHTS)
+    assert _digest(compute_distribution_snapshot(original, joint_columns=_PAIR)) == _DIGEST_COMPUTE
     df = _cond_frame()
-    assert _digest(compute_distribution_snapshot(df, joint_columns=_PAIR)) == _DIGEST_COMPUTE
     assert _digest(distribution_snapshot_document(df, joint_columns=_PAIR)) == _DIGEST_DOCUMENT
 
 

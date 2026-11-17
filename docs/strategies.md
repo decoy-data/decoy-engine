@@ -1693,7 +1693,9 @@ every column, not only the columns the profiler flags.
   free text, with length statistics only.
 - A column too small to floor (a numeric with under 20 finite cells, a categorical with every
   label under 10 rows, a datetime with no year held by 10 rows) is withheld and listed in
-  `redacted_columns`. Generating from it refuses with `plan.statistical_snapshot_values_redacted`.
+  `redacted_columns`. A categorical column, or a `condition_on` parent, then refuses with
+  `plan.statistical_snapshot_values_redacted`. A numeric column samples one coarse interval. A
+  datetime column samples its year ranges, and releases none when it has under 10 rows in all.
   `--include-values` keeps the old content.
 
 The snapshot is `distribution-snapshot/v2` and `value_policy` is `flagged-redacted/v2`. Readers
