@@ -642,11 +642,7 @@ because it is a pure R1 move and keeping it apart holds D-2b under the size cap.
 #301 (scan-ml C2a) both edit `run/_render.py`; whichever merges second rebases. D-2c and DI-3 share
 no file.
 
-Coordination with row 80: `plan/f15-bound-baseline` will later move `diff_scan_sets` from CLI
-`scanning/_diff.py` into an engine `scan-diff/v1` module. D-2a's move stays as planned. F15 C1 moves
-the rules on from `scanning/_diff.py` and leaves the `decoy.cli.scanning` facade names pointing at
-the engine module, so `rescan_and_diff`, `scan.py` and `ci/adapters.py` keep their imports. If F15 C1
-merges before D-2a, D-2a is dropped and D-2b imports from the facade F15 C1 leaves.
+Coordination with row 80 (orchestrator ruling at the round-3 cap): this plan owns the CLI facade names. D-2a lands first and exports `ScanDiff` and `diff_scan_sets` from `decoy.cli.scanning` (module `scanning/_diff.py`); D-2b adds `rescan_and_diff` and `check_drift` (module `scanning/_drift.py`). `plan/f15-bound-baseline` C1 must keep exactly these facade names and modules as the CLI entry points, turning `scanning/_diff.py` into a thin call into the engine `scan-diff/v1` module, so `rescan_and_diff`, `scan.py` and `ci/adapters.py` keep their imports. F15 C1 waits on D-2a; there is no F15-first path, so D-2a is never dropped. The F15 plan is amended to these names.
 
 ### 13.2 Engine releases
 
@@ -759,4 +755,4 @@ into D-2a (R1 move), D-2b (facade) and D-2c (wiring).
 |---|---|---|
 | A finite source moment that became inf or NaN in the output was `info`, so strict mode passed it | non-finite split by origin: source origin stays `info`; finite source with non-finite output is a breach (`fail` blocks under `fail`); DI-T4 cells for inf and NaN output; mutation MDI-4c (DI-1a) | 3.2, 5.1, 12 |
 | Detector parity covered NER and regex only | D-T5 names six fixture pairs including regex + classifier and regex + classifier + NER; D-T13 adds classifier missing and classifier version refusals before any source is opened, and a spy on the rebuilt `pre_scan`; mutations MD-5c and MD-13b | 12 |
-| Coordination with row 80 | `plan/f15-bound-baseline` C1 moves `diff_scan_sets` on from `scanning/_diff.py` into an engine `scan-diff/v1` module; D-2a stays | 13.1 |
+| Coordination with row 80 | this plan owns the facade names `ScanDiff`, `diff_scan_sets`, `rescan_and_diff`, `check_drift`; F15 C1 keeps them and waits on D-2a (orchestrator ruling at the round-3 cap) | 13.1 |
