@@ -45,7 +45,7 @@ from decoy_engine.contracts.distribution_snapshot import (
     encode_datetime_buckets,
 )
 from decoy_engine.generation.pool._events import QualityWarning
-from decoy_engine.profiling._cell_format import add_cell_format, scrub_cell_format
+from decoy_engine.internal.pandas_compat import finite_numeric_cells
 from decoy_engine.profiling._value_redaction import (
     DATA_RULES,
     MIN_RELEASE_COUNT,
@@ -60,6 +60,7 @@ from decoy_engine.profiling._value_redaction import (
     stamp_value_policy,
     value_sensitive_names,
 )
+from decoy_engine.profiling.cell_format import add_cell_format, scrub_cell_format
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.quality.snapshot import (
     DEFAULT_CATEGORICAL_TOP_K,
@@ -68,7 +69,6 @@ from decoy_engine.quality.snapshot import (
     DistributionSnapshotError,
     check_contingency_top_k,
     compute_distribution_snapshot,
-    finite_numeric_cells,
     freetext_stats,
     numeric_stats,
 )

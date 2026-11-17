@@ -3,7 +3,7 @@
 A snapshot column entry can carry a `cell_format` block that records how the source cells
 were written, so generation can reproduce it. The fit half (`learn_cell_format`,
 `add_cell_format`), the member descriptor `CELL_FORMAT_MEMBERS` and `scrub_cell_format` live in
-`profiling/_cell_format.py`, which the snapshot writer reaches without a back import from
+`profiling/cell_format.py`, which the snapshot writer reaches without a back import from
 `profiling` into `generation`; they are re-exported here so this module stays the one place the
 reader and sampler look. This module holds the strict decoders (`decode_cell_format`,
 `cell_format_from_dict`) and the apply side (`round_numeric`, `floor_datetime`,
@@ -19,26 +19,26 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 from decoy_engine import reasons
-from decoy_engine.profiling._cell_format import (
-    _UNIT_MICROS,
+from decoy_engine.profiling.cell_format import (
     CELL_FORMAT_MEMBERS,
+    UNIT_MICROS,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     MAX_DECIMAL_PLACES as MAX_DECIMAL_PLACES,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     RESOLUTIONS as RESOLUTIONS,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     add_cell_format as add_cell_format,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     cell_format_member_ok as cell_format_member_ok,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     learn_cell_format as learn_cell_format,
 )
-from decoy_engine.profiling._cell_format import (
+from decoy_engine.profiling.cell_format import (
     scrub_cell_format as scrub_cell_format,
 )
 
@@ -232,7 +232,7 @@ def is_integer_dtype(dtype: str) -> bool:
     return dtype.lstrip("uU").startswith("int") or dtype.startswith("Int")
 
 
-_FLOOR_MICROS: Final = dict(_UNIT_MICROS)
+_FLOOR_MICROS: Final = dict(UNIT_MICROS)
 _ONE_MICRO: Final = timedelta(microseconds=1)
 
 
