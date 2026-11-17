@@ -321,6 +321,16 @@ def test_a_short_last_range_joins_the_one_before_it() -> None:
     ]
 
 
+def test_a_year_past_the_sampled_range_keeps_its_own_bucket() -> None:
+    years = [2000] * 12 + [9998] * 3 + [9999] * 4
+    stamps = np.array([f"{y:04d}-02-02" for y in years], dtype="datetime64[s]")
+    df = pd.DataFrame({"d": pd.Series(stamps)})
+    assert _ranges(_doc(df, flagged=[]), "d") == [
+        {"start_year": 2000, "end_year": 9998, "count": 15},
+        {"start_year": 9999, "end_year": 9999, "count": 4},
+    ]
+
+
 def test_the_flagged_and_g5_bounds_stay_outside_every_range() -> None:
     doc = _doc(_date_frame(), flagged=["forced"])
     for name in ("forced", "sparse"):
@@ -447,8 +457,9 @@ _SEEDED = settings(max_examples=40, deadline=None, suppress_health_check=list(He
 def test_property_numeric_bounds_survive_a_tail_swap(values: list[float]) -> None:
     arr = np.asarray(values, dtype=float)
     ordered = np.sort(arr)
-    # With a == b every row may sit in one interior bin, so the swap moves bin counts there.
-    assume(ordered[K - 1] < ordered[-K])
+    # With a == b, or a span under the writable grid floor, the end bins are not the ones holding
+    # the K-th cells, so the swap can move bin counts there (plan 4.2).
+    assume(ordered[-K] - ordered[K - 1] >= 1e-10)
     a = _doc(pd.DataFrame({"x": arr}), flagged=[])
     b = _doc(pd.DataFrame({"x": _swap_tails(arr)}), flagged=[])
     assert "x" not in a["redacted_columns"]
