@@ -289,6 +289,11 @@ class OutputDir(Protocol):
         """fsync the bound leaf's tree, then its parent and each directory up to the anchor."""
         ...
 
+    def adopt_file(self, *, limit: int) -> bytes | None:
+        """The bytes of the file leaf (read-only, never through a link), at most `limit`, returned
+        only after that descriptor and then the chain were fsynced; `None` if absent."""
+        ...
+
 
 @runtime_checkable
 class FileAccess(Protocol):

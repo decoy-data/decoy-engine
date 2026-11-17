@@ -242,9 +242,10 @@ class KeyedColumn:
 
 def _walk_keyed_columns(config: Mapping[str, Any]) -> Iterator[KeyedColumn]:
     """The one config walk behind both public classifiers: tables then columns in config order,
-    generate tables skipped, ``column_is_keyed`` applied per column."""
+    ``column_is_keyed`` applied per column. A generate table holds no mask ``columns``; a raw dict
+    that holds both kinds is walked anyway, so invalid structure cannot hide a keyed column."""
     for table in config.get("tables") or []:
-        if not isinstance(table, dict) or table.get("generate_columns"):
+        if not isinstance(table, dict):
             continue
         for col in table.get("columns") or []:
             if not isinstance(col, dict):

@@ -63,7 +63,7 @@ set -uo pipefail
 REPO_NAME=decoy-engine
 RUFF_PATHS=(src tests testflight scripts)
 MYPY_ARGS=(src/decoy_engine testflight)
-SENTRY_PATHS=(tests/sentry tests/secret_providers/test_leak_sentry.py)
+SENTRY_PATHS=(tests/sentry tests/secret_providers/test_leak_sentry.py tests/secret_providers/test_classifier_equivalence.py)
 # The one sentry outside the sentry step: import-linter is not in the certified profile, so the
 # layer test runs only in the `layers` step. Every other pytest route ignores it.
 LAYER_TEST=tests/sentry/layout/test_import_layers.py
@@ -102,7 +102,7 @@ DOC_WALK_ROOTS=(docs/plans/h1-wave-b/manifests)
 # Several sentries walk all of docs/ (and root *.md) under one id, so a Markdown fix on main would
 # hide a re-break on the branch. Rather than list each walker, any stored failing id under these
 # prefixes (every sentry) makes any main move stale.
-DOC_WALK_GUARDS=(tests/sentry/ tests/secret_providers/test_leak_sentry.py)
+DOC_WALK_GUARDS=(tests/sentry/ tests/secret_providers/test_leak_sentry.py tests/secret_providers/test_classifier_equivalence.py)
 
 ROOT=$(git rev-parse --show-toplevel) || exit 2
 VENV=${DECOY_VENV:-${UV_PROJECT_ENVIRONMENT:-$ROOT/.venv}}

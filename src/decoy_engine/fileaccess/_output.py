@@ -25,6 +25,7 @@ the process umask. A parent keeps an inherited set-group-ID bit through that rep
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import secrets
@@ -130,10 +131,8 @@ def _make_dir_core(parent_fd: int, name: str, mode: int, *, keep_special: bool) 
             _call(os.fchmod, fd, _repaired(born, keep_special))
     except OSError:
         _close(fd)
-        try:
+        with contextlib.suppress(OSError):
             os.rmdir(name, dir_fd=parent_fd)
-        except OSError:
-            pass
         raise
     return fd, born
 
@@ -191,10 +190,8 @@ def _create_private_core(dir_fd: int, name: str, restore: Callable[[int], None])
         restore(fd)
     except OSError:
         _close(fd)
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(name, dir_fd=dir_fd)
-        except OSError:
-            pass
         raise
     return fd
 
@@ -222,10 +219,8 @@ def _dup(held_fd: int) -> int:
 
 
 def _close(fd: int) -> None:
-    try:
+    with contextlib.suppress(OSError):
         os.close(fd)
-    except OSError:
-        pass
 
 
 def _rmtree_fd(dir_fd: int) -> None:
@@ -268,20 +263,14 @@ def _discard(state: _State) -> None:
     try:
         if state.kind == "dir":
             if state.stage_fd >= 0:
-                try:
+                with contextlib.suppress(OSError):
                     _rmtree_fd(state.stage_fd)
-                except OSError:
-                    pass
                 _close(state.stage_fd)
-            try:
+            with contextlib.suppress(OSError):
                 os.rmdir(state.stage_name, dir_fd=state.parent_fd)
-            except OSError:
-                pass
         else:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(state.stage_name, dir_fd=state.parent_fd)
-            except OSError:
-                pass
     finally:
         state.stage_fd = -1
         _close_all(state.child_fds)
@@ -566,6 +555,11 @@ class RootedOutputDir:
         from decoy_engine.fileaccess import _durable
 
         _durable._sync_rooted_chain(self._open_parent, self._leaf)
+
+    def adopt_file(self, *, limit: int) -> bytes | None:
+        from decoy_engine.fileaccess._durable import _adopt_rooted
+
+        return _adopt_rooted(self._open_parent, self._leaf, limit)
 
     def is_empty_or_absent(self) -> bool:
         failed = False

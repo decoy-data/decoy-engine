@@ -65,7 +65,7 @@ and gaps known today.
 
 ### Add a masking strategy
 
-1. Give it a value in `execution/_distribution_behavior.py::_STATIC_BEHAVIOR`.
+1. Give it a value in `contracts/distribution_behavior.py::_STATIC_BEHAVIOR`.
 2. Add default expectations in `policy.py` for both value-identity and shape
    scoring, set to what the comparators actually report for it.
 3. Add a test-flight distribution case if it is a preserve or coarsen class.

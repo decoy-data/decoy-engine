@@ -16,9 +16,8 @@ vaulted source value. A vault is never keyed on the public job seed:
 every key that writes, opens or is matched against a vault must be the
 32-byte mask root, checked at construction and again at every write,
 load and key-match, because an 8-byte public seed gives a KDF nothing to
-amplify. Store the vault and
-the config separately, with the handling the source data itself would
-get; never ship a vault alongside its masked output. The encryption is
+amplify. Store the vault and the config separately, with the handling the
+source data itself would get; never ship a vault alongside its masked output. The encryption is
 Fernet from the `cryptography` package (AES-128-CBC + HMAC-SHA256,
 encrypt-then-MAC, per the published Fernet spec) -- an audited AEAD
 construction rather than anything hand-rolled, per the engine's
@@ -43,34 +42,33 @@ another. The `decoy-vault/v2` file format stamps that version in its
 unencrypted header, so a cross-version load fails with a clear
 `vault_protocol_version_mismatch` rather than an opaque key error.
 
-File format (`decoy-vault/v2`). Magic, then a length-prefixed
-unencrypted JSON header (`format`, `seed_protocol_version`,
-`ambiguous_dropped`, chunk framing), then a sequence of length-prefixed
-Fernet tokens, one per bounded chunk of sorted entries. Each chunk is
-serialized + encrypted independently (F13), so the full plaintext table
-is never held as one serialized blob before encryption.
+File format (`decoy-vault/v2`). Magic, then a length-prefixed unencrypted JSON header (`format`,
+`seed_protocol_version`, `ambiguous_dropped`, chunk framing), then a sequence of length-prefixed
+Fernet tokens, one per bounded chunk of sorted entries. Each chunk is serialized + encrypted
+independently (F13), so the full plaintext table is never held as one serialized blob before
+encryption.
 
-Determinism boundary. Vault CONTENTS are a pure function of (config,
-sources): entries are sorted before serialization. The vault FILE is
-not byte-reproducible because Fernet embeds a random IV and a
-timestamp; reproducibility contracts apply to masked outputs, never to
-this artifact.
+Determinism boundary. Vault CONTENTS are a pure function of (config, sources): entries are sorted
+before serialization. The vault FILE is not byte-reproducible because Fernet embeds a random IV and
+a timestamp; reproducibility contracts apply to masked outputs, never to this artifact.
 
 Ambiguity. Pooled strategies may map two source values to one masked
 value (e.g. `cardinality_mode: reuse` faker with a small pool). A
 masked value with conflicting sources cannot be inverted; `write()`
 drops those keys and records the count in the unencrypted header
 (`ambiguous_dropped`), and the unmask report surfaces it. Exact round
-trips are guaranteed only for collision-free maskings (hash under a
-namespace, unique-mode substitution).
+trips hold only for keys no other source value masked to; no strategy,
+hash included, is collision-free unless it is unique-mode.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +87,8 @@ from decoy_engine.fileaccess import (
     OutputDir,
 )
 from decoy_engine.fileaccess.adapters import serial
+from decoy_engine.internal.vault_entries import collect_vault_entries as collect_vault_entries
+from decoy_engine.internal.vault_entries import iter_vault_columns as iter_vault_columns
 from decoy_engine.keyprovider import (
     KEY_REQUIRED_GUIDANCE,
     KeyedStrategyRequiresSecret,
@@ -114,6 +114,13 @@ _CHUNK_ROWS = 65536
 _INSTALL_HINT = "pip install 'decoy-engine[vault]'"
 
 
+_SCHEMA = pa.schema([(n, pa.string()) for n in ("namespace", "masked", "source")])
+
+
+def _unreadable(message: str) -> VaultError:
+    return VaultError(code=reasons.runtime.VAULT_UNREADABLE, message=message)
+
+
 def _frame(block: bytes) -> bytes:
     """Length-prefix a block: 4-byte big-endian length || block."""
     return len(block).to_bytes(4, "big") + block
@@ -126,16 +133,12 @@ def _read_frame(blob: bytes, offset: int) -> tuple[bytes, int]:
     fails cleanly instead of slicing past the end.
     """
     if offset + 4 > len(blob):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE, message="vault file truncated (length prefix)"
-        )
+        raise _unreadable("vault file truncated (length prefix)")
     length = int.from_bytes(blob[offset : offset + 4], "big")
     start = offset + 4
     end = start + length
     if end > len(blob):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE, message="vault file truncated (block body)"
-        )
+        raise _unreadable("vault file truncated (block body)")
     return blob[start:end], end
 
 
@@ -195,57 +198,28 @@ def _fernet(mask_key: OpaqueBox, size: int) -> Any:
     )
 
 
-def iter_vault_columns(config: dict[str, Any]) -> list[tuple[str, str, str]]:
-    """List `(table, column, namespace)` for every `vault: true` mask column.
-
-    Pure config walk; the compile check `check_vault_columns` has
-    already guaranteed each vaulted column carries a namespace and a
-    one-way strategy.
-    """
-    out: list[tuple[str, str, str]] = []
-    for table_cfg in config.get("tables") or []:
-        if not isinstance(table_cfg, dict):
-            continue
-        table = table_cfg.get("name")
-        if not table:
-            continue
-        for col_cfg in table_cfg.get("columns") or []:
-            if not isinstance(col_cfg, dict) or not col_cfg.get("vault"):
-                continue
-            name = col_cfg.get("name")
-            namespace = col_cfg.get("namespace")
-            if name and namespace:
-                out.append((str(table), str(name), str(namespace)))
-    return out
+_ISSUER = object()
 
 
-def collect_vault_entries(
-    config: dict[str, Any],
-    sources: Mapping[str, pa.Table],
-    outputs: Mapping[str, pa.Table],
-) -> list[tuple[str, str, str]]:
-    """Pair source and masked values for every vaulted column.
+@dataclass(frozen=True)
+class VaultCommit:
+    """A vault whose bytes and directory chain are durable (F22 5.5); only `issue_commit` makes one."""
 
-    Returns `(namespace, masked, source)` string triples. Masking
-    preserves row count and order, so pairing is positional: source row
-    i maps to output row i. Rows where either side is null are skipped
-    (null is preserved by every strategy; there is nothing to recover).
-    """
-    entries: list[tuple[str, str, str]] = []
-    for table, column, namespace in iter_vault_columns(config):
-        src_tbl = sources.get(table)
-        out_tbl = outputs.get(table)
-        if src_tbl is None or out_tbl is None:
-            continue
-        if column not in src_tbl.schema.names or column not in out_tbl.schema.names:
-            continue
-        src_values = src_tbl.column(column).to_pylist()
-        out_values = out_tbl.column(column).to_pylist()
-        for src, masked in zip(src_values, out_values, strict=True):
-            if src is None or masked is None:
-                continue
-            entries.append((namespace, str(masked), str(src)))
-    return entries
+    sha256: str
+    size: int
+    entry_count: int
+    adopted: bool
+    _issuer: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._issuer is not _ISSUER:
+            raise FileAccessUnavailable("a vault commit is issued by the vault module")
+
+
+def issue_commit(blob: bytes, entry_count: int, *, adopted: bool) -> VaultCommit:
+    """The one issuer: for bytes just published, or a leaf adopted after its fsyncs."""
+    digest = hashlib.sha256(blob).hexdigest()
+    return VaultCommit(digest, len(blob), entry_count, adopted, _ISSUER)
 
 
 class VaultWriter:
@@ -330,8 +304,25 @@ class VaultWriter:
             VaultError: ``code='vault_crypto_not_installed'`` when the `cryptography` package is
                 missing; ``weak_mask_secret`` when the key is not the mask root's size;
                 ``vault_exists`` when the target exists; ``vault_commit_failed`` when the
-                write, fsync or link failed.
+                write, fsync or link failed, or a chain fsync failed after the link (the leaf is
+                kept, so a retry through `write` gets ``vault_exists``; only `publish_unit` adopts).
         """
+        blob, entries = self.serialize()
+        out: OutputDir
+        if isinstance(path, (str, Path)):
+            if not fileaccess.is_ambient(self._access):
+                raise FileAccessUnavailable(
+                    "a vault path string is accepted only under the ambient policy; "
+                    "pass an OutputDir issued by the policy"
+                )
+            out = self._access.output_dir(FileRequest(FileRole.VAULT, "write", str(path), "vault"))
+        else:
+            out = path
+        _publish(out, blob)
+        return entries
+
+    def _fold(self) -> tuple[list[tuple[str, str, str]], int]:
+        """The sorted invertible rows and the count of keys dropped for conflicting sources."""
         by_key: dict[tuple[str, str], str | None] = {}
         for namespace, masked, source in self._entries:
             key = (namespace, masked)
@@ -343,15 +334,17 @@ class VaultWriter:
         rows = sorted(
             (ns, masked, source) for (ns, masked), source in by_key.items() if source is not None
         )
+        return rows, ambiguous
+
+    def serialize(self) -> tuple[bytes, int]:
+        """The vault file's bytes and its entry count; nothing is written."""
+        rows, ambiguous = self._fold()
         import pyarrow.parquet as pq
 
-        # Build the Fernet (and surface the crypto-absent error) before any
-        # chunk work, so the failure point matches the pre-streaming writer.
+        # Build the Fernet first: a missing `cryptography` fails before any chunk work.
         fernet = self._fernet()
-        # chunk_rows/chunk_count are forensic/debug metadata only. load_vault
-        # does NOT trust them: it self-terminates on the framed token stream
-        # (while offset < len(blob)), so a tampered count cannot make the
-        # reader over- or under-read.
+        # chunk_rows/chunk_count are debug metadata only: load_vault reads the framed token
+        # stream to its end, so a tampered count cannot make it over- or under-read.
         chunk_count = (len(rows) + _CHUNK_ROWS - 1) // _CHUNK_ROWS
         header = {
             "format": VAULT_FORMAT_VERSION,
@@ -363,29 +356,30 @@ class VaultWriter:
         parts: list[bytes] = [_MAGIC, _frame(json.dumps(header, sort_keys=True).encode("utf-8"))]
         for start in range(0, len(rows), _CHUNK_ROWS):
             window = rows[start : start + _CHUNK_ROWS]
-            chunk_table = pa.table(
-                {
-                    "namespace": pa.array([r[0] for r in window], type=pa.string()),
-                    "masked": pa.array([r[1] for r in window], type=pa.string()),
-                    "source": pa.array([r[2] for r in window], type=pa.string()),
-                }
+            chunk_table = pa.Table.from_pylist(
+                [dict(zip(_SCHEMA.names, r, strict=True)) for r in window], schema=_SCHEMA
             )
             buf = pa.BufferOutputStream()
             pq.write_table(chunk_table, buf)
             # Encrypt this chunk and drop its plaintext before the next one.
             parts.append(_frame(fernet.encrypt(buf.getvalue().to_pybytes())))
-        out: OutputDir
-        if isinstance(path, (str, Path)):
-            if not fileaccess.is_ambient(self._access):
-                raise FileAccessUnavailable(
-                    "a vault path string is accepted only under the ambient policy; "
-                    "pass an OutputDir issued by the policy"
-                )
-            out = self._access.output_dir(FileRequest(FileRole.VAULT, "write", str(path), "vault"))
-        else:
-            out = path
-        _publish(out, b"".join(parts))
-        return len(rows)
+        return b"".join(parts), len(rows)
+
+    def publish(self, out: OutputDir) -> VaultCommit:
+        """`write` to a capability; the `VaultCommit` exists only once the leaf and its whole chain
+        were fsynced."""
+        blob, entries = self.serialize()
+        _publish(out, blob)
+        return issue_commit(blob, entries, adopted=False)
+
+    def reads_as_own(self, handle: FileHandle) -> bool:
+        """Whether `handle` opens under this key to exactly this writer's rows and dropped count."""
+        try:
+            mapping, ambiguous = load_vault(None, self._mask_key, vault=handle)
+        except VaultError:
+            return False
+        rows, own_ambiguous = self._fold()
+        return ambiguous == own_ambiguous and mapping == {(n, m): v for n, m, v in rows}
 
     def _fernet(self) -> Any:
         return _fernet(OpaqueBox(self._mask_key), _key_size(self._mask_key))
@@ -400,6 +394,7 @@ def _publish(out: OutputDir, data: bytes) -> None:
         try:
             serial.write_durable(fd, data)
             txn.publish()
+            out.sync_chain()  # the vault leaf's whole chain, before anything depends on it
         except FileExistsError:
             failure = "exists"
         except OSError:
@@ -536,24 +531,17 @@ def load_vault(
         if vault is None:
             handle.close()
     if not blob.startswith(_MAGIC):
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE,
-            message=f"{shown!r} is not a decoy vault file (bad magic header).",
-        )
+        raise _unreadable(f"{shown!r} is not a decoy vault file (bad magic header).")
 
-    # Parse + validate the UNENCRYPTED header before any decrypt, so a
-    # format/protocol-version mismatch yields a clear typed error instead of
-    # an opaque InvalidToken (the version byte is mixed into the vault key, so
-    # a cross-version vault is also undecryptable -- this makes the error
-    # diagnosable, it does not restore cross-version compatibility).
+    # Parse + validate the UNENCRYPTED header before any decrypt: a version mismatch then
+    # gets a clear typed error, not an opaque InvalidToken (it does not restore compatibility).
     header_bytes, offset = _read_frame(blob, len(_MAGIC))
     try:
         header = json.loads(header_bytes)
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE,
-            message=f"vault {shown!r} has an unreadable header",
-        ) from exc
+        if type(header.get("ambiguous_dropped", 0)) is not int:  # also bool, str, null
+            raise ValueError("ambiguous_dropped")
+    except (ValueError, UnicodeDecodeError, AttributeError) as exc:  # AttributeError: not a dict
+        raise _unreadable(f"vault {shown!r} has an unreadable header") from exc
     fmt = header.get("format")
     if fmt != VAULT_FORMAT_VERSION:
         raise VaultError(
@@ -574,7 +562,7 @@ def load_vault(
                 f"or use an engine at protocol version {vault_version!r}."
             ),
         )
-    ambiguous = int(header.get("ambiguous_dropped", 0))
+    ambiguous: int = header.get("ambiguous_dropped", 0)
 
     import pyarrow.parquet as pq
     from cryptography.fernet import InvalidToken
@@ -592,9 +580,17 @@ def load_vault(
                     "of the run that wrote it."
                 ),
             ) from exc
-        chunk = pq.read_table(pa.BufferReader(payload))
-        namespaces = chunk.column("namespace").to_pylist()
-        masked = chunk.column("masked").to_pylist()
-        sources = chunk.column("source").to_pylist()
-        mapping.update({(ns, m): s for ns, m, s in zip(namespaces, masked, sources, strict=True)})
+        rows = None  # the raise is outside the `except`, so no cause or context carries values
+        try:
+            chunk = pq.read_table(pa.BufferReader(payload))
+            if chunk.schema.equals(_SCHEMA) and not any(c.null_count for c in chunk.columns):
+                rows = list(zip(*(c.to_pylist() for c in chunk.columns), strict=True))
+        except (pa.ArrowException, KeyError, ValueError):
+            pass
+        if rows is None:
+            raise _unreadable("vault chunk is malformed")
+        known = len(mapping)
+        mapping.update({(ns, m): src for ns, m, src in rows})
+        if len(mapping) != known + len(rows):  # the writer folds duplicates, so one is corruption
+            raise _unreadable("vault holds a duplicate entry")
     return mapping, ambiguous

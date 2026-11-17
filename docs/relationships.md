@@ -37,6 +37,23 @@ join intact.
 If two unrelated columns must NOT collide, give them different namespaces. The
 engine rejects ambiguous namespace bindings at config time.
 
+### Generate-only relationships need no namespace
+
+A relationship whose parent and child tables are both generate tables (tables
+with `generate_columns`) masks nothing, so it needs no `namespace`. The engine
+derives a private label from the parent table and key columns. The label is not
+a declared namespace, is not bound to any column, and does not appear in the
+plan or the seed envelope. The generated rows are the same as for the same
+config without the `relationships:` block.
+
+A relationship with a mask table on either side still needs a namespace, and
+the engine refuses it with `namespace_missing`. A relationship that names a
+table not listed under `tables:` is refused as before.
+
+A config with a non-empty `relationships:` block runs on the full-frame route,
+including a generate-only one. The chunked route and shadow generation decline
+such a config, and the run reports the full-frame route.
+
 ## Orphans
 
 An orphan is a child row whose key has no matching parent. The `orphan_policy`
