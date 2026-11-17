@@ -38,6 +38,7 @@ from decoy_engine.config import (
 )
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.detection.types import DetectorSource, ModelRef
+from decoy_engine.profiling import recommendations
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
@@ -48,7 +49,9 @@ __all__ = [
     "build_entry",
     "check_starter_config",
     "declared_key_namespaces",
+    "detector_entry",
     "starter_config",
+    "swap_placeholder_namespaces",
 ]
 
 _KEY_STRATEGY = "hash"
@@ -103,6 +106,20 @@ class ColumnSuggestion:
     confidence_bucket: str | None = None
     entry: Mapping[str, Any] = field(default_factory=_empty_entry)
     live: bool = True
+
+    def __post_init__(self) -> None:
+        # `strategy`, `namespace` and `entry` describe one choice; a confirm matches on one and
+        # applies another, so they must agree. Only a regex suggestion is written into the config.
+        if self.live and self.source != "regex":
+            raise ValueError("only a regex suggestion can be live")
+        if self.entry and (
+            self.entry.get("name") != self.column
+            or self.entry.get("strategy") != self.strategy
+            or self.entry.get("namespace") != self.namespace
+        ):
+            raise ValueError(
+                "the suggestion's entry disagrees with its column, strategy or namespace"
+            )
 
 
 @dataclass(frozen=True)
@@ -221,6 +238,25 @@ def _suggestion(
     )
     named = dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
     return dataclasses.replace(named, entry=MappingProxyType(_entry(named)))
+
+
+def detector_entry(detector_id: str, column: str) -> dict[str, Any] | None:
+    """The column entry the starter writes for a column `detector_id` flagged, or None.
+
+    None when the detector has no starter choice. The namespace follows the same registry rule
+    as `starter_config`, so a review that takes a detector's default writes what a scan would.
+    """
+    choice = recommendations.starter_choice(detector_id)
+    if choice is None:
+        return None
+    bare = ColumnSuggestion(
+        "",
+        column,
+        choice.strategy,
+        provider=choice.provider,
+        provider_config=choice.provider_config,
+    )
+    return _entry(dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare)
 
 
 def _needs_namespace(s: ColumnSuggestion) -> bool:
@@ -374,12 +410,8 @@ def _refuse_shared_destinations(targets: Mapping[str, Any], table_names: Sequenc
         raise ValueError(f"tables {first!r} and {second!r} share one target destination")
 
 
-def check_starter_config(config: dict[str, Any]) -> PipelineConfig:
-    """Validate the config; a placeholder must be the only thing that fails it.
-
-    A failure here is a builder bug, so the error names codes and locations, never values.
-    """
-    expected = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
+def swap_placeholder_namespaces(config: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """A copy of `config` with every placeholder namespace set to a real one, and how many."""
     swapped = copy.deepcopy(config)
     placeholders = 0
     for table in swapped["tables"]:
@@ -387,6 +419,16 @@ def check_starter_config(config: dict[str, Any]) -> PipelineConfig:
             if str(column.get("namespace", "")).startswith(NAMESPACE_PLACEHOLDER_PREFIX):
                 column["namespace"] = _CHECK_NAMESPACE
                 placeholders += 1
+    return swapped, placeholders
+
+
+def check_starter_config(config: dict[str, Any]) -> PipelineConfig:
+    """Validate the config; a placeholder must be the only thing that fails it.
+
+    A failure here is a builder bug, so the error names codes and locations, never values.
+    """
+    expected = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
+    swapped, placeholders = swap_placeholder_namespaces(config)
     failed = _problems_of(swapped)
     if failed is not None:
         raise PipelineConfigError.from_problems(failed, prefix="starter config failed validation")

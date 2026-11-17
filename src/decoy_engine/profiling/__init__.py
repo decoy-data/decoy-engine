@@ -41,7 +41,9 @@ from decoy_engine.profiling._starter_config import (
     build_entry,
     check_starter_config,
     declared_key_namespaces,
+    detector_entry,
     starter_config,
+    swap_placeholder_namespaces,
 )
 from decoy_engine.profiling._value_redaction import (
     MIN_RELEASE_COUNT,
@@ -140,6 +142,7 @@ __all__ = [
     "check_starter_config",
     "column_distinct",
     "declared_key_namespaces",
+    "detector_entry",
     "diff_scan_documents",
     "diff_scan_tables",
     "distribution_snapshot_document",
@@ -158,4 +161,5 @@ __all__ = [
     "scan_sources",
     "snapshot_joint_warnings",
     "starter_config",
+    "swap_placeholder_namespaces",
 ]
