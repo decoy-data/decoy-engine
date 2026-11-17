@@ -144,9 +144,13 @@ card, account number) and you cannot change its shape.
 
 ### date_shift
 
-Shifts each date by a deterministic per-value offset within a bounded range.
-Same source date maps to the same shifted date within a namespace; byte-stable
-across runs. Null and unparseable values are left as-is. Needs a namespace.
+Shifts each date by a keyed per-value offset within a bounded range. The offset
+derives from the mask key (the admitted mask secret, at least 32 bytes), so a
+run with no mask secret is refused before any source is read. Same source date
+maps to the same shifted date within a namespace; byte-stable across runs for
+the same secret. Null values are left as-is. A non-null value that does not
+parse as a date records a `format_error` row error and is never written to the
+output as it came in. Needs a namespace.
 
 - `min_days` / `max_days`: the offset range (defaults -365 and 365). If
   reversed, they are swapped.
@@ -434,7 +438,8 @@ TIER-1 detector set may not cover all PII present.
 #### Cross-cell determinism
 
 The `faker` and `date_shift` span strategies key each matched span by
-`HMAC-SHA256(job_seed, matched_text)` (RFC 2104). The key depends only on the
+`HMAC-SHA256(mask_key, matched_text)` (RFC 2104), where `mask_key` is the
+admitted mask secret. The key depends only on the
 matched value, not on surrounding cell text, column name, or row index, so
 the same name or date in two different cells always produces the same
 synthetic replacement.
@@ -1250,7 +1255,7 @@ are not affected.
 
 ## Generation strategies (generate mode)
 
-In `mode: generate`, each column declares a `type` instead of a `strategy`.
+In a generate table (one with `generate_columns`), each column declares a `type` instead of a `strategy`.
 
 `sequence`, `categorical`, `faker` and `reference` columns accept `unique: true`, and a table
 accepts `unique_together` for pairs of `reference` columns. See

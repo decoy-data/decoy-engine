@@ -385,3 +385,73 @@ fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations other than the three above and the full suite.
+
+## Main merge (2026-11-16, `b886c61d`)
+
+`origin/main` moved during the checks above. `origin/main` `b886c61d` (#613, the scan-checks
+evidence baseline member and `on_drift` surface; #614, the README; #615, generate-only edges
+take a derived namespace in `relationships/_namespace.py`) merged into `312c12ab` as `3f26668f`.
+One registry conflict, `src/decoy_engine/reasons/warning/_part1.py`: main added
+`SCAN_BASELINE_MISSING` and this slice added `REFERENCE_PARENT_POOL_EMPTY` at the same place in
+`__all__` and in the definitions. Both are kept in name order, each with `since=UNRELEASED` as
+its side had it; nothing was renumbered. `docs/strategies.md` merged without a conflict. Main
+does not touch the draw-site catalogue, `.importlinter`, `uv.lock` or `generation/`. Main's three
+new changelog fragments arrive beside this slice's `changelog.d/gen-rel-e1.md`, which is kept.
+
+Checks on `3f26668f`, Python 3.10.20, `origin/main` `b886c61d`: ruff, format and mypy pass;
+`tests/sentry` 5895 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `57f5d25f`)
+
+`origin/main` moved again after the merge above. `origin/main` `57f5d25f` (#612, the date-shift
+MD5 offset path deleted and the unkeyed refusal pinned) merged into `0fb88b14` as `7fdaf539`.
+One test conflict, `tests/native/test_draw_sites_catalogue_pinned.py`: both sides re-pinned
+`_CATALOGUE_DIGEST`, main for its `mask.date_shift` metadata and this slice for
+`gen.reference`. The per-entry digests merged without a conflict (each side pins only its own
+entry), so the whole-tuple digest is neither side's value: it is re-pinned to the merged
+catalogue's digest, with main's comment kept and one line saying the pin carries both. No
+catalogue entry changed in the merge, and the two draw-site catalogue tests pass on it. Main also
+shrinks the secret-material census and three sentry baselines by its own deletions; nothing of
+this slice's grows. Main does not touch `.importlinter`, `uv.lock` or `generation/`. Main's
+changelog fragment arrives beside this slice's, which is kept.
+
+Checks on `7fdaf539`, Python 3.10.20, `origin/main` `57f5d25f`: ruff, format and mypy pass;
+`tests/sentry` 5914 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `85429533`)
+
+`origin/main` moved again after the merge above. `origin/main` `85429533` (#611, the
+distribution behavior table moved from `execution/_distribution_behavior.py` to
+`contracts/distribution_behavior.py`) merged into `82f83a56` as `1c3d70af`, without a conflict.
+No source or test file of this slice imports the moved module. Main's move lowers the
+`execution/` fan-out ceiling from 104 to 103 and drops the import-layer baseline key for the old
+path; this slice adds no module to `execution/`, so nothing of this slice's grows. Main does not
+touch `uv.lock`, `generation/` or the draw-site catalogue. Main's changelog fragment arrives
+beside this slice's, which is kept.
+
+Checks on `1c3d70af`, Python 3.10.20, `origin/main` `85429533`: ruff, format and mypy pass;
+`tests/sentry` 5914 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
