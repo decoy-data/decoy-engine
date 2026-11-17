@@ -6,10 +6,13 @@ resident tables, and writes every target (CSV through `generated_table_to_pandas
 Parquet through `pq.write_table`, fixed_width through a copy-and-write like the CLI's
 `_write_fixed_width`). The supervisor (`_supervisor.run_worker`) reads peak RSS from outside.
 
-Passed to `run_pipeline`: the config, the resident tables and a key provider. Not passed: the
-vault writer, quarantine path and report flags (outside the estimate, plan section 2), and the
-CLI's resource limits and native gate result (the CLI is not importable from the engine repo).
-The record lists them under `not_passed`.
+Passed to `run_pipeline`: the config, the resident tables, a key provider and the CLI's `auto`
+resource kwargs (`native_threads`, `out_of_core_threads` from `detect_usable_cpus`,
+`out_of_core_budget_bytes` from `resolve_conservative_ooc_budget_bytes`). The CLI itself is not
+importable from the engine repo, so these come from the engine helpers the CLI also uses. The
+native gate result is the default (`unified_slice_enabled` is not passed; the CLI passes it only
+to turn it off). Not passed: the vault writer, quarantine path and report flags (outside the
+estimate, plan section 2). The record lists them under `not_passed`.
 
     python scripts/fk-scale/bench_worker_lifecycle.py --cell AT-E1-17 --rows 1000000
 """
@@ -295,10 +298,15 @@ def run_child(args: argparse.Namespace) -> int:
     sys.path[:0] = [str(repo / "src")]
     record: dict[str, Any] = {"schema": SCHEMA, "completed_inner": False}
     try:
-        from decoy_engine import run_pipeline
+        from decoy_engine import (
+            detect_usable_cpus,
+            resolve_conservative_ooc_budget_bytes,
+            run_pipeline,
+        )
         from decoy_engine.keyprovider import SecretKeyProvider
 
         config = json.loads(Path(args.config).read_text())
+        threads = detect_usable_cpus()
         t0 = time.perf_counter()
         tables = _read_sources(config)
         t1 = time.perf_counter()
@@ -308,6 +316,11 @@ def run_child(args: argparse.Namespace) -> int:
             engine_version="f24-lifecycle-accuracy",
             key_provider=SecretKeyProvider(b"decoy-bench-throwaway-secret-0123456789"),
             base_dir=Path(args.config).parent,
+            # What the CLI's `_resources.run_pipeline_kwargs` passes for `auto` settings: the
+            # usable CPUs and the conservative out-of-core budget, both from engine helpers.
+            native_threads=threads,
+            out_of_core_threads=threads,
+            out_of_core_budget_bytes=resolve_conservative_ooc_budget_bytes(),
         )
         t2 = time.perf_counter()
         _write_targets(config, result.outputs)
@@ -368,7 +381,7 @@ def supervise(args: argparse.Namespace) -> dict[str, Any]:
         "result": outcome.result or {},
         "config": config,
         "work_dir": str(work) if args.keep else None,
-        "not_passed": ["vault_writer", "quarantine_path", "report flags", "resource limits"],
+        "not_passed": ["vault_writer", "quarantine_path", "report flags"],
     }
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)

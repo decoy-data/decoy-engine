@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pyarrow as pa
 
@@ -50,6 +50,9 @@ NOTE_SOURCE_NOT_LOCAL = "lifecycle not priced: source {table} is not a local fil
 NOTE_SOURCE_FORMAT = "lifecycle not priced: source {table} has a format with no rule"
 NOTE_TARGET_FORMAT = "lifecycle not priced: target {table} has a format with no rule"
 NOTE_LAYOUT = "lifecycle not priced: layout of target {table} not readable"
+NOTE_OUTPUT_WIDTH = (
+    "lifecycle not priced: column {column} has an output width its strategy does not declare"
+)
 NOTE_FAILED = "lifecycle not priced ({error})"
 
 NOTE_SHAPES = frozenset(
@@ -60,13 +63,14 @@ NOTE_SHAPES = frozenset(
         NOTE_SOURCE_FORMAT,
         NOTE_TARGET_FORMAT,
         NOTE_LAYOUT,
+        NOTE_OUTPUT_WIDTH,
         NOTE_FAILED,
     }
 )
 
 
 def _shape_pattern(shape: str) -> re.Pattern[str]:
-    parts = re.split(r"\{(?:table|error)\}", shape)
+    parts = re.split(r"\{(?:table|error|column)\}", shape)
     return re.compile(".+".join(re.escape(p) for p in parts))
 
 
@@ -90,6 +94,10 @@ class ColumnInputs:
     arrow_type: pa.DataType
     has_nulls: bool
     spec: ColumnSizeSpec
+    # What the column holds after its strategy ran; None means the input form (a strategy that
+    # keeps the type, or a table built before output specs are attached).
+    output_spec: ColumnSizeSpec | None = None
+    output_arrow_type: pa.DataType | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,37 @@ class Lifecycle:
 
 def table_spec(t: TableInputs) -> TableSizeSpec:
     return TableSizeSpec(name=t.name, row_count=t.rows, columns=tuple(c.spec for c in t.columns))
+
+
+def _cell_bytes(spec: ColumnSizeSpec) -> float:
+    return _priced(TableSizeSpec("c", 1000, (spec,))) / 1000
+
+
+def working_spec(c: ColumnInputs) -> ColumnSizeSpec:
+    """The larger of a column's input and output cell: the route holds whichever is bigger."""
+    out = c.output_spec
+    if out is None or _cell_bytes(out) <= _cell_bytes(c.spec):
+        return c.spec
+    return out
+
+
+def working_table_spec(t: TableInputs) -> TableSizeSpec:
+    return TableSizeSpec(t.name, t.rows, tuple(working_spec(c) for c in t.columns))
+
+
+def output_table(t: TableInputs) -> TableInputs:
+    """The table as written: each column in its output form."""
+    columns = tuple(
+        replace(
+            c,
+            spec=c.output_spec if c.output_spec is not None else c.spec,
+            arrow_type=c.output_arrow_type if c.output_arrow_type is not None else c.arrow_type,
+            output_spec=None,
+            output_arrow_type=None,
+        )
+        for c in t.columns
+    )
+    return replace(t, columns=columns)
 
 
 def _is_string(spec: ColumnSizeSpec) -> bool:
@@ -294,7 +333,7 @@ def _ingest(inputs: PhaseInputs, intercept: int) -> int:
 
 
 def _execute(inputs: PhaseInputs) -> int:
-    base = estimate_peak_bytes(tuple(table_spec(t) for t in inputs.tables), inputs.path)
+    base = estimate_peak_bytes(tuple(working_table_spec(t) for t in inputs.tables), inputs.path)
     if base.estimated_bytes is None:
         raise ValueError("lifecycle needs every column priced")
     arrows = [arrow_bytes(t) for t in inputs.tables]
@@ -309,8 +348,9 @@ def _execute(inputs: PhaseInputs) -> int:
 
 
 def _write(inputs: PhaseInputs, intercept: int) -> int:
-    resident = 2 * sum(arrow_bytes(t) for t in inputs.tables)  # inputs plus outputs
-    transient = max(WRITE_TRANSIENT[t.target.format](t) for t in inputs.tables)
+    outputs = [output_table(t) for t in inputs.tables]
+    resident = sum(arrow_bytes(t) for t in inputs.tables) + sum(arrow_bytes(o) for o in outputs)
+    transient = max(WRITE_TRANSIENT[o.target.format](o) for o in outputs)
     return intercept + resident + transient
 
 
