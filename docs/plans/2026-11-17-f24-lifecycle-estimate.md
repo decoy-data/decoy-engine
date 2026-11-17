@@ -308,17 +308,31 @@ same over-predict-by-design rule as FM-6 (FM-14).
 
 The rule:
 
+- The output cell is a fact of the strategy handler, so the handler declares it (one place, owned
+  by the code that writes the cell). Two optional members on a scalar handler, read by the
+  lifecycle through `SCALAR_HANDLERS[strategy]` (`execution/_strategies/__init__.py:48`) with
+  `getattr` defaults, so a handler that declares nothing is "unknown":
+  - `output_is_input: bool` (default False). True on `PassthroughHandler` only: its `run`
+    returns the frame unchanged (`_strategies/_passthrough.py:31`).
+  - `output_string_width(provider_config) -> int | None`: the UTF-8 width of every non-null cell
+    the handler writes, or None when the config makes it unknown (a `redact_with` that is not a
+    str), which the lifecycle treats as a handler that declares nothing. `HashStrategyHandler`: `truncate` when it is a positive int, else the hex length
+    of the HMAC-SHA256 digest `derive` returns (64). `RedactHandler`: the UTF-8 length of
+    `redact_with`, default `_DEFAULT_REDACT_WITH`. Each handler moves its config parsing (the
+    `truncate` test at `_strategies/_hash.py:56-57`, the `redact_with` lookup at
+    `_strategies/_redact.py:43`) into one module function that both `run` and
+    `output_string_width` call, so the declaration and the behavior read the same value.
+  - A guard test (AT-E1-30) runs each declaring handler on a small int64 frame and asserts every
+    non-null output cell has the declared width, so the declaration cannot drift from `run`.
+  - The lifecycle holds no strategy names or widths of its own; AT-E1-30 also checks that
+    `_lifecycle_inputs.py` and `_lifecycle.py` contain no strategy-name literal.
 - Each mask column gets an output spec from its compiled plan seed (`ColumnSeed.strategy` and
   `provider_config` through `provider_config_to_dict`, the values the handlers read):
-  - `passthrough`, and a column the plan leaves unconfigured: the input spec.
-  - `hash`: a string of width `truncate` when it is a positive int (the handler's own test,
-    `_strategies/_hash.py:56-57`), else `2 * hashlib.sha256().digest_size` (64), the hex length
-    of the HMAC-SHA256 digest `derive` returns.
-  - `redact`: a string of width `len(redact_with.encode("utf-8"))`, with the default read from
-    `_DEFAULT_REDACT_WITH` (`_strategies/_redact.py:23`), not restated.
+  - A handler with `output_is_input`, and a column the plan leaves unconfigured: the input spec.
+  - A handler with `output_string_width`: a string of that width.
   - An FK child column (an edge in the relationship graph names it): the output spec of the parent
     key column, because `_resolve_fk_node` writes the parent's masked values into the child.
-  - Any other strategy: a string input keeps its input spec (the revision 4 rule, V2-LOG); a
+  - A handler that declares neither: a string input keeps its input spec (the revision 4 rule, V2-LOG); a
     non-string input leaves the lifecycle unpriced with `NOTE_OUTPUT_WIDTH` naming `table.column`
     (FM-13). Never a guessed width.
   - The output keeps the input's null flag (`hash` and `redact` keep nulls).
@@ -444,10 +458,9 @@ execute phase above `peak_bytes`; the docstring and the docs section say which n
   - Widths: `_mask_specs` or the generate adapters.
   - Format names: `FILE_FORMATS` keys.
   - Note texts: one constants block.
-  - Output specs (section 4.2a): one function in `_lifecycle_inputs.py` reads each column's
-    compiled plan seed. The hash width comes from `hashlib.sha256().digest_size`, the redact
-    default from `_DEFAULT_REDACT_WITH`, the `truncate` and `redact_with` values through
-    `provider_config_to_dict`, as the handlers read them. No width is restated as a literal.
+  - Output cells (section 4.2a): declared by the strategy handler that writes them
+    (`output_is_input`, `output_string_width`), checked against `run` by AT-E1-30. The lifecycle
+    only reads the declaration; it holds no strategy name or width.
 - No private reach across packages: execution code imports generation only through
   `decoy_engine.generation` (catalog class 6). The guard test may read `FILE_FORMATS` from its
   private module; production code keys on the literal format names, and the guard pins them equal.
@@ -498,7 +511,8 @@ devbox. Accuracy cells are `benchmark`-marked and run on a test VM through `~/bi
 | AT-E1-16 | Transforms: a mask table with a declared transform adds one `arrow(t)` to execute | module does not exist | drop the transform copy |
 | AT-E1-20 | Format registry: the lifecycle rule table's keys equal `FILE_FORMATS` keys; a descriptor with an unknown format gives lifecycle defaults and a note | rule table does not exist | remove `fixed_width` from the rule table |
 | AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned (it includes `NOTE_OUTPUT_WIDTH`) | notes block does not exist | build a note with an inline f-string |
-| AT-E1-29 | Output specs (section 4.2a): an int64 column under `hash` is priced in execute and write as a string of width 64, and of width `truncate` when set; under `redact` as a string of `len(redact_with)` (default from `_DEFAULT_REDACT_WITH`); under `passthrough` with its input spec; an FK child column takes its parent key column's output spec; an int64 column under another strategy (`bucketize`) leaves the lifecycle at defaults with `NOTE_OUTPUT_WIDTH`; on sequential the basis is the two largest tables over working specs; `peak_bytes` and `route` equal their values with output specs off | output specs do not exist | (a) price execute with the input specs; (b) ignore `truncate`; (c) price an unknown-strategy int64 column at its input spec; (d) feed output specs into `peak_bytes` |
+| AT-E1-29 | Output specs (section 4.2a): an int64 column under `hash` is priced in execute and write as a string of width 64, and of width `truncate` when set; under `redact` as a string of `len(redact_with)` (default from `_DEFAULT_REDACT_WITH`); under `passthrough` with its input spec; an FK child column takes its parent key column's output spec; an int64 column under a strategy whose handler declares neither member (`bucketize`) leaves the lifecycle at defaults with `NOTE_OUTPUT_WIDTH`; on sequential the basis is the two largest tables over working specs; `peak_bytes` and `route` equal their values with output specs off | output specs do not exist | (a) price execute with the input specs; (b) ignore `truncate`; (c) price an unknown-strategy int64 column at its input spec; (d) feed output specs into `peak_bytes` |
+| AT-E1-30 | Handler output declarations: `HashStrategyHandler` (default, `truncate=12`) and `RedactHandler` (default, `redact_with="XX"`, `redact_with="é"`) run on a small int64 frame with a null; every non-null output cell's UTF-8 length equals `output_string_width(provider_config)`; `PassthroughHandler` returns the frame unchanged and declares `output_is_input`; no other handler in `SCALAR_HANDLERS` declares either member without a parity case here; `_lifecycle.py` and `_lifecycle_inputs.py` hold no string literal equal to a `SCALAR_HANDLERS` key (AST scan) | members do not exist | (a) return 64 from the hash declaration whatever `truncate` is; (b) count characters, not UTF-8 bytes, in the redact declaration; (c) put a `"hash"` literal back in `_lifecycle_inputs.py` |
 | AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column (the int column already integer-typed) adds exactly `max(coerce_moment, list_moment)` as section 4.2 defines it (not the summed form, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum the two moments instead of taking the larger |
 | AT-E1-28 | Fixed-width integer coercion: a CSV-sourced string column the target layout types `int` adds `coerce(c) = rows * (8 + int_object + 9)` to the coerce moment for the largest such column only, and `lists` prices it as an int object per cell, not as its input string spec; an integer-typed column adds no coerce term; with two int-declared string columns the coerce moment adds `converted` for both (the first column stays resident as `Int64` while the second is coerced); an unreadable layout leaves the write term unpriced with the constant note | module does not exist | (a) drop the `coerce(c)` term; (b) price `int_cols` lists with the input spec; (c) add `coerce` for every int column instead of the largest; (d) drop `converted` |
 | AT-E1-22 | Helper parity: `arrow_column_bytes(t, rows, 0)` equals the base head's `_arrow_column_floor(t, rows)` for a matrix of types (bool, int8 to int64, float32/64, string, large_string, timestamp, date32); `generation_floor_bytes` is unchanged on the merged generation fixtures | helper does not exist | drop the ceil division for bool |
@@ -597,6 +611,9 @@ Revision 5 corrections from the 84-E1 calibration record (head `b1213e83a`):
 | `tests/sentry/test_physical_seam_disconnection.py`, the inline set in `permitted_non_physical` (beside `_job_estimate.py`) | `src/decoy_engine/execution/pipeline/_lifecycle.py` (E1) | lifecycle phase arithmetic for `estimate_job`; imports `_mem_estimate` and `_arrow_types` only, nothing under `execution.physical` |
 | same | `src/decoy_engine/execution/pipeline/_lifecycle_inputs.py` (E1) | bounded sample reads and phase inputs for `estimate_job`; imports profile readers and `_mem_estimate*` only, nothing under `execution.physical` |
 | same | `src/decoy_engine/execution/pipeline/_lifecycle_generate.py` (E2) | generate and mixed lifecycle terms; imports `decoy_engine.generation` and `_lifecycle` only, nothing under `execution.physical` |
+| same | `src/decoy_engine/execution/_strategies/_hash.py` (E1, changed) | declares its output cell (`output_string_width`) and shares its `truncate` parsing with `run`; no physical import (the list already carries other `_strategies/` handlers, such as `_truncate.py`) |
+| same | `src/decoy_engine/execution/_strategies/_redact.py` (E1, changed) | declares its output cell and shares its `redact_with` lookup with `run`; no physical import |
+| same | `src/decoy_engine/execution/_strategies/_passthrough.py` (E1, changed) | declares `output_is_input`; no physical import |
 | `tests/sentry/source_config/test_declaration_gate.py`, `READERS` | `("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "resolve_csv_dialect")` | the estimate's bounded sample read; `estimate_job._estimate` runs `prepare_declared_execution_sources` and `profile_source` (the gate) before `_sample_stage` reaches it |
 | same | `("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "read_csv_source")` | same: a sample of at most 10,000 rows, after the gate in `_estimate` |
 | same | `("execution/pipeline/_lifecycle_inputs.py", "_read_parquet", "build_lazy_source")` | same: first batch only, after the gate in `_estimate` |
@@ -628,7 +645,7 @@ Revision 5 corrections from the 84-E1 calibration record (head `b1213e83a`):
 | `arrow_column_bytes` | `src/decoy_engine/_arrow_types.py` (existing, 49 lines) | bottom leaf "shared across layers"; imports only pyarrow |
 | Payload-aware generation bytes and export | `src/decoy_engine/generation/_bounds.py`, `src/decoy_engine/generation/__init__.py` | existing generation modules; export follows `resident_floor_shortfall` |
 | Result fields and wiring | `src/decoy_engine/execution/_job_estimate.py` | existing module (214 lines, ends near 300) |
-| Output specs (revision 5) | `src/decoy_engine/execution/pipeline/_lifecycle_inputs.py` (new in E1) | same row; it already reads the config and samples, so the plan-seed read sits beside them |
+| Output specs (revision 5) | `src/decoy_engine/execution/pipeline/_lifecycle_inputs.py` (new in E1) reads them; the declarations sit on the handlers in `src/decoy_engine/execution/_strategies/_hash.py`, `_redact.py`, `_passthrough.py` (existing) | the handler owns the cell it writes; the lifecycle only reads it |
 | Largest row group bytes | `src/decoy_engine/profile/_readers.py` `FooterFacts` (existing) | the footer facts owner; one defaulted field |
 | Sentry registrations | `tests/sentry/test_physical_seam_disconnection.py`, `tests/sentry/source_config/test_declaration_gate.py` (existing) | the rows in section 9, one per new module or reader site |
 | Unit tests | `tests/unit/execution/pipeline/` (new folder), `tests/unit/test_arrow_types.py` | "Unit tests" row: mirror `src/` |
@@ -740,8 +757,10 @@ Recurring-defects catalog classes, as they apply to this plan:
 
 - No FK: single or multiple independent tables, any route.
 - FK chain and fan-in: they only change the route and therefore the execute term; the ingest and
-  write sums are per table and do not depend on edges. AT-E1-18 and AT-E1-19 cover a chain on
-  sequential and out_of_core.
+  write sums are per table and do not depend on edges. AT-E1-18 and AT-E1-19 cover a chain. The
+  router put AT-E1-19 on sequential, and AT-E1-18 was predicted sequential and realized
+  out_of_core, so no accuracy cell checks out_of_core with a matching route; AT-E1-3 pins the
+  out_of_core term (section 8.3).
 
 ### Fields
 
@@ -760,7 +779,7 @@ Recurring-defects catalog classes, as they apply to this plan:
 
 | Slice | Repo | Production files | Count | Lines | Depends on | Risk |
 |---|---|---|---|---|---|---|
-| 84-E1 | engine | `execution/pipeline/_lifecycle.py` (new), `execution/pipeline/_lifecycle_inputs.py` (new), `execution/_job_estimate.py`, `_arrow_types.py`, `generation/_bounds.py` (helper call only), `profile/_readers.py` (one defaulted `FooterFacts` field); plus the worker, unit and perf tests, the section 9 sentry rows, CODEMAP rows, frozen-surface sentence, calibration record, changelog fragment | 6 | about 650 production (revision 5 adds the output specs, about 50) | #328 (merged) | R2 (reads source values for widths, a value-leak surface; changes values on a public result) |
+| 84-E1 | engine | `execution/pipeline/_lifecycle.py` (new), `execution/pipeline/_lifecycle_inputs.py` (new), `execution/_job_estimate.py`, `_arrow_types.py`, `generation/_bounds.py` (helper call only), `profile/_readers.py` (one defaulted `FooterFacts` field), `execution/_strategies/_hash.py`, `_redact.py`, `_passthrough.py` (output declarations); plus the worker, unit and perf tests, the section 9 sentry rows, CODEMAP rows, frozen-surface sentence, calibration record, changelog fragment | 9 | about 680 production (revision 5 adds the output specs and declarations, about 80) | #328 (merged) | R2 (reads source values for widths, a value-leak surface; changes values on a public result) |
 | 84-E2 | engine | `execution/pipeline/_lifecycle_generate.py` (new), `execution/_job_estimate.py`, `execution/pipeline/_lifecycle.py`, `generation/_bounds.py`, `generation/__init__.py`; plus tests, docs section, compatibility entry, changelog fragment | 5 | about 350 production | 84-E1 merged | R1 (no source values; one additive export) |
 
 Gates: R2 is Dennis then Codex on the exact head; R1 is Codex only. Tests: T0 per edit, T1 per
@@ -926,6 +945,11 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
     lower-only as string-output cells; AT-E1-27 stays bounded and is recorded as execute-limited.
     New FM-13 and FM-14, new note constant, new unit cell AT-E1-29, pre-mortem and follow-ups
     updated.
+  - Codex delta round 1 on `bd53d4de4`, NO-GO: the output widths were a second strategy registry
+    in the lifecycle. Fixed: the handlers declare their output cell (`output_is_input`,
+    `output_string_width`), sharing their config parsing with `run`; guard AT-E1-30 checks the
+    declarations against `run` and keeps strategy names out of the lifecycle; three permit rows for
+    the changed handler files. Also fixed: section 14 no longer claims an out_of_core FK cell.
   - Sentries: section 9 is now a table, one row per registration with its reason: the three
     physical-seam permit rows and the four declaration-gate `READERS` rows for the sample readers
     in `_lifecycle_inputs.py` (missed in revision 4). No other allowlist, cap, pin or baseline
