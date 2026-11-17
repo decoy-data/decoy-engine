@@ -41,14 +41,14 @@ from decoy_engine.internal.pandas_compat import finite_numeric_cells, utc_naive_
 MAX_DECIMAL_PLACES: Final = 15
 
 # Microseconds per unit, coarsest first.
-_UNIT_MICROS: Final = (
+UNIT_MICROS: Final = (
     ("day", 86_400_000_000),
     ("hour", 3_600_000_000),
     ("minute", 60_000_000),
     ("second", 1_000_000),
     ("millisecond", 1_000),
 )
-RESOLUTIONS: Final = frozenset(name for name, _ in _UNIT_MICROS) | {"microsecond"}
+RESOLUTIONS: Final = frozenset(name for name, _ in UNIT_MICROS) | {"microsecond"}
 
 
 def _is_places(value: object) -> bool:
@@ -128,7 +128,7 @@ def _resolution(non_null: pd.Series) -> str:
     if len(stamps) == 0 or (stamps.dt.nanosecond != 0).any():
         return "microsecond"
     micros = stamps.to_numpy(dtype="datetime64[us]").astype("int64")
-    for name, size in _UNIT_MICROS:
+    for name, size in UNIT_MICROS:
         if (micros % size == 0).all():
             return name
     return "microsecond"

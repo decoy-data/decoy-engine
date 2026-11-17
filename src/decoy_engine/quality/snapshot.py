@@ -206,7 +206,7 @@ def compute_distribution_snapshot(
 
         add_fanout(columns_block, df, fanout_columns)
     if cell_format:
-        from decoy_engine.profiling._cell_format import add_cell_format
+        from decoy_engine.profiling.cell_format import add_cell_format
 
         add_cell_format(columns_block, df)
     from decoy_engine.generation.statistical import add_numeric_shape
