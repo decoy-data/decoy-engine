@@ -48,7 +48,6 @@ ignore_imports =
     decoy_engine.profile._declared_columns -> decoy_engine.execution._transforms
     decoy_engine.profiling._scan_integrity -> decoy_engine.execution.out_of_core._duckdb
     decoy_engine.profiling._snapshot_values -> decoy_engine.generation.pool._events
-    decoy_engine.profiling._snapshot_values -> decoy_engine.generation.statistical._cell_format
     decoy_engine.profiling._snapshot_values -> decoy_engine.quality.snapshot
     decoy_engine.profiling.scan_set -> decoy_engine.execution._guards
     decoy_engine.telemetry._recorder -> decoy_engine.progress

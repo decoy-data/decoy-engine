@@ -39,9 +39,9 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine.generation.statistical._degenerate import refuse_degenerate
+from decoy_engine.internal.pandas_compat import finite_numeric_cells
 from decoy_engine.profiling import MIN_RELEASE_COUNT
 from decoy_engine.quality import CATEGORICAL_DISTINCT_CAP
-from decoy_engine.quality.snapshot import finite_numeric_cells
 
 GRID_KEY: Final = "quantile_grid"
 EXACT_KEY: Final = "exact_values"
