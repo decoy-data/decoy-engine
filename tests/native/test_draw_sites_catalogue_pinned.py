@@ -61,7 +61,7 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24zb: mask.date_shift metadata (call site, seed text, notes) only.
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
-_CATALOGUE_DIGEST = "0a839bb80ea3d1196dcaaf45d5a6385fe41f71021db51397a10ceab8a2ecd540"
+_CATALOGUE_DIGEST = "ccf929c0bd98033f05f6db766f04fbaea02be293d9964ab9a73a96c9bc9460f3"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -111,7 +111,7 @@ _ORDERED_IDS = [
 _ENTRY_DIGESTS = [
     "e20e8ee9afc564f34870205cabb2d7ce4da58b391e4d8c5cc754a77eca2185bf",  # mask.shuffle
     "46f06d1dbc4e5d0fbdb0eeac203fbdba6d6d157c9b4b46f0971f48d66a284e5a",  # mask.hash
-    "12e73378be96646a068a9e6ba4599743895983fc8e00c425153ed18641a55c15",  # mask.categorical_deterministic
+    "bd06bcb22c55f7423682660accf32079fce98bc13403eb3f1111aeabcc764b70",  # mask.categorical_deterministic
     "9aa436b5ecf26021ee8649c0ea47eec71f92064699828e183046db70d0f66412",  # mask.categorical_nondeterministic
     "1250c6e03f61cdc000a73f7f8f76088402fb6f5407e40d8a31e58052130bc571",  # mask.fpe
     "28a6b8a9a742bab28c5bbcea40da447b80719c66f8961a1a24735b955559d0fc",  # mask.date_shift
@@ -140,7 +140,7 @@ _ENTRY_DIGESTS = [
     "60d3a8236357b837990a978b3b84fa9681dfca409cf1896d13a3cc9e30d6079e",  # gen.reference_unique
     "81257af1bd65184ee366d01bd5f28e89bb58d7c09ab47e0c0543776a945453ba",  # gen.unique_pair
     "916ebf46efe090c9bffbef46663ff183797ad0adb588e13e0a560bc3a6e2fbed",  # mask.faker
-    "932378def48490921759f828213bfb1c992a6bb700be9a6e06055143a937e0c9",  # gen.pool_build_faker
+    "cb0c2d260f36b7d2f4e2d1f0755896e082e01822075e5073b6c76ceb08316b60",  # gen.pool_build_faker
     "e5e15c7f6cf521636920a2d6c4141e63ff8a49bb8256385c4a5230c577376146",  # gen.identifier_deterministic
     "c175f6bbb2e582aff8d45beee43466397a3c29ed6b0b5e8986d7863cf6909f57",  # gen.identifier_nondeterministic
     "5e6fa8311c566b1ffeb9e2d8496d76ee0bb91b37827e074b587384b90b9c3328",  # gen.derive_context
