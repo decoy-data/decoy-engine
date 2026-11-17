@@ -8,6 +8,7 @@ reader are strict about types.
 
 from __future__ import annotations
 
+import ast
 import copy
 import dataclasses
 import importlib.metadata
@@ -32,6 +33,7 @@ from decoy_engine.support import (
     build_runtime_lock,
     compare_runtime_locks,
     read_runtime_lock,
+    run_probe,
 )
 from tests.unit.delivery.resume import _docs
 
@@ -86,6 +88,7 @@ def test_lock_has_exactly_the_declared_fields_and_round_trips() -> None:
         "data_digest",
         "dependencies",
         "key_version",
+        "probe",
     }
     assert document["schema"] == "lock/v1"
     assert document["tz"] == "UTC"
@@ -399,7 +402,7 @@ def test_an_added_field_under_lock_v1_is_ignored() -> None:
     document = _sample()
     expected = read_runtime_lock(json.dumps(document))
     document["added_later"] = {"anything": [1, 2, 3]}
-    document["probe"] = "0" * 64
+    document["added_later_2"] = "0" * 64
     assert read_runtime_lock(json.dumps(document)) == expected
 
 
@@ -444,3 +447,82 @@ def test_reading_does_not_mutate_the_input() -> None:
     snapshot = copy.deepcopy(document)
     read_runtime_lock(json.dumps(document))
     assert document == snapshot
+
+
+# AT-E2-7, AT-E2-9, AT-E2-10, AT-E2-15 (slice 78-E2: the optional `probe` field) -------------------
+
+HEX = "ab" * 32
+
+
+def test_a_built_lock_carries_the_probe_and_a_sample_without_one_reads_as_none() -> None:
+    assert build_runtime_lock().probe == run_probe()
+    older = read_runtime_lock((CORPUS / "lock-v1.json").read_bytes())
+    assert older.probe is None
+    assert "probe" not in json.loads(older.to_json())
+
+
+def test_the_probe_sample_reads_and_rewrites_byte_identically() -> None:
+    raw = (CORPUS / "lock-v1-probe.json").read_bytes()
+    lock = read_runtime_lock(raw)
+    assert lock.probe == json.loads(raw)["probe"]
+    assert raw.decode("utf-8").strip() == lock.to_json()
+
+
+def test_a_probe_key_is_read_not_ignored() -> None:
+    document = _sample()
+    document["probe"] = HEX
+    assert read_runtime_lock(json.dumps(document)).probe == HEX
+
+
+def test_a_null_probe_is_refused_and_none_is_omitted_on_write() -> None:
+    document = _sample()
+    document["probe"] = None
+    with pytest.raises(ValueError, match=PREFIX):
+        read_runtime_lock(json.dumps(document))
+    assert "probe" not in json.loads(
+        dataclasses.replace(build_runtime_lock(), probe=None).to_json()
+    )
+
+
+def test_compare_names_probe_when_one_side_is_none() -> None:
+    a = build_runtime_lock()
+    assert _names(compare_runtime_locks([a, dataclasses.replace(a, probe=None)])) == ["probe"]
+    assert _names(compare_runtime_locks([a, dataclasses.replace(a, probe=HEX)])) == ["probe"]
+
+
+@pytest.mark.parametrize("bad", [True, 1, 0, "a" * 63, "A" * 64, HEX + "\n", [], {}])
+def test_probe_refuses_a_wrong_value_on_read_and_write(bad: Any) -> None:
+    document = _sample()
+    document["probe"] = bad
+    with pytest.raises(ValueError, match=PREFIX):
+        read_runtime_lock(json.dumps(document))
+    with pytest.raises(ValueError, match=PREFIX):
+        dataclasses.replace(build_runtime_lock(), probe=bad)
+
+
+def _fields_by_name() -> dict[str, Any]:
+    return {field.name: field for field in _runtime_lock._FIELDS}
+
+
+def test_optional_is_one_flag_on_the_field_descriptor(monkeypatch: pytest.MonkeyPatch) -> None:
+    fields = _fields_by_name()
+    assert [n for n, f in fields.items() if not f.required] == ["probe"]
+    # Flip the flag: the older sample must stop reading. No function names the field.
+    swapped = tuple(
+        dataclasses.replace(f, required=True) if f.name == "probe" else f
+        for f in _runtime_lock._FIELDS
+    )
+    monkeypatch.setattr(_runtime_lock, "_FIELDS", swapped)
+    with pytest.raises(ValueError, match=PREFIX + "missing_field"):
+        read_runtime_lock((CORPUS / "lock-v1.json").read_bytes())
+
+
+def test_no_function_but_the_field_table_names_probe() -> None:
+    tree = ast.parse(Path(_runtime_lock.__file__).read_text(encoding="utf-8"))
+    named = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Constant) and inner.value == "probe":
+                    named.append(node.name)
+    assert named == [], named
