@@ -10,7 +10,20 @@ engine `CLAUDE.md`, `CODEMAP.md` ("Where Things Go"), `docs/frozen-surfaces.md`,
 CLI `docs/ROADMAP.md` rows 24c, 24f and 24zm; the row 24f plan
 (`origin/plan/fit-unflagged-values:docs/plans/2026-11-16-fit-unflagged-values.md`, revision 4).
 
-Revision 4 (planner, 2026-11-17), a rebase onto what merged. No review round has run on it yet.
+Revision 5, after Dennis on revision 4 (`c2f08def6`, GO-WITH-FIXES, 0 blocker, 0 high). Every finding is taken.
+
+| # | Finding | Change |
+|---|---|---|
+| M1 | `code_tails_at_k` over `(key, count)` was a second shape beside the fold's `(start, end, count)` | one function over the fold's own shape, `release_ranges_at_k`, codes the tails and then folds; `fold_year_bins` and `_floor_field` both call it; #649's `_kth_year` and inline clamp are deleted (4.3, 7a, 8, section 10 mutation, stop line 9) |
+| M2 | no single statement of what an unflagged column may release | new umbrella guarantee P0; AT-11 asserts the date bounds against the K-th rows on random datetime frames; mutation "fold without coding" |
+| M3 | AT-4 tail wording allowed a move that crosses the K-th row | "any of the 9 lowest rows to any earlier decade, or any of the 9 highest to any later decade"; the 200-row fixture puts its 9th and 10th lowest (and highest) rows in different decades |
+| M4 | the 0.28.0 note had no owner | section 13: the orchestrator, as release owner, adds the line to the 0.28.0 notes before #647 merges |
+| L1 | section 3 named the planned fold, not the shipped functions | shipped names; new tail-coding row (sdcMicro `topBotCoding`, Hundepool 3.4) |
+| L2 | the Breaking fragment did not describe tail coding | it names the 10th earliest and 10th latest dated rows and the 19-row minimum |
+| L3 | section 8 said 3 production files | 4, one line count that matches section 10 |
+| L4 | no off-by-one mutation for the K-th row | "K-th row taken as (K-1)-th or (K+1)-th (AT-4, 19-row and 18-row cells)" |
+
+Revision 4 (planner, 2026-11-17), a rebase onto what merged.
 
 | # | What changed on main | Change to this plan |
 |---|---|---|
@@ -114,6 +127,11 @@ For a document written by `profile_document(profile)` or `redact_profile_dict(do
 `include_values=False`, every column that `is_value_sensitive` does not flag ("unflagged") gets
 the floor:
 
+- P0. Every value-bearing slot an unflagged column releases is one of: a text proven by a count
+  in the same document to be held by at least K rows; a date range whose buckets each hold at least
+  K rows and whose outer edges are the decades of the K-th lowest and K-th highest dated rows; a
+  sentinel kept by P6; or an aggregate over at least 2K non-null cells. Anything else is replaced.
+  P1 to P7 are the cases of this rule.
 - P1. Every text a document releases as a top value, a mode, a categorical label or a numeric
   bound is held by at least K source rows, as proven by a count in the same document. Text the
   document cannot prove is replaced (`[redacted]` in a list slot, `null` in a scalar slot). Bool
@@ -169,7 +187,8 @@ codebase, the value registry, row 24f's floor, the numeric shape release floor.
 | ydata-profiling `sensitive=True` ([docs](https://docs.profiling.ydata.ai/latest/features/sensitive_data/)) | A shareable profile hides value counts, samples and extreme values for every column, not only detected ones | The scope of the fix: every column of a shared profile; extremes withheld when unprovable |
 | Google Cloud DLP `include_quote` (cited at `_value_redaction.py:10-13`) | Findings omit the quote unless asked | Default-deny; `include_values=True` is the one opt-in |
 | R sdcMicro `globalRecode` | Recode values into intervals | The decade fold |
-| Row 24f plan, 4.2 and 4.3 | `FOLD_YEARS_UNDER_K` contiguous fold; 3-word free-text test | Reused by name, not restated |
+| R sdcMicro `topBotCoding`; Hundepool et al. (2012) section 3.4 | Values beyond a threshold are recoded to the threshold | Tail coding at the K-th row from each end, as row 24zp does for snapshot years (`release_ranges_at_k`) |
+| Row 24f E1 (engine #632) | `fold_ranges_under_k` contiguous fold; `labels_read_as_sentences` with `FREETEXT_MIN_WORDS` | Reused by name, not restated |
 
 Rounded percentages as count bounds: a percentage rounded to 0.1 bounds the count to within
 0.05 percent of the rows. No surveyed tool releases a label from a rounded share; the lower-bound
@@ -310,16 +329,15 @@ computed assignment. Every replacement goes through `_apply` (a `Rule` or a `Pla
 7. `AGGREGATE_2K`: kept when `n >= 2 * K`, else `NULL`.
 8. `FOLD_DECADES`: parse each label with `re.fullmatch(r"(\d{4})s(?:-(\d{4})s)?", label)`
    (defect class 1; the second form makes a second pass a no-op). Ranges must be ordered and
-   non-overlapping, and `len(data) == len(labels)`. Then code the tails with the shared tail
-   coder (below), keyed by bucket position: every bucket before the one holding the K-th lowest
-   row adds its count into that bucket, which keeps its own label, and likewise after the K-th
-   highest. If the two cross, the step fails as below. Then apply `fold_ranges_under_k` to
-   `(start, end, count)` with decade years: merge until the running count reaches K, and merge a
-   short final range into the one before. On a second pass the outer buckets already hold K rows,
-   so the coder and the fold change nothing. The computed
+   non-overlapping, and `len(data) == len(labels)`. Then pass the parsed `(start, end, count)`
+   ranges, with decade years (`end` is the end decade plus 9), to `release_ranges_at_k` (below).
+   It counts every range before the one holding the K-th lowest row into that range, which keeps
+   its own edges, and likewise after the K-th highest, then folds with `fold_ranges_under_k`. It
+   returns `[]` when the total is under K or the two K-th ranges cross. On a second pass the
+   outer ranges already hold K rows, so nothing changes. The computed
    `labels` and `data` are assigned; `data` holds the summed counts as floats, so `_conforms` still
    accepts them and a second pass reads the same numbers. If a label does not parse, a bin count
-   fails step 2, the total is under K, or the K-th buckets cross, `labels` resolves to
+   fails step 2, or `release_ranges_at_k` returns `[]`, `labels` resolves to
    `PLACEHOLDER_EACH` and the date bounds to `NULL`.
 9. `DECADE_START` / `DECADE_END`: computed from the coded and folded first and last range,
    `YYYY-01-01T00:00:00` and `YYYY-12-31T23:59:59.999999` for `FieldStats` (`YYYY` is the start
@@ -333,12 +351,14 @@ computed assignment. Every replacement goes through `_apply` (a `Rule` or a `Pla
 
 Shared helpers, one owner each, all in `_snapshot_values.py`: `labels_read_as_sentences` (the
 word test, row 24f E1), `fold_ranges_under_k` (the contiguous fold, row 24f E1) and the tail
-coder. Row 24zp (#649) writes the tail coding inline in `fold_year_bins` with a private
-`_kth_year`. E1b extracts it to one named function, `code_tails_at_k(counts)`: it takes
-`(key, count)` pairs in order and returns them with every count below the K-th lowest row's key
-added into that key and every count above the K-th highest added into that one, or `[]` when the
-total is under K or the two keys cross (Fowler "Extract Function", no new file). `fold_year_bins`
-and `_floor_field` both call it; #649's tests stay green unchanged. The 3-word threshold and K are
+coder. Row 24zp (#649) writes the tail coding inline in `fold_year_bins`, with a private
+`_kth_year` and an inline clamp. E1b replaces both with one function over the fold's own shape,
+`release_ranges_at_k(ranges: Sequence[tuple[int, int, int | float]]) -> list[tuple[int, int, int | float]]`:
+it codes the tails at the K-th row from each end, then calls `fold_ranges_under_k`, and returns
+`[]` when the total is under K or the K-th ranges cross (Fowler "Extract Function", no new file).
+`fold_year_bins` passes `(y, y, c)` after its `MAX_SAMPLED_YEAR` clamp; `_floor_field` passes the
+parsed decade ranges. `_kth_year` and the inline clamp are deleted, not left beside it, and
+#649's tests stay green unchanged. The 3-word threshold and K are
 never restated. `_profile_document.py` imports the three by name from the same package; the
 package `__init__` already imports both modules, so no import cycle is added (E1b checks
 `tests/unit/test_public_api.py` and import layers).
@@ -461,7 +481,7 @@ masking choosers) do not change: they never read the document.
 | Marker | `stamp_value_policy`, `POLICY_REDACTED` (v2 from row 24f E1) | no |
 | Contiguous fold | `fold_ranges_under_k` (row 24f E1) | no |
 | Free-text test | `labels_read_as_sentences` (row 24f E1) | no |
-| Tail coding | row 24zp's coding in `fold_year_bins` (#649) | extracted to `code_tails_at_k` (4.3) |
+| Tail coding and fold | row 24zp's coding in `fold_year_bins` (#649) and `fold_ranges_under_k` | coding moved into `release_ranges_at_k`, which calls the fold; `_kth_year` and the inline clamp deleted (4.3) |
 | Placeholder | `REDACTED` | no |
 
 ## 7. Acceptance tests, red first
@@ -475,14 +495,14 @@ asserted unflagged first.
 | AT-1 | `salary` (counts in section 5; the minimum's 59 rows are the strictly largest count, so no tie decides its place in the top 5): the raw `to_dict()` has `max_value "987654"`; the document has `max_value` null, `min_value` equal to the raw text (held by 59 rows), numeric labels all `[redacted]` with `data` unchanged, distribution `min` and `max` null, `mean_value` kept; `987654` is not in the JSON text. A 15-row numeric column has `mean_value` null | exact max and edges stored |
 | AT-2 | `diagnosis`: `ZXQ-RARE-LABEL` is in the raw labels and not in the document JSON; every kept top value and label is held by at least K rows of the frame; the 10-row and 9-row labels are first asserted to be in the raw top 5 (so each has an exact count), then the 10-row label is kept and the 9-row label is `[redacted]` | count-1 label stored |
 | AT-3 | `note`: no note string in the JSON; mode null; every label `[redacted]`. `comment` (heavily null): no comment string in the JSON, mode null; the raw top values hold `(null)` first, so the test fails if `(null)` joins the sample. `region` keeps both 2-word labels | all strings stored |
-| AT-4 | `visit_date`: labels `2010s` and `2020s`, every count at least K, the sum unchanged (the 1921 row counted in `2010s`); `date_min` `2010-01-01T00:00:00`, `date_max` `2029-12-31T23:59:59.999999`; neither `1921` nor `1920` is in the column's JSON. Tail property: moving any of the 9 lowest or 9 highest rows of a 200-row date column to an earlier or later decade leaves labels and bounds unchanged. A loaded dict with decades `1950s: 9`, `1990s: 1`, `2000s: 9` (19 rows) is coded to one range; with `1950s: 9`, `2000s: 9` (18 rows, the K-th buckets cross) every label is `[redacted]` and the bounds null. A 5-row date column: labels `[redacted]`, bounds null. A string date column: bounds null | raw decades and exact timestamps stored; an outer edge at one row's decade |
+| AT-4 | `visit_date`: labels `2010s` and `2020s`, every count at least K, the sum unchanged (the 1921 row counted in `2010s`); `date_min` `2010-01-01T00:00:00`, `date_max` `2029-12-31T23:59:59.999999`; neither `1921` nor `1920` is in the column's JSON. Tail property on a 200-row date column whose 9th and 10th lowest rows sit in different decades, and whose 9th and 10th highest rows do too: moving any of the 9 lowest rows to any earlier decade, or any of the 9 highest to any later decade, leaves labels and bounds unchanged. A loaded dict with decades `1950s: 9`, `1990s: 1`, `2000s: 9` (19 rows) is coded to one range; with `1950s: 9`, `2000s: 9` (18 rows, the K-th buckets cross) every label is `[redacted]` and the bounds null. A 5-row date column: labels `[redacted]`, bounds null. A string date column: bounds null | raw decades and exact timestamps stored; an outer edge at one row's decade |
 | AT-5 | dict cells through `redact_profile_dict` (row_count 1,000): a label outside the top values whose share `data[i]` is `1.0` (bound 9.5) is `[redacted]`, `1.1` (bound 10.5) is kept; the label reads its own index of `data`, not a `TopValue.pct`; the 11th `other` is kept; a real `other` at index 3 with share `0.1` is `[redacted]`; a share NaN or `"5.0"` is `[redacted]` | labels kept regardless of share |
 | AT-6 | fail closed: top-value counts as `True`, `"20"`, `20.0` or `-1` prove nothing; date bin counts as `True`, `20`, `2.5`, NaN or `-1.0` prove nothing; categorical `data` shorter than `labels` redacts every label; `top_values` missing; a decade label `1920s ` (trailing space), `1920s\n`, out of order or overlapping; an unknown distribution kind; an unknown key in an unflagged entry. Each yields the replacement in section 6 | ill-typed counts and keys pass through |
 | AT-7 | `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` on the floor frame and on the case "two 1-word labels under K, one 3-word label over K"; the input dict is not mutated; `profile_document(p) == redact_profile_dict(p.to_dict())` | the free-text case flips on a second pass if the test reads all labels |
 | AT-8 | `include_values=True` equals `to_dict()` plus the two keys on the floor frame (existing `test_include_values_is_to_dict_plus_the_two_keys` extended); flagged columns of the existing canary fixture are byte-identical to the pre-change document | not fail-before: pins what must not change |
 | AT-9 | guards that stay green: `is_active` keeps its count-1 `False`; profiled sentinels of unflagged columns keep `value` and `note`; `test_a_column_that_is_not_value_sensitive_keeps_its_values` unchanged | not fail-before |
 | AT-10 | sentry (`tests/sentry/profiling/test_profile_value_registry.py`): every `VALUE_FIELDS` pair, for each of the five kinds, is in exactly one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`, and nothing else is; every `PROFILE_FLOOR_FIELDS` value is a `Rule`; `PROFILE_FLOOR_KEEP` is exactly the freetext slots of 4.2, and the sentinel slots map to `SENTINEL_TABLE`. `test_every_value_rule_is_applied` gains a twin that builds an unflagged canary entry (count 1, no detector) and asserts each floor rule removes it. The twin cannot build an unflagged `DetectorMatch` or `Distribution.pattern` entry, so it asserts instead that a profiled entry with a `DetectorMatch` is flagged, and tests the pattern rows and the unknown-kind fallback on a loaded dict with `detector_matches: []`. `test_snapshot_value_registry.py` runs the shared `_guard_findings` checks on `_profile_document.py` | unflagged canaries survive |
-| AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K. On random datetime frames, `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` and the folded `data` entries are floats | fails on the first count-1 label; the fixed point fails if summed counts are written as ints |
+| AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K. On random datetime frames, `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` and the folded `data` entries are floats; with N dated rows, `date_min` and the distribution `min` are the first day of the decade of the K-th lowest row and `date_max` and `max` the last day of the decade of the K-th highest row, or all four are null when N < 2K-1 | fails on the first count-1 label; the fixed point fails if summed counts are written as ints; the bounds fail on a fold without coding |
 | AT-12 | the demo's 10-row sample through `profile_document`: `gender` labels and top values `[redacted]`, mode null; `redacted_columns` unchanged; no exception | `F`, `M` stored |
 | AT-13 | `nullish`: 999 null cells and one literal `(null)` cell (1,000 rows). Non-vacuity: the raw `to_dict()` has `mode_value "(null)"` and a top-value entry `(null)` with count 1. The document has `mode_value`, `min_value` and `max_value` null, no categorical label `(null)`, and the count-1 top-value entry `[redacted]`; the only `(null)` left in the column is the top-value entry with count 999, the null marker | the null count proves the literal mode |
 | AT-14 | sentinels. Profiled: a frame where one row holds ` N/A ` and one row holds `-999`; the flags read `value "n/a"` and `"-999"` with their table notes and `is_table_sentinel` holds for each; the text ` N/A ` and `N/A` is not in the JSON. Loaded dict: a `string_sentinel` flag with `value "Jane Q Example"`, a free-form note and count 1 has both slots `[redacted]`; the same flag with count 12 keeps them; a table `value` with a changed note is floored Loaded out-of-range mismatch: a `date_out_of_range` flag with `count: 1`, a fixed note and `value: "12 value(s)"` is floored (both slots `[redacted]`), while `value: "1 value(s)"` with `count: 1` is kept. | a loaded raw sentinel text is stored |
@@ -493,7 +513,8 @@ only (AT-9, the existing status test); drop the `- 0.05` margin (AT-5); treat th
 a label (AT-5); skip the free-text step (AT-3); run it on all labels (AT-7); let `(null)` join the
 free-text sample (AT-3 `comment`); apply steps 4 to 6 to bool columns (AT-9); leave a short final
 decade unmerged (AT-4); skip the tail coder or code only the low tail (AT-4 tail property);
-release ranges when the K-th buckets cross (AT-4, 18-row dict); `isinstance` for counts (AT-6); read bin counts with the int test (AT-4,
+release ranges when the K-th buckets cross (AT-4, 18-row dict); fold without coding (AT-11 date
+bounds); K-th row taken as (K-1)-th or (K+1)-th (AT-4, 19-row and 18-row cells); `isinstance` for counts (AT-6); read bin counts with the int test (AT-4,
 AT-11); write summed bin counts as ints (AT-11); ignore a `data`/`labels` length mismatch (AT-6);
 `match` for the decade grammar (AT-6); read `top_values` after replacement (AT-1 `min_value`);
 write `field["mode_value"] = None` inline in `_floor_field` (AT-10 guard); let `(null)` into the
@@ -532,15 +553,16 @@ the 24f C1 builder moves the marker to v2. C1 here adds the AT-C1 cells to the s
 | `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, seven `Rule` members, `DATA_RULES`, `PlaceholderAt` and its `_apply` branch | `src/decoy_engine/profiling/_value_redaction.py` | "Detectors, profiling" row | the one value registry; net smaller after E1a |
 | re-export path | `src/decoy_engine/profiling/__init__.py` | existing | public names unchanged |
 | `is_table_sentinel`, `_string_note`, `_numeric_text`, out-of-range note constants | `src/decoy_engine/profiling/sentinels.py` | "Detectors, profiling" row | the owner of the four tables; no new file |
-| `code_tails_at_k`, extracted from row 24zp's `fold_year_bins` | `src/decoy_engine/profiling/_snapshot_values.py` | "Detectors, profiling" row | owner of `fold_ranges_under_k` and `labels_read_as_sentences`; no new file |
+| `release_ranges_at_k`, replacing row 24zp's `_kth_year` and inline clamp in `fold_year_bins` | `src/decoy_engine/profiling/_snapshot_values.py` | "Detectors, profiling" row | owner of `fold_ranges_under_k` and `labels_read_as_sentences`; no new file |
 | floor tests | `tests/unit/profiling/test_profile_floor.py` (new) | "Unit tests" row: mirror `src/` under `tests/unit/<package>/` | beside `test_value_redaction.py` |
 | sentry changes | `tests/sentry/profiling/test_profile_value_registry.py`, `test_snapshot_value_registry.py` | "Sentry test" row: existing rules | existing files |
 | CODEMAP row text, QA checklist, fragment | `CODEMAP.md` profiling row, `docs/qa/03-pre-scan-profiling-detection.md`, `changelog.d/profile-unflagged-values.md` | "QA checklists" and "Changelog fragments" rows | existing owners |
 | CLI docstring, help text, tests, docs | CLI `src/decoy/api.py`, `src/decoy/cli/explain.py`, `tests/e2e/first_user/test_items_privacy.py`, `docs/qa/cli-v1-checklist.md` (SCAN-04), roadmap, shipped log, `CHANGELOG.md` | existing files; no new module in the frozen flat `src/decoy/cli/` | C1 rides the engine repin PR |
 
 Expected size. E1a: 2 production files plus the init, about 60 source lines moved (about 130
-diff lines with the sentry path and CODEMAP text). E1b: 3 production files (4 with the 4.3
-extraction); about 240 source lines, 390 test lines and 30 doc lines, below 800.
+diff lines with the sentry path and CODEMAP text). E1b: 4 production files (`_value_redaction.py`,
+`_profile_document.py`, `_snapshot_values.py`, `sentinels.py`); about 680 diff lines (about 255
+source, 395 test and 30 doc), below 800.
 `_profile_document.py` (76 lines at `8796ef691`) ends near 260 lines; `_value_redaction.py`
 (486) near 545; `_snapshot_values.py` (552, about 580 with #649) near 590. New names: the
 module, `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, seven `Rule` members, `PlaceholderAt`,
@@ -555,7 +577,9 @@ C1: no production logic; about 80 docstring, help, test and doc lines.
   "Breaking: a plain `profile_document` or `redact_profile_dict` document now redacts, in every
   column, any top value or label held by fewer than 10 rows, any label of a column whose labels
   read as sentences, every numeric bin label, any numeric or date extreme it cannot prove is held
-  by 10 rows, and the invalid-date samples. Date decades are merged until each holds 10 rows.
+  by 10 rows, and the invalid-date samples. Date decades are merged until each holds 10 rows, and
+  the outer decades are those of the 10th earliest and 10th latest dated rows; a column with fewer
+  than 19 dated rows releases no decade.
   `include_values=True` output is unchanged."
 - CLI `CHANGELOG.md` line, under Changed: "The `scan.json` that `decoy demo` writes keeps no value
   of any column held by fewer than 10 rows, and no numeric range or exact date (roadmap row
@@ -569,13 +593,13 @@ C1: no production logic; about 80 docstring, help, test and doc lines.
 | Slice | Content | Risk | Size | Depends on | Tests at T1 |
 |---|---|---|---|---|---|
 | E1a | MERGED (engine #629). 4.1 move, sentry path, CODEMAP row text | R1 | 3 production files; about 130 diff lines | none | `tests/unit/profiling/test_value_redaction.py`, `tests/sentry/profiling/`, `tests/unit/test_public_api.py`, import layers, module size |
-| E1b | 4.2 to 4.4 floor, the `code_tails_at_k` extraction, tests, QA checklist, fragment | R2 | 4 production files (`_value_redaction.py`, `_profile_document.py`, `_snapshot_values.py`, `sentinels.py`); about 680 diff lines | E1a, row 24f E1 and row 24zp (#649) merged | AT-1 to AT-14, `tests/unit/profiling/`, `tests/sentry/profiling/`, `tests/sentry/test_module_size.py`, `tests/sentry/layout/test_package_fanout.py` |
+| E1b | 4.2 to 4.4 floor, the `release_ranges_at_k` extraction, tests, QA checklist, fragment | R2 | 4 production files (`_value_redaction.py`, `_profile_document.py`, `_snapshot_values.py`, `sentinels.py`); about 680 diff lines | E1a, row 24f E1 and row 24zp (#649) merged | AT-1 to AT-14, `tests/unit/profiling/`, `tests/sentry/profiling/`, `tests/sentry/test_module_size.py`, `tests/sentry/layout/test_package_fanout.py` |
 | C1 | AT-C1, AT-C2, `decoy.scan()` docstring, `decoy explain security` line for the demo `scan.json`, SCAN-04 text, roadmap row, shipped log, changelog | R1 | about 80 lines | E1b released and pinned (repin checklist) | AT-C1, AT-C2, `tests/e2e/first_user/test_items_privacy.py`, `tests/sentry/io_policy/` |
 
 Named mutations per slice. E1a (merged): change a flagged rule during the move (existing
 `test_value_redaction.py`); change the public export path (`tests/unit/test_public_api.py`). E1b:
-the list after section 7's table, plus delete the `code_tails_at_k` call from `fold_year_bins`
-(#649's `test_snapshot_floor.py` tail tests). C1: assert `F` and `M` are present in the demo
+the list after section 7's table, plus make `fold_year_bins` call `fold_ranges_under_k` instead
+of `release_ranges_at_k` (#649's `test_snapshot_floor.py` tail tests). C1: assert `F` and `M` are present in the demo
 `scan.json` (AT-C1 goes red); save the `decoy.scan()` profile with `to_dict()` (the CLI sentry
 `test_profile_document_route.py` goes red).
 
@@ -603,9 +627,10 @@ then `~/bin/vm-run`, never on the devbox.
 7. No new reason code and no new marker string.
 8. A slice stops at 10 production files or 800 changed lines; split tests by the E1a/E1b line
    instead of raising the limit.
-9. Use `fold_ranges_under_k` and `labels_read_as_sentences` as row 24f E1 shipped them. If #649
-   merges with a different shape for the tail coding than 4.3 describes, extract what it shipped
-   and record the name in the PR; if #649 is not merged when E1b starts, stop and report.
+9. Use `fold_ranges_under_k` and `labels_read_as_sentences` as row 24f E1 shipped them. Put #649's
+   tail coding into `release_ranges_at_k` and delete `_kth_year` and the inline clamp; no second
+   tail coder. If #649 merges with coding that `release_ranges_at_k` cannot reproduce with its
+   tests unchanged, stop and report. If #649 is not merged when E1b starts, stop and report.
 
 ## 12. Owner questions
 
@@ -637,8 +662,10 @@ Each is taken under standing approval ("go with recommended") on 2026-11-17.
 - Engine 0.28.0 (#647) carries row 24f E1, so from 0.28.0 a profile document says
   `flagged-redacted/v2` while its unflagged columns are not floored. Q4 (a) stands: the CLI may
   repin 0.28.0 for row 24f C1, but no CLI release ships until it pins an engine release that holds
-  E1b too. The 0.28.0 release notes should say profile documents are floored from the next
-  release.
+  E1b too. Owned action: before #647 merges, the release owner (the orchestrator) adds this line
+  to the 0.28.0 notes: "`profile_document` and `redact_profile_dict` documents carry
+  `flagged-redacted/v2` in this release but floor unflagged columns only from the next release
+  (row 24zm)."
 - The CLI release order (Q4): no CLI release ships the 24f repin without 24zm C1. The release
   owner checks this at the repin; the 24f C1 and 24zm C1 PRs may be stacked on one repin.
 
