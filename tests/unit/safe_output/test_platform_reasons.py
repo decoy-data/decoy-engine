@@ -270,7 +270,7 @@ def test_workflow_tombstones_change_only_the_deprecation() -> None:
     entries = {e["code"]: e for e in reasons.manifest()["entries"] if e["namespace"] == "platform"}
     for code, replacement in WORKFLOW_TOMBSTONES:
         entry = dict(entries[code])
-        assert entry.pop("deprecated_in") == "unreleased"
+        assert entry.pop("deprecated_in") == "1.30.0"
         assert entry.pop("replaced_by") == ["platform", replacement]
         assert entry == {
             "namespace": "platform",

@@ -569,7 +569,7 @@ def test_at8_a_patch_release_moves_the_registry_and_keeps_the_ceiling(
         EMPTY_MARKERS.replace("frozenset()", 'frozenset({("config", "top_level.bad_mode")})'),
     )
     r.commit({}, "fix: correct another summary")
-    assert _stamp(r, "0.29.0") == v.patch2
+    assert _stamp(r, "0.30.0") == v.patch2
     pin = _pin(r.path)
     assert (pin["registry_version"], pin["baseline_ceiling"]) == (v.patch2, v.base)
     assert _fixtures(r.path) == before
