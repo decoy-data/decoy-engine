@@ -51,6 +51,7 @@ from decoy_engine.plan._types import (
     SeedEnvelope,
     TableSeed,
 )
+from decoy_engine.plan.checks._ner_models import run_ner_models
 
 __all__ = [
     "ColumnSeed",
@@ -70,4 +71,5 @@ __all__ = [
     "plan_from_yaml",
     "plan_to_yaml",
     "run_config_only_checks",
+    "run_ner_models",
 ]

@@ -66,6 +66,7 @@ UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 Problem = tuple[tuple[str | int, ...], str]
 # A check may add fixed, value-free hint text after the code's summary.
 Found = Problem | tuple[tuple[str | int, ...], str, str]
+ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
 Check = Callable[[Any, Mapping[str, Any]], Sequence[Found]]
 
 _OK: list[Problem] = []
@@ -538,19 +539,27 @@ _Loc = tuple[str | int, ...]
 
 
 def problem_details(
-    problems: Sequence[tuple[_Loc, str] | tuple[_Loc, str, str]],
+    problems: Sequence[tuple[_Loc, str] | tuple[_Loc, str, str] | ContextProblem],
+    templates: Mapping[str, str] | None = None,
 ) -> list[InitErrorDetails]:
     """Pydantic line errors for ``problems``: fixed text per code, no input kept.
 
-    A third item is value-free text (table and column names) added after the summary.
+    A text third item is value-free text (table and column names, or a fixed hint) added after
+    the summary. A mapping third item is a context: the text is the code's entry in
+    ``templates`` filled from it, and it holds config identifiers only.
     """
     details: list[InitErrorDetails] = []
     for problem in problems:
         loc, code = problem[0], problem[1]
         kind: Any = "missing"
         if code != "missing":
-            text = " ".join((reasons.lookup(code)[0].summary, *problem[2:]))
-            kind = PydanticCustomError(code, text)
+            summary = reasons.lookup(code)[0].summary
+            extra = problem[2] if len(problem) == 3 else None
+            if isinstance(extra, Mapping):
+                template = (templates or {}).get(code, summary)
+                kind = PydanticCustomError(code, template, dict(extra))
+            else:
+                kind = PydanticCustomError(code, " ".join((summary, *problem[2:])))
         details.append({"type": kind, "loc": loc, "input": None})
     return details
 
