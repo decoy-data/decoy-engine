@@ -988,7 +988,7 @@ builders use the test VMs or the Mac.
 |---|---|---|---|
 | No new file; `strict_json_read`, `strict_json_write`, `JsonNumber` added to `_json.py` (E1) | `src/decoy_engine/_canonical/` | "Foundation: `_canonical/`" (`CODEMAP.md:269`), unchanged row | `_canonical/_json.py` |
 | `nested/__init__.py`, `nested/_handler.py` (moved from `_nested.py`, E1a), `nested/_leaves.py` (E1), `nested/_apply.py` (E3b) | `src/decoy_engine/execution/_strategies/nested/` | "Masking strategy family: `execution/_strategies/<family>/`" (`CODEMAP.md:253`), the target the fan-out freeze names; the row gains the `nested/` code span in E1a | `execution/_strategies/_hash.py` |
-| `__init__.py`, `_rules.py` (E3a), `_paths.py` (E4b) | `src/decoy_engine/_nested_json/` | Map change: new row "Nested JSON cell foundation", worded like the `_canonical/` row (`CODEMAP.md:269`); bottom layer | `src/decoy_engine/_canonical/` |
+| `__init__.py`, `_rules.py` (E3a), `_paths.py` (E4a) | `src/decoy_engine/_nested_json/` | Map change: new row "Nested JSON cell foundation", worded like the `_canonical/` row (`CODEMAP.md:269`); bottom layer | `src/decoy_engine/_canonical/` |
 | `_scan_core.py` (E2a) | `src/decoy_engine/profiling/` | "Detectors, profiling" (`CODEMAP.md:262`) | `profiling/scan_set.py` |
 | `paths/__init__.py`, `paths/_walk.py`, `paths/_observe.py` (E2b) | `src/decoy_engine/profiling/paths/` | "Detectors, profiling"; map text gains "path observation in `profiling/paths/`" | `profiling/features/` |
 | `_nested_rules.py` (E3b) | `src/decoy_engine/plan/checks/` | "Plan compile and checks: new checks in `plan/checks/`" (`CODEMAP.md:251`) | `plan/checks/_relationship_keys.py` |
@@ -1333,3 +1333,4 @@ per merge-batch head under the merge-train rule.
     lines move to `docs/compatibility-contract.md:295` and `:1029`, `profiling/__init__.py:75`
     moves to `:77`; the nested handler, the keyed baselines, `CODEMAP.md` rows and the other cited
     lines are unchanged.
+- Codex round 2 (head fe6ad913e): GO. One V2-LOG fixed by the orchestrator: the Placement row now assigns `_nested_json/_paths.py` to E4a. Plan PASSED.
