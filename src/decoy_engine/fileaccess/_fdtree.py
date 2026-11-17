@@ -104,3 +104,36 @@ def _rmtree_fd(dir_fd: int) -> None:
             os.rmdir(entry.name, dir_fd=dir_fd)
         else:
             os.unlink(entry.name, dir_fd=dir_fd)
+
+
+def _try_exclusive(fd: int) -> str | None:
+    """Take a cleaner's `LOCK_EX|LOCK_NB` on `fd`: None when held (until `fd` closes), `live`
+    when an owner holds its lock, `lock_unavailable` for any other `OSError`, whatever the errno."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return "live"
+    except OSError:
+        return "lock_unavailable"
+    return None
+
+
+def _same_entry(dir_fd: int, name: str, fd: int) -> bool:
+    """`name` under `dir_fd`, not followed, is still the held directory `fd`: same inode, and an
+    owned directory with mode exactly 0700 (the post-lock recheck of a name, systemd's
+    `xopenat_lock_full_label` pattern)."""
+    try:
+        found = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        held = os.fstat(fd)
+    except OSError:
+        return False
+    same = (found.st_dev, found.st_ino) == (held.st_dev, held.st_ino)
+    return (
+        same and _exact_stat(found, stat.S_IFDIR, 0o700) and _exact_stat(held, stat.S_IFDIR, 0o700)
+    )
+
+
+def _is_empty(fd: int) -> bool:
+    """Whether the directory `fd` has no entry; the empty-only fallback's read-only test."""
+    with os.scandir(fd) as entries:
+        return next(entries, None) is None
