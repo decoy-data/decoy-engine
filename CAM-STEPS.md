@@ -12,7 +12,7 @@ What it is: instrumented microbenchmarks in `tests/codspeed/`, wired to
 
 Steps (needs BOTH a variable and a secret):
 1. Go to codspeed.io and sign in with GitHub, then link the
-   `louiskeep/decoy-engine` repo.
+   `decoy-data/decoy-engine` repo.
 2. CodSpeed gives you a token. In GitHub: Settings > Secrets and variables >
    Actions > Secrets > New repository secret. Name it exactly `CODSPEED_TOKEN`,
    paste the value, save.
@@ -42,7 +42,7 @@ starter merge-queue config that only fires once the app is installed.
 
 Steps:
 1. Go to github.com/apps/mergify and install the Mergify app on the
-   `louiskeep/decoy-engine` repo (or your whole GitHub account/org, scoped to
+   `decoy-data/decoy-engine` repo (or your whole GitHub account/org, scoped to
    this repo). This is the only step required; no secret to create.
 2. Optional, once you are ready to use the queue day to day: confirm the
    required-check names in `.mergify.yml` (`ci / ruff`, `ci / mypy`,
