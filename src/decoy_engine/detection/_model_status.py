@@ -48,14 +48,16 @@ class ModelUnavailableError(DecoyError):
     `import` or `pack` for the classifier and `None` for NER.
     """
 
-    def __init__(self, code: str, *, cause: str | None = None) -> None:
+    def __init__(self, code: str, *, cause: str | None = None, detail: str | None = None) -> None:
         self.code = code
         self.reason = qualified(code)
         self.cause_class = cause
-        super().__init__(self.reason if cause is None else f"{self.reason} (cause: {cause})")
+        self.detail = detail
+        text = self.reason if cause is None else f"{self.reason} (cause: {cause})"
+        super().__init__(text if detail is None else f"{text}: {detail}")
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (_rebuild_unavailable, (self.reason, self.cause_class))
+        return (_rebuild_unavailable, (self.reason, self.cause_class, self.detail))
 
 
 def registered_model_reason(reason: str) -> str:
@@ -63,8 +65,10 @@ def registered_model_reason(reason: str) -> str:
     return _REASONS[reason]
 
 
-def _rebuild_unavailable(reason: str, cause: str | None) -> ModelUnavailableError:
-    return ModelUnavailableError(registered_model_reason(reason), cause=cause)
+def _rebuild_unavailable(
+    reason: str, cause: str | None, detail: str | None = None
+) -> ModelUnavailableError:
+    return ModelUnavailableError(registered_model_reason(reason), cause=cause, detail=detail)
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,9 @@ _REASONS = {
 }
 
 
+_NOT_INSTALLED = qualified(reasons.provider.NER_MODEL_NOT_INSTALLED)
+
+
 def ner_model_state(model: str) -> tuple[ModelStatus, ModelRef | None]:
     """The NER model's status and, when usable, its ref. Never raises, never echoes the name."""
     version: str | None = None
@@ -129,14 +136,19 @@ def ner_model_state(model: str) -> tuple[ModelStatus, ModelRef | None]:
     return status, ref
 
 
-def ner_status(model: str = ner.DEFAULT_NER_MODEL) -> ModelStatus:
-    return ner_model_state(model)[0]
+def ner_status(model: str | None = None) -> ModelStatus:
+    return ner_model_state(ner.resolve_ner_model(model))[0]
 
 
-def refuse(status: ModelStatus) -> NoReturn:
+def refuse(status: ModelStatus, surface: ner.NerSurface | None = None) -> NoReturn:
     # Raised from a plain call, never inside an `except`: __cause__ and __context__ stay None,
     # so a loader message (it can carry a pack path label) cannot ride along.
-    raise ModelUnavailableError(registered_model_reason(status.reason or ""), cause=status.cause)
+    detail = None
+    if status.source == "ner" and status.model_id and status.reason == _NOT_INSTALLED:
+        detail = ner.model_not_installed_message(status.model_id, surface)
+    raise ModelUnavailableError(
+        registered_model_reason(status.reason or ""), cause=status.cause, detail=detail
+    )
 
 
 def log_detector_run(

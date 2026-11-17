@@ -34,6 +34,7 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 from collections.abc import Collection, Mapping, Sequence
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, NamedTuple
@@ -134,6 +135,46 @@ def resolve_column_ner(ner_value: object) -> tuple[str | None, list[str] | None]
     return model, entities
 
 
+class NerSurface(str, Enum):
+    """A place a config asks for NER; the value is the plan-check strategy or scan phase name."""
+
+    PRE_SCAN = "pre_scan"
+    POST_SCAN = "post_scan"
+    TEXT_REDACT = "text_redact"
+    TEXT_MASK = "text_mask"
+
+    @property
+    def opt_out_key(self) -> str:
+        """The config key that names another model for this surface."""
+        if self in (NerSurface.PRE_SCAN, NerSurface.POST_SCAN):
+            return f"{self.value}.ner_model"
+        return "provider_config.ner.model"
+
+
+def _wheel_url(model: str) -> str | None:
+    urls = [
+        (version, wheel.url) for (name, version), wheel in NER_MODEL_WHEELS.items() if name == model
+    ]
+    return max(urls)[1] if urls else None
+
+
+def model_not_installed_message(model: str, surface: NerSurface | None = None) -> str:
+    """The one not-installed text: surface, refused model, its pinned wheel, the opt-out key.
+
+    Only the validated model name and constants enter it. Without a surface the column wording is
+    used, because the plan check has already refused with the exact surface before a run starts.
+    """
+    validate_ner_model_name(model)
+    where = surface.value if surface is not None else "text_redact or text_mask"
+    key = (surface or NerSurface.TEXT_REDACT).opt_out_key
+    url = _wheel_url(model)
+    how = f"install {url}" if url else "no pinned wheel; install it from a local wheel"
+    return (
+        f"{where} NER model {model!r} is not installed: {how}, "
+        f"or set {key} to an installed calibrated model."
+    )
+
+
 class NerUnavailableError(DecoyError):
     """spaCy or the requested model is not installed. Machine-readable code."""
 
@@ -232,13 +273,13 @@ def _spacy_incompatible(spacy: Any, model: str) -> bool:
     return is_compatible_version(spacy.about.__version__, declared, prereleases=True) is False
 
 
-def ensure_ner_available(model: str = DEFAULT_NER_MODEL) -> None:
+def ensure_ner_available(model: str | None = None, surface: NerSurface | None = None) -> None:
     """Raise the typed error a config-only caller (decoy validate) needs.
 
     The name check runs first, before any message that would carry the name is built. Nothing
     but spaCy itself is imported: an installed model is recognised from its metadata.
     """
-    validate_ner_model_name(model)
+    model = resolve_ner_model(model)
     if not spacy_installed():
         raise NerUnavailableError(
             code=reasons.provider.NER_SPACY_NOT_INSTALLED,
@@ -250,10 +291,7 @@ def ensure_ner_available(model: str = DEFAULT_NER_MODEL) -> None:
     if not model_installed(model):
         raise NerUnavailableError(
             code=reasons.provider.NER_MODEL_NOT_INSTALLED,
-            message=(
-                f"text_redact `ner` model {model!r} is not installed: install its wheel "
-                "(the pinned wheels are listed in decoy_engine.detection.ner.NER_MODEL_WHEELS)."
-            ),
+            message=model_not_installed_message(model, surface),
         )
     spacy, failure = _import_spacy()
     if spacy is None:
