@@ -5,7 +5,7 @@ Short-loop planning for `decoy-engine` lives privately while the project is in p
 Public-facing planning surfaces:
 
 - [`CHANGELOG.md`](CHANGELOG.md): user-visible changes per release.
-- [GitHub Issues](https://github.com/louiskeep/decoy-engine/issues): bug reports, feature requests, and short-horizon planning discussion.
-- [GitHub Discussions](https://github.com/louiskeep/decoy-engine/discussions) (when enabled): longer-form design conversations.
+- [GitHub Issues](https://github.com/decoy-data/decoy-engine/issues): bug reports, feature requests, and short-horizon planning discussion.
+- [GitHub Discussions](https://github.com/decoy-data/decoy-engine/discussions) (when enabled): longer-form design conversations.
 
 For contributor onboarding, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CODEMAP.md`](CODEMAP.md).
