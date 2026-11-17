@@ -609,3 +609,76 @@ def test_the_shape_block_names_match_the_numeric_shape_module() -> None:
     from decoy_engine.generation.statistical import _numeric_shape as shape
 
     assert set(sv._SHAPE_BLOCKS) == {shape.GRID_KEY, shape.EXACT_KEY}
+
+
+# Row 24zp: datetime years are bottom and top coded at the K-th row from each end.
+
+
+def _spread(n: int, start: int = 1950) -> list[int]:
+    """One row in each of `n` consecutive years."""
+    return list(range(start, start + n))
+
+
+def _coded(years: list[int]) -> dict[str, Any]:
+    return _doc(_wide_years(years), flagged=[])
+
+
+def _span(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], Any, Any]:
+    stats = _col(doc, "d")["stats"]
+    return _ranges(doc, "d"), stats["min"], stats["max"]
+
+
+def test_single_low_outlier_year_is_bottom_coded() -> None:
+    ranges = _ranges(_coded([1850, *range(1990, 2020)]), "d")
+    assert ranges[0]["start_year"] == 1998  # the 10th lowest row
+    assert 1850 not in {r["start_year"] for r in ranges}
+
+
+def test_single_high_outlier_year_is_top_coded() -> None:
+    ranges = _ranges(_coded([*range(1990, 2020), 2090]), "d")
+    assert ranges[-1]["end_year"] == 2011  # the 10th highest row
+    assert 2090 not in {r["end_year"] for r in ranges}
+
+
+@pytest.mark.parametrize("total", range(2 * K - 1, 2 * K + 12))
+def test_moving_any_tail_row_outward_leaves_ranges_unchanged(total: int) -> None:
+    years = _spread(total)
+    base = _span(_coded(years))
+    for i in range(K - 1):
+        low = years.copy()
+        low[i] = 1700 + i  # at or below the K-th lowest row's year
+        assert _span(_coded(low)) == base, f"low row {i}"
+        high = years.copy()
+        high[-1 - i] = 2500 + i  # at or above the K-th highest row's year
+        assert _span(_coded(high)) == base, f"high row {i}"
+
+
+def test_overlapping_tails_release_one_range_inside_kth_rows() -> None:
+    years = _spread(15, 2001)
+    ranges, _, _ = _span(_coded(years))
+    assert len(ranges) == 1
+    assert ranges[0]["start_year"] >= years[-K]  # the 10th highest row's year
+    assert ranges[0]["end_year"] <= years[K - 1]  # the 10th lowest row's year
+    assert ranges[0]["count"] == 15
+
+
+@pytest.mark.parametrize("total", range(K, 2 * K - 1))
+def test_low_above_high_releases_one_range(total: int) -> None:
+    years = _spread(total, 2001)
+    ranges, _, _ = _span(_coded(years))
+    assert ranges == [{"start_year": years[-K], "end_year": years[K - 1], "count": total}]
+
+
+def test_year_edge_reads_coded_bounds() -> None:
+    df = _wide_years([1850, *range(1990, 2020)])
+    stats = _col(_doc(df, flagged=["d"]), "d")["stats"]
+    assert stats["min"] == "1997-01-01T00:00:00"  # one year below the coded first range
+    assert stats["max"] == "2011-12-31T23:59:59"
+
+
+def test_plain_min_max_read_coded_bounds() -> None:
+    _, low, _ = _span(_coded([1850, *range(1990, 2020)]))
+    assert low == "1998-01-01T00:00:00"
+    _, _, high = _span(_coded([*range(1990, 2020), 2090]))
+    assert high == "2011-12-31T23:59:59.999999"
+    assert "1850" not in json.dumps(_coded([1850, *range(1990, 2020)]))
