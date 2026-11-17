@@ -404,10 +404,26 @@ def _string_cell_execute(width: float) -> int | None:
     ("column", "width"),
     [
         ({"name": "n", "strategy": "hash", "namespace": "ns"}, 64.0),
-        ({"name": "n", "strategy": "hash", "namespace": "ns", "truncate": 12}, 12.0),
-        ({"name": "n", "strategy": "hash", "namespace": "ns", "truncate": 100}, 64.0),
+        (
+            {
+                "name": "n",
+                "strategy": "hash",
+                "namespace": "ns",
+                "provider_config": {"truncate": 12},
+            },
+            12.0,
+        ),
+        (
+            {
+                "name": "n",
+                "strategy": "hash",
+                "namespace": "ns",
+                "provider_config": {"truncate": 100},
+            },
+            64.0,
+        ),
         ({"name": "n", "strategy": "redact"}, 8.0),
-        ({"name": "n", "strategy": "redact", "redact_with": "XX"}, 2.0),
+        ({"name": "n", "strategy": "redact", "provider_config": {"redact_with": "XX"}}, 2.0),
     ],
     ids=["hash", "hash-truncate-12", "hash-truncate-100", "redact", "redact-xx"],
 )
@@ -490,7 +506,7 @@ def test_an_fk_child_column_takes_its_parent_keys_output(tmp_path: Path) -> None
                 "columns": [
                     {"name": "id", "strategy": "passthrough"},
                     # A shorter truncate than the parent's: the edge decides the child's output.
-                    {"name": "pid", **hashed, "truncate": 12},
+                    {"name": "pid", **hashed, "provider_config": {"truncate": 12}},
                 ],
             },
         ],
