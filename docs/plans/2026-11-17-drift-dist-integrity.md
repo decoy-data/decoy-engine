@@ -245,8 +245,12 @@ Facts per strategy:
 | passthrough, shuffle | preserves_all | yes | all five |
 | categorical (any form) | preserves_all when weighted or `from_profile`; other otherwise | yes | row_count, null_rate |
 | hash, fpe, tokenize | preserves_cardinality_only | yes | row_count, null_rate, distinct_ratio |
-| faker, bucketize, truncate, geo_generalize, code_set, bucket_perturb, top_code, date_shift, text_mask, text_redact, nested, redact | other labels | yes | row_count, null_rate |
-| joint_mask, group_key, windowed_date, grouped_series, derived, derived_aggregate, formula | other labels | no | row_count |
+| faker, bucketize, truncate, code_set, bucket_perturb, top_code, date_shift, text_mask, text_redact, nested, redact | other labels | yes | row_count, null_rate |
+| joint_mask, group_key, geo_generalize, windowed_date, grouped_series, derived, derived_aggregate, formula | other labels | no | row_count |
+
+geo_generalize turns a null into the text `None` or `nan` before generalizing, so it does not keep nulls (DI-1a review).
+
+DI-1b carries two DI-1a review items: the output-side value tally runs only when `distribution` is set and only for columns with a checked fact (no cost on an unconfigured integrity run); DI-T8 adds a null-bearing column for hash, fpe, categorical, bucket_perturb, text_redact and text_mask on the chunked and out-of-core routes, so a native kernel that fills nulls shows as a `null_rate` breach.
 
 Generate tables have no source and are skipped.
 
