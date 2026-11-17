@@ -1009,10 +1009,10 @@ class TestNumbersAreWrittenAsRead:
         assert type(value["b"][1]["c"]) is int
 
     def test_a_scalar_number_reaches_the_child_as_plain_int_or_float(self, monkeypatch):
-        child = _RecordingChild(lambda v: v)
-        _run_nested(['{"a":1.10,"b":7}'], {"target": "$.*", "strategy": "rec"}, monkeypatch, child)
-        leaves = child.frames[0]["_nested_leaves"].tolist()
-        assert sorted(type(v).__name__ for v in leaves) == ["float", "int"]
+        for cell, kind in (('{"a":1.10}', "float64"), ('{"a":7}', "int64")):
+            child = _RecordingChild(lambda v: v)
+            _run_nested([cell], {"target": "$.a", "strategy": "rec"}, monkeypatch, child)
+            assert str(child.frames[0]["_nested_leaves"].dtype) == kind
 
     def test_an_escaped_surrogate_is_read_and_written_back_unchanged(self, monkeypatch):
         out, _, ctx = _run_nested(
