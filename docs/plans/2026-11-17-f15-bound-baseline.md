@@ -412,6 +412,10 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
   `tests/sentry/test_strict_json_single_parser.py`, which fails on any `object_pairs_hook=` or
   `parse_constant=` call outside `_canonical/`, so `bound_baseline.py` cannot grow a second strict
   parser; F15-T7 fails if it uses plain `json.loads`. Mutation MF-7d: swap in `json.loads`.
+  Because Q17 makes `parse_float` part of the strict-parser mechanism, E2 extends this sentry in
+  the same slice: `parse_float` joins `_HOOKS`, the owner assertion names it, and a seeded
+  `json.loads(raw, parse_float=float)` call outside `_canonical/` must turn the sentry red.
+  Mutation MF-7f: remove `parse_float` from `_HOOKS` (the seeded cell goes red).
 
 ## 6. Reuse inventory
 
@@ -734,7 +738,7 @@ check through `check_drift` (drift plan Q-F) and gets the binding with it.
 | H3 two owners of table matching | engine `diff_scan_documents` owns matching including `no_common_table` and its single-entry rule; C1 deletes D-2b's matching; set-level names `diff_scan_documents` and `ScanSetDiff`, so `diff_scan_sets` means only the facade per-table call; facade `DriftVerdict` re-exports the engine type; `ctx.drift_verdict` shape change noted for row 62; F15-T2 cell, MF-2c, F15-C-T5 | 3.1, 3.3, 11, 16 |
 | H4 exit 1 for binding errors had no path | `BaselineBindingError` added to `usage_error_types()`, read by the exit map and the run error arm; `test_exit_code_for.py` cell in F15-C-T7; MC-7b; `scan bind` errors exit 1 | 3.3, 7, 8, 11 |
 | H5 binding landed after its own acceptance cell | `bind_baseline` in `check_drift` moves to C1; C1 updates D-2 fixtures to carry `sha256`; F15-C-T7 (mismatch exits 1 before any read) moves to C1 | 7, 11, 13 |
-| H6 engine diff validated cores, breaking legacy diffs | `diff_scan_tables` reads four members with no validation; legacy pair with int scores in the corpus and F15-C-T1; one `check_scan_finite` export called once before the CLI branch; legacy NaN cells | 3.1, 3.4, 11 |
+| H6 engine diff validated cores, breaking legacy diffs | `diff_scan_tables` reads four members with no validation; legacy pair with int scores in the corpus and F15-C-T1; one `check_scan_finite` export called once before the CLI branch (superseded in revision 3: the engine walker is removed, see section 18); legacy NaN cells | 3.1, 3.4, 11 |
 | M1 document lacked set members | the CLI passes both full documents with `tables=[selected]`; F15-C-T4 pins the versions and `detectors_changed`; MC-4 | 3.4, 11 |
 | M2 tightening a released key | described as a pre-GA tightening of the 0.28.0 key (`is_pre_ga()`), breaking changelog fragment, contract note | 3.2, 9, 14 |
 | M3 user text change in the reader | CLI catches `ScanSetReadError` and maps its `kind` to today's messages | 3.1, 3.4, 11 |
@@ -752,7 +756,7 @@ check through `check_drift` (drift plan Q-F) and gets the binding with it.
 
 | Finding | Change | Sections |
 |---|---|---|
-| `bind_baseline` parsed with plain `json.loads` (duplicate keys and non-finite values accepted) | `bind_baseline` parses with `strict_json_loads`; its `StrictJsonError` maps to `pre_scan.baseline_unreadable` after the `except` block; duplicate-key, `NaN`, `Infinity` and `1e999` cells in F15-T7; MF-7d swaps in `json.loads`, MF-7e drops the overflow hook | 3.2, 4, 5, 11 |
+| `bind_baseline` parsed with plain `json.loads` (duplicate keys and non-finite values accepted) | `bind_baseline` parses with `strict_json_loads`; its `StrictJsonError` maps to `pre_scan.baseline_unreadable` after the `except` block; duplicate-key, `NaN`, `Infinity` and `1e999` cells in F15-T7; MF-7d swaps in `json.loads`, MF-7e drops the overflow hook; the strict-parser sentry gains `parse_float` in `_HOOKS` with a seeded cell and MF-7f (orchestrator, after Codex round 2 DESIGN) | 3.2, 4, 5, 11 |
 | Two non-finite policies | the engine walker `check_scan_finite` is removed; the engine policy is the strict parser, extended in E2 to refuse an overflowed literal (Q17); the CLI keeps its existing `_has_non_finite` walk unchanged because it cannot import the private parser and a strict CLI loader is a user-visible change (V2-LOG). This replaces revision 2's H6 export | 3.1, 3.4, 7, 14, 15 |
 | Strict parser missing from the research | added to established solutions, reuse inventory and the choke points with its sentry | 2, 5, 6 |
 
