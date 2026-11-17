@@ -48,33 +48,60 @@ import logging
 import os
 import re
 import shutil
-import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine.fileaccess import open_protected_dir
-from decoy_engine.sdk import PermanentError
+from decoy_engine.connectors._postgres_session import (
+    ATTACH_ALIAS,
+    Deadline,
+    PostgresSnapshotError,
+    SessionSettings,
+    connected_session,
+    quote_ident,
+    raise_for_interrupt,
+    sql_literal,
+    validate_identifier,
+)
+from decoy_engine.connectors.postgres_catalog import check_relation_shape, read_relation_rows
+from decoy_engine.reasons import Outcome
 
 __all__ = [
+    "POSTGRES_SOURCE_USAGE_CODES",
     "PostgresSnapshotConfig",
     "PostgresSnapshotError",
     "RelationSelection",
     "snapshot_tables_to_parquet",
+    "validate_identifier",
 ]
 
 _log = logging.getLogger(__name__)
 
-# Strict on purpose: unquoted-safe Postgres identifiers. Names needing quoted
-# oddities (spaces, quotes, unicode) are rejected rather than escaped, so the
-# validation boundary and the quoting boundary cannot disagree.
-_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}\Z")
 
-# Alias for the attached database. Fixed, never caller-derived.
-_ATTACH_ALIAS = "decoy_pg_src"
+def _usage_codes() -> frozenset[str]:
+    return frozenset(
+        spec.code
+        for spec in reasons.specs()
+        if spec.namespace == "connector"
+        and any(r.outcome is Outcome.CONFIGURATION for r in spec.rules)
+    )
+
+
+# Codes a user can repair by changing the config or the database (exit 1 in the CLI). The
+# registry outcome is the one source, so a new usage code needs no second list.
+POSTGRES_SOURCE_USAGE_CODES: frozenset[str] = _usage_codes()
 
 # DuckDB TIMESTAMP is int64 microseconds. Postgres allows years up to 294276
 # AD, which wraps silently on the scanner's int64 conversion. The guard window
@@ -113,33 +140,6 @@ _NUMERIC_RE = re.compile(r"^numeric\((\d+),(\d+)\)\Z")
 _LEN_SUFFIX_RE = re.compile(r"\(\d+\)\Z")
 
 
-class PostgresSnapshotError(PermanentError):
-    """Coded, redacted snapshot failure.
-
-    ``code`` is a stable machine-readable token. ``location`` is a relation
-    (``schema.table``) or ``schema.table.column``, never a value or DSN. The
-    message is built only from those parts plus an exception type name.
-    """
-
-    def __init__(self, code: str, *, location: str = "", cause_type: str = "") -> None:
-        self.code = code
-        self.location = location
-        self.cause_type = cause_type
-        parts = [f"postgres_snapshot[{code}]"]
-        if location:
-            parts.append(f"at {location}")
-        if cause_type:
-            parts.append(f"cause={cause_type}")
-        super().__init__(" ".join(parts))
-
-
-def _validate_ident(value: str, what: str) -> str:
-    if not isinstance(value, str) or not _IDENT_RE.fullmatch(value):
-        # The offending text is not echoed: it may be attacker-shaped input.
-        raise ValueError(f"invalid {what} identifier")
-    return value
-
-
 class PostgresSnapshotConfig(BaseModel):
     """Connection and resource policy for one snapshot call. No SQL field."""
 
@@ -170,22 +170,25 @@ class RelationSelection(BaseModel):
     table: str
     columns: list[str] = Field(min_length=1)
     order_by: list[str] = Field(default_factory=list)
+    # True when ``columns`` is the whole relation as the caller checked it. The snapshot then
+    # refuses if the live column set differs inside the transaction.
+    whole_relation: bool = Field(default=False, strict=True)
 
     @field_validator("schema_name")
     @classmethod
     def _v_schema(cls, v: str) -> str:
-        return _validate_ident(v, "schema")
+        return validate_identifier(v, "schema")
 
     @field_validator("table")
     @classmethod
     def _v_table(cls, v: str) -> str:
-        return _validate_ident(v, "table")
+        return validate_identifier(v, "table")
 
     @field_validator("columns", "order_by")
     @classmethod
     def _v_cols(cls, v: list[str]) -> list[str]:
         for c in v:
-            _validate_ident(c, "column")
+            validate_identifier(c, "column")
         if len(set(v)) != len(v):
             raise ValueError("duplicate column")
         return v
@@ -201,85 +204,7 @@ class RelationSelection(BaseModel):
         return f"{self.schema_name}.{self.table}"
 
 
-def _q(ident: str) -> str:
-    """Quote a validated identifier. Validation already excludes ``"``."""
-    return '"' + ident.replace('"', '""') + '"'
-
-
-def _lit(text: str) -> str:
-    """SQL string literal. Used only for the DSN and generated paths."""
-    return "'" + text.replace("'", "''") + "'"
-
-
-# ----- extension loading --------------------------------------------------
-
-
-def _open_connection(config: PostgresSnapshotConfig, spill_dir: Path) -> Any:
-    open_protected_dir(spill_dir, create=True, parents=True)
-    try:
-        from decoy_engine.fileaccess.adapters import duckdb as duckdb_adapter
-
-        conn = duckdb_adapter.connect_internal(
-            {
-                "temp_directory": str(spill_dir),
-                "memory_limit": config.memory_limit,
-                "threads": config.threads,
-                "extension_directory": str(config.extension_directory),
-                # Fail closed offline: nothing may be fetched or auto-loaded.
-                "autoinstall_known_extensions": False,
-                "autoload_known_extensions": False,
-                "allow_unsigned_extensions": False,
-                # Kept True so the ORDER BY result order survives the Parquet
-                # write even when the export spills; dropping it would let DuckDB
-                # reorder spilled chunks and break the byte-identical snapshot
-                # (guarantee 2).
-                "preserve_insertion_order": True,
-            }
-        )
-    except Exception as exc:
-        raise PostgresSnapshotError(
-            reasons.connector.DUCKDB_UNAVAILABLE, cause_type=type(exc).__name__
-        ) from None
-    return conn
-
-
-def _load_postgres_extension(conn: Any, config: PostgresSnapshotConfig) -> None:
-    ext_dir = config.extension_directory
-    try:
-        conn.execute("LOAD postgres")
-        row = conn.execute(
-            "SELECT loaded, install_path FROM duckdb_extensions() WHERE extension_name = 'postgres_scanner'"
-        ).fetchone()
-    except Exception as exc:
-        raise PostgresSnapshotError(
-            reasons.connector.EXTENSION_UNAVAILABLE, cause_type=type(exc).__name__
-        ) from None
-    if not row or not row[0]:
-        raise PostgresSnapshotError(reasons.connector.EXTENSION_UNAVAILABLE)
-    installed_under = str(row[1] or "")
-    # An extension that loaded from anywhere but the bundled directory means the
-    # offline pin was bypassed, so refuse it.
-    if not installed_under.startswith(str(ext_dir)):
-        raise PostgresSnapshotError(reasons.connector.EXTENSION_UNTRUSTED_LOCATION)
-
-
 # ----- type fidelity ------------------------------------------------------
-
-# Constant catalog query: no caller text is interpolated. format_type gives
-# the declared type (with precision), and the element typtype lets enum
-# arrays be told apart from other arrays.
-_CATALOG_SQL = (
-    "SELECT n.nspname, c.relname, a.attname, format_type(a.atttypid, a.atttypmod), "
-    "COALESCE(e.typtype, t.typtype)::text "
-    "FROM pg_attribute a "
-    "JOIN pg_class c ON c.oid = a.attrelid "
-    "JOIN pg_namespace n ON n.oid = c.relnamespace "
-    "JOIN pg_type t ON t.oid = a.atttypid "
-    "LEFT JOIN pg_type e ON e.oid = t.typelem AND t.typcategory = 'A' "
-    "WHERE a.attnum > 0 AND NOT a.attisdropped "
-    "AND c.relkind IN ('r', 'p', 'v', 'm', 'f') "
-    "AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
-)
 
 
 def _classify(type_text: str, typtype: str) -> str | None:
@@ -314,36 +239,9 @@ def _classify(type_text: str, typtype: str) -> str | None:
 
 def _check_types(conn: Any, sel: RelationSelection) -> dict[str, str]:
     """Verify columns exist and are lossless. Returns {column: guard class}."""
-    try:
-        rows = conn.execute(
-            f"SELECT nspname, relname, attname, fmt, typtype FROM postgres_query({_lit(_ATTACH_ALIAS)}, ?) "
-            "AS q(nspname, relname, attname, fmt, typtype) "
-            "WHERE lower(nspname) = lower(?) AND lower(relname) = lower(?)",
-            [_CATALOG_SQL, sel.schema_name, sel.table],
-        ).fetchall()
-    except Exception as exc:
-        raise PostgresSnapshotError(
-            reasons.connector.CATALOG_READ_FAILED, location=sel.key, cause_type=type(exc).__name__
-        ) from None
-    # DuckDB resolves schema, table and column names case-insensitively, so a
-    # source with names differing only by case would export the wrong object
-    # without any error. Fetch case-insensitive matches and reject ambiguity,
-    # then require an exact-case match so a near miss is never resolved.
-    if len({r[0] for r in rows}) > 1 or len({(r[0], r[1]) for r in rows}) > 1:
-        raise PostgresSnapshotError(reasons.connector.AMBIGUOUS_NAME, location=sel.key)
-    rows = [r for r in rows if r[0] == sel.schema_name and r[1] == sel.table]
-    if not rows:
-        raise PostgresSnapshotError(reasons.connector.RELATION_NOT_FOUND, location=sel.key)
-    folded: dict[str, int] = {}
-    for r in rows:
-        folded[r[2].lower()] = folded.get(r[2].lower(), 0) + 1
-    # Reject the relation if ANY two of its columns collide case-insensitively,
-    # even ones outside this projection. DuckDB folds a case-colliding pair to
-    # one name and renames the duplicate with a generated suffix (a + "A" ->
-    # a, A_1), which can then shadow a real column like a_1 and export the
-    # wrong column with no error. The whole relation is unsafe, so refuse it.
-    if any(count > 1 for count in folded.values()):
-        raise PostgresSnapshotError(reasons.connector.AMBIGUOUS_NAME, location=sel.key)
+    rows = read_relation_rows(conn, sel.schema_name, sel.table)
+    if sel.whole_relation:
+        check_relation_shape(rows, sel.columns, sel.key)
     declared = {r[2]: (r[3], r[4]) for r in rows}
     classes: dict[str, str] = {}
     for col in sel.columns:
@@ -373,7 +271,7 @@ def _guard_values(conn: Any, sel: RelationSelection, classes: dict[str, str]) ->
     """
     checks: list[tuple[str, str]] = []
     for col, cls in classes.items():
-        qc = _q(col)
+        qc = quote_ident(col)
         if cls == "date":
             cond = f"NOT isfinite({qc})"
         elif cls == "timestamp":
@@ -396,16 +294,20 @@ def _guard_values(conn: Any, sel: RelationSelection, classes: dict[str, str]) ->
     sql = (
         "SELECT "
         + ", ".join(f"{expr} AS g{i}" for i, (_, expr) in enumerate(checks))
-        + f" FROM {_q(sel.schema_name)}.{_q(sel.table)}"
+        + f" FROM {quote_ident(sel.schema_name)}.{quote_ident(sel.table)}"
     )
+    counts: Any = None
+    cause_type = ""
     try:
         counts = conn.execute(
-            f"SELECT * FROM postgres_query({_lit(_ATTACH_ALIAS)}, ?)", [sql]
+            f"SELECT * FROM postgres_query({sql_literal(ATTACH_ALIAS)}, ?)", [sql]
         ).fetchone()
     except Exception as exc:
+        cause_type = type(exc).__name__
+    if cause_type:
         raise PostgresSnapshotError(
-            reasons.connector.VALUE_GUARD_FAILED, location=sel.key, cause_type=type(exc).__name__
-        ) from None
+            reasons.connector.VALUE_GUARD_FAILED, location=sel.key, cause_type=cause_type
+        )
     for (col, _), n in zip(checks, counts or (), strict=True):
         if n:
             raise PostgresSnapshotError(
@@ -420,16 +322,54 @@ def _order_clause(sel: RelationSelection) -> str:
     # Key columns first, then every other projected column as tiebreaker, so
     # keyless relations and non-unique keys still export in one total order.
     ordered = list(sel.order_by) + [c for c in sel.columns if c not in sel.order_by]
-    return ", ".join(f"{_q(c)} ASC NULLS LAST" for c in ordered)
+    return ", ".join(f"{quote_ident(c)} ASC NULLS LAST" for c in ordered)
 
 
 def _export_relation(conn: Any, sel: RelationSelection, target: Path, row_group_size: int) -> None:
-    cols = ", ".join(_q(c) for c in sel.columns)
-    src = f"{_q(_ATTACH_ALIAS)}.{_q(sel.schema_name)}.{_q(sel.table)}"
+    cols = ", ".join(quote_ident(c) for c in sel.columns)
+    src = f"{quote_ident(ATTACH_ALIAS)}.{quote_ident(sel.schema_name)}.{quote_ident(sel.table)}"
     conn.execute(
         f"COPY (SELECT {cols} FROM {src} ORDER BY {_order_clause(sel)}) "
-        f"TO {_lit(str(target))} (FORMAT parquet, ROW_GROUP_SIZE {int(row_group_size)})"
+        f"TO {sql_literal(str(target))} (FORMAT parquet, ROW_GROUP_SIZE {int(row_group_size)})"
     )
+
+
+def _export_all(
+    conn: Any,
+    config: PostgresSnapshotConfig,
+    selections: list[RelationSelection],
+    stage_dir: Path,
+    deadline: Deadline,
+) -> dict[str, Path]:
+    """Check and export every selection in one transaction, with the failure policy applied."""
+    staged: dict[str, Path] = {}
+    failure: PostgresSnapshotError | None = None
+    cause_type = ""
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        # Validate every relation first so a late type rejection never
+        # follows a long export. All of this reads the same snapshot.
+        plans = [(sel, _check_types(conn, sel)) for sel in selections]
+        for sel, classes in plans:
+            _guard_values(conn, sel, classes)
+        for sel, _ in plans:
+            target = stage_dir / f"{sel.schema_name}.{sel.table}.parquet"
+            _export_relation(conn, sel, target, config.row_group_size)
+            staged[sel.key] = target
+        conn.execute("COMMIT")
+    except PostgresSnapshotError as exc:
+        failure = exc
+    except Exception as exc:
+        cause_type = type(exc).__name__
+    if failure is not None:
+        cause_type = failure.cause_type
+    # Raised here, after the except blocks closed, so no error keeps DuckDB's text as context.
+    raise_for_interrupt(deadline, cause_type)
+    if failure is not None:
+        raise failure
+    if cause_type:
+        raise PostgresSnapshotError(reasons.connector.EXPORT_FAILED, cause_type=cause_type)
+    return staged
 
 
 def snapshot_tables_to_parquet(
@@ -442,7 +382,8 @@ def snapshot_tables_to_parquet(
     One ATTACH, one transaction across all selections, one ordered COPY per
     relation. A single-relation snapshot is this same call with one selection.
     On any failure, timeout, or interrupt nothing is published and every
-    staged and spill file is removed.
+    staged and spill file is removed. A DuckDB interrupt that is not the deadline
+    (Ctrl-C) is re-raised as ``KeyboardInterrupt``.
     """
     fileaccess.require_ambient("the Postgres snapshot")
     if not selections:
@@ -455,68 +396,13 @@ def snapshot_tables_to_parquet(
     dest_dir.mkdir(parents=True, exist_ok=True)
     stage_dir = dest_dir / f".stage-{run_id}"
     final_dir = dest_dir / f"snapshot-{run_id}"
-    spill_dir = config.temp_directory / f"spill-{run_id}"
     stage_dir.mkdir(mode=0o700)
 
     published = False
-    conn: Any = None
-    timed_out = threading.Event()
-    timer: threading.Timer | None = None
+    deadline = Deadline(config.deadline_s)
     try:
-        conn = _open_connection(config, spill_dir)
-        _load_postgres_extension(conn, config)
-
-        def _on_deadline() -> None:
-            timed_out.set()
-            try:
-                conn.interrupt()
-            except Exception:
-                pass
-
-        timer = threading.Timer(config.deadline_s, _on_deadline)
-        timer.daemon = True
-        timer.start()
-
-        try:
-            conn.execute("SET TimeZone = 'UTC'")
-            conn.execute(
-                f"SET pg_statement_timeout_millis = {int(config.statement_timeout_s) * 1000}"
-            )
-            conn.execute(
-                f"ATTACH {_lit(config.dsn.get_secret_value())} AS {_q(_ATTACH_ALIAS)} "
-                "(TYPE postgres, READ_ONLY)"
-            )
-        except Exception as exc:
-            raise PostgresSnapshotError(
-                reasons.connector.SOURCE_UNREACHABLE, cause_type=type(exc).__name__
-            ) from None
-
-        staged: dict[str, Path] = {}
-        try:
-            conn.execute("BEGIN TRANSACTION")
-            # Validate every relation first so a late type rejection never
-            # follows a long export. All of this reads the same snapshot.
-            plans = [(sel, _check_types(conn, sel)) for sel in selections]
-            for sel, classes in plans:
-                _guard_values(conn, sel, classes)
-            for sel, _ in plans:
-                target = stage_dir / f"{sel.schema_name}.{sel.table}.parquet"
-                _export_relation(conn, sel, target, config.row_group_size)
-                staged[sel.key] = target
-            conn.execute("COMMIT")
-        except PostgresSnapshotError:
-            if timed_out.is_set():
-                raise PostgresSnapshotError(reasons.connector.DEADLINE_EXCEEDED) from None
-            raise
-        except Exception as exc:
-            if timed_out.is_set():
-                raise PostgresSnapshotError(reasons.connector.DEADLINE_EXCEEDED) from None
-            raise PostgresSnapshotError(
-                reasons.connector.EXPORT_FAILED, cause_type=type(exc).__name__
-            ) from None
-
-        if timed_out.is_set():
-            raise PostgresSnapshotError(reasons.connector.DEADLINE_EXCEEDED)
+        with read_session(config, deadline) as conn:
+            staged = _export_all(conn, config, selections, stage_dir, deadline)
         os.replace(stage_dir, final_dir)
         published = True
         _log.info("postgres_snapshot published relations=%d", len(staged))
@@ -526,14 +412,18 @@ def snapshot_tables_to_parquet(
         _log.warning("postgres_snapshot failed code=%s location=%s", code, location)
         raise
     finally:
-        if timer is not None:
-            timer.cancel()
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
         shutil.rmtree(stage_dir, ignore_errors=True)
-        shutil.rmtree(spill_dir, ignore_errors=True)
         if not published:
             shutil.rmtree(final_dir, ignore_errors=True)
+
+
+@contextmanager
+def read_session(config: SessionSettings, deadline: Deadline) -> Iterator[Any]:
+    """A read-only session with its spill directory, closed and removed on every exit."""
+    fileaccess.require_ambient("the Postgres read session")
+    spill_dir = config.temp_directory / f"spill-{uuid.uuid4().hex}"
+    try:
+        with connected_session(config, spill_dir, deadline) as conn:
+            yield conn
+    finally:
+        shutil.rmtree(spill_dir, ignore_errors=True)
