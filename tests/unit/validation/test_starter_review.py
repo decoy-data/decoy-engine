@@ -2,8 +2,10 @@
 
 AT-E1 (every verdict, drop and the empty-table refusal), AT-E2 (a non-live suggestion applies only
 on a matching confirm), AT-E3 (refusals are coded, name no value and carry no exception context),
-AT-E4 (Hypothesis property over random decision sets) and AT-E8 (no retired product word in any
-note). Every result that matters is also compiled through `profile_source` and `compile_plan`.
+AT-E4 (Hypothesis property over random decision sets, plain and keyed starters) and AT-E8 (no
+retired product word in any note). The verdict results in AT-E1 are compiled through
+`profile_source` and `compile_plan`; the property runs the profile-free plan checks on each
+success.
 """
 
 from __future__ import annotations
@@ -20,15 +22,17 @@ from hypothesis import strategies as st
 from decoy_engine import strategy_catalog
 from decoy_engine.config import PipelineConfig, parse_pipeline_config
 from decoy_engine.detection.types import ModelRef
-from decoy_engine.plan import compile_plan
+from decoy_engine.plan import compile_plan, run_config_only_checks
 from decoy_engine.plan.checks import check_required_strategy_settings
 from decoy_engine.profile import profile_source
 from decoy_engine.profiling import (
     DETECTOR_DESCRIPTORS,
     ColumnSuggestion,
     StarterConfig,
+    detector_entry,
     scan_sources,
     starter_config,
+    swap_placeholder_namespaces,
 )
 from decoy_engine.validation.starter_review import (
     ReviewDecision,
@@ -342,16 +346,17 @@ def _example_entries() -> list[dict[str, Any]]:
 
 
 @st.composite
-def _decision_sets(draw: Any, starter: StarterConfig) -> list[ReviewDecision]:
+def _decision_sets(draw: Any, starter: StarterConfig, *, drop_all: bool) -> list[ReviewDecision]:
     examples = _example_entries()
     out: list[ReviewDecision] = []
     for table in starter.config["tables"]:
         names = [c["name"] for c in table["columns"]]
-        weight = draw(st.sampled_from(["mixed", "drop_all"]))
+        # About one table in five is dropped whole, so the empty-table refusal is exercised.
+        whole = drop_all and draw(st.sampled_from([False, False, False, False, True]))
         for name in names:
-            verdict = V.DROP if weight == "drop_all" else draw(st.sampled_from(list(V)))
-            if draw(st.booleans()) and weight == "mixed":
+            if not whole and draw(st.booleans()):
                 continue
+            verdict = V.DROP if whole else draw(st.sampled_from(list(V)))
             kw: dict[str, Any] = {}
             if verdict is V.EDIT:
                 kw["entry"] = draw(st.sampled_from(examples))
@@ -361,33 +366,51 @@ def _decision_sets(draw: Any, starter: StarterConfig) -> list[ReviewDecision]:
     return draw(st.permutations(out))
 
 
+KEY_COLUMNS = {("customers", "email"), ("orders", "customer_email")}
+
+
 @settings(
-    max_examples=60,
+    max_examples=80,
     deadline=None,
     derandomize=True,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
 @given(data=st.data())
-def test_property_random_decision_sets(starter: StarterConfig, data: st.DataObject) -> None:
-    decisions = data.draw(_decision_sets(starter))
+def test_property_random_decision_sets(
+    starter: StarterConfig, keyed: StarterConfig, data: st.DataObject
+) -> None:
+    on_keys = data.draw(st.booleans())
+    base = keyed if on_keys else starter
+    decisions = data.draw(_decision_sets(base, drop_all=True))
+    join_safe = {i.name for i in strategy_catalog() if i.join_safe}
     dropped: dict[str, set[str]] = {}
     for d in decisions:
         if d.verdict is V.DROP:
             dropped.setdefault(d.table, set()).add(d.column)
     emptied = [
         t["name"]
-        for t in starter.config["tables"]
+        for t in base.config["tables"]
         if len(dropped.get(t["name"], ())) == len(t["columns"])
     ]
+    key_violation = on_keys and any(
+        (d.table, d.column) in KEY_COLUMNS
+        and (d.verdict is V.DROP or (d.verdict is V.EDIT and d.entry["strategy"] not in join_safe))
+        for d in decisions
+    )
+    if key_violation:
+        err = _refusal(lambda: apply_review(base, decisions))
+        assert err.identity == "config.key_column_not_join_safe"
+        return
     if emptied:
-        err = _refusal(lambda: apply_review(starter, decisions))
+        err = _refusal(lambda: apply_review(base, decisions))
         assert err.identity == "pre_scan.review_empty_table"
         return
-    result = apply_review(starter, decisions)
+    result = apply_review(base, decisions)
     parse_pipeline_config(result.config)
+    run_config_only_checks(swap_placeholder_namespaces(result.config)[0])
     check_required_strategy_settings(result.config)  # every namespace-needing entry has one
     named = {(d.table, d.column) for d in decisions}
-    for table in starter.config["tables"]:
+    for table in base.config["tables"]:
         kept = {c["name"] for c in _table(result, table["name"])["columns"]}
         assert kept and kept.isdisjoint(dropped.get(table["name"], set()))
         gone = {
@@ -395,11 +418,116 @@ def test_property_random_decision_sets(starter: StarterConfig, data: st.DataObje
         }
         assert gone == dropped.get(table["name"], set())
         for column in table["columns"]:
-            if (table["name"], column["name"]) not in named:
-                assert _entry_of(result, table["name"], column["name"]) == column
-    assert result.config["tables"] is not starter.config["tables"]
-    again = apply_review(starter, list(reversed(decisions)))
+            slot = (table["name"], column["name"])
+            if slot not in named:
+                assert _entry_of(result, *slot) == column
+            elif on_keys and slot in KEY_COLUMNS:
+                entry = _entry_of(result, *slot)
+                if entry is not None:
+                    assert entry["namespace"] == "cust" and entry["strategy"] in join_safe
+    assert result.config["tables"] is not base.config["tables"]
+    again = apply_review(base, list(reversed(decisions)))
     assert again.config == result.config and dict(again.notes) == dict(result.notes)
+
+
+# EDIT entries through apply_review, ColumnSuggestion guard, catalog parity ---------------------
+
+
+@pytest.mark.parametrize(
+    ("entry", "option"),
+    [
+        ({"strategy": "truncate", "length": True}, "length"),
+        ({"strategy": "truncate", "length": 3, "bogus": CANARY}, "bogus"),
+        ({"strategy": "truncate", "length": 3, "keep": CANARY}, "keep"),
+        ({"strategy": 5}, None),
+        ({"strategy": ["hash"]}, None),
+        ({"length": 3}, None),
+        ({"strategy": "hash", "namespace": "   "}, "namespace"),
+        ({"strategy": "hash", "namespace": 7}, "namespace"),
+    ],
+)
+def test_invalid_edit_entries_are_refused_through_apply_review(
+    starter: StarterConfig, entry: dict[str, Any], option: str | None
+) -> None:
+    decision = ReviewDecision("customers", "email", V.EDIT, entry=entry)
+    err = _refusal(lambda: apply_review(starter, [decision]))
+    assert err.identity == "config.entry_invalid"
+    assert (err.table, err.column, err.option) == ("customers", "email", option)
+
+
+def test_a_config_the_plan_checks_refuse_is_a_coded_error_without_values(
+    starter: StarterConfig,
+) -> None:
+    # The catalog does not know provider names; the profile-free plan checks do.
+    bad = ReviewDecision(
+        "customers", "email", V.EDIT, entry={"strategy": "faker", "provider": CANARY}
+    )
+    err = _refusal(lambda: apply_review(starter, [bad]))
+    assert err.identity == "config.entry_invalid"
+    assert "unknown_provider" in str(err) and "customers" in str(err)
+
+
+def test_a_blank_namespace_is_refused_by_the_entry_writer() -> None:
+    for blank in ("", " ", "\t\n"):
+        err = _refusal(lambda b=blank: column_entry("hash", "c", namespace=b))
+        assert err.option == "namespace"
+
+
+def test_the_base_error_cannot_be_raised_directly() -> None:
+    with pytest.raises(TypeError):
+        ReviewInputError("text")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"source": "classifier", "live": True, "detector_id": "x"},
+        {"entry": {"name": "other", "strategy": "faker", "namespace": "c"}, "namespace": "c"},
+        {"entry": {"name": "c", "strategy": "hash", "namespace": "c"}, "namespace": "c"},
+        {"entry": {"name": "c", "strategy": "faker", "namespace": "z"}, "namespace": "c"},
+        {"entry": {"name": "c", "strategy": "faker"}, "namespace": "c"},
+    ],
+)
+def test_a_suggestion_whose_parts_disagree_is_refused(bad: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        ColumnSuggestion("t", "c", "faker", **bad)
+
+
+def test_a_consistent_suggestion_is_accepted() -> None:
+    entry = {"name": "c", "strategy": "faker", "namespace": "c", "provider": "uuid"}
+    assert ColumnSuggestion("t", "c", "faker", namespace="c", entry=entry).entry == entry
+    assert ColumnSuggestion("t", "c", "faker", source="classifier", live=False).live is False
+
+
+_NOT_OFFERED = {("fpe", "validate_luhn")}  # a starter setting the wizard catalog does not offer
+
+
+def test_every_starter_choice_matches_what_the_entry_writer_builds() -> None:
+    checked = 0
+    for detector_id, descriptor in DETECTOR_DESCRIPTORS.items():
+        choice = descriptor.starter
+        if choice is None:
+            continue
+        options: dict[str, Any] = {}
+        if choice.provider:
+            options["provider"] = choice.provider
+        options.update(
+            {
+                k: v
+                for k, v in choice.provider_config.items()
+                if (choice.strategy, k) not in _NOT_OFFERED
+            }
+        )
+        built = column_entry(choice.strategy, "c", options=options)
+        starter_entry = detector_entry(detector_id, "c")
+        assert starter_entry is not None
+        for entry in (built, starter_entry):
+            entry.pop("namespace", None)
+            for name in ("validate_luhn",):
+                entry.get("provider_config", {}).pop(name, None)
+        assert built == starter_entry, detector_id
+        checked += 1
+    assert checked > 10
 
 
 # AT-E8 ------------------------------------------------------------------------------------

@@ -8,8 +8,10 @@ of strategies, options, types or namespaces. The starter's own entries come from
 descriptors and go through `profiling.build_entry`, the same shape writer without the catalog
 check: they carry settings (`validate_luhn`) the wizard does not offer.
 
-This module sits beside the catalog (the `execution` tier) because it reads it, and `profiling`
-sits below that tier. Every refusal is a `ReviewInputError` that names a table, a column or an
+This module sits at the `execution` tier because it reads the catalog, and `profiling` is below
+that tier. `plan` is below it too, so `apply_review` runs the profile-free plan checks
+(`run_config_only_checks`). The full `compile_plan` needs a profile, which reads the data, so that
+step stays with the caller. Every refusal is a `ReviewInputError` that names a table, a column or an
 option key, never a value. It is raised after the `except` block that caught the cause has
 closed, so neither `__cause__` nor `__context__` holds a value.
 """
@@ -22,19 +24,21 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfigError
 from decoy_engine.contracts.strategy_requirements import lookup_path, requirement_applies
 from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.errors import DecoyError
-from decoy_engine.execution._strategies import StrategyInfo, StrategyOption, strategy_catalog
+from decoy_engine.execution import StrategyInfo, StrategyOption, strategy_catalog
+from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.profiling import (
     StarterConfig,
     build_entry,
     check_starter_config,
     declared_key_namespaces,
+    swap_placeholder_namespaces,
 )
 from decoy_engine.reasons import ReasonCode
 
@@ -77,6 +81,9 @@ class ReviewInputError(DecoyError):
         column: str | None = None,
         option: str | None = None,
     ) -> None:
+        if type(self) is ReviewInputError:
+            raise TypeError("ReviewInputError is a base class; raise one of its subclasses")
+        self.text = text
         self.table = table
         self.column = column
         self.option = option
@@ -176,7 +183,7 @@ def column_entry(
     info = _catalog().get(strategy) if isinstance(strategy, str) else None
     if info is None or not info.offer_in_wizard:
         raise _invalid(column, "the strategy is unknown or not offered for review")
-    if namespace is not None and not (isinstance(namespace, str) and namespace):
+    if namespace is not None and _blank(namespace):
         raise _invalid(column, "the namespace must be a non-empty string", option="namespace")
     fields: dict[str, Any] = {}
     provider_config: dict[str, Any] = {}
@@ -196,7 +203,7 @@ def column_entry(
         strategy, column, column_fields=fields, provider_config=provider_config, namespace=chosen
     )
     for req in info.requirements:
-        if requirement_applies(req, entry) and lookup_path(entry, req.path) is None:
+        if requirement_applies(req, entry) and _blank(lookup_path(entry, req.path)):
             raise _invalid(column, "a setting the strategy needs is missing", option=req.path[-1])
     return entry
 
@@ -209,8 +216,9 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
     keeps the starter's entry and note, `DROP` removes the column and lists it in the table's one
     `drop_column` transform. A column of a declared relationship keeps that relationship's
     namespace, takes only a join-safe strategy and cannot be dropped; `REJECT` leaves its key
-    entry as it is. The result validates, and every entry that needs a namespace has one. The
-    compile check is the caller's: `plan` sits above this module's layer.
+    entry as it is. The result passes the config validation and the profile-free plan checks
+    (`run_config_only_checks`), so every entry that needs a namespace has one. The full
+    `compile_plan` needs a profile, which reads the data, so that step is the caller's.
     """
     config = copy.deepcopy(starter.config)
     notes: dict[tuple[str, str], str] = dict(starter.notes)
@@ -266,11 +274,19 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
         notes.pop(slot, None)
     for table_name, names in dropped.items():
         _drop(tables[table_name], names)
-    _check_namespaces(config, catalog)
     problems = _validation_problems(config)
     if problems:
         raise ReviewEntryError(f"the reviewed config fails validation ({problems})")
     return dataclasses.replace(starter, config=config, notes=MappingProxyType(notes))
+
+
+def _blank(value: object) -> bool:
+    """The plan check's test for a missing name: anything but a non-blank string."""
+    return not isinstance(value, str) or not value.strip()
+
+
+def _unreachable(value: NoReturn) -> NoReturn:
+    raise AssertionError("an option kind the catalog does not define")
 
 
 def _catalog() -> dict[str, StrategyInfo]:
@@ -318,8 +334,10 @@ def _check_value(column: str, option: StrategyOption, value: Any) -> None:
         ok = type(value) is bool
     elif wire == "str_list":
         ok = isinstance(value, (list, tuple)) and all(type(v) is str for v in value)
-    else:
+    elif wire == "float_list":
         ok = isinstance(value, (list, tuple)) and all(type(v) in (int, float) for v in value)
+    else:
+        _unreachable(wire)
     if not ok:
         raise _invalid(column, "the option has the wrong type", option=option.name)
     if option.choices is not None:
@@ -336,8 +354,10 @@ def _place(
         fields[option.name] = stored
     elif option.location == "provider_config":
         provider_config[option.name] = stored
-    else:
+    elif option.location == "provider_config.ner":
         provider_config.setdefault("ner", {})[option.name.removeprefix(_NER_PREFIX)] = stored
+    else:
+        _unreachable(option.location)
 
 
 def _confirmed_entry(starter: StarterConfig, decision: ReviewDecision) -> dict[str, Any]:
@@ -380,7 +400,7 @@ def _edited_entry(decision: ReviewDecision, key_namespace: str | None) -> dict[s
         )
     except ReviewInputError as err:
         refused = type(err)(
-            "the edited entry is refused",
+            err.text,
             table=decision.table,
             column=err.column,
             option=err.option,
@@ -406,27 +426,17 @@ def _drop(table: dict[str, Any], names: set[str]) -> None:
         existing["columns"] = [*have, *(n for n in in_source_order if n not in have)]
 
 
-def _check_namespaces(config: Mapping[str, Any], catalog: Mapping[str, StrategyInfo]) -> None:
-    """Every entry whose strategy needs a namespace has one; the config check does not see it."""
-    for table in config["tables"]:
-        for entry in table["columns"]:
-            info = catalog.get(entry.get("strategy", ""))
-            for req in () if info is None else info.requirements:
-                if req.path == ("namespace",) and requirement_applies(req, entry):
-                    if not entry.get("namespace"):
-                        raise _invalid(
-                            entry["name"], "an entry that needs a namespace has none", table["name"]
-                        )
-
-
 def _validation_problems(config: dict[str, Any]) -> str:
     """The value-free summary of why `config` fails, or an empty string when it validates."""
     summary = ""
     try:
         check_starter_config(copy.deepcopy(config))
+        run_config_only_checks(swap_placeholder_namespaces(config)[0])
     except PipelineConfigError as err:
         shown = [
             f"{p.code} at {p.location or '(root)'}" for p in err.problems[:_MAX_PROBLEMS_SHOWN]
         ]
         summary = "; ".join(shown) or "no detail"
+    except PlanCompileError as err:
+        summary = f"{err.code} at {err.path or '(root)'}"
     return summary
