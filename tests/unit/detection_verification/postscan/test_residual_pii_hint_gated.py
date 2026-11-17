@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.verification.postmask._model_findings import review
 from decoy_engine.verification.postmask.residual_pii import (
     check_residual_pii,
     residual_pii_findings,
@@ -99,6 +100,7 @@ def test_gated_message_has_no_rate_or_value(identical, comparable):
     finding = _grade(identical=identical, comparable=comparable)
     assert "only through its column name" in finding.message
     assert not re.search(r"\d|%", finding.message), finding.message
+    assert "CUST-" not in finding.message and "REDACTED" not in finding.message
 
 
 def test_text_redact_hint_gated_hit_still_fails():
@@ -159,3 +161,30 @@ def test_frame_route_redact_that_did_not_fire_fails():
     source = pd.DataFrame({"customer_id": [f"CUST-{i:05d}" for i in range(n)]})
     finding = _one(check_residual_pii({"t": source}, _cfg("redact"), source_frames={"t": source}))
     assert finding.severity == "fail"
+
+
+def _dismissal(strategy: str = "redact") -> dict:
+    return {
+        "table": "t",
+        "column": "customer_id",
+        "detector_id": "mrn",
+        "source": "regex",
+        "strategy": strategy,
+    }
+
+
+@pytest.mark.parametrize(("identical", "comparable"), [(1, 100), (2, 100), (3, 100), (10, 100)])
+def test_a_dismissal_never_lowers_a_gated_warning(identical, comparable):
+    config = {**_cfg("redact"), "post_scan": {"dismissed": [_dismissal()]}}
+    findings = residual_pii_findings(_facts(identical=identical, comparable=comparable), config)
+    assert _one(findings).severity == "warning"
+    (reviewed,), _stale = review(findings, config)
+    assert reviewed.severity == "warning"
+    assert reviewed.dismissed is False
+
+
+def test_a_dismissal_still_lowers_nothing_on_a_gated_info():
+    config = {**_cfg("redact"), "post_scan": {"dismissed": [_dismissal()]}}
+    findings = residual_pii_findings(_facts(identical=0, comparable=100), config)
+    (reviewed,), _stale = review(findings, config)
+    assert reviewed.severity == "info"
