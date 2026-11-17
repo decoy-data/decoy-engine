@@ -51,7 +51,7 @@ def test_lexeme_mode_keeps_every_number_as_read() -> None:
     parsed = strict_json_read(cell, **_NESTED)
     assert parsed["amt"] == JsonNumber(1.1, "1.10")
     assert parsed["e"] == JsonNumber(float("inf"), "1e400")
-    assert parsed["i"] == JsonNumber(7, "7")
+    assert parsed["i"] == 7 and type(parsed["i"]) is int
     assert strict_json_write(parsed) == (
         '{"amt": 1.10, "big": 12345678901234567890.5, "e": 1e400, "n": -0, "i": 7}'
     )
@@ -124,7 +124,7 @@ def test_a_very_deep_cell_is_too_deep_in_bounded_mode_and_not_json_without_a_bou
 
 
 def test_trailing_whitespace_is_valid_and_trailing_text_is_not_json() -> None:
-    assert strict_json_read('{"a":1}  \n', **_NESTED)["a"].value == 1
+    assert strict_json_read('{"a":1}  \n', **_NESTED)["a"] == 1
     assert _token('{"a":1}x', **_NESTED) == "not_json"
     assert _token('{"a":1}\nx', **_NESTED) == "not_json"
 
@@ -159,3 +159,37 @@ def test_loads_defaults_are_unchanged() -> None:
         strict_json_loads("[" + "9" * 21 + "]")
     assert caught.value.token == "out_of_range"
     assert strict_json_loads('{"a":1.10}') == {"a": 1.1}
+
+
+def test_a_number_that_prints_as_read_is_plain_and_only_a_lossy_one_is_a_json_number() -> None:
+    parsed = strict_json_read(
+        "[1, -5, 0, 1.5, 2.0, 1.10, 1e2, -0, 1E400, 12345678901234567890.5]", **_NESTED
+    )
+    plain, lossy = parsed[:5], parsed[5:]
+    assert [type(v) for v in plain] == [int, int, int, float, float]
+    assert all(isinstance(v, JsonNumber) for v in lossy)
+    assert [v.lexeme for v in lossy] == ["1.10", "1e2", "-0", "1E400", "12345678901234567890.5"]
+    assert strict_json_write(parsed) == (
+        "[1, -5, 0, 1.5, 2.0, 1.10, 1e2, -0, 1E400, 12345678901234567890.5]"
+    )
+
+
+def test_a_tree_with_no_json_number_writes_as_json_dumps() -> None:
+    tree = {"b": [1, 2.5, None, True], "a": {"k": "é"}}
+    assert strict_json_write(tree) == json.dumps(tree)
+
+
+def test_the_lexeme_writer_names_keys_as_json_dumps_does() -> None:
+    tree = {1: JsonNumber(1.1, "1.10"), None: 2, False: 3, 2.5: 4, "é": 5}
+    assert strict_json_write(tree) == ('{"1": 1.10, "null": 2, "false": 3, "2.5": 4, "\\u00e9": 5}')
+
+
+def test_a_shallow_text_skips_the_depth_walk_and_a_deep_one_does_not() -> None:
+    assert _token("[" * 5 + "]" * 5, max_depth=4) == "too_deep"
+    assert strict_json_read("[" * 4 + "]" * 4, max_depth=4) == [[[[]]]]
+    # Few brackets cannot nest past the bound, but a text over the bracket count is still walked.
+    assert _token("[[[[[1]]]]]", max_depth=4) == "too_deep"
+
+
+def test_json_number_repr_does_not_show_the_source_text() -> None:
+    assert "1.10" not in repr(JsonNumber(1.1, "1.10"))
