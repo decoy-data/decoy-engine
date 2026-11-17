@@ -1229,7 +1229,19 @@ class TestArraySelectorOnAScalarNumber:
     """A number is a plain int or float again, so an array selector on it fails typed, as on main."""
 
     @pytest.mark.parametrize(
-        ("cell", "target"), [("5", "$[*]"), ('{"a":5}', "$.a[*]"), ('{"a":1.5}', "$.a[*]")]
+        ("cell", "target"),
+        [
+            ("5", "$[*]"),
+            ('{"a":5}', "$.a[*]"),
+            ('{"a":1.5}', "$.a[*]"),
+            # Lossy numbers stay `JsonNumber`; jsonpath-ng must not fail on them with a TypeError.
+            ('{"a":1.10}', "$.a[*]"),
+            ('{"a":1e400}', "$.a[*]"),
+            ('{"a":-0}', "$.a[*]"),
+            ("1e400", "$[*]"),
+            ("-0", "$[*]"),
+            ("1.10", "$[*]"),
+        ],
     )
     def test_the_selector_gives_the_typed_unwritable_container_error(self, cell, target):
         handler = NestedStrategyHandler()
