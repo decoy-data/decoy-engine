@@ -120,8 +120,8 @@ that the engine rejects rather than silently mis-keying.
 
 ## FPE key and tweak model
 
-FPE uses a single AES-256 key per `(job_seed, namespace)`, derived as
-`derive(job_seed, namespace, b"ff1-key/v1")`. This is a single-key/varying-tweak
+FPE uses a single AES-256 key per `(mask_key, namespace)`, derived as
+`derive(mask_key, namespace, b"ff1-key/v1")`. This is a single-key/varying-tweak
 key model (one key, varying tweak per column). The underlying primitive is
 NIST SP 800-38G FF1 (Algorithms 5/6, AES-256 via the `cryptography` package),
 which replaced the engine's earlier home-rolled 8-round HMAC-SHA256 Feistel
@@ -213,7 +213,7 @@ output.
 ## Deterministic shuffle and column names
 
 The `shuffle` strategy binds the column name into its derivation source:
-`derive(job_seed, namespace, column_name.encode("utf-8"))`. This ensures that
+`derive(mask_key, namespace, column_name.encode("utf-8"))`. This ensures that
 two shuffle columns in the same namespace draw distinct permutations. Without
 the column-name binding, both columns would share one permutation and their
 values would permute in lockstep, re-linking records across columns that masking
