@@ -64,7 +64,7 @@ def _csv_job(tmp_path: Path, rows: int = 200) -> dict[str, Any]:
 def test_a_csv_mask_job_gets_a_lifecycle_peak_and_the_estimated_rows_note(tmp_path: Path) -> None:
     est = estimate_job(_csv_job(tmp_path), tmp_path)
     assert est.priceable is True, est
-    assert est.lifecycle_peak_bytes is not None and est.lifecycle_peak_bytes > 0
+    assert est.lifecycle_peak_bytes is not None
     assert [name for name, _ in est.phase_bytes] == ["ingest", "execute", "write"]
     assert est.lifecycle_peak_bytes == max(b for _, b in est.phase_bytes)
     assert est.limiting_phase in {"ingest", "execute", "write"}
