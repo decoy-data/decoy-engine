@@ -436,3 +436,80 @@ def test_scope_that_drops_the_owning_module_is_caught() -> None:
     t = seeded()
     only_lane(t, ("ci.yml", "determinism"), "pytest tests/unit -m determinism_harness")
     assert outside_scope(marker_sites(lanes.ROOT), determinism_paths(t)) != []
+
+
+# --- the pg-gate job: every pg_integration file, a required service, no silent skips ---------
+
+# The job names its files, because a module-level skip in an unrelated file would trip the
+# zero-skip guard. Like the determinism job, this keeps that list complete.
+_PG_SITE = re.compile(r"mark\.pg_" + r"integration\b")
+
+
+def pg_sites(root: Path) -> list[str]:
+    return sorted(
+        str(p.relative_to(root))
+        for p in (root / "tests").rglob("*.py")
+        if _PG_SITE.search(p.read_text())
+    )
+
+
+def pg_gate_findings(tree: lanes.Tree, sites: list[str]) -> list[str]:
+    out: list[str] = []
+    gate = tree.workflows["ci.yml"]["jobs"].get("pg-gate")
+    if gate is None:
+        return ["pg-gate job is missing"]
+    (lane,) = [ln for ln in lanes.lanes(tree) if ln.job == "pg-gate"]
+    if lane.expr != "pg_integration" or lane.bad:
+        out.append("pg-gate does not select -m pg_integration")
+    out += [f"{s} is outside the pg-gate scope" for s in outside_scope(sites, lane.paths)]
+    env = {
+        **gate.get("env", {}),
+        **{k: v for st in gate.get("steps", []) for k, v in st.get("env", {}).items()},
+    }
+    if str(env.get("DECOY_REQUIRE_PG")) != "1":
+        out.append("pg-gate does not set DECOY_REQUIRE_PG=1")
+    if not any("junit_ran.py" in st.get("run", "") for st in gate.get("steps", [])):
+        out.append("pg-gate has no junit_ran.py guard step")
+    if "postgres" not in gate.get("services", {}):
+        out.append("pg-gate has no postgres service container")
+    merge = [j for e in tree.required["merge"] if e["workflow"] == "ci.yml" for j in e["jobs"]]
+    if "pg-gate" not in merge:
+        out.append("pg-gate is not a required merge job")
+    if "pg_integration" not in {e["name"] for e in tree.required["dedicated_marker"]}:
+        out.append("pg_integration is not a dedicated marker")
+    return out
+
+
+def test_pg_gate_lane_is_complete() -> None:
+    sites = pg_sites(lanes.ROOT)
+    assert sites, "no file carries the marker, so the scope check would pass vacuously"
+    assert pg_gate_findings(TREE, sites) == []
+
+
+def test_pg_integration_is_a_dedicated_marker_with_its_own_lane() -> None:
+    assert lanes.marker_findings(TREE) == []
+    t = seeded()
+    del t.workflows["ci.yml"]["jobs"]["pg-gate"]
+    assert has(lanes.marker_findings(t), "'pg_integration'")
+
+
+def test_pg_gate_seeded_failures() -> None:
+    sites = pg_sites(lanes.ROOT)
+    assert has(pg_gate_findings(TREE, [*sites, "tests/other/test_pg_new.py"]), "outside")
+    t = seeded()
+    gate = job(t, "ci.yml", "pg-gate")
+    gate["env"].pop("DECOY_REQUIRE_PG")
+    assert has(pg_gate_findings(t, sites), "DECOY_REQUIRE_PG")
+    t = seeded()
+    gate = job(t, "ci.yml", "pg-gate")
+    gate["steps"] = [s for s in gate["steps"] if "junit_ran" not in s.get("run", "")]
+    assert has(pg_gate_findings(t, sites), "junit_ran")
+    t = seeded()
+    t.required["merge"][0]["jobs"].remove("pg-gate")
+    assert has(pg_gate_findings(t, sites), "required merge job")
+    t = seeded()
+    del job(t, "ci.yml", "pg-gate")["services"]["postgres"]
+    assert has(pg_gate_findings(t, sites), "service container")
+    t = seeded()
+    only_lane(t, ("ci.yml", "pg-gate"), "pytest tests/connectors/test_postgres_snapshot.py")
+    assert has(pg_gate_findings(t, sites), "-m pg_integration")
