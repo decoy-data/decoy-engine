@@ -222,7 +222,10 @@ def configured_columns(
 def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
     """A regex finding raised from positional output==source evidence; a dismissal never lowers it."""
     rate = finding.source_identity_rate
-    return finding.source == "regex" and rate is not None and rate >= _LEAK_WARN_RATE
+    if finding.source != "regex" or rate is None:
+        return False
+    gated = _is_gated_whole_cell(finding.configured_strategy, finding.detector_id)
+    return _identity_evidence(rate, gated=gated)
 
 
 def _source_identity(
@@ -352,6 +355,21 @@ def _escalate(
     return None
 
 
+def _is_gated_whole_cell(strategy: str | None, detector_id: str) -> bool:
+    """A whole-cell destroying strategy on a hit from a name-hint-gated detector."""
+    return strategy in _WHOLE_CELL_DESTROYS and detector_id in NAME_HINT_GATED_DETECTORS
+
+
+def _identity_evidence(identity_rate: float, *, gated: bool) -> bool:
+    """Whether a source-identity rate is evidence the mask missed rows.
+
+    The one rule for grading and for the dismissal guard. On the gated path a whole-cell
+    strategy never legitimately leaves a cell equal to its source, so any identity counts; on
+    every other path the 5% floor keeps coincidence from escalating.
+    """
+    return identity_rate > 0 if gated else identity_rate >= _LEAK_WARN_RATE
+
+
 def _grade_gated(
     *, identical_rows: int, comparable_rows: int, detector_id: str, strategy: str
 ) -> tuple[Severity, str]:
@@ -363,13 +381,13 @@ def _grade_gated(
     its source. There is no constant-source or minimum-row exception. Messages carry no rate,
     count or value.
     """
-    if identical_rows == 0:
+    identity = identical_rows / comparable_rows
+    if not _identity_evidence(identity, gated=True):
         return (
             "info",
             f"column matched {detector_id!r} only through its column name; "
             f"strategy {strategy!r} replaced the values.",
         )
-    identity = identical_rows / comparable_rows
     if identical_rows == comparable_rows or (
         identical_rows >= _LEAK_FAIL_MIN_ROWS and identity >= _LEAK_FAIL_RATE
     ):
