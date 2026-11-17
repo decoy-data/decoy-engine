@@ -43,7 +43,10 @@ def only_installed(monkeypatch: pytest.MonkeyPatch) -> Any:
     def install(model: str) -> None:
         monkeypatch.setattr(ner, "spacy_installed", lambda: True)
         monkeypatch.setattr(ner, "model_installed", lambda name=model: name == model)
-        # A fallback to the installed model must be able to succeed, or it cannot be caught.
+        # A fallback to the installed model must be able to succeed (with or without a real
+        # spaCy in this venv), or it cannot be caught.
+        monkeypatch.setattr(ner, "_import_spacy", lambda: (object(), None))
+        monkeypatch.setattr(ner, "_spacy_incompatible", lambda _spacy, _model: False)
         monkeypatch.setattr(
             ner, "installed_model_version", lambda name=model: "3.8.0" if name == model else None
         )
