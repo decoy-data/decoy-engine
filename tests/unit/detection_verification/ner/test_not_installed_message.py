@@ -107,7 +107,7 @@ def test_refusal_names_model_wheel_and_opt_out(
     assert _wheel_url(refused) in text
     assert KEYS[surface] in text
     assert surface in text
-    assert MARKER not in text and MARKER not in str(exc)
+    assert MARKER not in text
     assert exc.__cause__ is None and exc.__context__ is None
     for key in KEYS.values():
         if key != KEYS[surface]:

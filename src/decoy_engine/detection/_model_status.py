@@ -137,7 +137,8 @@ def ner_model_state(model: str) -> tuple[ModelStatus, ModelRef | None]:
 
 
 def ner_status(model: str | None = None) -> ModelStatus:
-    return ner_model_state(ner.resolve_ner_model(model))[0]
+    # A given name goes to `ner_model_state`, which reports a bad one as a status, never raises.
+    return ner_model_state(ner.resolve_ner_model(None) if model is None else model)[0]
 
 
 def refuse(status: ModelStatus, surface: ner.NerSurface | None = None) -> NoReturn:
