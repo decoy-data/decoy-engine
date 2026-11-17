@@ -63,7 +63,7 @@ def check_when_grammar(config: dict[str, Any]) -> None:
     is rejected too: the seed envelope would otherwise drop it and silently remove a gate
     the caller asked for. The message carries the parser's reason, never the predicate.
     Nested children are not walked: a child's seed is built with `when=None`
-    (`_nested.py`), so a `when` key in a child's `strategy_config` is inert provider config.
+    (`nested/_handler.py`), so a `when` key in a child's `strategy_config` is inert provider config.
     """
     for table in config.get("tables", []) or []:
         if not isinstance(table, dict):

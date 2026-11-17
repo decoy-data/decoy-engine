@@ -33,7 +33,7 @@ from tests.unit._dps_helpers import compile_and_generate
 CODE = "statistical_snapshot_values_redacted"
 SENSITIVE = ("full_name", "balance", "admitted")
 _NAMES = ["Marguerite Okonkwo", "Dmitri Vasquez", "Ingrid Halvorsen", "Tobias Nakamura"]
-_ROWS = 48
+_ROWS = 480  # every joint cell of the fixture holds at least MIN_RELEASE_COUNT rows
 
 Build = Callable[..., dict[str, Any]]
 
@@ -43,7 +43,7 @@ def _frame(names: list[str] | None = None) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "full_name": [pool[i % len(pool)] for i in range(_ROWS)],
-            "status": ["open"] * 20 + ["closed"] * 16 + ["hold"] * 12,
+            "status": ["open"] * 200 + ["closed"] * 160 + ["hold"] * 120,
             "diagnosis": [["flu", "cold", "none"][i % 3] for i in range(_ROWS)],
             "balance": [31337.25 + 211.5 * i for i in range(_ROWS)],
             "admitted": pd.date_range("1991-01-01", periods=_ROWS, freq="9D"),
@@ -118,7 +118,7 @@ def test_a_missing_policy_beside_redacted_columns_refuses(build: Build) -> None:
     _refused(snap, _cfg("status", allow_real_categories=True))
 
 
-@pytest.mark.parametrize("policy", ["flagged-redacted/v2", "RAW", "", None, 7, ["raw"], True])
+@pytest.mark.parametrize("policy", ["flagged-redacted/v3", "RAW", "", None, 7, ["raw"], True])
 def test_an_unknown_or_ill_typed_policy_refuses(build: Build, policy: Any) -> None:
     snap = build()
     snap[VALUE_POLICY_KEY] = policy

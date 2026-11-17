@@ -4,7 +4,8 @@ A support bundle describes a run's structure (versions, limits, routes, timings,
 topology) with no cell value, name, path or free text. Names become ordinal labels from a
 per-build `LabelAllocator`. Decoy never uploads a bundle; the operator reviews and sends it.
 
-The runtime lock (`lock/v1`) records the versions and data digests masked bytes depend on.
+The runtime lock (`lock/v1`) records the versions and data digests masked bytes depend on, and the
+synthetic probe digest (`run_probe`, `probe_status`) that shows a host reproduces the engine's bytes.
 
 The engine enums a bundle carries (`RouteDeclineCode`, `PIIClass`, `Severity`, `Outcome`,
 `RetryClass`) are re-exported here so consumers never import a private module.
@@ -16,6 +17,7 @@ from decoy_engine.execution.native._route_decline_codes import RouteDeclineCode
 from decoy_engine.profile import PIIClass
 from decoy_engine.reasons import Outcome, RetryClass, Severity
 from decoy_engine.support._labels import LabelAllocator
+from decoy_engine.support._probe import ProbeError, probe_status, run_probe
 from decoy_engine.support._runtime_lock import (
     LockDifference,
     RuntimeLock,
@@ -71,6 +73,7 @@ __all__ = [
     "Phase",
     "PhaseTiming",
     "PlatformFamily",
+    "ProbeError",
     "RatioBucket",
     "RetryClass",
     "RouteDeclineCode",
@@ -87,5 +90,7 @@ __all__ = [
     "Versions",
     "build_runtime_lock",
     "compare_runtime_locks",
+    "probe_status",
     "read_runtime_lock",
+    "run_probe",
 ]
