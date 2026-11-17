@@ -425,6 +425,7 @@ exclude_patterns = [
     "archive/**",
     "backlog/**",
     "plans/**",
+    "records/**",
     "superpowers/**",
     "decisions/**",
     "v2/**",
