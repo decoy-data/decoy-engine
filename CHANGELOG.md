@@ -6855,6 +6855,6 @@ PyPI index; first publish lands with OSS.7.
   in `running` forever. Post-fix the validator rejects at submit time
   with a "deferred to V2.1" message.
 
-[Unreleased]: https://github.com/louiskeep/decoy-engine/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/decoy-data/decoy-engine/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/louiskeep/decoy-engine/compare/v0.1.0...v0.4.0
 [0.1.0]: https://github.com/louiskeep/decoy-engine/releases/tag/v0.1.0
