@@ -16,10 +16,19 @@ Input is a BOUNDED SAMPLE, not metadata-only and not a full read: `profile_sourc
 reads up to ~10k rows per source. The reported route is a coarse layer-1 prediction
 (it omits later chunk/native dispatch and mixed admission).
 
-Pre-run string pricing: like the engine's own byte-estimate router, a variable-
-width column with no resident sample is UNPRICEABLE (the profile carries no
-string-length statistic). Such a job returns `priceable=False` with the route
-still reported, honestly, rather than a guessed number.
+String pricing: a variable-width column is priced from a bounded sample (at most 10,000 rows)
+of its source file, read the way the CLI reads it. A column that cannot be priced (no sample, an
+all-null sample, a type with no size model) leaves the job `priceable=False` with the route
+still reported, rather than a guessed number.
+
+Lifecycle (F24): next to the execute-phase `peak_bytes`, `lifecycle_peak_bytes` is the largest
+of the ingest, execute and write phase peaks for a caller that reads every file source whole,
+holds inputs and outputs, and writes the last target. `limiting_phase` names it. Advisory like
+the rest: the `--chunked` CLI path and lazy handoff are over-predicted, subset jobs are not
+priced, generate and mixed jobs get no lifecycle yet, and vault maps, post-scan baselines and
+quarantine frames are not priced. A file that changes between the estimate and the run only
+makes the estimate stale. A sample taken from the head of a file under-prices a file whose later
+rows are wider.
 
 Route decision is MIRRORED from `capacity.py`'s prelude rather than shared: that
 module early-returns for a non-relational job BEFORE compiling, so a shared helper
@@ -34,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
 from decoy_engine.execution._throughput_calibration import (
@@ -44,6 +53,9 @@ from decoy_engine.execution._throughput_calibration import (
 )
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.fileaccess import FileAccess
+
+if TYPE_CHECKING:
+    from decoy_engine.execution.pipeline._lifecycle import Phase
 
 _PEAK_PATHS = frozenset({"full_frame", "out_of_core", "sequential"})
 
@@ -59,6 +71,9 @@ class JobEstimate:
     peak_bytes: int | None = None
     runtime: RuntimeBand | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
+    lifecycle_peak_bytes: int | None = None
+    limiting_phase: Literal["ingest", "execute", "write"] | None = None
+    phase_bytes: tuple[tuple[str, int], ...] = ()
 
 
 def _generation_rows(config: dict[str, Any]) -> tuple[int, bool]:
@@ -107,7 +122,6 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
     from decoy_engine.execution._pipeline_context import classify_table_kinds
     from decoy_engine.execution._pipeline_routing import decide_execution_route
     from decoy_engine.execution._pipeline_routing_signals import (
-        _mask_specs,
         largest_mask_table_rows_from_profile,
         out_of_core_admission,
     )
@@ -183,17 +197,20 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
         return JobEstimate(route, priceable=True, runtime=estimate_generation_runtime_band(rows))
 
     mask_tables = [t for t in profile.tables if table_kinds.get(t.name) == "mask"]
-    # No resident sources here (pre-run), so a variable-width column with no
-    # string-length statistic is unpriceable -- the same honest limit the
-    # engine's own byte-estimate router has.
-    specs = _mask_specs(mask_tables, {})
+    # Widths come from a bounded sample of each source. A failed sample falls back to the
+    # profile-only specs, where a variable-width column is unpriceable (the honest limit the
+    # engine's own byte-estimate router has).
+    sampled, specs = _sample_stage(config, mask_tables)
     raw = raw_data_bytes(specs)
     if not raw.is_priceable:
         cols = ", ".join(f"{table}.{column}" for table, column in raw.unpriceable_columns[:3])
         return JobEstimate(
             route,
             priceable=False,
-            notes=(f"unpriceable variable-width column(s) without a sample: {cols}",),
+            notes=(
+                f"unpriceable variable-width column(s) without a sample: {cols}",
+                *sampled.notes,
+            ),
         )
 
     path = route if route in _PEAK_PATHS else "full_frame"
@@ -202,12 +219,69 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
     notes: tuple[str, ...] = ()
     if route not in _PEAK_PATHS:
         notes = (f"route {route!r} priced as full_frame (no dedicated model)",)
+    life = _lifecycle_stage(sampled, config, path, plan)
     return JobEstimate(
         route,
         priceable=peak.estimated_bytes is not None,
         peak_bytes=peak.estimated_bytes,
         runtime=runtime,
-        notes=notes,
+        notes=(*notes, *life.notes),
+        lifecycle_peak_bytes=life.peak_bytes,
+        limiting_phase=life.limiting_phase,
+        phase_bytes=life.phase_bytes,
+    )
+
+
+def _sample_stage(config: dict[str, Any], mask_tables: list[Any]) -> tuple[Any, tuple[Any, ...]]:
+    """The sampled per-table inputs and the size specs priced from them. Any failure becomes a
+    note and the profile-only specs, never an exception."""
+    from decoy_engine.execution._pipeline_routing_signals import _mask_specs
+    from decoy_engine.execution.pipeline import _lifecycle, _lifecycle_inputs
+
+    try:
+        sampled = _lifecycle_inputs.read_samples(config, mask_tables)
+        if sampled.tables is not None:
+            return sampled, _lifecycle_inputs.table_specs(sampled.tables)
+    except Exception as exc:
+        note = _lifecycle.NOTE_FAILED.format(error=type(exc).__name__)
+        sampled = _lifecycle_inputs.Outcome(None, (note,))
+    return sampled, _mask_specs(mask_tables, {})
+
+
+@dataclass(frozen=True)
+class _LifecycleFields:
+    peak_bytes: int | None = None
+    limiting_phase: Phase | None = None
+    phase_bytes: tuple[tuple[Phase, int], ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+def _lifecycle_stage(
+    sampled: Any, config: dict[str, Any], path: str, plan: Any
+) -> _LifecycleFields:
+    """The lifecycle fields for a mask job, or defaults plus a note. Never raises."""
+    from decoy_engine.execution.pipeline import _lifecycle, _lifecycle_inputs
+
+    if sampled.tables is None:
+        return _LifecycleFields(notes=sampled.notes)
+    try:
+        attached = _lifecycle_inputs.attach_targets(sampled.tables, config)
+        if attached.tables is None:
+            return _LifecycleFields(notes=attached.notes)
+        outputs = _lifecycle_inputs.attach_outputs(attached.tables, plan)
+        if outputs.tables is None:
+            return _LifecycleFields(notes=outputs.notes)
+        result = _lifecycle.lifecycle_peak(
+            _lifecycle.PhaseInputs(path=path, tables=outputs.tables)  # type: ignore[arg-type]
+        )
+        estimated = any(not t.rows_exact for t in attached.tables)
+    except Exception as exc:
+        return _LifecycleFields(notes=(_lifecycle.NOTE_FAILED.format(error=type(exc).__name__),))
+    return _LifecycleFields(
+        peak_bytes=result.peak_bytes,
+        limiting_phase=result.limiting_phase,
+        phase_bytes=result.phase_bytes,
+        notes=(_lifecycle.NOTE_ROWS_ESTIMATED,) if estimated else (),
     )
 
 

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import arrow_column_bytes
 from decoy_engine.generation._faker_pool import POOL_ELIGIBLE_LOCALE_PAIRS
 from decoy_engine.generation.kinds import (
     constant_payload_bound,
@@ -299,17 +300,10 @@ def legacy_table_bytes(rows: int, payloads: list[int]) -> int:
 
 # One pointer per row in the Python list the legacy whole-table path builds for every column.
 _LEGACY_SLOT_BYTES = 8
-# One int32 offset per row of a variable-width Arrow column.
-_OFFSET_BYTES = 4
 
 
 def _arrow_column_floor(arrow_type: pa.DataType, rows: int) -> int:
-    try:
-        bit_width = arrow_type.bit_width
-    except ValueError:  # variable-width types have no bit width
-        return _OFFSET_BYTES * rows
-    # Ceil division keeps a 1-bit boolean column an integer byte count.
-    return (rows * bit_width + 7) // 8
+    return arrow_column_bytes(arrow_type, rows, 0)
 
 
 def _floor_by_table(config: dict[str, Any], admission: PlanAdmission) -> dict[str, int]:
