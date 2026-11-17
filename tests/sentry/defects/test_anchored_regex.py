@@ -109,7 +109,7 @@ def test_seeded_safe_forms_are_not_flagged(tmp_path: Path, text: str) -> None:
 
 
 def test_restoring_the_dollar_in_a_real_validator_turns_the_scan_red(tmp_path: Path) -> None:
-    real = (SRC / "connectors" / "postgres_snapshot.py").read_text(encoding="utf-8")
+    real = (SRC / "connectors" / "_postgres_session.py").read_text(encoding="utf-8")
     assert '_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}\\Z")' in real
     mutated = real.replace('{0,62}\\Z")', '{0,62}$")', 1)
     assert mutated != real
@@ -126,7 +126,7 @@ def test_a_stdlib_engine_request_is_flagged(tmp_path: Path) -> None:
 # (module, attribute, a value the pattern accepts). The "\n" twin must be refused.
 _FIXED = [
     ("decoy_engine.checksums", "_NPI_RE", "1234567890"),
-    ("decoy_engine.connectors.postgres_snapshot", "_IDENT_RE", "orders_1"),
+    ("decoy_engine.connectors._postgres_session", "_IDENT_RE", "orders_1"),
     ("decoy_engine.connectors.postgres_snapshot", "_NUMERIC_RE", "numeric(10,2)"),
     ("decoy_engine.connectors.postgres_snapshot", "_LEN_SUFFIX_RE", "(10)"),
     ("decoy_engine.execution._chunked_fk_dtype_safety", "_TIMESTAMP_DECLARED_RE", "timestamp[us]"),
