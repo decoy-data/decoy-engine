@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -32,6 +33,7 @@ __all__ = [
     "SessionSettings",
     "attach_read_only",
     "close_connection",
+    "connected_session",
     "load_postgres_extension",
     "open_connection",
     "open_read_session",
@@ -277,3 +279,21 @@ def close_connection(conn: Any) -> None:
         conn.close()
     except Exception:
         pass
+
+
+@contextmanager
+def connected_session(
+    config: SessionSettings, spill_dir: Path, deadline: Deadline
+) -> Iterator[Any]:
+    """An open read-only session whose connection is closed and whose deadline is cancelled on exit.
+
+    The caller owns ``spill_dir`` and its removal.
+    """
+    conn: Any = None
+    try:
+        conn = open_read_session(config, spill_dir, on_connect=deadline.arm, deadline=deadline)
+        yield conn
+    finally:
+        deadline.cancel()
+        if conn is not None:
+            close_connection(conn)

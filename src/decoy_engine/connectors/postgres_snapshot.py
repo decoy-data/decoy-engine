@@ -69,8 +69,7 @@ from decoy_engine.connectors._postgres_session import (
     Deadline,
     PostgresSnapshotError,
     SessionSettings,
-    close_connection,
-    open_read_session,
+    connected_session,
     quote_ident,
     raise_for_interrupt,
     sql_literal,
@@ -423,12 +422,8 @@ def read_session(config: SessionSettings, deadline: Deadline) -> Iterator[Any]:
     """A read-only session with its spill directory, closed and removed on every exit."""
     fileaccess.require_ambient("the Postgres read session")
     spill_dir = config.temp_directory / f"spill-{uuid.uuid4().hex}"
-    conn: Any = None
     try:
-        conn = open_read_session(config, spill_dir, on_connect=deadline.arm, deadline=deadline)
-        yield conn
+        with connected_session(config, spill_dir, deadline) as conn:
+            yield conn
     finally:
-        deadline.cancel()
-        if conn is not None:
-            close_connection(conn)
         shutil.rmtree(spill_dir, ignore_errors=True)
