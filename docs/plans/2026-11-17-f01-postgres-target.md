@@ -58,6 +58,7 @@ Nothing was left unapplied.
 | 1 `pg_sequences` has no `is_called` | AT-E9 reads `last_value` and `is_called` from each sequence relation (`SELECT last_value, is_called FROM <schema>.<sequence>`, identifiers quoted through the identifier rule). The transactional `RESTART WITH` and the `setval` mutation stay | Revision 2 table B1 row, AT-E9 |
 | 2 bookkeeping privilege check wrong when only the table is absent | Three cases: schema absent needs database `CREATE` (the role then owns the schema); schema present and table absent needs `CREATE` on schema `decoy_meta`; table present needs `SELECT`, `INSERT`, `UPDATE`. Each refused with `target_privilege_missing`; AT-E5 has a refusing and a passing cell per case | 4.3, 4.4 step 3, section 7, AT-E5, Q11 |
 | V2-LOG sibling citation | `plan/cli-db-src` cited as the engine branch `origin/plan/cli-db-src` at `59343ebd` | header, Rules consulted |
+| Codex on `1a4e5076` (orchestrator, round cap): schema `USAGE` missing | Both schema-present cases also need `USAGE` on `decoy_meta`; AT-E5 adds two refusing cells (schema `CREATE` without `USAGE`; table rights without schema `USAGE`); the pre-mortem line names every case | 3, 11 AT-E5, pre-mortem |
 
 ## 1. Guarantee and non-goals
 
@@ -277,8 +278,9 @@ No secret is read and no connection is opened at compile time (64b Q4 holds).
     a member of the owning role); no `REFERENCES` on a non-target table that a target foreign
     key points at; or the bookkeeping rights for the case found: schema `decoy_meta` absent
     and no `CREATE` on the database (the role then owns the schema it creates); schema present
-    and table `decoy_meta.publications` absent and no `CREATE` on schema `decoy_meta`; table
-    present without `SELECT`, `INSERT` and `UPDATE` on it;
+    and table `decoy_meta.publications` absent and no `USAGE` plus `CREATE` on schema
+    `decoy_meta`; table present without `USAGE` on schema `decoy_meta` and `SELECT`, `INSERT`
+    and `UPDATE` on the table;
   - `target_unreachable`, `catalog_read_failed`, `extension_unavailable`,
     `extension_untrusted_location`, `duckdb_unavailable`, `deadline_exceeded`.
   The catalog read decodes the bookkeeping row strictly (4.6); an unreadable row refuses with
@@ -644,7 +646,7 @@ must turn its test red on the final slice head (class 9).
 | AT-E3 | `tests/unit/connectors/test_postgres_typemap.py`: one cell per row of 4.5 across all three steps, including the pandas-route rows (int64 to integer, float64 to bigint, `timestamp[ns]`), numeric without typmod and numeric(40, 2) as `unsupported`, float64 to real and `character(n)` as `lossy`, decimal scale change, generated column, and a DuckDB middle type that downgrades an otherwise exact pair; missing and extra columns; the document is canonical bytes, sorted, tagged `decoy-pg-type-map/v1`, and its schema snapshot matches | no module | drop the DuckDB step from the worst-class fold | E1 |
 | AT-E4 | `tests/sentry/test_postgres_session_choke_point.py` (extends 64b's session sentry): in `connectors/`, `open_write_session` is called only from `postgres_target_publish.py`, and an `ATTACH` without `READ_ONLY` appears only in `_postgres_session.py`; seeded cells for each fail. Existing snapshot and 64b tests pass unchanged (negative control) | no write session | call `open_write_session` from `postgres_target.py` | E1 |
 | AT-E16 | `tests/connectors/test_postgres_typemap_roundtrip.py` (pg): for every `exact` row of 4.5, a Parquet value goes through `open_write_session` `INSERT` into a column of that PostgreSQL type in a rolled-back transaction and is read back by libpq equal to the source | no write session | map `timestamp[us, tz]` as `exact` to `timestamp without time zone` | E1 |
-| AT-E5 | `tests/connectors/test_postgres_target_inspect.py` (pg): server version faked below 13 (catalog stub cell), missing relation, partitioned table, inheritance child, rule, FORCE RLS, external FK, non-owned `nextval` default, shared sequence, negative increment, a role without TRUNCATE, a non-owner role, no `REFERENCES` on a lookup table, and the three bookkeeping cases (schema `decoy_meta` absent and no database `CREATE`; schema present, table absent and no `CREATE` on the schema while the role has database `CREATE`; table present without `UPDATE`) all refuse with their codes, `target_privilege_missing` for the three; each bookkeeping case also has a passing cell with the right granted; `pg_stat_user_tables` counters, `pg_namespace` and the catalog digest are unchanged afterwards | no `read_target` | skip the external-reference query | E2 |
+| AT-E5 | `tests/connectors/test_postgres_target_inspect.py` (pg): server version faked below 13 (catalog stub cell), missing relation, partitioned table, inheritance child, rule, FORCE RLS, external FK, non-owned `nextval` default, shared sequence, negative increment, a role without TRUNCATE, a non-owner role, no `REFERENCES` on a lookup table, and the three bookkeeping cases (schema `decoy_meta` absent and no database `CREATE`; schema present, table absent and no `CREATE` on the schema while the role has database `CREATE`; schema present, table absent, schema `CREATE` granted but no schema `USAGE`; table present without `UPDATE`; table present with table rights but no schema `USAGE`) all refuse with their codes, `target_privilege_missing` for the three; each bookkeeping case also has a passing cell with the right granted; `pg_stat_user_tables` counters, `pg_namespace` and the catalog digest are unchanged afterwards | no `read_target` | skip the external-reference query | E2 |
 | AT-E6 | `tests/connectors/test_postgres_target_plan.py` (pg): over-length varchar, unknown enum label, null into NOT NULL, numeric overflow, an int64 above the integer range, a float64 `1.5` into bigint, and a `timestamp[ns]` with a nanosecond part each refuse with `value_guard_failed` at `schema.table.column`; a blocked type refuses with `target_type_blocked`; no target write session opens (spy) | no `plan_target` | drop the sub-microsecond guard | E2 |
 | AT-E15 | `tests/unit/publication/test_pg_publication_row.py`: the bookkeeping row reader refuses a missing or unknown `format`, `"op\n"` as operation id, uppercase hex, a 63-character `result_id` and a bool in a text column; the writer's row round-trips; schema snapshot | no reader | read `format` with `startswith` | E2 |
 | AT-E7 | `tests/connectors/test_postgres_target_pipeline.py` (pg): a pipeline whose source and target references name the same database refuses `target_same_database` from `open_postgres_target`, and a spy on `stage_postgres_sources` and on the snapshot shows no call; a second database on the same server passes (negative control) | no probe | run the fingerprint compare after `stage_postgres_sources` | E3 |
@@ -847,8 +849,9 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
   in 0.29.0 and the CLI half waits; no interim CLI path is built.
 - 64b E1 changes the session module's names during review: E0 and E1 start only after 64b E1
   merges and use what merged.
-- `decoy_meta` is created by a role without `CREATE` on the database: refused at inspection, and
-  the guide gives the DBA the statements to create it once.
+- `decoy_meta` is absent and the role has no `CREATE` on the database (or it is present and the
+  role lacks `USAGE`, or `CREATE` on it when the table is absent): refused at inspection, and the
+  guide gives the DBA the statements to create the schema and table once and grant the rights.
 
 ## 16. Owner questions (each taken on the recommended answer and recorded)
 
