@@ -404,10 +404,10 @@ def test_push_only_job_cannot_reuse_a_required_check_name() -> None:
 
 def test_merge_job_with_an_unsupported_matrix_is_a_finding() -> None:
     t = seeded()
-    job(t, "native-companion.yml", "companion-wheel-macos")["strategy"]["matrix"]["exclude"] = [
+    job(t, "native-companion.yml", "companion-wheel-windows")["strategy"]["matrix"]["exclude"] = [
         {"python-version": "3.10"}
     ]
-    assert has(_r(t), "R2 native-companion.yml:companion-wheel-macos: matrix exclude")
+    assert has(_r(t), "R2 native-companion.yml:companion-wheel-windows: matrix exclude")
 
 
 def test_job_in_a_schedule_only_workflow_needs_no_listing() -> None:
