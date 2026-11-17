@@ -7,7 +7,8 @@ arrive in a later slice (F15 C1); until then the CLI's own copy of the rules is 
 `diff_scan_tables` is a line-for-line port of the CLI's `compute_scan_diff`. It reads only
 `fields[].name`, `fields[].pii_score`, `quasi_identifier_groups` and `reid_risk_score` and
 validates nothing else, so a legacy profile table (int scores, no `scan_schema`) diffs as it
-always did. `diff_scan_documents` matches tables by name and owns the set-level drift kinds.
+always did. A non-numeric `pii_score` is refused with a TypeError, even a falsy one (`""`) that
+the CLI's `or 0` read as zero. `diff_scan_documents` matches tables by name and owns the set-level drift kinds.
 
 Nothing here reads a cell value: a diff holds table and column names, scores, buckets,
 quasi-identifier group names and a risk delta. The persisted form is `ScanDiffCore` (strict,
@@ -253,10 +254,12 @@ def diff_scan_documents(
 
     A current table the baseline lacks is `table_added` drift; a baseline table the current set
     lacks is reported, not drift. When no table matches at all the one drift kind is
-    `no_common_table` and `tables_added` stays empty. `tables` limits both sides to those names.
+    `no_common_table` and `tables_added` stays empty. `tables` limits both sides to those names; a name in neither scan is refused.
     A change of engine version or detector runs sets `detectors_changed`, which is not drift.
     """
     base, cur = _by_name(baseline, tables), _by_name(current, tables)
+    if tables is not None and any(n not in base and n not in cur for n in tables):
+        raise ValueError("a selected table is in neither scan")
     common = sorted(set(base) & set(cur))
     no_common = not common and bool(base or cur)
     base_version = str(baseline.get("engine_version") or "")
