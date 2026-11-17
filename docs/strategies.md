@@ -57,9 +57,9 @@ want realistic-looking replacements rather than a redaction.
 ### hash
 
 Produces a deterministic, joinability-preserving token:
-`derive(seed, namespace, value).hex()`, optionally truncated. The same source
+`derive(mask_key, namespace, value).hex()`, optionally truncated. The same source
 value yields the same token within a namespace, byte-stable across runs and
-processes. Nulls are preserved. Needs a namespace.
+processes. Nulls are preserved. Needs a namespace and a mask secret.
 
 - `truncate`: positive int; keep only the first N hex characters.
 

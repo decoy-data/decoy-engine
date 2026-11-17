@@ -83,6 +83,7 @@ _NUMBER_WORD = re.compile(
     re.IGNORECASE,
 )
 _PASS_THROUGH = re.compile(r"pass(?:es|ed)? through|left as-is", re.IGNORECASE)
+_ROW_OUTCOME = re.compile(r"row error|quarantin|fails? the (?:job|run)", re.IGNORECASE)
 _UNPARSEABLE = re.compile(r"unparseable|non-numeric|not numeric|not parse|invalid", re.IGNORECASE)
 
 
@@ -118,11 +119,15 @@ def _mask_section(text: str, name: str) -> str:
     return _section(_mask_part(text), name)
 
 
+_UNKEYED_DERIVE = re.compile(r"\bderive\((?!mask_key\b)")
+
+
 def _job_seed_sentences(text: str, allowed: frozenset[str]) -> list[str]:
+    """Sentences that read `job_seed` or name a `derive(` call keyed on anything but `mask_key`."""
     return [
         sentence
         for sentence in _sentences(text)
-        if "job_seed" in sentence and sentence not in allowed
+        if ("job_seed" in sentence or _UNKEYED_DERIVE.search(sentence)) and sentence not in allowed
     ]
 
 
@@ -154,7 +159,10 @@ def test_format_error_strategies_say_what_an_unparseable_cell_does() -> None:
             continue
         checked.append(name)
         body = _mask_section(text, name)
-        assert "`format_error`" in body, f"{name}: section does not name format_error"
+        assert any(
+            "`format_error`" in sentence and _ROW_OUTCOME.search(sentence)
+            for sentence in _sentences(body)
+        ), f"{name}: no sentence ties format_error to the row error outcome"
         for sentence in _sentences(body):
             if _PASS_THROUGH.search(sentence) and _UNPARSEABLE.search(sentence):
                 raise AssertionError(f"{name}: unparseable cells pass through: {sentence}")
@@ -211,3 +219,13 @@ def test_the_pass_through_rule_sees_a_seeded_claim() -> None:
     assert _PASS_THROUGH.search(sentence) and _UNPARSEABLE.search(sentence)
     ok = "Null values are left as-is."
     assert not (_PASS_THROUGH.search(ok) and _UNPARSEABLE.search(ok))
+
+
+def test_the_derive_rule_sees_a_derivation_keyed_on_seed() -> None:
+    seeded = "The token is `derive(seed, namespace, value)`. Other text."
+    assert _job_seed_sentences(seeded, frozenset()) == [
+        "The token is `derive(seed, namespace, value)`."
+    ]
+    assert not _job_seed_sentences(
+        "The token is `derive(mask_key, namespace, value)`.", frozenset()
+    )
