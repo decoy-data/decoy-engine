@@ -1,12 +1,15 @@
 """date_shift strategy (engine-v2 S9): shift each date by a keyed offset.
 
 Re-keyed onto S3 (S9 spec §4 row 5): the per-value offset in
-``[min_days, max_days]`` is `min_days + (int.from_bytes(derive(job_seed,
-namespace, _canonicalize_source(value))[:8], "big") % range_size)` -- NOT the
-legacy HMAC(column_key)/MD5 path. Same source date -> same shift within a
-namespace; byte-stable across runs. Format detection + the vectorized
-datetime parse/reformat are reused from V1 `transforms/date_shift._detect_format`.
+``[min_days, max_days]`` is `min_days + (int.from_bytes(derive(mask_key,
+namespace, _canonicalize_source(value))[:8], "big") % range_size)`. The mask
+key is the admitted secret (at least 32 bytes); there is no key-free path. Same
+source date -> same shift within a namespace; byte-stable across runs. Format
+detection + the vectorized datetime parse/reformat are reused from
+`transforms/date_shift._detect_format`.
 Null + parse-failed positions restore the original value.
+
+Pattern: HKDF-SHA256 then HMAC-SHA256 keyed deterministic offset (HKDF RFC 5869; HMAC RFC 2104).
 
 Sprint 2 honesty pack (2026-07-04, D7/D8, discovery 0.1): a non-null cell
 that fails `pd.to_datetime` parsing used to silently keep the ORIGINAL

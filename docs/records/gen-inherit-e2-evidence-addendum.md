@@ -161,3 +161,29 @@ fan-out sentry: 5022 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merges (2026-11-16, `b886c61d`, `57f5d25f` and `85429533`), carried forward
+
+`origin/main` moved three times after the `13c95c7d` merge: `b886c61d` (#613, the scan-checks
+evidence baseline member and `on_drift` surface; #614, the README; #615, generate-only edges
+take a derived namespace), `57f5d25f` (#612, the date-shift MD5 offset path deleted and the
+unkeyed refusal pinned) and `85429533` (#611, the distribution behavior table moved from
+`execution/` to `contracts/`). gen-rel-e1 merged each in turn and the gen-rel slices carried
+them forward. `origin/feat/gen-rel-e3b` `3452a9a9` (holding `origin/main` `85429533`) merged into
+`57a73de3` as `92279cb9`, without a conflict. The `reasons/warning/_part1.py` and draw-site
+catalogue pin resolutions arrive from gen-rel-e1 and gen-rel-e2. Of this slice's files main
+touches `docs/strategies.md` and `CODEMAP.md`; each merged beside this slice's lines. Main's
+census, baseline, fan-out and import-layer changes are its own deletions; nothing of this
+chain's grows. Main does not touch `uv.lock` or `generation/`. Main's changelog fragments arrive
+beside this chain's, which are kept.
+
+Checks on `92279cb9`, Python 3.10.20, `origin/main` `85429533`: ruff, format and mypy pass;
+`tests/sentry` 6001 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 5022 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 596 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.

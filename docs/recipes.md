@@ -150,8 +150,9 @@ has no parent (`preserve`, `remap`, `warn`, `fail`). See
 
 ## (c) Generate a synthetic table
 
-Generation needs no input file: it builds rows from a column spec. Set
-`mode: generate` (or pass `--mode generate` on the command line).
+Generation needs no input file: it builds rows from a column spec. A table that
+lists `generate_columns` is a generate table. The config has no top-level `mode:`
+key; pass `--mode generate` on the command line to run it.
 
 ```yaml
 version: 2
