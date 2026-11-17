@@ -216,7 +216,6 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
-    ("py:class", "decoy_engine.profiling.StarterConfig"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),
