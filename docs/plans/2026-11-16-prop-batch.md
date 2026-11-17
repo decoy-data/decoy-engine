@@ -12,6 +12,39 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 owner memory rules: V1 bar, process by risk (2026-11-10), sentry over prose, pre-release no
 locking, no new features (2026-11-16).
 
+Revision 6 (2026-11-17). Changes since revision 5, from the Codex rev 5 NO-GO (one DESIGN
+finding) and the cross-check of `plan/prop`, CLI #308 and Dennis's findings (2 V1, 6 DESIGN, 23
+V2-LOG). Section 17 maps every finding to its fix. Bases unchanged.
+
+- Codex DESIGN, swallowed-broad-except: the save-and-re-raise exemption now needs the alias
+  assigned inside that handler and a matching `raise` lexically after the whole `try` statement
+  in the same function scope. AT-SBE gains the after-block (0), raise-before-try (1) and
+  assigned-outside (1) cells; section 7 gains the ordering mutation. The guard-lane slices
+  (E-G1, E-G2a, E-G2b, E-G3, C-G1, C-G2) are R2.
+- V1, A5: one rule for the reroute set. `_REROUTABLE` holds the coded declines from the two plan
+  callees, the two Arrow errors and `MemoryError`; everything else propagates. A census over the
+  named suites runs before the narrowing. New AT-A5c (section 2.3).
+- V1, D6b: `decoy demo` and the `decoy.scan()` guidance write `scan-set/v1` before the legacy
+  reader goes, in C-S2. New AT-D6b. OQ-5 re-decided.
+- DESIGN: module-size DENSE entries move as a `ceiling` field under the rise rule, LEGACY as a
+  shrink-only `max` (OQ-9); `count` becomes a ratchet ceiling; the E2 move gets an equivalence
+  snapshot test (AT-E2b), removed in E-G3 and C-G2; the CLI import-guard sentry covers every
+  listed spelling and `compile_explain.py` moves to D2; D7 importers use the public
+  `decoy_engine.profile.LazySource`; OQ-4 re-decided on the correct consumer fact, new slice
+  E-S1c.
+- B7 count corrected: 47 to 43 in E-S1b, 41 after E-S1c. Section 10a rewritten for the
+  module-size rules.
+- Folded V2-LOG items: A2 coded error and lazy load; `plan/_checks.py:638` narrowed (E-F2); dead
+  `isinstance(outputs, dict)` guards; emit-helper caplog and D12 ATs (AT-EMIT) and the two
+  protocol methods; A7 test comment; A9 lane holder; B8b test and doc list; platform note;
+  `test_mask_api_native.py`; D2 and D3 tests and dead arms; C-S1b hot files; `exit_codes.py`
+  scope; E-S2a split into E-S2a1 and E-S2a2; D8 dual paths and CODEMAP rows; E6 `exit` check; E2
+  leftover copies; OQ-6 re-decided (keep the Wave B guard); comment-history date rule and CLI
+  `_banned_text.py`; K1 `workflow_dispatch` and stale text; E1 second outside path; A1 logged.
+- Re-decided owner questions (section 12): OQ-4, OQ-5, OQ-6, new OQ-9 and the A5 reroute set,
+  each "decided under go-with-recommended 2026-11-17, re-decided on new facts". None adds a
+  feature, a dependency or raises a cap.
+
 Revision 5 (2026-11-17). Changes since revision 4:
 
 - Merged engine `origin/main` `8796ef691` into this branch. Re-verified every 24zj B item and
@@ -196,15 +229,15 @@ Test fixtures that use unsupported pairs today move to supported ones (section 8
 | Item | Site (at base) | Defect | Reachable | V1 behavior | Slice |
 |---|---|---|---|---|---|
 | A1 | `E:transforms/text_mask.py` `_mask_faker` | The audit named the inner `try` in `_mask_faker`. That catch is unreachable (`shared_faker()` is a default-locale `Faker()`). The reachable defect is section 2.1. | Yes, through section 2.1. | Section 2.1. The inner `try` and its `fake.name()` fallback are deleted in the same slice. | E-F0 |
-| A2 | `E:transforms/geo_generalize.py` `_build_state_map` (272-288) | A failed `load_table("us_zip5_city_state")` returns `{}` with a warning, so every state value is `""`. | Only on a broken install (the table ships in the wheel). | The load error propagates. | E-F1 |
+| A2 | `E:transforms/geo_generalize.py` `_build_state_map` (272-288) | A failed `load_table("us_zip5_city_state")` returns `{}` with a warning, so every state value is `""`. | Only on a broken install (the table ships in the wheel); reference #308 notes the effect is wrong masked output (over-suppression), not only a warning. | The load error propagates as a coded `ConfigError` (`transform.reference_table_unavailable`), and the zip5 table loads only when `state` is in the cascade, so a run that never asks for state never touches it. | E-F1 |
 | A3 | `E:plan/_seed_envelope.py` (~127) | `except _ProviderError: reg_caps = None`. | No. `check_unknown_provider` runs first at `E:plan/_compile.py:190`, and in the config-only checks at 514. | Catch deleted. | E-F1 |
 | A4 | `E:plan/checks/_generate_columns.py` `_expression_refs` | `except Exception: return frozenset()`: a bad expression becomes "no references". | No. `_check_parse_rules` runs before `_check_forward_references`, and `DerivedConfig.from_dict` already compiles the only `ref_kind="expression"` field. | Catch deleted. | E-F1 |
 | A5 | `E:execution/_unified_slice.py` (359-361) | `except Exception` logs `_REROUTE_LOG` (`:74`) and returns None, so the caller reruns the slice on pandas. A native bug becomes a slower correct run. | Yes, on any exception in the callees listed in section 2.3. Output does not change (the pandas oracle is correct). | Section 2.3. Owner question OQ-3. | E-F2 |
 | A6 | `E:execution/physical/_compiler.py` `_post_scan_resident` (~437-445) | `except Exception: return None` around `post_scan_resident_for(...)`, evidence only. The runtime calls the same function with no catch. | Only on an internal bug. | Catch deleted. | E-F1 |
-| A7 | `C:cli/init.py` `_validate_scaffold` (~315-332) | `try: import yaml; from decoy_engine.config import parse_pipeline_config except Exception: return`. Both are hard dependencies, so a broken install skips scaffold validation. | Only on a broken install. | Plain import. | C-F1a |
+| A7 | `C:cli/init.py` `_validate_scaffold` (~315-332) | `try: import yaml; from decoy_engine.config import parse_pipeline_config except Exception: return`. Both are hard dependencies, so a broken install skips scaffold validation. | Only on a broken install. | Plain import; update the comment at `CT:e2e/test_init_command.py:127`. | C-F1a |
 | A8a | `E:config/_targets.py:161-173` `duplicate_target_groups` and `E:config/_pipeline.py:370` `PipelineConfig._targets_distinct`; the old CLI skip is `C:cli/io/_targets.py:487-489` | A `targets:` key that names no configured table is never refused; a source name alone is not a valid target key. `write_targets` skips it and the run exits 0 with no file. | Yes, from any config with a typo in a target key. | The engine config validator is the one refusal point. Beside `_targets_distinct`, it checks target keys against table names only, raises the new engine code `config.target_table_unknown`, and updates `duplicate_target_groups`'s docstring so it no longer says writers skip unknown keys. CLI run and validate both exit 1 before any source read. The gate location is `targets.{table}`, not `targets.{table}.format` (`C:cli/gate/_layers.py:213-215`). | E-F1; CLI repin and C-F1a acceptance |
-| A8b | `C:cli/io/_targets.py` `write_targets` (`:461-495`); DELIV C2a retains `_write_mask_outputs` for `C:cli/tokenize.py:371` and `C:api.py:633` until C4; `C:cli/demo.py:295` has a separate `_write_mask_outputs`; RUN-STREAM C1a adds `seal_result` | A declared file target whose table the engine did not produce is skipped (`table = outputs.get(table_name); if table is None: continue`) and the run exits 0. Engine #584 (LOADER-DROP) closed one cause; the skip still hides any other. | Yes, on any engine result that lacks a declared table. | `missing_target_tables` is the one predicate. Both `seal_result` and `write_targets` call it before any write, so the retained tokenize, API and demo paths refuse too. Demo moves onto the shared check instead of owning a second rule. New CLI code `io.target_table_missing`, exit 3. Section 2.4. | C-F1b |
-| A9 | `C:cli/run/_render.py` `_next_hint_for_run` (~53-61), used at ~168 | Reads `raw_cfg["output"]["path"]`, a key the V2 schema does not have, inside `try/except: pass`. Always None. | Dead code. | Deleted; the caller drops the keyword. | C-F1a |
+| A8b | `C:cli/io/_targets.py` `write_targets` (`:461-495`); DELIV C2a retains `_write_mask_outputs` for `C:cli/tokenize.py:371` and `C:api.py:633` until C4; `C:cli/demo.py:295` has a separate `_write_mask_outputs`; RUN-STREAM C1a adds `seal_result` | A declared file target whose table the engine did not produce is skipped (`table = outputs.get(table_name); if table is None: continue`) and the run exits 0. Engine #584 (LOADER-DROP) closed one cause; the skip still hides any other. | Yes, on any engine result that lacks a declared table. | `missing_target_tables` is the one predicate. Both `seal_result` and `write_targets` call it before any write, so the retained tokenize, API and demo paths refuse too. Demo moves onto the shared check instead of owning a second rule. New CLI code `io.target_table_missing`, exit 3. Section 2.4. Also delete the dead `if not isinstance(outputs, dict)` guards at `C:cli/run/_execute.py:308-310` (in C-F1a, the `_execute.py` lane) and `C:cli/demo.py:300-302` (here); `outputs` is always a dict. | C-F1b |
+| A9 | `C:cli/run/_render.py` `_next_hint_for_run` (~53-61), used at ~168 | Reads `raw_cfg["output"]["path"]`, a key the V2 schema does not have, inside `try/except: pass`. Always None. | Dead code. | Deleted; the caller drops the keyword. `_render.py` is held by RESULT (row 62) inside F29 C1 (row 66): this hunk rides with that holder if it is open when C-F1a builds. | C-F1a |
 | Emit helpers | `E:context.py` `emit_step` (99-164), `emit_lineage` (167-182), `emit_fidelity` (185-195), `emit_quarantine` (198-213), `emit_throughput_sample` (216-226) | Five copies of `getattr` probing plus `except Exception: pass`; `emit_step` also retries without `node_id` on `TypeError` (D12). No failure is counted: `sink_failures` (`E:progress.py:178`, `:198`; `E:_progress_events.py:376`) counts only `ProgressReporter` sink failures, not these helpers. | The catch is a deliberate observation boundary: a logger that raises must not fail a run. The five copies and the `TypeError` retry are the defect. | One private `_dispatch_sink` in `E:context.py` owns the probe and the catch; it logs the exception class name (value-free) at DEBUG on the engine logger and counts nothing (adding a counter would be a new feature). The `TypeError` retry goes. `emit_fidelity`, `emit_quarantine` and `node_id` go with B5. | E-S1b |
 
 Failure modes:
@@ -230,8 +263,8 @@ Callees inside the `try` (`E:execution/_unified_slice.py` ~188-352) and the verd
 
 | Callee | On exception |
 |---|---|
-| `build_live_physical_plan_inputs` | propagate |
-| `compile_physical_plan` | propagate |
+| `build_live_physical_plan_inputs` | decided by the census below: its coded raise sites (an `ExecutionError` or `PlanCompileError` that carries a registered "slice not eligible" reason) reroute; anything else propagates |
+| `compile_physical_plan` | same rule as the row above |
 | `_admission.resident_contract_admission` | propagate (admission declines are return values, handled before the try) |
 | `build_unified_slice_activation` | propagate |
 | `ShadowContext.from_key_provider` | propagate |
@@ -243,10 +276,35 @@ Callees inside the `try` (`E:execution/_unified_slice.py` ~188-352) and the verd
 | `_typed_warnings`, `_typed_row_errors` and `ExecutionResult` construction | propagate |
 | `PoolBuildFailed` handler | unchanged |
 
-The builder lists every `raise` site reached from these callees. Any coded decline found (an
-exception class carrying a registered reason code that means "this slice is not eligible") goes
-into one tuple `_REROUTABLE` in `_unified_slice.py`, and only that tuple reroutes. If none is
-found, the `except Exception` arm is deleted.
+Revision 6 resolves the contradiction in revision 5, where the first two rows said "propagate"
+while this paragraph built a reroute set from those same callees. The rule is now one rule:
+
+- `_REROUTABLE` in `_unified_slice.py` is the only thing that reroutes. Its members:
+  1. the coded declines: an exception raised at a coded raise site in
+     `build_live_physical_plan_inputs` or `compile_physical_plan` whose reason code means "this
+     slice is not eligible". The builder lists every such site with its code, and the handler
+     checks the code, not only the class, so a `PlanCompileError` that is a real user error still
+     propagates exactly as the oracle would raise it (AT-A5b);
+  2. `pyarrow.ArrowInvalid` and `pyarrow.ArrowTypeError`, by exact class. Decided: reroute. The
+     native lane converts through Arrow, and Arrow refuses data that the pandas oracle accepts
+     (for example a mixed-type object column). The oracle output is correct, so failing those
+     runs would be a function break. Both classes subclass `ValueError` and `TypeError`, so the
+     tuple names them exactly and a plain `ValueError` or `TypeError` is not caught;
+  3. `MemoryError`. Decided: reroute. The unified lane holds the shadow snapshot and the
+     reconstructed output at once, so its peak is above the oracle's, and today's reroute is what
+     lets those runs finish. Failing them would be a function break.
+- Everything else propagates. Reference #308 lists `ValueError`, `KeyError` and `TypeError` as
+  classes that reach the handler today; each one found by the census is a lane bug. E-F2 fixes it
+  at the source or stops and reports. It is never added to `_REROUTABLE`.
+- The reroute log line stays value-free: it names the class and, for a coded decline, the code.
+
+Census (in E-F2, before the narrowing commit, recorded in the PR evidence). A temporary
+recording handler writes `type(exc).__qualname__`, the raising module and, if present, the
+reason code for every exception that reaches the `except`. It runs over `ET:physical/`,
+`ET:parity/`, `ET:native/`, `ET:unit/execution/`, `ET:integration/` (golden), the compat corpus
+suite, the testflight acceptance suite, and the flight below. Every class found is placed in one
+of the three `_REROUTABLE` groups or named as a lane bug. A census with zero unified-slice
+activations is void.
 
 Instrument for OQ-3 (no production change): before E-F2 merges, the test flight
 (`scripts/test_flight.py`, golden corpus plus the prodsim set) runs on engine main under a wrapper
@@ -331,11 +389,15 @@ What does not count:
 - A handler with any `raise` in its own body (bare `raise`, `raise X from exc`, or a raise
   under an `if`). A conditional raise is accepted as handled; that under-count is known and
   accepted, since the realistic quiet fallback has no raise at all.
-- A handler that saves the error and re-raises after the block: the handler binds `as exc`,
-  assigns an expression that holds `exc` to a local name, and the same function scope has a
-  `raise` whose exception or `from` cause names that local. Engine `8796ef691` has 26 such
-  handlers (for example deferred cleanup that raises the first error after closing every
-  resource). They are correct and stay uncounted.
+- A handler that saves the error and re-raises after the block. All three must hold: (1) the
+  handler binds `as exc`; (2) inside that handler's own body (nested `def`, `lambda` and `class`
+  excluded) an assignment stores an expression that holds `exc` into a local name; (3) the same
+  function scope has a `raise` whose exception or `from` cause names that local, and that `raise`
+  starts lexically after the end of the complete `try` statement (its `end_lineno`, so after
+  every handler, `else` and `finally`), not inside a nested `def` or `class`. A raise before the
+  `try`, or inside it, does not count. Engine `8796ef691` has about 26 such handlers (for example
+  deferred cleanup that raises the first error after closing every resource). They are correct
+  and stay uncounted; the exact number is in the E-F1 evidence under the tightened rule.
 - Narrow handlers (`except ValueError`, `except OSError`, `suppress(FileNotFoundError)`).
 - Anything under `tests/`, `scripts/` or `docs/`.
 
@@ -406,8 +468,9 @@ events) list them, and `docs/compatibility-contract.md` names `secret_registry` 
 an open owner question. The contract's own section 1 says pre-GA breaking changes need no shim
 or deprecation horizon, and the owner decided this row on 2026-11-15 (delete when no consumer).
 Each slice edits those lines in the same commit as the deletion. The names that do have a
-consumer (`chunked_dispatcher_enabled`, `multi_table_dispatch_enabled`, and the two routing
-switches under OQ-4) stay.
+consumer (`chunked_dispatcher_enabled`, `multi_table_dispatch_enabled`) stay. The two routing
+keywords had no production consumer after all; OQ-4 is re-decided in section 12 and they go in
+E-S1c.
 
 | Item | Names | Consumers found | Verdict | Slice |
 |---|---|---|---|---|
@@ -415,12 +478,12 @@ switches under OQ-4) stay.
 | B2 | `deterministic_hash` (`E:internal/crypto.py:18`) | none in src; `ET:unit/internal/test_crypto.py`; the `PERMANENT` row in `ET:sentry/test_deprecation_expiry.py:38-45`, whose rationale ("used when no master key is configured") is stale: no `src/` caller exists | Delete with its tests and the `PERMANENT` row. The five `src/` comments that name it (`E:determinism/_derive.py:77`, `E:execution/_strategies/_hash.py:7`, `E:generators/_formula.py:30,358`, `E:plan/_compile.py:50`) stay: they explain why the keyed scheme replaced it, and editing them would put E-S1a over 10 production files. | E-S1a |
 | B3 | `ExecutionContext.resolve_connector`, `captured_outputs`, `pool_resolver`, `column_relationships`, `_exports`, `_current_node_id`, `export()` | none; the platform builds only `ExecutionContext(logger=...)` (`api/storm/router.py:1297`) | Delete. `logger`, `derive_key`, `pipeline_derive_key` and `instance_default_locale` stay (read by `E:execution/_pipeline_full_frame.py`, `_pipeline_mixed_route.py`, `physical/_shadow_generation.py`). | E-S1b |
 | B4 | `TelemetryClient`, `ExecutionContext.telemetry` | none | Delete. | E-S1a |
-| B5 | `emit_fidelity`, `emit_quarantine`, `emit_step(node_id=)` | tests only; platform `api/persistence/logger.py` implements the sink methods, on engine 0.18 | Delete the two helpers and the keyword. The sink methods the platform implements are its own names. | E-S1b |
+| B5 | `emit_fidelity`, `emit_quarantine`, `emit_step(node_id=)`, and the protocol methods `StructuredEvents.fidelity` and `quarantine` (`E:context.py:83-84`) | tests only; platform `api/persistence/logger.py:337,346` implements the sink methods, on engine 0.18 | Delete the two helpers, the two protocol methods and the keyword. The platform's `Logger.fidelity` and `quarantine` become orphans; the build report lists them, and the stale `ctx.export` comments in `P:api/evidence/assembly.py` and `schema.py` (B3), for the platform. No platform change. | E-S1b |
 | B6 | `ExecutionEvent` (`E:execution/_events.py`) | never built | Delete the module and both exports. | E-S1a |
-| B7 | `run_pipeline` keywords `progress_interval_s`, `secret_registry`, `secret_cache_policy`, `stream_chunked_output` | no caller anywhere; `stream_chunked_output` has 12 src lines in 6 files and 3 test lines | Delete. `docs/compatibility-contract.md:43-50` names `secret_registry` and `secret_cache_policy` as additive and counts "42 frozen parameters"; that paragraph is updated (38 after the four removals) and records that `SecretCachePolicy` then has no per-run setter: the cache policy is the module default only. | E-S1b |
+| B7 | `run_pipeline` keywords `progress_interval_s`, `secret_registry`, `secret_cache_policy`, `stream_chunked_output` | no caller anywhere; `stream_chunked_output` has 12 src lines in 6 files and 3 test lines | Delete. `docs/compatibility-contract.md:43-50` names `secret_registry` and `secret_cache_policy` as additive; it records that `SecretCachePolicy` then has no per-run setter (the cache policy is the module default only). The live parameter count is 47 (`ET:unit/execution/test_r3_public_signature_freeze.py:116`, contract `:87`), not the 42 the older paragraph states; E-S1b makes it 43 and adds one dated line with the new count. | E-S1b |
 | B7 | `chunked_dispatcher_enabled`, `multi_table_dispatch_enabled` | platform `api/jobs/v2_runner.py:263-264` | Keep; record the consumer in `docs/frozen-surfaces.md`. | E-S1b (doc line) |
-| B7 | `use_byte_estimate_routing`, `use_probe_routing` | `E:capacity.py` passes `False`; `E:execution/__init__.py` documents them as the rollback path; also read by the physical `_snapshot` | OQ-4 (decided: keep as documented rollback switches, consumer recorded). | E-S1b (doc line) |
-| B8 | `FK_SELF_REFERENCE` alias at `E:validation_result.py:367`; `event_to_legacy_dict` (`E:_progress_events.py:598`, exported from `E:progress.py` and `__all__`) | tests only | Delete the alias (the code `fk.self_reference` stays). Delete `event_to_legacy_dict`; keep `_LEGACY_FIELDS`, which `event_to_dict` reads. E-S1a runs `ET:unit/test_reason_registry.py` and `test_reason_baseline_frozen` on its head. | E-S1a |
+| B7 | `use_byte_estimate_routing`, `use_probe_routing` (the `run_pipeline` keywords only) | Revision 5 named the wrong consumer: there is no `E:capacity.py`. The `False` values at `E:execution/_job_estimate.py:176-177` go to the internal `decide_execution_route`, not to `run_pipeline`. No production caller passes the keywords; the callers are 5 bench scripts and 65 test or script files | OQ-4 re-decided: delete both keywords. The internal routing parameters (`_pipeline_context.py`, `decide_execution_route`) stay. Tests and bench scripts that steer routing move to one `routing_overrides` fixture in `ET:conftest.py` that monkeypatches the internal decision the keywords fed; production code is not loosened for tests. Count 43 to 41. | E-S1c |
+| B8 | `FK_SELF_REFERENCE` alias at `E:validation_result.py:367`; `event_to_legacy_dict` (`E:_progress_events.py:598`, exported from `E:progress.py` and `__all__`) | tests only | Delete the alias (the code `fk.self_reference` stays). Delete `event_to_legacy_dict`; keep `_LEGACY_FIELDS`, which `event_to_dict` reads. Move the `ET:unit/safe_output/test_value_domains.py:71,281` snapshot pair to `event_to_dict`; update `ET:security/test_f29_remediation.py:27,139,148`, `ET:unit/progress/test_consumer_contract.py:102`, `ET:unit/progress/test_versioned_contract.py:103` and `docs/reasons.md:118`. E-S1a runs `ET:unit/test_reason_registry.py` and `test_reason_baseline_frozen` on its head. | E-S1a |
 | B9 | platform reason codes | platform wire contract | Stays. | none |
 
 Each deletion updates, in the same slice: `docs/frozen-surfaces.md`, `ET:unit/test_public_api.py`
@@ -445,23 +508,24 @@ slice removes a name a CLI probe asks for, so no CLI probe removal waits for a r
 
 | Item | Site | Change | Slice |
 |---|---|---|---|
-| D1 | `C:_native_gate.py:506-535` (`run_pipeline_accepts`, an `inspect.signature(run_pipeline)` probe used for `unified_slice_enabled`; `import inspect` at 48; `__all__` entry at 535). New since revision 4: `C:cli/run/_progress.py:51-60` `run_pipeline_kwargs` asks `run_pipeline_accepts("progress", run_pipeline)` (CLI #216) | Pass both keywords. `unified_slice_enabled` and `progress` are in `run_pipeline` (`E:execution/_pipeline.py:152-153`) in the pinned 0.27.0. Delete `run_pipeline_accepts` and `import inspect`. `run_pipeline_kwargs` returns `{"progress": fanout}` whenever `fanout` is set. Delete the tests that pin the probe: the first three cells of `CT:unit/run_progress/test_capability.py` (`:25`, `:39`, `:44`; the `:44` intent, no run module reads an engine signature, moves to the engine-import-guard sentry's `inspect.signature` rule in C-S1b) and the fake-old-engine wrapper case in `CT:e2e/test_run_native.py` (~384-404) | C-S1a |
-| D2 | `except ImportError` around engine names: `C:_mask_secret.py:77`, `C:_mask_secret_guidance.py:51-76` and 140 (`_OLD_ENGINE_HEAD`, `_OLD_ENGINE_TAIL`, `OLD_ENGINE_RUN`, `OLD_ENGINE_TOKENIZE`, `OLD_ENGINE_API`), `C:api.py:151-152`, `C:cli/exit_codes.py:274,280`, `C:cli/run/_errors.py:138,150`, `C:cli/run/_prepare.py:428-429`, `C:cli/tokenize.py:306-307`, `C:cli/extras.py:203-206` (`NerUnavailableError`, `PlanCompileError`; was 192-196 at revision 4), `C:ci/engine_logging.py:28-30` (`decoy_engine.internal.logging`) | Plain imports; delete the `OLD_ENGINE_*` texts. | C-S1b |
-| D3 | `getattr(decoy_engine, "native_companion_status", None)` at `C:_native_gate.py:139`, `C:cli/info.py:84`, `C:distribution/selfcheck.py:47`; `hasattr(_engine_execution, "estimate_job_capacity")` at `C:cli/preflight.py:386` (module imported under an alias; was 395-397 at revision 4), and the `native_companion_status` probe at `C:cli/preflight.py:546`; `getattr(engine_errors, "EnvFlagError", None)` at `C:cli/exit_codes.py:233` | Plain attribute access. `selfcheck.py` keeps its `try: import decoy_engine except Exception` (`:42-44`): reporting a broken install is that command's job. | C-S1a (`exit_codes.py` site in C-S1b) |
+| D1 | `C:_native_gate.py:506-535` (`run_pipeline_accepts`, an `inspect.signature(run_pipeline)` probe used for `unified_slice_enabled`; `import inspect` at 48; `__all__` entry at 535). New since revision 4: `C:cli/run/_progress.py:51-60` `run_pipeline_kwargs` asks `run_pipeline_accepts("progress", run_pipeline)` (CLI #216) | Pass both keywords. `unified_slice_enabled` and `progress` are in `run_pipeline` (`E:execution/_pipeline.py:152-153`) in the pinned 0.27.0. Delete `run_pipeline_accepts` and `import inspect`. `run_pipeline_kwargs` returns `{"progress": fanout}` whenever `fanout` is set. Delete the tests that pin the probe: the first three cells of `CT:unit/run_progress/test_capability.py` (`:25`, `:39`, `:44`; the `:44` intent, no run module reads an engine signature, moves to the engine-import-guard sentry's `inspect.signature` rule in C-S1b) and the fake-old-engine wrapper case in `CT:e2e/test_run_native.py` (~384-404); `CT:e2e/test_mask_api_native.py:192,346` also uses the probe and moves to the plain keyword | C-S1a |
+| D2 | `except ImportError` around engine names: `C:_mask_secret.py:77`, `C:_mask_secret_guidance.py:51-76` and 140 (`_OLD_ENGINE_HEAD`, `_OLD_ENGINE_TAIL`, `OLD_ENGINE_RUN`, `OLD_ENGINE_TOKENIZE`, `OLD_ENGINE_API`), `C:api.py:151-152`, `C:cli/exit_codes.py:274,280`, `C:cli/run/_errors.py:138,150`, `C:cli/run/_prepare.py:428-429`, `C:cli/tokenize.py:306-307`, `C:cli/extras.py:203-206` (`NerUnavailableError`, `PlanCompileError`; was 192-196 at revision 4), `C:ci/engine_logging.py:28-30` (`decoy_engine.internal.logging`) | Plain imports; delete the `OLD_ENGINE_*` texts. Also `C:cli/compile_explain.py:332-346` (`try: from decoy_engine.plan import PlanCompileError ... except ImportError`): an engine probe for a name 0.27.0 ships, not an optional dependency, so it moves here from the kept list. And `C:ci/engine_logging.py:35` `getattr(engine_log, "_LOGGER_INSTANCE", None)` becomes plain `engine_log._LOGGER_INSTANCE` (module-level in 0.27.0, `internal/logging.py:14`). Tests deleted with the branches they cover: `CT:e2e/test_run_mask_secret.py::TestPreDE02EngineGuard` and the `old_engine` tests in `CT:e2e/first_user/test_items_text.py`. `C:cli/exit_codes.py` (shared with 24zf CL3): touch only the probe lines; `exit_code_for` is unchanged. | C-S1b |
+| D3 | `getattr(decoy_engine, "native_companion_status", None)` at `C:_native_gate.py:139`, `C:cli/info.py:84`, `C:distribution/selfcheck.py:47`; `hasattr(_engine_execution, "estimate_job_capacity")` at `C:cli/preflight.py:386` (module imported under an alias; was 395-397 at revision 4), and the `native_companion_status` probe at `C:cli/preflight.py:546`; `getattr(engine_errors, "EnvFlagError", None)` at `C:cli/exit_codes.py:233` | Plain attribute access. Also delete the too-old branch at `C:_native_gate.py:352-358` and the `_NativeProbeUnavailable` arms at `:379` and `:393`, with the six `*older_engine*` tests and the skip at `CT:unit/test_exit_code_for.py:112-114`. `selfcheck.py` keeps its `try: import decoy_engine except Exception` (`:42-44`): reporting a broken install is that command's job. | C-S1a (`exit_codes.py` site in C-S1b) |
 | D4 | `C:cli/report.py` ~893 `import pandas` guard | Delete (pandas is a hard dependency). | C-S1a |
 | D5 | `C:cli/run/_execute.py` ~342-368, `_report_kwargs` left out "so the default call shape stays valid on an older engine" | Pass the keywords. | C-F1a (same hot file as A9) |
-| D6 | `C:cli/io/_scan_set.py` `_LEGACY_FIELD_*`, `_from_legacy`, `_legacy_field`; `C:cli/io/_targets.py` ~193 `_legacy_format_for_path` | OQ-5 (decided: delete). The remaining readers refuse an untagged or pre-`scan-set/v1` saved scan, and a manifest entry with no `format`, with a coded CLI error (`scan.saved_scan_schema_unsupported`, `io.manifest_format_missing`), exit 1, value-free. | C-S2 |
-| D7 | `E:execution/out_of_core/_source.py`, a re-export of `LazySource` from `E:profile/_readers` | Move 8 src importers (`out_of_core/__init__.py`, `_preflight.py`, `_relation.py`, `_rewrite_pass.py`, `_route_policy.py`, `_runner.py`, `_stage.py`, `_stream_driver.py`) and about 16 tests; delete the module. | E-S2a |
-| D8 | Re-exports in `E:execution/_mem_estimate.py` (~84-93), `_planner_columns.py` (through `_planner`), `_sequential.py:169` (`table_topo_order`), `_chunked_fk.py` (~22-35), `_pipeline_routing.py` (~22-40), `native/_dispatch.py` (`noqa: F401 -- re-exported for tests`) | Importers move to the owning module; the re-export lines go. `run_pipeline` imports the owning modules directly. | E-S2b |
+| D6 | `C:cli/io/_scan_set.py` `_LEGACY_FIELD_*`, `_from_legacy`, `_legacy_field`; `C:cli/io/_targets.py` ~193 `_legacy_format_for_path` | The reader still has live writers (reference #308, confirmed at `c558e2fb`): `C:cli/demo.py:166` writes `profile_document(profile)`, the untagged shape, and the `decoy.scan()` docstring at `C:api.py:686-688` tells library users to save that shape. C-S2 therefore first switches both writers (D6b), then deletes the readers (D6a): demo writes the value-free `scan-set/v1` core through the same writer `decoy scan --output` uses (the `_multi_payload` shape, `C:cli/scanning/_multi.py:289-298`), and the docstring points at `decoy scan --output`. The fixtures that feed the old shape move to `scan-set/v1` (`CT:fixtures/scan/legacy_profile.json`, `CT:e2e/cli_fmt/test_scan_saved.py`, `CT:e2e/test_scan_fields_show.py`, `CT:e2e/test_scan_diff_move.py:67-68`). Then the readers refuse an untagged or pre-`scan-set/v1` saved scan, and a manifest entry with no `format`, with a coded CLI error (`scan.saved_scan_schema_unsupported`, `io.manifest_format_missing`), exit 1, value-free. OQ-5 re-decided on this fact (section 12). | C-S2 |
+| D7 | `E:execution/out_of_core/_source.py`, a re-export of `LazySource` from `E:profile/_readers` | Move 8 src importers (`out_of_core/__init__.py`, `_preflight.py`, `_relation.py`, `_rewrite_pass.py`, `_route_policy.py`, `_runner.py`, `_stage.py`, `_stream_driver.py`), `scripts/build_floor_probe.py:55` and about 15 tests to the public `from decoy_engine.profile import LazySource` (`E:profile/__init__.py:44,66`). Import from `profile._readers` only where an import cycle is proven, and list each such site in the PR. Edit the `E:profile/_readers.py:27` docstring and CODEMAP row 107. Delete `ET:unit/execution/test_out_of_core_source.py::test_lazy_source_is_public_export` and the module. | E-S2a1 |
+| D8 | Re-exports in `E:execution/_mem_estimate.py` (~84-93), `_planner_columns.py` (through `_planner`), `_sequential.py:169` (`table_topo_order`), `_chunked_fk.py` (~22-35), `_pipeline_routing.py` (~22-40), `native/_dispatch.py` (`noqa: F401 -- re-exported for tests`) | Importers move to the owning module; the re-export lines go. `run_pipeline` imports the owning modules directly. `_planner_columns` and `_sequential_order` are real modules with their own use (dual paths), not shims: only their 5 old-path importers retarget. Edit engine CODEMAP rows 42 and 111 ("re-exported"). | E-S2b |
 | D9 | `E:quality/dp_budget.py` ~499-520, a module `__getattr__` that re-exports `OpenDpReleaseSession`, plus an empty `if TYPE_CHECKING: pass` | Delete. Update the docstrings that name the old path (`E:quality/dp.py:11`, `E:quality/dp_session.py:16`). | E-F1 |
-| D10 | `E:execution/_fk_key_compat.py`, a one-line delegate to `_fk_keys.fk_key_value` | Importers (`_pandas_adapter.py:51`, `ET:unit/execution/test_pandas_adapter_helper_kills.py:14`) move; delete; drop its rows in `ET:sentry/layout/test_module_size.py` and the seam test. | E-S2a |
-| D11 | `E:execution/_chunked_adapter_gate.py`: `chunked_adapter_touches_pandas_ingestion` always returns True | Fold the constant into the one caller (`_chunked_oracle.py:32`) and remove the dead branch; delete the module and its test references (`ET:unit/execution/test_de10_chunked_fk_passthrough.py:365`). | E-S2a |
+| D10 | `E:execution/_fk_key_compat.py`, a one-line delegate to `_fk_keys.fk_key_value` | Importers (`_pandas_adapter.py:51`, `ET:unit/execution/test_pandas_adapter_helper_kills.py:14`) move; delete; drop its rows in `ET:sentry/layout/test_module_size.py` and the seam test. | E-S2a2 |
+| D11 | `E:execution/_chunked_adapter_gate.py`: `chunked_adapter_touches_pandas_ingestion` always returns True | Fold the constant into the one caller (`_chunked_oracle.py:32`) and remove the dead branch; delete the module and its test references (`ET:unit/execution/test_de10_chunked_fk_passthrough.py:365`). | E-S2a2 |
 | D12 | `E:context.py` `emit_step` `TypeError` retry | Goes with the emit dispatch helper. | E-S1b |
 | D13 | V2 custom-provider table | Not a shim; out of scope (section 1). | none |
 
-Optional-dependency guards that stay, and form the allowlist of the CLI import-guard sentry:
-`C:_private_file.py:45` (Windows `fcntl`), `C:cli/compile_explain.py:345`, and
-`C:distribution/selfcheck.py:42-44` (reports a broken install). Two handlers that look alike
+Guards that stay, and form the kept entries of the CLI import-guard sentry's baseline:
+`C:_private_file.py:45` (Windows `fcntl`) and `C:distribution/selfcheck.py:42-44` (reports a
+broken install). `C:cli/compile_explain.py:345` was on this list in revision 5; it is an engine
+probe and moved to D2. Two handlers that look alike
 are not engine probes and are outside the sentry's scope, since their `try` imports no
 `decoy_engine` module: `C:cli/extras.py:98` (the generic missing-extra probe) and
 `C:cli/run/_notify.py:37` (the CLI's own `decoy.telemetry` extra).
@@ -476,14 +540,14 @@ addition to T1.
 
 | Item | Today | Change | Slice |
 |---|---|---|---|
-| E2 | Each allowlist is written up to four times: an in-code constant in the sentry, `tests/sentry/baselines/<id>.json`, a row in `scripts/dev/sentry_registry.toml`, and a `Source` in `tests/sentry/_baseline_sources.py` (engine 36 rows, 19 `in_code`; CLI 26 rows). | E-G2a adds a `kind` column to `sentry_registry.toml` and builds `SOURCES` from it, so `_baseline_sources.py` stops being a hand table. One loader, `load_allowlist(sentry_id)` in `tests/sentry/_ratchet.py`, reads the source the row names. Source per kind: `in_code` moves to the baseline JSON (the only allowlist from then on); `json_keys` and `from_file` already read a JSON file; `toml_keys` and `import_layer_keys` keep their own files (`pyproject.toml`, `.importlinter`) because those files are the configuration itself. `test_baseline_registry.py` keeps its job (every registry row has its source, every JSON has a row). The shrink-only ratchet is unchanged. Row 24ze builds on this loader. | E-G2a, E-G2b, C-G1 |
-| E1 | Hand list `SENTRIES` in `tests/sentry/test_sentry_manifest.py` (engine about 106 entries, including `tests/secret_providers/test_leak_sentry.py`; CLI about 72). The test cross-checks `scripts/dev/gates.sh` `SENTRY_PATHS`, `LAYER_TEST` and `LAYER_IGNORE`. | `SENTRIES` becomes the glob `tests/sentry/**/test_*.py` plus an explicit tuple of the paths outside `tests/sentry/`. The gates.sh cross-check stays. | E-G1, C-G1 |
+| E2 | Each allowlist is written up to four times: an in-code constant in the sentry, `tests/sentry/baselines/<id>.json`, a row in `scripts/dev/sentry_registry.toml`, and a `Source` in `tests/sentry/_baseline_sources.py` (engine 36 rows, 19 `in_code`; CLI 26 rows). | E-G2a adds a `kind` column to `sentry_registry.toml` and builds `SOURCES` from it, so `_baseline_sources.py` stops being a hand table. One loader, `load_allowlist(sentry_id)` in `tests/sentry/_ratchet.py`, reads the source the row names. Source per kind: `in_code` moves to the baseline JSON (the only allowlist from then on); `json_keys` and `from_file` already read a JSON file; `toml_keys` and `import_layer_keys` keep their own files (`pyproject.toml`, `.importlinter`) because those files are the configuration itself. `test_baseline_registry.py` keeps its job (every registry row has its source, every JSON has a row). The shrink-only ratchet keeps its meaning, with two corrections below (module-size fields and `count`). Leftover copies go in the same slices: the CLI middle copy `BASELINE_ROWS` (`CT:sentry/io_policy/test_private_files.py:185`), the nine CLI tests that assert JSON equals constant (their constant no longer exists; each becomes the shared registry check), and the engine `UNCHECKED_HELPERS` three-way copy (`ET:sentry/test_reason_registry.py:202-210` and `:838-848`), collapsed to the baseline. Row 24ze builds on this loader. | E-G2a, E-G2b, C-G1 |
+| E1 | Hand list `SENTRIES` in `tests/sentry/test_sentry_manifest.py` (engine about 106 entries, including `tests/secret_providers/test_leak_sentry.py`; CLI about 72). The test cross-checks `scripts/dev/gates.sh` `SENTRY_PATHS`, `LAYER_TEST` and `LAYER_IGNORE`. | `SENTRIES` becomes the glob `tests/sentry/**/test_*.py` plus an explicit tuple of the paths outside `tests/sentry/` (engine: `ET:secret_providers/test_leak_sentry.py` and `test_classifier_equivalence.py`). The gates.sh cross-check stays. | E-G1, C-G1 |
 | E3 | `ET:sentry/test_physical_seam_disconnection.py` (1057 lines) holds `test_production_execution_modules_are_byte_identical_to_origin_main` (~296) and its ~720-line allowlist. | Delete that test and its allowlist (owner 2026-11-15). Keep the import-direction tests (~164-221 and ~1039). Update the two CODEMAP rows that describe the seam guard. `.github/workflows/ci.yml:121-128` keeps `fetch-depth: 0` (`scripts/dev/ratchet_check.py:44` needs the merge base) and its comment is rewritten to name the ratchet instead of the deleted gate. | E-G1 |
 | E4 | `CT:sentry/layout/test_codemap_paths.py` pins the `KINDS` frozenset of verbatim row titles. | Drop `KINDS`; keep the path-exists test. | C-G1 |
-| E6 | Baseline header pins (`doc["created_in"] ==`, `sentry_id`, registry text) in seven CLI files: `CT:sentry/cli_text/test_one_error_emitter.py`, `cli_text/test_stdout_writes.py`, `defects/test_exit_code_owner.py`, `defects/test_exception_context.py:26`, `io_policy/test_config_load_choke_point.py`, `io_policy/test_environment_reads.py`, `io_policy/test_private_files.py`. The engine has none. | Delete the header asserts; `test_baseline_registry.py` already checks every baseline header once. | C-G1 |
-| E7 | `ET:sentry/test_wave_b_no_registry_version_literal.py` (obsolete since REG-RELEASE: `REGISTRY_VERSION` moves only at release); `ET:sentry/test_perf_claim_provenance.py` (a forward invariant on `docs/`). | OQ-6 (decided): delete the Wave B guard, keep the perf guard. | E-G1 |
-| Comment history | No guard. | A sentry in each repo fails a new comment or docstring under `src/` that carries a task id, review round, dated decision or reviewer name. Baseline: per-file counts of today's hits in `tests/sentry/baselines/comment-history.json`, numeric `max`, shrink-only through the existing ratchet. | E-G3, C-G2 |
-| K1 | `C:.github/workflows/regen-diagrams.yml` commits `docs/diagrams/{classes_decoy,deps,packages_decoy}.svg` as `github-actions[bot]` after each push to main, with `permissions: contents: write`. | Upload the three SVGs with `actions/upload-artifact`; `permissions: contents: read`; delete the committed SVGs; drop `docs/diagrams/*.svg` from `GENERATED_UNREAD_GLOBS` (`scripts/dev/gates.sh:65`) and the three entries in `CT:sentry/baselines/retired-name-pending.json` (~37-45). `CT:unit/scripts/test_gates_baseline_file.py:710-729` uses synthetic paths and stays. `C:docs/records/2026-11-08-cli-baseline-build.md` is a record and stays. | C-G2 |
+| E6 | Baseline header pins (`doc["created_in"] ==`, `sentry_id`, registry text) in seven CLI files: `CT:sentry/cli_text/test_one_error_emitter.py`, `cli_text/test_stdout_writes.py`, `defects/test_exit_code_owner.py`, `defects/test_exception_context.py:26`, `io_policy/test_config_load_choke_point.py`, `io_policy/test_environment_reads.py`, `io_policy/test_private_files.py`. The engine has none. | Delete the header asserts; `test_baseline_registry.py` already checks every baseline header once. Keep the `exit` check at `CT:sentry/io_policy/test_private_files.py:615` (it is a behavior fact, not a header). Drop the third hand copy of the keys in `test_exit_code_owner.py`. | C-G1 |
+| E7 | `ET:sentry/test_wave_b_no_registry_version_literal.py` (obsolete since REG-RELEASE: `REGISTRY_VERSION` moves only at release); `ET:sentry/test_perf_claim_provenance.py` (a forward invariant on `docs/`). | OQ-6 re-decided on reference #308's evidence (section 12): keep the Wave B guard until Wave B closes (its E1.x, E2, E4, E6, E7 and E0r handoffs are not yet written), then delete it with its baseline in the Wave B closing slice. Keep the perf-claim guard's scope; rewrite its docstring to say what it checks (32 docs carry claims; one provenance keyword passes). Strengthening it is a follow-up. E7 therefore changes only one docstring here. | E-G1 |
+| Comment history | No guard. | A sentry in each repo fails a new comment or docstring under `src/` that carries a task id, review round, dated decision or reviewer name. C-G2 also rewrites the CLI sentence at `CT:sentry/cli_text/_banned_text.py:8-12` ("Comments and docstrings keep their ids"), which the new guard contradicts. Baseline: per-file counts of today's hits in `tests/sentry/baselines/comment-history.json`, numeric `max`, shrink-only through the existing ratchet. | E-G3, C-G2 |
+| K1 | `C:.github/workflows/regen-diagrams.yml` commits `docs/diagrams/{classes_decoy,deps,packages_decoy}.svg` as `github-actions[bot]` after each push to main, with `permissions: contents: write`. | Upload the three SVGs with `actions/upload-artifact`; add a `workflow_dispatch` trigger; `permissions: contents: read`; fix the text that describes the bot commits at `CONTRIBUTING.md:44` and `scripts/dev/gates.sh:18,63,318`; delete the committed SVGs; drop `docs/diagrams/*.svg` from `GENERATED_UNREAD_GLOBS` (`scripts/dev/gates.sh:65`) and the three entries in `CT:sentry/baselines/retired-name-pending.json` (~37-45). `CT:unit/scripts/test_gates_baseline_file.py:710-729` uses synthetic paths and stays. `C:docs/records/2026-11-08-cli-baseline-build.md` is a record and stays. | C-G2 |
 
 Comment-history scanner:
 
@@ -493,9 +557,10 @@ Comment-history scanner:
 - It reads `tokenize` `COMMENT` tokens and `ast` docstrings (module, class, function). It does
   not read other string literals, so reason texts and test data do not count.
 - Patterns (case-sensitive unless marked):
-  - Dated decision: an ISO date `\b20\d\d-\d\d-\d\d\b` in parentheses, or in the same comment as
-    one of `owner`, `decided`, `decision`, `added`, `fixed`, `merged`, `landed`, `as of`, `per`
-    (case-insensitive). An example date in a docstring (`"2024-01-15" -> "2024-03-02"`) passes.
+  - Dated decision: an ISO date `\b20\d\d-\d\d-\d\d\b` only in the same comment as one of
+    `owner`, `decided`, `decision`, `added`, `fixed`, `merged`, `landed`, `as of`, `per`
+    (case-insensitive). A date in parentheses alone does not match (revision 6). An example date
+    in a docstring (`"2024-01-15" -> "2024-03-02"`) passes.
   - Reviewer names as whole words: `\b(Dennis|Codex|Barry|Fable)\b`.
   - Review phrases: `plan-gate`, `cold-read`, `\b(review|gate) round \d+\b`, `\bround \d+
     (finding|review)\b`, `\bBLOCKER\b`.
@@ -503,6 +568,30 @@ Comment-history scanner:
     an exclusion list of standards and code systems: `AES-\d+`, `SHA-\d+`, `UTF-\d+`,
     `RFC-?\d+`, `ISO-?\d+`, `CVE-\d+`, `GHSA-`, `PEP-?\d+`, `ICD-\d+`, `HKDF-`, `FF\d-`.
 - Scope: `src/` only.
+
+E2 corrections (revision 6):
+
+- **Module-size fields (OQ-9 correction, `ET:sentry/test_module_size.py` header policy and
+  `catalogs/recurring-defects.md` class 11).** In the E2 move only LEGACY entries (over 700
+  lines) carry a ratcheted `max`; they are exact and may only shrink. DENSE entries carry a
+  separate `ceiling` field that `_ratchet.py` does not treat as shrink-only: it may rise by the
+  lines the change adds, never above 700 (`new_ceiling - old_ceiling <= max(0, new_loc -
+  old_loc)`), and `ratchet_check` enforces that rise rule for `ceiling` fields. A dense pin moves
+  down only when the sentry's 40-line stale rule demands it, and then to `ceiling_for(loc)`, never
+  to the raw count. The CLI exact pins on `report.py` and `preflight.py` are legacy (over 700),
+  so lowering them is right.
+- **`count` is a ceiling.** `_ratchet.max_raised` reads only `max` (`_ratchet.py:108-117`), so a
+  moved `count` (CLI `engine-internal-boundary`, `engine-reason-code-copies`) could rise
+  unseen. `_max_of` reads `max`, else `count`, so both are ceilings. Mutation: raise one `count`
+  by 1; `ratchet_check` goes red.
+- **Equivalence proof.** E-G2a's first commit, and C-G1's first commit, add
+  `tests/sentry/allowlist-before.json` (a snapshot of each moved guard's decoded allowlist object
+  with its Python types: frozenset or dict, int `max`, `count`, `ceiling`) and
+  `tests/sentry/test_allowlist_move_equivalence.py`, which asserts the object `load_allowlist`
+  returns equals the snapshot. It passes before the move by construction and must still pass
+  after it. Each migrated guard keeps one seeded violation that stays red after the move. The
+  snapshot and its test are deleted in E-G3 (engine) and C-G2 (CLI), after which
+  `ratchet_check` against the merge base carries the guarantee.
 
 Failure modes for package E:
 
@@ -548,9 +637,9 @@ Failure modes for package E:
 | Observation sinks (emit helpers) | one private `_dispatch_sink` in `E:context.py` | `ET:unit/test_context_emit_dispatch.py` | Delete the `except` in the helper: a raising sink fails the run. |
 | Allowlist source (E2) | `load_allowlist` in `tests/sentry/_ratchet.py` (both repos) | new case `test_no_sentry_holds_an_inline_allowlist` in `tests/sentry/test_baseline_registry.py`: an AST walk of `tests/sentry/**` for a module-level `Assign` or `AnnAssign` whose value is a `frozenset`, `set`, `tuple`, `list` or `dict` literal or constructor call, in a module that a registry row of kind `in_code` named before E2 | Re-add `_ALLOWED: dict[str, str] = {...}` to one migrated sentry: the case fails. |
 | Comment history | `tests/sentry/_comment_history.py` | `tests/sentry/defects/test_comment_history.py` (both repos) | Drop the reviewer-name pattern: the positive fixture `# per Dennis` no longer fails and the self-test goes red. |
-| CLI engine-import probes (D1 to D3) | the exact pin in `pyproject.toml` | `CT:sentry/defects/test_engine_import_guards.py`: an AST walk of `src/` that fails (1) a `try` whose body imports a `decoy_engine` module (any alias) and whose handler catches `ImportError`, `ModuleNotFoundError`, `Exception` or a tuple holding one of them, (2) `getattr` or `hasattr` with a string constant on a name bound to a `decoy_engine` module, including an aliased import such as `import decoy_engine.execution as _engine_execution`, (3) `inspect.signature` applied to a name imported from `decoy_engine`. Allowlist JSON: the three sites listed under section 4. | Re-add `hasattr(_engine_execution, "estimate_job_capacity")` in `preflight.py`: the walk fails. |
+| CLI engine-import probes (D1 to D3) | the exact pin in `pyproject.toml` | `CT:sentry/defects/test_engine_import_guards.py`: an AST walk of `src/` that fails (1) a `try` whose body imports a `decoy_engine` module and whose handler catches `ImportError`, `ModuleNotFoundError`, `Exception` or a tuple holding one of them (`except (ImportError, X)`); (2) `getattr` (with or without a default) or `hasattr` with a string constant on a name bound to a `decoy_engine` module; (3) `getattr` without a default inside a `try` whose handler catches `AttributeError`; (4) `inspect.signature` applied to a name imported from `decoy_engine`; (5) any name starting `OLD_ENGINE_`. Bound-name spellings it resolves, each with one seeded failing case: `import decoy_engine`, `import decoy_engine.x as y`, `from decoy_engine import x` and `from decoy_engine.x import y` where the imported name is a module, and a local alias of any of these. Baseline JSON: the two kept sites listed under section 4, plus, shrink-only, any `cli/run/` site whose hunk rides with its lane holder (C-S1b) instead of landing in C-S1b. | Re-add `hasattr(_engine_execution, "estimate_job_capacity")` in `preflight.py`: the walk fails. |
 | Re-export and delegate engine modules (D7, D8, D10, D11) | the walk itself | `ET:sentry/layout/test_no_reexport_modules.py`: an AST walk of `src/` fails a non-`__init__` module (outside the exempt list, which is the JSON baseline `ET:sentry/baselines/reexport-modules.json` with a reason per file, registered in `sentry_registry.toml`, never an in-code constant) whose body is only imports plus `__all__`; an import line marked `noqa: F401` whose comment says "re-export"; or a module whose only function bodies are a single `return` of a call to an imported name with the same arguments (a delegate) | Re-create `_fk_key_compat.py` with its one-line `_fk_key_value` delegate: the walk fails. |
-| Swallowing broad handlers (24zi class, section 2.5) | the per-file `max` in `tests/sentry/baselines/swallowed-broad-except.json` (both repos), enforced by the sentry and by `scripts/dev/ratchet_check.py` | `tests/sentry/defects/test_swallowed_broad_except.py` (both repos) over the one predicate `tests/sentry/defects/_swallowed_except.py` (engine source, CLI vendored copy) | Delete the save-and-re-raise exclusion from the predicate: the seeded `saved_then_raised` cell counts 1 and goes red, and the engine tree count exceeds the baseline by the 26 such handlers. Second mutation: drop the `suppress` branch; the seeded `suppress(Exception)` cell goes red. Tree mutation: add `except Exception: pass` to a `src/` file with no entry; the sentry and `ratchet_check` both go red. |
+| Swallowing broad handlers (24zi class, section 2.5) | the per-file `max` in `tests/sentry/baselines/swallowed-broad-except.json` (both repos), enforced by the sentry and by `scripts/dev/ratchet_check.py` | `tests/sentry/defects/test_swallowed_broad_except.py` (both repos) over the one predicate `tests/sentry/defects/_swallowed_except.py` (engine source, CLI vendored copy) | Delete the save-and-re-raise exclusion from the predicate: the seeded `saved_then_raised` cell counts 1 and goes red, and the engine tree count exceeds the baseline by the save-and-re-raise handlers. Ordering mutation: drop the "raise starts after the try's `end_lineno`" check; the seeded `raise_before_try` cell counts 0 instead of 1 and goes red. Second mutation: drop the `suppress` branch; the seeded `suppress(Exception)` cell goes red. Tree mutation: add `except Exception: pass` to a `src/` file with no entry; the sentry and `ratchet_check` both go red. |
 
 Each walk is shown to see a seeded violation in a scratch copy before its count is trusted.
 
@@ -571,6 +660,7 @@ row says it pins a no-regression fact.
 | AT-A2 | Monkeypatch `load_table` to raise `FileNotFoundError`: `geo_generalize` with the state fallback raises it. | Returns `""` states with a warning. |
 | AT-A3, A4, A6 | No behavior test (unreachable). An ordering test, `ET:unit/plan/test_compile_check_order.py`, pins that `check_unknown_provider` runs before `_build_seed_envelope` and `_check_parse_rules` before `_check_forward_references`. | Passes before; it pins why each catch is dead. |
 | AT-A5 | Inject a `RuntimeError` into `reconstruct_source_shaped_output`: `run_pipeline` raises it, and no `_REROUTE_LOG` record is emitted. | Reroutes and returns success. |
+| AT-A5c | Inject, one cell each: a coded decline from `compile_physical_plan`, `pyarrow.ArrowInvalid`, `pyarrow.ArrowTypeError` and `MemoryError`: each reroutes, the run succeeds, and the log names the class (and the code for the decline). A plain `ValueError` and `TypeError` propagate. Mutation: drop `MemoryError` from `_REROUTABLE`; its cell fails the run. Second mutation: replace the Arrow classes with `ValueError`; the plain-`ValueError` cell reroutes and goes red. | Fail-before only for the `ValueError` and `TypeError` cells (they reroute today); the reroute cells pin today's behavior. |
 | AT-A5b | In `ET:physical/test_unified_slice_exception_boundary.py`, error parity covers FPE sub-floor with no `sub_floor_span`, checksum failure, a `when:` expression error, the E-F0 `_mask_span` `ConfigError`, validator failure, and provider failure. For each, unified-slice on and `unified_slice_enabled=False` raise the same raw exception type, reason code and CLI exit code; the E-F0 execution cell matches the oracle's wrapped `StrategyError`, exit 3, rather than exposing the direct helper's `ConfigError`. | On base the lane catches and reroutes, so the pandas rerun raises; the rewrite pins that removing the catch preserves the oracle boundary rather than exposing a lower-level type. |
 | AT-A7 | Set `sys.modules["decoy_engine.config"] = None` (so the import raises `ImportError`) and call `_validate_scaffold`: the `ImportError` propagates. | Returns silently. |
 | AT-A8a | Engine config with a `targets:` key `custmers` and a source of that name but no table: `PipelineConfig` refuses it with `config.target_table_unknown`. Through the repinned CLI, `decoy run` and `decoy validate` exit 1 before any source read and locate the gate finding at `targets.custmers`, not `.format`. | Exits 0, no file. |
@@ -581,13 +671,16 @@ row says it pins a no-regression fact.
 | AT-D | `test_no_reexport_modules.py` (section 7). | `_source.py`, `_fk_key_compat.py` and the D8 lines exist. |
 | AT-C-D | `test_engine_import_guards.py` (section 7). | 13 guarded imports and 7 probes exist. |
 | AT-D6 | A saved scan without the `scan-set/v1` tag, and a manifest entry with no `format`: each exits 1 with its code, value-free. | Read through the legacy readers. |
+| AT-D6b | `decoy demo` in a temp directory, then `decoy scan show <its scan.json>` and `decoy scan fields <its scan.json>`: both exit 0, and the saved file carries `scan_schema: scan-set/v1` and no cell values. Mutation: restore `profile_document` in demo; with the reader deleted, `scan show` exits 1 and the cell goes red. | On base the demo file is untagged; after C-S2's reader deletion without the writer switch, `scan show` would exit 1. |
 | AT-E1 | Add an empty `tests/sentry/test_zz_probe.py` in a scratch copy: the manifest test passes with no list edit. | The manifest fails until the list is edited. |
 | AT-E2 | `test_no_sentry_holds_an_inline_allowlist` (section 7). | 19 engine sentries and the CLI `InCode` sentries hold inline constants. |
+| AT-E2b | `test_allowlist_move_equivalence.py` (section 5): equal before and after the move; plus one seeded violation per migrated guard that stays red. Mutations: add one key to any moved JSON, or raise one `max` or `count` by 1: the equivalence test and `ratchet_check` go red. Raise a dense `ceiling` by more than the lines the change adds: `ratchet_check` goes red; raise it by exactly the lines added: green. | Passes before by construction; the fail-before proof is AT-E2 and the `count` mutation (today `ratchet_check` ignores `count`). |
+| AT-EMIT | `ET:unit/test_context_emit_dispatch.py`: a sink method that raises is swallowed and `caplog` holds one DEBUG record naming the class; a sink `step()` whose body raises `TypeError` is called once, not retried (D12; the fake `CapturingStructured.step` at `ET:unit/test_structured_events.py:40` widens to the protocol signature). Mutation: restore the `TypeError` retry; the call count is 2 and the cell goes red. | Today `emit_step` retries on `TypeError` and logs nothing. |
 | AT-E3 | The seam test file runs no `git show origin/main:`; the import-direction tests still fail when a fixture module under `execution/` imports `execution.physical`. | It calls git and compares bytes. |
 | AT-E4, E6 | Rename a CODEMAP row title in a scratch copy: `test_codemap_paths` passes. Change one baseline's `created_in`: only `test_baseline_registry` reacts. | `KINDS` and the seven header asserts fail. |
 | AT-CH | Positive fixtures (one per pattern family) fail the scanner. Negative fixtures pass: `AES-256`, `UTF-8`, `SHA-256`, `RFC 3339`, `ICD-10`, `Argon2`, `HKDF-SHA256`, "round to 2 decimal places", an example date in a date-shift docstring (`"2024-01-15" -> "2024-03-02"`), a date inside a string literal. The real tree passes against the committed baseline. Adding `# per Dennis round 2` to a src file fails. | No scanner exists. |
-| AT-SBE | `test_swallowed_broad_except.py` seeded cells, each a parsed snippet with its expected count: bare `except: pass` (1); `except Exception: log(...)` (1); `except (ValueError, Exception): return None` (1); `except BaseException: continue` (1); `with contextlib.suppress(Exception)` (1); `with suppress(OSError)` (0); `except Exception as e: raise Wrapped() from e` (0); `except Exception: if bad: raise` (0, the accepted conditional case); `except Exception as e: err = e` then `raise err` after the `try` in the same function (0); `except Exception as e: err = e` with no later raise (1); `except Exception:` whose only `raise` sits in a nested `def` (1); `except ValueError: pass` (0). The tree cell: every `src/` file's count equals its `max`. | No predicate or baseline exists; on main the tree cell has about 144 engine and 53 CLI unbaselined sites. |
-| AT-K1 | `CT:sentry/tooling/test_no_bot_commits.py`: no workflow step runs `git commit` or `git push`, and `docs/diagrams/*.svg` is not tracked. It does not check `permissions:`, so a release workflow that needs `contents: write` to publish (row 93) is not blocked. | `regen-diagrams.yml` commits and pushes. |
+| AT-SBE | `test_swallowed_broad_except.py` seeded cells, each a parsed snippet with its expected count: bare `except: pass` (1); `except Exception: log(...)` (1); `except (ValueError, Exception): return None` (1); `except BaseException: continue` (1); `with contextlib.suppress(Exception)` (1); `with suppress(OSError)` (0); `except Exception as e: raise Wrapped() from e` (0); `except Exception: if bad: raise` (0, the accepted conditional case); `except Exception as e: err = e` then `raise err` after the `try` in the same function (0); `except Exception as e: err = e` with no later raise (1); `except Exception:` whose only `raise` sits in a nested `def` (1); `except ValueError: pass` (0); revision 6 ordering cells: `except Exception as e: err = e` with `raise err` after the whole `try` (after its `finally`) (0), and the same handler with `raise err` placed before the `try` in the same function (1); `err` assigned outside the handler and raised after the `try` (1). The tree cell: every `src/` file's count equals its `max`. | No predicate or baseline exists; on main the tree cell has about 144 engine and 53 CLI unbaselined sites. |
+| AT-K1 | A `workflow_dispatch` run on the slice branch shows an `architecture-diagrams` artifact with three SVGs (evidence, not a test). `CT:sentry/tooling/test_no_bot_commits.py`: no workflow step runs `git commit` or `git push`, and `docs/diagrams/*.svg` is not tracked. It does not check `permissions:`, so a release workflow that needs `contents: write` to publish (row 93) is not blocked. | `regen-diagrams.yml` commits and pushes. |
 
 ## 8a. Class table (recurring defect classes)
 
@@ -737,6 +830,9 @@ Checked against the engine and CLI CODEMAP "Where Things Go".
 | Swallowed-broad-except sentry and baseline | `tests/sentry/defects/test_swallowed_broad_except.py` and `tests/sentry/baselines/swallowed-broad-except.json` (both repos); one `sentry_registry.toml` row each | same; baselines live in `tests/sentry/baselines/` | other `defects/` sentries; `retired-name-pending.json` (CLI) for the per-file `max` shape |
 | Re-export sentry exempt list | `ET:sentry/baselines/reexport-modules.json`, one registry row | baselines in `tests/sentry/baselines/` | `module-size.json` |
 | Bot-commit sentry | `CT:sentry/tooling/test_no_bot_commits.py` | test tooling rules | other `tooling/` sentries |
+| Routing override fixture (E-S1c) | `routing_overrides` in `ET:conftest.py`; the module constants it patches in `E:execution/_pipeline.py` | shared test fixtures | the existing root fixtures |
+| E2 equivalence snapshot and test (temporary) | `tests/sentry/allowlist-before.json` and `tests/sentry/test_allowlist_move_equivalence.py` (both repos) | Sentry test | `_ratchet.py`; deleted in E-G3 and C-G2 |
+| A5 reroute set | `_REROUTABLE` in `E:execution/_unified_slice.py` | execution (owning module) | the handler it narrows |
 
 Every new element has a present consumer in the same slice; no slice merges a helper for a later
 slice.
@@ -761,23 +857,25 @@ row names.
 | E-F0 | engine | Section 2.1 (leak fix, two derived detector inventories, predicate, compile check, detector-id refusal, runtime error boundary, draw-site wording and pin), AT-A1d and AT-A1g inventory and direct-kernel cells, AT-A1f fixture moves, plan YAML pins, changelog, `docs/strategies.md` | 9 (`detection/detectors.py`, `transforms/text_mask.py`, `_strategies/_text_mask.py`, `native/_text_mask_native_fpe.py`, `native/_draw_sites_mask.py`, `out_of_core/_mask_group_c.py`, new `plan/checks/_text_mask_strategy.py`, `plan/_compile.py`, the `reasons/config` part file) | <=800 total changed lines, currently estimated ~680 including tests and docs | R2 (live value leak; wrong output from accepted non-runnable selectors; output and serialized-plan change; new compile refusal) | none; first in the batch; `text_mask.py` stays at or below its 670-line pin without raising it; split before review if either cap is exceeded |
 | E-F0 release | engine | Daily train containing E-F0 alone; changelog names the masking refusal, safe date fallback and plan YAML `checks_passed` addition | | | R2 | E-F0 |
 | E-F0 repin | CLI | Pin the E-F0 engine release before any surface-lane release | | | R1 | E-F0 release |
-| E-G1 | engine | E3, E1, E7, `ci.yml` comment | 0 | -800 / +80 | R1 | none |
-| E-G2a | engine | E2 `kind` column, registry-derived `SOURCES`, loader, first half of the `in_code` sentries | 0 | ~600 | R1 | E-G1 |
-| E-G2b | engine | E2 remaining sentries, `test_no_sentry_holds_an_inline_allowlist` | 0 | ~500 | R1 | E-G2a |
-| E-G3 | engine | comment-history guard, pattern module, baseline | 0 | ~400 | R1 | E-G2b |
-| E-F1 | engine | A2, A3, A4, A6, A8a, D9; engine `swallowed-broad-except` predicate, sentry, baseline and registry row (tests only, written last so the A2, A4 and A6 deletions are not baselined) | 10 (`transforms/geo_generalize.py`, `plan/_seed_envelope.py`, `plan/checks/_generate_columns.py`, `execution/physical/_compiler.py`, `quality/dp_budget.py`, `quality/dp.py`, `quality/dp_session.py`, `config/_targets.py`, `config/_pipeline.py`, engine reason registry) | ~300 | R2 (D9 removes an old public import path; A8a adds a config refusal) | E-G1 |
-| E-F2 | engine | A5 | 1 | ~150 | R2 (a native-lane exception now fails the run) | E-G1; OQ-3 flight evidence |
+| E-G1 | engine | E3, E1, E7 (perf-guard docstring only), `ci.yml` comment | 0 | -800 / +80 | R2 (sentry machinery; Codex rev 5) | none |
+| E-G2a | engine | E2 `kind` column, registry-derived `SOURCES`, loader, `count`-as-ceiling and module-size `ceiling` field (section 5), equivalence snapshot and test (AT-E2b), first half of the `in_code` sentries | 0 | ~650 | R2 (shared ratchet machinery) | E-G1 |
+| E-G2b | engine | E2 remaining sentries, `UNCHECKED_HELPERS` collapse, `test_no_sentry_holds_an_inline_allowlist` | 0 | ~500 | R2 | E-G2a |
+| E-G3 | engine | comment-history guard, pattern module, baseline; deletes the engine equivalence snapshot and test | 0 | ~400 | R2 | E-G2b |
+| E-F1 | engine | A2 (coded error, load only when `state` is asked for), A3, A4, A6, A8a, D9; engine `swallowed-broad-except` predicate, sentry, baseline and registry row (tests only, written last so the A2, A4 and A6 deletions are not baselined) | 10 (`transforms/geo_generalize.py`, `plan/_seed_envelope.py`, `plan/checks/_generate_columns.py`, `execution/physical/_compiler.py`, `quality/dp_budget.py`, `quality/dp.py`, `quality/dp_session.py`, `config/_targets.py`, `config/_pipeline.py`, engine reason registry) | ~300 | R2 (D9 removes an old public import path; A8a adds a config refusal) | E-G1 |
+| E-F2 | engine | A5: census, `_REROUTABLE`, AT-A5, AT-A5b, AT-A5c; also narrows the A4-adjacent `except Exception: continue` at `E:plan/_checks.py:638` to the parse error type (`ValidationError`), which E-F1 has no file budget for | 2 (`execution/_unified_slice.py`, `plan/_checks.py`) | ~220 | R2 (a native-lane exception now fails the run) | E-G1; OQ-3 flight and census evidence |
 | E-S1a | engine | B1, B2, B4, B6, B8 | 8 (`__init__.py`, `internal/crypto.py`, `context.py`, `execution/_events.py` deleted, `execution/__init__.py`, `validation_result.py`, `_progress_events.py`, `progress.py`) | ~280 | R2 (public API) | none |
-| E-S2a | engine | D7, D10, D11, re-export sentry | 10 (8 `out_of_core` importers, `_pandas_adapter.py`, `_chunked_oracle.py`; 3 modules deleted) | ~250 | R1 (private paths) | E-G1 |
-| E-S2b | engine | D8 | up to 10 (`_mem_estimate.py`, `_planner.py`, `_sequential.py`, `_chunked_fk.py`, `_pipeline_routing.py`, `native/_dispatch.py`, the importers that move) | ~300 | R1 | E-S2a |
-| E-S1b | engine | B3, B5, B7, D12, emit dispatch helper | up to 9 (`context.py`, `execution/_pipeline.py`, and the files that carry `stream_chunked_output`, `progress_interval_s`, `secret_registry`, `secret_cache_policy`) | ~400 | R2 (public API, `run_pipeline` signature) | E-S1a (`context.py`), E-S2a (`_chunked_oracle.py`), E-S2b (`_pipeline.py` area); split by keyword if over 10 files |
-| Surface release | engine | 0.29.0; notes list every removed name (D9 included), A8a, and the remaining refusals | | | | E-F1, E-S1a, E-S1b; E-F2 if merged by then, else the next train |
+| E-S2a1 | engine | D7 | 9 (8 `out_of_core` importers, `scripts/build_floor_probe.py`; `_source.py` deleted; `profile/_readers.py` docstring) | ~150 | R1 (private paths) | E-G1 |
+| E-S2a2 | engine | D10, D11, re-export sentry | 2 (`_pandas_adapter.py`, `_chunked_oracle.py`; 2 modules deleted) | ~150 | R1 | E-S2a1 |
+| E-S2b | engine | D8 | up to 10 (`_mem_estimate.py`, `_planner.py`, `_sequential.py`, `_chunked_fk.py`, `_pipeline_routing.py`, `native/_dispatch.py`, the importers that move) | ~300 | R1 | E-S2a2 |
+| E-S1b | engine | B3, B5, B7, D12, emit dispatch helper | up to 9 (`context.py`, `execution/_pipeline.py`, and the files that carry `stream_chunked_output`, `progress_interval_s`, `secret_registry`, `secret_cache_policy`) | ~450 | R2 (public API, `run_pipeline` signature) | E-S1a (`context.py`), E-S2a2 (`_chunked_oracle.py`), E-S2b (`_pipeline.py` area); split by keyword if over 10 files |
+| E-S1c | engine | B7 routing keywords (OQ-4): delete `use_byte_estimate_routing` and `use_probe_routing` from `run_pipeline`; the internal values become module constants in `_pipeline.py` that one `routing_overrides` fixture in `ET:conftest.py` monkeypatches; about 60 test files and 5 bench scripts move to the fixture; docs in `execution/__init__.py:45-53` and `_governor.py:46-47` | 8 (`execution/_pipeline.py`, `execution/__init__.py`, `execution/_governor.py`, 5 bench scripts) | ~600, split by test directory if over 800 | R2 (public `run_pipeline` signature; full-suite trigger: `tests/conftest.py` is a shared fixture) | E-S1b (`_pipeline.py`) |
+| Surface release | engine | 0.29.0 (or the next free version at release); notes list every removed name (D9 included), A8a, and the remaining refusals | | | | E-F1, E-S1a, E-S1b, E-S1c; E-F2 if merged by then, else the next train |
 | Surface repin | CLI | pin `decoy-engine==0.29.0` (engine repin checklist) | | | R1 | Surface release |
-| C-G1 | CLI | E2, E1, E4, E6 | 0 | ~600 | R1 | none; split E2 from E1/E4/E6 if over 800 |
-| C-G2 | CLI | comment-history guard (vendored module), CLI `swallowed-broad-except` (vendored predicate, sentry, baseline, registry row), K1, bot-commit sentry | 0 (workflow YAML, SVG deletions) | ~450 plus the baseline JSON | R1 | C-G1; E-G3 and E-F1 merged (vendored sources) |
-| C-S1a | CLI | D1 (both sites), D3 (except `exit_codes.py`), D4 | 6 (`_native_gate.py`, `cli/run/_progress.py`, `cli/preflight.py`, `cli/info.py`, `distribution/selfcheck.py`, `cli/report.py`) | ~170 | R1 | none (0.27.0 ships every name); `cli/run/_progress.py` is a `cli/run/` hot file, so the orchestrator confirms no open writer holds it (LIB L5a, RUN-STREAM) or the hunk rides with the holder |
-| C-S1b | CLI | D2, D3 `exit_codes.py` site, engine-import-guard sentry | 9 (`_mask_secret.py`, `_mask_secret_guidance.py`, `api.py`, `cli/exit_codes.py`, `cli/run/_errors.py`, `cli/run/_prepare.py`, `cli/tokenize.py`, `cli/extras.py`, `ci/engine_logging.py`) | ~350 | R1 | C-S1a (the sentry's allowlist holds only the three kept sites) |
-| C-S2 | CLI | D6 | 2 (`cli/io/_scan_set.py`, `cli/io/_targets.py`) plus the reason registry module | ~200 | R1 | none |
+| C-G1 | CLI | E2 (with `count`-as-ceiling, equivalence snapshot, `BASELINE_ROWS` and the nine JSON-equals-constant tests), E1, E4, E6 | 0 | ~650 | R2 (shared ratchet machinery) | none; split E2 from E1/E4/E6 if over 800 |
+| C-G2 | CLI | comment-history guard (vendored module), CLI `swallowed-broad-except` (vendored predicate, sentry, baseline, registry row), K1, bot-commit sentry | 0 (workflow YAML, SVG deletions) | ~450 plus the baseline JSON; deletes the CLI equivalence snapshot; rewrites `_banned_text.py:8-12` | R2 | C-G1; E-G3 and E-F1 merged (vendored sources) |
+| C-S1a | CLI | D1 (both sites, plus `test_mask_api_native.py`), D3 (except `exit_codes.py`; dead `_native_gate.py` arms and their tests), D4 | 6 (`_native_gate.py`, `cli/run/_progress.py`, `cli/preflight.py`, `cli/info.py`, `distribution/selfcheck.py`, `cli/report.py`) | ~170 | R1 | none (0.27.0 ships every name); `cli/run/_progress.py` is a `cli/run/` hot file, so the orchestrator confirms no open writer holds it (LIB L5a, RUN-STREAM) or the hunk rides with the holder |
+| C-S1b | CLI | D2 (with `compile_explain.py`), D3 `exit_codes.py` site, engine-import-guard sentry with one seeded case per covered spelling | 10 (`_mask_secret.py`, `_mask_secret_guidance.py`, `api.py`, `cli/exit_codes.py`, `cli/run/_errors.py`, `cli/run/_prepare.py`, `cli/tokenize.py`, `cli/extras.py`, `ci/engine_logging.py`, `cli/compile_explain.py`); at the cap, so it splits into C-S1b1 (the eight non-`run/` files) and C-S1b2 (`run/` files and the sentry) if one more file appears | ~400 | R1 | C-S1a. `cli/run/_errors.py` and `cli/run/_prepare.py` are hot files: the orchestrator confirms no open writer holds them, or those hunks ride with the holder and the sentry baseline keeps the remaining `run/` sites, shrink-only |
+| C-S2 | CLI | D6b first (demo and `api.py` docstring write or name `scan-set/v1`; four fixtures move; AT-D6b), then D6 readers (AT-D6) | 4 (`cli/io/_scan_set.py`, `cli/io/_targets.py`, `cli/demo.py`, `api.py`) plus the reason registry module | ~300 | R1 | none; `demo.py` is shared with C-F1b, so whichever merges second rebases |
 | C-F1a | CLI | A7, A8a acceptance and gate-location pin, A9, D5 | 4 (`cli/init.py`, `cli/gate/_layers.py` only if location rendering needs a fix, `cli/run/_render.py`, `cli/run/_execute.py`) | ~180 | R2 (exit code change on a config that exits 0 today) | Surface repin; the open row 63a RUN-STREAM CLI slices (C1l, C1a, C1b) that edit `_execute.py` and `_render.py` merge first |
 | C-F1b | CLI | A8b | 3 (`cli/io/_targets.py`, the module holding `seal_result`, CLI reason registry module) | ~200 | R2 (exit code change) | row 61 DELIV C2a and row 63a RUN-STREAM C1a merged; the section 2.4 amendments applied to both plans |
 
@@ -787,27 +885,27 @@ Ordering:
   the live leak ships ahead of the surface lane and later `execution/` slices stop editing the
   720-line allowlist.
 - After E-G1 the lanes run in parallel in separate worktrees: guard lane E-G2a, E-G2b, E-G3; fix
-  lane E-F1, E-F2; surface lane E-S1a, E-S2a, E-S2b, E-S1b in that order. The surface lane is
-  serial because `context.py` (E-S1a, E-S1b), `_chunked_oracle.py` (E-S2a, E-S1b) and
+  lane E-F1, E-F2; surface lane E-S1a, E-S2a1, E-S2a2, E-S2b, E-S1b, E-S1c in that order. The surface lane is
+  serial because `context.py` (E-S1a, E-S1b), `_chunked_oracle.py` (E-S2a2, E-S1b) and
   `execution/_pipeline.py` and its routing modules (E-S2b, E-S1b) overlap.
 - CLI lanes do not wait for the engine except C-G2 (two vendored modules, from E-G3 and E-F1), E-F0 repin, Surface repin,
   and C-F1a's A8a acceptance. C-F1a also waits on row 63a; C-F1b waits on rows 61 and 63a.
 - Row 24zj merges before row 93 (REL-GATE). Row 24ze plans on top of E-G2b and C-G1.
 
-Expected size: 18 build slices plus two engine releases and two CLI repins, so 22 PRs. Production
+Expected size: 20 build slices plus two engine releases and two CLI repins, so 24 PRs. Production
 code is net negative; the B, D and E deletions remove about 2,500 lines, most of them the E3 allowlist and
 the shims. New root public names: none. New public-in-package name: `SPAN_DETECTOR_IDS` in
 `detection.detectors`. New private names: `strategy_supported`,
 `SELECTABLE_TEXT_MASK_DETECTORS`, `TEXT_MASK_STRATEGY_DETECTORS`,
-`check_text_mask_strategies`, `_dispatch_sink`, `_REROUTABLE` (only if a coded decline exists),
+`check_text_mask_strategies`, `_dispatch_sink`, `_REROUTABLE`, the `routing_overrides` test fixture,
 `missing_target_tables`, `TargetTableMissingError`, `load_allowlist`. New reason codes: engine
 `config.mask.text_mask_strategy_unsupported`,
-`config.mask.text_mask_detector_unknown`, `config.target_table_unknown`; CLI
+`config.mask.text_mask_detector_unknown`, `config.target_table_unknown`, `transform.reference_table_unavailable` (A2); CLI
 `io.target_table_missing`, `scan.saved_scan_schema_unsupported`, `io.manifest_format_missing`.
 
 Testing per slice (owner test-depth rule): T0 per edit, T1 impact selection per commit, gates run
 T1 on the exact head. Full suite only on an escalation trigger: E-S1a, E-S1b and E-F1 (frozen
-contract), E-G1, E-G2a, E-G2b and C-G1 (shared test machinery and moved or deleted tests), E-F0
+contract), E-S1c (shared `tests/conftest.py` fixture), E-G1, E-G2a, E-G2b and C-G1 (shared test machinery and moved or deleted tests), E-F0
 (golden output and moved parity fixtures). All runs on the Mac or a VM through `~/bin/vm-run`,
 never on the devbox. Mutation testing only on the E-F0 predicate and check and the A8b check (core
 logic). The `swallowed-broad-except` predicate carries the three named mutations of section 7
@@ -830,8 +928,8 @@ New shrink-only baselines (each born as JSON with a registry row, so E2 has noth
 
 - `swallowed-broad-except`: one per repo (engine in E-F1, CLI in C-G2).
 - `comment-history`: one per repo (E-G3, C-G2).
-- `engine-import-guards`: CLI, three kept entries (C-S1b).
-- `reexport-modules`: engine exempt list of the re-export sentry (E-S2a).
+- `engine-import-guards`: CLI, two kept entries plus any `cli/run/` site whose hunk rides with its lane holder (C-S1b).
+- `reexport-modules`: engine exempt list of the re-export sentry (E-S2a2).
 
 Per slice:
 
@@ -843,15 +941,23 @@ Per slice:
   as growth, the builder stops and reports: the plan does not authorize that growth.
 - **E-G1**: deletes the byte-identical allowlist in `ET:sentry/test_physical_seam_disconnection.py`
   (about 720 lines, in-code) and the hand `SENTRIES` list (E1). E7 deletes the Wave B guard and
-  removes its registry row and baseline file if it has one. All are shrinks.
-- **E-G2a, E-G2b**: move `in_code` allowlists into their JSON baselines. Keys and `max` values
-  are unchanged; the equivalence check in section 5 proves it.
+  E7 keeps the Wave B guard (OQ-6 re-decided) and changes only the perf guard's docstring. All
+  are shrinks.
+- **E-G2a, E-G2b**: move `in_code` allowlists into their JSON baselines. Keys, `max` and `count`
+  values are unchanged; the equivalence test (section 5, "E2 corrections", AT-E2b) proves it.
+  `count` becomes a ceiling in `_ratchet.py`. Module-size DENSE entries move as a `ceiling`
+  field, which is not shrink-only; LEGACY entries move as `max`. `UNCHECKED_HELPERS` collapses to
+  its baseline (E-G2b). The equivalence snapshot is added in E-G2a and deleted in E-G3.
 - **E-G3**: adds `comment-history` (new).
 - **E-F1**: adds `swallowed-broad-except` (new, written after the A2, A4, A6 deletions). Reason
-  registry grows by `config.target_table_unknown`, appended. Module-size pins of any capped file
-  that shrinks are lowered to the new count (exact-match legacy entries must move down).
-- **E-F2**: `swallowed-broad-except` `max` for `src/decoy_engine/execution/_unified_slice.py`
-  drops by one (or the key goes if it was the file's only site).
+  registry grows by `config.target_table_unknown` and `transform.reference_table_unavailable`,
+  appended. Module-size: a LEGACY (over 700, exact) entry of a file that shrinks moves down to
+  the new count. A DENSE entry moves only if the file is now more than 40 lines under its
+  ceiling, and then to `ceiling_for(loc)`, never to the raw count.
+- **E-F2**: the `except Exception` arm in `src/decoy_engine/execution/_unified_slice.py` becomes
+  `except _REROUTABLE`, so that file's `swallowed-broad-except` `max` drops by one (or the key
+  goes if it was the file's only site). `src/decoy_engine/plan/_checks.py` drops by one the same
+  way.
 - **E-S1a**: `__all__` and `docs/frozen-surfaces.md` shrink (B1, B2, B4, B6, B8);
   `ET:unit/test_public_api.py` expected set shrinks; the `PERMANENT` row in
   `ET:sentry/test_deprecation_expiry.py` goes (B2). B8 removes one key from
@@ -860,24 +966,34 @@ Per slice:
   is never edited (frozen digest); `test_baseline_identities_all_registered` still holds because
   the code `fk.self_reference` stays registered.
 - **E-S1b**: `run_pipeline` loses four keywords, so `FROZEN_PARAMETERS` in
-  `ET:unit/execution/test_r3_public_signature_freeze.py` and the contract count shrink
-  (42 to 38). `swallowed-broad-except` `max` for `src/decoy_engine/context.py` drops from five
-  handlers to one (`_dispatch_sink`). The `context.py` module-size pin is lowered if it is capped.
-- **E-S2a**: deletes three modules; their rows go from `ET:sentry/test_module_size.py` (the
-  `_fk_key_compat` row) and from the seam test's lists if E-G1 has not already removed them.
-  Adds `reexport-modules` (new).
-- **E-S2b**: `ET:sentry/test_module_size.py` pin for `src/decoy_engine/execution/native/_dispatch.py`
-  (688 at `8796ef691`) and any other capped file that loses its re-export lines is lowered.
+  `ET:unit/execution/test_r3_public_signature_freeze.py:116` and the contract count at
+  `docs/compatibility-contract.md:87` shrink (47 to 43). `swallowed-broad-except` `max` for
+  `src/decoy_engine/context.py` drops from five handlers to one (`_dispatch_sink`). The
+  `context.py` module-size entry follows the E-F1 rule: legacy moves down, dense only past the
+  40-line stale rule.
+- **E-S1c**: `run_pipeline` loses two more keywords (47 to 43 to 41 across the two slices).
+- **E-S2a1**: deletes `out_of_core/_source.py`; its rows go from the seam test's lists if E-G1
+  has not already removed them.
+- **E-S2a2**: deletes two modules; the `_fk_key_compat` row goes from
+  `ET:sentry/test_module_size.py`. Adds `reexport-modules` (new).
+- **E-S2b**: `src/decoy_engine/execution/native/_dispatch.py` is a DENSE entry at 688 with 677
+  lines at `8796ef691`. Losing a few re-export lines leaves it well within 40 lines of its
+  ceiling, so its entry most likely does not move; if it does, it moves to `ceiling_for(loc)`.
+  The same rule applies to any other dense file that loses re-export lines; a legacy file moves
+  to its new count.
 - **Surface release and repin**: CLI pin `decoy-engine==0.27.0` moves to the surface release
   (engine repin checklist). The E-F0 repin moves it first.
 - **C-S1a**: CLI module-size `SIZE_ALLOWLIST` entries for `cli/report.py` and `cli/preflight.py`
-  are lowered or dropped if those files fall under their caps.
-- **C-S1b**: adds `engine-import-guards` (new, three entries).
-- **C-G1**: same as E-G2 in the CLI; no key or `max` changes.
+  are legacy exact pins (both files over 700), so they are lowered to the new counts, or dropped
+  if a file falls under its cap.
+- **C-S1b**: adds `engine-import-guards` (new, two kept entries plus any riding `run/` sites).
+- **C-G1**: same as E-G2 in the CLI; no key, `max` or `count` changes; `count` becomes a ceiling
+  (CLI `engine-internal-boundary`, `engine-reason-code-copies`).
 - **C-G2**: adds `comment-history` and `swallowed-broad-except` (new); `ci/vendored.toml` gains
   two pins (the two engine pattern modules); `CT:sentry/baselines/retired-name-pending.json` loses
   the three SVG entries (K1).
-- **C-S2**: CLI reason registry grows by two codes, appended.
+- **C-S2**: CLI reason registry grows by two codes, appended. Four test fixtures change shape to
+  `scan-set/v1` (D6b); no baseline moves.
 - **C-F1a**: CLI `swallowed-broad-except` `max` drops for `src/decoy/cli/init.py` (A7) and
   `src/decoy/cli/run/_render.py` (A9).
 - **C-F1b**: CLI reason registry grows by `io.target_table_missing`, appended.
@@ -906,7 +1022,7 @@ Per slice:
   is needed.
 - K1: `actions/upload-artifact` is the standard way to publish CI build output.
 
-## 12. Owner questions (decided 2026-11-16 as recommended; OQ-7 restated)
+## 12. Owner questions (decided 2026-11-16 as recommended; OQ-4, OQ-5, OQ-6, OQ-9 and the A5 set re-decided 2026-11-17)
 
 - OQ-1. Scope split: do all nine A items in this batch, although the CLI post-1.0 plan (#284)
   lists A2, A5, A6, A7 and A9 as 1.x patch. Decided: yes. E-F0 (the leak) is V1 under any reading.
@@ -918,10 +1034,30 @@ Per slice:
 - OQ-3. Let an unexpected native-lane exception fail the run instead of rerunning on pandas.
   Decided: yes, after the section 2.3 flight shows no reroute from a non-coded exception with a
   non-zero activation count.
-- OQ-4. Keep `use_byte_estimate_routing` and `use_probe_routing` as documented rollback switches.
-  Decided: keep.
-- OQ-5. Delete the pre-`scan-set/v1` and pre-CLI-FMT readers. Decided: yes, with coded refusals.
-- OQ-6. Delete the Wave B guard, keep the perf-claim guard. Decided: yes.
+- OQ-4. Delete the `run_pipeline` keywords `use_byte_estimate_routing` and `use_probe_routing`.
+  Decided under go-with-recommended 2026-11-17, re-decided on new facts: delete (E-S1c). Reason:
+  the "documented rollback switch" consumer cited earlier does not exist (no `E:capacity.py`;
+  the `False` at `_job_estimate.py:176-177` goes to the internal route), so the keywords serve
+  only tests and bench scripts, which move to one fixture. Earlier answer: keep.
+- OQ-5. Delete the pre-`scan-set/v1` and pre-CLI-FMT readers. Decided under go-with-recommended
+  2026-11-17, re-decided on new facts: yes, after `decoy demo` and the `decoy.scan()` guidance
+  write `scan-set/v1` in the same slice (D6b), with coded refusals. Reason: the new fact is that
+  demo still writes the old shape, which the writer switch removes; pre-GA there are no saved
+  user files to protect, so keeping the reader until a later breaking release buys nothing.
+- OQ-6. Wave B guard and perf-claim guard. Decided under go-with-recommended 2026-11-17,
+  re-decided on new facts: keep the Wave B guard until Wave B closes, then delete it in the
+  closing slice; keep the perf guard and fix its docstring. Reason: reference #308 shows Wave B
+  is not finished (its handoffs are not written), so the guard still protects open work.
+  Earlier answer: delete the Wave B guard.
+- OQ-9 (new in revision 6, from the cross-check). How the E2 move stores module-size pins.
+  Decided under go-with-recommended 2026-11-17, re-decided on new facts: LEGACY entries as a
+  shrink-only `max`, DENSE entries as a `ceiling` field under the documented rise rule (section
+  5). Reason: the sentry's own header policy lets a dense ceiling rise by the lines added, and a
+  shrink-only `max` would forbid that.
+- A5 reroute set (revision 6, not an owner question before). Decided under go-with-recommended
+  2026-11-17, re-decided on new facts: `MemoryError`, `pyarrow.ArrowInvalid` and
+  `pyarrow.ArrowTypeError` keep rerouting with the coded declines; all else propagates. Reason:
+  each one is a run the oracle completes today (#308), and failing it would be a function break.
 - OQ-7 (changed by review finding H2). A target key that names no table is a config error: exit 1
   at config time (A8a). A declared table that the engine did not produce is a runtime failure:
   exit 3 at the post-engine choke point (A8b). Decided: yes to both.
@@ -936,6 +1072,15 @@ Per slice:
   hide a V1 failure, which then gets its own row.
 - The post-1.0 plan rows for B1 to B8, D6, D9 and A1 to A9 are marked done as each slice merges.
 - The section 2.4 amendments go into the RUN-STREAM and DELIV plan files.
+- Wave B closing slice deletes `ET:sentry/test_wave_b_no_registry_version_literal.py` and its
+  baseline (OQ-6).
+- Strengthen the perf-claim guard beyond a single provenance keyword (E7, V2-LOG).
+- Platform: `Logger.fidelity` and `Logger.quarantine` (`P:api/persistence/logger.py:337,346`)
+  become orphans after E-S1b, and `P:api/evidence/assembly.py` and `schema.py` carry stale
+  `ctx.export` comments (B3). Listed in the E-S1b build report; the platform is parked.
+- A1 tests were already deleted in #617 (E-F0); logged here only so the review map is complete.
+- Cross-check items not folded in: see the section 17 map; each row there marked "follow-up"
+  goes to V2-LOG with its finding id.
 
 ## 14. Review round 1 map (Dennis, `68d581ba243c`)
 
@@ -997,3 +1142,41 @@ decides the verdict; the `V2-LOG` scope correction does not.
 |---|---|---|
 | E-F0 accepted detector selectors that `iter_spans` cannot execute because the plan derived one inventory from every `DETECTOR_DEFAULTS` key | V1 | Section 2.1 defines exact selector and override inventories from `_SPAN_DETECTORS`, `NER_ENTITY_MAP`, and the documented `DETECTOR_DEFAULTS` library-extra-span source; section 6 names one fact source per inventory; section 7 adds the equality guard and named mutation; AT-A1d distinguishes the inventories; fail-before AT-A1g refuses `iso_date` and `person_name`; sections 8b, 9 and 10 carry the route, placement and slice effects. The shipped-surface paragraph records that no template, init output, testflight manifest, proof manifest or docs example requires migration. |
 | AT-A1f grep covered only three test subtrees | V2-LOG | AT-A1f widens the same inventory command to all of `tests/`. |
+
+## 17. Codex rev 5 and cross-check map (revision 6)
+
+| Finding | Tier | Fix |
+|---|---|---|
+| Codex: save-and-re-raise exemption ignores order and scope | DESIGN | Section 2.5 rule; AT-SBE ordering cells; section 7 ordering mutation |
+| Codex: guard-lane slices under-tiered | V2-LOG | E-G1, E-G2a, E-G2b, E-G3, C-G1, C-G2 are R2 (section 10) |
+| V1-a A5 decline set | V1 | Section 2.3 rule and census; AT-A5c; section 12 A5 entry |
+| V1-b D6b live writer | V1 | Section 4 D6; C-S2; AT-D6b; OQ-5 |
+| D-a OQ-9 dense ceilings | DESIGN | Section 5 "E2 corrections"; section 10a; OQ-9 |
+| D-b `count` invisible to the ratchet | DESIGN | Section 5; AT-E2b mutation; section 10a C-G1 |
+| D-c E2 equivalence proof | DESIGN | Section 5; AT-E2b; snapshot removal in E-G3 and C-G2 |
+| D-d import-guard gaps | DESIGN | Section 4 D2 and kept list; section 7 sentry spellings; C-S1b |
+| D-e D7 target | DESIGN | Section 4 D7 |
+| D-f OQ-4 consumer fact | DESIGN | Section 3 B7; E-S1c; OQ-4 |
+| V2-LOG 1 A2 | folded | Section 2.2 A2; E-F1 |
+| V2-LOG 2 `plan/_checks.py:638` | folded | E-F2 |
+| V2-LOG 3 `isinstance(outputs, dict)` | folded | Section 2.2 A8b; C-F1a, C-F1b |
+| V2-LOG 4 emit helpers | folded | Section 3 B5; AT-EMIT |
+| V2-LOG 5 A7 test comment | folded | Section 2.2 A7 |
+| V2-LOG 6 A9 lane | folded | Section 2.2 A9 |
+| V2-LOG 7 B7 count | folded | Section 3 B7; section 10a |
+| V2-LOG 8 B8b tests and docs | folded | Section 3 B8 |
+| V2-LOG 9 platform note | folded | Section 3 B5; section 13 |
+| V2-LOG 10 `test_mask_api_native.py` | folded | Section 4 D1 |
+| V2-LOG 11 D2 and D3 tests and dead arms | folded | Section 4 D2, D3 |
+| V2-LOG 12 C-S1b hot files | folded | Section 10 C-S1b; section 7 baseline |
+| V2-LOG 13 `exit_codes.py` scope | folded | Section 4 D2 |
+| V2-LOG 14 E-S2a count | folded | E-S2a split into E-S2a1, E-S2a2 |
+| V2-LOG 15 D8 dual paths | folded | Section 4 D8 |
+| V2-LOG 16 E3 risk | folded | E-G1 R2 |
+| V2-LOG 17 E6 | folded | Section 5 E6 |
+| V2-LOG 18 E2 leftovers | folded | Section 5 E2; E-G2b, C-G1 |
+| V2-LOG 19 E7 and OQ-6 | folded | Section 5 E7; OQ-6; section 13 |
+| V2-LOG 20 comment-history | folded | Section 5 scanner and C-G2 |
+| V2-LOG 21 K1 | folded | Section 5 K1; AT-K1. The CI lane files that name the workflow are rechecked only if its trigger or job name changes |
+| V2-LOG 22 E1 outside paths | folded | Section 5 E1 |
+| V2-LOG 23 A1 tests | logged | Section 13 |
