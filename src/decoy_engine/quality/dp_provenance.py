@@ -276,13 +276,12 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
             # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version, and from 0.18.0 every prior row
-            # stays so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0)
-            # with certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces
-            # 31ecf945.... 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine
-            # moved); 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79...
-            # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
-            # regenerated NOTICE. Rows from SCAN-ML M2 on are one per engine release, newest first.
+            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays.
+            # Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with certifi, cryptography,
+            # pyasn1, urllib3 and werkzeug put back reproduces 31ecf945.... 7d1c1a2a... is the
+            # 0.19.0 lock (77 dists; b9b42047... with the engine moved); 78af2b5a... adds
+            # pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds pytest-timeout (80).
+            # A lock change needs its own row (test_dp_lock_row.py) and NOTICE regenerated.
             "da1a743343925aa00e7c59c64338a2ba49354a7f75f7f623a158a3c9a8208f5b",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
@@ -304,10 +303,11 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # requirements-certified.txt (proof-critical libraries at the annotated versions,
             # packaging==26.2). To reproduce: `--no-dev` install it into a 3.10.20 venv and run the
             # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
-            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change
-            # just decoy-engine's version; 0.6.0 (and 0.5.0) were installed in a real 3.10.20 venv,
-            # later rows are computed from the pins. All stay, one per release, newest first.
+            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change just
+            # the engine version; 0.5.0 and 0.6.0 ran in a real 3.10.20 venv, later rows come from
+            # the pins. All stay, newest first. Row F (24zc) follows the 0.28.0 row.
             "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+            "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
             "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
             "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
             "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",
