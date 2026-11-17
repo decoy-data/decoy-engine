@@ -1260,6 +1260,14 @@ def test_every_fault_the_handler_records_maps_to_its_own_warning_code():
     assert {t for t in STRICT_JSON_TOKENS if t != "non_finite"} <= set(_leaves._FAULTS)
 
 
+def _vault_ctx() -> _FakeCtx:
+    from tests.unit.execution.test_tokenize import FakeVault
+
+    ctx = _FakeCtx()
+    ctx.vault_writer = FakeVault()  # tokenize checks for a vault before it checks the dtype
+    return ctx
+
+
 def _flat_vs_nested(name: str) -> tuple[Any, Any]:
     """The child run on the flat int64 leaf frame (the pre-E1 frame), and the same child under nested."""
     handler, child_seed = NestedStrategyHandler()._resolve_child(
@@ -1269,7 +1277,9 @@ def _flat_vs_nested(name: str) -> tuple[Any, Any]:
     for run in ("flat", "nested"):
         try:
             if run == "flat":
-                frame, _ = handler.run(pd.DataFrame({"c": [1, 2, 3]}), "c", child_seed, _FakeCtx())
+                frame, _ = handler.run(
+                    pd.DataFrame({"c": [1, 2, 3]}), "c", child_seed, _vault_ctx()
+                )
                 outcomes.append(frame["c"].tolist())
             else:
                 cells = ['{"v":1}', '{"v":2}', '{"v":3}']
@@ -1277,7 +1287,7 @@ def _flat_vs_nested(name: str) -> tuple[Any, Any]:
                     pd.DataFrame({"data": cells}),
                     "data",
                     _seed({"target": "$.v", "strategy": name}, "ns"),
-                    _FakeCtx(),
+                    _vault_ctx(),
                 )
                 outcomes.append([json.loads(c)["v"] for c in frame["data"].tolist()])
         except Exception as exc:
