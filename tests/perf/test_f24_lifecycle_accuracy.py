@@ -12,6 +12,8 @@ outside. Predicted and measured phase figures are printed for the calibration re
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,8 +24,6 @@ pytestmark = pytest.mark.benchmark
 
 _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "fk-scale"
 sys.path.insert(0, str(_SCRIPTS))
-
-import bench_worker_lifecycle as worker  # noqa: E402
 
 from decoy_engine import PipelineConfig, estimate_job  # noqa: E402
 
@@ -43,10 +43,14 @@ BOUND = {
 
 
 def _run(cell: str, rows: int, tmp_path: Path) -> dict[str, Any]:
-    args = worker._parser().parse_args(
-        ["--cell", cell, "--rows", str(rows), "--work-root", str(tmp_path), "--keep"]
-    )
-    return worker.supervise(args)
+    # A fresh process, so this test's own memory never reaches the measured peak.
+    out = tmp_path / "record.json"
+    subprocess.run(  # noqa: S603
+        [sys.executable, str(_SCRIPTS / "bench_worker_lifecycle.py"), "--cell", cell,
+         "--rows", str(rows), "--work-root", str(tmp_path), "--out", str(out)],
+        check=False, capture_output=True,
+    )  # fmt: skip
+    return json.loads(out.read_text())  # type: ignore[no-any-return]
 
 
 @pytest.mark.parametrize("tier", list(TIERS))
