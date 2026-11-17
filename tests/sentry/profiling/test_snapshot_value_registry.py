@@ -19,6 +19,9 @@ import pytest
 from decoy_engine.profiling import _value_redaction as vr
 from decoy_engine.profiling import distribution_snapshot_document
 from decoy_engine.profiling._value_redaction import (
+    DATA_RULES,
+    SNAPSHOT_FLOOR_KEPT_STATS,
+    SNAPSHOT_FLOOR_STATS,
     SNAPSHOT_KINDS,
     SNAPSHOT_VALUE_FREE_STATS,
     SNAPSHOT_VALUE_STATS,
@@ -119,9 +122,18 @@ def test_the_registries_are_disjoint() -> None:
 
 
 def test_the_four_snapshot_rules_join_the_one_rule_enum() -> None:
-    assert {"coarse_range", "empty_map", "previous_year_start", "next_year_end"} <= {
-        r.value for r in Rule
-    }
+    assert {
+        "coarse_range",
+        "empty_map",
+        "previous_year_start",
+        "next_year_end",
+        "top_coded_range",
+        "k_tail_quantiles",
+        "fold_years_under_k",
+        "kept_year_start",
+        "kept_year_end",
+        "fold_under_k",
+    } <= {r.value for r in Rule}
     enums = [v for v in vars(vr).values() if isinstance(v, type) and issubclass(v, enum.Enum)]
     assert enums == [Rule]
 
@@ -130,7 +142,8 @@ def test_every_visited_key_is_classified_and_every_entry_is_visited() -> None:
     snap = _snapshot(high_cardinality_columns=["code"])
     assert _kinds_seen(snap) == SNAPSHOT_KINDS
     assert _unclassified(snap) == set()
-    assert _visited(snap) == set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
+    plain = distribution_snapshot_document(_frame(), joint_columns=_PAIRS)
+    assert _visited(snap) | _visited(plain) == set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
 
 
 def test_the_kinds_equal_the_kinds_the_snapshot_source_can_emit() -> None:
@@ -150,14 +163,28 @@ def test_a_new_stats_key_is_reported_unclassified(monkeypatch: pytest.MonkeyPatc
 
 def test_a_sixth_kind_literal_is_seen_by_the_source_read() -> None:
     source = Path(snapshot_module.__file__).read_text(encoding="utf-8")
-    patched = source.replace(
-        'return "freetext", _freetext_stats', 'return "geo", _freetext_stats', 1
-    )
+    patched = source.replace('return "freetext", freetext_stats', 'return "geo", freetext_stats', 1)
     assert patched != source
     assert _kinds_in_source(patched) - SNAPSHOT_KINDS == {"geo"}
 
 
-# AT-11
+# AT-11 (floor table)
+
+
+def test_the_floor_table_and_the_kept_aggregates_cover_every_flagged_key() -> None:
+    year_bins = {("datetime", "year_bins")}
+    assert (
+        set(SNAPSHOT_FLOOR_STATS) | SNAPSHOT_FLOOR_KEPT_STATS
+        == set(SNAPSHOT_VALUE_STATS) | year_bins
+    )
+    assert set(SNAPSHOT_FLOOR_STATS) & SNAPSHOT_FLOOR_KEPT_STATS == set()
+    assert set(SNAPSHOT_FLOOR_STATS.values()) <= DATA_RULES
+    assert set(SNAPSHOT_FLOOR_STATS) <= set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
+
+
+def test_every_key_of_a_plain_document_is_classified() -> None:
+    doc = distribution_snapshot_document(_frame(), joint_columns=_PAIRS)
+    assert _unclassified(doc) == set()
 
 
 def _containers(doc: dict[str, Any], scope: str, names: set[str]) -> list[dict[str, Any]]:
@@ -376,10 +403,15 @@ def test_the_guard_bites_on_each_forbidden_shape(snippet: str) -> None:
 
 
 def test_the_profile_redactor_uses_the_same_selection_stamp_and_applier() -> None:
-    tree = _tree(_SRC / "profiling" / "_value_redaction.py")
-    by_name = {
-        fn.name: set(_call_names(fn)) for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
-    }
-    assert {"_sensitive_entries", "stamp_value_policy"} <= by_name["redact_profile_dict"]
-    assert "_apply" in by_name["redact_profile_dict"] | by_name["_redact_field"]
-    assert "_sensitive_entries" in by_name["value_sensitive_names"]
+    def calls(path: str) -> dict[str, set[str]]:
+        return {
+            fn.name: set(_call_names(fn))
+            for fn in ast.walk(_tree(_SRC / "profiling" / path))
+            if isinstance(fn, ast.FunctionDef)
+        }
+
+    writer = calls("_profile_document.py")
+    registry = calls("_value_redaction.py")
+    assert {"_sensitive_entries", "stamp_value_policy"} <= writer["redact_profile_dict"]
+    assert "_apply" in writer["redact_profile_dict"] | registry["_redact_field"]
+    assert "_sensitive_entries" in registry["value_sensitive_names"]

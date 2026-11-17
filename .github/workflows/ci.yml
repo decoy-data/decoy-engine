@@ -75,6 +75,8 @@ jobs:
           python: ${{ matrix.python }}
       - name: Import
         run: python -c "import decoy_engine"
+      - name: Probe
+        run: python -c 'from decoy_engine.support import probe_status, run_probe; assert probe_status(run_probe()) == "ok"'
 
   mypy:
     if: github.event_name != 'pull_request'
@@ -378,3 +380,39 @@ jobs:
           -m determinism_harness --tb=short --junitxml=determinism.xml
       - name: Guard -- the harness actually executed (passed>0, none skipped/errored/failed)
         run: python scripts/dev/junit_ran.py determinism.xml
+
+  # pg-gate: the pg_integration suites against a Postgres service container. The default marker
+  # expression still selects them, but they skip without a server, so this job is their lane.
+  # DECOY_REQUIRE_PG=1 turns a missing server or extension into a failure, and junit_ran.py fails
+  # the job on any skip.
+  pg-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DECOY_REQUIRE_PG: "1"
+      DECOY_TEST_PG_DSN: host=127.0.0.1 port=5432 user=postgres password=pw dbname=postgres
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          bootstrap: "true"
+      - name: Postgres integration suites
+        # Scoped to the files that carry the marker: a module-level skip elsewhere would trip the
+        # zero-skip guard below. A sentry (test_ci_lanes.py) fails if a marked file falls outside.
+        run: >
+          pytest tests/connectors/test_postgres_snapshot.py
+          -m pg_integration --tb=short --junitxml=pg.xml
+      - name: Guard -- the suites actually executed (passed>0, none skipped/errored/failed)
+        run: python scripts/dev/junit_ran.py pg.xml

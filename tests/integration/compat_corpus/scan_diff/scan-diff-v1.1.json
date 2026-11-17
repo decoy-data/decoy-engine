@@ -1,0 +1,76 @@
+{
+  "scan_diff_schema": "scan-diff/v1.1",
+  "baseline_engine_version": "0.27.0",
+  "current_engine_version": "0.29.0",
+  "detectors_changed": true,
+  "drift": true,
+  "drift_kinds": [
+    "table_added"
+  ],
+  "no_common_table": false,
+  "tables_added": [
+    "orders"
+  ],
+  "tables_removed": [
+    "legacy_accounts"
+  ],
+  "tables": [
+    {
+      "table": "customers",
+      "drift": true,
+      "drift_kinds": [
+        "pii_bucket_increased",
+        "new_high_pii_field",
+        "new_quasi_identifier_group"
+      ],
+      "added": [
+        {
+          "name": "alt_email",
+          "pii_score": 0.91,
+          "pii_bucket": "high",
+          "added_in_v1_1": "x"
+        }
+      ],
+      "removed": [
+        {
+          "name": "fax",
+          "pii_score": null,
+          "pii_bucket": "none"
+        }
+      ],
+      "pii_increased": [
+        {
+          "name": "notes",
+          "old_score": 0.1,
+          "new_score": 0.7,
+          "old_bucket": "low",
+          "new_bucket": "high"
+        }
+      ],
+      "pii_decreased": [
+        {
+          "name": "zip",
+          "old_score": 0.65,
+          "new_score": 0.2,
+          "old_bucket": "high",
+          "new_bucket": "low"
+        }
+      ],
+      "qi_added": [
+        [
+          "dob",
+          "zip"
+        ]
+      ],
+      "qi_removed": [],
+      "risk_delta": 12.5,
+      "added_in_v1_1": [
+        1,
+        2
+      ]
+    }
+  ],
+  "added_in_v1_1": {
+    "note": "a member a later minor added"
+  }
+}

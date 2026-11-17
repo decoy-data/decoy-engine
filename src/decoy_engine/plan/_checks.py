@@ -331,7 +331,7 @@ def check_statistical_columns(
     case (a `faker`/`sequence`/... column carrying a stray `high_cardinality`
     key) is caught here instead.
     """
-    from decoy_engine.generation.statistical import load_spec, spec_to_dict
+    from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
     from decoy_engine.plan._generation import resolve_pinned_snapshot
 
@@ -379,6 +379,7 @@ def check_statistical_columns(
                         dp_verified=dp_verified,
                         snapshot_digest=read.sha256 if read is not None else None,
                     )
+                    check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     raise PlanCompileError(
                         code=exc.code,
@@ -391,15 +392,10 @@ def check_statistical_columns(
 
 
 def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> None:
-    """Shared body: reject `strategy` columns whose `ner` config cannot run here.
+    """Shared body of rows #13 and #30: reject `strategy` columns whose `ner` cannot run here.
 
-    Extracted for TX-2 (2026-07-20) so `check_text_redact_ner_available` and
-    `check_text_mask_ner_available` (row #13 / row #30) stay byte-identical in
-    shape without duplicating the walk. NER is an optional capability (the
-    `ner` extra plus a separately-downloaded spaCy model); a column that opts
-    in while either piece is missing is guaranteed dead at run. Config +
-    installed packages only (no model load, no profile): safe for config-only
-    callers (decoy validate).
+    A column that opts in while spaCy or its model is missing is dead at run. Config and
+    installed packages only (no model load, no profile): safe for `decoy validate`.
     """
     from decoy_engine.detection import ner  # module import keeps the legacy-file LOC flat
 
@@ -417,18 +413,19 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
             ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
             if not ner_cfg:
                 continue
-            model = ner.DEFAULT_NER_MODEL
-            if isinstance(ner_cfg, dict) and ner_cfg.get("model"):
-                model = str(ner_cfg["model"])
             col_name = col_entry.get("name", "?")
+            refusal = None
             try:
-                ner.ensure_ner_available(model)
+                model = str(ner.resolve_column_ner(ner_cfg)[0])
+                ner.ensure_ner_available(model, ner.NerSurface(strategy))
             except ner.NerUnavailableError as exc:
+                refusal = exc
+            if refusal is not None:  # raised outside the handler: no cause, no context
                 raise PlanCompileError(
-                    code=exc.code,
+                    code=refusal.code,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.ner",
-                    message=exc.message,
-                ) from exc
+                    message=refusal.message,
+                )
 
 
 def check_text_redact_ner_available(config: dict[str, Any]) -> None:

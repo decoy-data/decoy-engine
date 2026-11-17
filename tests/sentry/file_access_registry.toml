@@ -1347,12 +1347,12 @@ ambient_only = true
 
 [[entry]]
 module = "decoy_engine/connectors/postgres_snapshot.py"
-function = "snapshot_tables_to_parquet"
+function = "read_session"
 sink = "shutil.rmtree"
-ordinal = 2
-rule = "path derived from the caller's dest_dir or the config's temp_directory; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
+ordinal = 0
+rule = "path derived from the config's temp_directory; reached only after `fileaccess.require_ambient` refused every policy but the ambient one"
 owner = "cam"
-reason = "the Postgres snapshot child stages Parquet beside a platform-chosen destination and cannot carry a strict policy (D6 fail-closed fallback), so a strict policy never gets here"
+reason = "the read session removes its own spill directory; its callers are the Postgres snapshot and catalog reads, which run only on the ambient policy"
 ambient_only = true
 
 [[entry]]

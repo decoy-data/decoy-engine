@@ -320,7 +320,7 @@ def test_datetime_bounds_are_the_years_around_the_data(force_sensitive: None) ->
     exact = [
         "1991-01-01T00:00:00",
         "1991-12-31T23:59:59",
-        *[f"1991-0{m}-15T08:30:00" for m in range(2, 9)],
+        *[f"1991-0{m}-15T08:30:00" for m in range(2, 10)],
     ]
     df = pd.DataFrame({"admitted": pd.to_datetime(exact)})
     raw = compute_distribution_snapshot(df)
@@ -328,7 +328,8 @@ def test_datetime_bounds_are_the_years_around_the_data(force_sensitive: None) ->
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "1990-01-01T00:00:00"
     assert stats["max"] == "1992-12-31T23:59:59"
-    assert stats["year_bins"] == _col(raw, "admitted")["stats"]["year_bins"]
+    assert stats["year_bins"] == [{"start_year": 1991, "end_year": 1991, "count": 10}]
+    assert _col(raw, "admitted")["stats"]["year_bins"] == [{"year": 1991, "count": 10}]
     assert _leaks(doc, ["1991-01-01T00", "1991-12-31T23", "08:30:00"]) == []
     drawn = sample_column(_spec_for(doc, "admitted"), 200, col_seed=9)
     assert {d.year for d in drawn} == {1991}
@@ -339,7 +340,9 @@ def _calendar_edge_frame(stamps: list[str]) -> pd.DataFrame:
 
 
 def test_datetime_bounds_at_the_first_calendar_year_stay_parseable(force_sensitive: None) -> None:
-    df = _calendar_edge_frame(["0001-03-04T05:06:07", "0001-09-10T11:12:13", "0002-06-01T00:00:00"])
+    df = _calendar_edge_frame(
+        ["0001-03-04T05:06:07"] * 4 + ["0001-09-10T11:12:13"] * 3 + ["0002-06-01T00:00:00"] * 3
+    )
     doc = distribution_snapshot_document(df)
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "0001-01-01T00:00:00"
@@ -349,7 +352,7 @@ def test_datetime_bounds_at_the_first_calendar_year_stay_parseable(force_sensiti
 
 
 def test_datetime_bounds_at_the_last_calendar_year_stay_parseable(force_sensitive: None) -> None:
-    df = _calendar_edge_frame(["9998-03-04T05:06:07", "9999-09-10T11:12:13"])
+    df = _calendar_edge_frame(["9998-03-04T05:06:07"] * 5 + ["9999-09-10T11:12:13"] * 5)
     doc = distribution_snapshot_document(df)
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "9997-01-01T00:00:00"
@@ -419,13 +422,23 @@ def test_a_real_redacted_cell_is_not_a_sentinel(force_sensitive: None) -> None:
     assert joint["other_count"] == 12
 
 
-def test_a_joint_of_two_plain_columns_is_unchanged() -> None:
-    df = _joint_frame(_EMAILS)
+def test_a_joint_of_two_plain_columns_keeps_every_cell_held_by_k_rows() -> None:
+    df = pd.DataFrame(
+        {"status": [("open", "closed", "held")[i % 3] for i in range(120)]}
+        | {"tier": [("gold", "basic")[(i // 3) % 2] for i in range(120)]}
+    )
     pair = [("status", "tier")]
     raw = compute_distribution_snapshot(df, joint_columns=pair)
     doc = distribution_snapshot_document(df, joint_columns=pair)
     assert doc["joints"] == raw["joints"]
     assert doc["joints"][0]["cells"]
+
+
+def test_a_joint_of_two_plain_columns_folds_cells_under_k_rows() -> None:
+    pair = [("status", "tier")]
+    (joint,) = distribution_snapshot_document(_joint_frame(_EMAILS), joint_columns=pair)["joints"]
+    assert joint["cells"] == []
+    assert joint["other_count"] == 40
 
 
 @pytest.mark.parametrize("pair", [("email", "status"), ("status", "zemail")])
@@ -443,14 +456,18 @@ def test_joint_output_does_not_follow_the_real_sensitive_labels(pair: tuple[str,
 # AT-8 and AT-9
 
 
-def test_plain_columns_equal_the_raw_snapshot() -> None:
+def test_plain_categorical_columns_equal_the_raw_snapshot_and_numbers_are_top_coded() -> None:
     df = _joint_frame(_EMAILS)
     df["amount"] = [1, 2, 3, 4, 5] * 8
     raw = compute_distribution_snapshot(df, cell_format=True)
     doc = distribution_snapshot_document(df)
     for name in ("status", "tier", "amount"):
         assert name not in doc["redacted_columns"]
+    for name in ("status", "tier"):
         assert doc["columns"][name] == raw["columns"][name]
+    amount = doc["columns"]["amount"]["stats"]
+    assert amount["min"] <= 2 and amount["max"] >= 4  # the K-th smallest and largest cells
+    assert sum(amount["bin_counts"]) == 40
     assert {"email", "zemail"} <= set(doc["redacted_columns"])
 
 
