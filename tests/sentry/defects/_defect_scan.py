@@ -415,3 +415,43 @@ def facade_import_findings(index: ModuleIndex) -> list[str]:
                 if facade and not rel.startswith(FACADES[facade]):
                     out.add(f"{rel}:{node.lineno} imports {target}")
     return sorted(out)
+
+
+# A consumer package that must reach a private implementation through its package facade.
+# consumer path prefix -> private module -> the public name that fronts it.
+CONSUMER_FACADES: dict[str, dict[str, str]] = {
+    "validation/post/": {
+        "decoy_engine.kernel._canonicalize": "decoy_engine.kernel",
+        "decoy_engine.generation.pool._canonicalize": "decoy_engine.kernel",
+        "decoy_engine.generation.pool._identity": "decoy_engine.generation.pool",
+    },
+}
+
+
+def consumer_facade_findings(index: ModuleIndex) -> list[str]:
+    """``path:line imports <private> (use <facade>)`` for a consumer that skips its facade."""
+    out: set[str] = set()
+    for path, tree in index.trees.items():
+        rel = path.relative_to(index.src).as_posix()
+        bans = {
+            private: public
+            for prefix, table in CONSUMER_FACADES.items()
+            if rel.startswith(prefix)
+            for private, public in table.items()
+        }
+        if not bans:
+            continue
+        mod = module_name(path, index.src)
+        is_pkg = path.name == "__init__.py"
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                base = resolve_from(mod, is_pkg, node)
+                targets = [base, *(f"{base}.{a.name}" for a in node.names)]
+            elif isinstance(node, ast.Import):
+                targets = [a.name for a in node.names]
+            else:
+                continue
+            for target in targets:
+                if target in bans:
+                    out.add(f"{rel}:{node.lineno} imports {target} (use {bans[target]})")
+    return sorted(out)
