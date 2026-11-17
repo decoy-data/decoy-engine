@@ -27,6 +27,7 @@ from decoy_engine.config._generate_options import ContextProblem, problem_detail
 from decoy_engine.config.policy._policy import ColumnDecision, DisguisePin, PolicyConfig, PolicyRule
 from decoy_engine.config.policy._precedence import PrecedenceLevel, selector_level
 from decoy_engine.config.policy._selectors import facts_for, matches, roles_by_field
+from decoy_engine.contracts.declared_casting import CONTRACT_FIELDS
 from decoy_engine.detection.domains import registered_detector_ids
 
 __all__ = [
@@ -40,18 +41,7 @@ __all__ = [
 
 # The keys a column may carry without a strategy: identity, labels and the F06 declared-casting
 # contract. Anything else shapes the strategy, so a policy-decided column may not set it.
-_ALLOWED_WITHOUT_STRATEGY = frozenset(
-    {
-        "name",
-        "classification",
-        "tags",
-        "logical_type",
-        "parse_format",
-        "sentinel_to_null",
-        "error_policy",
-        "output_format",
-    }
-)
+_ALLOWED_WITHOUT_STRATEGY = frozenset({"name", "classification", "tags", *CONTRACT_FIELDS})
 _DECISION_KEYS = tuple(ColumnDecision.model_fields)
 
 

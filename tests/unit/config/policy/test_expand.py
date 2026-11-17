@@ -414,6 +414,9 @@ def test_column_config_fields_partition_with_no_leftovers():
     assert sum(len(g) for g in groups) == len(set().union(*groups)), "groups overlap"
     # classification and tags join ColumnConfig in a later slice
     assert fields - {"classification", "tags"} == set().union(*groups) - {"classification", "tags"}
+    from decoy_engine.contracts.declared_casting import CONTRACT_FIELDS
+
+    assert set(CONTRACT_FIELDS) == _DECLARED_CASTING
     assert _ALLOWED_WITHOUT_STRATEGY == _IDENTITY_AND_LABELS | _DECLARED_CASTING
 
 
