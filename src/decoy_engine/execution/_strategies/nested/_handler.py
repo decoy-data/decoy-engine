@@ -62,6 +62,7 @@ from decoy_engine.execution._adapter import StrategyContext, StrategyOption, pro
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution._strategies.nested._leaves import (
+    find_matches,
     leaf_frame,
     read_cell,
     record_fault,
@@ -338,7 +339,7 @@ class NestedStrategyHandler:
                 record_fault(ctx, warnings, column, pos, exc.token)
                 continue
             saw_parseable = True
-            matches = jsonpath_expr.find(parsed)
+            matches = find_matches(jsonpath_expr, parsed, column)
             if not matches:
                 continue
             # QA-3 F14 (2026-05-31, security): detect prefix-overlap

@@ -19,10 +19,11 @@ from decoy_engine._canonical import (
     MASK_MAX_DEPTH,
     strict_json_read,
 )
+from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
 
-__all__ = ["leaf_frame", "read_cell", "record_fault", "written_leaf"]
+__all__ = ["find_matches", "leaf_frame", "read_cell", "record_fault", "written_leaf"]
 
 # fault -> (trigger, fixed reason). `not_json` keeps its original text.
 _FAULTS: dict[str, tuple[str, str]] = {
@@ -36,6 +37,32 @@ _FAULTS: dict[str, tuple[str, str]] = {
         "a nested child returned a value that is not a finite number",
     ),
 }
+
+
+def find_matches(expr: Any, parsed: Any, column: str) -> list[Any]:
+    """The JSONPath matches in one parsed cell, the single place `find` is called.
+
+    jsonpath-ng treats an array selector on a scalar as a one-item list, but it calls `len()` on a
+    `JsonNumber` (a lossy number kept as read). That `TypeError` is the same fault as an array
+    selector on a plain scalar, which the writeback check refuses with the unwritable-container
+    code, so it gets that code here. No match is returned, so nothing can be written back.
+    """
+    failed = False
+    matches: list[Any] = []
+    try:
+        matches = expr.find(parsed)
+    except TypeError:
+        failed = True
+    if failed:
+        raise StrategyError(
+            code=reasons.runtime.NESTED_TARGET_UNWRITABLE_CONTAINER,
+            strategy="nested",
+            message=(
+                f"nested target cannot be applied to a number in column {column!r}: an array "
+                "selector on a scalar. Failing closed to avoid leaking the source value."
+            ),
+        )
+    return matches
 
 
 def read_cell(cell: Any) -> Any:
