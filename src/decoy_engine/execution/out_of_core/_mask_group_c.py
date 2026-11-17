@@ -87,7 +87,10 @@ from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
-from decoy_engine.execution._strategies._ner_config import enforce_ner_model_version
+from decoy_engine.execution._strategies._ner_config import (
+    enforce_ner_model_version,
+    resolve_ner_config,
+)
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
 from decoy_engine.generation.pool._events import QualityWarning
@@ -324,22 +327,8 @@ def _text_mask_ner(
     """Resolve NER config + enforce the compile-vs-runtime model-version pin.
 
     The pin check is the shared `enforce_ner_model_version`, so the whole-frame and out-of-core
-    routes raise the same text. The config parse below is still a local copy of
-    `resolve_ner_config`; folding it in is a logged follow-up."""
-    ner_cfg = cfg.get("ner")
-    if not ner_cfg:
-        return None, None
-    from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-    ner_model: str
-    ner_entities: list[str] | None = None
-    if isinstance(ner_cfg, dict):
-        ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-        raw_entities = ner_cfg.get("entities")
-        if isinstance(raw_entities, (list, tuple)) and raw_entities:
-            ner_entities = [str(e) for e in raw_entities]
-    else:
-        ner_model = DEFAULT_NER_MODEL
+    routes raise the same text, and `resolve_ner_config` is the one config parse."""
+    ner_model, ner_entities = resolve_ner_config(cfg)
 
     enforce_ner_model_version(
         ner_model=ner_model,
