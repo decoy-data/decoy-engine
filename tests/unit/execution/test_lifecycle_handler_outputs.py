@@ -149,3 +149,32 @@ def test_the_spill_estimate_uses_the_handler_declaration(
     from decoy_engine.execution.out_of_core._spill_estimate import _strategy_output_width_bytes
 
     assert _strategy_output_width_bytes(strategy, params) == expected
+
+
+def test_both_estimates_read_the_declaration_through_one_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyarrow as pa
+
+    from decoy_engine.execution import _strategies
+    from decoy_engine.execution._mem_estimate import ColumnSizeSpec
+    from decoy_engine.execution.out_of_core._spill_estimate import _strategy_output_width_bytes
+    from decoy_engine.execution.pipeline import _lifecycle as lc
+    from decoy_engine.execution.pipeline import _lifecycle_inputs as li
+
+    monkeypatch.setattr(
+        _strategies, "output_declaration", lambda *_: _strategies.OutputDeclaration(string_width=7)
+    )
+    assert _strategy_output_width_bytes("hash", {}) == 7.0
+    column = lc.ColumnInputs("n", pa.int64(), False, ColumnSizeSpec("n", "int64"))
+    table = lc.TableInputs("t", 10, (column,), "parquet")
+    seed = SimpleNamespace(strategy="hash", provider_config=())
+    plan = SimpleNamespace(
+        seed_envelope=SimpleNamespace(
+            per_table=(("t", SimpleNamespace(per_column=(("n", seed),))),)
+        ),
+        relationships=(),
+    )
+    outcome = li.attach_outputs((table,), plan)
+    assert outcome.tables is not None
+    assert outcome.tables[0].columns[0].output_spec.string_width_bytes == 7.0  # type: ignore[union-attr]
