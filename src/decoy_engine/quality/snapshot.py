@@ -58,7 +58,12 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
-from decoy_engine.internal.pandas_compat import canonical_dtype_label, utc_naive_datetimes
+from decoy_engine.internal.pandas_compat import (
+    canonical_dtype_label,
+    finite_numeric_cells,
+    numeric_cells,
+    utc_naive_datetimes,
+)
 
 # Single source of truth for the DP schema version is the pandas-free
 # `dp_schema` module (guide section 3.8), re-exported here for the existing
@@ -201,7 +206,7 @@ def compute_distribution_snapshot(
 
         add_fanout(columns_block, df, fanout_columns)
     if cell_format:
-        from decoy_engine.generation.statistical import add_cell_format
+        from decoy_engine.profiling._cell_format import add_cell_format
 
         add_cell_format(columns_block, df)
     from decoy_engine.generation.statistical import add_numeric_shape
@@ -398,22 +403,12 @@ def _high_cardinality_categorical_stats(non_null: pd.Series) -> dict[str, Any]:
     return stats
 
 
-def _numeric_cells(series: pd.Series) -> np.ndarray[Any, np.dtype[np.float64]]:
-    return np.asarray(pd.to_numeric(series, errors="coerce").dropna(), dtype=float)
-
-
-def finite_numeric_cells(series: pd.Series) -> np.ndarray[Any, np.dtype[np.float64]]:
-    """The series' numeric cells as floats with nan and +-inf dropped."""
-    arr = _numeric_cells(series)
-    return np.extract(np.isfinite(arr), arr)
-
-
 def numeric_stats(
     non_null: pd.Series, *, bins: int, domain: tuple[float, float] | None = None
 ) -> dict[str, Any]:
     finite = finite_numeric_cells(non_null)
     if finite.size == 0:
-        if _numeric_cells(non_null).size == 0:
+        if numeric_cells(non_null).size == 0:
             return {}
         # Only inf cells: an empty stat, as JSON cannot encode inf.
         return {
