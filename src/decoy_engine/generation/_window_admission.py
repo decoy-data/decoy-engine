@@ -168,9 +168,12 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
     # flagged column's year-around bound is, never moves a draw.
     live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
     first, last = live[0], live[-1]
-    if first.start_year != first.end_year and parsed_bounds["min"].year > first.start_year:
+    if first.start_year != first.end_year and parsed_bounds["min"] > datetime(
+        first.start_year, 1, 1
+    ):
         _refuse(table, col, CODE_DEGENERATE, "min", "datetime min is inside its range")
-    if last.start_year != last.end_year and parsed_bounds["max"].year < last.end_year:
+    last_instant = datetime(last.end_year, 12, 31, 23, 59, 59, 999999)
+    if last.start_year != last.end_year and parsed_bounds["max"] < last_instant:
         _refuse(table, col, CODE_DEGENERATE, "max", "datetime max is inside its range")
 
 
