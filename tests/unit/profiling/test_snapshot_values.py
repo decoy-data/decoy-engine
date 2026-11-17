@@ -320,7 +320,7 @@ def test_datetime_bounds_are_the_years_around_the_data(force_sensitive: None) ->
     exact = [
         "1991-01-01T00:00:00",
         "1991-12-31T23:59:59",
-        *[f"1991-0{m}-15T08:30:00" for m in range(2, 9)],
+        *[f"1991-0{m}-15T08:30:00" for m in range(2, 10)],
     ]
     df = pd.DataFrame({"admitted": pd.to_datetime(exact)})
     raw = compute_distribution_snapshot(df)
@@ -328,9 +328,8 @@ def test_datetime_bounds_are_the_years_around_the_data(force_sensitive: None) ->
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "1990-01-01T00:00:00"
     assert stats["max"] == "1992-12-31T23:59:59"
-    # One year holds 9 rows, under K, so the single bin is the one folded range.
-    assert stats["year_bins"] == [{"start_year": 1991, "end_year": 1991, "count": 9}]
-    assert _col(raw, "admitted")["stats"]["year_bins"] == [{"year": 1991, "count": 9}]
+    assert stats["year_bins"] == [{"start_year": 1991, "end_year": 1991, "count": 10}]
+    assert _col(raw, "admitted")["stats"]["year_bins"] == [{"year": 1991, "count": 10}]
     assert _leaks(doc, ["1991-01-01T00", "1991-12-31T23", "08:30:00"]) == []
     drawn = sample_column(_spec_for(doc, "admitted"), 200, col_seed=9)
     assert {d.year for d in drawn} == {1991}
@@ -341,7 +340,9 @@ def _calendar_edge_frame(stamps: list[str]) -> pd.DataFrame:
 
 
 def test_datetime_bounds_at_the_first_calendar_year_stay_parseable(force_sensitive: None) -> None:
-    df = _calendar_edge_frame(["0001-03-04T05:06:07", "0001-09-10T11:12:13", "0002-06-01T00:00:00"])
+    df = _calendar_edge_frame(
+        ["0001-03-04T05:06:07"] * 4 + ["0001-09-10T11:12:13"] * 3 + ["0002-06-01T00:00:00"] * 3
+    )
     doc = distribution_snapshot_document(df)
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "0001-01-01T00:00:00"
@@ -351,7 +352,7 @@ def test_datetime_bounds_at_the_first_calendar_year_stay_parseable(force_sensiti
 
 
 def test_datetime_bounds_at_the_last_calendar_year_stay_parseable(force_sensitive: None) -> None:
-    df = _calendar_edge_frame(["9998-03-04T05:06:07", "9999-09-10T11:12:13"])
+    df = _calendar_edge_frame(["9998-03-04T05:06:07"] * 5 + ["9999-09-10T11:12:13"] * 5)
     doc = distribution_snapshot_document(df)
     stats = _col(doc, "admitted")["stats"]
     assert stats["min"] == "9997-01-01T00:00:00"

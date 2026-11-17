@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections import Counter
 from collections.abc import Callable, Collection, Iterator, Sequence
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 from itertools import islice, pairwise
@@ -214,17 +215,21 @@ def labels_read_as_sentences(labels: Collection[str]) -> bool:
 
 
 def fold_year_bins(stats: dict[str, Any]) -> None:
-    """Replace a datetime column's one-year bins with folded v2 ranges, flagged or not."""
+    """Replace a datetime column's one-year bins with folded v2 ranges, flagged or not.
+
+    A column with fewer than K rows in all has nothing it may release, so it keeps no range. A
+    year past the last sampled year (a 9999 sentinel) is counted under the last sampled year: a
+    multi-year range cannot end later, and a bucket of its own would hold the few sentinel rows.
+    """
     raw = stats.get("year_bins")
     if not raw:
         return
-    # A multi-year range cannot end past the last sampled year, so a year beyond it (a 9999
-    # sentinel) keeps its own bucket instead of being counted under an earlier year.
-    inside = [(b["year"], b["year"], b["count"]) for b in raw if b["year"] <= MAX_SAMPLED_YEAR]
-    beyond = [(b["year"], b["year"], b["count"]) for b in raw if b["year"] > MAX_SAMPLED_YEAR]
-    stats["year_bins"] = encode_datetime_buckets(
-        [DatetimeBucket(*r) for r in [*fold_ranges_under_k(inside), *beyond]]
-    )
+    by_year: Counter[int] = Counter()
+    for b in raw:
+        by_year[min(b["year"], MAX_SAMPLED_YEAR)] += b["count"]
+    folded = fold_ranges_under_k([(y, y, c) for y, c in sorted(by_year.items())])
+    kept = folded if sum(c for _, _, c in folded) >= MIN_RELEASE_COUNT else []
+    stats["year_bins"] = encode_datetime_buckets([DatetimeBucket(*r) for r in kept])
 
 
 def _withhold(container: dict[str, Any], scope: str) -> None:
@@ -289,7 +294,9 @@ def _top_coded_stats(
     Top and bottom coding (R sdcMicro `topBotCoding`): the cells beyond those two are clamped into
     the end bins, so replacing any of them leaves every key unchanged. The bounds sit on a nice
     grid (Heckbert 1990), widened until `numeric_bins` edges survive the 12-place writer; near
-    float max the public fixed domain is used. The flag is True for that fallback.
+    float max the public fixed domain is used. The flag is True for that fallback. When the two
+    cells are equal, or closer than the grid floor can resolve, the requested bin count puts them
+    in an interior bin, so a tail swap can move counts there (still counts on a public grid).
     """
     ordered = np.sort(finite)
     low, high = float(ordered[MIN_RELEASE_COUNT - 1]), float(ordered[-MIN_RELEASE_COUNT])
