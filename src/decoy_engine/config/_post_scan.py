@@ -29,7 +29,7 @@ from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
 from decoy_engine.config._pre_scan import canonical_detectors, checked_ner_model, inactive
-from decoy_engine.detection.ner import DEFAULT_NER_MODEL
+from decoy_engine.detection.ner import DEFAULT_NER_MODEL, is_default_ner_model
 from decoy_engine.detection.types import DetectorSource
 from decoy_engine.reasons import ReasonCode
 
@@ -115,7 +115,7 @@ class PostScanConfig(BaseModel):
         data: dict[str, Any] = handler(self)
         if tuple(data.get("detectors", ())) == ("regex",):
             data.pop("detectors", None)
-        if data.get("ner_model") == DEFAULT_NER_MODEL:
+        if is_default_ner_model(data.get("ner_model", "")):
             data.pop("ner_model", None)
         if data.get("ner_findings") == "warn":
             data.pop("ner_findings", None)
