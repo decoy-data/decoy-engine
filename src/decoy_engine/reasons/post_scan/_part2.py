@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, ReasonCode, RetryClass
 
 __all__ = [
     "DISMISS_REFUSED",
@@ -75,21 +75,26 @@ FINDING_BLOCKED = _verdict(
 
 # INIT-WIZARD E2: a post-scan review the engine cannot turn into config edits. The caller repairs
 # its decisions; each names a table or column, never a value.
-_review = _catalog.post_scan("ReviewInputError")
-_REVIEW_RULES = {
-    "phases": (Phase.CONFIGURATION,),
-    "outcome": Outcome.CONFIGURATION,
-    "retry": RetryClass.CONFIGURATION_REPAIR,
-    "since": UNRELEASED,
-}
+_review_declare = _catalog.post_scan("ReviewInputError")
+
+
+def _review(code: str, summary: str) -> ReasonCode:
+    return _review_declare(
+        code,
+        summary,
+        phases=(Phase.CONFIGURATION,),
+        outcome=Outcome.CONFIGURATION,
+        retry=RetryClass.CONFIGURATION_REPAIR,
+        since=UNRELEASED,
+    )
+
+
 DISMISS_REFUSED = _review(
     "dismiss_refused",
     "A finding that failed a mask check, or that came from source-identity evidence, cannot be "
     "dismissed.",
-    **_REVIEW_RULES,
 )
 REVIEW_CONFLICT = _review(
     "review_conflict",
     "Decisions for findings on one column propose different entries.",
-    **_REVIEW_RULES,
 )
