@@ -24,7 +24,7 @@ from decoy_engine.generation.pool._events import QualityWarning
 
 __all__ = ["leaf_frame", "read_cell", "record_fault", "written_leaf"]
 
-# token -> (trigger, fixed reason). `not_json` keeps its original text.
+# fault -> (trigger, fixed reason). `not_json` keeps its original text.
 _FAULTS: dict[str, tuple[str, str]] = {
     "not_json": ("format_error", "cell is not valid JSON under nested masking"),
     "duplicate_key": ("format_error", "cell repeats an object key under nested masking"),
@@ -56,26 +56,26 @@ def read_cell(cell: Any) -> Any:
 
 
 def record_fault(
-    ctx: Any, warnings: list[QualityWarning], column: str, pos: int, token: str
+    ctx: Any, warnings: list[QualityWarning], column: str, pos: int, fault: str
 ) -> None:
     """Fail the row closed: one row error and one warning, neither holding any cell text."""
-    trigger, reason = _FAULTS[token]
+    trigger, reason = _FAULTS[fault]
     ctx.row_errors.append(RowError(column=column, row_index=pos, trigger=trigger, reason=reason))
-    warnings.append(_warning(token, column, pos))
+    warnings.append(_warning(fault, column, pos))
 
 
-def _warning(token: str, column: str, pos: int) -> QualityWarning:
+def _warning(fault: str, column: str, pos: int) -> QualityWarning:
     """The warning beside the row error; each code is a registry symbol, never a forwarded value."""
     detail = {"row_pos": str(pos)}
-    if token == "duplicate_key":
+    if fault == "duplicate_key":
         code = reasons.warning.NESTED_CELL_DUPLICATE_KEY
-    elif token == "oversized":
+    elif fault == "oversized":
         code = reasons.warning.NESTED_CELL_OVERSIZED
-    elif token == "too_deep":
+    elif fault == "too_deep":
         code = reasons.warning.NESTED_CELL_TOO_DEEP
-    elif token == "out_of_range":
+    elif fault == "out_of_range":
         code = reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE
-    elif token == "child_non_finite":
+    elif fault == "child_non_finite":
         code = reasons.warning.NESTED_CHILD_NON_FINITE
     else:
         code = reasons.warning.NESTED_CELL_JSON_PARSE_ERROR
