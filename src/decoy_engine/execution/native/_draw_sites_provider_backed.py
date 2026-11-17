@@ -17,7 +17,7 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.faker",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_faker.py:141",
+        call_site="execution/_strategies/_faker.py::FakerStrategyHandler.run#2",
         entropy_root="mask_key",
         seed_derivation=(
             "PoolSampler.sample(..., seed=ctx.mask_key) -> per-row "
@@ -37,13 +37,13 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
             "Non-deterministic reuse is mask.faker_nondeterministic; its other modes are "
             "whole-column numpy draws. Native (2.3): derive_index_batch per chunk."
         ),
-        mirror_call_sites=("generation/pool/_sampler.py:225",),
+        mirror_call_sites=("generation/pool/_sampler.py::PoolSampler.sample#2",),
     ),
     # -- Generation: Faker value-pool build (build-time draw) ----------------
     DrawSite(
         draw_site_id="gen.pool_build_faker",
         family="faker_seed_instance",
-        call_site="generation/pool/_builder.py:161",
+        call_site="generation/pool/_builder.py::PoolBuilder.identity_for",
         entropy_root="job_seed",
         seed_derivation=(
             "pool_seed = derive(job_seed, 'pool/{provider}/{locale}/{namespace}', "
@@ -67,15 +67,15 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
             "(providers_v2/mimesis/_adapter.py:167)."
         ),
         mirror_call_sites=(
-            "providers_v2/_faker_adapter.py:224",
-            "providers_v2/mimesis/_adapter.py:167",
+            "providers_v2/_faker_adapter.py::FakerAdapter.generate_batch",
+            "providers_v2/mimesis/_adapter.py::MimesisAdapter._generic",
         ),
     ),
     # -- Providers_v2: synthetic-identifier adapters -------------------------
     DrawSite(
         draw_site_id="gen.identifier_deterministic",
         family="source_keyed_hmac",
-        call_site="providers_v2/identifiers/_ssn.py:159",
+        call_site="providers_v2/identifiers/_ssn.py::SsnAdapter.generate#1",
         entropy_root="mask_key",
         seed_derivation=(
             "derive_value(seed=spec.seed, namespace=spec.namespace, source=canonical, "
@@ -101,20 +101,20 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
             "adapters' derive_value call."
         ),
         mirror_call_sites=(
-            "providers_v2/identifiers/_npi.py:131",
-            "providers_v2/identifiers/_ein.py:200",
-            "providers_v2/identifiers/_iban.py:244",
-            "providers_v2/identifiers/_pan.py:133",
-            "providers_v2/identifiers/_icd10.py:127",
-            "providers_v2/identifiers/_mrn.py:131",
-            "providers_v2/identifiers/_ndc.py:139",
-            "providers_v2/identifiers/_cusip.py:190",
+            "providers_v2/identifiers/_npi.py::NpiAdapter.generate#1",
+            "providers_v2/identifiers/_ein.py::EinAdapter.generate#1",
+            "providers_v2/identifiers/_iban.py::IbanAdapter.generate#1",
+            "providers_v2/identifiers/_pan.py::PanAdapter.generate#1",
+            "providers_v2/identifiers/_icd10.py::Icd10Adapter.generate#1",
+            "providers_v2/identifiers/_mrn.py::MrnAdapter.generate#1",
+            "providers_v2/identifiers/_ndc.py::NdcAdapter.generate#1",
+            "providers_v2/identifiers/_cusip.py::CusipAdapter.generate#1",
         ),
     ),
     DrawSite(
         draw_site_id="gen.identifier_nondeterministic",
         family="numpy_pcg64",
-        call_site="providers_v2/identifiers/_ssn.py:165",
+        call_site="providers_v2/identifiers/_ssn.py::SsnAdapter.generate#2",
         entropy_root="none",
         seed_derivation="np.random.default_rng()  # unseeded, S4 random-by-default contract",
         api_operation="numpy.random.default_rng() then the provider's generate_random(rng=...)",
@@ -131,15 +131,15 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
             "adapters. Non-deterministic by contract (output differs run to run)."
         ),
         mirror_call_sites=(
-            "providers_v2/identifiers/_ssn.py:178",
-            "providers_v2/identifiers/_npi.py:137",
-            "providers_v2/identifiers/_ein.py:206",
-            "providers_v2/identifiers/_iban.py:250",
-            "providers_v2/identifiers/_pan.py:139",
-            "providers_v2/identifiers/_icd10.py:133",
-            "providers_v2/identifiers/_mrn.py:137",
-            "providers_v2/identifiers/_ndc.py:145",
-            "providers_v2/identifiers/_cusip.py:196",
+            "providers_v2/identifiers/_ssn.py::SsnAdapter.generate_batch",
+            "providers_v2/identifiers/_npi.py::NpiAdapter.generate#2",
+            "providers_v2/identifiers/_ein.py::EinAdapter.generate#2",
+            "providers_v2/identifiers/_iban.py::IbanAdapter.generate#2",
+            "providers_v2/identifiers/_pan.py::PanAdapter.generate#2",
+            "providers_v2/identifiers/_icd10.py::Icd10Adapter.generate#2",
+            "providers_v2/identifiers/_mrn.py::MrnAdapter.generate#2",
+            "providers_v2/identifiers/_ndc.py::NdcAdapter.generate#2",
+            "providers_v2/identifiers/_cusip.py::CusipAdapter.generate#2",
         ),
     ),
 )

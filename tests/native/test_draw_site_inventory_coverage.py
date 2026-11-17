@@ -9,8 +9,9 @@ determinism protocol Task 0.3 builds on. The scan reads the SAME
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+
+import pytest
 
 import decoy_engine
 from decoy_engine.config._tables import GENERATE_TYPES
@@ -38,6 +39,8 @@ from decoy_engine.providers_v2.identifiers import (
     PanAdapter,
     SsnAdapter,
 )
+from tests.native import _draw_site_locator as locator
+from tests.native._draw_site_locator import DRAW_TOKEN, strip_prose
 
 _IDENTIFIER_ADAPTERS = (
     SsnAdapter,
@@ -111,8 +114,10 @@ def test_every_required_field_populated_and_from_allowed_enum() -> None:
         assert isinstance(s.consumes_variable_draws, bool)
         assert isinstance(s.partitionable, bool)
         assert isinstance(s.uncertain, bool)
-        # call_site is "module:line".
-        assert re.fullmatch(r".+\.py:\d+", s.call_site), f"{s.draw_site_id}: call_site shape"
+        # call_site is "path::qualified_function[#n]", never a line number.
+        locator.parse(s.call_site)
+        for mirror in s.mirror_call_sites:
+            locator.parse(mirror)
 
 
 def test_unseeded_sites_are_not_partitionable() -> None:
@@ -194,31 +199,10 @@ _SCAN_ROOTS = (
     "providers_v2",
 )
 
-# Call-level tokens that indicate an actual randomness draw. Includes the three
-# keyed primitives (derive / derive_index / derive_value), the numpy and Python
-# RNG constructors, Faker.seed_instance, the whole-column numpy ops, and the
-# Mimesis Generic() seeded constructor. Prose is stripped before matching (see
-# _strip_prose) so a docstring mention of `derive(...)` does not count.
-_DRAW_TOKEN = re.compile(
-    r"np\.random\.default_rng\(|np\.random\.RandomState\(|random\.Random\(|"
-    r"\.seed_instance\(|\.permutation\(|\.shuffle\(|\.choices\(|"
-    r"derive_index\(|derive_value\(|\bderive\(|Generic\("
-)
-
-_TRIPLE_QUOTED = re.compile(r"(\"\"\".*?\"\"\"|'''.*?''')", re.DOTALL)
-
-
-def _strip_prose(text: str) -> str:
-    """Remove triple-quoted blocks and line comments so the scan matches code.
-
-    Bare `derive(` also appears in docstrings and comments describing the keyed
-    primitive; stripping prose keeps the scan matching real call sites, not
-    documentation. Single-line string literals are intentionally left in (a
-    handful are handled by the allowlist), since removing them reliably needs a
-    real tokenizer.
-    """
-    without_docstrings = _TRIPLE_QUOTED.sub("", text)
-    return "\n".join(re.sub(r"#.*$", "", line) for line in without_docstrings.splitlines())
+# Call-level tokens that indicate an actual randomness draw: `DRAW_TOKEN` and `strip_prose` live in
+# `_draw_site_locator`, which the call-site resolution tests share.
+_DRAW_TOKEN = DRAW_TOKEN
+_strip_prose = strip_prose
 
 
 # RNG-token-bearing files that are NOT masked/generated-output draw sites:
@@ -294,7 +278,7 @@ def _catalogued_paths() -> set[str]:
     paths: set[str] = set()
     for s in DRAW_SITES:
         for entry in (s.call_site, *s.mirror_call_sites):
-            paths.add(entry.rsplit(":", 1)[0])
+            paths.add(locator.parse(entry).path)
     return paths
 
 
@@ -338,5 +322,71 @@ def test_catalogued_call_sites_point_at_real_files() -> None:
     # Every call_site file (not the drifting line number) must exist in the tree.
     for s in DRAW_SITES:
         for entry in (s.call_site, *s.mirror_call_sites):
-            rel = entry.rsplit(":", 1)[0]
+            rel = locator.parse(entry).path
             assert (_PKG_DIR / rel).is_file(), f"{s.draw_site_id}: missing file {rel}"
+
+
+# --------------------------------------------------------------------------
+# Call sites name a function, not a line (row 24ze G1).
+# --------------------------------------------------------------------------
+def test_every_call_site_resolves_to_a_function_that_draws() -> None:
+    assert locator.problems(_PKG_DIR, DRAW_SITES) == []
+
+
+def _scratch_copy(tmp_path: Path, transform) -> Path:  # type: ignore[no-untyped-def]
+    """A copy of every module the catalogue names, with `transform(path, text)` applied."""
+    scratch = tmp_path / "decoy_engine"
+    for site in DRAW_SITES:
+        for entry in (site.call_site, *site.mirror_call_sites):
+            rel = locator.parse(entry).path
+            target = scratch / rel
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    transform(rel, (_PKG_DIR / rel).read_text(encoding="utf-8")), encoding="utf-8"
+                )
+    return scratch
+
+
+def test_a_blank_line_above_every_draw_keeps_every_entry_resolving(tmp_path: Path) -> None:
+    def add_blank_lines(_rel: str, text: str) -> str:
+        out: list[str] = []
+        for line in text.splitlines():
+            if locator.ENTRY_DRAW_TOKEN.search(locator.strip_prose(line)):
+                out.append("")
+            out.append(line)
+        return "\n".join(out) + "\n"
+
+    scratch = _scratch_copy(tmp_path, add_blank_lines)
+    assert locator.problems(scratch, DRAW_SITES) == []
+
+
+def test_renaming_a_catalogued_function_fails(tmp_path: Path) -> None:
+    victim = locator.parse(DRAW_SITES[0].call_site)
+    leaf = victim.qualified.rsplit(".", 1)[-1]
+
+    def rename(rel: str, text: str) -> str:
+        return text.replace(f"def {leaf}(", f"def {leaf}_renamed(") if rel == victim.path else text
+
+    scratch = _scratch_copy(tmp_path, rename)
+    found = locator.problems(scratch, DRAW_SITES)
+    assert any(line.startswith(f"{DRAW_SITES[0].draw_site_id}:") for line in found)
+
+
+def test_two_sites_in_one_function_need_distinct_ordinals() -> None:
+    clash = DrawSite(
+        **{
+            **{f: getattr(DRAW_SITES[0], f) for f in DrawSite.__dataclass_fields__},
+            "draw_site_id": "scratch.clash",
+            "call_site": DRAW_SITES[0].call_site.split("#")[0],
+            "mirror_call_sites": (),
+        }
+    )
+    base = DRAW_SITES[0].call_site.split("#")[0]
+    found = locator.problems(_PKG_DIR, (DRAW_SITES[0], clash))
+    assert any(base in line and "distinct" in line for line in found)
+
+
+def test_a_line_number_call_site_is_refused() -> None:
+    with pytest.raises(ValueError):
+        locator.parse("generation/synthesize.py:491")

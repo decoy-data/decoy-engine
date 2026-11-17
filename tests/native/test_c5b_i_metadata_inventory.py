@@ -28,9 +28,11 @@ from decoy_engine.execution.native._draw_site_providers import (
     all_providers,
     provider_for,
 )
+from tests.native import _draw_site_locator as locator
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / "docs" / "native" / "draw-site-inventory.md"
+PACKAGE = ROOT / "src" / "decoy_engine"
 SITE = "mask.faker_nondeterministic"
 JOB = (0x0123456789).to_bytes(8, "big")
 
@@ -71,16 +73,14 @@ class TestSiteIsSeededAndPositionKeyed:
         text = (site.seed_derivation + site.api_operation + site.notes).lower()
         assert SITE in text
         assert "default_rng off job_seed" not in text
-        # The call site moved with the handler edit; it must name a real line of the file.
-        path, line = site.call_site.rsplit(":", 1)
-        lines = (ROOT / "src" / "decoy_engine" / path).read_text().splitlines()
-        assert "PoolSampler" in lines[int(line) - 1] or "sample(" in lines[int(line) - 1]
+        # The call site names a function, not a line; its body must hold the sampler call.
+        ref = locator.parse(site.call_site)
+        assert "sample(" in locator.function_source(PACKAGE, ref)
 
-    def test_new_site_call_site_names_a_real_line(self) -> None:
+    def test_new_site_call_site_names_a_real_function(self) -> None:
         site = draw_site_by_id(SITE)
-        path, line = site.call_site.rsplit(":", 1)
-        lines = (ROOT / "src" / "decoy_engine" / path).read_text().splitlines()
-        assert 1 <= int(line) <= len(lines)
+        ref = locator.parse(site.call_site)
+        assert locator.body_token_count(PACKAGE, ref) >= (ref.ordinal or 1)
 
     def test_capabilities_row_describes_both_selections(self) -> None:
         from decoy_engine.execution.native._capabilities import capabilities_for

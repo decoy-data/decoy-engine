@@ -16,7 +16,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.shuffle",
         family="numpy_pcg64",
-        call_site="execution/_strategies/_shuffle.py:80",
+        call_site="execution/_strategies/_shuffle.py::ShuffleStrategyHandler.run",
         entropy_root="mask_key",
         seed_derivation=(
             "int.from_bytes(derive(ctx.mask_key, plan.namespace, "
@@ -48,7 +48,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.hash",
         family="source_keyed_hmac",
-        call_site="kernel/_scalar.py:75",
+        call_site="kernel/_scalar.py::hash_array",
         entropy_root="mask_key",
         seed_derivation="derive(seed, namespace, canonicalize_derive_source(value))",
         api_operation="determinism.derive -> HMAC-SHA256 digest hex",
@@ -64,7 +64,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.categorical_deterministic",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_categorical.py:211",
+        call_site="execution/_strategies/_categorical.py::CategoricalStrategyHandler.run#1",
         entropy_root="mask_key",
         seed_derivation=(
             "derive_index(ctx.mask_key, plan.namespace, _canonicalize_source(value), "
@@ -83,14 +83,14 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "plan category pool (execution/out_of_core/_mask_group_b.py:336)."
         ),
         mirror_call_sites=(
-            "execution/out_of_core/_mask_group_b.py:336",
-            "execution/out_of_core/_mask_group_b.py:346",
+            "execution/out_of_core/_mask_group_b.py::_categorical_config",
+            "execution/out_of_core/_mask_group_b.py::_categorical_config",
         ),
     ),
     DrawSite(
         draw_site_id="mask.categorical_nondeterministic",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_categorical.py:211",
+        call_site="execution/_strategies/_categorical.py::CategoricalStrategyHandler.run#2",
         entropy_root="mask_key",
         seed_derivation="derive_index(mask_key, namespace, encode_int(row_offset + i), pool_size=n)",
         api_operation="determinism.derive_index -> index in [0, pool_size)",
@@ -102,12 +102,12 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
         config_fingerprint_source="namespace_registry(namespace)+categories+weights",
         provider_version=_V6,
         notes="i is the handler-frame ordinal, not the source value; see the inventory doc.",
-        mirror_call_sites=("execution/native/_operator_step.py:335",),
+        mirror_call_sites=("execution/native/_operator_step.py::run_kernel_step",),
     ),
     DrawSite(
         draw_site_id="mask.fpe",
         family="source_keyed_hmac",
-        call_site="transforms/fpe.py:406",
+        call_site="transforms/fpe.py::_fpe_value",
         entropy_root="mask_key",
         seed_derivation="derive(mask_key, namespace, FF1_KEY_LABEL)  # per-column AES-256 FF1 key",
         api_operation="NIST SP 800-38G FF1 (10 rounds, AES-256 CBC-MAC PRF; see transforms/_ff1.py)",
@@ -124,14 +124,14 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "unmask always reports reversed_unverified for this strategy."
         ),
         mirror_call_sites=(
-            "execution/_strategies/_fpe.py:188",
-            "execution/out_of_core/_mask_group_b.py:153",
+            "execution/_strategies/_fpe.py::FpeStrategyHandler.run",
+            "execution/out_of_core/_mask_group_b.py::fpe_array",
         ),
     ),
     DrawSite(
         draw_site_id="mask.date_shift",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_date_shift.py:303",
+        call_site="execution/_strategies/_date_shift.py::_shift_rows",
         entropy_root="mask_key",
         seed_derivation=(
             "min_days + (int.from_bytes(derive(mask_key, namespace, value)[:8], "
@@ -150,12 +150,12 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "value) (execution/_strategies/_date_shift.py:303). The mask key is the "
             "admitted secret; there is no key-free path."
         ),
-        mirror_call_sites=("execution/_strategies/_date_shift.py:198",),
+        mirror_call_sites=("execution/_strategies/_date_shift.py::DateShiftStrategyHandler.run",),
     ),
     DrawSite(
         draw_site_id="mask.bucket_perturb",
         family="source_keyed_hmac",
-        call_site="transforms/bucket_perturb.py:119",
+        call_site="transforms/bucket_perturb.py::_perturb_date",
         entropy_root="mask_key",
         seed_derivation="derive(job_seed, namespace, _canonicalize_source(value_str))",
         api_operation="determinism.derive -> within-bucket offset",
@@ -170,7 +170,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.group_key",
         family="source_keyed_hmac",
-        call_site="transforms/group_key.py:171",
+        call_site="transforms/group_key.py::apply_group_key",
         entropy_root="mask_key",
         seed_derivation="derive(seed, namespace, source)  # per group-by source bytes",
         api_operation="determinism.derive -> 32-byte group key",
@@ -185,7 +185,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.code_set",
         family="source_keyed_hmac",
-        call_site="transforms/code_set.py:592",
+        call_site="transforms/code_set.py::_pick_from_seq",
         entropy_root="mask_key",
         seed_derivation=(
             "derive_index(hmac_key=derive(mask_key, namespace or 'code_set', _KEYED_SALT), "
@@ -204,7 +204,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.joint_mask_keyed_row",
         family="source_keyed_hmac",
-        call_site="reference_tables/_types.py:87",
+        call_site="reference_tables/_types.py::ReferenceTable.keyed_row",
         entropy_root="mask_key",
         seed_derivation=(
             "hmac_hex(hmac_key, key_value) % row_count, where hmac_key = "
@@ -223,13 +223,13 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "the consumer. Deterministic WITHIN a table version only (index shifts if "
             "row_count changes)."
         ),
-        mirror_call_sites=("transforms/joint_mask.py:223",),
+        mirror_call_sites=("transforms/joint_mask.py::validate_joint_mask_config",),
     ),
     # -- Masking: joint_mask seeded row streams (one per group) --------------
     DrawSite(
         draw_site_id="mask.joint_mask_null_fallback",
         family="numpy_pcg64",
-        call_site="transforms/joint_mask.py:376",
+        call_site="transforms/joint_mask.py::_pick_rows_mask",
         entropy_root="mask_key",
         seed_derivation=(
             "seed_bytes_to_int(derive(mask_key, namespace or 'joint_mask', "
@@ -256,7 +256,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.joint_mask_gen_row",
         family="numpy_pcg64",
-        call_site="transforms/joint_mask.py:415",
+        call_site="transforms/joint_mask.py::_pick_rows_gen",
         entropy_root="mask_key",
         seed_derivation=(
             "seed_bytes_to_int(derive(mask_key, namespace or 'joint_mask', "
@@ -280,7 +280,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.text_mask_date_shift",
         family="source_keyed_hmac",
-        call_site="transforms/text_mask.py:308",
+        call_site="transforms/text_mask.py::_span_key",
         entropy_root="mask_key",
         seed_derivation=(
             'min_days + (int.from_bytes(span_key[:8], "big") % range_size); '
@@ -300,7 +300,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.text_mask_faker",
         family="faker_seed_instance",
-        call_site="transforms/text_mask.py:262",
+        call_site="transforms/text_mask.py::_mask_faker",
         entropy_root="mask_key",
         seed_derivation='seed = int.from_bytes(span_key[:4], "big")  # span_key = HMAC(mask_key, text)',
         api_operation="Faker().seed_instance(seed) then provider method()",
@@ -320,7 +320,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.grouped_series_monotone_walk",
         family="per_group_stream",
-        call_site="transforms/grouped_series.py:274",
+        call_site="transforms/grouped_series.py::_apply_monotone_walk",
         entropy_root="mask_key",
         seed_derivation=(
             'int.from_bytes(derive(seed, namespace, str(g).encode("utf-8", '
@@ -344,7 +344,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.windowed_date",
         family="numpy_pcg64",
-        call_site="transforms/windowed_date.py:209",
+        call_site="transforms/windowed_date.py::apply_windowed_date",
         entropy_root="mask_key",
         seed_derivation='int.from_bytes(derive(seed, namespace, i.to_bytes(8, "big"))[:8], "big")',
         api_operation="numpy.random.default_rng(row_seed).integers, fresh Generator per row",
@@ -364,7 +364,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "derive_index seed."
         ),
         uncertain=True,
-        mirror_call_sites=("execution/out_of_core/_mask_group_c.py:43",),
+        mirror_call_sites=("execution/out_of_core/_mask_group_c.py::group_c_array",),
     ),
 )
 
@@ -372,7 +372,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
 MASK_FORMULA_DRAW_SITE = DrawSite(
     draw_site_id="mask.formula",
     family="python_mt19937",
-    call_site="transforms/formula.py:55",
+    call_site="transforms/formula.py::FormulaStrategy.apply",
     entropy_root="none",
     seed_derivation=(
         'formula_seed = int(sha256(f"{col_name}|{expr}").hexdigest()[:16], 16); '
