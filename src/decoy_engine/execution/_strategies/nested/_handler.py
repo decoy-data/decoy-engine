@@ -321,6 +321,7 @@ class NestedStrategyHandler:
         # valid column where the target matched NOTHING -- a misconfiguration that
         # must fail closed rather than pass every cell through raw (TEST-3 P1-2).
         saw_parseable = False
+        saw_matched_fault = False
         # Per-position: (parsed_object, list[jsonpath_match]). Position
         # is the row's 0-indexed offset in the column, not its label.
         per_position_state: dict[int, tuple[Any, list]] = {}
@@ -371,6 +372,7 @@ class NestedStrategyHandler:
                 cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
             except StrictJsonError as exc:
                 record_fault(ctx, warnings, column, pos, exc.token)
+                saw_matched_fault = True  # the target did match; the row error already fails it
                 continue
             per_position_state[pos] = (parsed, ordered_matches)
             leaf_values.extend(cell_leaves)
@@ -385,7 +387,7 @@ class NestedStrategyHandler:
             # SOME cell matched) never reaches here -- `leaf_values` is non-empty.
             # An all-null or all-malformed column (saw_parseable False) is handled
             # by the null passthrough / the malformed-cell RowError above.
-            if saw_parseable:
+            if saw_parseable and not saw_matched_fault:
                 raise StrategyError(
                     code=reasons.runtime.NESTED_TARGET_MATCHED_NOTHING,
                     strategy="nested",
