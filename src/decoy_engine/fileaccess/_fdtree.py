@@ -24,7 +24,6 @@ if sys.platform != "win32":
     import fcntl
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_MARKER_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 # Longer than any magic plus token plus newline: a read of this size that fills it is not a marker.
 _MARKER_MAX = 128
 
@@ -71,7 +70,10 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
     mode exactly 0600, and content exactly `magic`, a token matching `token_pattern`, and one
     newline. Any `OSError` is None; nothing is raised and nothing is changed."""
     try:
-        fd = os.open(name, _MARKER_FLAGS, dir_fd=dir_fd)
+        # Literal read-only flags at each open, so the private-file sentry can read them.
+        fd = os.open(
+            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd
+        )
     except OSError:
         return None
     try:
@@ -90,7 +92,11 @@ def _rmtree_fd(dir_fd: int) -> None:
     """Remove everything beneath `dir_fd` without following any link."""
     for entry in list(os.scandir(dir_fd)):
         if entry.is_dir(follow_symlinks=False):
-            child = os.open(entry.name, _DIR_FLAGS, dir_fd=dir_fd)
+            child = os.open(
+                entry.name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=dir_fd,
+            )
             try:
                 _rmtree_fd(child)
             finally:

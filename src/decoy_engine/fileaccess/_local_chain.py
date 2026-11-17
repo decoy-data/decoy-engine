@@ -20,9 +20,9 @@ from decoy_engine.fileaccess._fdtree import _close
 from decoy_engine.fileaccess._output import (
     STAGE_PREFIX,
     _call,
+    _mark_publication_stage,
     make_parent_dir_at,
     make_stage_dir_at,
-    _mark_publication_stage,
 )
 
 
