@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from decoy_engine.config._post_scan import post_scan_integrity_requested
+from decoy_engine.config import post_scan_integrity_requested
 from decoy_engine.detection.ner import NerSurface, resolve_column_ner, resolve_ner_model
 
 __all__ = ["run_ner_models"]
