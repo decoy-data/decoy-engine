@@ -65,21 +65,49 @@ def record_fault(
 
 
 def _warning(fault: str, column: str, pos: int) -> QualityWarning:
-    """The warning beside the row error; each code is a registry symbol, never a forwarded value."""
+    """The warning beside the row error; each branch names its registry symbol."""
     detail = {"row_pos": str(pos)}
     if fault == "duplicate_key":
-        code = reasons.warning.NESTED_CELL_DUPLICATE_KEY
-    elif fault == "oversized":
-        code = reasons.warning.NESTED_CELL_OVERSIZED
-    elif fault == "too_deep":
-        code = reasons.warning.NESTED_CELL_TOO_DEEP
-    elif fault == "out_of_range":
-        code = reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE
-    elif fault == "child_non_finite":
-        code = reasons.warning.NESTED_CHILD_NON_FINITE
-    else:
-        code = reasons.warning.NESTED_CELL_JSON_PARSE_ERROR
-    return QualityWarning(code=code, provider="nested", column=column, detail=detail)
+        return QualityWarning(
+            code=reasons.warning.NESTED_CELL_DUPLICATE_KEY,
+            provider="nested",
+            column=column,
+            detail=detail,
+        )
+    if fault == "oversized":
+        return QualityWarning(
+            code=reasons.warning.NESTED_CELL_OVERSIZED,
+            provider="nested",
+            column=column,
+            detail=detail,
+        )
+    if fault == "too_deep":
+        return QualityWarning(
+            code=reasons.warning.NESTED_CELL_TOO_DEEP,
+            provider="nested",
+            column=column,
+            detail=detail,
+        )
+    if fault == "out_of_range":
+        return QualityWarning(
+            code=reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE,
+            provider="nested",
+            column=column,
+            detail=detail,
+        )
+    if fault == "child_non_finite":
+        return QualityWarning(
+            code=reasons.warning.NESTED_CHILD_NON_FINITE,
+            provider="nested",
+            column=column,
+            detail=detail,
+        )
+    return QualityWarning(
+        code=reasons.warning.NESTED_CELL_JSON_PARSE_ERROR,
+        provider="nested",
+        column=column,
+        detail=detail,
+    )
 
 
 def leaf_frame(name: str, leaves: list[Any]) -> pd.DataFrame:
