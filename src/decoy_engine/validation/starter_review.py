@@ -224,7 +224,6 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
     notes: dict[tuple[str, str], str] = dict(starter.notes)
     tables = {t["name"]: t for t in config["tables"]}
     keys = declared_key_namespaces(config.get("relationships") or ())
-    catalog = _catalog()
     seen: set[tuple[str, str]] = set()
     dropped: dict[str, set[str]] = {}
     for decision in decisions:
