@@ -179,12 +179,38 @@ jobs:
           path: decoy-engine-native/dist/*.whl
           retention-days: 14
 
+  # native-changes: whether this pull request touches the native companion (the paths and
+  # the match rule live in scripts/dev/native_scope.py). Hosted macOS runners are few, so the
+  # macOS legs wait for one only when the companion changed. A schedule or dispatch run, and any
+  # git error, say `true`. Full history, so the base commit and the merge base are present.
+  native-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.scope.outputs.native }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether the native companion changed
+        id: scope
+        run: |
+          python3 scripts/dev/native_scope.py changes \
+            --event "${{ github.event_name }}" \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+
   # companion-wheel-macos: the macOS arm64 row of the approved target matrix (Task
   # 3.1). `macos-15` is the current pinned Apple-Silicon runner label (`macos-14` is
   # deprecated); `target: aarch64-apple-darwin` selects the arm64 architecture
   # explicitly rather than relying on the runner's default. Same shared
-  # parity_smoke.py as every other target.
+  # parity_smoke.py as every other target. Runs only when native-changes says the companion
+  # changed; companion-wheel-macos-ok is the merge check, not these legs.
   companion-wheel-macos:
+    needs: native-changes
+    if: needs.native-changes.outputs.native == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
@@ -224,6 +250,25 @@ jobs:
           name: companion-wheel-macos-${{ matrix.python-version }}
           path: decoy-engine-native/dist/*.whl
           retention-days: 14
+
+  # companion-wheel-macos-ok: the one required check for the macOS legs. A skipped matrix job
+  # reports no per-leg check, so the legs are not required themselves. The decision (native
+  # false and legs skipped, or native true and legs green) is scripts/dev/native_scope.py judge;
+  # anything else is red, including a native-changes that wrote no output.
+  companion-wheel-macos-ok:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [native-changes, companion-wheel-macos]
+    if: always()
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/dev
+          persist-credentials: false
+      - name: Judge the macOS legs against the path scope
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: printf '%s' "$NEEDS" | python3 scripts/dev/native_scope.py judge
 
   # companion-rust-lint: format + clippy gate on the Rust crate so the first
   # real kernel (Task 2.2) cannot merge without Rust lint enforcement. Pins the

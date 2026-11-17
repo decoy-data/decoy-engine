@@ -356,7 +356,7 @@ def test_gate_verdict_posts_status_on_dispatch_only() -> None:
     assert "needs.gate.result == 'success'" in env["STATE"]
     assert env["STATE"].count("'success'") == 2 and "'failure'" in env["STATE"]
     # A status context is satisfied only by a dispatch, unlike the check run of a skipped job.
-    assert 'repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA' in step["run"]
+    assert "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" in step["run"]
     contexts = [e["context"] for e in _registry()["merge_status"]]
     assert contexts == ["engine-gate/verdict"]
     assert env["CONTEXT"] == contexts[0]

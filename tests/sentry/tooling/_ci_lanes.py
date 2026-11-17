@@ -295,6 +295,8 @@ def registry_findings(tree: Tree) -> list[str]:
         {
             "merge": {"workflow": str, "jobs": list},
             "merge_exempt": {"workflow": str, "job": str, "reason": str},
+            "aggregator": {"workflow": str, "job": str, "judges": list, "reason": str},
+            "merge_status": {"context": str, "reason": str},
             "dedicated_marker": {"name": str, "reason": str},
         },
     )
@@ -302,6 +304,10 @@ def registry_findings(tree: Tree) -> list[str]:
         return out  # the rules below assume well-formed entries
     merge = {e["workflow"]: list(e["jobs"]) for e in tree.required.get("merge", [])}
     exempt = {(e["workflow"], e["job"]) for e in tree.required.get("merge_exempt", [])}
+    aggregators = {(e["workflow"], e["job"]): e for e in tree.required.get("aggregator", [])}
+    for wf, key in aggregators:
+        if key not in merge.get(wf, []):
+            out.append(f"R2 {wf}:{key}: aggregator is not a merge job")
     for wf, jobs in merge.items():
         doc = tree.workflows.get(wf)
         if doc is None:
@@ -310,7 +316,9 @@ def registry_findings(tree: Tree) -> list[str]:
         if "pull_request" not in workflow_events(doc):
             out.append(f"R2 {wf}: merge workflow has no pull_request trigger")
         for key in jobs:
-            out += _merge_job_findings(wf, key, doc["jobs"].get(key), jobs)
+            out += _merge_job_findings(
+                wf, key, doc["jobs"].get(key), jobs, aggregators.get((wf, key)), exempt
+            )
     out += _context_findings(tree.workflows, merge)
     for wf, doc in tree.workflows.items():
         events = workflow_events(doc)
@@ -355,18 +363,42 @@ def _context_findings(
 
 
 def _merge_job_findings(
-    wf: str, key: str, job: dict[str, Any] | None, tier: list[str]
+    wf: str,
+    key: str,
+    job: dict[str, Any] | None,
+    tier: list[str],
+    aggregator: dict[str, Any] | None = None,
+    exempt: set[tuple[str, str]] | frozenset[tuple[str, str]] = frozenset(),
 ) -> list[str]:
+    """R2 for one merge job. Only a registered aggregator may (and must) carry `if: always()` and
+    may need the exempt jobs it judges; it must run the judge script on `toJSON(needs)`."""
     if job is None:
         return [f"R2 {wf}:{key}: merge job does not exist"]
     needs = job.get("needs", [])
     needs = [needs] if isinstance(needs, str) else needs
+    judged = set(aggregator["judges"]) if aggregator else set()
+    if aggregator:
+        if_ok = str(job.get("if", "")).strip() == "always()"
+    else:
+        if_ok = "if" not in job
     checks = {
-        "has an `if` (a skipped job reports success)": "if" in job,
-        "needs a job outside the merge tier": bool(set(needs) - set(tier)),
+        "has an `if` (a skipped job reports success)": not if_ok,
+        "needs a job outside the merge tier": bool(set(needs) - set(tier) - judged),
         "is self-hosted": "self-hosted" in str(job.get("runs-on", "")),
     }
-    return [f"R2 {wf}:{key}: merge job {why}" for why, bad in checks.items() if bad]
+    out = [f"R2 {wf}:{key}: merge job {why}" for why, bad in checks.items() if bad]
+    for name in sorted(judged):
+        if (wf, name) not in exempt:
+            out.append(f"R2 {wf}:{key}: judged job {name!r} is not in merge_exempt")
+        if name not in needs:
+            out.append(f"R2 {wf}:{key}: needs no judged job {name!r}")
+    if aggregator and not any(
+        "scripts/dev/native_scope.py judge" in str(step.get("run", ""))
+        and "toJSON(needs)" in str(step)
+        for step in job.get("steps", [])
+    ):
+        out.append(f"R2 {wf}:{key}: no step runs native_scope.py judge on toJSON(needs)")
+    return out
 
 
 def trigger_findings(tree: Tree) -> list[str]:
