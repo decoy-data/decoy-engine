@@ -19,6 +19,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from decoy_engine.reasons import evidence as ev
+
 from ._boundary import SignedEvidence
 from ._context import Purpose, VerificationContext
 from ._errors import SignedEvidenceError
@@ -41,9 +43,9 @@ class ReleasePermit:
 
     def __init__(self, *args: Any, **fields: Any) -> None:
         if not args or args[0] is not _PERMIT_TOKEN or len(args) != 1:
-            raise SignedEvidenceError("PERMIT_CONSTRUCTION_FORBIDDEN")
+            raise SignedEvidenceError(ev.PERMIT_CONSTRUCTION_FORBIDDEN)
         if set(fields) != {f.name for f in dataclasses.fields(self)}:
-            raise SignedEvidenceError("PERMIT_FIELDS_INVALID")
+            raise SignedEvidenceError(ev.PERMIT_FIELDS_INVALID)
         for name, value in fields.items():
             object.__setattr__(self, name, value)
 

@@ -1,35 +1,50 @@
 """Artifact binding: open every delivered file safely and hash the bytes actually read.
 
-Pattern: openat-style traversal (``dir_fd`` + ``O_NOFOLLOW`` per component, as in Linux
-``openat2(RESOLVE_NO_SYMLINKS)`` and CERT FIO45-C) so a path inside the root cannot be redirected
-by a symlink or a swapped directory; the size and the hash both come from the one open descriptor,
-never from a separate ``stat`` on the pathname. A FIFO or device is opened non-blocking and refused
-on ``fstat`` before any read. Reads stream in bounded chunks.
+Pattern: rooted no-follow reads under a held directory descriptor (``decoy_engine.fileaccess``:
+``openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)`` or its descriptor walk, as in ``cap-std`` and
+CERT FIO45-C), so a path inside the tree cannot be redirected by a symlink or a swapped directory.
+The size and the hash both come from the one open descriptor, never from a separate ``stat`` on the
+pathname. A FIFO or device is refused on ``fstat`` before any read. Reads stream in bounded chunks.
 
-Extra files under the root are reported as unbound; they cannot be part of a verified release.
+A file that changes while it is hashed is caught two ways (pattern: git's racy-index check): its
+size, ``mtime`` and ``ctime`` must be equal before and after the read, and the same relative path
+opened again must be the same inode. Either difference is ``ARTIFACT_CHANGED_DURING_READ``. A
+filesystem with a coarse ``ctime`` can miss a same-size write inside one tick (named limit).
+
+Enumeration fails closed: any error while listing a directory is ``ARTIFACT_ENUMERATION_FAILED``
+and the artifact status is never ``MATCH``. Extra files under the tree are reported as unbound; they
+cannot be part of a verified release.
+
+Where the tree comes from is the caller's choice. ``open_path_tree`` opens a caller-named directory
+(the path form); a ``SignedBundle`` hands over its ``artifacts`` child. Both give this module a
+zero-argument opener, so one binding routine serves both.
 """
 
 from __future__ import annotations
 
-import contextlib
-import errno
 import hashlib
 import os
-import stat
-from collections.abc import Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+
+from decoy_engine import fileaccess
+from decoy_engine.fileaccess import DirHandle, FileAccessDenied, FileHandle
+from decoy_engine.reasons import evidence as ev
 
 from ._context import ExpectedArtifact
 from ._errors import SignedEvidenceError
 from ._result import ArtifactResult, ArtifactStatus
-from ._statement import EvidenceStatementV1, check_relative_path
+from ._statement import EvidenceStatementV1
 
 _CHUNK = 1024 * 1024
 MAX_TREE_ENTRIES = 200_000
+MAX_TREE_DEPTH = 32
 MAX_REPORTED_UNBOUND = 100
 
-_POSIX = os.name == "posix" and hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd
+_POSIX = os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+
+#: Opens the artifact tree. Raises ``FileAccessDenied`` (with its ``kind``) when it cannot.
+TreeOpener = Callable[[], DirHandle]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,127 +63,158 @@ _PRECEDENCE = (
 )
 
 
-@contextlib.contextmanager
-def _open_regular(root_fd: int, rel_path: str) -> Iterator[tuple[int, os.stat_result]]:
-    """Open ``rel_path`` under ``root_fd`` without following symlinks; yield ``(fd, fstat)``.
+def require_supported_platform() -> None:
+    """The one temporary V1 rule: the signed filesystem routes are POSIX only.
 
-    Raises ``SignedEvidenceError`` (code = reason, status = the artifact status) for a missing, redirected, non-regular or unreadable file. All stat data
-    comes from the descriptor that is then read, never from the pathname.
+    Raised before any opener runs, with no path and no platform value. The Windows chain replaces
+    this refusal later.
     """
-    parts = rel_path.split("/")
-    with contextlib.ExitStack() as stack:
-        cur = root_fd
-        for comp in parts[:-1]:
-            try:
-                cur = os.open(
-                    comp, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=cur
-                )
-            except OSError as exc:
-                raise _refusal_for(exc, directory=True) from None
-            stack.callback(os.close, cur)
-        try:
-            fd = os.open(
-                parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=cur
-            )
-        except OSError as exc:
-            raise _refusal_for(exc, directory=False) from None
-        stack.callback(os.close, fd)
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            raise _refusal(ArtifactStatus.UNAVAILABLE, "ARTIFACT_NOT_REGULAR_FILE")
-        yield fd, st
+    if not _POSIX:
+        raise SignedEvidenceError(ev.ARTIFACT_PLATFORM_UNSUPPORTED)
 
 
-def _refusal(status: ArtifactStatus, reason: str) -> SignedEvidenceError:
-    return SignedEvidenceError(reason, status=status.value)
+def _artifact_refusal(kind: str | None) -> tuple[ArtifactStatus, str]:
+    """The one table from a no-follow denial kind to an artifact status and reason token."""
+    if kind == "absent":
+        return ArtifactStatus.MISSING, ev.WIRE_TOKEN[ev.ARTIFACT_MISSING]
+    if kind == "link":
+        return ArtifactStatus.UNAVAILABLE, ev.WIRE_TOKEN[ev.ARTIFACT_PATH_UNSAFE]
+    if kind == "not_regular":
+        return ArtifactStatus.UNAVAILABLE, ev.WIRE_TOKEN[ev.ARTIFACT_NOT_REGULAR_FILE]
+    return ArtifactStatus.UNAVAILABLE, ev.WIRE_TOKEN[ev.ARTIFACT_UNREADABLE]
 
 
-def _refusal_for(exc: OSError, *, directory: bool) -> SignedEvidenceError:
-    if exc.errno == errno.ENOENT:
-        return _refusal(ArtifactStatus.MISSING, "ARTIFACT_MISSING")
-    if exc.errno == errno.ELOOP or (directory and exc.errno == errno.ENOTDIR):
-        return _refusal(ArtifactStatus.UNAVAILABLE, "ARTIFACT_PATH_UNSAFE")
-    return _refusal(ArtifactStatus.UNAVAILABLE, "ARTIFACT_UNREADABLE")
+def open_path_tree(root: str | os.PathLike[str]) -> DirHandle:
+    """Open the caller-named artifact root once (the path form). Ambient policy only."""
+    return fileaccess.open_ambient_tree(root)
+
+
+def _open_tree(opener: TreeOpener) -> tuple[DirHandle | None, str | None]:
+    """The held tree, or the denial kind. The kind is read in the handler and used outside it."""
+    kind: str | None = None
+    try:
+        return opener(), None
+    except FileAccessDenied as denial:
+        kind = denial.kind or "unreadable"
+    except OSError:
+        kind = "unreadable"
+    return None, kind
+
+
+def _open_file(tree: DirHandle, rel: str) -> tuple[FileHandle | None, str | None]:
+    kind: str | None = None
+    try:
+        return tree.open_file(rel), None
+    except FileAccessDenied as denial:
+        kind = denial.kind or "unreadable"
+    return None, kind
+
+
+def _read_chunk(fd: int) -> bytes:
+    """One bounded read. A named function so a test can write to the file between chunks."""
+    return os.read(fd, _CHUNK)
+
+
+def _before_reopen() -> None:
+    """Runs after the second ``fstat`` and before the re-open. A test seam; does nothing."""
 
 
 def _hash_artifact(
-    root_fd: int, rel_path: str, size: int, digest: str
+    tree: DirHandle, rel_path: str, size: int, digest: str
 ) -> tuple[ArtifactStatus, str | None]:
-    try:
-        with _open_regular(root_fd, rel_path) as (fd, st):
-            if st.st_size != size:
-                return ArtifactStatus.MISMATCH, "ARTIFACT_LENGTH_MISMATCH"
-            h = hashlib.sha256()
-            read = 0
-            while chunk := os.read(fd, _CHUNK):
+    handle, kind = _open_file(tree, rel_path)
+    if handle is None:
+        return _artifact_refusal(kind)
+    changed = False
+    unreadable = False
+    with handle as held:
+        fd = held.fileno()
+        before = os.fstat(fd)
+        if before.st_size != size:
+            return ArtifactStatus.MISMATCH, "ARTIFACT_LENGTH_MISMATCH"
+        h = hashlib.sha256()
+        read = 0
+        try:
+            while chunk := _read_chunk(fd):
                 read += len(chunk)
                 if read > size:
                     return ArtifactStatus.MISMATCH, "ARTIFACT_LENGTH_MISMATCH"
                 h.update(chunk)
-            if read != size:
-                return ArtifactStatus.MISMATCH, "ARTIFACT_CHANGED_DURING_READ"
-            if "sha256:" + h.hexdigest() != digest:
-                return ArtifactStatus.MISMATCH, "ARTIFACT_DIGEST_MISMATCH"
-            return ArtifactStatus.MATCH, None
-    except SignedEvidenceError as refusal:
-        return ArtifactStatus(refusal.status), refusal.code
+            after = os.fstat(fd)
+        except OSError:
+            unreadable = True
+        if not unreadable:
+            changed = (
+                read != size
+                or after.st_size != before.st_size
+                or after.st_mtime_ns != before.st_mtime_ns
+                or after.st_ctime_ns != before.st_ctime_ns
+            )
+            if not changed:
+                _before_reopen()
+                again, _ = _open_file(tree, rel_path)
+                if again is None:
+                    changed = True
+                else:
+                    with again as second:
+                        changed = second.identity() != held.identity()
+    if unreadable:
+        return ArtifactStatus.UNAVAILABLE, ev.WIRE_TOKEN[ev.ARTIFACT_UNREADABLE]
+    if changed:
+        return ArtifactStatus.MISMATCH, ev.WIRE_TOKEN[ev.ARTIFACT_CHANGED_DURING_READ]
+    if "sha256:" + h.hexdigest() != digest:
+        return ArtifactStatus.MISMATCH, "ARTIFACT_DIGEST_MISMATCH"
+    return ArtifactStatus.MATCH, None
 
 
-def hash_file_under(
-    root: str | os.PathLike[str], rel_path: str, *, make_readonly: bool = False
-) -> tuple[int, str]:
-    """``(size, "sha256:<hex>")`` of one file under ``root``, read through the safe opener.
+@dataclass(slots=True)
+class _Walk:
+    found: list[str]
+    seen: int = 0
+    truncated: bool = False
+    failed: bool = False
 
-    Used when sealing an artifact set before it is described in a statement. The same traversal
-    rules apply as when a verifier later reads it, so a file the seal accepts is a file the
-    verifier can bind. ``make_readonly`` additionally drops all write bits on the very descriptor
-    that was hashed, so sealing cannot be redirected to another file by a swapped path.
+
+def _scan(tree: DirHandle, prefix: str, depth: int, bound: set[str], walk: _Walk) -> None:
+    """Every non-directory entry (symlinks, FIFOs and devices included) not named by the statement.
+
+    Directories are entered through ``open_dir`` on the held handle, so no link is followed. A
+    listing or open error sets ``failed``; a limit sets ``truncated``.
     """
-    if not _POSIX:
-        raise SignedEvidenceError("ARTIFACT_PLATFORM_UNSUPPORTED")
-    check_relative_path(rel_path)
+    names: list[tuple[str, bool]] = []
     try:
-        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    except OSError as exc:
-        raise SignedEvidenceError(_refusal_for(exc, directory=True).code) from None
-    try:
-        with _open_regular(root_fd, rel_path) as (fd, st):
-            h = hashlib.sha256()
-            read = 0
-            while chunk := os.read(fd, _CHUNK):
-                read += len(chunk)
-                h.update(chunk)
-            if read != st.st_size:
-                raise SignedEvidenceError("ARTIFACT_CHANGED_DURING_READ")
-            if make_readonly:
-                os.fchmod(fd, 0o400)
-            return read, "sha256:" + h.hexdigest()
-    except SignedEvidenceError as refusal:
-        raise SignedEvidenceError(refusal.code) from None
-    finally:
-        os.close(root_fd)
-
-
-def _unbound_entries(root: Path, bound: set[str]) -> tuple[list[str], bool]:
-    """Every non-directory entry (symlinks, FIFOs and devices included) not named by the statement."""
-    found: list[str] = []
-    seen = 0
-    truncated = False
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        rel_dir = os.path.relpath(dirpath, root)
-        prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
-        entries = list(filenames)
-        # os.walk lists a symlink-to-directory under dirnames and does not descend into it.
-        entries += [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]
-        for name in entries:
-            seen += 1
-            if seen > MAX_TREE_ENTRIES:
-                truncated = True
-                return found, truncated
-            rel = prefix + name
+        for entry in tree.entries():
+            walk.seen += 1
+            if walk.seen > MAX_TREE_ENTRIES:
+                walk.truncated = True
+                return
+            names.append((entry.name, entry.is_dir(follow_symlinks=False)))
+    except OSError:
+        walk.failed = True
+        return
+    for name, is_dir in names:
+        rel = prefix + name
+        if not is_dir:
             if rel not in bound:
-                found.append(rel)
-    return found, truncated
+                walk.found.append(rel)
+            continue
+        if depth >= MAX_TREE_DEPTH:
+            walk.truncated = True
+            continue
+        child, _ = _open_tree(lambda n=name: tree.open_dir(n))  # type: ignore[misc]
+        if child is None:
+            walk.failed = True
+            continue
+        with child:
+            _scan(child, rel + "/", depth + 1, bound, walk)
+        if walk.truncated:
+            return
+
+
+def _unbound_entries(tree: DirHandle, bound: set[str]) -> tuple[list[str], bool, bool]:
+    walk = _Walk(found=[])
+    _scan(tree, "", 0, bound, walk)
+    return sorted(walk.found), walk.truncated, walk.failed
 
 
 def bind_artifacts(
@@ -176,7 +222,7 @@ def bind_artifacts(
     statement: EvidenceStatementV1,
     expected: tuple[ExpectedArtifact, ...],
     empty_output_allowed: bool,
-    root: str | os.PathLike[str] | None,
+    open_tree: TreeOpener | None,
 ) -> ArtifactEvaluation:
     reasons: set[str] = set()
     results: list[ArtifactResult] = []
@@ -214,35 +260,28 @@ def bind_artifacts(
     if rejected:
         for aid in comparable:
             note(aid, ArtifactStatus.WITHHELD, None)
-        if root is not None and Path(root).is_dir():
-            extras, _ = _unbound_entries(Path(root), set())
+        held = _open_tree(open_tree)[0] if open_tree is not None else None
+        if held is not None:
+            with held:
+                extras, _, _ = _unbound_entries(held, set())
             if extras:
                 unbound = extras
                 reasons.add("ARTIFACT_PRESENT_FOR_REJECTED")
                 status_seen.add(ArtifactStatus.UNEXPECTED)
-    elif root is None:
+    elif open_tree is None:
         for aid in comparable:
             note(aid, ArtifactStatus.NOT_EVALUATED, "ARTIFACTS_NOT_EVALUATED")
         # Even an empty inventory was not checked against anything on disk.
         status_seen.add(ArtifactStatus.NOT_EVALUATED)
         reasons.add("ARTIFACTS_NOT_EVALUATED")
-    elif not _POSIX:
-        for aid in comparable:
-            note(aid, ArtifactStatus.UNAVAILABLE, "ARTIFACT_PLATFORM_UNSUPPORTED")
     else:
-        root_path = Path(root)
-        try:
-            root_fd = os.open(root_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        except OSError as exc:
-            missing = exc.errno == errno.ENOENT
+        tree, kind = _open_tree(open_tree)
+        if tree is None:
+            status, why = _artifact_refusal(kind)
             for aid in comparable:
-                note(
-                    aid,
-                    ArtifactStatus.MISSING if missing else ArtifactStatus.UNAVAILABLE,
-                    "ARTIFACT_MISSING" if missing else "ARTIFACT_ROOT_UNAVAILABLE",
-                )
+                note(aid, status, why)
         else:
-            try:
+            with tree:
                 bound_paths: set[str] = set()
                 for aid in comparable:
                     entry = by_stmt[aid]
@@ -251,15 +290,16 @@ def bind_artifacts(
                         # The schema forbids this for a published artifact; refuse rather than skip.
                         note(aid, ArtifactStatus.UNAVAILABLE, "ARTIFACT_INVENTORY_INVALID")
                         continue
-                    st, why = _hash_artifact(root_fd, entry.path, entry.bytes, entry.sha256)
-                    note(aid, st, why)
-                extras, truncated = _unbound_entries(root_path, bound_paths)
-                if extras or truncated:
-                    unbound = extras[:MAX_REPORTED_UNBOUND]
-                    reasons.add("ARTIFACT_UNBOUND_FILE" if extras else "ARTIFACT_TREE_TOO_LARGE")
-                    status_seen.add(ArtifactStatus.UNEXPECTED)
-            finally:
-                os.close(root_fd)
+                    st, why_hash = _hash_artifact(tree, entry.path, entry.bytes, entry.sha256)
+                    note(aid, st, why_hash)
+                extras, truncated, failed = _unbound_entries(tree, bound_paths)
+            if failed:
+                reasons.add(ev.WIRE_TOKEN[ev.ARTIFACT_ENUMERATION_FAILED])
+                status_seen.add(ArtifactStatus.UNAVAILABLE)
+            if extras or truncated:
+                unbound = extras[:MAX_REPORTED_UNBOUND]
+                reasons.add("ARTIFACT_UNBOUND_FILE" if extras else "ARTIFACT_TREE_TOO_LARGE")
+                status_seen.add(ArtifactStatus.UNEXPECTED)
 
     for candidate in _PRECEDENCE:
         if candidate in status_seen:

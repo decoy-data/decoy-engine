@@ -23,9 +23,11 @@ from cryptography.hazmat.primitives.asymmetric.utils import (
 )
 from joserfc.jwk import ECKey
 
+from decoy_engine.reasons import evidence as ev
+
 from ._errors import SignedEvidenceError
 
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _P256_ORDER = int("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", 16)
 
 
@@ -40,7 +42,7 @@ class SigningIdentity:
     def __post_init__(self) -> None:
         for v in (self.signer, self.kid, self.key_version):
             if not isinstance(v, str) or not _ID.fullmatch(v):
-                raise SignedEvidenceError("SIGNER_IDENTITY_INVALID")
+                raise SignedEvidenceError(ev.SIGNER_IDENTITY_INVALID)
 
 
 @runtime_checkable
@@ -59,14 +61,18 @@ class ResolvedSigner(Protocol):
 
 def der_to_p1363(der: bytes) -> bytes:
     """Convert a DER ECDSA-Sig-Value to the 64-byte JOSE form, rejecting anything not canonical."""
+    r = s = 0
+    bad = False
     try:
         r, s = decode_dss_signature(bytes(der))
     except ValueError:
-        raise SignedEvidenceError("SIGNER_BAD_SIGNATURE") from None
+        bad = True
+    if bad:
+        raise SignedEvidenceError(ev.SIGNER_BAD_SIGNATURE)
     if not (0 < r < _P256_ORDER and 0 < s < _P256_ORDER):
-        raise SignedEvidenceError("SIGNER_BAD_SIGNATURE")
+        raise SignedEvidenceError(ev.SIGNER_BAD_SIGNATURE)
     if encode_dss_signature(r, s) != bytes(der):
-        raise SignedEvidenceError("SIGNER_BAD_SIGNATURE")  # non-minimal / padded DER
+        raise SignedEvidenceError(ev.SIGNER_BAD_SIGNATURE)  # non-minimal / padded DER
     return r.to_bytes(32, "big") + s.to_bytes(32, "big")
 
 
@@ -85,7 +91,7 @@ class LocalEs256Signer:
         if not isinstance(private_key, ec.EllipticCurvePrivateKey) or not isinstance(
             private_key.curve, ec.SECP256R1
         ):
-            raise SignedEvidenceError("SIGNER_KEY_INVALID")
+            raise SignedEvidenceError(ev.SIGNER_KEY_INVALID)
         self._key = private_key
         self._identity = identity
 

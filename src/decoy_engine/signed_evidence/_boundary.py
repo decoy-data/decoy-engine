@@ -24,7 +24,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from decoy_engine.reasons import evidence as ev
+
 from . import _jws
+from ._bundle import EVIDENCE_FILENAME, SIGNATURE_FILENAME
 from ._canonical import canonical_bytes
 from ._context import VerificationContext
 from ._envelope import ALG, CTY, TYP, parse_signature_object
@@ -33,9 +36,6 @@ from ._result import SchemaStatus, SignatureStatus, TrustStatus
 from ._signer import ResolvedSigner
 from ._statement import EvidenceStatementV1, build_statement_bytes, parse_statement_ex
 from ._verifier import verify_signed_evidence
-
-EVIDENCE_FILENAME = "evidence.json"
-SIGNATURE_FILENAME = "evidence.sig.json"
 
 _CARRIER_TOKEN = object()
 
@@ -56,12 +56,12 @@ class SignedEvidence:
 
     def __init__(self, *args: Any, **fields: Any) -> None:
         if not args or args[0] is not _CARRIER_TOKEN or len(args) != 1:
-            raise SignedEvidenceError("CARRIER_CONSTRUCTION_FORBIDDEN")
+            raise SignedEvidenceError(ev.CARRIER_CONSTRUCTION_FORBIDDEN)
         names = {f.name for f in dataclasses.fields(self)}
         if set(fields) != names:
-            raise SignedEvidenceError("CARRIER_FIELDS_INVALID")
+            raise SignedEvidenceError(ev.CARRIER_FIELDS_INVALID)
         if not (isinstance(fields["statement"], bytes) and isinstance(fields["signature"], bytes)):
-            raise SignedEvidenceError("CARRIER_FIELDS_INVALID")
+            raise SignedEvidenceError(ev.CARRIER_FIELDS_INVALID)
         for name, value in fields.items():
             object.__setattr__(self, name, value)
 
@@ -125,7 +125,7 @@ def sign_evidence(draft: Mapping[str, Any], *, signer: ResolvedSigner) -> Signed
     parsed, _ = parse_statement_ex(statement)
     identity = signer.identity  # resolved exactly once: an alias cannot rotate mid-flight
     if parsed.signer != identity.signer:
-        raise SignedEvidenceError("SIGNER_IDENTITY_MISMATCH")
+        raise SignedEvidenceError(ev.SIGNER_IDENTITY_MISMATCH)
     header = {
         "alg": ALG,
         "kid": identity.kid,
@@ -135,6 +135,7 @@ def sign_evidence(draft: Mapping[str, Any], *, signer: ResolvedSigner) -> Signed
         "decoy_signer": identity.signer,
         "decoy_key_version": identity.key_version,
     }
+    failed = False
     try:
         protected, signature_segment = _jws.sign_detached(
             protected_header=header, statement=statement, signer=signer
@@ -143,7 +144,9 @@ def sign_evidence(draft: Mapping[str, Any], *, signer: ResolvedSigner) -> Signed
     except SignedEvidenceError:
         raise
     except Exception:
-        raise SignedEvidenceError("SIGNING_FAILED") from None
+        failed = True
+    if failed:
+        raise SignedEvidenceError(ev.SIGNING_FAILED)
 
     signature = json.dumps(
         {"protected": protected, "signature": signature_segment}, separators=(",", ":")
@@ -154,14 +157,14 @@ def sign_evidence(draft: Mapping[str, Any], *, signer: ResolvedSigner) -> Signed
         identity.signer,
         identity.key_version,
     ):
-        raise SignedEvidenceError("SIGNER_IDENTITY_MISMATCH")
+        raise SignedEvidenceError(ev.SIGNER_IDENTITY_MISMATCH)
     if not _jws.verify_es256_signature(
         protected_segment=protected,
         payload_segment=_jws.b64u_encode(statement),
         signature_segment=signature_segment,
         public_jwk=public_jwk,
     ):
-        raise SignedEvidenceError("SIGNER_BAD_SIGNATURE")
+        raise SignedEvidenceError(ev.SIGNER_BAD_SIGNATURE)
     return _carrier(
         statement, signature, parsed, signer=identity.signer, version=identity.key_version
     )
@@ -177,7 +180,7 @@ def adopt_verified_evidence(
     inspected here: adoption is about the statement and signature bytes.
     """
     if signature is None:
-        raise SignedEvidenceError("ADOPT_NOT_VERIFIED")
+        raise SignedEvidenceError(ev.ADOPT_NOT_VERIFIED)
     result = verify_signed_evidence(
         statement=statement, signature=signature, artifact_root=None, context=context
     )
@@ -187,7 +190,7 @@ def adopt_verified_evidence(
         and result.trust in (TrustStatus.TRUSTED, TrustStatus.RETIRED)
         and result.identity.name != "MISMATCH"
     ):
-        raise SignedEvidenceError("ADOPT_NOT_VERIFIED")
+        raise SignedEvidenceError(ev.ADOPT_NOT_VERIFIED)
     parsed, _ = parse_statement_ex(statement)
     envelope = parse_signature_object(signature)
     return _carrier(

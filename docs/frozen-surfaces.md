@@ -93,6 +93,7 @@ have nothing more. `JobEstimate` gained three defaulted fields after `notes` (`l
 | Determinism: same input and seed give the same bytes | contract 3.3 | `src/decoy_engine/determinism/` | `tests/unit/determinism/test_derive_vectors.py`, `tests/unit/determinism/test_hkdf.py`, `tests/native/test_draw_site_providers_golden.py`, `tests/native/test_determinism_goldens.py`, `accepted-known-limit: RGF1-KL-2` |
 | Disguise registry (every disguise spec) | contract 3.5 | `src/decoy_engine/disguises/` | `tests/unit/test_disguises_loader.py`, `accepted-known-limit: RGF1-KL-3` |
 | Reason registry | contract 3.4 | `src/decoy_engine/reasons/` | `tests/unit/test_reason_registry.py`, `tests/sentry/test_reason_baseline_frozen.py`, `tests/unit/test_reason_release_pin.py` |
+| Signed evidence: the `decoy.evidence.statement/v1` statement, the detached signature object, the trust policy, `expectations` version 1 and the wire result tokens | F33 V1 plan, section 10 | `src/decoy_engine/signed_evidence/`, `src/decoy_engine/reasons/evidence/` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/unit/signed_evidence/test_expectations.py`, `tests/unit/reasons/test_signed_evidence_codes.py` |
 | Engine version literal | `pyproject.toml` | `src/decoy_engine/release.py` | `tests/unit/test_version_agreement.py` |
 
 The schema snapshots pin field names, types and declared defaults; descriptions (the model

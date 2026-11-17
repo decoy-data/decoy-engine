@@ -11,13 +11,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from decoy_engine.reasons import evidence as ev
+
 from ._catalog import RequiredCatalog
 from ._errors import SignedEvidenceError
 from ._trust import TrustPolicy
 
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
 
 
 class Purpose(Enum):
@@ -45,7 +47,7 @@ class ExpectedArtifact:
             and _DIGEST.fullmatch(self.sha256)
             and _MEDIA.fullmatch(self.media_type)
         ):
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +71,7 @@ class HistoricalDecision:
             and isinstance(self.decision_ref, str)
             and 0 < len(self.decision_ref) <= 256
         ):
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,14 +87,19 @@ class VerificationContext:
     expected_artifacts: tuple[ExpectedArtifact, ...] = ()
     historical_decisions: tuple[HistoricalDecision, ...] = ()
     evaluation_time: datetime | None = None
+    #: How many outputs the producer reports as not bound into the statement. Above zero the
+    #: verdict can never be full success (PARTIAL), whatever else holds. The count is never echoed.
+    expected_unbound_outputs: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.purpose, Purpose):
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
+        if type(self.expected_unbound_outputs) is not int or self.expected_unbound_outputs < 0:
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
         if not isinstance(self.trust_policy, TrustPolicy) or not isinstance(
             self.required_catalog, RequiredCatalog
         ):
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
         for value in (
             self.expected_tenant,
             self.expected_bundle_id,
@@ -101,15 +108,15 @@ class VerificationContext:
             self.expected_snapshot_id,
         ):
             if value is not None and not (isinstance(value, str) and _ID.fullmatch(value)):
-                raise SignedEvidenceError("CONTEXT_INVALID")
+                raise SignedEvidenceError(ev.CONTEXT_INVALID)
         ids = [a.id for a in self.expected_artifacts]
         if len(set(ids)) != len(ids):
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
         if self.evaluation_time is not None and self.evaluation_time.tzinfo is None:
-            raise SignedEvidenceError("CONTEXT_INVALID")
+            raise SignedEvidenceError(ev.CONTEXT_INVALID)
         if self.purpose.strict:
             required = [self.expected_tenant, self.expected_job_id, self.expected_attempt_id]
             if self.required_catalog.has_required_snapshot_check:
                 required.append(self.expected_snapshot_id)
             if any(v is None for v in required):
-                raise SignedEvidenceError("CONTEXT_INCOMPLETE")
+                raise SignedEvidenceError(ev.CONTEXT_INCOMPLETE)

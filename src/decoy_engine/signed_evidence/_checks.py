@@ -38,6 +38,11 @@ def _subjects(
     ]
 
 
+# A signed check's own severity words, named once. They are not a post-scan report's outcomes.
+_SEVERITY_FAILS = "error"
+_SEVERITY_WARNS = "warning"
+
+
 def _judge(req: RequiredCheck, outcome: CheckOutcome) -> tuple[str, str | None]:
     """Return ``(PASS | FAIL | INCONCLUSIVE, reason)`` for one outcome against its requirement."""
     if outcome.status == "FAIL":
@@ -48,9 +53,9 @@ def _judge(req: RequiredCheck, outcome: CheckOutcome) -> tuple[str, str | None]:
         if outcome.reason_code in req.not_applicable_reason_codes:
             return "PASS", None
         return "INCONCLUSIVE", "NOT_APPLICABLE_UNJUSTIFIED"
-    if outcome.severity == "error":
+    if outcome.severity == _SEVERITY_FAILS:
         return "FAIL", "CHECK_FAILED"
-    if outcome.severity == "warning" and not req.allow_warning:
+    if outcome.severity == _SEVERITY_WARNS and not req.allow_warning:
         return "FAIL", "WARNING_NOT_PERMITTED"
     cov = outcome.coverage
     if cov.rows_scanned < req.min_rows_scanned:

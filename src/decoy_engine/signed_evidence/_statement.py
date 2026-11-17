@@ -18,6 +18,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from decoy_engine import fileaccess
+from decoy_engine.reasons import ReasonCode
+from decoy_engine.reasons import evidence as ev
+
 from . import _strict_json as sj
 from ._canonical import canonical_bytes
 from ._errors import SignedEvidenceError
@@ -38,25 +42,25 @@ SEVERITIES = ("info", "warning", "error")
 DISPOSITIONS = ("INCLUDED", "WITHHELD", "UNAVAILABLE")
 LEGACY_SCHEMA_VERSIONS = frozenset({"r3.1", "cli-local-1"})
 
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_FP_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}$")
-_ALGO = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
-_ENGINE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
-_METHOD = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
-_BIG = re.compile(r"^[1-9][0-9]{0,29}$")
-_DECIMAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
+_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+_FP_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}\Z")
+_ALGO = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
+_ENGINE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
+_METHOD = re.compile(r"^[a-z][a-z0-9_.-]{0,63}\Z")
+_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
+_BIG = re.compile(r"^[1-9][0-9]{0,29}\Z")
+_DECIMAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?\Z")
 
 
-def _bad(code: str, status: str = "MALFORMED") -> SignedEvidenceError:
+def _bad(code: ReasonCode, status: str = "MALFORMED") -> SignedEvidenceError:
     return SignedEvidenceError(code, status=status)
 
 
 def _schema() -> SignedEvidenceError:
-    return _bad("STATEMENT_SCHEMA_INVALID")
+    return _bad(ev.STATEMENT_SCHEMA_INVALID)
 
 
 # ------------------------------------------------------------------ typed carriers
@@ -164,9 +168,9 @@ def _obj(value: Any, members: tuple[str, ...]) -> dict[str, Any]:
         raise _schema()
     extra = set(value) - set(members)
     if extra:
-        raise _bad("STATEMENT_UNKNOWN_FIELD")
+        raise _bad(ev.STATEMENT_UNKNOWN_FIELD)
     if set(members) - set(value):
-        raise _bad("STATEMENT_MISSING_FIELD")
+        raise _bad(ev.STATEMENT_MISSING_FIELD)
     return value
 
 
@@ -222,19 +226,18 @@ def check_relative_path(value: Any) -> str:
 
 def _safe_path(value: Any) -> str:
     if not isinstance(value, str) or not 0 < len(value) <= MAX_PATH_CHARS:
-        raise _bad("STATEMENT_PATH_INVALID")
+        raise _bad(ev.STATEMENT_PATH_INVALID)
     if value.startswith("/") or "\\" in value:
-        raise _bad("STATEMENT_PATH_INVALID")
+        raise _bad(ev.STATEMENT_PATH_INVALID)
     for comp in value.split("/"):
         if (
-            not comp
-            or comp in (".", "..")
+            not fileaccess.is_valid_component(comp)
             or len(comp) > MAX_COMPONENT_CHARS
             or comp != comp.strip(" ")
             or ":" in comp
             or any(unicodedata.category(ch).startswith("C") for ch in comp)
         ):
-            raise _bad("STATEMENT_PATH_INVALID")
+            raise _bad(ev.STATEMENT_PATH_INVALID)
     return value
 
 
@@ -264,7 +267,7 @@ def _named_fingerprints(node: Any) -> tuple[NamedFingerprint, ...]:
         )
     names = [f.name for f in out]
     if names != sorted(set(names)):
-        raise _bad("STATEMENT_ARRAY_ORDER")
+        raise _bad(ev.STATEMENT_ARRAY_ORDER)
     return tuple(out)
 
 
@@ -279,7 +282,7 @@ def _warnings(node: Any) -> tuple[str, ...]:
         raise _schema()
     codes = [_match(c, _CODE) for c in node]
     if codes != sorted(set(codes)):
-        raise _bad("STATEMENT_ARRAY_ORDER")
+        raise _bad(ev.STATEMENT_ARRAY_ORDER)
     return tuple(codes)
 
 
@@ -292,7 +295,7 @@ def _publication(node: Any) -> Publication:
     if reason is not None:
         _match(reason, _CODE)
     if (state == "PUBLISHED") != (reason is None):
-        raise _bad("STATEMENT_PUBLICATION_INCOHERENT")
+        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
     return Publication(state, reason)
 
 
@@ -319,16 +322,16 @@ def _artifacts(node: Any) -> tuple[ArtifactEntry, ...]:
     if not isinstance(node, list):
         raise _schema()
     if len(node) > MAX_ARTIFACTS:
-        raise _bad("STATEMENT_TOO_MANY_ARTIFACTS")
+        raise _bad(ev.STATEMENT_TOO_MANY_ARTIFACTS)
     out = [_artifact(a) for a in node]
     ids = [a.id for a in out]
     if len(set(ids)) != len(ids):
-        raise _bad("STATEMENT_ARTIFACT_ID_DUPLICATE")
+        raise _bad(ev.STATEMENT_ARTIFACT_ID_DUPLICATE)
     paths = [a.path for a in out]
     if len(set(paths)) != len(paths):
-        raise _bad("STATEMENT_PATH_DUPLICATE")
+        raise _bad(ev.STATEMENT_PATH_DUPLICATE)
     if ids != sorted(ids):
-        raise _bad("STATEMENT_ARRAY_ORDER")
+        raise _bad(ev.STATEMENT_ARRAY_ORDER)
     return tuple(out)
 
 
@@ -336,7 +339,7 @@ def _coverage(node: Any) -> Coverage:
     o = _obj(node, ("rows_scanned", "rows_total", "columns"))
     cov = Coverage(_count(o["rows_scanned"]), _count(o["rows_total"]), _count(o["columns"]))
     if cov.rows_scanned > cov.rows_total:
-        raise _bad("STATEMENT_COVERAGE_INVALID")
+        raise _bad(ev.STATEMENT_COVERAGE_INVALID)
     return cov
 
 
@@ -389,11 +392,11 @@ def _checks(node: Any) -> tuple[CheckOutcome, ...]:
     if not isinstance(node, list):
         raise _schema()
     if len(node) > MAX_CHECKS:
-        raise _bad("STATEMENT_TOO_MANY_CHECKS")
+        raise _bad(ev.STATEMENT_TOO_MANY_CHECKS)
     out = [_check(c) for c in node]
     keys = [(c.check_id, c.subject_kind, c.subject_id) for c in out]
     if keys != sorted(keys):
-        raise _bad("STATEMENT_ARRAY_ORDER")
+        raise _bad(ev.STATEMENT_ARRAY_ORDER)
     return tuple(out)
 
 
@@ -423,10 +426,10 @@ def _validate(doc: Any, statement_id: str) -> EvidenceStatementV1:
     schema = doc.get("schema")
     if schema is None:
         if doc.get("schema_version") in LEGACY_SCHEMA_VERSIONS:
-            raise _bad("LEGACY_INTEGRITY_ONLY", "UNSUPPORTED")
-        raise _bad("STATEMENT_MISSING_FIELD")
+            raise _bad(ev.LEGACY_INTEGRITY_ONLY, "UNSUPPORTED")
+        raise _bad(ev.STATEMENT_MISSING_FIELD)
     if schema != SCHEMA_ID:
-        raise _bad("STATEMENT_SCHEMA_UNSUPPORTED", "UNSUPPORTED")
+        raise _bad(ev.STATEMENT_SCHEMA_UNSUPPORTED, "UNSUPPORTED")
     o = _obj(doc, _TOP)
     issuer = _obj(o["issuer"], ("tenant", "signer"))
     engine = _obj(o["engine"], ("name", "version"))
@@ -437,9 +440,9 @@ def _validate(doc: Any, statement_id: str) -> EvidenceStatementV1:
     included = [a for a in artifacts if a.disposition == "INCLUDED"]
     # PUBLISHED carries every artifact; REJECTED carries none (it may carry zero artifacts).
     if publication.state == "PUBLISHED" and len(included) != len(artifacts):
-        raise _bad("STATEMENT_PUBLICATION_INCOHERENT")
+        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
     if publication.state == "REJECTED" and included:
-        raise _bad("STATEMENT_PUBLICATION_INCOHERENT")
+        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
     return EvidenceStatementV1(
         statement_id=statement_id,
         bundle_id=_match(o["bundle_id"], _ID),
@@ -472,10 +475,13 @@ def parse_statement_ex(raw: bytes) -> tuple[EvidenceStatementV1, bool]:
     Canonicality is a separate fact from validity so a verifier can report an authentic but
     non-canonical statement as exactly that.
     """
+    inner: ReasonCode | None = None
     try:
         doc = sj.parse_strict(raw)
     except SignedEvidenceError as exc:
-        raise SignedEvidenceError(f"STATEMENT_{exc.code}", status="MALFORMED") from None
+        inner = exc.identity
+    if inner is not None:
+        raise SignedEvidenceError(ev.wire_for(ev.Prefix.STATEMENT, inner), status="MALFORMED")
     parsed = _validate(doc, "sha256:" + hashlib.sha256(raw).hexdigest())
     return parsed, canonical_bytes(doc) == bytes(raw)
 
@@ -483,7 +489,7 @@ def parse_statement_ex(raw: bytes) -> tuple[EvidenceStatementV1, bool]:
 def parse_statement(raw: bytes) -> EvidenceStatementV1:
     parsed, canonical = parse_statement_ex(raw)
     if not canonical:
-        raise _bad("STATEMENT_NOT_CANONICAL", "NON_CANONICAL")
+        raise _bad(ev.STATEMENT_NOT_CANONICAL, "NON_CANONICAL")
     return parsed
 
 

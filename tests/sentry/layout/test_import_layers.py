@@ -46,7 +46,7 @@ LAYERS: tuple[str, ...] = (
     "plan : generation : generators : transforms : declared_casting : secret_providers"
     " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
-    " : contracts : connectors : expressions : validators : sdk : run_result",
+    " : contracts : connectors : expressions : validators : sdk : run_result : signed_evidence",
     "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
     " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"

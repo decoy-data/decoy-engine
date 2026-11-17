@@ -1,37 +1,32 @@
 """Signed evidence: detached ES256 JWS over a JCS statement, with offline verification (F33).
 
-Public surface: the full Decoy-profile verifier and its typed inputs and results. The low-level
-ES256 check is private by design; see ``_verifier``. This package imports only the standard
-library, ``joserfc``, ``rfc8785`` and ``cryptography``, so a standalone verifier can ship it
-without ``decoy_engine`` initialisation or any data library.
+Public surface: the verifier entries (the path form and the bundle capability form), the pinned
+expectations loader, the typed inputs and results, and the signer side. The low-level ES256 check
+is private by design; see ``_verifier``. The package sits in the engine's ``signed_evidence``
+layer and imports only the engine's ``_canonical``, ``_error_base``, ``reasons`` and
+``fileaccess`` owners, the standard library, ``joserfc``, ``rfc8785`` (through ``_canonical``) and
+``cryptography``.
 
-Plan: docs/plans/2026-10-29-f33-signed-evidence-offline-verify.md.
+Plan: docs/plans/2026-11-17-f33-v1.md.
 """
 
 from __future__ import annotations
 
-from ._artifacts import hash_file_under
-from ._boundary import (
+from ._boundary import sign_evidence
+from ._bundle import (
     EVIDENCE_FILENAME,
+    MAX_SIGNATURE_BYTES,
+    MAX_STATEMENT_BYTES,
     SIGNATURE_FILENAME,
-    SignedEvidence,
-    adopt_verified_evidence,
-    sign_evidence,
+    SignedBundle,
+    open_signed_bundle,
 )
-from ._catalog import RequiredCatalog, RequiredCheck
+from ._catalog import RequiredCatalog
 from ._context import ExpectedArtifact, HistoricalDecision, Purpose, VerificationContext
 from ._errors import SignedEvidenceError
-from ._release import (
-    DenyAllReleaseEvaluator,
-    ReleaseDecision,
-    ReleaseEvaluator,
-    ReleasePermit,
-    StrictReleaseEvaluator,
-)
+from ._expectations import MAX_EXPECTATIONS_BYTES, Expectations, parse_expectations
 from ._result import (
-    ArtifactResult,
     ArtifactStatus,
-    CheckResult,
     CheckStatus,
     ExitClass,
     HistoricalAuthorization,
@@ -39,56 +34,45 @@ from ._result import (
     ReleaseVerdict,
     SchemaStatus,
     SignatureStatus,
-    TimeInfo,
     TrustStatus,
     VerificationResult,
 )
-from ._signer import LocalEs256Signer, ResolvedSigner, SigningIdentity, der_to_p1363
-from ._statement import EvidenceStatementV1, check_relative_path, parse_statement
-from ._trust import KeyState, TrustedKey, TrustPolicy
-from ._verifier import verify_signed_evidence
+from ._signer import LocalEs256Signer, SigningIdentity, der_to_p1363
+from ._trust import MAX_POLICY_BYTES, TrustPolicy
+from ._verifier import verify_signed_bundle, verify_signed_evidence
 
 __all__ = [
     "EVIDENCE_FILENAME",
+    "MAX_EXPECTATIONS_BYTES",
+    "MAX_POLICY_BYTES",
+    "MAX_SIGNATURE_BYTES",
+    "MAX_STATEMENT_BYTES",
     "SIGNATURE_FILENAME",
-    "ArtifactResult",
     "ArtifactStatus",
-    "CheckResult",
     "CheckStatus",
-    "DenyAllReleaseEvaluator",
-    "EvidenceStatementV1",
     "ExitClass",
+    "Expectations",
     "ExpectedArtifact",
     "HistoricalAuthorization",
     "HistoricalDecision",
     "IdentityBinding",
-    "KeyState",
     "LocalEs256Signer",
     "Purpose",
-    "ReleaseDecision",
-    "ReleaseEvaluator",
-    "ReleasePermit",
     "ReleaseVerdict",
     "RequiredCatalog",
-    "RequiredCheck",
-    "ResolvedSigner",
     "SchemaStatus",
     "SignatureStatus",
-    "SignedEvidence",
+    "SignedBundle",
     "SignedEvidenceError",
     "SigningIdentity",
-    "StrictReleaseEvaluator",
-    "TimeInfo",
     "TrustPolicy",
     "TrustStatus",
-    "TrustedKey",
     "VerificationContext",
     "VerificationResult",
-    "adopt_verified_evidence",
-    "check_relative_path",
     "der_to_p1363",
-    "hash_file_under",
-    "parse_statement",
+    "open_signed_bundle",
+    "parse_expectations",
     "sign_evidence",
+    "verify_signed_bundle",
     "verify_signed_evidence",
 ]

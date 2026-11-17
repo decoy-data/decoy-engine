@@ -15,9 +15,13 @@ import os
 from collections.abc import Callable
 from datetime import datetime, timezone
 
+from decoy_engine.fileaccess import DirHandle
+from decoy_engine.reasons import evidence as ev
+
 from . import _jws
 from . import _strict_json as sj
-from ._artifacts import bind_artifacts
+from ._artifacts import TreeOpener, bind_artifacts, open_path_tree, require_supported_platform
+from ._bundle import SignedBundle
 from ._checks import evaluate_checks
 from ._context import Purpose, VerificationContext
 from ._envelope import SignatureEnvelopeV1, parse_signature_object
@@ -65,6 +69,7 @@ def _decide(
     checks: CheckStatus,
     identity: IdentityBinding,
     rejected: bool,
+    unbound_outputs: int = 0,
 ) -> ExitClass:
     """The single release decision. ``OK`` is reachable only by satisfying every dimension.
 
@@ -110,7 +115,11 @@ def _decide(
         and checks is CheckStatus.PASS
         and identity is IdentityBinding.BOUND
     )
-    return ExitClass.OK if fully_verified else ExitClass.BLOCKED
+    if not fully_verified:
+        return ExitClass.BLOCKED
+    # Last, so every specific failure above keeps its own class: an unbound output only keeps an
+    # otherwise complete verification from being full success.
+    return ExitClass.PARTIAL if unbound_outputs > 0 else ExitClass.OK
 
 
 def _identity(
@@ -142,11 +151,64 @@ def verify_signed_evidence(
 ) -> VerificationResult:
     """Verify a detached-JWS signed evidence statement against trusted expectations.
 
-    ``artifact_root=None`` is a signature-only diagnostic: artifacts are not evaluated and the
-    result can never be full success.
+    The path form: ``artifact_root`` is a caller-named directory, opened once under the ambient
+    policy with its final component followed (the caller named it). ``artifact_root=None`` is a
+    signature-only diagnostic: artifacts are not evaluated and the result can never be full
+    success. Raises ``SignedEvidenceError`` only for input, context and unsupported-platform errors.
     """
+    open_tree: TreeOpener | None = None
+    if artifact_root is not None:
+        if not isinstance(artifact_root, (str, os.PathLike)):
+            raise SignedEvidenceError(ev.INPUT_INVALID)
+        require_supported_platform()
+        root = artifact_root
+
+        def open_tree() -> DirHandle:
+            return open_path_tree(root)
+
+    return _verify(
+        statement=statement,
+        signature=signature,
+        open_tree=open_tree,
+        context=context,
+        clock=clock,
+    )
+
+
+def verify_signed_bundle(
+    bundle: SignedBundle,
+    *,
+    context: VerificationContext,
+    clock: Callable[[], datetime] | None = None,
+) -> VerificationResult:
+    """Verify an opened ``SignedBundle``: the capability form, with the result of the path form.
+
+    The statement and signature come from the bundle's held handle. The artifacts are its
+    ``artifacts`` child, opened confined and without following a link, so a missing or symlinked
+    ``artifacts`` directory is a verification result, never a raised error.
+    """
+    if not isinstance(bundle, SignedBundle):
+        raise SignedEvidenceError(ev.INPUT_INVALID)
+    return _verify(
+        statement=bundle.statement,
+        signature=bundle.signature,
+        open_tree=bundle.open_artifacts,
+        context=context,
+        clock=clock,
+    )
+
+
+def _verify(
+    *,
+    statement: bytes,
+    signature: bytes | None,
+    open_tree: TreeOpener | None,
+    context: VerificationContext,
+    clock: Callable[[], datetime] | None,
+) -> VerificationResult:
+    """The one verification core both entries call."""
     if not isinstance(statement, (bytes, bytearray, memoryview)):
-        raise SignedEvidenceError("INPUT_INVALID")
+        raise SignedEvidenceError(ev.INPUT_INVALID)
     statement = bytes(statement)
     if signature is not None:
         signature = bytes(signature)
@@ -201,7 +263,7 @@ def verify_signed_evidence(
                     reasons.add("SIGNATURE_INVALID")
 
     if sig_status is SignatureStatus.VALID and stmt is not None and envelope and key:
-        ev = evaluate_trust(
+        verdict = evaluate_trust(
             policy=context.trust_policy,
             key=key,
             header_signer=envelope.decoy_signer,
@@ -211,8 +273,8 @@ def verify_signed_evidence(
             expected_tenant=context.expected_tenant,
             evaluation_time=evaluation_time,
         )
-        trust = TrustStatus[ev.status]
-        reasons.update(ev.reasons)
+        trust = TrustStatus[verdict.status]
+        reasons.update(verdict.reasons)
 
     identity = _identity(stmt, context, reasons)
 
@@ -227,7 +289,7 @@ def verify_signed_evidence(
             statement=stmt,
             expected=context.expected_artifacts,
             empty_output_allowed=context.required_catalog.empty_output_allowed,
-            root=artifact_root,
+            open_tree=open_tree,
         )
         c_ev = evaluate_checks(
             statement=stmt,
@@ -269,6 +331,7 @@ def verify_signed_evidence(
         checks=checks,
         identity=identity,
         rejected=rejected,
+        unbound_outputs=context.expected_unbound_outputs,
     )
     allow = exit_class is ExitClass.OK
 

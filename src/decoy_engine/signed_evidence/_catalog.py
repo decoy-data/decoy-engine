@@ -13,16 +13,19 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from decoy_engine.reasons import ReasonCode
+from decoy_engine.reasons import evidence as ev
+
 from . import _strict_json as sj
 from ._canonical import canonical_bytes
 from ._errors import SignedEvidenceError
 
 SCHEMA_ID = "decoy.required-catalog/v1"
 MAX_REQUIREMENTS = 256
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
+_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
+_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
 _REQ_KEYS = (
     "check_id",
     "scope",
@@ -63,35 +66,38 @@ class RequiredCatalog:
 
     @classmethod
     def from_bytes(cls, raw: bytes) -> RequiredCatalog:
+        inner: ReasonCode | None = None
         try:
             doc = sj.parse_strict(raw, max_bytes=256 * 1024)
         except SignedEvidenceError as exc:
-            raise SignedEvidenceError(f"CATALOG_{exc.code}") from None
+            inner = exc.identity
+        if inner is not None:
+            raise SignedEvidenceError(ev.wire_for(ev.Prefix.CATALOG, inner))
         return _build(doc)
 
 
-def _bad(code: str) -> SignedEvidenceError:
+def _bad(code: ReasonCode) -> SignedEvidenceError:
     return SignedEvidenceError(code)
 
 
 def _closed(node: Any, keys: tuple[str, ...]) -> dict[str, Any]:
     if not isinstance(node, dict) or set(node) != set(keys):
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     return node
 
 
 def _bool(v: Any) -> bool:
     if not isinstance(v, bool):
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     return v
 
 
 def _requirement(node: Any) -> RequiredCheck:
     o = _closed(node, _REQ_KEYS)
     if not isinstance(o["check_id"], str) or not _NAME.fullmatch(o["check_id"]):
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     if o["scope"] not in ("each_artifact", "snapshot"):
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     media = o["media_types"]
     if media is not None:
         if (
@@ -100,14 +106,14 @@ def _requirement(node: Any) -> RequiredCheck:
             or not media
             or not all(isinstance(m, str) and _MEDIA.fullmatch(m) for m in media)
         ):
-            raise _bad("CATALOG_SCHEMA_INVALID")
+            raise _bad(ev.CATALOG_SCHEMA_INVALID)
         media = frozenset(media)
     rows = o["min_rows_scanned"]
     if isinstance(rows, bool) or not isinstance(rows, int) or rows < 0:
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     na = o["not_applicable_reason_codes"]
     if not isinstance(na, list) or not all(isinstance(c, str) and _CODE.fullmatch(c) for c in na):
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     return RequiredCheck(
         check_id=o["check_id"],
         scope=o["scope"],
@@ -124,19 +130,19 @@ def _requirement(node: Any) -> RequiredCheck:
 def _build(doc: Any) -> RequiredCatalog:
     o = _closed(doc, ("schema", "id", "version", "empty_output_allowed", "requirements"))
     if o["schema"] != SCHEMA_ID:
-        raise _bad("CATALOG_SCHEMA_UNSUPPORTED")
+        raise _bad(ev.CATALOG_SCHEMA_UNSUPPORTED)
     for key in ("id", "version"):
         if not isinstance(o[key], str) or not _ID.fullmatch(o[key]):
-            raise _bad("CATALOG_SCHEMA_INVALID")
+            raise _bad(ev.CATALOG_SCHEMA_INVALID)
     reqs = o["requirements"]
     if not isinstance(reqs, list) or len(reqs) > MAX_REQUIREMENTS:
-        raise _bad("CATALOG_SCHEMA_INVALID")
+        raise _bad(ev.CATALOG_SCHEMA_INVALID)
     parsed = tuple(_requirement(r) for r in reqs)
     ids = [r.check_id for r in parsed]
     if len(set(ids)) != len(ids):
-        raise _bad("CATALOG_DUPLICATE_REQUIREMENT")
+        raise _bad(ev.CATALOG_DUPLICATE_REQUIREMENT)
     if not any(not r.optional for r in parsed):
-        raise _bad("CATALOG_NO_REQUIRED_CHECKS")
+        raise _bad(ev.CATALOG_NO_REQUIRED_CHECKS)
     return RequiredCatalog(
         id=o["id"],
         version=o["version"],

@@ -28,6 +28,8 @@ from joserfc.jws import (
 )
 from joserfc.registry import HeaderParameter
 
+from decoy_engine.reasons import evidence as ev
+
 from ._errors import SignedEvidenceError
 
 ALG = "ES256"
@@ -58,16 +60,16 @@ class _ExternalEs256(JWSAlgModel):
 
     def check_key(self, key: Any) -> None:
         if not callable(getattr(key, "sign_signing_input", None)):
-            raise SignedEvidenceError("SIGNER_INVALID")
+            raise SignedEvidenceError(ev.SIGNER_INVALID)
 
     def sign(self, msg: bytes, key: Any) -> bytes:
         sig = key.sign_signing_input(msg)
         if not isinstance(sig, (bytes, bytearray)) or len(sig) != SIGNATURE_BYTES:
-            raise SignedEvidenceError("SIGNER_BAD_SIGNATURE")
+            raise SignedEvidenceError(ev.SIGNER_BAD_SIGNATURE)
         return bytes(sig)
 
     def verify(self, msg: bytes, sig: bytes, key: Any) -> bool:  # pragma: no cover - never used
-        raise SignedEvidenceError("SIGNER_VERIFY_UNSUPPORTED")
+        raise SignedEvidenceError(ev.SIGNER_VERIFY_UNSUPPORTED)
 
 
 class _SignRegistry(JWSRegistry):
@@ -103,6 +105,8 @@ def sign_detached(
     registry = _SignRegistry(
         header_registry=_DECOY_HEADERS, algorithms=[ALG], strict_check_header=True
     )
+    failed = False
+    out: Any = None
     try:
         out = sign_flattened_json(
             HeaderMember(protected=protected_header), statement, registry, lambda _m: signer
@@ -110,7 +114,9 @@ def sign_detached(
     except SignedEvidenceError:
         raise
     except JoseError:
-        raise SignedEvidenceError("SIGNING_FAILED") from None
+        failed = True
+    if failed:
+        raise SignedEvidenceError(ev.SIGNING_FAILED)
     return out["protected"], out["signature"]
 
 

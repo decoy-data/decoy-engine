@@ -24,6 +24,9 @@ from typing import Any
 
 from joserfc.jwk import ECKey
 
+from decoy_engine.reasons import ReasonCode
+from decoy_engine.reasons import evidence as ev
+
 from . import _strict_json as sj
 from ._errors import SignedEvidenceError
 from ._time import parse_utc
@@ -31,9 +34,9 @@ from ._time import parse_utc
 SCHEMA_ID = "decoy.trust-policy/v1"
 MAX_KEYS = 1000
 MAX_POLICY_BYTES = 1024 * 1024
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_B64URL = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+_B64URL = re.compile(r"^[A-Za-z0-9_-]{1,100}\Z")
 _KEY_MEMBERS = (
     "tenant",
     "signer",
@@ -87,19 +90,39 @@ class TrustPolicy:
     @classmethod
     def from_bytes(cls, raw: bytes, *, pinned_sha256: str) -> TrustPolicy:
         """Load a policy only if its digest equals the digest the operator pinned out of band."""
-        if not isinstance(pinned_sha256, str) or not _DIGEST.fullmatch(pinned_sha256):
-            raise SignedEvidenceError("TRUST_POLICY_PIN_INVALID")
-        actual = "sha256:" + hashlib.sha256(raw).hexdigest()
-        if not hmac.compare_digest(actual, pinned_sha256):
-            raise SignedEvidenceError("TRUST_POLICY_DIGEST_MISMATCH")
+        actual = _check_pinned_digest(
+            raw,
+            pinned_sha256,
+            invalid=ev.TRUST_POLICY_PIN_INVALID,
+            mismatch=ev.TRUST_POLICY_DIGEST_MISMATCH,
+        )
+        inner: ReasonCode | None = None
         try:
             doc = sj.parse_strict(raw, max_bytes=MAX_POLICY_BYTES)
         except SignedEvidenceError as exc:
-            raise SignedEvidenceError(f"TRUST_POLICY_{exc.code}") from None
+            inner = exc.identity
+        if inner is not None:
+            raise SignedEvidenceError(ev.wire_for(ev.Prefix.TRUST_POLICY, inner))
         return _build(doc, actual)
 
 
-def _bad(code: str) -> SignedEvidenceError:
+def _check_pinned_digest(
+    raw: bytes, pinned_sha256: str, *, invalid: ReasonCode, mismatch: ReasonCode
+) -> str:
+    """The one pin check: ``raw`` must hash to the digest pinned out of band, before any parse.
+
+    Used by the trust policy loader and the expectations loader. Returns the actual digest. The
+    caller names the fixed refusal for a malformed pin and for a mismatch.
+    """
+    if not isinstance(pinned_sha256, str) or not _DIGEST.fullmatch(pinned_sha256):
+        raise SignedEvidenceError(invalid)
+    actual = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if not hmac.compare_digest(actual, pinned_sha256):
+        raise SignedEvidenceError(mismatch)
+    return actual
+
+
+def _bad(code: ReasonCode) -> SignedEvidenceError:
     return SignedEvidenceError(code)
 
 
@@ -108,21 +131,21 @@ def _ts(value: Any, *, nullable: bool = False) -> datetime | None:
         return None
     parsed = parse_utc(value)
     if parsed is None:
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     return parsed
 
 
 def _ident(value: Any) -> str:
     if not isinstance(value, str) or not _ID.fullmatch(value):
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     return value
 
 
 def _key(node: Any) -> TrustedKey:
     if not isinstance(node, dict) or set(node) != set(_KEY_MEMBERS):
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     if node["alg"] != "ES256":
-        raise _bad("TRUST_POLICY_ALG_UNSUPPORTED")
+        raise _bad(ev.TRUST_POLICY_ALG_UNSUPPORTED)
     jwk = node["jwk"]
     if (
         not isinstance(jwk, dict)
@@ -131,16 +154,20 @@ def _key(node: Any) -> TrustedKey:
         or jwk["crv"] != "P-256"
         or not all(isinstance(jwk[m], str) and _B64URL.fullmatch(jwk[m]) for m in ("x", "y"))
     ):
-        raise _bad("TRUST_POLICY_KEY_INVALID")
+        raise _bad(ev.TRUST_POLICY_KEY_INVALID)
+    thumb = ""
+    bad = False
     try:
         thumb = ECKey.import_key(dict(jwk)).thumbprint()
     except (ValueError, TypeError, KeyError):
-        raise _bad("TRUST_POLICY_KEY_INVALID") from None
+        bad = True
+    if bad:
+        raise _bad(ev.TRUST_POLICY_KEY_INVALID)
     declared = node["jwk_thumbprint"]
     if not isinstance(declared, str) or not hmac.compare_digest(thumb, declared):
-        raise _bad("TRUST_POLICY_THUMBPRINT_MISMATCH")
+        raise _bad(ev.TRUST_POLICY_THUMBPRINT_MISMATCH)
     if node["state"] not in KeyState.__members__:
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     state = KeyState[node["state"]]
     retired = _ts(node["retired_at"], nullable=True)
     revoked = _ts(node["revoked_at"], nullable=True)
@@ -151,7 +178,7 @@ def _key(node: Any) -> TrustedKey:
         KeyState.REVOKED: revoked is not None,
     }[state]
     if not coherent:
-        raise _bad("TRUST_POLICY_LIFECYCLE_INCOHERENT")
+        raise _bad(ev.TRUST_POLICY_LIFECYCLE_INCOHERENT)
     return TrustedKey(
         tenant=_ident(node["tenant"]),
         signer=_ident(node["signer"]),
@@ -175,21 +202,21 @@ def _build(doc: Any, digest: str) -> TrustPolicy:
         "expires_at",
         "keys",
     }:
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     if doc["schema"] != SCHEMA_ID:
-        raise _bad("TRUST_POLICY_SCHEMA_UNSUPPORTED")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_UNSUPPORTED)
     issued, expires = _ts(doc["issued_at"]), _ts(doc["expires_at"])
     if issued is None or expires is None or expires <= issued:
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     nodes = doc["keys"]
     if not isinstance(nodes, list) or not nodes or len(nodes) > MAX_KEYS:
-        raise _bad("TRUST_POLICY_SCHEMA_INVALID")
+        raise _bad(ev.TRUST_POLICY_SCHEMA_INVALID)
     keys = tuple(_key(n) for n in nodes)
     if len({k.kid for k in keys}) != len(keys):
-        raise _bad("TRUST_POLICY_DUPLICATE_KID")
+        raise _bad(ev.TRUST_POLICY_DUPLICATE_KID)
     scoped = [(k.tenant, k.signer, k.key_version) for k in keys]
     if len(set(scoped)) != len(scoped) or len({k.thumbprint for k in keys}) != len(keys):
-        raise _bad("TRUST_POLICY_KEY_CONFLICT")
+        raise _bad(ev.TRUST_POLICY_KEY_CONFLICT)
     return TrustPolicy(
         id=_ident(doc["id"]),
         version=_ident(doc["version"]),
