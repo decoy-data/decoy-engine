@@ -264,8 +264,8 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # reproducible locked profile tested on that interpreter: the engine's own
 # dev/CI lock, and the `decoy` CLI's pristine runtime profile (engine + CLI
 # runtime deps, no dev tooling), whose proof-critical library versions are pinned to EXACTLY the
-# certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the
-# annotation below) so the DP behaviour is the tested behaviour; the CLI's extra
+# certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the annotation below) so
+# the DP behaviour is the tested behaviour; the CLI's extra
 # packages (typer/rich/...) are off the DP code path. Membership, not equality:
 # a distinct profile that pins the same proof-critical set earns its own row
 # rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9,
