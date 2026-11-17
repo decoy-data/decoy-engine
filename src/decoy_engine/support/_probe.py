@@ -52,7 +52,7 @@ PROBE_GOLDEN: Final[Mapping[int, str]] = {
     7: "1807cd26ed7736c174c4c00d1111038d8114d1cee8f695489cdbff7eec18388c",
 }
 
-_MESSAGE: Final = "The synthetic probe could not run."
+_MESSAGE: Final = reasons.get_reason("runtime", "probe_failed").summary
 
 
 class ProbeError(DecoyError):
@@ -97,7 +97,14 @@ def _pool_part() -> list[str]:
     from decoy_engine import providers_v2
     from decoy_engine.generation.pool import PoolBuilder
 
-    pool = PoolBuilder(providers_v2.get_default_registry()).build(
+    registry = providers_v2.get_default_registry()
+    caps = registry.get_capabilities(POOL_PROVIDER)
+    # With the mimesis extra the default registry binds `person_first_name` to the Mimesis
+    # adapter. The golden is a Faker answer on every install, so the pool part pins the Faker
+    # adapter for this one provider and leaves the shared registry untouched.
+    faker = providers_v2.FakerAdapter(capabilities_lookup=lambda _name: caps)
+    pinned = registry.override(POOL_PROVIDER, faker, caps)
+    pool = PoolBuilder(pinned).build(
         POOL_PROVIDER, size=POOL_SIZE, job_seed=PROBE_JOB_SEED, locale=POOL_LOCALE
     )
     return [str(value) for value in pool.values.tolist()]

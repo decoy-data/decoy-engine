@@ -526,3 +526,10 @@ def test_no_function_but_the_field_table_names_probe() -> None:
                 if isinstance(inner, ast.Constant) and inner.value == "probe":
                     named.append(node.name)
     assert named == [], named
+
+
+def test_every_optional_field_defaults_to_none() -> None:
+    optional = [f.name for f in _runtime_lock._FIELDS if not f.required]
+    defaults = {f.name: f.default for f in dataclasses.fields(_runtime_lock.RuntimeLock)}
+    assert optional == ["probe"]
+    assert all(defaults[name] is None for name in optional)
