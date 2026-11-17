@@ -213,12 +213,29 @@ def labels_read_as_sentences(labels: Collection[str]) -> bool:
     )
 
 
+def _kth_year(counts: Sequence[tuple[int, int | float]]) -> int:
+    """The year holding the `MIN_RELEASE_COUNT`-th row, walking `(year, count)` in the order given."""
+    running: int | float = 0
+    for year, count in counts:
+        running += count
+        if running >= MIN_RELEASE_COUNT:
+            return year
+    raise ValueError("fewer than MIN_RELEASE_COUNT rows")
+
+
 def fold_year_bins(stats: dict[str, Any]) -> None:
     """Replace a datetime column's one-year bins with folded v2 ranges, flagged or not.
 
     A column with fewer than K rows in all has nothing it may release, so it keeps no range. A
     year past the last sampled year (a 9999 sentinel) is counted under the last sampled year: a
     multi-year range cannot end later, and a bucket of its own would hold the few sentinel rows.
+
+    The years are then bottom and top coded, as numeric columns are: every row below the year of
+    the K-th lowest row counts under that year, and likewise above the K-th highest, so the
+    outer edges of the released ranges never name one of the K-1 rows at either end. With fewer
+    than 2K-1 rows the two tails overlap and one range between the K-th highest and K-th lowest
+    row's years is released. Top and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al.,
+    Statistical Disclosure Control (Wiley, 2012), section 3.4.
     """
     raw = stats.get("year_bins")
     if not raw:
@@ -226,8 +243,21 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     by_year: Counter[int] = Counter()
     for b in raw:
         by_year[min(b["year"], MAX_SAMPLED_YEAR)] += b["count"]
-    folded = fold_ranges_under_k([(y, y, c) for y, c in sorted(by_year.items())])
-    kept = folded if sum(c for _, _, c in folded) >= MIN_RELEASE_COUNT else []
+    total = sum(by_year.values())
+    if total < MIN_RELEASE_COUNT:
+        stats["year_bins"] = encode_datetime_buckets([])
+        return
+    years = sorted(by_year.items())
+    low = _kth_year(years)
+    high = _kth_year(years[::-1])
+    kept: list[tuple[int, int, int | float]]
+    if low > high:
+        kept = [(high, low, total)]
+    else:
+        coded: Counter[int] = Counter()
+        for year, count in years:
+            coded[min(max(year, low), high)] += count
+        kept = fold_ranges_under_k([(y, y, c) for y, c in sorted(coded.items())])
     stats["year_bins"] = encode_datetime_buckets([DatetimeBucket(*r) for r in kept])
 
 
