@@ -1,9 +1,9 @@
 """One NER model resolution for every route (SCAN-ML-MD A-13).
 
-The default is patched to a calibrated sentinel that is not the shipped default, so a route that
-still reads a copy of the constant (or a literal) resolves a different model and fails here. Each
-route cell records that it was entered, so a route that stops calling the resolver cannot pass by
-never running.
+Route cells replace the resolver's default answer with a value no constant or literal holds, so a
+route that reads the constant, hard-codes a model or keeps its own copy of the logic resolves
+something else and fails. Each route cell also records that it was entered, so a route that stops
+running cannot pass.
 """
 
 from __future__ import annotations
@@ -22,11 +22,27 @@ from decoy_engine.verification.postmask import _model_findings
 
 SENTINEL = "en_core_web_md"
 NAMED = "xx_named_model"
+ROUTED = "xx_from_the_resolver"
+_REAL_RESOLVE = ner.resolve_ner_model
 
 
 @pytest.fixture(autouse=True)
 def _sentinel_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ner, "DEFAULT_NER_MODEL", SENTINEL)
+
+
+@pytest.fixture
+def routed(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    """The resolver answers ROUTED for an unset model; every call is recorded."""
+    calls: list[str | None] = []
+
+    def _resolve(value: str | None) -> str:
+        calls.append(value)
+        return ROUTED if not value else _REAL_RESOLVE(value)
+
+    monkeypatch.setattr(ner, "resolve_ner_model", _resolve)
+    monkeypatch.setattr(_model_findings, "resolve_ner_model", _resolve)
+    return calls
 
 
 class _EnteredError(Exception):
@@ -96,29 +112,33 @@ def _record_enforce(monkeypatch: pytest.MonkeyPatch, module: object) -> list[str
     return seen
 
 
-@pytest.mark.parametrize(("ner_value", "expected"), [(True, SENTINEL), ({"model": NAMED}, NAMED)])
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
 def test_text_mask_resident(
-    monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
+    routed: list[str | None], monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
 ) -> None:
     seen = _record_enforce(monkeypatch, _text_mask)
     df = pd.DataFrame({"c": ["x"]})
     with pytest.raises(_EnteredError):
         _text_mask.TextMaskHandler().run(df, "c", _seed(ner_value), object())  # type: ignore[arg-type]
     assert seen == [expected]
+    assert routed, "the route never called the resolver"
 
 
-@pytest.mark.parametrize(("ner_value", "expected"), [(True, SENTINEL), ({"model": NAMED}, NAMED)])
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
 def test_out_of_core_group_c(
-    monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
+    routed: list[str | None], monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
 ) -> None:
     seen = _record_enforce(monkeypatch, _mask_group_c)
     with pytest.raises(_EnteredError):
         _mask_group_c._text_mask_ner({"ner": ner_value}, _seed(ner_value), "c")
     assert seen == [expected]
+    assert routed, "the route never called the resolver"
 
 
-@pytest.mark.parametrize(("ner_value", "expected"), [(True, SENTINEL), ({"model": NAMED}, NAMED)])
-def test_plan_check(monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str) -> None:
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
+def test_plan_check(
+    routed: list[str | None], monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
+) -> None:
     seen: list[str] = []
 
     def _ensure(model: str, *_: object, **__: object) -> None:
@@ -141,10 +161,13 @@ def test_plan_check(monkeypatch: pytest.MonkeyPatch, ner_value: object, expected
     }
     _checks.check_text_mask_ner_available(config)
     assert seen == [expected]
+    assert routed, "the route never called the resolver"
 
 
-@pytest.mark.parametrize(("ner_value", "expected"), [(True, SENTINEL), ({"model": NAMED}, NAMED)])
-def test_seed_envelope(monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str) -> None:
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
+def test_seed_envelope(
+    routed: list[str | None], monkeypatch: pytest.MonkeyPatch, ner_value: object, expected: str
+) -> None:
     from decoy_engine.execution._chunked_profile import first_chunk_profile
     from decoy_engine.plan import _compile as compile_mod
 
@@ -176,11 +199,15 @@ def test_seed_envelope(monkeypatch: pytest.MonkeyPatch, ner_value: object, expec
     column = dict(plan.seed_envelope.per_table[0][1].per_column)["c"]
     assert column.ner_model_version == "9.9.9"
     assert seen == [expected]
+    assert routed, "the route never called the resolver"
 
 
-@pytest.mark.parametrize(("block_model", "expected"), [(None, SENTINEL), (NAMED, NAMED)])
+@pytest.mark.parametrize(("block_model", "expected"), [(None, ROUTED), (NAMED, NAMED)])
 def test_post_scan_findings(
-    monkeypatch: pytest.MonkeyPatch, block_model: str | None, expected: str
+    routed: list[str | None],
+    monkeypatch: pytest.MonkeyPatch,
+    block_model: str | None,
+    expected: str,
 ) -> None:
     seen: list[str] = []
 
@@ -195,6 +222,7 @@ def test_post_scan_findings(
         block["ner_model"] = block_model
     assert _model_findings.post_scan_detectors({"post_scan": block}) == "loaded"
     assert seen == [expected]
+    assert routed, "the route never called the resolver"
 
 
 @pytest.mark.parametrize(
