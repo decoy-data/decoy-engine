@@ -57,8 +57,8 @@ value (e.g. `cardinality_mode: reuse` faker with a small pool). A
 masked value with conflicting sources cannot be inverted; `write()`
 drops those keys and records the count in the unencrypted header
 (`ambiguous_dropped`), and the unmask report surfaces it. Exact round
-trips are guaranteed only for collision-free maskings (hash under a
-namespace, unique-mode substitution).
+trips hold only for keys no other source value masked to; no strategy,
+hash included, is collision-free unless it is unique-mode.
 """
 
 from __future__ import annotations

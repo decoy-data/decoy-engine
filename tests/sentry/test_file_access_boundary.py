@@ -448,7 +448,7 @@ def test_native_key_membership_is_derived(cell: str, engine_bare, fixture_bare) 
         } == NATIVE_OWNERS
         assert {
             "decoy_engine/fileaccess/adapters/duckdb.py",
-            "decoy_engine/connectors/postgres_snapshot.py",
+            "decoy_engine/connectors/_postgres_session.py",
             "decoy_engine/data_discovery.py",
         } == NATIVE_OWN_MAPPING
 

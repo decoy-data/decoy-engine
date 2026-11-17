@@ -13,8 +13,10 @@ what keeps masked values stable and joinable.
 
 ## Mask strategies
 
-There are seventeen mask strategies. `passthrough` (a no-op pass) and the
-internal composite/nested handlers are listed separately below.
+[capability-matrix](capability-matrix.md) lists every mask strategy and is
+generated from the strategy registry. This page has a section for each of
+them. `passthrough` and the internal composite and nested handlers share the
+last section.
 
 ### faker
 
@@ -36,15 +38,28 @@ modes draw a seeded whole-column stream from the job seed.
   default registry.
 - `namespace`: scopes determinism and joinability.
 
+Deterministic `faker` is a keyed many-to-one pick. Each source value selects one
+slot of a fixed pool, so two distinct source values can share one output. With
+the default pool of 10,000 slots, 1,000 distinct sources already share about 50
+slots, and a name provider's pool holds fewer distinct values than its size. A
+larger `pool_size` lowers the rate and a smaller one raises it. `allow_collisions`
+only states this explicitly. For a one-to-one mapping inside a format domain use
+`fpe`. Untruncated `hash` and `tokenize` are collision-resistant, and a
+`truncate` makes collisions likely again. A `--post-validate` run reports, for
+each deterministic `faker` column that is not `unique` and has no `when:`, how
+many distinct source values were lost to shared outputs (the warning
+`cardinality_collisions`, with counts and no values). A `when:` column is not
+reported, because its unmasked rows keep their source values.
+
 Use it for names, emails, phone numbers, addresses, and other fields where you
 want realistic-looking replacements rather than a redaction.
 
 ### hash
 
 Produces a deterministic, joinability-preserving token:
-`derive(seed, namespace, value).hex()`, optionally truncated. The same source
+`derive(mask_key, namespace, value).hex()`, optionally truncated. The same source
 value yields the same token within a namespace, byte-stable across runs and
-processes. Nulls are preserved. Needs a namespace.
+processes. Nulls are preserved. Needs a namespace and a mask secret.
 
 - `truncate`: positive int; keep only the first N hex characters.
 
@@ -55,7 +70,9 @@ rejected with `gated_hash_on_integer_unsupported` before that table is masked. H
 the whole column, or stringify it upstream and hash the text.
 
 Use it for opaque identifiers (SSN, MRN, account number) that must remain
-join-stable but not human-readable.
+join-stable but not human-readable. An untruncated token is collision-resistant,
+so two distinct values sharing a token is negligible but not impossible. A
+`truncate` makes collisions likely again as it gets shorter.
 
 Text normalization and the compute path. Before hashing, text is normalized
 with Unicode NFC so that two encodings of the same characters hash alike. The
@@ -69,6 +86,35 @@ entirely on one path is internally consistent; if you first mask on a
 Python-only install and later mask new rows on a companion-present install (or
 the reverse), those rare values can fail to join across the two runs. To keep
 such values join-stable, mask the related data on the same path.
+
+### tokenize
+
+Reversible tokenization. Each distinct plaintext becomes an opaque token,
+`tok_` followed by 32 hex characters, and the plaintext and token pair is
+recorded in a token vault so the value can be recovered later. The engine holds
+no vault. The platform that runs the job supplies one, so a job with no vault is
+refused. Needs a namespace and a mask secret. See
+[security/token-vault](security/token-vault.md).
+
+- No options.
+- The token derives from the mask key, the column namespace, the text after
+  Unicode NFC normalization, and the vault's own derivation scope. The same
+  value therefore tokenizes differently in another namespace or another vault,
+  and never equals a `hash` output.
+- The vault is the identity authority. If it already holds a token for the
+  namespace and plaintext, that token is reused, so a value keeps its token
+  across jobs.
+- Nulls stay null.
+- The source column must be a string or object column. A number, date or
+  boolean column is refused, not converted.
+
+Refusals, all before any row is written: `tokenize_requires_vault`,
+`tokenize_requires_namespace`, `tokenize_requires_string_dtype`,
+`tokenize_vault_scope_required` and `token_vault_derivation_unsupported` (the
+vault has no usable derivation scope). A vault call that fails stops the run
+with `tokenize_vault_error`, which names neither the value nor the token.
+Untruncated tokens are collision-resistant: two distinct values sharing a token
+is negligible but not impossible.
 
 ### fpe
 
@@ -168,8 +214,9 @@ the absolute date must move.
 Coarse time-bucket generalization: snaps each date to a deterministic position
 within its ISO week, calendar month, or calendar quarter. The bucket boundary
 is determined by the input date; the position within the bucket is derived
-deterministically from `derive(job_seed, namespace, value)`, so the same input
-value always maps to the same output position. Needs a namespace.
+deterministically from `derive(mask_key, namespace, value)`, so the same input
+value always maps to the same output position. Needs a namespace and a mask
+secret.
 
 - `bucket` (str, required): one of `week`, `month`, or `quarter`. An invalid
   or misspelled value raises `StrategyError(bucket_perturb_invalid_config)` at
@@ -194,15 +241,16 @@ Bucket semantics:
   Oct-Dec). Output day in `[1, days_in_quarter]`. Dates in the same quarter
   stay in that quarter.
 
-Determinism keying: uses `derive(job_seed, namespace, value)` (HKDF-SHA256,
+Determinism keying: uses `derive(mask_key, namespace, value)` (HKDF-SHA256,
 S3 contract) to derive a per-value offset within `[0, bucket_size - 1]` days
 from the bucket start. Namespace-bound: two columns with different namespaces
-sharing the same job seed produce independent offsets. Same `(job_seed,
+sharing the same mask key produce independent offsets. Same `(mask_key,
 namespace, value)` always produces the same output, byte-stable across runs
 and processes.
 
-Null and unparseable values are passed through unchanged (same contract as
-`date_shift`). When no date format is detected, the column is passed through
+Null values stay null. A non-null value that does not parse as a date is kept
+as it came in, with no row error. This differs from `date_shift`, which records
+a `format_error`. When no date format is detected, the column is passed through
 unchanged with a WARNING log (carry-forward: surfacing as a `QualityWarning`
 is deferred).
 
@@ -277,7 +325,11 @@ provider_config:
 ### bucketize
 
 Rounds numeric values into fixed-width bins. Deterministic by construction
-(same value maps to same bucket). Non-numeric and null values pass through.
+(same value maps to same bucket). Null values stay null. A non-null value that
+is not numeric records a `format_error` row error and is never written to the
+output as it came in: the job fails, or the row is quarantined, by the
+row-error policy (see
+"Per-row strategy errors" below).
 
 - `width`: positive bin width, or
 - `preset`: a named width (`by_year`, `by_2_years`, `by_5_years`, `by_decade`,
@@ -285,6 +337,36 @@ Rounds numeric values into fixed-width bins. Deterministic by construction
 - `format`: `lower` (bin floor, default), `range` (`lo-hi`), or `midpoint`.
 
 Use it to generalize ages, incomes, or counts into ranges.
+
+### top_code
+
+Top-coding and bottom-coding: folds the rare tail of a numeric column into one
+label. The standard case is HIPAA Safe Harbor, where every age over 89 becomes
+"90+". It is not keyed and needs no namespace.
+
+- `preset`: `hipaa_age` sets `cap` 89 and `over_label` "90+". A preset wins over
+  `cap` and `over_label`.
+- `cap`: values above it become `over_label`. It must be a finite number with a
+  magnitude below 2**53.
+- `over_label`: the text for values above `cap` (required with `cap`).
+- `floor` and `under_label`: values below `floor` become `under_label`. Set
+  both or neither. `floor` must be below `cap`.
+
+Every other number is written as text, so the column holds one type. A whole
+number has no trailing `.0`, whichever route runs it. Null values stay null. A
+non-null value that is not numeric records a `format_error` row error and is
+never written to the output as it came in: the job fails, or the row is
+quarantined, by the row-error policy. In a text or object column, a value with a
+fractional part fails the whole column with `top_code_non_integral_object_column`,
+because the exact tail comparison needs whole numbers. Generalized rows are
+reported in the `top_code_generalized` quality warning, which carries counts and
+row positions and never a value.
+
+Refusals at compile time or before any row is read: `top_code_bounds_unresolvable`,
+`top_code_missing_over_label`, `top_code_invalid_floor`,
+`top_code_missing_under_label`, `top_code_under_label_without_floor`,
+`top_code_floor_ge_cap`, `top_code_with_when_unsupported` (top-coding is
+whole-column, so a `when:` is refused) and `top_code_unsupported_in_nested`.
 
 ### categorical
 
@@ -621,13 +703,14 @@ can produce a city/state pair that does not exist in the source data.
 Two modes:
 
 - **Mask mode**: calls `ReferenceTable.keyed_row(str(key_by_value))`, which
-  selects a row at position `HMAC-SHA256(job_seed, key_value) % row_count` in
-  the `id`-sorted table (RFC 2104). Same key value and seed always produce the
-  same row. Null `key_by` values fall back to a seeded random row.
+  selects a row at position `HMAC-SHA256(key, key_value) % row_count` in the
+  `id`-sorted table (RFC 2104), where `key` is derived from the mask key. Same
+  key value and mask key always produce the same row. Null `key_by` values fall
+  back to a keyed random row.
 - **Gen mode**: draws row indices from `numpy.default_rng`, independent of
-  source column values. Deterministic for the same seed and DataFrame length.
+  source column values. Deterministic for the same mask key and DataFrame length.
 
-The null-key fallback and gen mode seed from `derive(job_seed, namespace, source)`,
+The null-key fallback and gen mode seed from `derive(mask_key, namespace, source)`,
 where the source names the table, the reference and the target columns. Each
 `joint_mask` group therefore draws its own stream: two groups of one run never
 pick the same reference row index. `joint_mask` runs on the whole-frame route only.
@@ -697,12 +780,12 @@ Two modes:
   % candidate_count` over the full corpus sorted ascending by code. The
   candidate set excludes the input code, so output is never equal to input
   (domain-exclusion idiom, RFC 2104 keying, same primitive as `fpe` and
-  `joint_mask`). Same input, same job_seed, same corpus version always produce
+  `joint_mask`). Same input, same mask key, same corpus version always produce
   the same output.
 - **GEN mode**: picks a code for each source row via `derive_index` keyed on
   the column namespace and the row index (HKDF+HMAC, covered by
   `SEED_PROTOCOL_VERSION`). Two columns with different namespaces sharing the
-  same job_seed produce decorrelated output sequences. Same namespace, seed,
+  same mask key produce decorrelated output sequences. Same namespace, mask key,
   and row index always produce the same code. Needs a namespace on the column.
 
 `chapter_preserve` fail-closed cases (both raise `PlanCompileError`,
@@ -1104,6 +1187,82 @@ Use it to attach a table-level summary scalar to every row (for example: a
 grand total, a mean rate, or a non-null row count computed from a sibling
 column).
 
+### group_key
+
+Gives every row that shares a group value the same opaque key, so a group such
+as a household stays linked without exposing the real group identifier. The key
+is the group value passed through the keyed derivation under the mask key, in the
+namespace `group_key/<column>`. Two `group_key` columns therefore derive
+independent keys. The column needs no `namespace` of its own, and it is refused
+when the run has no mask secret.
+
+- `group_by` (required): the column that defines the group.
+- `length`: hex characters in the key. Even, from 8 to 64. Default 16.
+- `prefix`: constant text put before the key. Default none.
+
+Rows with the same `group_by` value get the same key on every run that uses the
+same mask secret. A null group value is not kept null: it is keyed from its text
+form, so all null rows share one key.
+
+Refusals at compile time: `group_key_group_by_missing`, `group_key_length_odd`,
+`group_key_length_out_of_range` and `group_key_missing_group_by_ref` (the
+`group_by` column is not in the table).
+
+### grouped_series
+
+Writes a per-group counter or walk into the column. The source value of the
+column is not used.
+
+- `group_by` and `order_by` (both required, and different columns): the first
+  splits rows into groups, the second orders rows inside each group.
+- `generator`: `cumcount` (default) or `monotone_walk`.
+- `start`: the first value in each group. Default 0 for `cumcount`, 1 for
+  `monotone_walk`.
+- `step`: for `cumcount`, the gap between values. For `monotone_walk`, the
+  smallest step. Default 1. It must be from 0 to `max_step`.
+- `max_step`: the largest step of a `monotone_walk`. Default 10.
+
+`cumcount` counts rows inside each group in `order_by` order and draws nothing.
+`monotone_walk` never decreases inside a group. Its steps are drawn from a
+stream derived from the mask key, the namespace `grouped_series/<column>` and the
+group value, so a run with the same secret writes the same walk. Both
+generators are treated as keyed, so a run with no mask secret is refused even
+for `cumcount`.
+
+Refusals at compile time: `grouped_series_group_by_missing`,
+`grouped_series_order_by_missing`, `grouped_series_group_by_equals_order_by`,
+`grouped_series_generator_invalid`, `grouped_series_step_out_of_range`,
+`grouped_series_missing_group_by_ref` and `grouped_series_missing_order_by_ref`.
+
+### windowed_date
+
+Writes a date inside a window around an anchor date in another column of the
+same row, for example a discharge date a few days after an admission date.
+
+- `anchor` (required): the column that holds the anchor date.
+- `max_days` (required): the largest offset in days.
+- `min_days`: the smallest offset in days. Default 0. It may be negative and must
+  not exceed `max_days`.
+- `distribution`: `uniform` (default), `early` (offsets near `min_days` are more
+  likely) or `late` (offsets near `max_days` are more likely).
+
+The output is text in `YYYY-MM-DD` form, from anchor plus `min_days` to anchor
+plus `max_days`, inclusive. The offset is drawn from a stream derived from the
+mask key, the namespace `windowed_date/<column>` and the row's position in the
+table, so it depends on the position and not on the anchor value. A `when:` gate
+keeps each row's position in the whole table. A null anchor gives a null output.
+
+A non-null anchor must be an ISO date or datetime with no timezone, from
+1700-01-01 to 2200-12-31. Any other anchor, or a result outside that range,
+stops the run. The error names the row position and never the value. No row is
+clamped. The column is refused when the run has no mask secret.
+
+Refusals at compile time: `windowed_date_anchor_missing`,
+`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`,
+`windowed_date_distribution_invalid` and `windowed_date_missing_anchor_ref`.
+At run time `windowed_date_position_out_of_domain` refuses a row position it
+cannot encode.
+
 ### passthrough and structural handlers
 
 - `passthrough`: leaves the column untouched. Use it to make an unmasked column
@@ -1116,11 +1275,13 @@ column).
 
 ### Intentional collisions (allow_collisions)
 
-By default deterministic identifier and pool strategies preserve cardinality:
-distinct source values map to distinct masked values within a namespace. Set
-`allow_collisions: true` on a column when you deliberately want distinct inputs
-to collapse onto the same output (the classic "Tom and Peter both become Matt"
-case), for example to model a smaller masked population.
+A deterministic `faker` column already maps many sources onto a fixed pool, so
+two distinct source values can share an output by default. How often depends on
+`pool_size`. Set `allow_collisions: true` on a column to state that on purpose
+(the classic "Tom and Peter both become Matt" case), for example to model a
+smaller masked population. Only `fpe` is one-to-one, and only inside its format
+domain. Untruncated `hash` and `tokenize` are collision-resistant.
+`--post-validate` reports how many distinct source values a `faker` column lost.
 
 ```yaml
 columns:
@@ -1135,8 +1296,8 @@ It is a compile-time alias for `cardinality_mode: reuse` plus `deterministic:
 true`, so it requires a namespace and conflicts with an explicitly different
 `cardinality_mode` (the compiler raises `allow_collisions_mode_conflict`). When
 such a column is vaulted, the ambiguous source-to-masked pairs cannot be
-reversed and are counted in the vault's `ambiguous_dropped`. The default stays
-collision-free; this knob is purely additive.
+reversed and are counted in the vault's `ambiguous_dropped`. The default
+selection is the same, so this knob changes no output.
 
 ### Conditional masking (when:)
 
@@ -1799,9 +1960,9 @@ failing rows to a JSONL file instead of failing the job.
 
 ### Per-row strategy errors (Sprint 2 honesty pack, D7/D8)
 
-Independent of the `validators:` block, `bucketize`, `date_shift`, and
-`code_set` can each produce PER-ROW errors during masking itself (not a
-post-mask check): a non-null `bucketize`/`date_shift` cell that fails
+Independent of the `validators:` block, `bucketize`, `date_shift`, `top_code`
+and `code_set` can each produce PER-ROW errors during masking itself (not a
+post-mask check): a non-null `bucketize`/`date_shift`/`top_code` cell that fails
 numeric/date coercion (`format_error`), or a `code_set` `chapter_preserve`
 value that cannot be masked -- input chapter absent from the corpus, or a
 sole-member chapter bucket (`mask_error`).

@@ -269,3 +269,15 @@ def resolve_mask_key(*, plan: Plan, key_provider: KeyProvider | None = None) -> 
     """Gate + resolve straight to `mask_key` bytes for callers that stand outside
     `StrategyContext`. The provider must already be admitted; refs are not resolved here."""
     return require_mask_key(plan, key_provider)
+
+
+# The one rule for a `key_version` label: the resume store records and the runtime lock both read
+# it through `is_key_version_label`. fullmatch, not a `$` anchor, which also accepts "v1\n".
+KEY_VERSION_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:+!-]{0,63}"
+
+
+def is_key_version_label(value: object) -> bool:
+    """True when ``value`` is a ``str`` that fully matches the key version label rule."""
+    import re
+
+    return type(value) is str and re.fullmatch(KEY_VERSION_PATTERN, value) is not None
