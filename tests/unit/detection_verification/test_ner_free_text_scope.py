@@ -39,7 +39,7 @@ def test_a_notes_column_where_one_cell_in_four_names_a_person_is_a_hit() -> None
     rate = nr.ner_rates(_notes_column(4))["person_name"]
     assert rate.scanned_cells == CELLS
     assert rate.hit, rate
-    assert rate.rate >= nr.NER_MIN_RATE
+    assert rate.rate >= nr.NER_MIN_RATES["en_core_web_sm"]
     print("1-in-4 person_name rate", rate.rate, rate.hit_cells)
 
 
@@ -47,7 +47,7 @@ def test_a_notes_column_where_one_cell_in_four_names_a_person_is_a_hit() -> None
 def test_a_notes_column_where_one_cell_in_ten_names_a_person_is_visible_but_not_a_hit() -> None:
     rate = nr.ner_rates(_notes_column(10))["person_name"]
     assert rate.scanned_cells == CELLS
-    assert 0 < rate.rate < nr.NER_MIN_RATE, rate
+    assert 0 < rate.rate < nr.NER_MIN_RATES["en_core_web_sm"], rate
     assert not rate.hit
     print("1-in-10 person_name rate", rate.rate, rate.hit_cells)
 

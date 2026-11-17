@@ -80,9 +80,6 @@
   "layers::decoy_engine.profiling._snapshot_values -> decoy_engine.generation.pool._events": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
-  "layers::decoy_engine.profiling._snapshot_values -> decoy_engine.generation.statistical._cell_format": {
-   "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
-  },
   "layers::decoy_engine.profiling._snapshot_values -> decoy_engine.quality.snapshot": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },

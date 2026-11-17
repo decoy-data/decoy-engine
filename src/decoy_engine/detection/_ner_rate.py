@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
-from decoy_engine.detection.ner import DEFAULT_NER_MODEL, NER_ENTITY_MAP, iter_ner_spans_batch
+from decoy_engine.detection.ner import NER_ENTITY_MAP, iter_ner_spans_batch, resolve_ner_model
 
 RateBucket = Literal["<10%", "10-50%", ">=50%"]
 
@@ -80,8 +80,6 @@ def ner_min_rate(model: str) -> float | None:
     return NER_MIN_RATES.get(model)
 
 
-# The rate of the default model; callers move to `NER_MIN_RATES` when the default changes.
-NER_MIN_RATE = NER_MIN_RATES[DEFAULT_NER_MODEL]
 # Bounds the span lists held at once; far below the pipe window in `ner.py`.
 _WINDOW = 512
 
@@ -133,13 +131,14 @@ def is_free_text(cells: Sequence[str]) -> bool:
     return statistics.median(len(cell.split()) for cell in cells) >= FREE_TEXT_MIN_TOKENS
 
 
-def ner_rates(values: Iterable[object], *, model: str = DEFAULT_NER_MODEL) -> dict[str, NerRate]:
+def ner_rates(values: Iterable[object], *, model: str | None = None) -> dict[str, NerRate]:
     """Per-detector-id rates over the cell sample of `values`; every NER id is present.
 
     The only NER scoring entry. A column that is not free text is not scored: no cell reaches
     spaCy and every rate is over zero scanned cells. Each rate carries `model`'s own hit threshold;
     a model with no calibrated rate is not scored.
     """
+    model = resolve_ner_model(model)
     min_rate = ner_min_rate(model)
     if min_rate is None:
         raise ValueError("no calibrated NER hit rate for this model")
