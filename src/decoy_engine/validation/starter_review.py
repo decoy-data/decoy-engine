@@ -23,6 +23,7 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -32,6 +33,7 @@ from decoy_engine.contracts.strategy_requirements import lookup_path, requiremen
 from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.errors import DecoyError
 from decoy_engine.execution import StrategyInfo, StrategyOption, strategy_catalog
+from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.profiling import (
     StarterConfig,
@@ -208,7 +210,14 @@ def column_entry(
     return entry
 
 
-def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) -> StarterConfig:
+@entry_point
+def apply_review(
+    starter: StarterConfig,
+    decisions: Sequence[ReviewDecision],
+    *,
+    file_access: FileAccess | None = None,
+    base_dir: str | Path | None = None,
+) -> StarterConfig:
     """Fold one verdict per column into a new `StarterConfig`.
 
     The result does not depend on the order of `decisions`. `CONFIRM` takes the suggestion the
@@ -219,6 +228,9 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
     entry as it is. The result passes the config validation and the profile-free plan checks
     (`run_config_only_checks`), so every entry that needs a namespace has one. The full
     `compile_plan` needs a profile, which reads the data, so that step is the caller's.
+
+    `file_access` and `base_dir` go to `run_config_only_checks`, which reads the snapshot
+    artifacts a config names.
     """
     config = copy.deepcopy(starter.config)
     notes: dict[tuple[str, str], str] = dict(starter.notes)
@@ -273,7 +285,7 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
         notes.pop(slot, None)
     for table_name, names in dropped.items():
         _drop(tables[table_name], names)
-    problems = _validation_problems(config)
+    problems = _validation_problems(config, file_access, base_dir)
     if problems:
         raise ReviewEntryError(f"the reviewed config fails validation ({problems})")
     return dataclasses.replace(starter, config=config, notes=MappingProxyType(notes))
@@ -425,12 +437,16 @@ def _drop(table: dict[str, Any], names: set[str]) -> None:
         existing["columns"] = [*have, *(n for n in in_source_order if n not in have)]
 
 
-def _validation_problems(config: dict[str, Any]) -> str:
+def _validation_problems(
+    config: dict[str, Any], file_access: FileAccess | None, base_dir: str | Path | None
+) -> str:
     """The value-free summary of why `config` fails, or an empty string when it validates."""
     summary = ""
     try:
         check_starter_config(copy.deepcopy(config))
-        run_config_only_checks(swap_placeholder_namespaces(config)[0])
+        run_config_only_checks(
+            swap_placeholder_namespaces(config)[0], file_access=file_access, base_dir=base_dir
+        )
     except PipelineConfigError as err:
         shown = [
             f"{p.code} at {p.location or '(root)'}" for p in err.problems[:_MAX_PROBLEMS_SHOWN]
