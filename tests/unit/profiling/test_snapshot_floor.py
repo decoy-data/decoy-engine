@@ -321,14 +321,31 @@ def test_a_short_last_range_joins_the_one_before_it() -> None:
     ]
 
 
-def test_a_year_past_the_sampled_range_keeps_its_own_bucket() -> None:
-    years = [2000] * 12 + [9998] * 3 + [9999] * 4
+def _wide_years(years: list[int]) -> pd.DataFrame:
     stamps = np.array([f"{y:04d}-02-02" for y in years], dtype="datetime64[s]")
-    df = pd.DataFrame({"d": pd.Series(stamps)})
-    assert _ranges(_doc(df, flagged=[]), "d") == [
-        {"start_year": 2000, "end_year": 9998, "count": 15},
-        {"start_year": 9999, "end_year": 9999, "count": 4},
-    ]
+    return pd.DataFrame({"d": pd.Series(stamps)})
+
+
+def test_a_year_past_the_sampled_range_never_gets_a_bucket_of_its_own() -> None:
+    df = _wide_years([2000] * 12 + [9998] * 3 + [9999])
+    ranges = _ranges(_doc(df, flagged=[]), "d")
+    assert ranges == [{"start_year": 2000, "end_year": 9998, "count": 16}]
+    assert _draw(_doc(df, flagged=[]), "d", 50, 1)
+
+
+def test_a_lone_row_in_year_9999_is_not_released_as_a_bucket() -> None:
+    df = _wide_years([2000] * 30 + [9999])
+    assert all(r["count"] >= K for r in _ranges(_doc(df, flagged=[]), "d"))
+    assert 9999 not in {r["start_year"] for r in _ranges(_doc(df, flagged=[]), "d")}
+
+
+def test_a_datetime_column_under_k_rows_releases_no_range() -> None:
+    df = pd.DataFrame({"d": pd.to_datetime(["2001-01-01"] * 5)})
+    doc = _doc(df, flagged=[])
+    assert doc["redacted_columns"] == ["d"]
+    assert _ranges(doc, "d") == []
+    assert _col(doc, "d")["stats"]["min"] is None
+    assert "2001" not in json.dumps(doc)
 
 
 def test_the_flagged_and_g5_bounds_stay_outside_every_range() -> None:
@@ -487,9 +504,11 @@ def test_property_labels_and_joint_cells_are_held_by_k_rows(
 def test_property_every_year_range_holds_k_rows_and_the_count_is_kept(years: list[int]) -> None:
     df = pd.DataFrame({"d": pd.to_datetime([f"{y:04d}-07-07" for y in years])})
     ranges = _ranges(_doc(df, flagged=[]), "d")
-    assert sum(r["count"] for r in ranges) == len(years)
     if len(years) >= K:
+        assert sum(r["count"] for r in ranges) == len(years)
         assert all(r["count"] >= K for r in ranges)
+    else:
+        assert ranges == []
     assert all(a["end_year"] < b["start_year"] for a, b in pairwise(ranges))
 
 
