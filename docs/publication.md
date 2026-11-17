@@ -424,8 +424,10 @@ admits and reads the tables back the same way, and nothing is published.
   root) is durable by deployment, as is a directory another uid owns and left unsynced. No macOS
   CI row runs these paths yet.
 - **L2, stages left by a killed attempt.** A SIGKILL leaves the attempt's
-  `._decoy_publication_pending_<token>` stage beside the destination. Nothing reclaims it: it is
-  never read as output and never bound, and each attempt uses a fresh token, so it blocks nothing.
+  `._decoy_publication_pending_<token>` stage beside the destination. It is never read as output
+  and never bound, and each attempt uses a fresh token, so it blocks nothing. A caller can find it
+  with `fileaccess.reclaim_stages` (F26, below the file-access policy's "Reclaiming dead stages");
+  `publish_unit` itself never reclaims.
 - **The destination lock.** The lock name adds 12 bytes to the leaf (`.` before it,
   `.decoy-lock` after it), so a publication destination leaf longer than 243 bytes
   (`MAX_PUBLICATION_LEAF_BYTES` in `fileaccess/_component.py`, 255 less those 12) is refused up

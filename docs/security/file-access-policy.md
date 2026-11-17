@@ -196,6 +196,42 @@ in the logging config, no log file is written any more (project-layout E2).
   a strict policy it answers "inconclusive" and routing falls back to the static estimate. The
   isolated and governor routes themselves fail closed with `FileAccessUnavailable`.
 
+## Reclaiming dead stages (F26)
+
+`reclaim_stages(directory, *, apply, min_age_s=3600) -> ReclaimReport` judges the dead
+`publication` stages directly in one directory. It serves the ambient policy only
+(`FileAccessUnavailable` under any other) and returns an empty report on win32. This release
+builds the preview, `apply=False`; `apply=True` raises `NotImplementedError` until the removal
+arm lands.
+
+Only an exact litter name is judged: `re.fullmatch` on `._decoy_publication_pending_<12 hex>` or
+`._decoy_publication_reclaim_<12 hex>`. Every other entry (a bound unit, a lock file, another
+stage label, a user file, a near-miss name) is never opened. For each exact name, in order:
+
+1. `fstatat` without following: another uid is `foreign` and is never opened; anything but an
+   owned directory of mode exactly `0700` is `unproven`;
+2. open `O_NOFOLLOW` and match the inode of step 1;
+3. prove the `.decoy-publication-stage` marker through the one reader (`_fdtree._prove_marker`):
+   a no-follow `0600` regular file of the effective user, exact magic and token. A pending stage
+   must carry its own name's token;
+4. for a pending name, the age: now minus the newest `max(mtime, ctime)` over the whole tree,
+   walked by descriptor (a subdirectory that cannot be opened counts with its own times). Under
+   the grace it is `young`, whatever its marker says, since it may be a writer that has not
+   locked yet or an engine that writes no marker. A reclaim name has no grace;
+5. `flock(LOCK_EX|LOCK_NB)`: `BlockingIOError` is `live`, any other `OSError` is
+   `lock_unavailable`;
+6. after the lock, steps 1 to 4 again and the name still the locked inode, else `unproven`.
+
+A fully proved entry is `eligible`. A pending stage with a missing or foreign marker is `kept`.
+A reclaim name without a valid marker is `eligible` only when empty and `kept` otherwise: the
+reclaim name authorizes nothing by itself. The preview creates, renames, removes and chmods
+nothing, and the lock is released before the next entry.
+
+`ReclaimReport` holds one count per `ReclaimOutcome` (`removed`, `eligible`, `live`, `young`,
+`foreign`, `unproven`, `kept`, `lock_unavailable`, `failed`) and `scope_unavailable`, set when
+the directory cannot be opened (its last component a link included) or listed. It holds no path,
+name, token, errno or message, and no exception escapes the scope open.
+
 ## Operator requirements
 
 `RootedFileAccess` needs `openat2` and a mounted `/proc` (a handle's library path is
