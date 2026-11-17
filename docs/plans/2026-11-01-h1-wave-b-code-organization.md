@@ -1,6 +1,6 @@
 # H-1 Wave B: code organization plan (engine and CLI slices, roadmap rows 46 to 54)
 
-Status: plan, revision 4 (re-anchor; plan only, no production code, no moves). Risk R2.
+Status: plan, revision 4.1 (re-anchor plus Codex round 1 fixes D13 and D14; plan only, no production code, no moves). Risk R2.
 Repo and branch: decoy-engine `plan/h1-wave-b` (this file). It also plans the CLI slices C0 and C3, which build in decoy (CLI).
 Date: 2026-11-17. Author: Opus plan author. Review: Codex reviews the "Re-anchor deltas" section only; the design it changes was GO'd on revision 3.
 Moved from: decoy-platform `P:plan/h1-wave-b` `944fb295` (revision 3, Codex GO, measured 2026-11-01). Every roadmap row this plan serves (46 to 54) targets engine or CLI files. The platform clusters (P0 to P11) and the web list stay in the platform copy, which is parked with the platform (owner 2026-11-05: CLI V1 first). The platform copy gets a one-line pointer to this file.
@@ -24,6 +24,8 @@ Codex: this section is the whole review surface. Everything below it is revision
 | D9 | E1.2 also rewrites the three production importers that still read `_scoring` names through `detectors` (`profiling/profiler.py:19`, `profiling/sentinels.py:30`, `verification/postmask/_column_facts.py:31`). E1.1 landed with a re-export, which rule 1.2 (no shims) forbids. E1.2's touched set grows from 3 to 5 files | `detectors.py:58` to `:71` (`# noqa: F401 re-exported constants`) | E1 |
 | D10 | Gates re-measured. A-4 (#361) and F06 (#338) merged, so every revision 3 WAIT on them clears. New claims come from open PRs: PROP EF0 #617 (`detectors.py`, `text_mask.py`, `_compile.py`); GEN-REL and GEN-INHERIT #523, #546, #555, #557, #561, #596 (`plan/_checks.py`, `generators/columns.py`, `test_table_kind_classifier.py`); #645 and #655 (`producer-inventory.json`). The STORM CLI half (row 56) still gates C3 | `gh pr list --state open` and `git diff origin/main...<head>` on 2026-11-17 | section 3 |
 | D11 | Added for plan-lint and the current plan format: Placement table, Ratchets touched line, class table, enumerations, reuse inventory | plan format | sections 6 to 11 |
+| D13 | Codex NO-GO round 1 on `810442380`, V1: E0r's replacement count came from the pruned fixture, so it proved nothing, and removed rows were not proven dead. Fix: (a) a stdlib-only site finder, `tests/sentry/_ast_site.py`, independent of the scanner, proves every pruned row has no live site before the prune writes, and again on every run through a committed `pruned-rows.json`; (b) `test_every_producer_resolves` moves to the live scan and counts code entries (literal codes plus resolved registry constants), checked against a fixed floor in `tests/sentry/baselines/f29-resolved-entries.json` (1353 on `2e1108a0d`) that the ratchet lets only rise. Measured: the fixture's 1306 coded rows hold 1327 code entries, but the live tree has 0 literal code entries (every producer now uses a registry constant), so a fixture-based floor would be 0 after the prune | measured on `2e1108a0d` with `build()`; Codex `h1b` | E0r steps 1, 4, 5, 7 |
+| D14 | Codex NO-GO round 1, DESIGN: E0m trusted the manifest without running the pure-move checker in the ratchet. Fix: condition 6 runs `check_move` (`scripts/check_pure_move.py:210`) inside `_ratchet.py`; one function, `manifest_rehomes()`, is the only acceptance path, guarded by an AST test; new test and mutation: a manifest that meets conditions 1 to 5 but fails the checker is refused | Codex `h1b` | E0m |
 | D12 | Row 49's E6b stays dropped (revision 3: an import cycle, not a move). `native/_dispatch.py` is now 677 (ceiling 688) and `native/_requirements.py` 657 (ceiling 677); both stay dense, owner question Q7 | `tests/sentry/test_module_size.py:118`, `:126` | E6 |
 
 Proposed roadmap bookkeeping (for the coordinator; this plan does not edit the roadmap): row 48 DONE (E1.1, #468); row 49 DONE (E6a #419; E6b dropped by revision 3); row 47 CLOSED as not needed (D3); rows 46, 50, 51, 52 re-planned here; row 53 still waits on row 56; row 54 per file. The roadmap's plan link moves to `E:docs/plans/2026-11-01-h1-wave-b-code-organization.md` on `E:plan/h1-wave-b`.
@@ -105,9 +107,11 @@ Behavior. `tests/sentry/_ratchet.py` gains `REHOME_BY_MANIFEST`, a frozenset of 
 4. The key count of the sentry does not grow. For a sentry with `max` values (`table-kind-truth-tests`), the head maxes of O and N together are at most the base max of O, and N's entry carries `moved_from: <K'>`.
 5. Each lost key is claimed once.
 
-Any other added key fails as today. The gate prints one review line per re-homed key. This mirrors the existing `REHOME_BY_BINDING` rule (`tests/sentry/_ratchet.py:40`), which proves a re-home by AST; here the proof is the manifest, which the pure-move checker has already verified for the same commit.
+6. The pure-move checker passes on that manifest, run inside the ratchet (D14). `_ratchet.py` loads `scripts/check_pure_move.py` by path (as `scripts/dev/ratchet_check.py:24` loads `_ratchet.py`) and calls `check_move(manifest, read_base, read_head, production_files)` (`scripts/check_pure_move.py:210`) with readers over `git show <base>:` and `git show HEAD:`. Any problem it returns refuses every re-home that manifest would allow, and the checker's lines are printed as ratchet findings. A `ValueError` from a malformed manifest refuses too.
 
-Touched set: `tests/sentry/_ratchet.py`, one new test file. No production file. `scripts/dev/ratchet_check.py` only loads `_ratchet.py` and is unchanged.
+Conditions 1 to 6 are checked in one function, `manifest_rehomes()`, the only code in `_ratchet.py` that names `REHOME_BY_MANIFEST`. So no ratchet path, `ratchet_check.py` or a direct call of `_ratchet.check()`, can accept a manifest re-home without the checker passing. Any other added key fails as today. The gate prints one review line per re-homed key. This follows the existing `REHOME_BY_BINDING` rule (`tests/sentry/_ratchet.py:40`, `rehomes` at `:227`), which proves a re-home by AST inside the ratchet; here the proof is the manifest plus the checker, both run inside the ratchet.
+
+Touched set: `tests/sentry/_ratchet.py`, one new test file. No production file. `scripts/dev/ratchet_check.py` only loads `_ratchet.py` and is unchanged; `scripts/check_pure_move.py` is called, not changed.
 
 Tests, red first (`tests/sentry/test_ratchet_rehome_manifest.py`, using scratch git repos like the existing ratchet tests):
 - `::test_manifest_move_rehomes_keys`: a scratch move of one function from O to N with its manifest; three baselines re-keyed; passes.
@@ -116,8 +120,10 @@ Tests, red first (`tests/sentry/test_ratchet_rehome_manifest.py`, using scratch 
 - `::test_rehome_of_unmoved_function_fails` (seeded: a key for a function not in `map`).
 - `::test_rehome_that_grows_count_fails` (seeded: O keeps its max and N adds 1).
 - `::test_double_claim_fails` (seeded: two new keys claim one lost key).
+- `::test_rehome_with_impure_manifest_fails` (D14, seeded): a manifest that meets conditions 1 to 5, but the moved function's body differs by one constant between base O and head N, so `check_move` reports a rule-1 problem; the re-home is refused and the checker line is printed.
+- `::test_manifest_rehome_has_one_acceptance_path` (D14, AST over `_ratchet.py`): `REHOME_BY_MANIFEST` is referenced only in `manifest_rehomes`, `check()` reaches manifest re-homes only through it, and `manifest_rehomes` calls `check_move` on every path that returns a non-empty acceptance set.
 
-Named mutations: drop condition 3 (the unmoved-function test goes red); drop condition 4's max sum (the count test goes red); accept any manifest in the tree instead of one changed in the diff (a stale-manifest case goes red).
+Named mutations: drop condition 3 (the unmoved-function test goes red); drop condition 4's max sum (the count test goes red); accept any manifest in the tree instead of one changed in the diff (a stale-manifest case goes red); skip the `check_move` call, so a manifest that meets conditions 1 to 5 but fails the checker is accepted (the impure-manifest test and the one-path test go red).
 
 ### E0r. F29 producer inventory: prune to live sites and guard each row (redesigned, D6; R2)
 
@@ -128,16 +134,19 @@ Measured on engine `2e1108a0d` (`git diff --stat 2e1108a0d bb993f398 -- tests/fi
 - Of the 211 rows that match, `line` drifted in 189 and `codes` and `value_class` in 137.
 - 1 of 51 consumer rows names no live consumer.
 
-The slice (no production code; touched set: `tests/sentry/_reason_baseline.py`, the fixture, the two baselines, one test file, `tests/unit/test_reason_registry.py`):
+Also measured (D13): the fixture's 1306 coded rows hold 1327 code entries. The live scan has 0 literal code entries: its 1493 sites are 1353 `registry` (a registry constant such as `reasons.plan.DEDUPE_UNSUPPORTED_TYPE`), 88 `forward`, 39 `dynamic` and 13 `none`. The 211 rows the prune keeps carry 0 code entries once refreshed (137 of them are `registry`). So after the prune, `tests/unit/test_reason_registry.py::test_every_producer_resolves` (`:126`), which reads the fixture and counts only literal codes, would check 0 entries.
 
-1. Red first: `tests/sentry/test_reason_inventory_paths.py::test_every_row_is_its_ast_site`. It is independent of the scanner, so a scanner bug cannot write and bless a row. For every site row: `src/decoy_engine/<file>` exists; `function` names a definition reached by the qualified-name walk, or `<module>`; `line` lies inside that definition; an AST node starting on `line` unparses to `expr` (with the scanner's 100-character truncation); `kind` and `value_class` are in closed sets the test holds; `family` equals the callee or target chain of that node; each member of `codes` is a string literal in that node, or `codes` is empty and `value_class` is not `literal`. The same walk runs over `consumers`. It is red on today's fixture (1176 site rows and 1 consumer row fail).
-2. Seeded fixture mutants under `tests/fixtures/f29/mutants/`, each red on its own through `::test_guard_rejects_each_seeded_mutant`: one `line` off by one; one `expr` edited; one `codes` emptied while `value_class` stays `literal`; one `function` renamed; one `file` renamed.
-3. Repair: `_reason_baseline.py` gains `--prune-inventory`. It keeps only fixture rows whose key the live scan yields, and rewrites their non-key fields (`line`, `codes`, `value_class`, `family`) from the live row. It never adds a row. `--write` and its refusal (`_reason_baseline.py:228`) are unchanged, so `reason-baseline.json` cannot change on this path. The two ratchet baselines lose the pruned keys (a shrink).
-4. `tests/unit/test_reason_registry.py:145` asserts `checked > 1000`. After the prune the fixture holds 211 site rows, so that floor would fail. It is replaced by `checked == <the number of coded rows in the pruned fixture>`, computed by the test from the fixture, plus `assert checked > 0`. This is a test change a reviewer must see: the old floor only proved the file was large. The AST guard in step 1 is the strength that replaces it.
-5. Determinism: `--prune-inventory` runs twice and once under the CI interpreter (3.10); the three outputs are byte-identical, or the slice stops and goes to the owner.
-6. Mutation before push: add one stale row back; the guard goes red; revert.
+The slice (no production code; touched set: `tests/sentry/_reason_baseline.py`, `tests/sentry/_ratchet.py`, the fixture, the two baselines, one new baseline, one new helper, one test file, `tests/unit/test_reason_registry.py`):
 
-Named mutations: the `line`-span check removed (the off-by-one mutant survives, so the test must go red only with the check); the `codes` literal check removed; the prune keeping rows with no live key.
+1. Independent site finder. New `tests/sentry/_ast_site.py`: given `(file, function, line, expr)`, it parses `src/decoy_engine/<file>` with `ast`, walks the qualified name, and returns the nodes in that definition whose `ast.unparse` (cut at the scanner's 100 characters) equals `expr`. It imports only the standard library; `::test_ast_site_imports_only_stdlib` fails if it imports `_reason_scan`, `_reason_baseline` or any `decoy_engine` module. So the scanner that chose the rows is never the thing that proves them.
+2. Red first: `tests/sentry/test_reason_inventory_paths.py::test_every_row_is_its_ast_site`, built on `_ast_site`. For every site row: `src/decoy_engine/<file>` exists; `function` names a definition reached by the qualified-name walk, or `<module>`; `line` lies inside that definition; a node starting on `line` unparses to `expr`; `kind` and `value_class` are in closed sets the test holds; `family` equals the callee or target chain of that node; each member of `codes` is a string literal in that node, or `codes` is empty and `value_class` is not `literal`. The same walk runs over `consumers`. It is red on today's fixture (1176 site rows and 1 consumer row fail).
+3. Seeded fixture mutants under `tests/fixtures/f29/mutants/`, each red on its own through `::test_guard_rejects_each_seeded_mutant`: one `line` off by one; one `expr` edited; one `codes` emptied while `value_class` stays `literal`; one `function` renamed; one `file` renamed.
+4. Repair with a dead-row proof (D13). `_reason_baseline.py` gains `--prune-inventory`. It selects the rows whose key the live scan does not yield, then proves each one dead with `_ast_site`: the named file is gone, or the named definition is gone, or no node in it unparses to the row's `expr`. If any selected row still has a site, the tool writes nothing and lists the rows (a scanner miss to fix first). For the kept rows it rewrites the non-key fields (`line`, `codes`, `value_class`, `family`) from the live row. It never adds a row. The removed rows, with the base commit, are committed as `tests/fixtures/f29/pruned-rows.json`, and `::test_pruned_rows_have_no_live_site` checks every one with `_ast_site` on every run, so a removed row whose site returns fails. `--write` and its refusal (`_reason_baseline.py:228`) are unchanged, so `reason-baseline.json` cannot change on this path. The two ratchet baselines lose the pruned keys (a shrink).
+5. Completeness floor that the fixture cannot set (D13). `test_every_producer_resolves` stops reading the fixture. It runs on the live scan (`_reason_baseline.build()`), and it counts one code entry for each literal code (resolved as today) and for each `registry` site (the constant its `expr` names is looked up as an attribute of `decoy_engine.reasons`, or of the site's own module for a module constant such as `FK_KEY_DTYPE_UNSUPPORTED_CODE`, and its value must pass `reasons.is_registered`); an entry that does not resolve fails. It asserts `checked >= FLOOR`, where `FLOOR` is a fixed number in a new baseline, `tests/sentry/baselines/f29-resolved-entries.json` (`{"floor": N}`), set by hand to the count measured on the E0r base (1353 on `2e1108a0d`) and reviewed in the PR. The old `checked > 1000` (`tests/unit/test_reason_registry.py:145`) goes. The floor can only rise: E0r adds a `FLOORS` table to `tests/sentry/_ratchet.py` with this one baseline, and the ratchet fails when head's `floor` is below base's; the baseline is registered in `scripts/dev/sentry_registry.toml`. A scanner regression that finds fewer registry sites fails the floor; deleting producers for real needs an owner exception to lower it.
+6. Determinism: `--prune-inventory` runs twice and once under the CI interpreter (3.10); the three outputs are byte-identical, or the slice stops and goes to the owner.
+7. Mutations before push: add one stale row back (the AST guard goes red); add a live row to `pruned-rows.json` (the dead-row test goes red); make the scanner skip one module (the floor goes red); lower the floor by one (the ratchet goes red).
+
+Named mutations: the `line`-span check removed (the off-by-one mutant survives, so the test must go red only with the check); the `codes` literal check removed; the prune keeping rows with no live key; the prune skipping the `_ast_site` dead-row proof (a seeded live row is pruned and the dead-row test goes red); `FLOOR` computed from the fixture or the scan instead of read from the baseline (the skip-one-module mutant passes, so the test must go red only with the fixed floor).
 
 Why this order: E2 and E4 move or shift reason sites, and after E0r each such slice updates its rows' non-key fields (E4) or re-homes keys through E0m (E2). E0r opens after #645 and #655 merge or close, because both edit the fixture; re-measure that day.
 
@@ -302,12 +311,13 @@ Checked against engine `CODEMAP.md` "Where Things Go" (`CODEMAP.md:237`) and the
 | `E:src/decoy_engine/plan/checks/_fpe_checksum.py` | E2 | same | as above |
 | `E:docs/decisions/text-mask-span-masking.md` | E4 | decision records | n/a (doc) |
 | `E:tests/sentry/test_ratchet_rehome_manifest.py` | E0m | "Sentry test" | n/a (tests) |
-| `E:tests/sentry/test_reason_inventory_paths.py` | E0r | "Sentry test" | n/a (tests) |
+| `E:tests/sentry/test_reason_inventory_paths.py`, `E:tests/sentry/_ast_site.py` | E0r | "Sentry test" | n/a (tests) |
+| `E:tests/fixtures/f29/pruned-rows.json`, `E:tests/sentry/baselines/f29-resolved-entries.json` | E0r | beside the f29 fixture and the baselines | n/a (data) |
 | `E:docs/plans/h1-wave-b/manifests/e1-2.json`, `e1-3.json`, `e2.json`, `e4.json` | each slice | beside `e3.json`, `e5.json` | n/a |
 | `C:scripts/dev/check_pure_move.py`, `C:scripts/dev/check_pure_move_scope.py` | C0 | "Developer environment scripts": `scripts/dev/` | `scripts/dev/` 10 to 12 |
 | `C:tests/unit/scripts/test_check_pure_move.py`, `test_check_pure_move_parity.py` | C0 | "Developer environment scripts" tests: `tests/unit/scripts/` | n/a |
 
-Ratchets touched: engine `module-size` (shrink only: E1.3 deletes `detection/detectors.py`, E2 deletes `plan/_checks.py`, E4 deletes `transforms/text_mask.py`); `f29-producer-inventory` and `f29-consumer-inventory` (E0r shrink; E2 re-home through E0m, count unchanged); `table-kind-truth-tests` (E2 re-home through E0m, total unchanged); `package-fanout` (no entry changes; `plan/` stays 30); `secret-material-census` and `gcs-call-kwargs` (unchanged; E4 shifts lines only, keys are by function); `import-layers` (unchanged: no new cross-layer import); `public-import-boundary` (unchanged); the ratchet tool itself (E0m adds `REHOME_BY_MANIFEST`). CLI: `module-size` unchanged (C0 adds no file over 800).
+Ratchets touched: engine `module-size` (shrink only: E1.3 deletes `detection/detectors.py`, E2 deletes `plan/_checks.py`, E4 deletes `transforms/text_mask.py`); `f29-producer-inventory` and `f29-consumer-inventory` (E0r shrink; E2 re-home through E0m, count unchanged); `table-kind-truth-tests` (E2 re-home through E0m, total unchanged); `package-fanout` (no entry changes; `plan/` stays 30); `secret-material-census` and `gcs-call-kwargs` (unchanged; E4 shifts lines only, keys are by function); `import-layers` (unchanged: no new cross-layer import); `public-import-boundary` (unchanged); the ratchet tool itself (E0m adds `REHOME_BY_MANIFEST`, checked by `check_move`; E0r adds `FLOORS`); new registered baseline `f29-resolved-entries` (E0r, a floor that only rises). CLI: `module-size` unchanged (C0 adds no file over 800).
 
 ## 7. Order
 
@@ -330,8 +340,8 @@ Cross-repo order: no remaining engine slice moves a path the CLI imports. `git g
 
 | Slice | Repo | Touched production files | Risk | Review | Named mutations | Test depth |
 |---|---|---|---|---|---|---|
-| E0m | engine | none | R2 | Dennis then Codex | drop the unmoved-function condition; drop the max-sum condition; accept a manifest not in the diff | T1: `tests/sentry/`; full suite on the merge head (test tooling is an escalation trigger) |
-| E0r | engine | none | R2 | Dennis then Codex | remove the line-span check; remove the codes-literal check; prune keeps a row with no live key | T1: `tests/sentry/`, `tests/unit/test_reason_registry.py`; full suite on the merge head (shared fixture) |
+| E0m | engine | none | R2 | Dennis then Codex | drop the unmoved-function condition; drop the max-sum condition; accept a manifest not in the diff; skip the `check_move` call | T1: `tests/sentry/`; full suite on the merge head (test tooling is an escalation trigger) |
+| E0r | engine | none | R2 | Dennis then Codex | remove the line-span check; remove the codes-literal check; prune keeps a row with no live key; skip the dead-row proof; compute the floor from the scan | T1: `tests/sentry/`, `tests/unit/test_reason_registry.py`; full suite on the merge head (shared fixture) |
 | E1.2 | engine | 5 | R2 | Dennis then Codex | hoisted `ContextVar` import; one `_scoring` importer left on `detectors` | T1: `tests/unit/detection/`, `tests/unit/profiling/`, `tests/unit/verification/`, `tests/sentry/` |
 | E1.3 | engine | 6 | R2 | Dennis then Codex | swap two `REGISTERED_DETECTORS` entries; move one variant table out of order | T1: as E1.2 plus `tests/unit/providers_v2/`, `tests/unit/validation/` |
 | E2 | engine | 6 | R2 | Dennis then Codex | drop `check_text_mask_ner_available` from the rewritten import; leave one `ADAPTERS` key on the old path; keep the truth-test count at 3 | T1: `tests/unit/plan/`, `tests/sentry/`, `tests/unit/test_reason_registry.py`; full suite on the merge head (reason fixture and ratchet baselines move) |
@@ -345,8 +355,8 @@ Each slice: manifest first, tests red first, pure move next, importer rewrites a
 
 | Id | Slice | Test | Red on |
 |---|---|---|---|
-| AT-1 | E0m | `tests/sentry/test_ratchet_rehome_manifest.py` (six tests in E0m) | each seeded case; the accepting case is the control |
-| AT-2 | E0r | `tests/sentry/test_reason_inventory_paths.py::test_every_row_is_its_ast_site` | today's fixture (1176 site rows, 1 consumer row) and each of five seeded mutants |
+| AT-1 | E0m | `tests/sentry/test_ratchet_rehome_manifest.py` (eight tests in E0m) | each seeded case, including the impure manifest; the accepting case is the control |
+| AT-2 | E0r | `tests/sentry/test_reason_inventory_paths.py` (row guard, dead-row proof, stdlib-only import guard) and `tests/unit/test_reason_registry.py::test_every_producer_resolves` (fixed floor) | today's fixture (1176 site rows, 1 consumer row), each of five seeded mutants, a live row in `pruned-rows.json`, a scanner that skips one module |
 | AT-3 | E1.2 | `tests/unit/detection/test_detectors_characterization.py` (two tests) | the swapped-entry and `SAMPLE_MISS_LIMIT` mutants |
 | AT-4 | E1.2 | `tests/unit/detection/test_spans_characterization.py::test_iter_spans_golden` | `_STREET_ADDRESS_RE` without `re.IGNORECASE` |
 | AT-5 | E1.2 | `tests/unit/detection/test_detection_import_order.py` | `builtin` imported before `_hints` |
@@ -365,9 +375,9 @@ Each slice: manifest first, tests red first, pure move next, importer rewrites a
 | 3 | State | Import-time state: `_NAME_HINT_EXTRAS` is a `ContextVar`; module execution order decides when `_NAME_HINTS` is built | Checker rule 4 (execution order) and the runtime import-order test | AT-5, AT-10 | hoist the `ContextVar` import; import `builtin` first |
 | 4 | Route divergence | `validate` and `run` call the plan checks through two entry points; a moved check dropped from one import breaks only one route | Both entry points import from the defining module; the order test runs `compile_plan` and `run_config_only_checks` | AT-7 | drop one check from the `_compile.py` import |
 | 5 | Referential integrity | A ratchet key re-homed to a file that does not hold the function; a fixture row naming a deleted function | E0m condition 3; E0r AST guard | AT-1, AT-2 | re-home an unmoved function; rename a fixture `function` |
-| 6 | Untrusted producer | A manifest is hand-written and could claim any move | The ratchet accepts a manifest only when the pure-move checker passes on the same commit (the gate runs both), and only a manifest changed in the slice diff | AT-1 stale-manifest case | accept a manifest not in the diff |
+| 6 | Untrusted producer | A manifest is hand-written and could claim any move | The ratchet runs the pure-move checker itself (E0m condition 6) in its one acceptance function, and takes only a manifest changed in the slice diff | AT-1 impure-manifest and stale-manifest cases | skip the `check_move` call; accept a manifest not in the diff |
 | 7 | TOCTOU / check-then-use | Claims measured today and stale on the day a slice opens | Rule 2.1: each slice re-measures claims on its own base before opening | the slice's opening checklist | open E2 while #596 is unmerged (the rebase conflict is the evidence) |
-| 8 | Weak test | The `checked > 1000` floor in `test_every_producer_resolves` proves only size; revision 3's decline-order oracle survived its mutant (F-13) | E0r replaces the floor with an exact computed count plus the AST guard; F-13 stays recorded | AT-2 | remove the AST line-span check |
+| 8 | Weak test | The `checked > 1000` floor in `test_every_producer_resolves` proves only size; a count taken from the fixture under test proves nothing; revision 3's decline-order oracle survived its mutant (F-13) | E0r: a fixed resolved-entry floor on the live scan that only rises, a scanner-independent dead-row proof and the AST row guard; F-13 stays recorded | AT-2 | remove the AST line-span check; compute the floor from the scan |
 | 9 | Refactor drift | Two copies of the checker (engine and CLI) drift; E1.1 landed with a re-export shim | Parity digest test in C0; E1.2 removes the shim | AT-9, `test_wave_b_definition_owners.py` | edit one rule in the CLI copy; leave one importer on the re-export |
 | 10 | Frozen contract | Reason registry, `reason-baseline.json`, the public surface, the ratchet baselines and the mypy strict list | No identity changes (8.2 of revision 3); `test_reason_baseline_frozen.py`; `test_public_api.py`; E0m keeps key counts; `test_mypy_override_targets.py` | AT-1, `test_reason_baseline_frozen.py`, `test_public_api.py` | re-home with a count increase; omit a new module from the strict list |
 
@@ -376,7 +386,8 @@ Each slice: manifest first, tests red first, pure move next, importer rewrites a
 - Pure-move checker: `E:scripts/check_pure_move.py`, `E:scripts/check_pure_move_scope.py` (on main since #372 to #374). C0 ports it; it is not rewritten.
 - Wave B sentries on main: `tests/sentry/test_wave_b_no_registry_version_literal.py`, `tests/unit/test_wave_b_definition_owners.py`, `tests/sentry/test_engine_string_targets.py`, `tests/sentry/test_reason_baseline_frozen.py`.
 - Ratchet re-home precedent: `REHOME_BY_BINDING` in `tests/sentry/_ratchet.py:40`, with `moved_from`. E0m follows its shape.
-- Reason scanner: `tests/sentry/_reason_baseline.py::build()` and `_reason_scan.py`. E0r adds a flag; it does not write a second scanner.
+- Reason scanner: `tests/sentry/_reason_baseline.py::build()` and `_reason_scan.py`. E0r adds a flag; it does not write a second scanner. `_ast_site.py` is a site finder for one known row, not a scanner: it never lists sites.
+- Pure-move checker inside the ratchet: `check_move` (`scripts/check_pure_move.py:210`), called, not copied.
 - Manifest format: `docs/plans/h1-wave-b/manifests/e3.json`, `e5.json`.
 - CLI size census: `C:tests/sentry/layout/test_module_size.py` (exists; not ported).
 - Established method: the move is checked by AST comparison (`ast.dump`, the Python language reference's import semantics), the approach revision 3 chose over `git diff -M`.
@@ -426,17 +437,17 @@ Each slice: manifest first, tests red first, pure move next, importer rewrites a
 
 | Failure | Likelihood | Guard |
 |---|---|---|
-| E0m becomes a general escape hatch for growing a baseline | medium | Only three sentry ids; manifest must be in the diff; key count and max sums cannot grow; AT-1 |
-| E0r's prune deletes a row that is still a live site because the scanner misses it | low | The prune keeps rows by live key; the AST guard checks the kept rows; a row the scanner misses was already untracked |
+| E0m becomes a general escape hatch for growing a baseline | medium | Only three sentry ids; manifest must be in the diff and pass `check_move` inside the ratchet; one acceptance function; key count and max sums cannot grow; AT-1 |
+| E0r's prune deletes a row that is still a live site because the scanner misses it | low | The stdlib-only `_ast_site` proves each removed row dead before the write and on every run (`pruned-rows.json`); the live-scan floor catches a scanner that finds fewer sites |
 | The checker copies drift between repos | medium | C0 parity digest |
 | E2 lands while a GEN-REL PR still edits `plan/_checks.py`, and the rebase silently re-adds a moved function | medium | Rule 2.1 re-measure; the checker's owner rule (a name defined twice is red) |
 | #617 lands a different cut of `detectors.py` | medium | E1 re-measures every line number on its base; the design is by block, not by line |
-| A reviewer reads the `checked > 1000` change as a weakened test | high | It is named in D6 and in E0r step 4 with the replacing guard |
+| A reviewer reads the `checked > 1000` change as a weakened test | high | It is named in D6 and D13; the replacement is a fixed floor (1353 entries, above the old 1000) on the live scan that only rises |
 
 ## Findings in the existing code (listed, not fixed)
 
 - F-9 (revision 3) holds and is larger: 1176 of 1387 fixture rows name no live site (D6).
-- F-14 (new, class 8): `tests/unit/test_reason_registry.py:145` (`checked > 1000`) passes on a fixture that is 85% stale; it proves size, not truth. E0r fixes it.
+- F-14 (new, class 8): `tests/unit/test_reason_registry.py:145` (`checked > 1000`) passes on a fixture that is 85% stale; it proves size, not truth. On the live tree its literal-code count is 0. E0r fixes it (D13).
 - F-15 (new, class 9): E1.1 (#468) left `_scoring` names re-exported through `detectors.py:58` to `:71` with `# noqa: F401`, against rule 1.2. E1.2 fixes it.
 - F-13 (revision 3): the decline-order oracle gap in `native/_dispatch.py` stays recorded.
 
