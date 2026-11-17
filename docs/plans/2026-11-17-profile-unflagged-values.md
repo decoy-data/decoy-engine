@@ -10,7 +10,21 @@ engine `CLAUDE.md`, `CODEMAP.md` ("Where Things Go"), `docs/frozen-surfaces.md`,
 CLI `docs/ROADMAP.md` rows 24c, 24f and 24zm; the row 24f plan
 (`origin/plan/fit-unflagged-values:docs/plans/2026-11-16-fit-unflagged-values.md`, revision 4).
 
-Revision 1.
+Revision 2, after Dennis round 1 on revision 1 (`334971cfb`). Every finding is taken.
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | HIGH: distribution bin counts are floats, so a strict int reader would fold nothing | one bin-count reading (finite float, `>= 0`, `is_integer()`), summed counts written back as floats (4.3 step 2, step 8); AT-11 adds the fixed-point property over random date frames |
+| 2 | HIGH (design): `_floor_field` wrote null, `[redacted]` and `[]` itself, a second applier | `_floor_field` resolves each key to an `_apply` rule or a computed value and calls `_apply`; one per-index helper `_placeholder_at` sits beside `_apply` (4.2, 4.3); AT-10 points the forbidden-shape guard at `_profile_document.py`; mutation: an inline `field["mode_value"] = None` |
+| 3 | MEDIUM: the free-text sample and count map could hold `[redacted]`, `(null)` and the aggregate; the fixed-point argument was loose | sample is the distinct kept labels without those three; the count map skips `[redacted]`; the argument is restated (4.3 step 5); AT-3 adds a heavily null column |
+| 4 | MEDIUM: AT-1 fixture had 1,001 rows and relied on tie order; AT-2's 10-row and 9-row labels were not pinned in the top 5 | fixture counts fixed in sections 5 and 7 so the minimum has the largest count and both labels sit in the top 5 |
+| 5 | MEDIUM: the AT-10 twin cannot build an unflagged `DetectorMatch` or pattern entry | those rows are covered by the flagged path; AT-10 asserts an entry with a `DetectorMatch` is flagged and tests the pattern and unknown-kind fallback on a loaded dict with empty `detector_matches` |
+| 6 | V2-LOG: a mean plus released counts can reveal one outlier | recorded in section 15 |
+| 7 | LOW: `Rule.KEEP` would reach `_apply`'s placeholder branch | `KEEP` is not a `Rule`; it is the frozenset `PROFILE_FLOOR_KEEP` (4.2); AT-10 checks the two tables are disjoint and cover `VALUE_FIELDS` |
+| 8 | LOW: row 24f's 7b names `test_items_privacy.py` | section 13 and Q4 corrected; dependency note: no CLI release carries the 24f repin without 24zm C1 |
+| 9 | LOW: a new `_count` duplicated the strict check | counts read through the existing `_conforms` (4.3 step 2) |
+| 10 | LOW: a categorical share is `Distribution.data[i]`, not `TopValue.pct` | P2 and step 4 say so; a length mismatch between `data` and `labels` fails closed |
+| 11 | LOW: AT-9 mutation wording | "apply steps 4 to 6 to bool columns" |
 
 Bases (2026-11-17): engine `origin/main` `902968682`, CLI `origin/main` `419572a`. Line numbers
 are read at these bases.
@@ -84,8 +98,10 @@ the floor:
   document cannot prove is replaced (`[redacted]` in a list slot, `null` in a scalar slot). Bool
   columns (`inferred_type: boolean`) are exempt, as in row 24f G1.
 - P2. A categorical label without an exact top-value count is kept only when the lower end of its
-  rounded percentage, `(pct - 0.05) / 100 * row_count`, is at least K. The trailing `other`
-  aggregate label (`_distributions.py:93-95`) is kept.
+  rounded share, `(data[i] - 0.05) / 100 * row_count`, is at least K. `data[i]` is the
+  `Distribution.data` entry at the label's own index (the builder writes the two lists in step,
+  `_distributions.py:89-96`). When `data` and `labels` differ in length, every label is
+  `[redacted]`. The trailing `other` aggregate label (`_distributions.py:93-95`) is kept.
 - P3. Numeric distribution labels are `[redacted]` (bin counts stay), and the distribution `min`
   and `max` are `null`. `mean_value` and the numeric distribution `mean` are kept only when the
   column has at least 2K non-null cells, the row 24f rule for `mean`.
@@ -100,7 +116,8 @@ the floor:
 - P6. `sample_invalid` is empty. Sentinel values and notes are kept: every engine version writes
   them from the four closed tables in `sentinels.py` (unchanged since `16dba4f1`).
 - P7. A key that no profile type declares, or a value-free key with the wrong type, is replaced
-  inside an unflagged column, as it is today inside a flagged one (`_value_redaction.py:445-470`, the default-deny at `:461`).
+  inside an unflagged column, as it is today inside a flagged one (`_value_redaction.py:445-470`,
+  the default-deny at `:461`).
 - P8. `include_values=True` output is byte-identical to today. Flagged columns are handled as
   today. `redacted_columns` still lists the flagged names only. `value_policy` is the marker row
   24f E1 defines (`flagged-redacted/v2`).
@@ -108,7 +125,7 @@ the floor:
 
 Non-goals (V1): a hand-edited or hostile loaded document (sentinel text, counts that lie; the V1
 threat model covers accidental leaks only); `mean_value` arithmetic that isolates one outlier when
-the other cells are known (an aggregate, as row 24f keeps it); free-text length statistics; the
+the other cells are known (an aggregate, as row 24f keeps it; V2-LOG, section 15); free-text length statistics; the
 in-memory `ColumnProfile` that `decoy.scan()` returns (it holds values by design and its docstring
 says so); the value-free `scan-set/v1` core that `decoy scan --output` writes (already value-free,
 `scan_set.py:528`).
@@ -144,13 +161,25 @@ one writer module per document type. Same package, so no new cross-package priva
 class 6).
 
 Choke point: `redact_profile_dict` is the one plain profile writer (`profile_document` calls it).
-After E1b it calls `_floor_field` on every unflagged entry. Guards: the existing sentry
-`test_the_profile_redactor_uses_the_same_selection_stamp_and_applier`
-(`tests/sentry/profiling/test_snapshot_value_registry.py:378-385`) moves to the new path and also
-requires `_floor_field` in `redact_profile_dict`; a registry sentry requires a floor rule for
-every `VALUE_FIELDS` pair (per distribution kind). Mutations that must turn them red: delete the
-`_floor_field` call; delete one `PROFILE_FLOOR_FIELDS` row. The CLI sentry
-`tests/sentry/io_policy/test_profile_document_route.py` already refuses a raw `to_dict()` write.
+After E1b it calls `_floor_field` on every unflagged entry, and `_floor_field` changes a slot only
+through `_apply` (a rule) or by assigning a value it computed from counts (a folded label list,
+summed bin counts, a decade edge, as `_year_edge` does for the snapshot,
+`_snapshot_values.py:109-116`). It never writes `null`, `[redacted]` or `[]` itself. Guards:
+- the existing sentry `test_the_profile_redactor_uses_the_same_selection_stamp_and_applier`
+  (`tests/sentry/profiling/test_snapshot_value_registry.py:378-385`) moves to the new path and
+  also requires `_floor_field` in `redact_profile_dict`;
+- the forbidden-shape guard `_guard_findings` (`test_snapshot_value_registry.py:245-277`) also
+  scans `_profile_document.py`. The profile writer's placeholder is `REDACTED`, the `_apply`
+  default, so the sentry splits the guard into the shared shape checks (both files) and the
+  snapshot-only "`_apply` without `denied_value=None`" check. No check is dropped for the snapshot
+  file;
+- a registry sentry requires every `VALUE_FIELDS` pair (per distribution kind) to be in exactly
+  one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`.
+
+Mutations that must turn them red: delete the `_floor_field` call; delete one
+`PROFILE_FLOOR_FIELDS` row; write `field["mode_value"] = None` inline in `_floor_field`. The CLI
+sentry `tests/sentry/io_policy/test_profile_document_route.py` already refuses a raw `to_dict()`
+write.
 
 ### 4.1 E1a: move the profile writer
 
@@ -163,12 +192,17 @@ CODEMAP profiling row and the sentry path change with it. About 50 lines move.
 
 ### 4.2 E1b: registry
 
-`_value_redaction.py` gains `PROFILE_FLOOR_FIELDS`, keyed like `VALUE_FIELDS`, with the
-distribution keyed per kind (`Distribution.<kind>`). New `Rule` members join the one enum:
-`HELD_BY_K`, `UNDER_K_PLACEHOLDER`, `AGGREGATE_2K`, `FOLD_DECADES`, `DECADE_START`, `DECADE_END`,
-`KEEP`. All but `KEEP` join `DATA_RULES` (`_apply` never performs them).
+`_value_redaction.py` gains two tables, keyed like `VALUE_FIELDS`, with the distribution keyed
+per kind (`Distribution.<kind>`):
 
-| Type, field | Rule |
+- `PROFILE_FLOOR_FIELDS`, the rule for each value slot of an unflagged column. New `Rule`
+  members join the one enum: `HELD_BY_K`, `UNDER_K_PLACEHOLDER`, `AGGREGATE_2K`, `FOLD_DECADES`,
+  `DECADE_START`, `DECADE_END`. All six join `DATA_RULES`: `_floor_field` resolves them to an
+  existing `_apply` rule or a computed value, and `_apply` never receives them.
+- `PROFILE_FLOOR_KEEP`, a frozenset of the value slots an unflagged column keeps unchanged. It is
+  not a `Rule`, so nothing can route it to `_apply`'s placeholder branch.
+
+| Type, field | Floor |
 |---|---|
 | `FieldStats` `min_value`, `max_value`, `mode_value` | `HELD_BY_K` |
 | `FieldStats` `mean_value` | `AGGREGATE_2K` |
@@ -178,49 +212,71 @@ distribution keyed per kind (`Distribution.<kind>`). New `Rule` members join the
 | `Distribution.categorical` `labels` | `UNDER_K_PLACEHOLDER` |
 | `Distribution.numeric` `labels` / `min`, `max` / `mean` | `PLACEHOLDER_EACH` / `NULL` / `AGGREGATE_2K` |
 | `Distribution.date` `labels` / `min` / `max` | `FOLD_DECADES` / `DECADE_START` / `DECADE_END` |
-| `Distribution.freetext` `labels`, `min`, `max`, `mean` | `KEEP` (length buckets and length statistics) |
-| `Distribution.pattern` (any field) | the `VALUE_FIELDS` rule (a pattern needs a detector hit, so the column is flagged) |
-| `SentinelFlag` `value`, `note` | `KEEP` (closed tables, P6) |
+| `Distribution.pattern` (any field) | the `VALUE_FIELDS` rule |
+| `Distribution.freetext` `labels`, `min`, `max`, `mean` | `PROFILE_FLOOR_KEEP` (length buckets and length statistics) |
+| `SentinelFlag` `value`, `note` | `PROFILE_FLOOR_KEEP` (closed tables, P6) |
 
-A distribution `kind` outside the five gets the `VALUE_FIELDS` rules (fail closed).
+A distribution `kind` outside the five gets the `VALUE_FIELDS` rules (fail closed). The
+`DetectorMatch` and `Distribution.pattern` rows exist for completeness: a profiled column holds
+either only when a detector fired, and a detector hit flags the column (`_value_redaction.py:290-303`),
+so the flagged path covers them. They matter only for a loaded document.
+
+One helper joins `_apply` in `_value_redaction.py`: `_placeholder_at(container, key, indexes)`
+replaces the listed entries of one list slot with the placeholder and leaves the others. It is
+the only per-index writer; `_apply` keeps the whole-slot rules.
 
 ### 4.3 E1b: rules (all in `_profile_document.py`)
 
-`_floor_field(field)` runs on one unflagged entry, reading a copy taken before any change:
+`_floor_field(field)` runs on one unflagged entry. It reads a copy taken before any change, works
+out a decision per slot, then applies all decisions through `_apply`, `_placeholder_at` or a
+computed assignment:
 
 1. Default-deny keys (P7): reuse `_field_plan` containers with a keep test that admits the
    type's value-free shapes (`_shape_keep`) and its `VALUE_FIELDS` names.
-2. Counts: `_count(x)` returns `x` when `type(x) is int` and `x >= 0`, else 0. A bool, string or
-   float count therefore proves nothing (defect class 2). `n` is `row_count - null_count`, both
-   through `_count`.
+2. Counts, through the existing strict predicate `_conforms` (`_value_redaction.py:214-236`), no
+   new reader. A top-value count, `row_count` or `null_count` proves something only when
+   `_conforms(x, int)` and `x >= 0` (a bool or string fails, defect class 2). A distribution bin
+   count is written as a float (`_distributions.py:77`, `types.py:46`), so it proves something only
+   when `_conforms(x, float)`, `x >= 0` and `x.is_integer()`. A share `data[i]` proves something
+   only when `_conforms(x, float)` and `x >= 0`. A value that fails proves nothing. `n` is
+   `row_count - null_count`.
 3. Proven counts by text: from `top_values`, `{value: count}`, keeping the larger count if a text
-   repeats.
+   repeats. An entry whose text is `REDACTED` is skipped, so a placeholder never proves itself.
 4. `UNDER_K_PLACEHOLDER`: a top value is kept when its own count is at least K. A categorical
    label is kept when its proven count is at least K, or, with no proven count, when the P2 lower
-   bound is at least K. The bound uses `Decimal(repr(pct))`, so float error cannot round it up. A
-   `pct` that is not a finite real proves nothing. The label at index 10 of an 11-label list,
-   when it reads `other`, is the aggregate and is kept. The 0.05 margin is one named constant
-   beside the categorical builder's rounding in `_distributions.py`.
-5. Free text (P5): take the labels step 4 keeps (top values and categorical labels, the aggregate
-   excluded). If row 24f's word-count test says they read as sentences, every top value and
-   categorical label becomes `[redacted]` and `mode_value`, `min_value`, `max_value` become
-   `null`. Running the test on the kept labels, not on all labels, keeps the pass a fixed point:
-   a second pass sees the same kept set.
+   bound on `data[i]` is at least K. The bound uses `Decimal(repr(x))`, so float error cannot
+   round it up. The label at index 10 of an 11-label list, when it reads `other`, is the
+   aggregate and is kept. When `len(data) != len(labels)`, every label is replaced. The 0.05
+   margin is one named constant beside the categorical builder's rounding in `_distributions.py`
+   (the forbidden-shape guard bans a float literal from 0 to 1 in `_profile_document.py`).
+   Replacements go through `_placeholder_at`.
+5. Free text (P5). The sample is the distinct texts step 4 keeps, from top values and categorical
+   labels, without `REDACTED`, the `(null)` marker (`profiler.py:100`) and the trailing aggregate.
+   An empty sample is not free text. If row 24f's word-count test says the sample reads as
+   sentences, every top value and categorical label is replaced (`_placeholder_at` over all
+   indexes) and `mode_value`, `min_value`, `max_value` resolve to `NULL`.
+   Fixed point: on a second pass the counts are unchanged and step 3 skips placeholders, so step 4
+   keeps exactly the texts the first pass kept. If the first pass found free text, nothing is kept,
+   the sample is empty and every slot is already replaced. If it did not, the sample is the same
+   set, so the verdict is the same.
 6. `HELD_BY_K`: the scalar text is kept when step 3 proves at least K rows hold that exact text,
-   else `null`. The profiler writes both through `str()` of the same pandas scalar, so a numeric
-   `min_value` held by K rows and present in the top 5 survives; any other bound is `null`.
-7. `AGGREGATE_2K`: kept when `n >= 2 * K`, else `null`.
+   else it resolves to `NULL`. The profiler writes both through `str()` of the same pandas scalar,
+   so a numeric `min_value` held by K rows and present in the top 5 survives; any other bound is
+   `null`.
+7. `AGGREGATE_2K`: kept when `n >= 2 * K`, else `NULL`.
 8. `FOLD_DECADES`: parse each label with `re.fullmatch(r"(\d{4})s(?:-(\d{4})s)?", label)`
    (defect class 1; the second form makes a second pass a no-op). Ranges must be ordered and
-   non-overlapping. Then apply row 24f's contiguous fold (`FOLD_YEARS_UNDER_K`, 4.2 of that plan)
-   to `(start, end, count)` with decade keys: merge until the running count reaches K, and merge a
-   short final range into the one before. `data` holds the summed counts. If a label does not
-   parse, a count is not a non-negative whole number, or the total is under K, every label is
-   `[redacted]` and the date bounds are `null`.
-9. `DECADE_START` / `DECADE_END`: from the folded first and last range,
+   non-overlapping, and `len(data) == len(labels)`. Then apply row 24f's contiguous fold
+   (`FOLD_YEARS_UNDER_K`, 4.2 of that plan) to `(start, end, count)` with decade keys: merge until
+   the running count reaches K, and merge a short final range into the one before. The computed
+   `labels` and `data` are assigned; `data` holds the summed counts as floats, so `_conforms` still
+   accepts them and a second pass reads the same numbers. If a label does not parse, a bin count
+   fails step 2, or the total is under K, `labels` resolves to `PLACEHOLDER_EACH` and the date
+   bounds to `NULL`.
+9. `DECADE_START` / `DECADE_END`: computed from the folded first and last range,
    `YYYY-01-01T00:00:00` and `YYYY-12-31T23:59:59.999999` for `FieldStats` (`YYYY` is the start
    decade, or the end decade plus 9), and `YYYY-01-01` / `YYYY-12-31` for the distribution. With
-   no date distribution, `null`.
+   no date distribution, or a fold that failed, `NULL`.
 10. Bool columns skip steps 4 to 6 (P1).
 
 Shared helpers, one owner each: row 24f E1 owns the word-count test and the contiguous fold. If
@@ -242,11 +298,12 @@ Fixture: the floor frame in AT-1 (1,000 rows); the demo sample (10 rows).
 
 | Column | Today | After |
 |---|---|---|
-| `salary`, 50 round values of 20 rows each and one row 987,654 | `max_value: "987654"`; bin edges from 987,654 | `max_value: null`; `min_value` kept (its 20 rows show in the top values); labels `[redacted]`, counts kept; `mean_value` kept |
-| `diagnosis` with `ZXQ-RARE-LABEL` x1 | the label in `distribution.labels` | `[redacted]` in that slot |
+| `salary`: its minimum held by 59 rows, 47 other round values of 20 rows each, and one row 987,654 (1,000 rows) | `max_value: "987654"`; bin edges from 987,654 | `max_value: null`; `min_value` kept (its 59 rows, the largest count, show in the top values); labels `[redacted]`, counts kept; `mean_value` kept |
+| `diagnosis`: labels of 400, 300, 280, 10 and 9 rows, and `ZXQ-RARE-LABEL` x1 | the label in `distribution.labels` | `[redacted]` in that slot; the 9-row label `[redacted]`, the 10-row label kept |
 | `note`, 30 three-word strings, about 33 rows each | all 10 labels, 5 top values and the mode stored | every label and top value `[redacted]`, mode `null` |
 | `tier` (A, B, C, each over 10 rows) | stored | stored |
 | `region` (`New York`, `San Diego`, each over 10 rows) | stored | stored (2 words, not free text) |
+| `comment`: 900 nulls and 10 three-word strings of 10 rows each | `(null)` and four strings in the top values; the strings in the labels | every string `[redacted]`, mode `null`; `(null)` does not count as a 1-word label |
 | `is_active` bool with one `False` | stored | stored (bool exempt) |
 | `visit_date`, one 1921 row, the rest 2015 to 2024 | `date_min` the exact 1921 timestamp; label `1920s` with count 1 | labels `1920s-2010s`, `2020s`; `date_min` `1920-01-01T00:00:00` |
 | demo `gender` (F and M, 5 rows each) | `F` and `M` in top values, mode and labels | `[redacted]`, mode `null`, counts kept |
@@ -286,7 +343,7 @@ masking choosers) do not change: they never read the document.
 | 3 | State machine and concurrency | none | N/A: no shared state, cache or lock is added | n/a | n/a |
 | 4 | Route parity and silent fallback | `profile_document`, `redact_profile_dict`, `decoy demo`, the `decoy.scan()` save advice | one writer; `profile_document` calls `redact_profile_dict`; the CLI route sentry refuses a raw `to_dict()` | AT-7, AT-C1, AT-C2 | make `profile_document` build its own dict |
 | 5 | Referential integrity | mode and bounds proven by top-value counts | proof by exact text match inside the same entry, read before any replacement | AT-1, AT-6 | read `top_values` after the placeholder step |
-| 6 | Untrusted producer | a loaded document with ill-typed counts or keys | strict `_count`; default-deny keys; fixed label grammar with `fullmatch` | AT-6 | accept `isinstance(x, int)` (a bool passes) |
+| 6 | Untrusted producer | a loaded document with ill-typed counts or keys | counts through `_conforms` (bin counts also `is_integer()`); default-deny keys; fixed label grammar with `fullmatch` | AT-6 | accept `isinstance(x, int)` (a bool passes) |
 | 7 | Check then use (TOCTOU) | none | N/A: no file read; the caller owns the dict and the writer copies it first | n/a | n/a |
 | 8 | Weak tests | a floor test that passes on a frame with no rare cell | each canary test first asserts the canary is in the raw `to_dict()` and the column is unflagged | AT-1 to AT-5 non-vacuity lines | build the AT-1 frame without the rare row |
 | 9 | Refactor drift | E1a move; flagged columns; `include_values=True` | E1a moves code unchanged; flagged and raw paths untouched | existing `test_value_redaction.py`, AT-8 | change a flagged rule in E1a |
@@ -337,7 +394,9 @@ masking choosers) do not change: they never read the document.
 | Floor constant | `MIN_RELEASE_COUNT` | no |
 | Unflagged selection | `_sensitive_entries`, `is_value_sensitive` | no |
 | Default-deny keys | `_field_plan`, `_containers`, `_shape_keep`, `_shapes` | no |
-| Rule enum, flagged applier | `Rule`, `_apply` | seven members |
+| Rule enum, flagged applier | `Rule`, `_apply` | six members; `_placeholder_at` beside `_apply` |
+| Strict count test | `_conforms` | no |
+| Forbidden-shape guard | `_guard_findings` | shared checks split from the snapshot-only one |
 | Marker | `stamp_value_policy`, `POLICY_REDACTED` (v2 from row 24f E1) | no |
 | Contiguous fold | row 24f E1 `FOLD_YEARS_UNDER_K` fold | extracted to one function if inline (4.3) |
 | Free-text test | row 24f E1 3-word median test | extracted to one function if inline (4.3) |
@@ -351,26 +410,29 @@ asserted unflagged first.
 
 | # | Test | Fail before |
 |---|---|---|
-| AT-1 | `salary`: the raw `to_dict()` has `max_value "987654"`; the document has `max_value` null, `min_value` equal to the raw text (held by 20 rows), numeric labels all `[redacted]` with `data` unchanged, distribution `min` and `max` null, `mean_value` kept; `987654` is not in the JSON text. A 15-row numeric column has `mean_value` null | exact max and edges stored |
-| AT-2 | `diagnosis`: `ZXQ-RARE-LABEL` is in the raw labels and not in the document JSON; every kept top value and label is held by at least K rows of the frame; a label with exactly 10 rows is kept and one with 9 is `[redacted]` | count-1 label stored |
-| AT-3 | `note`: no note string in the JSON; mode null; every label `[redacted]`. `region` keeps both 2-word labels | all strings stored |
+| AT-1 | `salary` (counts in section 5; the minimum's 59 rows are the strictly largest count, so no tie decides its place in the top 5): the raw `to_dict()` has `max_value "987654"`; the document has `max_value` null, `min_value` equal to the raw text (held by 59 rows), numeric labels all `[redacted]` with `data` unchanged, distribution `min` and `max` null, `mean_value` kept; `987654` is not in the JSON text. A 15-row numeric column has `mean_value` null | exact max and edges stored |
+| AT-2 | `diagnosis`: `ZXQ-RARE-LABEL` is in the raw labels and not in the document JSON; every kept top value and label is held by at least K rows of the frame; the 10-row and 9-row labels are first asserted to be in the raw top 5 (so each has an exact count), then the 10-row label is kept and the 9-row label is `[redacted]` | count-1 label stored |
+| AT-3 | `note`: no note string in the JSON; mode null; every label `[redacted]`. `comment` (heavily null): no comment string in the JSON, mode null; the raw top values hold `(null)` first, so the test fails if `(null)` joins the sample. `region` keeps both 2-word labels | all strings stored |
 | AT-4 | `visit_date`: labels `1920s-2010s` and `2020s`, every count at least K, the sum unchanged; `date_min` `1920-01-01T00:00:00`, `date_max` `2029-12-31T23:59:59.999999`; the raw 1921 timestamp text absent. A 5-row date column: labels `[redacted]`, bounds null. A string date column: bounds null | raw decades and exact timestamps stored |
-| AT-5 | dict cells through `redact_profile_dict` (row_count 1,000): a label outside the top values with `pct 1.0` (bound 9.5) is `[redacted]`, `pct 1.1` (bound 10.5) is kept; the 11th `other` is kept; a real `other` at index 3 with `pct 0.1` is `[redacted]`; `pct` NaN or `"5.0"` is `[redacted]` | labels kept regardless of share |
-| AT-6 | fail closed: counts as `True`, `"20"`, `20.0` or `-1` prove nothing; `top_values` missing; a decade label `1920s ` (trailing space), `1920s\n`, out of order or overlapping; an unknown distribution kind; an unknown key in an unflagged entry. Each yields the replacement in section 6 | ill-typed counts and keys pass through |
+| AT-5 | dict cells through `redact_profile_dict` (row_count 1,000): a label outside the top values whose share `data[i]` is `1.0` (bound 9.5) is `[redacted]`, `1.1` (bound 10.5) is kept; the label reads its own index of `data`, not a `TopValue.pct`; the 11th `other` is kept; a real `other` at index 3 with share `0.1` is `[redacted]`; a share NaN or `"5.0"` is `[redacted]` | labels kept regardless of share |
+| AT-6 | fail closed: top-value counts as `True`, `"20"`, `20.0` or `-1` prove nothing; date bin counts as `True`, `20`, `2.5`, NaN or `-1.0` prove nothing; categorical `data` shorter than `labels` redacts every label; `top_values` missing; a decade label `1920s ` (trailing space), `1920s\n`, out of order or overlapping; an unknown distribution kind; an unknown key in an unflagged entry. Each yields the replacement in section 6 | ill-typed counts and keys pass through |
 | AT-7 | `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` on the floor frame and on the case "two 1-word labels under K, one 3-word label over K"; the input dict is not mutated; `profile_document(p) == redact_profile_dict(p.to_dict())` | the free-text case flips on a second pass if the test reads all labels |
 | AT-8 | `include_values=True` equals `to_dict()` plus the two keys on the floor frame (existing `test_include_values_is_to_dict_plus_the_two_keys` extended); flagged columns of the existing canary fixture are byte-identical to the pre-change document | not fail-before: pins what must not change |
 | AT-9 | guards that stay green: `is_active` keeps its count-1 `False`; unflagged sentinels keep `value` and `note`; `test_a_column_that_is_not_value_sensitive_keeps_its_values` unchanged | not fail-before |
-| AT-10 | sentry (`tests/sentry/profiling/test_profile_value_registry.py`): `PROFILE_FLOOR_FIELDS` covers every `VALUE_FIELDS` pair for each of the five kinds and nothing else; its rules are `Rule` members; the `KEEP` rows are exactly the freetext and sentinel rows of 4.2; `test_every_value_rule_is_applied` gains a twin that builds an unflagged canary entry (count 1, no detector) and asserts each floor rule other than `KEEP` removes it | unflagged canaries survive |
-| AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K | fails on the first count-1 label |
+| AT-10 | sentry (`tests/sentry/profiling/test_profile_value_registry.py`): every `VALUE_FIELDS` pair, for each of the five kinds, is in exactly one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`, and nothing else is; every `PROFILE_FLOOR_FIELDS` value is a `Rule`; `PROFILE_FLOOR_KEEP` is exactly the freetext and sentinel slots of 4.2. `test_every_value_rule_is_applied` gains a twin that builds an unflagged canary entry (count 1, no detector) and asserts each floor rule removes it. The twin cannot build an unflagged `DetectorMatch` or `Distribution.pattern` entry, so it asserts instead that a profiled entry with a `DetectorMatch` is flagged, and tests the pattern rows and the unknown-kind fallback on a loaded dict with `detector_matches: []`. `test_snapshot_value_registry.py` runs the shared `_guard_findings` checks on `_profile_document.py` | unflagged canaries survive |
+| AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K. On random datetime frames, `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` and the folded `data` entries are floats | fails on the first count-1 label; the fixed point fails if summed counts are written as ints |
 | AT-12 | the demo's 10-row sample through `profile_document`: `gender` labels and top values `[redacted]`, mode null; `redacted_columns` unchanged; no exception | `F`, `M` stored |
 
 Mutations that must turn a test red: delete the `_floor_field` call (AT-1 to AT-4); delete one
 `PROFILE_FLOOR_FIELDS` row (AT-10); `>` instead of `>=` K (AT-2); read label counts from `pct`
 only (AT-9, the existing status test); drop the `- 0.05` margin (AT-5); treat the 11th `other` as
-a label (AT-5); skip the free-text step (AT-3); run it on all labels (AT-7); fold bool columns
-(AT-9); leave a short final decade unmerged (AT-4); `isinstance` for counts (AT-6); `match` for
-the decade grammar (AT-6); read `top_values` after replacement (AT-1 `min_value`); floor flagged
-or raw output (AT-8).
+a label (AT-5); skip the free-text step (AT-3); run it on all labels (AT-7); let `(null)` join the
+free-text sample (AT-3 `comment`); apply steps 4 to 6 to bool columns (AT-9); leave a short final
+decade unmerged (AT-4); `isinstance` for counts (AT-6); read bin counts with the int test (AT-4,
+AT-11); write summed bin counts as ints (AT-11); ignore a `data`/`labels` length mismatch (AT-6);
+`match` for the decade grammar (AT-6); read `top_values` after replacement (AT-1 `min_value`);
+write `field["mode_value"] = None` inline in `_floor_field` (AT-10 guard); floor flagged or raw
+output (AT-8).
 
 E1a: no new test. The existing suite and the moved sentry stay green; `git diff -M` shows the
 three functions moved unchanged.
@@ -390,16 +452,16 @@ reads `_profile_document.py` (E1a) and also requires `_floor_field` (E1b). Any t
 base; they import from `decoy_engine.profiling`). `tests/unit/profiling/test_value_redaction.py`
 gains the AT-8 and AT-9 cells; no assertion is weakened.
 
-CLI: `test_c1_demo_scan_file_redacts_sensitive_values` asserts `flagged-redacted/v1`. Row 24f
-E1 changes that marker for profile documents too, so whichever CLI slice first pins an engine
-with 24f E1 must move this line to v2 (row 24f's C1 list does not name it; see section 13).
+CLI: `test_c1_demo_scan_file_redacts_sensitive_values` in `tests/e2e/first_user/test_items_privacy.py`
+asserts `flagged-redacted/v1`. Row 24f's C1 7b list names that file (24f plan, section 7b), so
+the 24f C1 builder moves the marker to v2. C1 here adds the AT-C1 cells to the same file.
 
 ## 8. Placement
 
 | Change | File and directory | CODEMAP placement | Existing neighbour or reason |
 |---|---|---|---|
 | profile writer (moved), `_floor_field` and its rules | `src/decoy_engine/profiling/_profile_document.py` (new) | "Detectors, profiling" row: by profiling concern | beside `_snapshot_values.py`, the snapshot writer over the same registry; `profiling/` holds 18 modules, under the fan-out limit of 25 |
-| `PROFILE_FLOOR_FIELDS`, seven `Rule` members, `DATA_RULES` | `src/decoy_engine/profiling/_value_redaction.py` | "Detectors, profiling" row | the one value registry; net smaller after E1a |
+| `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, six `Rule` members, `DATA_RULES`, `_placeholder_at` | `src/decoy_engine/profiling/_value_redaction.py` | "Detectors, profiling" row | the one value registry; net smaller after E1a |
 | re-export path | `src/decoy_engine/profiling/__init__.py` | existing | public names unchanged |
 | shared fold and word test, if row 24f merged them inline | `src/decoy_engine/profiling/_snapshot_values.py` | "Detectors, profiling" row | row 24f's owner; no new file |
 | floor tests | `tests/unit/profiling/test_profile_floor.py` (new) | "Unit tests" row: mirror `src/` under `tests/unit/<package>/` | beside `test_value_redaction.py` |
@@ -411,7 +473,8 @@ Expected size. E1a: 2 production files plus the init, about 60 source lines move
 diff lines with the sentry path and CODEMAP text). E1b: 2 production files (3 with the 4.3
 extraction); about 200 source lines, 350 test lines and 30 doc lines, below 800.
 `_profile_document.py` ends near 260 lines; `_value_redaction.py` near 470. New names: the
-module, `PROFILE_FLOOR_FIELDS`, seven `Rule` members and `_floor_field`; no new public export.
+module, `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, six `Rule` members, `_placeholder_at` and
+`_floor_field`; no new public export.
 C1: no production logic; about 80 docstring, help, test and doc lines.
 
 ## 9. Frozen contracts touched
@@ -474,8 +537,10 @@ Each is taken under standing approval ("go with recommended") on 2026-11-17.
 4. The marker window: row 24f E1 flips the shared marker to v2 before E1b floors profile
    documents. (a) Accept the window and ship E1b in the next engine release after 24f E1; (b) hold
    24f E1 until E1b is ready. Recommended and taken: (a). The leak exists today; the window only
-   makes the marker describe the target state early. If a release is cut between them, its notes
-   say profile documents are floored from the next release.
+   makes the marker describe the target state early. If an engine release is cut between them,
+   its notes say profile documents are floored from the next release. No CLI release carries the
+   24f repin without 24zm C1: the CLI pins the first engine release that holds both, or holds its
+   release until it does. Row 24f's C1 already moves the `test_items_privacy.py` marker to v2.
 5. Sentinels of unflagged columns: (a) keep (closed tables); (b) redact. Recommended and taken:
    (a).
 
@@ -483,10 +548,8 @@ Each is taken under standing approval ("go with recommended") on 2026-11-17.
 
 - Row 24f E1 is not merged. E1b's start date follows it.
 - The names of row 24f's fold and word test are fixed only when 24f E1 merges (stop line 9).
-- Row 24f's C1 7b list does not name CLI `test_c1_demo_scan_file_redacts_sensitive_values`, which
-  asserts the v1 marker on the demo `scan.json` and turns red at the first CLI repin past 24f E1.
-  The 24f C1 builder (or whichever CLI slice repins first) must move it to v2. Raise this with the
-  24f slice owner.
+- The CLI release order (Q4): no CLI release ships the 24f repin without 24zm C1. The release
+  owner checks this at the repin; the 24f C1 and 24zm C1 PRs may be stacked on one repin.
 
 ## 14. Pre-mortem
 
@@ -499,5 +562,16 @@ Each is taken under standing approval ("go with recommended") on 2026-11-17.
 - The percentage rounding in `_distributions.py` changes. Effect: P2's margin may be wrong.
   Mitigation: the margin is one constant beside the categorical builder's rounding (4.3 step 4),
   and AT-5 pins both.
-- A builder routes around a hard case by widening `KEEP`. Mitigation: AT-10 lists the exact `KEEP`
-  rows.
+- A builder routes around a hard case by widening `PROFILE_FLOOR_KEEP`. Mitigation: AT-10 lists
+  its exact slots.
+- A builder writes `null` or `[redacted]` inline in `_floor_field` instead of resolving a rule.
+  Mitigation: the shared `_guard_findings` checks scan `_profile_document.py` (AT-10).
+
+## 15. V2-LOG
+
+- Mean dominance. A released `mean_value` (kept at `n >= 2K`) together with released top-value
+  counts can isolate one outlier: when every other cell is known from the top values, the mean
+  gives the last one. The SDC answer is a dominance or p% rule on the aggregate (Hundepool et al.,
+  the sensitivity rules for magnitude tables). Row 24f keeps `mean` on the same `2K` rule, so both
+  writers would change together. V1 threat model: an accidental leak needs a reader to do this
+  arithmetic on purpose, so it is out of scope for V1 and logged for V2.
