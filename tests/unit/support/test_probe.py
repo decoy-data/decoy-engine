@@ -7,10 +7,8 @@ golden for its seed protocol is `mismatch`, never `ok`.
 
 from __future__ import annotations
 
-import builtins
 import os
 import re
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -91,15 +89,37 @@ def test_the_probe_never_reads_a_key_provider(monkeypatch: pytest.MonkeyPatch) -
     assert run_probe() == expected
 
 
+_IO_GUARD = {"on": False}
+
+
+def _io_audit(event: str, args: tuple[Any, ...]) -> None:
+    # An audit hook cannot be removed, so it stays installed and only acts while the flag is on.
+    if _IO_GUARD["on"] and (event == "open" or event.startswith("socket.")):
+        raise AssertionError(f"the probe did I/O: {event}")
+
+
+sys.addaudithook(_io_audit)
+
+
 def test_the_probe_opens_no_file_and_no_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pandas
+    import pyarrow.parquet
+
     run_probe()  # first-use imports are not the probe's own I/O
 
     def refuse(*_: Any, **__: Any) -> Any:
-        raise AssertionError("the probe did I/O")
+        raise AssertionError("the probe read a parquet file")
 
-    monkeypatch.setattr(builtins, "open", refuse)
-    monkeypatch.setattr(socket, "socket", refuse)
-    assert HEX64.fullmatch(run_probe())
+    # Audit events cover open(), io.open, os.open, pathlib and socket; the Arrow readers open
+    # files in C++, so they are patched by name.
+    monkeypatch.setattr(pyarrow.parquet, "read_table", refuse)
+    monkeypatch.setattr(pandas, "read_parquet", refuse)
+    _IO_GUARD["on"] = True
+    try:
+        digest = run_probe()
+    finally:
+        _IO_GUARD["on"] = False
+    assert HEX64.fullmatch(digest)
 
 
 def test_a_failing_part_raises_a_value_free_probe_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,3 +183,47 @@ def test_a_custom_person_first_name_provider_is_refused_before_any_draw(
     _unregister_faker_provider_v2("person_first_name")
     assert "person_first_name" not in providers_v2.custom_provider_names()
     assert HEX64.fullmatch(run_probe())
+
+
+# V1-1: the pool part is a Faker pool on every install ----------------------------------------
+
+
+def test_the_pool_provider_is_a_mimesis_candidate_and_the_pin_is_faker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decoy_engine.providers_v2 import FakerAdapter
+    from decoy_engine.providers_v2.mimesis import MIMESIS_CANDIDATES
+
+    # The pin below is what keeps the answer a Faker one when the provider is a candidate.
+    assert _probe.POOL_PROVIDER in MIMESIS_CANDIDATES
+    seen: list[type] = []
+    real = providers_v2.ProviderRegistry.override
+
+    def spy(self: Any, provider: str, adapter: Any, caps: Any) -> Any:
+        seen.append(type(adapter))
+        return real(self, provider, adapter, caps)
+
+    monkeypatch.setattr(providers_v2.ProviderRegistry, "override", spy)
+    run_probe()
+    assert seen == [FakerAdapter]
+
+
+def test_a_mimesis_style_binding_does_not_change_the_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = run_probe()
+    registry = providers_v2.get_default_registry()
+    caps = registry.get_capabilities(_probe.POOL_PROVIDER)
+
+    class Other:
+        """Stands in for the Mimesis adapter: same provider name, other values."""
+
+        def generate_batch(self, provider: str, *, spec: Any, count: int) -> list[str]:
+            return [f"other-{n}" for n in range(count)]
+
+        def capability_matrix(self, provider: str) -> Any:
+            return caps
+
+    rebound = registry.override(_probe.POOL_PROVIDER, Other(), caps)  # type: ignore[arg-type]
+    monkeypatch.setattr(providers_v2, "get_default_registry", lambda: rebound)
+    assert run_probe() == expected

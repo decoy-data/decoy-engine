@@ -1,0 +1,3 @@
+"""Planted: a private module imported by name from its public package."""
+
+from decoy_engine.providers_v2 import _faker_adapter

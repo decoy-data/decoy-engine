@@ -1,0 +1,5 @@
+"""Allowed: a private sibling inside decoy_engine.support and the shared root module."""
+
+from ._labels import LabelAllocator
+from decoy_engine._canonical import canonical_json_bytes
+from decoy_engine.support._probe import run_probe

@@ -12,16 +12,22 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "src" / "decoy_engine" / "support"
 MODULES = (SUPPORT / "_probe.py", SUPPORT / "_runtime_lock.py")
-FIXTURE = (
-    Path(__file__).resolve().parent
-    / "fixtures"
-    / "runtime_lock_public_imports"
-    / "private_import.py"
-)
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "runtime_lock_public_imports"
 _ROOT_SHARED = ("decoy_engine._canonical",)
+_PACKAGE = ("decoy_engine", "support")
+
+
+def _resolved(node: ast.ImportFrom) -> str:
+    """The absolute dotted module of a `from` import, resolving a relative one in `support`."""
+    if node.level == 0:
+        return node.module or ""
+    base = _PACKAGE[: len(_PACKAGE) - (node.level - 1)]
+    return ".".join([*base, *([node.module] if node.module else [])])
 
 
 def private_imports(path: Path) -> list[tuple[int, str]]:
@@ -30,8 +36,9 @@ def private_imports(path: Path) -> list[tuple[int, str]]:
         names: list[str] = []
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            module = _resolved(node)
+            names = [module] + [f"{module}.{a.name}" for a in node.names]
         for name in names:
             parts = name.split(".")
             if parts[0] != "decoy_engine" or len(parts) < 3:
@@ -50,5 +57,14 @@ def test_the_f10_modules_import_only_public_names_of_other_packages() -> None:
     assert not any(found.values()), found
 
 
-def test_a_planted_private_import_is_flagged() -> None:
-    assert "decoy_engine.providers_v2._faker_adapter" in {n for _, n in private_imports(FIXTURE)}
+@pytest.mark.parametrize(
+    "fixture",
+    ["private_import", "plain_import", "from_package", "relative"],
+)
+def test_a_planted_private_import_is_flagged(fixture: str) -> None:
+    names = {n for _, n in private_imports(FIXTURES / f"{fixture}.py.txt")}
+    assert "decoy_engine.providers_v2._faker_adapter" in names
+
+
+def test_private_siblings_in_support_and_the_shared_root_module_are_allowed() -> None:
+    assert private_imports(FIXTURES / "allowed.py.txt") == []
