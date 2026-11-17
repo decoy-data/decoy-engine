@@ -68,7 +68,7 @@ from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
-from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core import _join as _join_ooc
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
