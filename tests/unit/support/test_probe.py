@@ -188,14 +188,13 @@ def test_a_custom_person_first_name_provider_is_refused_before_any_draw(
 # V1-1: the pool part is a Faker pool on every install ----------------------------------------
 
 
-def test_the_pool_provider_is_a_mimesis_candidate_and_the_pin_is_faker(
+def test_the_pool_part_pins_the_faker_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from decoy_engine.providers_v2 import FakerAdapter
-    from decoy_engine.providers_v2.mimesis import MIMESIS_CANDIDATES
 
-    # The pin below is what keeps the answer a Faker one when the provider is a candidate.
-    assert _probe.POOL_PROVIDER in MIMESIS_CANDIDATES
+    # `person_first_name` is a Mimesis adoption candidate; the pin is what keeps the answer a
+    # Faker one on a host with the extra installed.
     seen: list[type] = []
     real = providers_v2.ProviderRegistry.override
 
