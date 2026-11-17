@@ -152,7 +152,14 @@ def seed_fingerprint_bytes(value: object) -> bytes:
     return _encode(value, ensure_ascii=True)
 
 
-STRICT_JSON_TOKENS = ("not_json", "duplicate_key", "non_finite", "out_of_range")
+STRICT_JSON_TOKENS = (
+    "not_json",
+    "duplicate_key",
+    "non_finite",
+    "out_of_range",
+    "negative_zero",
+    "float",
+)
 
 
 class StrictJsonError(CanonicalJsonError):
@@ -170,9 +177,19 @@ class StrictJsonError(CanonicalJsonError):
         return (type(self), (self.token,))
 
 
-def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
+def strict_json_loads(
+    data: bytes | str,
+    *,
+    max_int_digits: int | None = 20,
+    forbid_float: bool = False,
+    forbid_negative_zero: bool = False,
+) -> Any:
     """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
     ``max_int_digits`` digits (``None`` sets no digit limit).
+
+    Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
+    ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
+    ``negative_zero`` for the integer text ``-0``. Both default off, so the defaults read as before.
 
     The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
     error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
@@ -187,7 +204,15 @@ def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> 
     def constant(_name: str) -> None:
         found.append("non_finite")
 
+    def number(text: str) -> float:
+        if forbid_float:
+            found.append("float")
+        return float(text)
+
     def integer(text: str) -> int | None:
+        if forbid_negative_zero and text == "-0":
+            found.append("negative_zero")
+            return None
         if max_int_digits is not None and len(text.lstrip("-")) > max_int_digits:
             found.append("out_of_range")
             return None
@@ -198,7 +223,11 @@ def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> 
     try:
         text = data.decode("utf-8") if isinstance(data, bytes) else data
         parsed = json.loads(
-            text, object_pairs_hook=pairs, parse_constant=constant, parse_int=integer
+            text,
+            object_pairs_hook=pairs,
+            parse_constant=constant,
+            parse_int=integer,
+            parse_float=number,
         )
     except (UnicodeDecodeError, ValueError, RecursionError):
         malformed = True
