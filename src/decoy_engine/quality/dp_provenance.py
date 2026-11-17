@@ -265,9 +265,8 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # dev/CI lock, and the `decoy` CLI's pristine runtime profile (engine + CLI
 # runtime deps, no dev tooling), whose proof-critical library versions are pinned to EXACTLY the
 # certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the annotation below) so
-# the DP behaviour is the tested behaviour; the CLI's extra
-# packages (typer/rich/...) are off the DP code path. Membership, not equality:
-# a distinct profile that pins the same proof-critical set earns its own row
+# the DP behaviour is the tested behaviour; the CLI's extra packages (typer/rich/...) are off the
+# DP code path. Membership, not equality: a distinct profile that pins the same proof-critical set earns its own row
 # rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9,
 # CLI host wiring).
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
