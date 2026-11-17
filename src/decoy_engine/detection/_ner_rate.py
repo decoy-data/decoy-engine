@@ -40,13 +40,20 @@ with en_core_web_sm 3.8.0:
 
 The owner accepted 0.211 on 2026-11-07. A free-text column is flagged when about 1 cell in 5 or
 more holds a span of that id; lower nonzero rates stay visible as rates.
+
+The rate is per model (`NER_MIN_RATES`). en_core_web_md is measured over the same corpus plus the
+clinical-vocabulary negatives in `_ner_clinical_corpus.py` (Synthea drug, vaccine, lab, procedure,
+condition and device terms), by the same rule, in `test_ner_md_rate.py`. Highest false-hit rate
+0.061 (`careplans.REASONDESCRIPTION`, person_name), highest 95% bound 0.0705, rule output 0.122.
+Stop value 0.2005: above it md would miss a notes column where 1 cell in 4 names a person.
 """
 
 from __future__ import annotations
 
 import statistics
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Literal
 
 from decoy_engine.detection.ner import DEFAULT_NER_MODEL, NER_ENTITY_MAP, iter_ner_spans_batch
@@ -56,8 +63,25 @@ RateBucket = Literal["<10%", "10-50%", ">=50%"]
 NER_SCAN_CELLS = 2_000
 # A column is free text when the median whitespace-token count of its sampled cells reaches this.
 FREE_TEXT_MIN_TOKENS = 3
-# Share of scanned cells at which a free-text column counts as a hit; measured, see above.
-NER_MIN_RATE = 0.211
+# Share of scanned cells at which a free-text column counts as a hit, per model. Each value is the
+# rule above over that model's own measurement (`test_ner_min_rate.py` for sm, `test_ner_md_rate.py`
+# for md, which adds the clinical-vocabulary negatives of `_ner_clinical_corpus.py`); a model has no
+# entry until it is measured, and a scan refuses a model with none (`load_detectors`).
+NER_MIN_RATES: Mapping[str, float] = MappingProxyType(
+    {
+        "en_core_web_sm": 0.211,
+        "en_core_web_md": 0.122,
+    }
+)
+
+
+def ner_min_rate(model: str) -> float | None:
+    """The calibrated hit threshold of `model`, or None when it has none: the one lookup."""
+    return NER_MIN_RATES.get(model)
+
+
+# The rate of the default model; callers move to `NER_MIN_RATES` when the default changes.
+NER_MIN_RATE = NER_MIN_RATES[DEFAULT_NER_MODEL]
 # Bounds the span lists held at once; far below the pipe window in `ner.py`.
 _WINDOW = 512
 
@@ -69,6 +93,7 @@ class NerRate:
     detector_id: str
     hit_cells: int
     scanned_cells: int
+    min_rate: float
 
     @property
     def rate(self) -> float:
@@ -77,7 +102,7 @@ class NerRate:
     @property
     def hit(self) -> bool:
         """The one place an NER hit is decided; a column that was not scored never hits."""
-        return self.scanned_cells > 0 and self.rate >= NER_MIN_RATE
+        return self.scanned_cells > 0 and self.rate >= self.min_rate
 
     @property
     def bucket(self) -> RateBucket:
@@ -112,18 +137,22 @@ def ner_rates(values: Iterable[object], *, model: str = DEFAULT_NER_MODEL) -> di
     """Per-detector-id rates over the cell sample of `values`; every NER id is present.
 
     The only NER scoring entry. A column that is not free text is not scored: no cell reaches
-    spaCy and every rate is over zero scanned cells.
+    spaCy and every rate is over zero scanned cells. Each rate carries `model`'s own hit threshold;
+    a model with no calibrated rate is not scored.
     """
+    min_rate = ner_min_rate(model)
+    if min_rate is None:
+        raise ValueError("no calibrated NER hit rate for this model")
     cells = sample_cells(values)
     detector_ids = sorted(set(NER_ENTITY_MAP.values()))
     if not is_free_text(cells):
-        return {i: NerRate(i, 0, 0) for i in detector_ids}
+        return {i: NerRate(i, 0, 0, min_rate) for i in detector_ids}
     hits = dict.fromkeys(detector_ids, 0)
     for start in range(0, len(cells), _WINDOW):
         for spans in iter_ner_spans_batch(cells[start : start + _WINDOW], model=model):
             for detector_id in {span.detector_id for span in spans}:
                 hits[detector_id] += 1
-    return {i: NerRate(i, hits[i], len(cells)) for i in detector_ids}
+    return {i: NerRate(i, hits[i], len(cells), min_rate) for i in detector_ids}
 
 
 def rate_bucket(rate: float) -> RateBucket:

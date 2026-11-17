@@ -101,8 +101,9 @@ the failure would surface as an opaque `vault_key_mismatch`.
    vault-write time.
 4. Pooled strategies can map two sources to one masked value; those
    keys are dropped at write time (`ambiguous_dropped` in the unencrypted
-   header and the unmask report). Exact round trips are guaranteed only
-   for collision-free maskings such as `hash` under a namespace.
+   header and the unmask report). Exact round trips need `fpe`, or an
+   untruncated `hash` or `tokenize` under a namespace, where a collision is
+   negligible and not impossible.
 5. **Publication (B-6 D1).** `VaultWriter.write` never writes the vault in
    place. It opens the target's parent directory, creates a stage
    `_decoy_vault_stage_<hex>` beside the vault with creation mode `0600`

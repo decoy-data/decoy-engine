@@ -312,7 +312,7 @@ def test_an_entry_built_from_the_examples_validates_compiles_and_runs(
 def test_the_full_ner_entry_is_valid_config_even_without_the_model(info: StrategyInfo) -> None:
     entry = _entry(info)
     assert entry["provider_config"]["ner"] == {
-        "model": "en_core_web_sm",
+        "model": "en_core_web_md",
         "entities": ["person_name"],
     }
     support.make_cfg([entry])
@@ -434,7 +434,7 @@ def test_strategies_that_never_read_a_namespace_run_without_one(tmp_path: Path) 
 _PC = "provider_config"
 _NER = "provider_config.ner"
 _NER_ROWS = (
-    ("ner_model", "str", False, _NER, None, "en_core_web_sm"),
+    ("ner_model", "str", False, _NER, None, "en_core_web_md"),
     ("ner_entities", "str_list", False, _NER, ("location", "person_name"), ("person_name",)),
 )
 EXPECTED_OPTIONS: dict[str, tuple[tuple[Any, ...], ...]] = {

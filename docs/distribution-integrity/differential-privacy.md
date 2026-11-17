@@ -187,14 +187,22 @@ compile.
 ### Re-pinning
 
 Any change to `uv.lock` that moves the certified profile, and any engine
-version bump, needs a new row. In one change:
+version bump, needs a new row. Release prep writes them; nobody edits
+`_CERTIFIED_STACKS` by hand.
 
-1. Sync the profile fresh on CPython 3.10.20 and compute the fingerprint with
-   `compute_lock_fingerprint(installed_distribution_set())`.
-2. Add the fingerprint to `_CERTIFIED_STACKS`, keeping older rows.
+1. In the `decoy` repo, re-derive `requirements-certified.txt` for the new
+   release and keep the last certified file as the base.
+2. Run `scripts/release/stamp_release.py --version X.Y.Z --cli-version A.B.C
+   --cli-pins-base <base file> --cli-pins <candidate file>` (repeat
+   `--cli-pins` for each candidate; `--allow-delta <name>` for a package the
+   candidate may add or drop). In the same transaction as the changelog it
+   computes the engine dev and CI row from `uv.lock` and one CLI runtime row
+   per candidate through `compute_lock_fingerprint`, and inserts them newest
+   first, keeping older rows. It refuses with the tree unchanged on a missing
+   flag, an unreadable or malformed pin file, a pin that breaks the pin rules,
+   a name pinned twice, or a candidate whose name set differs from the base
+   beyond `--allow-delta`.
 3. Regenerate NOTICE with `scripts/dev/licenses_write.sh`.
-4. For the CLI runtime row, re-derive `requirements-certified.txt` in the
-   `decoy` repo, confirm its fingerprint, and add that row too.
 
 `tests/sentry/test_dp_lock_row.py` recomputes the fingerprint from `uv.lock`
 alone and fails when it is not a member. It never skips, so a forgotten re-pin

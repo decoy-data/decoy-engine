@@ -111,9 +111,9 @@ global_settings:
 DE-02. Do not confuse it with the `mask_key` model above:
 
 - `ExecutionContext.derive_key` (`context.py`) was the legacy **mask**
-  resolver. The V1 strategy classes that consumed it -- `transforms/fpe.py`
-  and `transforms/date_shift.py`, both calling `self.derive_key("mask")` --
-  are dead on the live masking path: V2 handlers key off
+  resolver. The V1 strategy class that consumed it, `transforms/fpe.py`
+  calling `self.derive_key("mask")`, is dead on the live masking path (the
+  V1 `transforms/date_shift.py` class was deleted): V2 handlers key off
   `StrategyContext.mask_key` instead. `ExecutionContext.pipeline_derive_key`
   was the legacy generate resolver.
 - Synthetic *generation* determinism on the live path takes its key material

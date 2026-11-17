@@ -51,7 +51,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-DistributionBehavior = Literal[
+_DistributionBehavior = Literal[
     "preserves_all",
     "preserves_cardinality_only",
     "destroys_frequency",
@@ -67,7 +67,7 @@ DistributionBehavior = Literal[
 # uniform-default value; the function below resolves it dynamically.
 # nested is `inherits` -- the manifest carries the child's actual
 # behavior after plan-compile resolves it.
-_STATIC_BEHAVIOR: dict[str, DistributionBehavior] = {
+_STATIC_BEHAVIOR: dict[str, _DistributionBehavior] = {
     "passthrough": "preserves_all",
     "shuffle": "preserves_all",
     "hash": "preserves_cardinality_only",
@@ -137,9 +137,11 @@ _STATIC_BEHAVIOR: dict[str, DistributionBehavior] = {
     # group_key (SP-10c): HKDF-SHA256 + HMAC-SHA256 keyed per-group identifier.
     # All rows sharing a group_by value collapse to the same key; all distinct
     # groups get distinct keys (collision probability negligible under 32-byte
-    # HMAC output). Preserves_cardinality_only: distinct count of the group_by
-    # column is preserved in the output; individual values are replaced.
-    "group_key": "preserves_cardinality_only",
+    # HMAC output). The output cardinality is that of the `group_by` column, not
+    # of the column the strategy is configured on, so the source column's
+    # distribution does not propagate: destroys_frequency (DIST-INTEGRITY DI-1a;
+    # it was preserves_cardinality_only before).
+    "group_key": "destroys_frequency",
     # top_code (HC-3b): numeric tail generalization. Only the tail is
     # rewritten to a constant label; in-range values pass through unchanged.
     # Coarsens: same class as bucketize (many-to-one on the affected slice).
@@ -147,10 +149,36 @@ _STATIC_BEHAVIOR: dict[str, DistributionBehavior] = {
 }
 
 
+# Strategies whose output cell can be null, or not null, for a reason other than its own source
+# cell being null. `post_scan.distribution` does not check `null_rate` on these columns. Kept with
+# the behaviour table above because it is the same kind of per-strategy distribution fact, and so
+# the facts a column keeps (`verification/postmask/distribution.py`) derive from this module
+# alone. `tests/unit/detection_verification/postscan/test_distribution_preserved_facts.py` runs
+# every strategy outside this set over a null-bearing column and asserts the output null
+# positions equal the source ones.
+NULLS_NOT_PRESERVED: frozenset[str] = frozenset(
+    {
+        # A null key selects a seeded random reference row.
+        "joint_mask",
+        # Fills from the `group_by` column, not from its own cell.
+        "group_key",
+        # Null where the anchor column is null, not where its own cell is.
+        "windowed_date",
+        # The cascade turns every cell into a level string, a null into the suppressed value.
+        "geo_generalize",
+        # Positions and walks within a group; derived values and aggregate fills.
+        "grouped_series",
+        "derived",
+        "derived_aggregate",
+        "formula",
+    }
+)
+
+
 def distribution_behavior_for(
     strategy: str | None,
     provider_config: tuple[tuple[str, Any], ...] | None = None,
-) -> DistributionBehavior | None:
+) -> _DistributionBehavior | None:
     """Resolve the distribution-behavior label for a strategy.
 
     Returns `None` when the strategy is unknown. `provider_config`
