@@ -33,6 +33,7 @@ __all__ = [
     "PolicyConfig",
     "PolicyRule",
     "Prohibition",
+    "json_carryable",
 ]
 
 MAX_RULES = 200
@@ -46,6 +47,15 @@ Why = Annotated[StrictStr, StringConstraints(max_length=500)]
 StrategyName = Annotated[StrictStr, StringConstraints(min_length=1, max_length=64)]
 
 _STRICT = ConfigDict(extra="forbid", strict=True, frozen=True, hide_input_in_errors=True)
+
+
+def json_carryable(value: Any) -> bool:
+    """True when `value` has a canonical JSON form (no NaN, infinity or foreign type)."""
+    try:
+        canonical_json_bytes(value)
+    except CanonicalJsonError:
+        return False
+    return True
 
 
 class ColumnDecision(BaseModel):
@@ -64,13 +74,7 @@ class ColumnDecision(BaseModel):
     @classmethod
     def _json_carryable(cls, value: dict[str, Any]) -> dict[str, Any]:
         """A NaN or other non-JSON value cannot be compared or digested; refuse it by code."""
-        try:
-            canonical_json_bytes(value)
-        except CanonicalJsonError:
-            carryable = False
-        else:
-            carryable = True
-        if not carryable:
+        if not json_carryable(value):
             raise PydanticCustomError(
                 str(reasons.config.POLICY_BLOCK_INVALID),
                 "provider_config holds a value JSON cannot carry.",
