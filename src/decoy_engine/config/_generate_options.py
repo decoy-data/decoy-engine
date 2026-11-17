@@ -63,6 +63,9 @@ _FORMULA = str(reasons.config.GENERATE_FORMULA_INVALID)
 UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 
 Problem = tuple[tuple[str | int, ...], str]
+ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
+# A problem whose message adds value-free names to the code's summary.
+NamedProblem = tuple[tuple[str | int, ...], str, str]
 Check = Callable[[Any, Mapping[str, Any]], list[Problem]]
 
 _OK: list[Problem] = []
@@ -531,23 +534,28 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
     return found
 
 
-_Loc = tuple[str | int, ...]
-
-
 def problem_details(
-    problems: Sequence[tuple[_Loc, str] | tuple[_Loc, str, str]],
+    problems: Sequence[Problem | ContextProblem | NamedProblem],
+    templates: Mapping[str, str] | None = None,
 ) -> list[InitErrorDetails]:
     """Pydantic line errors for ``problems``: fixed text per code, no input kept.
 
-    A third item is value-free text (table and column names) added after the summary.
+    A problem with a third member carries config identifiers only. A mapping is a context: the
+    text is the code's entry in ``templates`` filled from it. A string is value-free text (table
+    and column names) added after the summary.
     """
     details: list[InitErrorDetails] = []
     for problem in problems:
         loc, code = problem[0], problem[1]
         kind: Any = "missing"
         if code != "missing":
-            text = " ".join((reasons.lookup(code)[0].summary, *problem[2:]))
-            kind = PydanticCustomError(code, text)
+            summary = reasons.lookup(code)[0].summary
+            extra = problem[2] if len(problem) == 3 else None
+            if isinstance(extra, str):
+                kind = PydanticCustomError(code, f"{summary} {extra}")
+            else:
+                template = (templates or {}).get(code, summary) if extra is not None else summary
+                kind = PydanticCustomError(code, template, dict(extra) if extra else None)
         details.append({"type": kind, "loc": loc, "input": None})
     return details
 

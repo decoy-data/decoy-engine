@@ -29,8 +29,8 @@ from decoy_engine.execution._adapter import StrategyContext, provider_config_to_
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies import _faker_positional as fp
 from decoy_engine.execution._strategies._faker import FakerStrategyHandler
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
 from decoy_engine.execution._strategies._orphan import make_remap_fn
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.execution._when_gate import run_with_when_gate
 from decoy_engine.execution.native._companion_status import native_companion_status
 from decoy_engine.execution.native._index_ext import (
