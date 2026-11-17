@@ -268,7 +268,7 @@ def test_an_undecodable_text_file_is_scanned_not_skipped(tmp_path: pathlib.Path)
 
 def test_an_undecodable_file_without_a_retired_name_is_clean(tmp_path: pathlib.Path) -> None:
     target = tmp_path / "vector.bin"
-    target.write_bytes(b"{\"a\": \"\xff\xfe\"}")
+    target.write_bytes(b'{"a": "\xff\xfe"}')
     assert scan(tmp_path, ["vector.bin"]) == []
 
 
