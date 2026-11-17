@@ -51,6 +51,7 @@ from decoy_engine.providers_v2._faker_adapter import (
     FakerAdapter as FakerAdapter,  # re-export; intentionally not in __all__ (Dennis S22 L4)
 )
 from decoy_engine.providers_v2._faker_adapter import (
+    custom_provider_names,
     register_faker_provider_v2,
 )
 from decoy_engine.providers_v2._registry import (
@@ -65,6 +66,7 @@ __all__ = [
     "ProviderError",
     "ProviderRegistry",
     "ProviderSpec",
+    "custom_provider_names",
     "get_default_registry",
     "register_faker_provider_v2",
 ]

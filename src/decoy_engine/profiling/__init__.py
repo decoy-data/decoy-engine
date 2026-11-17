@@ -45,6 +45,7 @@ from decoy_engine.profiling._value_redaction import (
     POLICY_RAW,
     POLICY_REDACTED,
     REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
     VALUE_POLICY_KEY,
     is_value_sensitive,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "POLICY_RAW",
     "POLICY_REDACTED",
     "REDACTED_COLUMNS_KEY",
+    "REDACTED_POLICIES",
     "SCAN_DIFF_SCHEMA",
     "SCAN_SET_SCHEMA",
     "VALUE_POLICY_KEY",
