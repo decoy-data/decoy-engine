@@ -30,6 +30,7 @@ from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.quality.snapshot import compute_distribution_snapshot
 
 CODE = "statistical_stats_degenerate"
+DECODER_CODE = "statistical_snapshot_schema_mismatch"
 NAN = float("nan")
 INF = float("inf")
 
@@ -250,7 +251,10 @@ def test_compile_refuses_what_run_refuses(tmp_path: Path, name: str) -> None:
     path = _snapshot_file(tmp_path, column, stats)
     with pytest.raises(PlanCompileError) as exc:
         check_statistical_columns(_config(path, column))
-    assert exc.value.code == CODE
+    # The v2 datetime decoder refuses a negative bucket count while the snapshot loads, with its own
+    # code, before the shared rule runs; every other case reaches the shared rule.
+    expected = DECODER_CODE if name == "datetime negative count" else CODE
+    assert exc.value.code == expected
     assert exc.value.path == f"tables.t.generate_columns.{column}"
 
 

@@ -28,7 +28,6 @@ from decoy_engine import reasons as reason_codes
 from decoy_engine.contracts.distribution_snapshot import (
     MAX_SAMPLED_YEAR,
     MIN_YEAR,
-    names_unsupported_year,
 )
 from decoy_engine.errors import DecoyError
 
