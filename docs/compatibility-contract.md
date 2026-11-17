@@ -170,6 +170,15 @@ still returns `None` and its warning no longer holds the value. The engine-set `
 marker reads through the same parser, so any accepted true spelling counts as inside a worker. The custom
 provider folder variable `CUSTOM_PROVIDERS_DIR` is renamed `DECOY_CUSTOM_PROVIDERS_DIR` with no alias.
 
+**Pre-GA correction (retired route reasons removed, 2026-11-16).** The two route tombstones the v0.16.0 reframe left
+behind, the requested-check reason and the resident-output reason that `route/post_scan_integrity_requested` and
+`route/post_scan_integrity` replaced, are deleted from the registry. This is a one-time exception to the append-only
+rule, approved by the owner before GA. `reasons.find("route", <code>)` returns `None` for both, and a persisted
+record that names one reads as `decoy/unknown_reason_from_future` with the original identity kept in its context,
+the same path a record from a newer engine takes. `REGISTRY_VERSION` stays `1.29.0`, so engine 0.27.0 and the first
+release with this change report one registry version with two different catalogs. An engine branch forked before
+this change sees the two identities as stale in its registry checks until it rebases.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
