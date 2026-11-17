@@ -21,7 +21,7 @@ import yaml
 from scripts.dev import required_checks as rc
 
 ROOT = Path(__file__).resolve().parents[3]
-REPO = "louiskeep/decoy-engine"
+REPO = "decoy-data/decoy-engine"
 MAIN = "a" * 40
 HEAD = "b" * 40
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
