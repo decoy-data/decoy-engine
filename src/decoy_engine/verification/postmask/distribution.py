@@ -37,13 +37,13 @@ from decoy_engine.contracts.distribution_behavior import (
 )
 from decoy_engine.verification.postmask._column_facts import ValueFacts
 
-Fact = Literal["row_count", "null_rate", "distinct_ratio", "mean", "std"]
-FACTS: tuple[Fact, ...] = get_args(Fact)
+_Fact = Literal["row_count", "null_rate", "distinct_ratio", "mean", "std"]
+FACTS: tuple[_Fact, ...] = get_args(_Fact)
 
-_ROW: frozenset[Fact] = frozenset({"row_count"})
-_NULLS: frozenset[Fact] = frozenset({"row_count", "null_rate"})
-_CARDINALITY: frozenset[Fact] = frozenset({"row_count", "null_rate", "distinct_ratio"})
-_ALL: frozenset[Fact] = frozenset(FACTS)
+_ROW: frozenset[_Fact] = frozenset({"row_count"})
+_NULLS: frozenset[_Fact] = frozenset({"row_count", "null_rate"})
+_CARDINALITY: frozenset[_Fact] = frozenset({"row_count", "null_rate", "distinct_ratio"})
+_ALL: frozenset[_Fact] = frozenset(FACTS)
 # Strategies whose label claims more than the five facts can show; see the module docstring.
 _VALUES_REMAPPED = frozenset({"categorical"})
 
@@ -53,7 +53,7 @@ def preserved_facts(
     provider_config: tuple[tuple[str, Any], ...] | None = None,
     *,
     conditional: bool = False,
-) -> frozenset[Fact]:
+) -> frozenset[_Fact]:
     """The facts a column configured with `strategy` is checked on; always includes `row_count`.
 
     `provider_config` matters only for `categorical`, whose label depends on it. An unknown
@@ -84,7 +84,7 @@ class DistributionFinding:
 
     table: str
     column: str | None
-    fact: Fact
+    fact: _Fact
     severity: Severity
     delta_pct: float | None
 
@@ -106,7 +106,7 @@ class ColumnSides:
     which is an `error` row for `distinct_ratio`."""
 
     column: str
-    facts: frozenset[Fact]
+    facts: frozenset[_Fact]
     source: ValueFacts
     output: ValueFacts
     source_distinct: int | None
@@ -114,14 +114,14 @@ class ColumnSides:
 
 
 def _finding(
-    table: str, column: str | None, fact: Fact, severity: Severity, delta: float | None
+    table: str, column: str | None, fact: _Fact, severity: Severity, delta: float | None
 ) -> DistributionFinding:
     rounded = round(delta, 1) if delta is not None and math.isfinite(delta) else None
     return DistributionFinding(table, column, fact, severity, rounded)
 
 
 def _judged(
-    table: str, column: str | None, fact: Fact, delta: float, tolerance_pct: float
+    table: str, column: str | None, fact: _Fact, delta: float, tolerance_pct: float
 ) -> DistributionFinding:
     """A defined change: `warning` above the tolerance, `info` inside it. A change too large to
     represent (infinite) is a breach with no delta; one that is not a number is undefined, so `info`."""

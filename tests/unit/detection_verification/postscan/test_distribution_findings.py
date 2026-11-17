@@ -18,8 +18,10 @@ from decoy_engine.verification.postmask.distribution import (
     FACTS,
     ColumnSides,
     DistributionFinding,
-    Fact,
     distribution_findings,
+)
+from decoy_engine.verification.postmask.distribution import (
+    _Fact as Fact,
 )
 
 ALL: frozenset[Fact] = frozenset(FACTS)
