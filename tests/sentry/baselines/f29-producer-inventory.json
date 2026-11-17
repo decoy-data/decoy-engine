@@ -635,9 +635,6 @@
   "execution/_strategies/_text_mask.py::TextMaskHandler.run::kw::'fpe_unencryptable_domain'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/_strategies/_text_mask.py::text_mask_sub_floor_warning::kw::'text_mask_sub_floor_span_handled'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/_strategies/_text_redact.py::TextRedactHandler.run::kw::'ner_model_version_mismatch'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
