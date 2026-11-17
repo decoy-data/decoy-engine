@@ -34,9 +34,10 @@ PLACEHOLDERS = frozenset({"todo", "tbd", "fixme", "xxx", "n/a", "none"})
 # changed last segment can mean a different permitted thing, so it compares exactly.
 REKEY_PER_SITE = frozenset({"validation-name-messages"})
 # Only these sentries may move a key to a new home, and only by a declared ``moved_from``. Their
-# keys are ``<file under src/>::<qualname>::<binding name>``; other sentries use other key shapes
-# (src-relative paths, ordinals) for which "the old site is gone" cannot be proven.
-REHOME_BY_BINDING = frozenset({"secret-material-census"})
+# keys are ``<file under src/>::<qualname>::<name>``, optionally followed by ``::<ordinal>`` (the
+# call sites of one method in one function); other sentries use other key shapes (src-relative
+# paths) for which "the old site is gone" cannot be proven.
+REHOME_BY_BINDING = frozenset({"secret-material-census", "gcs-call-kwargs"})
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,14 @@ def _mentions(n: ast.AST, name: str) -> bool:
     return getattr(n, "name", None) == name
 
 
+def _site_parts(key: str) -> tuple[str, str, str] | None:
+    """Split ``<file>::<qualname>::<name>`` with an optional all-digit ``::<ordinal>`` suffix."""
+    parts = key.split("::")
+    if len(parts) == 4 and parts[3].isdigit():
+        parts = parts[:3]
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+
+
 def site_gone(root: Path, key: str, base_ref: str) -> bool:
     """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
 
@@ -202,8 +211,8 @@ def site_gone(root: Path, key: str, base_ref: str) -> bool:
     when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
     file that never existed is "not proven" and returns false.
     """
-    parts = key.split("::")
-    if len(parts) != 3 or not parts[0].endswith(".py") or not parts[2].isidentifier():
+    parts = _site_parts(key)
+    if parts is None or not parts[0].endswith(".py") or not parts[2].isidentifier():
         return False
     file, qualname, name = parts
     if not all(q.isidentifier() for q in qualname.split(".")):
@@ -237,7 +246,8 @@ def rehomes(
     remaining = set(grown)
     report: list[str] = []
     for old, keys in sorted(claims.items()):
-        same_name = old.rpartition("::")[2] == keys[0].rpartition("::")[2]
+        old_parts, new_parts = _site_parts(old), _site_parts(keys[0])
+        same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
         if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
             continue
         if site_gone(root, old, base_ref):
