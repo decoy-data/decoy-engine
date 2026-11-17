@@ -51,7 +51,7 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span, iter_spans
 from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._text_redact import _splice
 from decoy_engine.execution.native._text_mask_native_fpe import (
     encrypt_spans,
@@ -64,10 +64,7 @@ from decoy_engine.execution.native._text_mask_native_splice import (
     plan_native_splice,
     splice_batch,
 )
-from decoy_engine.execution.native._text_mask_route import (
-    text_mask_fail_closed_error,
-    text_mask_unsupported_pair_error,
-)
+from decoy_engine.execution.native._text_mask_route import text_mask_fail_closed_error
 from decoy_engine.execution.native._text_redact_kernel import (
     load_text_redact_kernel,
     merge_text_redact_spans,

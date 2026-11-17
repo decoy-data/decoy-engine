@@ -14,10 +14,9 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._text_mask import TextMaskHandler
 from decoy_engine.execution.native._kernels_scalar import native_text_mask
-from decoy_engine.execution.native._text_mask_route import text_mask_unsupported_pair_error
 from decoy_engine.execution.out_of_core._mask_group_c import _text_mask_array
 from decoy_engine.plan._types import ColumnSeed
 

@@ -21,7 +21,6 @@ from decoy_engine.generation.pool._events import QualityWarning
 __all__ = [
     "text_mask_fail_closed_error",
     "text_mask_sub_floor_warning",
-    "text_mask_unsupported_pair_error",
 ]
 
 # The exact note `TextMaskHandler.run` attaches, so the native warning's detail is byte-identical
@@ -47,20 +46,6 @@ def text_mask_fail_closed_error(exc: FpeUnencryptableError, column: str) -> Stra
             f"column {column!r}: {exc}. The engine fails closed rather than "
             "silently choose a sub_floor_span fallback."
         ),
-    )
-
-
-def text_mask_unsupported_pair_error(column: str | None) -> StrategyError:
-    """The value-free `StrategyError` a span whose detector cannot take its strategy maps to.
-
-    Every route catches the tagged `PipelineValidationError` from `mask_cell`, then raises this
-    AFTER its `except` block closes, so no `__cause__` or `__context__` carries the span. One
-    function keeps the code and message identical on the handler, the native chunked route and the
-    out-of-core route."""
-    return StrategyError(
-        code=reasons.runtime.UNSUPPORTED_STRATEGY,
-        strategy="text_mask",
-        message=f"column {column!r}: a span's detector cannot take its strategy.",
     )
 
 

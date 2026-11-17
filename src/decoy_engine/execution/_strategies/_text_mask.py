@@ -45,7 +45,7 @@ from decoy_engine.execution._adapter import (
     option,
     provider_config_to_dict,
 )
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
@@ -242,12 +242,6 @@ class TextMaskHandler:
             ) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
-            # Imported here: the native package imports the execution guards, which import this
-            # module, so a top-level import is a cycle.
-            from decoy_engine.execution.native._text_mask_route import (
-                text_mask_unsupported_pair_error,
-            )
-
             raise text_mask_unsupported_pair_error(column)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
