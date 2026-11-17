@@ -284,6 +284,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
             # regenerated NOTICE. Rows from SCAN-ML M2 (classifier stack in base deps) on are one
             # per engine release, newest first.
+            "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
             "f921d069fb3cd5baebc6940de37076103ba6a663c977db346c81fd6cdcbfc326",
