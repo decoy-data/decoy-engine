@@ -106,10 +106,6 @@
    "reason": "inline `.get(\"generate_columns\")` truth tests existing when the table-kind owner moved to config; count may only go down, new modules call config.classify_table_kinds",
    "max": 2
   },
-  "secret_providers/_requirements.py": {
-   "reason": "inline `.get(\"generate_columns\")` truth tests existing when the table-kind owner moved to config; count may only go down, new modules call config.classify_table_kinds",
-   "max": 1
-  },
   "unmask.py": {
    "reason": "inline `.get(\"generate_columns\")` truth tests existing when the table-kind owner moved to config; count may only go down, new modules call config.classify_table_kinds",
    "max": 1

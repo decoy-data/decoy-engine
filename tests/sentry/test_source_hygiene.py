@@ -16,8 +16,11 @@ convention.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
+
+from tests.sentry._call_resolution import resolved_calls
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 
@@ -227,3 +230,61 @@ def test_banned_glyph_sentry_flags_injected_em_dash(tmp_path: Path) -> None:
     injected = tmp_path / "injected.py"
     injected.write_text("x = 1  " + chr(0x2014) + " note\n", encoding="utf-8")
     assert _files_with_banned_glyphs(tmp_path) == ["injected.py"]
+
+
+# --- 6. No MD5 in the engine (roadmap row 24zb) ---------------------------------------------------
+#
+# An MD5-derived date offset was reversible by search. The engine has no MD5 call and no `noqa:
+# S324` waiver. The scan resolves import aliases; deliberate evasion (getattr, importlib) is V2-LOG.
+
+
+def _md5_hits(source: str) -> list[int]:
+    """Line numbers of an MD5 call or an S324 waiver in `source`.
+
+    Spellings come from the shared resolver (`tests/sentry/_call_resolution.py`): the bare name,
+    an `as` alias, a plain re-binding and `mod.md5(...)`. `hashlib.new` counts when its first
+    positional argument or its `name=` keyword is the string "md5".
+    """
+    tree = ast.parse(source)
+    hits = {i for i, line in enumerate(source.splitlines(), 1) if "noqa: S324" in line}
+    hits |= {call.lineno for call in resolved_calls(tree, "md5")}
+    for call in resolved_calls(tree, "new"):
+        named = [kw.value for kw in call.keywords if kw.arg == "name"]
+        first = call.args[0] if call.args else (named[0] if named else None)
+        if isinstance(first, ast.Constant) and str(first.value).lower() == "md5":
+            hits.add(call.lineno)
+    return sorted(hits)
+
+
+_MD5_SPELLINGS = {
+    "attribute": "import hashlib\nhashlib.md5(b'x')\n",
+    "module alias": "import hashlib as h\nh.md5(b'x')\n",
+    "from import": "from hashlib import md5\nmd5(b'x')\n",
+    "from import alias": "from hashlib import md5 as m\nm(b'x')\n",
+    "new, double quotes": 'import hashlib\nhashlib.new("md5", b"x")\n',
+    "new, single quotes": "import hashlib\nhashlib.new('md5', b'x')\n",
+    "new via from import": "from hashlib import new\nnew('md5', b'x')\n",
+    "re-binding": "import hashlib\nf = hashlib.md5\nf(b'x')\n",
+    "new with name keyword": 'import hashlib\nhashlib.new(name="md5")\n',
+    "waiver": "x = 1  # noqa: S324\n",
+}
+
+
+def test_md5_scan_flags_every_spelling() -> None:
+    """Negative controls: one seeded failing case per spelling, so the scan cannot go blind."""
+    for label, source in _MD5_SPELLINGS.items():
+        assert _md5_hits(source), label
+    assert _md5_hits("import hashlib\nhashlib.sha256(b'x')\n") == []
+
+
+def test_no_md5_in_engine_source() -> None:
+    offenders: list[str] = []
+    for path in ENGINE_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        for line in _md5_hits(path.read_text(encoding="utf-8")):
+            offenders.append(f"{path.relative_to(ENGINE_ROOT).as_posix()}:{line}")
+    assert not offenders, (
+        "MD5 call or `noqa: S324` waiver in src/decoy_engine (an MD5-derived value is reversible "
+        "by search; use a keyed HMAC):\n  - " + "\n  - ".join(offenders)
+    )

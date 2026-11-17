@@ -271,7 +271,7 @@ def _ner_stub(monkeypatch: pytest.MonkeyPatch) -> None:
 _PII = _payload(["mail alice@example.com", None, "Bob 415-555-0132", "", "ssn 123-45-6789"])
 _DECLINES = {
     "ner": (tr_seed(ner=True), _PII, "text_redact_ner_not_native:a"),
-    "ner_mapping": (tr_seed(ner={"model": "m"}), _PII, "text_redact_ner_not_native:a"),
+    "ner_mapping": (tr_seed(ner={"model": "xx_m"}), _PII, "text_redact_ner_not_native:a"),
     "token_not_string": (tr_seed(token=5), _PII, "text_redact_token_not_string:a"),
     "token_none": (tr_seed(token=None), _PII, "text_redact_token_not_string:a"),
     "detectors_string": (

@@ -143,6 +143,9 @@ class EvidencePayload(_Model, _BindingRules):
     # Absent must stay absent for the manifest_hash, so these are never given a stored default.
     path_base: Literal["project"] | None = None
     project_manifest: RelPath | None = None
+    # Additive to cli-local-1: the pipeline's scan baseline, hashed at run start. Absent when the
+    # pipeline names none; a path with a null fingerprint when the file could not be read.
+    scan_baseline: FileFingerprint | None = None
 
 
 class ColumnRef(_Model):
