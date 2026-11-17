@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
 from decoy_engine.execution._throughput_calibration import (
@@ -53,6 +53,9 @@ from decoy_engine.execution._throughput_calibration import (
 )
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.fileaccess import FileAccess
+
+if TYPE_CHECKING:
+    from decoy_engine.execution.pipeline._lifecycle import Phase
 
 _PEAK_PATHS = frozenset({"full_frame", "out_of_core", "sequential"})
 
@@ -224,7 +227,7 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
         runtime=runtime,
         notes=(*notes, *life.notes),
         lifecycle_peak_bytes=life.peak_bytes,
-        limiting_phase=life.limiting_phase,  # type: ignore[arg-type]
+        limiting_phase=life.limiting_phase,
         phase_bytes=life.phase_bytes,
     )
 
@@ -248,8 +251,8 @@ def _sample_stage(config: dict[str, Any], mask_tables: list[Any]) -> tuple[Any, 
 @dataclass(frozen=True)
 class _LifecycleFields:
     peak_bytes: int | None = None
-    limiting_phase: str | None = None
-    phase_bytes: tuple[tuple[str, int], ...] = ()
+    limiting_phase: Phase | None = None
+    phase_bytes: tuple[tuple[Phase, int], ...] = ()
     notes: tuple[str, ...] = ()
 
 

@@ -20,6 +20,7 @@ import pyarrow as pa
 
 from decoy_engine.execution._mem_estimate import ColumnSizeSpec
 from decoy_engine.execution._mem_estimate_arrow import (
+    _is_string_family,
     column_arrow_types,
     source_nullable_columns,
 )
@@ -31,13 +32,6 @@ from decoy_engine.profile._lazy_build import build_lazy_source, descriptor_path
 from decoy_engine.profile._readers import LazySource, build_profile_source
 
 SAMPLE_ROWS = 10_000
-
-_STRING_FAMILY = (
-    pa.types.is_string,
-    pa.types.is_large_string,
-    pa.types.is_binary,
-    pa.types.is_large_binary,
-)
 
 
 @dataclass(frozen=True)
@@ -105,7 +99,7 @@ def _is_empty_in_sample(column: pa.ChunkedArray) -> bool:
         return False
     if pa.types.is_null(column.type):
         return True
-    return any(f(column.type) for f in _STRING_FAMILY) and column.null_count == len(column)
+    return _is_string_family(column.type) and column.null_count == len(column)
 
 
 def _table_inputs(profile_table: Any, descriptor: dict[str, Any], fmt: str) -> lc.TableInputs:
@@ -237,7 +231,7 @@ def attach_outputs(tables: tuple[lc.TableInputs, ...], plan: Any) -> Outcome:
         (child.table, column): (rel.parent.table, parent_column)
         for rel in plan.relationships
         for child in rel.children
-        for column, parent_column in zip(child.columns, rel.parent.columns, strict=False)
+        for column, parent_column in zip(child.columns, rel.parent.columns, strict=True)
     }
     by_key = {(t.name, c.name): c for t in tables for c in t.columns}
     resolved: dict[tuple[str, str], tuple[ColumnSizeSpec, pa.DataType] | None] = {}
