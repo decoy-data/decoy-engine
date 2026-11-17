@@ -420,7 +420,7 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
                 continue
             col_name = col_entry.get("name", "?")
             try:
-                model = ner.resolve_column_ner(ner_cfg)[0] or ner.DEFAULT_NER_MODEL
+                model = str(ner.resolve_column_ner(ner_cfg)[0])
                 ner.ensure_ner_available(model)
             except ner.NerUnavailableError as exc:
                 raise PlanCompileError(
