@@ -108,7 +108,7 @@ All paths are under `src/decoy_engine/`.
 | Caller | What it uses |
 |---|---|
 | `execution/_pipeline_finalize.py` | `compute_quality_report` per mask table when `run_pipeline(fidelity_report=True)`. |
-| `execution/_distribution_behavior.py` | Static per-strategy label of what a strategy does to a distribution. Observational only. |
+| `contracts/distribution_behavior.py` | Static per-strategy label of what a strategy does to a distribution. Observational only. |
 | `testflight/_distribution.py`, `_distribution_generate.py` | Acceptance checks built on the report and policy. |
 | `decoy` CLI | `fit.py`, `report.py` (`report fidelity`), `run.py` (`--fidelity`). |
 | `decoy-platform` | `api/quality/runner_hook.py` (best-effort report after a job), `api/jobs/routes_quality.py`. |
