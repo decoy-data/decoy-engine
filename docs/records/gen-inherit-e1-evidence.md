@@ -521,9 +521,58 @@ at 600 lines once main's `publication_receipt` field meets that slice's referenc
 
 Checks on `9ecfa437`, Python 3.10.20, `origin/main` `ddd014a5`: ruff, format and mypy pass;
 `tests/sentry` 5985 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation`
-with this chain's changed test files, the two draw-site catalogue tests and the fan-out sentry:
+with the tests of this slice and the slices below it, the two draw-site catalogue tests and the fan-out sentry:
 5112 passed, 0 failed, 43 skipped. Script checks (`registry_renumber.py --check --main
 ddd014a5`, `ratchet_check.py --base ddd014a5`, `check_fragment.py --base ddd014a5`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 597 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules. Not run on this
+head: the full T1 gate, mutations and the full suite.
+
+## Main merge (2026-11-16, `13c95c7d`), carried forward
+
+`origin/feat/gen-inherit-e2` `57a73de3` (holding `origin/main` `13c95c7d`: #605, the run-stream
+E5b no-sink collector scratch opened on first spill, and #607, the F22 b1 durable vault adopt and
+`VaultCommit`) merged into `bb381ab5` as `3b11bbee`, without a conflict. It carries gen-rel-e1's
+owner ruling A: the three orphan-policy refusal tests in
+`tests/property/test_ri_graph_invariants.py` assert the reason code and field, not the declared
+policies, and the refusal source is unchanged. Main does not touch the draw-site catalogue,
+`.importlinter`, `uv.lock`, `generation/` or `testflight/`. Of this slice's files main touches
+`CODEMAP.md`; it merged beside this slice's lines. Main's changelog fragments arrive beside this
+chain's six, which are kept. This head was not pushed: `origin/main` moved before its record.
+
+Checks on `3b11bbee`, Python 3.10.20: ruff, format and mypy pass; `tests/sentry` 5993 passed, 0
+failed, 2 skipped; layers 15 passed; `tests/unit/generation` with the tests of this slice and the
+slices below it, the two draw-site catalogue tests and the fan-out sentry: 5149 passed, 0 failed,
+43 skipped; `tests/property/test_ri_graph_invariants.py` 35 passed. Script checks against
+`13c95c7d` (`registry_renumber.py --check --main`, `ratchet_check.py --base`,
+`check_fragment.py --base`, `reason_release_pin.py --check`): each exit 0. `generation/synthesize.py`
+597 lines, `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+## Main merges (2026-11-16, `b886c61d`, `57f5d25f` and `85429533`), carried forward
+
+`origin/main` moved three times more: `b886c61d` (#613, the scan-checks evidence baseline member
+and `on_drift` surface; #614, the README; #615, generate-only edges take a derived namespace),
+`57f5d25f` (#612, the date-shift MD5 offset path deleted and the unkeyed refusal pinned) and
+`85429533` (#611, the distribution behavior table moved from `execution/` to `contracts/`).
+gen-rel-e1 merged each in turn: `reasons/warning/_part1.py` kept main's `SCAN_BASELINE_MISSING`
+beside gen-rel-e1's `REFERENCE_PARENT_POOL_EMPTY`, both `since=UNRELEASED`, and
+`tests/native/test_draw_sites_catalogue_pinned.py` re-pinned the whole-catalogue digest to the
+merged catalogue in gen-rel-e1 and gen-rel-e2. `origin/feat/gen-inherit-e2` `e9a209d1` (holding
+`origin/main` `85429533`) merged into `3b11bbee` as `47f82498`, without a conflict; this slice's
+`GEN_KIND_TO_SITE` map pin is unchanged and the two catalogue tests pass. No file of this chain
+imports the moved distribution behavior module, and no generation or relationship test of this
+chain depends on the namespace refusal #615 lifts for generate-only edges. Of this slice's files
+main touches `docs/strategies.md` and `CODEMAP.md`; each merged beside this slice's lines. Main's
+census, baseline, fan-out and import-layer changes are its own deletions; nothing of this chain's
+grows. Main does not touch `uv.lock`, `generation/` or `testflight/`. Main's changelog fragments
+arrive beside this chain's six, which are kept.
+
+Checks on `47f82498`, Python 3.10.20, `origin/main` `85429533`: ruff, format and mypy pass;
+`tests/sentry` 6012 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 5149 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
 `reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 597 lines,
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules. Not run on this
 head: the full T1 gate, mutations and the full suite.
