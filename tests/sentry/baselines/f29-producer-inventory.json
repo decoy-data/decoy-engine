@@ -317,9 +317,6 @@
   "execution/_fk_resolve.py::orphan_fk_violation_error::kw::'orphan_fk_violation'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/_fk_resolve.py::orphan_fk_warning::kw::'orphan_fk'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/_gated_string_guard.py::reject_gated_string_on_numeric::kw::'gated_string_output_on_numeric_unsupported'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
