@@ -2,9 +2,10 @@ Status: plan
 
 # F24 engine half: full-lifecycle estimate including the ingestion peak (roadmap row 84)
 
-Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 3 (Dennis round 1 on
-`f7c5065f4` applied in revision 2; Codex round 1 on `1181509d7`, one V1 finding on the
-fixed-width write term, applied here; the review record is in section 20).
+Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 4 (Dennis round 1 on
+`f7c5065f4` applied in revision 2; Codex round 1 on `1181509d7` applied in revision 3; Codex
+round 2 on `d03677750`, two V1 findings on the fixed-width write term, applied here; the review
+record is in section 20).
 Scope: engine slices 84-E1 and 84-E2. Advisory only. No CLI or platform change in this row.
 
 Rules consulted: `dev-rules/README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1
@@ -64,10 +65,10 @@ The gaps this row closes, each checked in code:
 - G1. No ingestion term. The CLI reads every file source whole before the engine runs
   (`decoy/cli/run/_prepare.py:553` calls `_load_sources_from_config`,
   `decoy/cli/run/_execute.py:261`). A CSV source is read all-text into a pandas object frame,
-  then copied to Arrow (`decoy/cli/_sources.py:416`); fixed_width goes through
+  then copied to Arrow (`decoy/cli/_sources.py:418-419`); fixed_width goes through
   `read_fixed_width`, which parses each line into a dict of typed Python values and builds one
   DataFrame from the list (`src/decoy_engine/profile/_fixed_width_reader.py:343`, `:384`), then
-  Arrow (`decoy/cli/_sources.py:419`). Every earlier table stays resident while the next one is read.
+  Arrow (`decoy/cli/_sources.py:423-424`). Every earlier table stays resident while the next one is read.
 - G2. Inputs stay resident for the whole run in the CLI. TB-4 ran through `run_pipeline_isolated`
   with `LazySource` inputs that `run_pipeline` resolves at the point of use
   (`src/decoy_engine/execution/_isolated_worker.py:76`). Full_frame resolved all of them and held
@@ -77,11 +78,16 @@ The gaps this row closes, each checked in code:
   Arrow from start to end.
 - G3. No write term. Outputs come back resident; a CSV target converts each output to a pandas
   frame before `to_csv` (`decoy/cli/io/_targets.py:359`, `:405`). A fixed_width target is
-  heavier: `_write_fixed_width` (`decoy/cli/io/_targets.py:372`) converts Arrow to pandas,
-  `_coerce_int_columns` copies that frame (`decoy/cli/io/_targets.py:324`, `frame.copy()`), and
-  the engine writer turns every column into a Python list with `.tolist()`
-  (`src/decoy_engine/profile/_fixed_width_writer.py:310`). The Arrow table, both frames and the
-  lists are live at the same time.
+  heavier. `_write_fixed_width` (`decoy/cli/io/_targets.py:372`) runs
+  `_coerce_int_columns(table.to_pandas(), layout)` (`decoy/cli/io/_targets.py:324`), which copies
+  the frame (`out = frame.copy()`) and returns the copy, then passes the copy to the engine
+  writer, which turns every column into a Python list with `.tolist()`
+  (`src/decoy_engine/profile/_fixed_width_writer.py:310`). The live set has two moments, checked
+  against those lines:
+  - During coercion: the Arrow output, the `to_pandas` frame and its copy.
+  - During the list conversion: the Arrow output, the copy and the lists. The `to_pandas` frame
+    has no reference left once coercion returns, so its numeric arrays are freed; its str objects
+    stay alive because the copy points at them, so the copy then costs a full `frame`.
 - G4. Every string column is unpriceable in `estimate_job`, because it passes no sample
   (`_job_estimate.py:189`, `_mask_specs(mask_tables, {})`). A CSV source is all strings, so every
   CSV job is unpriceable today.
@@ -181,7 +187,7 @@ Python-object terms price the fixed-width paths:
 - `refs(t)`: a pandas array that points at Python objects that already exist. 8 bytes per cell
   for a string (object) column, the dtype item size (plus 1 for a nullable extension dtype) for
   a numeric column. A pandas deep copy of an object column copies the pointer array, not the
-  str objects, so `frame.copy()` costs `refs(t)`.
+  str objects, so `frame.copy()` costs `refs(t)` while the original frame is alive.
 - `lists(t)`: the `.tolist()` lists. An 8-byte list slot per cell; a numeric cell also gets a new
   Python int or float object (its `sys.getsizeof`, read once at import, not a pinned number); a
   string cell reuses the frame's str object.
@@ -210,8 +216,15 @@ Python-object terms price the fixed-width paths:
 - Write: `I + sum(arrow(inputs)) + sum(arrow(outputs)) + transient_out(t*)`, where outputs are
   priced with the input specs and `t*` is the output with the largest transient:
   - CSV target: `frame(t)`.
-  - fixed_width target: `frame(t) + refs(t) + lists(t)` (the `to_pandas` frame, the
-    `_coerce_int_columns` copy and the writer's lists; the Arrow output is already in the sum).
+  - fixed_width target: `frame(t) + max(refs(t), lists(t))`, the larger of the two moments in G3
+    (the Arrow output is already in the sum). During coercion the original frame costs `frame`
+    and the copy `refs`; during the list conversion the copy, now the only owner of the str
+    objects, costs `frame` and the lists `lists`. With the cell costs above `lists >= refs` for
+    every column type (8 against 8 for a string cell; a slot plus an int or float object against
+    an item size of at most 9 for a numeric cell), so the term equals `frame + lists` today. The
+    code keeps the `max` so a change to either cost stays correct.
+  - The per-column `Int64` series `_coerce_int_columns` builds is one column at a time and
+    replaces the copy's column; it is not priced (below the copy it replaces plus one column).
   - Parquet target: 0.
 - Lifecycle peak is the largest phase peak; the limiting phase is its token. Ties go to the
   earlier phase.
@@ -350,7 +363,7 @@ devbox. Accuracy cells are `benchmark`-marked and run on a test VM through `~/bi
 | AT-E1-16 | Transforms: a mask table with a declared transform adds one `arrow(t)` to execute | module does not exist | drop the transform copy |
 | AT-E1-20 | Format registry: the lifecycle rule table's keys equal `FILE_FORMATS` keys; a descriptor with an unknown format gives lifecycle defaults and a note | rule table does not exist | remove `fixed_width` from the rule table |
 | AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned | notes block does not exist | build a note with an inline f-string |
-| AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column adds `frame + refs + lists` for the largest output; `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | drop the `_coerce_int_columns` copy from the fixed_width write term |
+| AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column adds exactly `frame + max(refs, lists)` for the largest output (not `frame + refs + lists`, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum `refs` and `lists` instead of taking the larger |
 | AT-E1-22 | Helper parity: `arrow_column_bytes(t, rows, 0)` equals the base head's `_arrow_column_floor(t, rows)` for a matrix of types (bool, int8 to int64, float32/64, string, large_string, timestamp, date32); `generation_floor_bytes` is unchanged on the merged generation fixtures | helper does not exist | drop the ceil division for bool |
 
 ### 8.2 84-E1, accuracy (`tests/perf/test_f24_lifecycle_accuracy.py`, `benchmark` marker, test VM only)
@@ -378,7 +391,7 @@ the unit cells above.
 | AT-E1-23 | Parquet, one numeric table, full_frame, Parquet target | numeric | bounded |
 | AT-E1-24 | CSV with Latin-1 text (FM-5) | string, execute | lower |
 | AT-E1-25 | CSV, single table, `hash` (native auto-chunk eligible, FM-6) | realized route may differ | lower |
-| AT-E1-27 | Parquet, one table of 4 int and 2 short string columns, full_frame, fixed_width target | numeric-led, write-limited by the model | bounded |
+| AT-E1-27 | Parquet, one table of 4 int and 2 short string columns, full_frame, fixed_width target | numeric-led, write-limited by the model | bounded (bound check only; it does not separate the old and new write formulas, AT-E1-26 does) |
 
 ### 8.3 Expected ratios from TB-4 (execute term; predicted over measured)
 
@@ -394,12 +407,13 @@ slope.
 | AT-E1-19 | numeric_fk, out_of_core (slope 0.95) | 500k / 1M | 1.24 / 1.32 | 1.5 |
 | AT-E1-23 | numeric_single, full_frame (slope 3.45) | 1M / 2M | 1.26 / 1.28 | 1.5 |
 | AT-E1-25 | native route, not in TB-4 | any | unknown | lower only |
-| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term | 1M / 3M | execute about 1.26 / 1.28; write is a direct sum | 1.5 if the model predicts write as the limiting phase (expected: write), else lower only |
+| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term `frame + max(refs, lists)` | 1M / 3M | execute about 1.26 / 1.28; write is a direct sum with no slope | 1.5 if the model predicts write as the limiting phase (expected: write), else lower only |
 
 The ingest and write terms are direct sums with no slope, so a cell whose predicted limiting phase
 is ingest or write also takes the 1.5 bound. Under the pinned slopes only AT-E1-27 is expected to
 be write-limited: per int cell the write term holds 8 (input Arrow) + 8 (output Arrow) + 8
-(frame) + 8 (copy) + 8 plus an int object (lists), against about 32 for the execute term. The
+(frame) + 8 plus an int object (lists, the larger of `refs` and `lists`), about 60 bytes with a
+28-byte int, against about 32 for the execute term. The
 cell asserts its bound from the phase the model predicts at run time, and all cells record the
 predicted and measured phase peaks. The resident-input term on out_of_core (AT-E1-19) is a direct
 sum and keeps that cell inside the bound by construction if the Arrow sizes are right.
@@ -621,8 +635,9 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
   the slice stops and the plan is amended with a measured term (FM-12), not a tuned constant.
 - The sequential input term double counted or missed a table. Guard: section 4.2 states the rule
   from `_sequential.py:443`; AT-E1-3 pins it; AT-E1-18 is the lower-bound check.
-- The fixed-width write term missed a live copy. Guard: AT-E1-26 pins the three terms from the CLI
-  code; AT-E1-27 is the lower-bound check on a real fixed-width write.
+- The fixed-width write term missed a live copy or summed copies that are never live together.
+  Guard: section 4.2 states the two moments from the CLI code; AT-E1-26 pins the formula and
+  kills the summed form; AT-E1-27 checks the bounds on a real fixed-width write.
 - The upper bound failed on a string cell. Guard: string execute cells are lower bound only, from
   the TB-4 ratios in 8.3.
 - The upper bound failed on a cell that went native. Guard: realized route recorded; FM-6.
@@ -680,4 +695,13 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
   - Checked against the reader: the revision 2 "integer coercion copy" at ingest was stale.
     `read_fixed_width` builds typed row dicts and one DataFrame, so the ingest transient is now
     `max(records + refs, frame + arrow)`; the extra copy is dropped.
-- Next: Codex round 2 of 3 on revision 3.
+- Codex round 2 on `d03677750`: NO-GO, two V1 findings; the ingest transient was confirmed.
+- Revision 4 applies:
+  - V1-1: the fixed_width write transient is `frame + max(refs, lists)`. Checked against
+    `_targets.py:324` and `:372` and `_fixed_width_writer.py:310`: the `to_pandas` frame is
+    unreferenced once `_coerce_int_columns` returns, and its str objects live on in the copy.
+    G3, section 4.2, AT-E1-26 and the 8.3 row are updated; `lists >= refs` per cell is stated.
+  - V1-2: AT-E1-27 claims only the bound check; the named mutation (summed `refs` and `lists`)
+    sits on unit cell AT-E1-26. No accuracy cell carries a mutation.
+  - CLI citations: CSV conversion `_sources.py:418-419`, fixed-width conversion `:423-424`.
+- Next: Codex round 3 of 3 (last) on revision 4.
