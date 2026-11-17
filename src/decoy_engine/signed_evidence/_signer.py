@@ -103,4 +103,8 @@ class LocalEs256Signer:
         return public_jwk_of(self._key.public_key())
 
     def sign_signing_input(self, signing_input: bytes) -> bytes:
-        return der_to_p1363(self._key.sign(signing_input, ec.ECDSA(hashes.SHA256())))
+        try:
+            return der_to_p1363(self._key.sign(signing_input, ec.ECDSA(hashes.SHA256())))
+        except BaseException:
+            del signing_input  # the frame a traceback keeps must not hold the signed bytes
+            raise
