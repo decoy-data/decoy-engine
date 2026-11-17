@@ -24,7 +24,13 @@ from pydantic_core import ValidationError
 from decoy_engine import reasons
 from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine.config._generate_options import ContextProblem, problem_details
-from decoy_engine.config.policy._policy import ColumnDecision, DisguisePin, PolicyConfig, PolicyRule
+from decoy_engine.config.policy._policy import (
+    ColumnDecision,
+    DisguisePin,
+    PolicyConfig,
+    PolicyRule,
+    json_carryable,
+)
 from decoy_engine.config.policy._precedence import PrecedenceLevel, selector_level
 from decoy_engine.config.policy._selectors import facts_for, matches, roles_by_field
 from decoy_engine.contracts.declared_casting import CONTRACT_FIELDS
@@ -137,11 +143,12 @@ def _own_decision(column: Mapping[str, Any]) -> tuple[ColumnDecision | None, boo
     reports them. The flag is set for a `provider_config` JSON cannot carry.
     """
     own = {k: column[k] for k in _DECISION_KEYS if k in column}
+    if isinstance(own.get("provider_config"), dict) and not json_carryable(own["provider_config"]):
+        return None, True
     try:
         return ColumnDecision.model_validate(own, strict=False), False
-    except _PydanticValidationError as exc:
-        unjson = any(e["type"] == str(reasons.config.POLICY_BLOCK_INVALID) for e in exc.errors())
-    return None, unjson
+    except _PydanticValidationError:
+        return None, False
 
 
 def _decided_column(column: Mapping[str, Any], decision: ColumnDecision) -> dict[str, Any]:
