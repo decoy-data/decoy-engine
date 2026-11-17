@@ -54,6 +54,7 @@ from decoy_engine.generation.statistical._cell_format import (
     format_numeric,
     is_integer_dtype,
 )
+from decoy_engine.generation.statistical._degenerate import check_degenerate
 from decoy_engine.generation.statistical._numeric_shape import (
     NumericShape,
     decode_numeric_shape,
@@ -406,6 +407,8 @@ def sample_column(
     if spec.kind == "empty":  # an all-null source column: nothing to seed or draw
         return [None] * n
 
+    check_degenerate(spec)  # the one degenerate rule; the draws below assume it held
+
     rng = random.Random()
     fmt = spec.cell_format
     null_rate = _null_rate(fmt)
@@ -416,14 +419,6 @@ def sample_column(
             return _sample_shape(spec, shape, n, rng, col_seed=col_seed, start=start)
         edges = [float(e) for e in spec.stats.get("bin_edges") or []]
         counts = [float(c) for c in spec.stats.get("bin_counts") or []]
-        if len(edges) < 2 or len(counts) != len(edges) - 1 or sum(counts) <= 0:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=(
-                    f"statistical column {spec.column!r}: snapshot histogram is "
-                    f"degenerate (edges={len(edges)}, counts={len(counts)})."
-                ),
-            )
         cum = _cumulative(counts)
         as_int = emits_int(spec)
         lo_bound, hi_bound = edges[0], edges[-1]
@@ -442,26 +437,9 @@ def sample_column(
 
     if spec.kind == "categorical":
         values, weights = _categorical_tables(spec)
-        if not values:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=f"statistical column {spec.column!r}: snapshot has no top_values.",
-            )
-        if sum(weights) <= 0:
-            # An aggressively DP-noised snapshot can clamp every count to
-            # zero; surface the typed code instead of random.choices's bare
-            # ValueError.
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=(
-                    f"statistical column {spec.column!r}: every top_values count "
-                    "is zero (nothing to weight a draw by). Refit, or use a "
-                    "larger epsilon if the snapshot was DP-noised."
-                ),
-            )
         # Drop zero-weight entries before drawing (see _positive_weight_only). sum(weights) > 0 keeps
-        # the marginal non-empty; each conditional table is non-empty because admission refuses a
-        # conditional row whose weights sum to <= 0.
+        # the marginal non-empty; each conditional table is non-empty because `check_degenerate`
+        # (called above) refuses a conditional row whose weights sum to <= 0.
         values, weights = _positive_weight_only(values, weights)
         conditional = _conditional_lookup(spec)
         out = []
@@ -479,20 +457,6 @@ def sample_column(
     if spec.kind == "datetime":
         buckets = spec.datetime_buckets or ()
         weights = [float(b.count) for b in buckets]
-        if not buckets:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=f"statistical column {spec.column!r}: snapshot has no year_bins.",
-            )
-        if sum(weights) <= 0:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=(
-                    f"statistical column {spec.column!r}: every year_bins count "
-                    "is zero (nothing to weight a draw by). Refit, or use a "
-                    "larger epsilon if the snapshot was DP-noised."
-                ),
-            )
         # Drop zero-weight bins before drawing: random.choices can round a draw up to the cumulative
         # total and land on a trailing zero-weight range, so a range admission ignored (weight 0, e.g.
         # 9999) could still be picked and crash datetime(year + 1). Non-empty since sum(weights) > 0.
@@ -515,16 +479,6 @@ def sample_column(
 
     if spec.kind == "freetext":
         edges, _, length_cum = freetext_tables(spec)
-        counts = [float(c) for c in spec.stats.get("length_bin_counts") or []]
-        if len(edges) < 2 or len(counts) != len(edges) - 1 or sum(counts) <= 0:
-            raise StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_STATS_DEGENERATE,
-                message=(
-                    f"statistical column {spec.column!r}: snapshot length histogram "
-                    f"is degenerate (edges={len(edges)}, counts={len(counts)}). "
-                    "Refit, or use a larger epsilon if the snapshot was DP-noised."
-                ),
-            )
         lo_len, hi_len = int(edges[0]), int(edges[-1])
         # blank_count <= non-null cells, so a positive count also means a positive denominator.
         blank_share = fmt.blank_count / fmt.non_null_cells if fmt and fmt.blank_count else 0.0
