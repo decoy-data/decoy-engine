@@ -259,7 +259,7 @@ the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not par
 
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
-refused, scores strict floats, drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The
+refused, scores floats (bool and strings refused), drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The
 tag is required. A reader accepts `scan-diff/v1` and `scan-diff/v1.<minor>`, and refuses another major, a missing tag
 and text after the tag. A drift kind this reader does not know (one a later minor could add) is refused with fixed
 text, because a reader that dropped a kind could report a drifted diff as clean. The five kinds are, per table,

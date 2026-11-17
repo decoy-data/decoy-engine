@@ -228,6 +228,17 @@ def test_tables_selects_the_names_compared() -> None:
     assert only_b.drift and only_b.tables_added == ()
 
 
+def test_a_selected_table_in_neither_scan_is_refused_without_its_name() -> None:
+    doc = _doc([_table("a", [_field("x")])])
+    with pytest.raises(ValueError) as caught:
+        diff_scan_documents(doc, doc, tables=["a", CANARY])
+    assert CANARY not in str(caught.value)
+    assert str(caught.value) == "a selected table is in neither scan"
+    assert caught.value.__context__ is None
+    # in one scan only is still a valid selection
+    diff_scan_documents(doc, _doc([]), tables=["a"])
+
+
 def test_set_members_survive_a_selection() -> None:
     diff = diff_scan_documents(
         _doc([_table("a", [])], version="0.27.0"),
