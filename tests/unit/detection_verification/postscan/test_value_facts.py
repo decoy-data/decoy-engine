@@ -197,3 +197,35 @@ def test_the_standard_deviation_is_the_sample_one() -> None:
     values = np.array([1.0, 2.0, 4.0, 8.0])
     assert Moments.of(values).std == pytest.approx(values.std(ddof=1))
     assert Moments.of(values).std != pytest.approx(values.std(ddof=0))
+
+
+@pytest.mark.parametrize("constant", [0.1, 1e6 + 0.1, 3.0])
+def test_a_constant_float_column_has_exact_moments_at_any_batch_cut(constant: float) -> None:
+    """The pairwise merge of a constant leaves an M2 a few ulps above zero, which a float test
+    `std > 0` would read as a spread. Source cut at 7 and output cut at 50,000 must agree."""
+    from decoy_engine.verification.postmask.distribution import ColumnSides, distribution_findings
+
+    n = 1000
+    table = pa.table({"x": pa.array([constant] * n, pa.float64())})
+    src = value_facts(_cut(table, 7), ["x"], batch_rows=7)["x"]
+    out = value_facts(_cut(table, 50_000), ["x"], batch_rows=50_000)["x"]
+    assert src.moments is not None and out.moments is not None
+    assert src.moments.m2 == 0.0 and out.moments.m2 == 0.0
+    assert src.moments.mean == constant == out.moments.mean
+    rows = distribution_findings(
+        "t",
+        source_rows=n,
+        quarantined=0,
+        output_rows=n,
+        columns=[ColumnSides("x", frozenset({"mean", "std"}), src, out, 1, 1)],
+        tolerance_pct=1.0,
+    )
+    got = {r.fact: (r.severity, r.delta_pct) for r in rows if r.column == "x"}
+    assert got == {"mean": ("info", 0.0), "std": ("info", 0.0)}
+
+
+def test_a_duplicated_column_name_does_not_raise_in_the_numeric_check() -> None:
+    from decoy_engine.verification.postmask._column_facts import _is_numeric
+
+    schema = pa.schema([("x", pa.int64()), ("x", pa.string())])
+    assert _is_numeric(schema, "x") is True

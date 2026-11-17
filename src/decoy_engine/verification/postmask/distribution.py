@@ -123,9 +123,12 @@ def _finding(
 def _judged(
     table: str, column: str | None, fact: Fact, delta: float, tolerance_pct: float
 ) -> DistributionFinding:
-    """A defined change: `warning` above the tolerance, `info` inside it. A change that is not a
-    finite number (an overflow) is undefined, so `info` with no delta."""
-    if not math.isfinite(delta):
+    """A defined change: `warning` above the tolerance, `info` inside it. A change too large to
+    represent (infinite) is a breach with no delta; one that is not a number is undefined, so `info`."""
+    if math.isinf(delta):
+        # A finite change too large to represent is still a change: a breach with no ratio.
+        return _finding(table, column, fact, "warning", None)
+    if math.isnan(delta):
         return _finding(table, column, fact, "info", None)
     return _finding(table, column, fact, "warning" if delta > tolerance_pct else "info", delta)
 
