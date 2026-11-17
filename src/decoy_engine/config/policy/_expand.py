@@ -330,7 +330,7 @@ class _Expansion:
             if own is None:
                 if unjson:
                     self._problem(loc, reasons.config.POLICY_BLOCK_INVALID, field=name)
-                elif isinstance(column["strategy"], str):
+                elif isinstance(column["strategy"], str) and not 1 <= len(column["strategy"]) <= 64:
                     self._problem(
                         (*loc, "strategy"),
                         reasons.config.POLICY_UNKNOWN_STRATEGY,
