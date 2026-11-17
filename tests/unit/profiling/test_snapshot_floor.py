@@ -533,11 +533,13 @@ def test_property_labels_and_joint_cells_are_held_by_k_rows(
 def test_property_every_year_range_holds_k_rows_and_the_count_is_kept(years: list[int]) -> None:
     df = pd.DataFrame({"d": pd.to_datetime([f"{y:04d}-07-07" for y in years])})
     ranges = _ranges(_doc(df, flagged=[]), "d")
-    if len(years) >= K:
+    if len(years) >= 2 * K - 1:
+        assert sum(r["count"] for r in ranges) == len(years)
+    if ranges:  # fewer than 2K-1 rows may release none, when the K-th rows cross
         assert sum(r["count"] for r in ranges) == len(years)
         assert all(r["count"] >= K for r in ranges)
     else:
-        assert ranges == []
+        assert len(years) < 2 * K - 1
     assert all(a["end_year"] < b["start_year"] for a, b in pairwise(ranges))
 
 
