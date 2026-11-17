@@ -10,6 +10,7 @@ Contract: ``docs/publication.md``.
 
 from __future__ import annotations
 
+import errno
 import io
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, BinaryIO, TextIO
@@ -24,7 +25,22 @@ if TYPE_CHECKING:
 
     from decoy_engine.fileaccess import OutputDir
 
-__all__ = ["BytesHandle", "VaultConflict", "adopt_vault", "same_rows"]
+__all__ = [
+    "Absent",
+    "BytesHandle",
+    "FsyncFailed",
+    "LeafRead",
+    "TooLarge",
+    "Unadoptable",
+    "VaultConflict",
+    "adopt_vault",
+    "read_vault_leaf",
+    "same_rows",
+]
+
+# errnos that say the leaf is not a file this code could adopt (a link, a directory, a path that
+# runs through a file), as opposed to a read or fsync that failed on a leaf that is one.
+_STRUCTURAL = frozenset({errno.ELOOP, errno.EINVAL, errno.ENOTDIR, errno.EISDIR})
 
 _SLACK_BYTES = 64 * 1024  # a leaf this much over twice our own size cannot hold the same rows
 
@@ -33,6 +49,50 @@ _SLACK_BYTES = 64 * 1024  # a leaf this much over twice our own size cannot hold
 class VaultConflict:
     """`adopt_vault`'s refusal: the vault found is not this writer's. A value of its own, so it
     is never mistaken for `adopt_file`'s `None` (an absent leaf)."""
+
+
+@dataclass(frozen=True)
+class Absent:
+    """No leaf at the vault path."""
+
+
+@dataclass(frozen=True)
+class TooLarge:
+    """The leaf holds more bytes than the limit."""
+
+
+@dataclass(frozen=True)
+class Unadoptable:
+    """The leaf is not a regular file reachable without a link (`ELOOP`, `EINVAL`, `ENOTDIR`,
+    `EISDIR`). Not an fsync failure."""
+
+
+@dataclass(frozen=True)
+class FsyncFailed:
+    """The leaf or its chain could not be read or fsynced; `errno_name` is the closed token."""
+
+    errno_name: str
+
+
+LeafRead = bytes | Absent | TooLarge | Unadoptable | FsyncFailed
+
+
+def read_vault_leaf(out: OutputDir, limit: int) -> LeafRead:
+    """The one place a vault leaf is read and classified, for adoption and for the republish check.
+
+    `adopt_file` fsyncs the leaf and its chain before it returns bytes, so `bytes` here are
+    durable. A file-access error from `out` (`FileAccessDenied`) is not caught: it means the
+    destination itself is unusable and propagates. Callers map the result to their own code."""
+    try:
+        blob = out.adopt_file(limit=limit)
+    except LeafTooLarge:
+        return TooLarge()
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+        if code in _STRUCTURAL:
+            return Unadoptable()
+        return FsyncFailed(errno.errorcode.get(code, "EIO"))
+    return Absent() if blob is None else blob
 
 
 class BytesHandle:
@@ -91,23 +151,19 @@ def adopt_vault(out: OutputDir, writer: VaultWriter) -> VaultCommit | VaultConfl
     The leaf and its chain are fsynced by `adopt_file` before the rows are compared, so the
     `VaultCommit` covers a leaf whose own directory fsync failed or was killed, and the leaf is
     never rewritten. Returns a `VaultConflict` (never `None`, which `adopt_file` uses for an absent
-    leaf) for a conflict: other rows, another key's data, or more than this vault could hold. The
+    leaf) for a conflict: other rows, another key's data, more than this vault could hold, or a leaf
+    that is not an adoptable file. The
     caller refuses with `publication_vault_conflict`, a `decoy` code that cannot ride a `VaultError`. Raises `VaultError` with
     ``vault_commit_failed`` when the leaf cannot be read or made durable."""
     own, entries = writer.serialize()
-    blob = None
-    failed = too_big = False
-    try:
-        blob = out.adopt_file(limit=2 * len(own) + _SLACK_BYTES)
-    except LeafTooLarge:
-        too_big = True
-    except OSError:
-        failed = True
-    if failed or (blob is None and not too_big):  # absent after `vault_exists`: deleted out of band
+    read = read_vault_leaf(out, 2 * len(own) + _SLACK_BYTES)
+    if isinstance(read, (TooLarge, Unadoptable)):
+        return VaultConflict()
+    if not isinstance(read, bytes):  # an fsync failed, or absent after `vault_exists` (deleted)
         raise VaultError(
             code=reasons.runtime.VAULT_COMMIT_FAILED,
             message=reasons.get("runtime", reasons.runtime.VAULT_COMMIT_FAILED).summary,
         )
-    if blob is None or not same_rows(blob, writer):
+    if not same_rows(read, writer):
         return VaultConflict()
-    return vault.issue_commit(blob, entries, adopted=True)
+    return vault.issue_commit(read, entries, adopted=True)
