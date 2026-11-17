@@ -2,47 +2,48 @@ Status: record
 
 # F24 lifecycle estimate: accuracy calibration (84-E1)
 
-Head the cells ran on: `b1213e83a` (source files identical to `f5b26d420`). Run on a Linux test VM
-through `vm-run`, one child process per cell, peak RSS from `wait4` `ru_maxrss` outside the
-child. The worker reads each source whole, runs `run_pipeline` on the resident tables and writes
-every target. It does not pass the vault writer, quarantine path, report flags, resource limits
-or the native gate result.
+Two runs. The first (head `b1213e83a`) found four cells below the measured peak and the plan
+was amended (revision 5, section 4.2a: execute priced on each column's working spec, the larger of
+its input and output cell, from the strategy handlers' own declarations). The second run, below,
+is on the revision 5 build; head recorded in the PR.
 
-Result: 10 of 14 cells pass. Four cells put the estimate below the measured peak. Under the
-plan's rule (FM-12) the slice stops here and the plan is amended; no constant was tuned.
+Method: Linux test VM through `vm-run`, one child process per cell, peak RSS from `wait4`
+`ru_maxrss` outside the child, fixtures built in a separate process. The worker reads each source
+whole, runs `run_pipeline` on the resident tables and writes every target. It passes the CLI's
+`auto` resource kwargs (`native_threads` and `out_of_core_threads` from `detect_usable_cpus`,
+`out_of_core_budget_bytes` from `resolve_conservative_ooc_budget_bytes`, the engine helpers the
+CLI uses) and the default native gate (the CLI passes `unified_slice_enabled` only to turn it
+off). The CLI package is not importable from the engine repo, so the kwargs are rebuilt from the
+engine helpers rather than from the CLI's `_resources` module. It does not pass the vault writer,
+quarantine path or report flags.
+
+Result: 14 of 14 cells pass.
 
 | Cell | Rows | Predicted route | Realized route | Limiting phase | Predicted MB | Measured MB | Ratio | Result |
 |---|---|---|---|---|---|---|---|---|
-| AT-E1-17 | 1M | full_frame | full_frame | execute | 2156 | 721 | 2.99 | pass (lower) |
-| AT-E1-17 | 3M | full_frame | full_frame | execute | 6432 | 1713 | 3.76 | pass (lower) |
-| AT-E1-18 | 1M | sequential | out_of_core | execute | 928 | 620 | 1.50 | pass (lower) |
-| AT-E1-18 | 3M | sequential | out_of_core | execute | 2435 | 1238 | 1.97 | pass (lower) |
-| AT-E1-19 | 1M | sequential | sequential | execute | 285 | 625 | 0.46 | FAIL |
-| AT-E1-19 | 3M | sequential | sequential | execute | 456 | 1435 | 0.32 | FAIL |
-| AT-E1-23 | 1M | full_frame | full_frame | execute | 383 | 397 | 0.96 | FAIL |
-| AT-E1-23 | 3M | full_frame | full_frame | execute | 749 | 793 | 0.95 | FAIL |
-| AT-E1-24 | 1M | full_frame | full_frame | execute | 1164 | 652 | 1.78 | pass (lower) |
-| AT-E1-24 | 3M | full_frame | full_frame | execute | 3207 | 1646 | 1.95 | pass (lower) |
-| AT-E1-25 | 1M | full_frame | full_frame | execute | 1178 | 1078 | 1.09 | pass (lower) |
-| AT-E1-25 | 3M | full_frame | full_frame | execute | 3316 | 2634 | 1.26 | pass (lower) |
-| AT-E1-27 | 1M | full_frame | full_frame | execute | 794 | 701 | 1.13 | pass (bounded) |
-| AT-E1-27 | 3M | full_frame | full_frame | execute | 1983 | 1605 | 1.24 | pass (bounded) |
+| AT-E1-17 | 1M | full_frame | full_frame | execute | 2190 | 722 | 3.03 | pass (lower) |
+| AT-E1-17 | 3M | full_frame | full_frame | execute | 6541 | 1703 | 3.84 | pass (lower) |
+| AT-E1-18 | 1M | sequential | out_of_core | execute | 1382 | 597 | 2.31 | pass (lower) |
+| AT-E1-18 | 3M | sequential | out_of_core | execute | 3820 | 1216 | 3.14 | pass (lower) |
+| AT-E1-19 | 1M | sequential | sequential | execute | 1149 | 621 | 1.85 | pass (lower) |
+| AT-E1-19 | 3M | sequential | sequential | execute | 3047 | 1492 | 2.04 | pass (lower) |
+| AT-E1-23 | 1M | full_frame | full_frame | execute | 1688 | 402 | 4.19 | pass (lower) |
+| AT-E1-23 | 3M | full_frame | full_frame | execute | 4663 | 792 | 5.89 | pass (lower) |
+| AT-E1-24 | 1M | full_frame | full_frame | execute | 1164 | 645 | 1.81 | pass (lower) |
+| AT-E1-24 | 3M | full_frame | full_frame | execute | 3207 | 1614 | 1.99 | pass (lower) |
+| AT-E1-25 | 1M | full_frame | full_frame | execute | 2052 | 1059 | 1.94 | pass (lower) |
+| AT-E1-25 | 3M | full_frame | full_frame | execute | 6102 | 2761 | 2.21 | pass (lower) |
+| AT-E1-27 | 1M | full_frame | full_frame | execute | 794 | 749 | 1.06 | pass (bounded 1.5) |
+| AT-E1-27 | 3M | full_frame | full_frame | execute | 1983 | 1637 | 1.21 | pass (bounded 1.5) |
 
-Phase peaks and wall times per cell are in the `F24_CELL` lines the test prints.
+Revision 5 prediction check: AT-E1-19 predicted 1149 and 3047 MB and AT-E1-23 1688 and 4663 MB,
+the figures section 4.2a computed ahead of the build. AT-E1-19 and AT-E1-23 write strings from
+int64 columns, so they take the lower bound only. AT-E1-27 keeps the 1.5 bound and passes.
+Realized and predicted routes differ for AT-E1-18 (sequential predicted, out_of_core realized,
+FM-6); it takes the lower bound.
 
-## What the failures show
+## First run (revision 4 model, head `b1213e83a`)
 
-- AT-E1-19 (numeric FK chain, three tables, sequential, CSV targets): measured peak grows about
-  400 MB per million rows; the model predicts 285 MB at 1M and 456 MB at 3M. The execute term
-  is the TB-4 sequential model on numeric data and the write phase prices CSV output as a
-  pandas frame only. The plan expected this cell on out_of_core; at these row counts the
-  router chooses sequential, so the 1.5 bound check was reached on a route the plan did not
-  calibrate for numeric data.
-- AT-E1-23 (one numeric table, full_frame, Parquet target): 4 to 5 percent below measured at
-  both sizes. The plan's TB-4 ratio for this shape was 1.26 to 1.28; the worker's process
-  baseline or its resident Arrow copies run above the 200 MiB intercept.
-- AT-E1-27 passes, with execute as the limiting phase; the write phase is 596 MB (1M) and
-  1388 MB (3M) against 794 and 1983 for execute, so the plan's expected write-limited
-  outcome did not occur. Its bound check used the execute phase.
-- String cells (17, 18, 24, 25) are above the measured peak everywhere, as the plan expects.
-- Realized and predicted routes differ for AT-E1-18 (sequential predicted, out_of_core realized).
+AT-E1-19 0.46 and 0.32, AT-E1-23 0.96 and 0.95 (predicted over measured); the other ten cells
+passed. Cause: the basis priced every column at its input cell, but those cells are rewritten to
+strings by `hash` and `redact`.
