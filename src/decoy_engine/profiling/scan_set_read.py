@@ -15,10 +15,10 @@ from __future__ import annotations
 import re
 from typing import Any, Final, Literal
 
-from decoy_engine.config import PipelineConfigError
+from decoy_engine.errors import DecoyError
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSetCoreRead
 
-ScanSetReadKind = Literal["missing_tag", "unsupported_tag", "invalid"]
+_Kind = Literal["missing_tag", "unsupported_tag", "invalid"]
 
 # `scan-set/v1` or `scan-set/v1.<minor>`; fullmatch, so a trailing newline or text is refused.
 _TAG: Final = re.compile(re.escape(SCAN_SET_SCHEMA) + r"(\.[0-9]+)?")
@@ -29,16 +29,16 @@ _TEXT: Final[dict[str, str]] = {
 }
 
 
-class ScanSetReadError(PipelineConfigError):
+class ScanSetReadError(DecoyError, ValueError):
     """A scan document could not be read. Fixed text; `kind` says which rule refused it.
 
-    It sits under `PipelineConfigError` (a `ValueError` and a `DecoyError` with a registered
-    reason) so no new exception family needs classifying, as `StrictJsonError` does.
+    A `ValueError` so callers that catch bad input as one idiom still do. Its reason is the
+    fixed untagged config reason (`reason_adapter._FIXED`).
     """
 
-    def __init__(self, kind: ScanSetReadKind) -> None:
+    def __init__(self, kind: _Kind) -> None:
         super().__init__(_TEXT[kind])
-        self.kind: ScanSetReadKind = kind
+        self.kind: _Kind = kind
 
 
 def read_scan_set(data: object) -> dict[str, Any]:
