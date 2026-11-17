@@ -446,3 +446,11 @@ def test_non_json_provider_config_in_any_mapping_is_refused():
     column = col("c", strategy="hash", provider_config=UserDict({"k": float("nan")}))
     exc = refusal(raw_config([table("t", column)]), {})
     assert codes(exc) == ["policy_block_invalid"]
+
+
+def test_a_clean_non_dict_mapping_provider_config_is_decided():
+    from collections import UserDict
+
+    column = col("c", strategy="hash", provider_config=UserDict({"k": 1}))
+    out, expansion = expand(raw_config([table("t", column)]), {})
+    assert expansion.fields[0].decision.provider_config == {"k": 1}
