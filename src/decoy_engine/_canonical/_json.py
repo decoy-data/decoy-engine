@@ -17,6 +17,8 @@ the UTF-8 form would crash on it with codec text.
 
 ``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity and
 an over-long integer, and names the defect as a closed token, never as input text.
+``strict_json_read`` is the same reader with bounds (bytes, depth) and a number-lexeme mode for the
+nested strategy; ``strict_json_write`` writes such a tree back without changing a number.
 
 Every refusal is raised after the encoder or the walk has returned, outside any ``except`` block,
 so the error holds no ``__context__`` and no text of the value.
@@ -27,19 +29,32 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Final, Literal
 
 from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
 
 __all__ = [
+    "MASK_CELL_BYTES",
+    "MASK_MAX_DEPTH",
+    "STRICT_JSON_TOKENS",
     "CanonicalJsonError",
     "CanonicalStringError",
+    "JsonNumber",
     "StrictJsonError",
     "canonical_json_bytes",
     "seed_fingerprint_bytes",
     "strict_json_loads",
+    "strict_json_plain",
+    "strict_json_read",
+    "strict_json_write",
 ]
+
+# Bounds for one nested-mask cell. A cell over either bound is refused with a closed token before
+# any rule runs, so a hostile or broken cell cannot exhaust memory or the parser stack.
+MASK_CELL_BYTES: Final = 16 * 1024 * 1024
+MASK_MAX_DEPTH: Final = 64
 
 _SURROGATE = re.compile("[\ud800-\udfff]")
 # A lone surrogate written by the ASCII encoder is always `\ud8xx` to `\udfxx`. A literal
@@ -152,7 +167,14 @@ def seed_fingerprint_bytes(value: object) -> bytes:
     return _encode(value, ensure_ascii=True)
 
 
-STRICT_JSON_TOKENS = ("not_json", "duplicate_key", "non_finite", "out_of_range")
+STRICT_JSON_TOKENS = (
+    "not_json",
+    "duplicate_key",
+    "non_finite",
+    "out_of_range",
+    "oversized",
+    "too_deep",
+)
 
 
 class StrictJsonError(CanonicalJsonError):
@@ -170,9 +192,59 @@ class StrictJsonError(CanonicalJsonError):
         return (type(self), (self.token,))
 
 
-def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
-    """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
-    ``max_int_digits`` digits (``None`` sets no digit limit).
+@dataclass(frozen=True)
+class JsonNumber:
+    """A JSON number with its source text. ``value`` is ``None`` for an integer too long for ``int``.
+
+    Reading in lexeme mode keeps every number as one of these so an unselected number is written
+    back exactly as read (``1.10``, ``1e400``, a long decimal), not as ``json.dumps`` would print it.
+    """
+
+    value: int | float | None
+    lexeme: str
+
+
+def _oversized(text: str, max_bytes: int) -> bool:
+    """Whether the UTF-8 length of ``text`` is over ``max_bytes``. Never raises, whatever the text."""
+    if len(text) > max_bytes:
+        return True  # every character is at least one byte
+    if len(text) * 4 <= max_bytes:
+        return False  # no character is more than four bytes
+    return len(text.encode("utf-8", "surrogatepass")) > max_bytes
+
+
+def _deeper_than(parsed: Any, max_depth: int) -> bool:
+    """Whether containers nest more than ``max_depth`` levels. Iterative, so it cannot recurse."""
+    stack: list[tuple[Any, int]] = [(parsed, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, dict):
+            children: Any = item.values()
+        elif isinstance(item, list):
+            children = item
+        else:
+            continue
+        if depth + 1 > max_depth:
+            return True
+        stack.extend((child, depth + 1) for child in children)
+    return False
+
+
+def strict_json_read(
+    data: bytes | str,
+    *,
+    max_bytes: int | None = None,
+    max_depth: int | None = None,
+    non_finite: Literal["refuse", "keep"] = "refuse",
+    keep_lexemes: bool = False,
+    max_int_digits: int | None = 20,
+) -> Any:
+    """Parse JSON under bounds, refusing a duplicate key and a lone surrogate in the text.
+
+    ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
+    bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
+    ``"refuse"`` names them ``non_finite``. ``keep_lexemes`` returns every number as a
+    ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
 
     The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
     error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
@@ -184,26 +256,131 @@ def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> 
             found.append("duplicate_key")
         return dict(items)
 
-    def constant(_name: str) -> None:
+    def constant(name: str) -> float | None:
+        if non_finite == "keep":
+            return float(name)
         found.append("non_finite")
+        return None
 
-    def integer(text: str) -> int | None:
+    def integer(text: str) -> Any:
         if max_int_digits is not None and len(text.lstrip("-")) > max_int_digits:
             found.append("out_of_range")
             return None
-        return int(text)
+        if not keep_lexemes:
+            return int(text)
+        try:
+            return JsonNumber(int(text), text)
+        except ValueError:  # past CPython's integer string limit: keep the lexeme only
+            return JsonNumber(None, text)
+
+    def real(text: str) -> JsonNumber:
+        return JsonNumber(float(text), text)
 
     parsed: Any = None
     malformed = False
+    too_big = False
+    too_deep = False
     try:
-        text = data.decode("utf-8") if isinstance(data, bytes) else data
-        parsed = json.loads(
-            text, object_pairs_hook=pairs, parse_constant=constant, parse_int=integer
-        )
-    except (UnicodeDecodeError, ValueError, RecursionError):
+        if max_bytes is not None and isinstance(data, bytes) and len(data) > max_bytes:
+            too_big = True
+        else:
+            text = data.decode("utf-8") if isinstance(data, bytes) else data
+            if max_bytes is not None and _oversized(text, max_bytes):
+                too_big = True
+            else:
+                if not text.isascii():
+                    text.encode("utf-8")  # a raw lone surrogate is not RFC 8259 text
+                parsed = json.loads(
+                    text,
+                    object_pairs_hook=pairs,
+                    parse_constant=constant,
+                    parse_int=integer,
+                    parse_float=real if keep_lexemes else None,
+                )
+    except (UnicodeError, ValueError):
         malformed = True
+    except RecursionError:
+        too_deep = max_depth is not None
+        malformed = not too_deep
+    if too_big:
+        raise StrictJsonError("oversized")
     if malformed:
         raise StrictJsonError("not_json")
+    if too_deep or (max_depth is not None and _deeper_than(parsed, max_depth)):
+        raise StrictJsonError("too_deep")
     if found:
         raise StrictJsonError(found[0])
     return parsed
+
+
+def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
+    """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
+    ``max_int_digits`` digits (``None`` sets no digit limit). Raises ``StrictJsonError``.
+    """
+    return strict_json_read(data, max_int_digits=max_int_digits)
+
+
+def strict_json_plain(value: Any) -> Any:
+    """``value`` with every ``JsonNumber`` replaced by its plain ``int`` or ``float``.
+
+    Raises ``StrictJsonError("out_of_range")`` for a number that has no plain value.
+    """
+    refused = False
+
+    def walk(item: Any) -> Any:
+        nonlocal refused
+        if isinstance(item, JsonNumber):
+            if item.value is None:
+                refused = True
+            return item.value
+        if isinstance(item, dict):
+            return {key: walk(child) for key, child in item.items()}
+        if isinstance(item, list):
+            return [walk(child) for child in item]
+        return item
+
+    plain = walk(value)
+    if refused:
+        raise StrictJsonError("out_of_range")
+    return plain
+
+
+def _write_lexemes(value: Any) -> str:
+    """The ``json.dumps`` form, with each ``JsonNumber`` written as its source text."""
+    if isinstance(value, JsonNumber):
+        return value.lexeme
+    if isinstance(value, dict):
+        members = (
+            f"{json.dumps(key if isinstance(key, str) else str(key))}: {_write_lexemes(child)}"
+            for key, child in value.items()
+        )
+        return "{" + ", ".join(members) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_write_lexemes(child) for child in value) + "]"
+    return json.dumps(value)
+
+
+def _lossless(value: Any) -> bool:
+    """Whether every ``JsonNumber`` in ``value`` prints as its own source text."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, JsonNumber):
+            if item.value is None or json.dumps(item.value) != item.lexeme:
+                return False
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return True
+
+
+def strict_json_write(value: Any) -> str:
+    """Write a tree read with ``keep_lexemes`` back as JSON text, never changing a number.
+
+    When every number prints as it was read, this is exactly ``json.dumps`` of the plain value, so
+    the bytes equal what the strategy wrote before lexemes were kept.
+    """
+    if _lossless(value):
+        return json.dumps(strict_json_plain(value))
+    return _write_lexemes(value)

@@ -26,10 +26,11 @@ target raises (fail-closed by design); if that partition legitimately
 lacks the field, target a path that matches or narrow the gate.
 
 Round-trip note (QA-3 F8, 2026-05-31): the cell is parsed via
-`json.loads` and re-serialized via `json.dumps`. JSON serialization
-canonicalizes whitespace, escapes, and key ordering, so the masked
-cell is not byte-for-byte identical to the input even when the
-target leaf is unchanged. Operators relying on byte-stable input
+`strict_json_read` and re-serialized via `strict_json_write`. Whitespace
+and escapes are canonicalized, so the masked cell is not byte-for-byte
+identical to the input even when the target leaf is unchanged. A number
+is the exception: it is written as it was read (`1.10`, `1e400`, a long
+decimal). Operators relying on byte-stable input
 should mask upstream of any JSON normalization.
 
 Config (`provider_config`):
@@ -50,16 +51,22 @@ posture for numexpr / polars (we don't reinvent parsers).
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import jsonpath_ng
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution._strategies.nested._leaves import (
+    leaf_frame,
+    read_cell,
+    record_fault,
+    written_leaf,
+)
 from decoy_engine.execution._technique_class import technique_class_for
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
@@ -322,33 +329,12 @@ class NestedStrategyHandler:
             if pd.isna(cell):
                 continue
             try:
-                parsed = json.loads(cell) if isinstance(cell, str) else cell
-            except Exception:
-                # A malformed-JSON cell cannot be masked, so it must fail closed
-                # like every sibling cell-parsing strategy (bucketize / top_code /
-                # code_set): record a RowError so the row is quarantined or the job
-                # fails loud, never emitted with its cleartext intact. The advisory
-                # QualityWarning alone did NOT reach the quarantine gate -- a
-                # malformed cell (a truncated export, a trailing comma) whose raw
-                # text still carried the target PII passed straight through to the
-                # main output unmasked (TEST-3 finding 1). `reason` never embeds the
-                # cell value (trap T3).
-                ctx.row_errors.append(
-                    RowError(
-                        column=column,
-                        row_index=pos,
-                        trigger="format_error",
-                        reason="cell is not valid JSON under nested masking",
-                    )
-                )
-                warnings.append(
-                    QualityWarning(
-                        code=reasons.warning.NESTED_CELL_JSON_PARSE_ERROR,
-                        provider="nested",
-                        column=column,
-                        detail={"row_pos": str(pos)},
-                    )
-                )
+                parsed = read_cell(cell)
+            except StrictJsonError as exc:
+                # A faulty cell cannot be masked, so it fails closed like every sibling
+                # cell-parsing strategy: a RowError (never the cell text, trap T3) so the row is
+                # quarantined or the job fails, never emitted with its cleartext intact.
+                record_fault(ctx, warnings, column, pos, exc.token)
                 continue
             saw_parseable = True
             matches = jsonpath_expr.find(parsed)
@@ -381,10 +367,14 @@ class NestedStrategyHandler:
                         },
                     )
                 )
+            try:
+                cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
+            except StrictJsonError as exc:
+                record_fault(ctx, warnings, column, pos, exc.token)
+                continue
             per_position_state[pos] = (parsed, ordered_matches)
-            for m in ordered_matches:
-                leaf_values.append(m.value)
-                leaf_outer_pos.append(pos)
+            leaf_values.extend(cell_leaves)
+            leaf_outer_pos.extend([pos] * len(cell_leaves))
 
         if not leaf_values:
             # A valid non-null cell existed but the target matched NOTHING in the
@@ -414,7 +404,7 @@ class NestedStrategyHandler:
         # `child_handler` and `child_seed` were resolved earlier via
         # `_resolve_child` (shared with `preflight()`).
         temp_col = "_nested_leaves"
-        temp_df = pd.DataFrame({temp_col: leaf_values})
+        temp_df = leaf_frame(temp_col, leaf_values)
         # Codex round-4 P2 NESTED CODE_SET MIS-KEYED EVIDENCE remediation:
         # the child is invoked with the synthetic `temp_col` name, not the
         # real column this nested strategy is configured on. A child handler
@@ -480,7 +470,13 @@ class NestedStrategyHandler:
                         )
                     )
         warnings.extend(child_warnings)
-        new_leaf_values = temp_df[temp_col].tolist()
+        new_leaf_values: list[Any] = []
+        non_finite_pos: set[int] = set()
+        for leaf_pos, out in zip(leaf_outer_pos, temp_df[temp_col].tolist(), strict=True):
+            out, finite = written_leaf(out)
+            new_leaf_values.append(out)
+            if not finite:
+                non_finite_pos.add(leaf_pos)
 
         # Writeback: walk matches in the same order leaves were
         # collected, replace each, re-serialize the cell. Positional
@@ -488,6 +484,11 @@ class NestedStrategyHandler:
         # `col_values` rather than mutating by index label.
         cursor = 0
         for pos, (parsed, matches) in per_position_state.items():
+            if pos in non_finite_pos:
+                # The cell keeps its input text and the row fails closed, so no `Infinity` is written.
+                cursor += len(matches)
+                record_fault(ctx, warnings, column, pos, "child_non_finite")
+                continue
             for m in matches:
                 new_value = new_leaf_values[cursor]
                 cursor += 1
@@ -524,7 +525,7 @@ class NestedStrategyHandler:
                 # applies the mask for the root case and is a no-op-equivalent for
                 # in-place field writes (same object returned).
                 parsed = m.full_path.update(parsed, new_value)
-            col_values[pos] = json.dumps(parsed)
+            col_values[pos] = strict_json_write(parsed)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
         return df, warnings
