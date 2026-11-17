@@ -16,6 +16,7 @@ from decoy_engine.generation.statistical._cell_format import (
     learn_cell_format,
     scrub_cell_format,
 )
+from decoy_engine.generation.statistical._degenerate import check_degenerate, degenerate_finding
 from decoy_engine.generation.statistical._fanout import (
     FanoutSpec,
     add_fanout,
@@ -43,7 +44,9 @@ __all__ = [
     "add_numeric_shape",
     "cell_format_arrow_type",
     "cell_format_member_ok",
+    "check_degenerate",
     "conditional_fallback_counts",
+    "degenerate_finding",
     "fanout_spec_from_snapshot",
     "fitted_reference_values",
     "learn_cell_format",
