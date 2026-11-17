@@ -8,11 +8,13 @@ manifest field. No double-definition.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
 DetailValue: TypeAlias = str | int | float | bool | None
+# What a producer may pass: a scalar, or a list of names the constructor joins with ", ".
+DetailInput: TypeAlias = DetailValue | list[str] | tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -34,7 +36,7 @@ class QualityWarning:
     - `mimesis_locale_fallback` (S7): an adopted Mimesis provider was asked for
       a locale outside Mimesis coverage; the adapter fell back to Faker for
       that locale + provider. `detail` carries `requested_locale` +
-      `mimesis_locales` (the locales joined with ", ").
+      `mimesis_locales`.
     - `cardinality_collisions` (post-validation cardinality scan): a deterministic `faker` column
       (not `unique`, no `when:`) merged distinct source values into shared outputs. `detail`
       carries `table`, `source_distinct`, `output_distinct`, `distinct_lost` and `pool_size`
@@ -52,27 +54,35 @@ class QualityWarning:
     code: str
     provider: str
     column: str | None = None
-    detail: dict[str, DetailValue] = field(default_factory=dict)
+    detail: Mapping[str, DetailInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Refuse what `EvidencePayload` refuses, so a producer fails where it builds the warning.
+        """Make the warning evidence-ready, the one place every producer's warning passes.
 
-        `provider` names the source (a provider, a strategy or a route) and is never empty.
-        `detail` holds scalars only: a list of names is joined with ", " by the producer, and a
-        per-row map becomes counts. Messages name the key, never a value.
+        `EvidencePayload` refuses an empty provider and any non-scalar `detail` value. So
+        `provider` names the source (a provider, a strategy or a route) and is never empty, and
+        `detail` ends up scalar-only: a list or tuple of names becomes one string joined with
+        ", " here and nowhere else, and anything else non-scalar is refused (a per-row map must
+        become counts at the producer). Messages name the key, never a value.
         """
         if not isinstance(self.provider, str) or not self.provider:
             raise ValueError(f"QualityWarning {self.code!r}: provider must be a non-empty string")
         if self.column is not None and (not isinstance(self.column, str) or not self.column):
             raise ValueError(f"QualityWarning {self.code!r}: column must be None or non-empty")
+        scalar: dict[str, DetailValue] = {}
         for key, value in self.detail.items():
             if not isinstance(key, str):
                 raise TypeError(f"QualityWarning {self.code!r}: detail keys must be strings")
-            if value is not None and not isinstance(value, (str, int, float, bool)):
+            if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+                scalar[key] = ", ".join(value)
+            elif value is None or isinstance(value, (str, int, float, bool)):
+                scalar[key] = value
+            else:
                 raise TypeError(
                     f"QualityWarning {self.code!r}: detail[{key!r}] must be a str, int, float, "
-                    "bool or None"
+                    "bool, None or a list of strings"
                 )
+        object.__setattr__(self, "detail", scalar)
 
 
 def emit_generation_warning(
