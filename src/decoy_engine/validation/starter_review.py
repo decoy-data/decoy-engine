@@ -36,12 +36,12 @@ from decoy_engine.execution import StrategyInfo, StrategyOption, strategy_catalo
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.profiling import (
-    StarterConfig,
     build_entry,
     check_starter_config,
     declared_key_namespaces,
     swap_placeholder_namespaces,
 )
+from decoy_engine.profiling._starter_config import StarterConfig
 from decoy_engine.reasons import ReasonCode
 
 __all__ = [

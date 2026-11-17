@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, Phase, RetryClass, Severity
+from decoy_engine.reasons._types import (
+    UNRELEASED,
+    Kind,
+    Outcome,
+    Phase,
+    ReasonCode,
+    RetryClass,
+    Severity,
+)
 
 __all__ = [
     "DRIFT_BLOCKED",
@@ -42,30 +50,33 @@ DRIFT_BLOCKED = _d(
 # INIT-WIZARD E1: a review decision the starter config cannot take. The caller repairs its input,
 # so these are configuration failures, not scan failures. Each names a table or column, never a
 # value.
-_review = _catalog.pre_scan("ReviewInputError")
-_REVIEW_RULES = {
-    "phases": (Phase.CONFIGURATION,),
-    "outcome": Outcome.CONFIGURATION,
-    "retry": RetryClass.CONFIGURATION_REPAIR,
-    "since": UNRELEASED,
-}
+_review_declare = _catalog.pre_scan("ReviewInputError")
+
+
+def _review(code: str, summary: str) -> ReasonCode:
+    return _review_declare(
+        code,
+        summary,
+        phases=(Phase.CONFIGURATION,),
+        outcome=Outcome.CONFIGURATION,
+        retry=RetryClass.CONFIGURATION_REPAIR,
+        since=UNRELEASED,
+    )
+
+
 REVIEW_UNKNOWN_COLUMN = _review(
     "review_unknown_column",
     "A review decision names a column that is not in the starter config.",
-    **_REVIEW_RULES,
 )
 REVIEW_DUPLICATE = _review(
     "review_duplicate",
     "Two review decisions name the same column.",
-    **_REVIEW_RULES,
 )
 REVIEW_STALE = _review(
     "review_stale",
     "A confirmed suggestion no longer matches the starter config's suggestion for that column.",
-    **_REVIEW_RULES,
 )
 REVIEW_EMPTY_TABLE = _review(
     "review_empty_table",
     "The review drops every column of a table, and a mask table needs at least one column.",
-    **_REVIEW_RULES,
 )
