@@ -8,7 +8,7 @@ it is deprecated, never deleted, and points at the live reason that replaces it.
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, Severity
+from decoy_engine.reasons._types import Kind, Outcome, Severity
 
 __all__ = [
     "WORKFLOW_RESTART_INTERRUPTED",
@@ -23,7 +23,7 @@ WORKFLOW_RESTART_INTERRUPTED = _log(
     "workflow_restart_interrupted",
     "The platform restarted while this workflow step ran. Progress was not kept; run it again when ready.",
     since="1.5.0",
-    deprecated_in=UNRELEASED,
+    deprecated_in="1.30.0",
     replaced_by=("platform", "startup_failed"),
 )
 WORKFLOW_STEP_NOT_RUN = _log(
@@ -33,13 +33,13 @@ WORKFLOW_STEP_NOT_RUN = _log(
     severity=Severity.INFO,
     outcome=Outcome.CANCELLED,
     since="1.5.0",
-    deprecated_in=UNRELEASED,
+    deprecated_in="1.30.0",
     replaced_by=("platform", "job_cancelled"),
 )
 WORKFLOW_STEP_FAILED = _response(
     "workflow_step_failed",
     "The workflow step failed. The server log has the details.",
     since="1.5.0",
-    deprecated_in=UNRELEASED,
+    deprecated_in="1.30.0",
     replaced_by=("platform", "job_failed"),
 )
