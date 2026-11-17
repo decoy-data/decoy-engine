@@ -57,7 +57,6 @@ from pydantic import (
     ConfigDict,
     Field,
     SecretStr,
-    StrictBool,
     field_validator,
     model_validator,
 )
@@ -170,7 +169,7 @@ class RelationSelection(BaseModel):
     order_by: list[str] = Field(default_factory=list)
     # True when ``columns`` is the whole relation as the caller checked it. The snapshot then
     # refuses if the live column set differs inside the transaction.
-    whole_relation: StrictBool = False
+    whole_relation: bool = Field(default=False, strict=True)
 
     @field_validator("schema_name")
     @classmethod
