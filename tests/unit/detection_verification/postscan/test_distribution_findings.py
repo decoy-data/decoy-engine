@@ -234,6 +234,25 @@ def test_a_finite_source_with_a_non_finite_output_is_a_breach() -> None:
     assert rows[("c", "mean")].severity == "info"
 
 
+def test_a_non_finite_output_stays_a_breach_for_a_source_with_under_two_cells_or_all_null() -> None:
+    broken = ValueFacts(5, 0, None, non_finite=True)
+    for src in (_values([5.0, None, None]), _values([None, None, None])):
+        col = ColumnSides("c", frozenset({"mean", "std"}), src, broken, 3, 5)
+        rows = _run(col, src_rows=3, out_rows=5)
+        for fact in ("mean", "std"):
+            assert (rows[("c", fact)].severity, rows[("c", fact)].delta_pct) == ("warning", None)
+
+
+def test_a_finite_change_that_overflows_is_a_breach_not_info() -> None:
+    src = ValueFacts(4, 0, Moments(4, 0.0, 1e-300))  # std ~ 5.8e-151
+    out = ValueFacts(4, 0, Moments(4, 1e200, 1e-300))
+    rows = _run(ColumnSides("c", frozenset({"mean"}), src, out, 4, 4), src_rows=4, out_rows=4)
+    assert (rows[("c", "mean")].severity, rows[("c", "mean")].delta_pct) == ("warning", None)
+    ok = ValueFacts(4, 0, Moments(4, 0.0, 12.0))
+    near = _run(ColumnSides("c", frozenset({"mean"}), ok, ok, 4, 4), src_rows=4, out_rows=4)
+    assert near[("c", "mean")].severity == "info"
+
+
 def test_a_failed_read_is_an_error_row() -> None:
     failed = ValueFacts(5, 0, None, error="ValueError")
     ok = ValueFacts(5, 0, Moments.of(np.arange(5.0)))

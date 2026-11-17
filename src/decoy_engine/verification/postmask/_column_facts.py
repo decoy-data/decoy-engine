@@ -48,9 +48,9 @@ class Moments:
         n = int(values.size)
         if n == 0:
             return cls()
-        mean = float(values.mean())
         # A spread past the float range overflows to infinity; the caller withholds such moments.
         with np.errstate(over="ignore"):
+            mean = float(values.mean())
             return cls(n, mean, float(np.square(values - mean).sum()))
 
     def merge(self, other: Moments) -> Moments:
@@ -97,6 +97,11 @@ class _ValueTally:
     rows: int = 0
     nulls: int = 0
     moments: Moments = field(default_factory=Moments)
+    # Exact extremes of the finite values, internal only. A constant column has min == max, and
+    # its moments are then exact (`done`): the pairwise merge of a constant leaves a mean and an M2
+    # a few ulps off, which would read as a spread.
+    low: float = math.inf
+    high: float = -math.inf
     finite: bool = True
     error: str | None = None
 
@@ -114,6 +119,9 @@ class _ValueTally:
                 # A sum of squared deviations can overflow on finite values; withhold it too.
                 if merged is not None and math.isfinite(merged.mean) and math.isfinite(merged.m2):
                     self.moments = merged
+                    if values.size:
+                        self.low = min(self.low, float(values.min()))
+                        self.high = max(self.high, float(values.max()))
                 else:
                     self.finite = False
         except Exception as exc:
@@ -123,16 +131,21 @@ class _ValueTally:
 
     def done(self) -> ValueFacts:
         keeps = self.numeric and self.finite and self.error is None
+        moments = self.moments
+        if moments.count and self.low == self.high:
+            moments = Moments(moments.count, self.low, 0.0)
         return ValueFacts(
             self.rows,
             self.nulls,
-            self.moments if keeps else None,
+            moments if keeps else None,
             self.error,
             non_finite=self.numeric and not self.finite and self.error is None,
         )
 
 
-def _is_numeric(data_type: pa.DataType) -> bool:
+def _is_numeric(schema: pa.Schema, column: str) -> bool:
+    # By position, not `schema.field(name)`, which raises on a duplicated column name.
+    data_type = schema.types[schema.names.index(column)]
     return pa.types.is_integer(data_type) or pa.types.is_floating(data_type)
 
 
@@ -303,9 +316,7 @@ def column_facts(
         return {}
     compared = [c for c in wanted if source is not None and c in source.schema.names]
     aligned = source is not None and source.num_rows == output.num_rows
-    tallies = {
-        c: _Tally(values=_ValueTally(_is_numeric(output.schema.field(c).type))) for c in wanted
-    }
+    tallies = {c: _Tally(values=_ValueTally(_is_numeric(output.schema, c))) for c in wanted}
     out_read, out_verify = _counted(output)
     checks = [out_verify]
     if aligned and source is not None and compared:
@@ -373,7 +384,7 @@ def value_facts(
     wanted = [c for c in dict.fromkeys(columns) if c in table.schema.names]
     if not wanted:
         return {}
-    tallies = {c: _ValueTally(_is_numeric(table.schema.field(c).type)) for c in wanted}
+    tallies = {c: _ValueTally(_is_numeric(table.schema, c)) for c in wanted}
     counted, verify = _counted(table)
     for batch in counted.read(wanted, batch_rows):
         for c in wanted:
