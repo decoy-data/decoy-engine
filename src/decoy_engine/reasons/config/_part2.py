@@ -33,6 +33,7 @@ __all__ = [
     "POLICY_BLOCK_INVALID",
     "POLICY_COLUMN_PARTIAL",
     "POLICY_FIELD_UNDECIDED",
+    "POLICY_PROHIBITED",
     "POLICY_RULE_CONFLICT",
     "POLICY_SELECTOR_INVALID",
     "POLICY_SELECTOR_UNMATCHED",
@@ -238,5 +239,10 @@ POLICY_BLOCK_INVALID = _d(
     "policy_block_invalid",
     "The policy block has a duplicate id, a prohibition without exactly one of forbid and "
     "require, or a value JSON cannot carry.",
+    since=UNRELEASED,
+)
+POLICY_PROHIBITED = _d(
+    "policy_prohibited",
+    "A mask column's decided strategy breaks a policy prohibition.",
     since=UNRELEASED,
 )
