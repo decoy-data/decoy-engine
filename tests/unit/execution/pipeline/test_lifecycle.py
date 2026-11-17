@@ -351,3 +351,19 @@ def test_the_resident_input_term_keeps_the_input_form() -> None:
         "out_of_core",
     )
     assert _phase(_peak((table,), "out_of_core"), "execute") == base.estimated_bytes + 8_000
+
+
+def test_sequential_basis_takes_the_two_largest_tables_by_working_spec() -> None:
+    # B is narrow as input (8 bytes a row) but hashed to 64-byte strings, so by working spec it
+    # is the largest table and joins A in the basis; C stays out.
+    a = _table("a", 1000, (_str("s", 20.0),))
+    b = _table("b", 1000, (_hashed_int("n", 64.0),))
+    c = _table("c", 1000, (_int("n"),))
+    a_spec = ColumnSizeSpec("s", "object", string_width_bytes=20.0)
+    b_spec = ColumnSizeSpec("n", "object", string_width_bytes=64.0)
+    two_largest = estimate_peak_bytes(
+        (TableSizeSpec("a", 1000, (a_spec,)), TableSizeSpec("b", 1000, (b_spec,))), "sequential"
+    )
+    resident_inputs = (24_000 + 8_000 + 8_000) - 24_000
+    result = _peak((a, b, c), "sequential")
+    assert _phase(result, "execute") == two_largest.estimated_bytes + resident_inputs

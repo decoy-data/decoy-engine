@@ -124,3 +124,28 @@ def test_the_lifecycle_modules_hold_no_strategy_name(module: str) -> None:
         n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
     }
     assert literals.isdisjoint(SCALAR_HANDLERS), sorted(literals & set(SCALAR_HANDLERS))
+
+
+# --- The out-of-core spill estimate reads the same declaration ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("strategy", "params", "expected"),
+    [
+        ("hash", {}, 64.0),
+        ("hash", {"truncate": 12}, 12.0),
+        ("hash", {"truncate": 100}, 64.0),
+        ("redact", {}, 8.0),
+        ("redact", {"redact_with": "XX"}, 2.0),
+        # Spill stages bytes: a two-byte character is two bytes, not one.
+        ("redact", {"redact_with": "éé"}, 4.0),
+        # Text that is not text has no declared width: the unknown-width ceiling.
+        ("redact", {"redact_with": 5}, 256.0),
+    ],
+)
+def test_the_spill_estimate_uses_the_handler_declaration(
+    strategy: str, params: dict[str, Any], expected: float
+) -> None:
+    from decoy_engine.execution.out_of_core._spill_estimate import _strategy_output_width_bytes
+
+    assert _strategy_output_width_bytes(strategy, params) == expected

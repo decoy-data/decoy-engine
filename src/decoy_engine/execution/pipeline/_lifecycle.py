@@ -20,6 +20,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Literal
 
 import pyarrow as pa
 
@@ -33,7 +34,8 @@ from decoy_engine.execution._mem_estimate import (
     route_intercept_bytes,
 )
 
-PHASES = ("ingest", "execute", "write")
+Phase = Literal["ingest", "execute", "write"]
+PHASES: tuple[Phase, ...] = ("ingest", "execute", "write")
 
 # Read once from the running interpreter, never pinned.
 _INT_OBJECT = sys.getsizeof(1 << 20)
@@ -131,9 +133,9 @@ class PhaseInputs:
 
 @dataclass(frozen=True)
 class Lifecycle:
-    phase_bytes: tuple[tuple[str, int], ...]
+    phase_bytes: tuple[tuple[Phase, int], ...]
     peak_bytes: int
-    limiting_phase: str
+    limiting_phase: Phase
 
 
 # --- Per-table terms --------------------------------------------------------------------
@@ -354,7 +356,7 @@ def _write(inputs: PhaseInputs, intercept: int) -> int:
     return intercept + resident + transient
 
 
-def limiting_phase(phase_bytes: tuple[tuple[str, int], ...]) -> str:
+def limiting_phase(phase_bytes: tuple[tuple[Phase, int], ...]) -> Phase:
     """The phase with the largest bytes; a tie goes to the earlier phase."""
     best = phase_bytes[0]
     for item in phase_bytes[1:]:
@@ -368,7 +370,7 @@ def lifecycle_peak(inputs: PhaseInputs) -> Lifecycle:
     if not inputs.tables:
         raise ValueError("lifecycle needs at least one table")
     intercept = route_intercept_bytes("full_frame")
-    phases = (
+    phases: tuple[tuple[Phase, int], ...] = (
         ("ingest", _ingest(inputs, intercept)),
         ("execute", _execute(inputs)),
         ("write", _write(inputs, intercept)),

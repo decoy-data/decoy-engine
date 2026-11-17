@@ -55,7 +55,6 @@ from decoy_engine.execution.out_of_core import _budget as budget_mod
 from decoy_engine.execution.out_of_core import _spill_estimate as spill_mod
 from decoy_engine.execution.out_of_core._spill_estimate import (
     DISK_SAFETY_MARGIN,
-    HASH_DIGEST_HEX_BYTES,
     SPILL_OVERHEAD,
     UNKNOWN_WIDTH_CEILING_BYTES,
     default_ooc_temp_root,
@@ -577,7 +576,7 @@ class TestMaskedHashKeyWidth:
         # The FK key hashes to a 64-char digest, so the masked estimate is
         # materially larger than the source-int (8-byte) estimate.
         assert masked.total_bytes > source.total_bytes
-        assert masked.output_bytes >= HASH_DIGEST_HEX_BYTES * rows  # parent_id digest
+        assert masked.output_bytes >= 64 * rows  # parent_id digest
 
     def test_warns_on_disk_sized_to_the_source_width_estimate(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture

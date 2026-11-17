@@ -355,7 +355,8 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_job_estimate.py",
             # F24 lifecycle estimate: phase arithmetic and bounded sample reads behind
             # `estimate_job`. `_lifecycle.py` imports `_mem_estimate` and `_arrow_types` only;
-            # `_lifecycle_inputs.py` imports the profile readers and `_mem_estimate*` only.
+            # `_lifecycle_inputs.py` imports the profile readers, `_mem_estimate*` and
+            # `execution._strategies` (the handlers' output declarations) only.
             # Neither imports anything under `execution.physical`.
             "src/decoy_engine/execution/pipeline/_lifecycle.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",

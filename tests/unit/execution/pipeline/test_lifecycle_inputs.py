@@ -529,3 +529,46 @@ def test_an_fk_child_column_takes_its_parent_keys_output(tmp_path: Path) -> None
     assert (
         dict(est.phase_bytes)["write"] == route_intercept_bytes("full_frame") + arrow_in + arrow_out
     )
+
+
+def test_a_column_the_plan_has_no_seed_for_keeps_its_input_form() -> None:
+    # The config gate lists every column, so a missing seed is not reachable from a config; the
+    # rule (the output is the input) is pinned on the plan the estimate reads.
+    from types import SimpleNamespace
+
+    from decoy_engine.execution._mem_estimate import ColumnSizeSpec
+
+    column = lc.ColumnInputs("b", pa.int64(), False, ColumnSizeSpec("b", "int64"))
+    table = lc.TableInputs("t", ROWS, (column,), "parquet")
+    plan = SimpleNamespace(
+        seed_envelope=SimpleNamespace(per_table=(("t", SimpleNamespace(per_column=())),)),
+        relationships=(),
+    )
+    outcome = li.attach_outputs((table,), plan)
+    assert outcome.tables is not None
+    (written,) = outcome.tables[0].columns
+    assert written.output_spec == column.spec and written.output_arrow_type == pa.int64()
+    # And it prices as the input: 8 bytes a row in, 8 bytes a row out.
+    assert lc.arrow_bytes(lc.output_table(outcome.tables[0])) == 8 * ROWS
+
+
+def test_a_string_column_under_a_strategy_that_declares_nothing_is_priced_as_input(
+    tmp_path: Path,
+) -> None:
+    from decoy_engine.execution._mem_estimate import (
+        ColumnSizeSpec,
+        TableSizeSpec,
+        estimate_peak_bytes,
+    )
+
+    values = [f"value-{i:05d}" for i in range(ROWS)]  # 11 bytes each
+    path = tmp_path / "t.parquet"
+    pq.write_table(pa.table({"s": pa.array(values, type=pa.string())}), path)
+    cfg = _config(
+        tmp_path, fmt="parquet", src=str(path), column={"name": "s", "strategy": "shuffle"}
+    )
+    est = estimate_job(cfg, tmp_path)
+    assert est.lifecycle_peak_bytes is not None, est.notes
+    spec = ColumnSizeSpec("s", "string", string_width_bytes=11.0)
+    base = estimate_peak_bytes((TableSizeSpec("t", ROWS, (spec,)),), "full_frame")
+    assert dict(est.phase_bytes)["execute"] == base.estimated_bytes

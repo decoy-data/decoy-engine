@@ -5,7 +5,7 @@ Status: record
 Two runs. The first (head `b1213e83a`) found four cells below the measured peak and the plan
 was amended (revision 5, section 4.2a: execute priced on each column's working spec, the larger of
 its input and output cell, from the strategy handlers' own declarations). The second run, below,
-is on the revision 5 build; head recorded in the PR.
+ran on head `47b0260575be1bc9f5bf7f6c8f1c94d41820783b` (revision 5 build). Later commits change handler-declaration reuse in the spill estimate and tests, not the lifecycle arithmetic.
 
 Method: Linux test VM through `vm-run`, one child process per cell, peak RSS from `wait4`
 `ru_maxrss` outside the child, fixtures built in a separate process. The worker reads each source
