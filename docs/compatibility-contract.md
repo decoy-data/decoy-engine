@@ -971,6 +971,7 @@ for another config raises `ValueError`). `build_run_context` checks the config d
 columns is refused before it is profiled or masked. `run_pipeline_isolated` runs the same check in the parent before
 staging or spawn, and the child `run_pipeline` rechecks. The refusals are `source_file.undeclared_column` (names a
 position and a count, never a column) and `source_file.undeclared_table`.
+`DeclarationRequest.for_validate` is the offline form for `decoy validate`: it reads only local file headers, never opens an `s3`, `gcs` or other non-file source, and names those sources in `remote_sources` so the caller can report them as not checked (additive, 2026-11-16, QA-GATE G-eng).
 
 **Declaration gate on the chunked entries (CONFIG-EXPLICIT E2d).** `run_mask_pipeline_chunked`,
 `run_mask_chunked` and `run_native_or_oracle_chunked` call `prepare_declared_sources`

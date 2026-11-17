@@ -331,7 +331,7 @@ def check_statistical_columns(
     case (a `faker`/`sequence`/... column carrying a stray `high_cardinality`
     key) is caught here instead.
     """
-    from decoy_engine.generation.statistical import load_spec, spec_to_dict
+    from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
     from decoy_engine.plan._generation import resolve_pinned_snapshot
 
@@ -379,6 +379,7 @@ def check_statistical_columns(
                         dp_verified=dp_verified,
                         snapshot_digest=read.sha256 if read is not None else None,
                     )
+                    check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     raise PlanCompileError(
                         code=exc.code,
