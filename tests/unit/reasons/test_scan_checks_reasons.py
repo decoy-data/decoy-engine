@@ -7,7 +7,6 @@ import re
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.reasons import UNRELEASED
 
 NEW = (
     ("pre_scan", "drift_detected", "warning", "warning"),
@@ -22,7 +21,7 @@ def test_the_code_is_registered_pending_with_fixed_value_free_text(
 ) -> None:
     spec = reasons.find(namespace, code)
     assert spec is not None
-    assert spec.since == UNRELEASED
+    assert spec.since == "1.30.0"
     assert spec.kind.value == kind
     assert all(rule.severity.value == severity for rule in spec.rules)
     assert not re.search(r"[{}%]", spec.summary)

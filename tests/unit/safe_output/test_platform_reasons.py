@@ -14,7 +14,6 @@ from packaging.version import Version
 
 from decoy_engine import reasons
 from decoy_engine.reasons import (
-    UNRELEASED,
     Kind,
     Outcome,
     Phase,
@@ -257,7 +256,7 @@ WORKFLOW_SHIPPED_ENTRIES = {
 def test_workflow_codes_are_tombstones() -> None:
     for code, replacement in WORKFLOW_TOMBSTONES:
         spec = reasons.get("platform", code)
-        assert (spec.deprecated_in, spec.replaced_by) == (UNRELEASED, ("platform", replacement))
+        assert (spec.deprecated_in, spec.replaced_by) == ("1.30.0", ("platform", replacement))
         assert reasons.get("platform", replacement).deprecated_in is None
 
 
@@ -271,7 +270,7 @@ def test_workflow_tombstones_change_only_the_deprecation() -> None:
     entries = {e["code"]: e for e in reasons.manifest()["entries"] if e["namespace"] == "platform"}
     for code, replacement in WORKFLOW_TOMBSTONES:
         entry = dict(entries[code])
-        assert entry.pop("deprecated_in") == "unreleased"
+        assert entry.pop("deprecated_in") == "1.30.0"
         assert entry.pop("replaced_by") == ["platform", replacement]
         assert entry == {
             "namespace": "platform",

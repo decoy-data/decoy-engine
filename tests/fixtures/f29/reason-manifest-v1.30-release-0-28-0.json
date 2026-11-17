@@ -1,0 +1,389 @@
+{
+  "entries": [
+    {
+      "code": "policy_block_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The policy block has a duplicate id, a prohibition without exactly one of forbid and require, or a value JSON cannot carry.",
+      "symbol": "POLICY_BLOCK_INVALID"
+    },
+    {
+      "code": "policy_column_partial",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A column without a strategy sets keys that only a strategy can use.",
+      "symbol": "POLICY_COLUMN_PARTIAL"
+    },
+    {
+      "code": "policy_field_undecided",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "No policy level decides a mask column.",
+      "symbol": "POLICY_FIELD_UNDECIDED"
+    },
+    {
+      "code": "policy_rule_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Two policy sources decide one column differently at the same precedence level.",
+      "symbol": "POLICY_RULE_CONFLICT"
+    },
+    {
+      "code": "policy_selector_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy selector is empty, has an unknown key or holds a value outside the grammar.",
+      "symbol": "POLICY_SELECTOR_INVALID"
+    },
+    {
+      "code": "policy_selector_unmatched",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy rule selects no mask column.",
+      "symbol": "POLICY_SELECTOR_UNMATCHED"
+    },
+    {
+      "code": "policy_unknown_classification",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A classification is not one the engine knows.",
+      "symbol": "POLICY_UNKNOWN_CLASSIFICATION"
+    },
+    {
+      "code": "policy_unknown_strategy",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy names a masking strategy the engine does not know.",
+      "symbol": "POLICY_UNKNOWN_STRATEGY"
+    },
+    {
+      "code": "column_name_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "connector",
+      "owner": "PostgresSnapshotError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Column name unsupported.",
+      "symbol": "COLUMN_NAME_UNSUPPORTED"
+    },
+    {
+      "code": "relation_shape_changed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "connector",
+      "owner": "PostgresSnapshotError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Relation shape changed.",
+      "symbol": "RELATION_SHAPE_CHANGED"
+    },
+    {
+      "code": "drift_blocked",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "finding",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The sources drifted from the scan baseline, so the run stopped under on_drift: fail.",
+      "symbol": "DRIFT_BLOCKED"
+    },
+    {
+      "code": "drift_detected",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The sources drifted from the scan baseline; the run continues under on_drift: warn.",
+      "symbol": "DRIFT_DETECTED"
+    },
+    {
+      "code": "ner_model_uncalibrated",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "provider",
+      "owner": "NerUnavailableError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "NER model has no calibrated hit rate.",
+      "symbol": "NER_MODEL_UNCALIBRATED"
+    },
+    {
+      "code": "key_version_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "MaskSecretError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The key version label is not valid.",
+      "symbol": "KEY_VERSION_INVALID"
+    },
+    {
+      "code": "probe_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ProbeError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "resolve",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The synthetic probe could not run.",
+      "symbol": "PROBE_FAILED"
+    },
+    {
+      "code": "cardinality_collisions",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Cardinality collisions.",
+      "symbol": "CARDINALITY_COLLISIONS"
+    },
+    {
+      "code": "scan_baseline_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "EvidenceManifest",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
+      "symbol": "SCAN_BASELINE_MISSING"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.30.0"
+}
