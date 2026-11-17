@@ -17,6 +17,9 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - the two v0.16.0 route tombstones are removed from the reason registry; a record that names one now reads as `decoy/unknown_reason_from_future`.
 - a generate snapshot with a negative or non-finite weight or count is now refused at run, even when its total is positive
 - a `pre_scan` or `post_scan` config that names an NER model other than en_core_web_sm or en_core_web_md (for example en_core_web_lg) now refuses at load with `provider.ner_model_uncalibrated`; `text_redact` is unaffected.
+- a DuckDB interrupt that is not the deadline (Ctrl-C) is now raised as `KeyboardInterrupt`, no longer reported as `export_failed`
+- ten connector reasons now carry outcome `configuration` and retry class `configuration_repair`: `ambiguous_name`, `column_name_unsupported`, `column_not_found`, `duplicate_relation`, `extension_unavailable`, `extension_untrusted_location`, `relation_not_found`, `relation_shape_changed`, `unsupported_column_type` and `value_not_representable`
+- the `group_key` distribution-behavior label is now `destroys_frequency` instead of `preserves_cardinality_only`, in newly compiled plan YAML and the strategy manifest
 
 ### Changed (nested handler moves into its own package, 82-E1a, 2026-11-17)
 

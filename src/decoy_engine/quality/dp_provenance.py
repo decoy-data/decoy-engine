@@ -276,12 +276,12 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
             # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays.
-            # Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with certifi, cryptography,
-            # pyasn1, urllib3 and werkzeug put back reproduces 31ecf945.... 7d1c1a2a... is the
-            # 0.19.0 lock (77 dists; b9b42047... with the engine moved); 78af2b5a... adds
-            # pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds pytest-timeout (80).
-            # A lock change needs its own row (test_dp_lock_row.py) and NOTICE regenerated.
+            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
+            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with
+            # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
+            # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
+            # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
+            # pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
             "da1a743343925aa00e7c59c64338a2ba49354a7f75f7f623a158a3c9a8208f5b",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
