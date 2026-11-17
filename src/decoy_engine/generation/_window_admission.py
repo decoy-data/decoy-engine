@@ -107,7 +107,6 @@ def _check_histogram(
     table: str,
     col: dict[str, Any],
     edges_key: str,
-    counts_key: str,
     stats: Mapping[str, Any],
     *,
     strictly_ordered: bool,
@@ -196,9 +195,7 @@ def _check_statistical(
 ) -> None:
     _refuse_degenerate(table, col, spec)
     if spec.kind == "numeric":
-        edges = _check_histogram(
-            table, col, "bin_edges", "bin_counts", spec.stats, strictly_ordered=True
-        )
+        edges = _check_histogram(table, col, "bin_edges", spec.stats, strictly_ordered=True)
         from decoy_engine.generation.statistical._sample import _is_integer_dtype
 
         # Integer outputs are clamped to [edges[0], edges[-1]] then materialized as Arrow int64;
@@ -212,9 +209,7 @@ def _check_statistical(
                 f"integer numeric edges [{edges[0]}, {edges[-1]}] exceed the int64 range",
             )
     elif spec.kind == "freetext":
-        edges = _check_histogram(
-            table, col, "length_bin_edges", "length_bin_counts", spec.stats, strictly_ordered=False
-        )
+        edges = _check_histogram(table, col, "length_bin_edges", spec.stats, strictly_ordered=False)
         if int(edges[-1]) > max_cell_chars:
             _refuse(
                 table,
