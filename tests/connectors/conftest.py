@@ -10,6 +10,7 @@ psycopg out of the test dependencies.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -17,6 +18,29 @@ import uuid
 from pathlib import Path
 
 import pytest
+
+# The pg-gate CI job sets DECOY_REQUIRE_PG=1 so a missing Postgres or extension fails the job
+# instead of skipping every test (the DECOY_REQUIRE_NER pattern in tests/_ner.py).
+REQUIRE_PG = os.environ.get("DECOY_REQUIRE_PG") == "1"
+
+
+def pg_unavailable(reason: str) -> None:
+    """Skip where Postgres is optional, fail where the lane requires it."""
+    if REQUIRE_PG:
+        pytest.fail(f"DECOY_REQUIRE_PG=1 but {reason}")
+    pytest.skip(reason)
+
+
+@pytest.fixture
+def pg_policy(monkeypatch):
+    """Run ``pg_unavailable`` as if DECOY_REQUIRE_PG were ``require``."""
+    import sys
+
+    def run(require: bool, reason: str) -> None:
+        monkeypatch.setattr(sys.modules[__name__], "REQUIRE_PG", require)
+        pg_unavailable(reason)
+
+    return run
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess[str]:
@@ -27,12 +51,12 @@ def _docker(*args: str) -> subprocess.CompletedProcess[str]:
 
 def _docker_postgres() -> tuple[str, str]:
     if shutil.which("docker") is None:
-        pytest.skip("docker unavailable")
+        pg_unavailable("docker unavailable")
     started = _docker(
         "run", "-d", "--rm", "-e", "POSTGRES_PASSWORD=pw", "-p", "127.0.0.1::5432", "postgres:16"
     )
     if started.returncode != 0:
-        pytest.skip("cannot start postgres container")
+        pg_unavailable("cannot start postgres container")
     cid = started.stdout.strip()
     port = _docker("port", cid, "5432/tcp").stdout.strip().splitlines()[0].rsplit(":", 1)[1]
     ready = ("exec", cid, "pg_isready", "-U", "postgres")
@@ -48,8 +72,6 @@ def _docker_postgres() -> tuple[str, str]:
 
 @pytest.fixture(scope="session")
 def pg_dsn():
-    import os
-
     env = os.environ.get("DECOY_TEST_PG_DSN")
     if env:
         yield env
@@ -70,7 +92,7 @@ def ext_dir(tmp_path_factory):
     try:
         c.execute("INSTALL postgres")
     except Exception:
-        pytest.skip("postgres extension cannot be installed for the test fixture")
+        pg_unavailable("postgres extension cannot be installed for the test fixture")
     finally:
         c.close()
     return d
@@ -128,3 +150,85 @@ def make_config(pg_dsn, ext_dir, tmp_path):
         return PostgresSnapshotConfig(**base)
 
     return _make
+
+
+# ----- a scripted DuckDB connection, for the no-database suites ------------------------------
+
+
+class FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+class FakeConn:
+    """Stands in for a DuckDB connection. ``fail`` maps a SQL fragment to an action.
+
+    ``"raise"`` raises an error whose text carries the DSN (as DuckDB does). ``"block"`` waits
+    for ``interrupt()`` and then raises the same. ``"interrupt"`` raises DuckDB's
+    ``InterruptException`` at once. ``catalog`` is a list of ``(column, type, typtype)``.
+    """
+
+    DSN_MARK = "PW_MARK_9f3"
+
+    def __init__(self, ext_dir, catalog, fail=None, schema="public", table="t"):
+        import threading
+
+        self.ext_dir = ext_dir
+        self.catalog = catalog
+        self.fail = fail or {}
+        self.schema = schema
+        self.table = table
+        self.statements: list[str] = []
+        self.interrupted = threading.Event()
+        self.closed = False
+
+    def interrupt(self):
+        self.interrupted.set()
+
+    def close(self):
+        self.closed = True
+
+    def execute(self, sql, params=None):
+        import duckdb
+
+        self.statements.append(sql)
+        text = sql + " " + " ".join(str(p) for p in params or [])
+        for fragment, action in self.fail.items():
+            if fragment in text:
+                if action == "interrupt":
+                    raise duckdb.InterruptException("INTERRUPT Error: Interrupted!")
+                if action == "block":
+                    self.interrupted.wait(30)
+                raise RuntimeError(f"IO Error: connection failed: {self.DSN_MARK} in {sql[:60]}")
+        if sql.startswith("SELECT loaded, install_path"):
+            return FakeResult([(True, str(self.ext_dir) + "/postgres_scanner")])
+        if "AS q(nspname" in sql:
+            return FakeResult(
+                [
+                    (self.schema, self.table, name, fmt, typtype, i)
+                    for i, (name, fmt, typtype) in enumerate(self.catalog, start=1)
+                ]
+            )
+        if "count(*) FILTER" in text:
+            return FakeResult([(0,) * text.count(" AS g")])
+        return FakeResult([])
+
+
+@pytest.fixture
+def fake_pg(monkeypatch, tmp_path):
+    """Patch DuckDB's connect so the primitive runs against a ``FakeConn``."""
+
+    def _install(catalog=(("a", "text", "b"),), fail=None):
+        conn = FakeConn(tmp_path / "ext", list(catalog), fail)
+        monkeypatch.setattr(
+            "decoy_engine.fileaccess.adapters.duckdb.connect_internal", lambda cfg: conn
+        )
+        return conn
+
+    return _install

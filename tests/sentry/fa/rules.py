@@ -345,8 +345,8 @@ NATIVE_OWN_MAPPING = frozenset(
     {
         # runs inside a caller's wrapped `connect_internal` or `untrusted_session`
         "decoy_engine/fileaccess/adapters/duckdb.py",
-        # code-only `PostgresSnapshotError` raised from None
-        "decoy_engine/connectors/postgres_snapshot.py",
+        # code-only `PostgresSnapshotError`, raised after the handler
+        "decoy_engine/connectors/_postgres_session.py",
         # code-only `DiscoverySqlError` raised after the handler
         "decoy_engine/data_discovery.py",
     }
