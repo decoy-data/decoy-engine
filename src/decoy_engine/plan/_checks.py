@@ -418,11 +418,9 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
             ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
             if not ner_cfg:
                 continue
-            model = ner.DEFAULT_NER_MODEL
-            if isinstance(ner_cfg, dict) and ner_cfg.get("model"):
-                model = str(ner_cfg["model"])
             col_name = col_entry.get("name", "?")
             try:
+                model = str(ner.resolve_column_ner(ner_cfg)[0])
                 ner.ensure_ner_available(model)
             except ner.NerUnavailableError as exc:
                 raise PlanCompileError(
