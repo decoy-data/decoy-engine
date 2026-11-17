@@ -43,12 +43,12 @@ behind its own opt-in.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine.contracts import distribution_snapshot as dsc
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.generation.statistical._cell_format import (
@@ -61,13 +61,13 @@ from decoy_engine.generation.statistical._numeric_shape import (
     numeric_shape_withheld,
     redacted_fix_hint,
 )
+from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
 from decoy_engine.profiling import (
     POLICY_RAW,
-    POLICY_REDACTED,
     REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
     VALUE_POLICY_KEY,
 )
-from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
 
 _SUPPORTED_KINDS = ("numeric", "categorical", "datetime", "freetext")
 # `empty` (an all-null source column) is sampled only when the snapshot carries a `cell_format`
@@ -123,6 +123,8 @@ class StatisticalSpec:
     # Fitted cell shape (`generation/statistical/_cell_format.py`); None for a snapshot without the
     # block, which keeps the old draw sequence byte for byte.
     cell_format: CellFormat | None = None
+    # Year ranges from the contract decoder; admission and the sampler read these, not `year_bins`.
+    datetime_buckets: tuple[dsc.DatetimeBucket, ...] | None = None
 
 
 def spec_to_dict(spec: StatisticalSpec) -> dict[str, Any]:
@@ -138,6 +140,8 @@ def spec_to_dict(spec: StatisticalSpec) -> dict[str, Any]:
         del data["carrier"]
     if data.get("cell_format") is None:
         del data["cell_format"]
+    if data.get("datetime_buckets") is None:
+        del data["datetime_buckets"]
     return data
 
 
@@ -161,21 +165,15 @@ def spec_from_dict(data: Mapping[str, Any]) -> StatisticalSpec:
         cell_format=cell_format_from_dict(
             data["column"], str(data["kind"]), data.get("cell_format")
         ),
+        datetime_buckets=dsc.pinned_buckets(
+            str(data["kind"]), dict(data["stats"]), data.get("datetime_buckets")
+        ),
     )
 
 
-# `_load_snapshot` is the sole `open()` site for a snapshot artifact in
-# this package (guide section 4.7 item 3): the process-global content-
-# keyed cache that used to live here is GONE. It stopped being a
-# correctness mechanism once the compiler started reading every path
-# exactly once, up front, into an immutable pinned mapping
-# (`plan._generation.read_and_pin_snapshots`) before any check or
-# `load_spec` call runs -- caching a second time here would only risk
-# serving a DIFFERENT read's bytes to a caller expecting the compiler's
-# pinned bytes. `load_spec` below never calls this function itself; it
-# takes the already-parsed snapshot mapping as an explicit argument. This
-# function remains for compile-time callers that still need to read a
-# path (the compiler's read-once pass) and for tests building fixtures.
+# `_load_snapshot` is the sole `open()` site for a snapshot artifact in this package (guide section
+# 4.7 item 3). `load_spec` never calls it: it takes the snapshot the compiler already read and
+# pinned. It remains for compile-time callers that must read a path, and for tests building fixtures.
 def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, dict[str, Any]]:
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
@@ -201,25 +199,19 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
             message=f"snapshot_file {shown!r} could not be read: {failure}",
         )
     digest = hashlib.sha256(raw).hexdigest()
-    try:
-        snap = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-            message=f"snapshot_file {shown!r} could not be read: {exc}",
-        ) from exc
+    snap = parse_snapshot_json(raw, shown=shown)
     if not isinstance(snap, dict):
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
             message=f"snapshot_file {shown!r} does not contain a JSON object at the top level.",
         )
     version = snap.get("schema_version")
-    if version != DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION:
+    if version not in dsc.ACCEPTED_SCHEMA_VERSIONS:
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
             message=(
                 f"snapshot_file {shown!r} declares schema {version!r}; this engine "
-                f"consumes {DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION!r}."
+                f"consumes {dsc.ACCEPTED_SCHEMA_VERSIONS!r}."
             ),
         )
     return digest, snap
@@ -276,9 +268,9 @@ def _refuse_withheld_values(
         return
     policy = snap.get(VALUE_POLICY_KEY)
     listed = snap.get(REDACTED_COLUMNS_KEY)
-    well_formed = policy in (POLICY_REDACTED, POLICY_RAW) and (
-        isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed)
-    )
+    well_formed = (
+        isinstance(policy, str) and (policy in REDACTED_POLICIES or policy == POLICY_RAW)
+    ) and (isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed))
     if well_formed and policy == POLICY_RAW:
         return
     if not well_formed:
@@ -294,7 +286,7 @@ def _refuse_withheld_values(
             return
         why = (
             f"the snapshot withheld the real values of source column {redacted[0]!r} "
-            "(a sensitive column)"
+            "(a sensitive column, or one with too few rows to release values)"
         )
     raise StatisticalSpecError(
         code=reasons.plan.STATISTICAL_SNAPSHOT_VALUES_REDACTED,
@@ -580,6 +572,17 @@ def load_spec(
             )
         parent_first = joint["columns"][0] == condition_on
 
+    buckets = None
+    if kind == "datetime":
+        buckets = dsc.decoded_or_none(snap.get("schema_version"), col_stats)
+        if buckets is None:
+            raise StatisticalSpecError(
+                code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
+                message=(
+                    f"statistical column {name!r}: the snapshot schema_version or the "
+                    "datetime year_bins is not a supported shape."
+                ),
+            )
     return StatisticalSpec(
         column=str(name),
         source_column=source_column,
@@ -593,4 +596,5 @@ def load_spec(
         snapshot_digest=snapshot_digest,
         carrier=carrier,
         cell_format=cell_format,
+        datetime_buckets=buckets,
     )

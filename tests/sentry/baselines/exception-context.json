@@ -23,30 +23,6 @@
   "decoy_engine/config/_pre_scan.py::checked_ner_model::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
-  "decoy_engine/connectors/postgres_snapshot.py::_check_types::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::_guard_values::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::_load_postgres_extension::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::_open_connection::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::1": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::2": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/connectors/postgres_snapshot.py::snapshot_tables_to_parquet::3": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
   "decoy_engine/contracts/_declared_formats.py::validate_format_spec::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
@@ -78,12 +54,6 @@
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
   "decoy_engine/execution/_sequential_composite_chain.py::decline_composite_chain::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/execution/_strategies/_tokenize.py::TokenizeStrategyHandler.run::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/execution/_strategies/_tokenize.py::TokenizeStrategyHandler.run::1": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
   "decoy_engine/execution/native/_capabilities.py::capabilities_for::0": {

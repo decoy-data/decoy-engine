@@ -334,6 +334,7 @@ class TestFakerParityV1:
         }
         assert _v2_run(col, 10) == _v1_run(col, 10, numeric=True)
 
+    @pytest.mark.usefixtures("lenient_generate_checks")
     def test_unknown_faker_type_falls_back_to_word(self):
         # V1: unknown faker_type silently falls back to providers["word"]
         # (columns.py:246-247). The v2 mirrors the silent fallback.
@@ -731,11 +732,11 @@ class TestFormulaParityV1:
         assert _v2_run(col, 5) == _v1_run(col, 5)
 
     def test_inline_with_random(self):
-        # Inline path: random.randint(1, 100) is row-seeded via local_seed.
+        # Inline path: randint(1, 100) is row-seeded via local_seed.
         col = {
             "name": "rand",
             "type": "formula",
-            "formula": "random.randint(1, 100)",
+            "formula": "randint(1, 100)",
         }
         assert _v2_run(col, 10) == _v1_run(col, 10)
 
@@ -802,6 +803,7 @@ def _v2_run_single_table(gcols: list[dict], n: int, seed: int = 42, derive_key=N
     return {c: tbl.column(c).to_pylist() for c in tbl.column_names}
 
 
+@pytest.mark.usefixtures("lenient_generate_checks")
 class TestReferencedFormulaPostPass:
     """BF3: a ``formula`` column carrying ``references: [...]`` is filled by an
     in-memory declared-order post-pass (ColumnGenerator.fill_referenced_formula_column)
@@ -1049,7 +1051,8 @@ def _v2_run_multi(tables_cfg: list[dict], seed: int = 42, derive_key=None) -> di
         "sources": {},
         "tables": tables_cfg,
         "targets": {
-            t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables_cfg
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"}
+            for t in tables_cfg
         },
     }
     cfg = PipelineConfig.model_validate(cfg).model_dump()
@@ -1553,6 +1556,7 @@ class TestReferenceEdgeCases:
             },
         ]
 
+    @pytest.mark.usefixtures("lenient_generate_checks")
     def test_weighted_size_mismatch_falls_back_to_uniform(self):
         # parent pool has 5 unique values; weights has only 3 -> V1 sets weights
         # to None (uniform). v2 mirrors.

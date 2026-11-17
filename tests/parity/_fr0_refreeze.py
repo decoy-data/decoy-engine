@@ -22,14 +22,23 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine.generation._reproducibility import build_envelope, reproducibility_exclusions
+from tests._lenient_checks import lenient_generate_checks_lifted
 from tests.parity import _f0_fixtures as fx
 from tests.parity import _fr0_semantic_gate as gate
 from tests.parity._f0_canonical import table_fingerprint
 
-RE_FROZEN_ON = "2026-11-08"
+RE_FROZEN_ON = "2026-11-13"
 # Fixtures whose checked-in digest moved in the latest re-freeze, and why. `nulls` moved twice;
 # its previous digests are those of the 2026-10-18 re-freeze.
 REFROZEN: dict[str, dict[str, Any]] = {
+    "formula": {
+        "reason": (
+            "2026-11-13: the `bad` column (`undefined_name + 1`, refused at compile) was removed from the fixture because an unevaluable formula now fails the run instead of writing nulls; every other column digest is unchanged"
+        ),
+        "previous_tables": {
+            "formula": "1e934ccf90c1bc2211fdfe9f6171fdde380146d65a8f0d10aefe274e312dfdcb"
+        },
+    },
     "sequence": {
         "reason": (
             "schema only: unformatted sequence and numeric faker columns now declare int64 instead of string; every cell prints as the same text and every null stays at the same row"
@@ -40,7 +49,7 @@ REFROZEN: dict[str, dict[str, Any]] = {
     },
     "live_faker": {
         "reason": (
-            "schema only: unformatted sequence and numeric faker columns now declare int64 instead of string; every cell prints as the same text and every null stays at the same row"
+            "schema only: unformatted sequence and numeric faker columns now declare int64 instead of string; every cell prints as the same text and every null stays at the same row; 2026-11-10: the `fallback` column (an unknown faker type, now refused at compile) was removed from the fixture"
         ),
         "previous_tables": {
             "live": "8aba04ab3f97f3d163a41609c45e4cad07b93e724a9fddf4b5d199240a2e83b7"
@@ -114,7 +123,7 @@ def g_pooled(t: dict[str, pa.Table]) -> None:
 
 
 def g_live_faker(t: dict[str, pa.Table]) -> None:
-    for name in ("city", "email", "de_name", "fallback", "opt_out"):
+    for name in ("city", "email", "de_name", "opt_out"):
         assert all(isinstance(v, str) and v for v in _col(t, "live", name))
     assert all("@" in v for v in _col(t, "live", "email"))
     assert all(5 <= int(v) <= 9 for v in _col(t, "live", "num"))
@@ -151,6 +160,23 @@ def g_nulls_large(t: dict[str, pa.Table]) -> None:
     gate.check_marginal(_col(t, "nulls", "cat_partial"), ["u", "v"])
 
 
+def g_source_free(t: dict[str, pa.Table]) -> None:
+    table = t["source_free"]
+    types = {f.name: f.type for f in table.schema}
+    assert types == {
+        "country": pa.string(),
+        "age": pa.float64(),
+        "score": pa.float64(),
+        "visits": pa.float64(),
+        "rank": pa.float64(),
+    }
+    assert set(_col(t, "source_free", "country")) <= {"US", None}
+    assert all(18 <= v <= 90 for v in _col(t, "source_free", "age"))
+    assert all(0 <= v <= 1 for v in _col(t, "source_free", "score"))
+    assert all(v is None or 0 <= v <= 20 for v in _col(t, "source_free", "visits"))
+    assert all(1 <= v <= 40 for v in _col(t, "source_free", "rank"))
+
+
 def g_reference(t: dict[str, pa.Table]) -> None:
     child, parent = t["ref_child"], t["ref_parent"]
     for col in ("r_random", "r_seq", "r_weighted", "r_bounded"):
@@ -177,7 +203,9 @@ def g_derived(t: dict[str, pa.Table]) -> None:
 
 
 def g_mixed_fk(t: dict[str, pa.Table]) -> None:
-    assert set(_col(t, "people", "id")) <= {"x", "y", "z", "w", "v"}
+    ids = _col(t, "people", "id")
+    assert set(ids) <= set(fx.MIXED_FK_PARENT_KEYS)
+    assert len(set(ids)) == len(ids)
 
 
 def g_composite(table: str) -> Callable[[dict[str, pa.Table]], None]:
@@ -192,6 +220,7 @@ GATES: dict[str, Callable[[dict[str, pa.Table]], None]] = {
     "live_faker_default_locale": g_live_default_locale,
     "keyed_derive": g_keyed,
     "nulls": g_nulls,
+    "source_free": g_source_free,
     "reference": g_reference,
     "referenced_formula": g_referenced_formula,
     "derived": g_derived,
@@ -305,4 +334,7 @@ def build_manifest() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(build_manifest(), indent=2, sort_keys=True))
+    # The goldens pin runtime output for fixtures the strict plan check refuses (`formula`,
+    # `referenced_formula`), so lift the same checks tests/parity/conftest.py lifts.
+    with lenient_generate_checks_lifted():
+        print(json.dumps(build_manifest(), indent=2, sort_keys=True))

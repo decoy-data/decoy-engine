@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine._reference_date import PinnedModeError
 
 PINNED_PLAN_SCHEMA = "pinned-plan/v1"
@@ -169,13 +170,13 @@ def runtime_identity() -> tuple[tuple[str, str], ...]:
     import pandas
     import pyarrow
 
-    import decoy_engine
     from decoy_engine.determinism import SEED_PROTOCOL_VERSION
+    from decoy_engine.release import __version__ as engine_version
 
     return tuple(
         sorted(
             {
-                "engine": str(decoy_engine.__version__),
+                "engine": str(engine_version),
                 "numpy": str(numpy.__version__),
                 "pandas": str(pandas.__version__),
                 "pyarrow": str(pyarrow.__version__),
@@ -197,7 +198,7 @@ def validate_seed(seed: Any) -> int:
 
 
 def _canonical(payload: Any) -> bytes:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return canonical_json_bytes(payload)
 
 
 def fingerprint(plan: PinnedPlan) -> str:

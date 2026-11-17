@@ -12,6 +12,10 @@ Public API:
         derive,
         derive_index,
         derive_value,
+        fresh_seed,
+        resolve_seed,
+        seed_bytes_to_int,
+        COMPOSITE_SEED_WIDTHS,
         Domain,
         IdentityDomain,
         SEED_PROTOCOL_VERSION,
@@ -27,9 +31,8 @@ Source patterns:
 - HKDF-SHA256 (RFC 5869): https://datatracker.ietf.org/doc/html/rfc5869
 - HMAC-SHA256 (RFC 2104): https://datatracker.ietf.org/doc/html/rfc2104
 
-Implementation lives on stdlib `hmac` + `hashlib`; no PyCA `cryptography`
-dependency is added (the engine has an explicit anti-PyCA design choice
-in `transforms/fpe.py` lines 21-23 that this package preserves).
+HKDF is PyCA `cryptography`'s (`_hkdf.py`); the per-source HMAC is stdlib
+`hmac` + `hashlib`.
 """
 
 from __future__ import annotations
@@ -43,8 +46,15 @@ from decoy_engine.determinism._derive import (
     derive_index,
     derive_value,
 )
+from decoy_engine.determinism._seeds import (
+    COMPOSITE_SEED_WIDTHS,
+    fresh_seed,
+    resolve_seed,
+    seed_bytes_to_int,
+)
 
 __all__ = [
+    "COMPOSITE_SEED_WIDTHS",
     "SEED_PROTOCOL_VERSION",
     "DeterminismError",
     "Domain",
@@ -52,4 +62,7 @@ __all__ = [
     "derive",
     "derive_index",
     "derive_value",
+    "fresh_seed",
+    "resolve_seed",
+    "seed_bytes_to_int",
 ]

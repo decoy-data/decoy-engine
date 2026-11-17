@@ -29,8 +29,9 @@ from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
 from decoy_engine.config._pre_scan import canonical_detectors, checked_ner_model, inactive
-from decoy_engine.detection.ner import DEFAULT_NER_MODEL
+from decoy_engine.detection.ner import DEFAULT_NER_MODEL, is_default_ner_model
 from decoy_engine.detection.types import DetectorSource
+from decoy_engine.reasons import ReasonCode
 
 _DISMISSAL_INVALID = str(reasons.config.DISMISSAL_INVALID)
 
@@ -114,7 +115,7 @@ class PostScanConfig(BaseModel):
         data: dict[str, Any] = handler(self)
         if tuple(data.get("detectors", ())) == ("regex",):
             data.pop("detectors", None)
-        if data.get("ner_model") == DEFAULT_NER_MODEL:
+        if is_default_ner_model(data.get("ner_model", "")):
             data.pop("ner_model", None)
         if data.get("ner_findings") == "warn":
             data.pop("ner_findings", None)
@@ -133,3 +134,88 @@ def post_scan_integrity_requested(config: Mapping[str, Any]) -> bool:
     """True when a validated config dict opts in to Post-scan integrity."""
     block = config.get("post_scan")
     return bool(block.get("integrity")) if isinstance(block, Mapping) else False
+
+
+def post_scan_gate_applies(config: Mapping[str, Any]) -> bool:
+    """True when a validated config dict needs the post-scan gate: a relationship is declared or
+    Post-scan integrity is on. The one place that decision is made."""
+    return bool(config.get("relationships")) or post_scan_integrity_requested(config)
+
+
+def post_scan_model_setting(config: Mapping[str, Any]) -> str | None:
+    """The post-scan setting that asks for a model check (`post_scan.detectors` other than
+    regex, or `post_scan.ner_findings: fail`), or `None`. Only an enabled suite asks."""
+    if not post_scan_integrity_requested(config):
+        return None
+    block = config["post_scan"]
+    detectors = block.get("detectors")
+    # Anything other than a list of `regex` entries counts as a model ask: fail closed on a raw dict.
+    if isinstance(detectors, list | tuple):
+        asks = any(d != "regex" for d in detectors)
+    else:
+        asks = detectors is not None and detectors != "regex"
+    if asks:
+        return "post_scan.detectors"
+    return "post_scan.ner_findings" if block.get("ner_findings") == "fail" else None
+
+
+def post_scan_ner_findings(config: Mapping[str, Any]) -> str:
+    """The run's `post_scan.ner_findings` mode, `warn` when unset: what the NER predicate of the
+    verdict and the promotion of NER warnings read."""
+    block = config.get("post_scan")
+    return str(block.get("ner_findings") or "warn") if isinstance(block, Mapping) else "warn"
+
+
+NO_SINK_KIND = "None"
+# The sink classes whose staged output the gate may read back: the reference sink and the
+# isolated child's staging sink, which stages into the same kind of private stage. Any other
+# class, including a subclass, is a foreign producer: its files are never trusted, so it keeps
+# its route and the gate is deferred.
+_READABLE_SINK_KINDS = frozenset(
+    {
+        NO_SINK_KIND,
+        "decoy_engine.execution._transactional_sink.ParquetTransactionalSink",
+        "decoy_engine.execution._isolated_common.StagingSink",
+    }
+)
+
+
+def post_scan_sink_kind(sink: object | None) -> str:
+    """The class token of a sink (`"None"` for no sink): what readability is decided on."""
+    if sink is None:
+        return NO_SINK_KIND
+    cls = type(sink)
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def post_scan_output_readable(sink_kind: str) -> bool:
+    """Whether the gate can read this sink's output back before it commits. No sink is readable:
+    the routes that write none hand their outputs back resident."""
+    return sink_kind in _READABLE_SINK_KINDS
+
+
+def post_scan_resident_reason(config: Mapping[str, Any]) -> ReasonCode | None:
+    """Why a job must stay on the resident route for the post-scan gate, or `None`.
+
+    Only a model check needs resident values (the passes read `TableBatches.resident`); regex
+    integrity and declared keys are judged from batches and staged files. A sink the gate cannot
+    read keeps the route it takes on main and the gate is deferred for it, because a resident run
+    never writes a sink (plan, Foreign sinks)."""
+    if post_scan_model_setting(config) is not None:
+        return reasons.route.POST_SCAN_MODELS_RESIDENT
+    return None
+
+
+def post_scan_sink_refusal(
+    config: Mapping[str, Any], sink_kind: str, *, deferred: bool
+) -> ReasonCode | None:
+    """Why an explicit `post_scan.integrity: true` run must be refused before it starts, or `None`.
+
+    Declared keys alone defer on a sink the gate cannot read (plan, Foreign sinks). The column
+    suite has no report-only fallback that blocks, so integrity with a sink present and either an
+    unreadable sink or a deferred gate refuses, fail closed."""
+    if not post_scan_integrity_requested(config) or sink_kind == NO_SINK_KIND:
+        return None
+    if deferred or not post_scan_output_readable(sink_kind):
+        return reasons.runtime.POST_SCAN_INTEGRITY_SINK_UNREADABLE
+    return None

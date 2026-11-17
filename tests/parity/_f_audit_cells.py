@@ -103,6 +103,43 @@ def cfg_categorical() -> dict[str, Any]:
     )
 
 
+def cfg_constant() -> dict[str, Any]:
+    return fx.config(
+        [
+            _t(
+                "t",
+                40,
+                [
+                    {"name": "k", "type": "constant", "value": "US"},
+                    {"name": "k_m", "type": "constant", "value": 7, "null_probability": 0.3},
+                ],
+            )
+        ]
+    )
+
+
+def cfg_distribution() -> dict[str, Any]:
+    return fx.config(
+        [
+            _t(
+                "t",
+                40,
+                [
+                    {"name": "x", "type": "distribution", "family": "uniform", "low": 1, "high": 9},
+                    {
+                        "name": "x_m",
+                        "type": "distribution",
+                        "family": "uniform",
+                        "low": 0,
+                        "high": 8,
+                        "null_probability": 0.3,
+                    },
+                ],
+            )
+        ]
+    )
+
+
 def _parent(null_probability: float = 0.0) -> dict[str, Any]:
     col: dict[str, Any] = {"name": "k", "type": "categorical", "categories": ["K1", "K2", "K3"]}
     if null_probability:
@@ -222,6 +259,11 @@ def cfg_derived() -> dict[str, Any]:
 def cfg_derived_aggregate() -> dict[str, Any]:
     agg = {"name": "agg", "type": "derived_aggregate", "op": "sum", "column": "fm"}
     return fx.config([_t("t", 40, [_FM, agg])])
+
+
+def cfg_lookup() -> dict[str, Any]:
+    """A shipped code set: the column needs no file, so the cell stays self-contained."""
+    return fx.config([_t("t", 30, [{"name": "x", "type": "lookup", "codeset": "hcpcs"}])])
 
 
 def cfg_fresh() -> dict[str, Any]:
@@ -539,6 +581,12 @@ def _cells(unmarked_windowed: Callable[..., list[Any]]) -> tuple[Cell, ...]:
             {("t", "cat"): "categorical", ("t", "cat_m"): "categorical"},
             mutants=m("categorical"),
         ),
+        Cell("constant", cfg_constant, {("t", "k"): "constant", ("t", "k_m"): "constant"}),
+        Cell(
+            "distribution",
+            cfg_distribution,
+            {("t", "x"): "distribution", ("t", "x_m"): "distribution"},
+        ),
         ref_cell("reference-sequential", "sequential"),
         ref_cell("reference-random", "random"),
         ref_cell("reference-weighted", "weighted"),
@@ -630,6 +678,7 @@ def legacy_cells(unmarked_windowed: Callable[..., list[Any]]) -> tuple[Cell, ...
         Cell("statistical", fx.cfg_statistical, {}, admission_key=("stat", "amount")),
         Cell("grouped-series", fx.cfg_grouped_windowed, {}, admission_key=("gw", "cum")),
         Cell("group-key", fx.cfg_grouped_windowed, {}, admission_key=("gw", "gkey")),
+        Cell("lookup", cfg_lookup, {}, admission_key=("t", "x")),
         Cell(
             "determinism-fresh",
             cfg_fresh,

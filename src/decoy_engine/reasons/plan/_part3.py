@@ -5,19 +5,32 @@ from __future__ import annotations
 from decoy_engine.reasons import _catalog
 
 __all__ = [
+    "CONFIG_VALUE_NOT_JSON",
     "DEDUPE_UNSUPPORTED_TYPE",
     "GENERATE_CATEGORIES_MIXED",
     "GENERATE_COLUMN_FORWARD_REFERENCE",
     "GENERATE_FAKER_KWARGS_UNKNOWN",
     "GENERATE_FAKER_TYPE_UNKNOWN",
     "GENERATE_FORMULA_NAME_UNKNOWN",
+    "GENERATE_FORMULA_NUMBER_USED_AS_TEXT",
     "GENERATE_FORMULA_REFERENCE_MISSING",
     "GENERATE_FORMULA_REFERENCE_UNKNOWN",
     "GENERATE_FORMULA_TEMPLATE_SYNTAX",
     "GENERATE_LOCALE_UNKNOWN",
     "GENERATE_OPTION_INVALID",
     "GROUPED_SERIES_GROUP_BY_EQUALS_ORDER_BY",
+    "LOOKUP_COLUMN_MISSING",
+    "LOOKUP_FILE_EMPTY",
+    "LOOKUP_FILE_FORMAT_UNSUPPORTED",
+    "LOOKUP_FILE_TOO_LARGE",
+    "LOOKUP_FILE_UNREADABLE",
+    "LOOKUP_NOT_PINNED",
+    "LOOKUP_PINNED_DIGEST_MISMATCH",
+    "LOOKUP_TOO_MANY_ENTRIES",
+    "LOOKUP_WEIGHT_INVALID",
+    "PINNED_LOOKUP_UNSUPPORTED",
     "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
+    "RELATIONSHIP_PARENT_NOT_UNIQUE",
     "SORT_UNSUPPORTED_TYPE",
     "STATISTICAL_HIGH_CARDINALITY_REQUIRES_REAL_CATEGORIES",
     "STATISTICAL_HIGH_CARDINALITY_SNAPSHOT_MISMATCH",
@@ -81,6 +94,11 @@ TOP_CODE_INVALID_FLOOR = _d("top_code_invalid_floor", "Top code invalid floor.")
 # Summaries double as the refusal text plan checks show, so they never name a value.
 _d = _catalog.plan("PlanCompileError")
 
+CONFIG_VALUE_NOT_JSON = _d(
+    "config_value_not_json",
+    "A config value has a type JSON cannot hold; quote it as a string.",
+    since="1.27.0",
+)
 GENERATE_CATEGORIES_MIXED = _d(
     "generate_categories_mixed",
     "Generate column categories mix value types.",
@@ -105,6 +123,11 @@ GENERATE_FORMULA_NAME_UNKNOWN = _d(
     "generate_formula_name_unknown",
     "Generate column formula uses a name that is not defined.",
     since="1.13.0",
+)
+GENERATE_FORMULA_NUMBER_USED_AS_TEXT = _d(
+    "generate_formula_number_used_as_text",
+    "A formula uses a number reference as text.",
+    since="1.26.0",
 )
 GENERATE_FORMULA_REFERENCE_MISSING = _d(
     "generate_formula_reference_missing",
@@ -140,4 +163,65 @@ REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
     "reference_weights_length_mismatch",
     "Reference weights count does not match the parent sequence row count.",
     since="1.13.0",
+)
+RELATIONSHIP_PARENT_NOT_UNIQUE = _d(
+    "relationship_parent_not_unique",
+    "A generated relationship parent key is not provably unique.",
+    since="1.25.0",
+)
+
+_d = _catalog.plan("PlanCompileError")
+
+LOOKUP_COLUMN_MISSING = _d(
+    "lookup_column_missing",
+    "Lookup file does not have the value or weight column the generate column names.",
+    since="1.25.0",
+)
+LOOKUP_FILE_EMPTY = _d(
+    "lookup_file_empty",
+    "Lookup file has no entries.",
+    since="1.25.0",
+)
+LOOKUP_FILE_FORMAT_UNSUPPORTED = _d(
+    "lookup_file_format_unsupported",
+    "Lookup file is not a CSV or Parquet file with a value column of a supported type.",
+    since="1.25.0",
+)
+LOOKUP_FILE_TOO_LARGE = _d(
+    "lookup_file_too_large",
+    "Lookup file is larger than the embedded-artifact size cap.",
+    since="1.25.0",
+)
+LOOKUP_FILE_UNREADABLE = _d(
+    "lookup_file_unreadable",
+    "Lookup file could not be read or parsed.",
+    since="1.25.0",
+)
+LOOKUP_NOT_PINNED = _d(
+    "lookup_not_pinned",
+    "A lookup file named by the plan's configuration is not among its pinned lookups.",
+    since="1.25.0",
+)
+LOOKUP_PINNED_DIGEST_MISMATCH = _d(
+    "lookup_pinned_digest_mismatch",
+    "A pinned lookup file does not match its recorded sha256.",
+    since="1.25.0",
+)
+LOOKUP_TOO_MANY_ENTRIES = _d(
+    "lookup_too_many_entries",
+    "Lookup file has more entries than the 1,000,000 entry cap.",
+    since="1.25.0",
+)
+LOOKUP_WEIGHT_INVALID = _d(
+    "lookup_weight_invalid",
+    "Lookup file has a weight that is not a finite number of at least zero, or no positive total.",
+    since="1.25.0",
+)
+
+_d = _catalog.plan("PinnedModeError")
+
+PINNED_LOOKUP_UNSUPPORTED = _d(
+    "pinned_lookup_unsupported",
+    "Lookup columns are not available in pinned mode.",
+    since="1.25.0",
 )

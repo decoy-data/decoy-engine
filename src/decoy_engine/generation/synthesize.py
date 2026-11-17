@@ -37,13 +37,20 @@ import pyarrow as pa
 from faker import Faker
 
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._numeric_typing import numeric_plan, restore_declared
+from decoy_engine.generation._numeric_typing import numeric_plan, reader_types, restore_declared
 from decoy_engine.generation._statistical_column import (
     arrow_table,
     statistical_generate,
     warn_on_unseen_parents,
 )
 from decoy_engine.generation._synthesize_derived import _derived_generate, _formula, _reference
+from decoy_engine.generation.kinds import (
+    LookupList,
+    constant_values,
+    lookup_digests,
+    parametric_values,
+)
+from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
@@ -90,6 +97,7 @@ def _generate_tables_from_config(
     snapshot_artifacts: list[dict[str, Any]] | None = None,
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None = None,
     reference_fanouts: dict[tuple[str, str], FanoutSpec] | None = None,
+    lookup_lists: dict[tuple[str, str], LookupList] | None = None,
     on_warning: Callable[[QualityWarning], None] | None = None,
 ) -> dict[str, pa.Table]:
     """The actual generation logic, over a plain config dict recovered
@@ -107,6 +115,8 @@ def _generate_tables_from_config(
     custom faker providers against the live registry exactly as before.
     ``reference_fanouts`` is ``{(table_name, column_name): FanoutSpec}`` decoded from the
     pinned snapshot bytes; a ``distribution: fitted`` reference column reads only this.
+    ``lookup_lists`` is ``{(table_name, column_name): LookupList}`` parsed from the plan's pinned
+    lookup bytes (or a shipped code set); a ``lookup`` column reads only this, never its ``file``.
     ``on_warning`` receives each fidelity-gate ``QualityWarning`` as it is raised; it never
     changes the generated tables.
     """
@@ -128,6 +138,7 @@ def _generate_tables_from_config(
     # Parents-before-children, ties by declaration and first-reference order (never a `set`).
     ordered = [name for name, _parents in generation_order(config)]
     numeric = numeric_plan(config, provider_snapshot=provider_snapshot)
+    types = reader_types(config, provider_snapshot=provider_snapshot)
     pools: dict[str, pa.Table] = {}
     out: dict[str, pa.Table] = {}
     for name in ordered:
@@ -172,6 +183,7 @@ def _generate_tables_from_config(
                     provider_snapshot=provider_snapshot,
                     numeric_type=numeric.get((name, col["name"])),
                     reference_fanouts=reference_fanouts,
+                    lookup_lists=lookup_lists,
                 )
                 warn_on_unseen_parents(
                     col,
@@ -194,8 +206,8 @@ def _generate_tables_from_config(
                 fill_referenced_formula_columns,
             )
 
-            fill_referenced_formula_columns(gcols, data, seed, derive_key, table_name=name)
-        tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs)
+            fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
+        tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
         # Generation-time fidelity warn-gate (deferred follow-up 5,
         # 2026-06-12): score statistical columns against their source
         # snapshot and warn below global_settings.fidelity_warn_threshold.
@@ -305,6 +317,7 @@ def _generate_column(
     pinned: bool = False,
     numeric_type: pa.DataType | None = None,
     reference_fanouts: dict[tuple[str, str], FanoutSpec] | None = None,
+    lookup_lists: dict[tuple[str, str], LookupList] | None = None,
 ) -> list[Any]:
     """Dispatch a generate column to its generator by ``type`` (mirrors V1
     ``ColumnGenerator.generators``), then apply the V1 ``null_probability``
@@ -337,6 +350,18 @@ def _generate_column(
         else:
             # The non-fitted call keeps its five-argument shape: parity tests wrap `_reference`.
             values = _reference(col, n, seed, derive_key, pools or {})
+    elif kind == "constant":
+        values = constant_values(col, n)
+    elif kind == "distribution":
+        values = parametric_values(
+            col,
+            n,
+            GenDeriveContext.for_column(
+                derive_key=derive_key, column_config=col, fallback_seed=seed
+            ),
+        )
+    elif kind == "lookup":
+        values = lookup_column_values(col, n, seed, derive_key, table_name, lookup_lists)
     elif kind == "statistical":
         values = statistical_generate(
             col, n, seed, derive_key, generated or {}, table_name, statistical_specs or {}
@@ -370,20 +395,17 @@ def _generate_column(
     # for_column from trying to open that string as a file. The ordinary path passes None and
     # derives the null seed exactly as before.
     pinned_spec = (statistical_specs or {}).get((table_name, str(col.get("name"))))
-    digest = (
-        f"sha256:{pinned_spec.snapshot_digest}"
-        if pinned
-        and kind == "statistical"
-        and pinned_spec is not None
-        and pinned_spec.snapshot_digest
-        else None
-    )
+    digests: dict[tuple[str, str], str] | None = None
+    if pinned and kind == "statistical" and pinned_spec is not None and pinned_spec.snapshot_digest:
+        digests = {("statistical", "snapshot_file"): f"sha256:{pinned_spec.snapshot_digest}"}
     if kind == "reference" and col.get("distribution") == "fitted":
         # The null mask derives its seed through `for_column` too; the pinned digest keeps
         # it from reopening `snapshot_file`. A missing spec already raised in `_reference`.
         fanout = (reference_fanouts or {}).get((table_name, str(col.get("name"))))
-        digest = fanout.seed_digest if fanout is not None else None
-    return _apply_null_probability(values, col, seed, derive_key, snapshot_content_digest=digest)
+        digests = {("reference", "snapshot_file"): fanout.seed_digest} if fanout else None
+    elif kind == "lookup":
+        digests = lookup_digests(col, (lookup_lists or {}).get((table_name, str(col.get("name")))))
+    return _apply_null_probability(values, col, seed, derive_key, content_digests=digests)
 
 
 def _sequence(col: dict[str, Any], n: int, numeric: bool = False) -> list[Any]:
@@ -520,7 +542,7 @@ def _apply_null_probability(
     seed: int,
     derive_key: Any = None,
     *,
-    snapshot_content_digest: str | None = None,
+    content_digests: dict[tuple[str, str], str] | None = None,
 ) -> list[Any]:
     """Apply V1's ``null_probability`` post-process (``columns.py:174-187``): per-row
     seeded coin-flip; same column + same row -> same null/non-null decision across
@@ -541,12 +563,12 @@ def _apply_null_probability(
     # identical null PATTERN (same seed, same N) so a null-prob column is
     # byte-identical V1<->V2, closing the pre-fix divergence the parity
     # oracle previously tolerated as fraction-only convergence.
-    # A caller-supplied digest replaces the snapshot_file read inside for_column.
+    # Caller-supplied digests replace the file read inside for_column.
     col_seed = GenDeriveContext.for_column(
         derive_key=derive_key,
         column_config=col,
         fallback_seed=seed,
-        snapshot_content_digest=snapshot_content_digest,
+        content_digests=content_digests,
     ).base_int("np")
     out = list(values)
     null_mask = np.random.default_rng(col_seed).random(len(out)) < null_prob

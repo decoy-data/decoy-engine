@@ -17,6 +17,7 @@ import pytest
 from scripts.release.reason_manifest_policy import append_only_violations
 
 from decoy_engine import reasons
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME, RETIRED_PATTERN
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "f29"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sentry"))
@@ -475,4 +476,261 @@ def test_joint_cap_codes_are_registered_with_a_pinned_fixture() -> None:
         ("warning", "seed_ignored_with_master_key"),
     ]
     assert pinned["registry_version"] == "1.22.0"
-    assert reasons.REGISTRY_VERSION == "1.22.0"
+    assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 22, 0)
+
+
+GEN_TYPES_FIXTURE = "reason-manifest-v1.23-gen-types.json"
+
+
+def test_gen_types_e2_codes_are_registered_with_a_pinned_fixture() -> None:
+    """GEN-TYPES E2: two output-type codes and the boolean kernel's value failure, all `since` 1.23.0."""
+    expected = [
+        ("config", "generate_output_type_unsupported", "PipelineValidationError"),
+        ("runtime", "declared_boolean_invalid", "decoy_engine.declared_casting"),
+        ("runtime", "output_type_cast_failed", "ExecutionError"),
+    ]
+    for ns, code, owner in expected:
+        spec = reasons.find(ns, code)
+        assert spec is not None
+        assert (spec.owner, spec.since) == (owner, "1.23.0")
+        assert not re.search(r"[{}%]", spec.summary)
+        assert getattr(getattr(reasons, ns), code.upper()) == code
+    pinned = _load(GEN_TYPES_FIXTURE)
+    assert sorted((e["namespace"], e["code"]) for e in pinned["entries"]) == sorted(
+        (n, c) for n, c, _ in expected
+    )
+    assert pinned["registry_version"] == "1.23.0"
+    assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 23, 0)
+
+
+def test_f22_publication_codes_are_registered_pending() -> None:
+    """F22 publication: the thirteen `decoy` publication outcome codes, pending release."""
+    codes = (
+        "publication_attempt_aborted",
+        "publication_attempt_sealed",
+        "publication_commit_in_progress",
+        "publication_commit_not_visible",
+        "publication_commit_uncertain",
+        "publication_lock_timeout",
+        "publication_lock_unavailable",
+        "publication_operation_conflict",
+        "publication_recovery_in_progress",
+        "publication_target_occupied",
+        "publication_vault_conflict",
+        "publication_vault_mismatch",
+        "publication_write_in_progress",
+    )
+    # The file-access errors raise the lock and durability codes, so `fileaccess` owns them.
+    fileaccess = {
+        "publication_commit_uncertain",
+        "publication_lock_timeout",
+        "publication_lock_unavailable",
+    }
+    for code in codes:
+        spec = reasons.find("decoy", code)
+        assert spec is not None
+        owner = "decoy_engine.fileaccess" if code in fileaccess else "decoy_engine.publication"
+        assert (spec.owner, spec.since) == (owner, "1.29.0")
+        assert not re.search(r"[{}%]", spec.summary)
+        assert getattr(reasons.decoy, code.upper()) == code
+
+
+FPE_FALLBACKS_FIXTURE = "reason-manifest-v1.24-fpe-fallbacks.json"
+
+
+def test_fpe_handler_fallback_codes_are_registered_with_a_pinned_fixture() -> None:
+    """The FPE handler's two default codes resolve in the registry, `since` 1.24.0."""
+    from decoy_engine.errors import FpeChecksumError, FpeUnencryptableError
+    from decoy_engine.execution._strategies._fpe import (
+        strategy_code_for_checksum,
+        strategy_code_for_unencryptable,
+    )
+
+    expected = [
+        ("runtime", "fpe_checksum_unsupported", "FPE_CHECKSUM_UNSUPPORTED_STRATEGY"),
+        ("runtime", "fpe_unencryptable_value", "FPE_UNENCRYPTABLE_VALUE"),
+    ]
+    for ns, code, symbol in expected:
+        spec = reasons.find(ns, code)
+        assert spec is not None
+        assert (spec.owner, spec.since, spec.symbol) == ("StrategyError", "1.24.0", symbol)
+        assert not re.search(r"[{}%]", spec.summary)
+        assert getattr(getattr(reasons, ns), symbol) == code
+    assert strategy_code_for_unencryptable(FpeUnencryptableError("x")) == "fpe_unencryptable_value"
+    assert strategy_code_for_checksum(FpeChecksumError("x", scheme="luhn")) == (
+        "fpe_checksum_unsupported"
+    )
+    pinned = _load(FPE_FALLBACKS_FIXTURE)
+    assert sorted((e["namespace"], e["code"]) for e in pinned["entries"]) == sorted(
+        (n, c) for n, c, _ in expected
+    )
+    assert pinned["registry_version"] == "1.24.0"
+    assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 24, 0)
+
+
+def test_scanml_m5_route_refusal_is_registered_as_pending() -> None:
+    """SCAN-ML M5: one route refusal owned by PostScanRouteError, stamped at 1.25.0."""
+    spec = reasons.find("route", "post_scan_models_unsupported")
+    assert spec is not None
+    assert (spec.owner, spec.since, spec.kind.value) == (
+        "PostScanRouteError",
+        "1.25.0",
+        "failure",
+    )
+    assert not re.search(r"[{}%]", spec.summary)
+    assert reasons.route.POST_SCAN_MODELS_UNSUPPORTED == "post_scan_models_unsupported"
+
+
+def test_scanml_m4_post_scan_block_is_registered_in_1_29() -> None:
+    """SCAN-ML M4: one post-scan block owned by PostScanBlockedError, stamped at 1.29.0."""
+    spec = reasons.find("post_scan", "ner_blocked")
+    assert spec is not None
+    assert (spec.owner, spec.since, spec.kind.value) == (
+        "PostScanBlockedError",
+        "1.29.0",
+        "failure",
+    )
+    assert not re.search(r"[{}%]", spec.summary)
+    assert reasons.post_scan.NER_BLOCKED == "ner_blocked"
+
+
+def _blocked_report(**parts: object) -> dict[str, object]:
+    return {
+        "schema_version": "post-scan-integrity/v3",
+        "residual_pii": [],
+        "fk_preservation": [],
+        "policy_validation": [],
+        **parts,
+    }
+
+
+def _blocked_key(code: str, status: str, baseline: str) -> dict[str, object]:
+    return {
+        "kind": "primary",
+        "status": status,
+        "baseline": baseline,
+        "codes": [{"namespace": "post_scan", "code": code}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        (
+            _blocked_report(
+                keys=[_blocked_key("key_column_missing", "key_column_missing", "not_run")]
+            ),
+            "post_scan.key_column_missing",
+        ),
+        (
+            _blocked_report(
+                residual_pii=[{"table": "t", "column": "c", "detector_id": "d", "severity": "fail"}]
+            ),
+            "post_scan.finding_blocked",
+        ),
+        (_blocked_report(pass_failed_with="TypeError"), "post_scan.check_error"),
+    ],
+)
+def test_a_post_scan_blocked_error_is_classified_by_its_first_blocking_code(
+    report: dict[str, object], expected: str
+) -> None:
+    import pickle
+
+    from decoy_engine.reason_adapter import reason_from_exception
+    from decoy_engine.verification.postmask import PostScanBlockedError
+
+    error = PostScanBlockedError(report)
+    for subject in (error, pickle.loads(pickle.dumps(error))):  # noqa: S301
+        record = reason_from_exception(subject)
+        assert f"{record.namespace}.{record.code}" == expected
+
+
+def test_a_post_scan_blocked_error_blocked_only_by_an_ner_row_is_ner_blocked() -> None:
+    import inspect
+
+    from decoy_engine.reason_adapter import reason_from_exception
+    from decoy_engine.verification.postmask import PostScanBlockedError, post_scan_verdict
+
+    assert "ner_findings" in inspect.signature(post_scan_verdict).parameters
+    row = {"table": "t", "column": "c", "detector_id": "person_name", "severity": "fail"}
+    report = _blocked_report(residual_pii=[{**row, "source": "ner"}])
+    error = PostScanBlockedError(report, post_scan_verdict(report, ner_findings="fail"))
+    assert error.code == "ner_blocked"
+    assert str(error) == reasons.get("post_scan", "ner_blocked").summary
+    record = reason_from_exception(error)
+    assert (record.namespace, record.code) == ("post_scan", "ner_blocked")
+
+
+def test_a_post_scan_blocked_error_whose_only_code_is_not_in_the_registry_is_unregistered() -> None:
+    from decoy_engine.reason_adapter import reason_from_exception
+    from decoy_engine.reasons import ReasonRef
+    from decoy_engine.verification.postmask import PostScanBlockedError, PostScanVerdict
+
+    unknown = ReasonRef("post_scan", "not_a_registered_code")
+    assert reasons.find("post_scan", unknown.code) is None
+    error = PostScanBlockedError(_blocked_report(), PostScanVerdict(True, (unknown,), ()))
+    assert error.code is None
+    record = reason_from_exception(error)
+    assert (record.namespace, record.code) == ("decoy", "unregistered_reason")
+
+
+def test_gen_types_e3_codes_are_registered() -> None:
+    """GEN-TYPES E3: nine `lookup_*` plan codes and the pinned-mode refusal, all stamped at 1.25.0."""
+    expected = [
+        ("plan", "lookup_column_missing", "PlanCompileError"),
+        ("plan", "lookup_file_empty", "PlanCompileError"),
+        ("plan", "lookup_file_format_unsupported", "PlanCompileError"),
+        ("plan", "lookup_file_too_large", "PlanCompileError"),
+        ("plan", "lookup_file_unreadable", "PlanCompileError"),
+        ("plan", "lookup_not_pinned", "PlanCompileError"),
+        ("plan", "lookup_pinned_digest_mismatch", "PlanCompileError"),
+        ("plan", "lookup_too_many_entries", "PlanCompileError"),
+        ("plan", "lookup_weight_invalid", "PlanCompileError"),
+        ("plan", "pinned_lookup_unsupported", "PinnedModeError"),
+    ]
+    for ns, code, owner in expected:
+        spec = reasons.find(ns, code)
+        assert spec is not None
+        assert (spec.owner, spec.since) == (owner, "1.25.0")
+        assert not re.search(r"[{}%]", spec.summary)
+        assert getattr(getattr(reasons, ns), code.upper()) == code
+    assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 24, 0)
+
+
+# The two route tombstones removed before GA (one-time exception to the append-only rule).
+REMOVED_ROUTE_CODES = (f"run_{RETIRED_NAME}_requested", f"run_{RETIRED_NAME}")
+REMOVED_IDS = ["requested-check", "resident-output"]
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_removed_route_codes_no_longer_resolve(code: str) -> None:
+    assert reasons.find("route", code) is None
+
+
+def test_no_registered_reason_carries_the_retired_name() -> None:
+    for entry in reasons.manifest()["entries"]:
+        for field in ("code", "summary", "owner", "symbol"):
+            assert not RETIRED_PATTERN.search(str(entry[field])), (entry["namespace"], field)
+
+
+def _record_naming(namespace: str, code: str) -> dict[str, object]:
+    payload = reasons.ReasonRecord.for_reason(reasons.runtime.MISSING_MASK_SECRET).to_payload()
+    return {**payload, "registry_version": "1.29.0", "namespace": namespace, "code": code}
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_a_record_naming_a_removed_code_reads_as_an_unknown_reason(code: str) -> None:
+    record, written = reasons.ReasonRecord.parse_payload(_record_naming("route", code))
+    assert (record.namespace, record.code) == ("decoy", "unknown_reason_from_future")
+    assert record.context.original_identity == ("route", code)
+    assert written == "1.29.0"
+
+
+def test_a_malformed_identity_beside_a_removed_code_is_dropped() -> None:
+    for namespace, code in (
+        ("route\n", REMOVED_ROUTE_CODES[0]),
+        ("route", REMOVED_ROUTE_CODES[1] + "\n"),
+    ):
+        record, _ = reasons.ReasonRecord.parse_payload(_record_naming(namespace, code))
+        assert record.code == "unknown_reason_from_future"
+        assert record.context.original_identity is None

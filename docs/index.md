@@ -10,6 +10,7 @@ New to Decoy? Start with the quickstart, then the recipes.
 - [Recipes](recipes.md): five runnable recipes (CSV, folder + FKs, generate, detect PII, CI).
 - [Strategy catalog](strategies.md): every mask and generation strategy.
 - [Free-text NER](guides/free-text-ner.md): activating spaCy person-name/location detection on `text_redact`.
+- [Unique generated columns](guides/generate-uniqueness.md): `unique`, `unique_together` and `pooled` on generate columns; the domain checks and refusal codes.
 - [Relationships](relationships.md): foreign-key and referential-integrity preservation.
 - [Declared parsing, casting and quarantine](declared-casting.md): per-column parse formats, sentinels, error policies and output formats.
 - [Determinism](determinism.md): the seed and key protocol; what is and is not deterministic.
@@ -58,6 +59,8 @@ link to GitHub rather than into the rendered API reference.
 - [Execution backends and route coverage](execution-backends.md): which backend (compiled Rust, Arrow, or Python) computes each masking strategy per route, and where a shape is declined with a caller-visible reason; generation is Python/NumPy by design.
 - [Reason codes and progress events](reasons.md): the versioned reason registry, retry classes, outcome categories and the version-1 progress event schema.
 - [Compatibility contract](compatibility-contract.md): the frozen public surface and what changing it means.
+- [Frozen surfaces](frozen-surfaces.md): each frozen surface with the code that owns it and the test that pins it.
+- [Output publication](publication.md): how output directories are created, staged and bound, and what the engine promises about them.
 - [Supported production matrix](native/supported-matrix.md): supported Python/OS/arch combinations for the core, the compiled native companion's prebuilt wheels, and the official production image.
 
 ## Development & planning
@@ -66,6 +69,7 @@ link to GitHub rather than into the rendered API reference.
 - [SBOM](sbom.md): generating the CycloneDX SBOM for the engine wheel.
 - [License policy](license-policy.md): allowed licenses, named exceptions, and how NOTICE is generated and checked.
 - Engine-scoped implementation plans, decision records, and the findings register live in `docs/plans/`, `docs/decisions/`, and `docs/remediation-source.md` (working docs, not guides).
+- The V1 QA checklist (expected behaviour and checks per engine area, no results) lives in `docs/qa/`; start at `docs/qa/README.md`.
 - Shipped-work history (sprint plans, review snapshots, superseded design discussions) is kept in `docs/archive/` for context; see `docs/archive/README.md`. None of it is current how-to guidance.
 
 ---
@@ -80,6 +84,7 @@ quickstart
 recipes
 strategies
 guides/free-text-ner
+guides/generate-uniqueness
 relationships
 determinism
 cli
@@ -96,6 +101,8 @@ capability-matrix
 distribution-integrity/index
 execution-backends
 compatibility-contract
+frozen-surfaces
+publication
 native/supported-matrix
 ```
 

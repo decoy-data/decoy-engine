@@ -110,9 +110,9 @@ ORACLE = [
         (K("t", "a", "hash"),),
     ),
     (
-        "generate table with keyed columns still skipped",
+        "raw dict holding both kinds still walks its mask columns",
         _cfg(_col("a", "hash"), generate_columns=[{"name": "n", "type": "int"}]),
-        (),
+        (K("t", "a", "hash"),),
     ),
     (
         "config order across tables and columns",

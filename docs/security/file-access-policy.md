@@ -7,7 +7,7 @@ tables, corpora, secrets, vaults, quarantine sidecars, target directories. This 
 contract for an integrator (the platform, a service, a test harness) that must decide which of
 those files an engine call may touch. Plan and build record:
 [plan](https://github.com/louiskeep/decoy-engine/blob/main/docs/plans/2026-10-02-file-access-authz-engine-platform.md),
-[E1 build record](../records/2026-10-07-file-access-e1-build.md).
+E1 build record (`docs/records/2026-10-07-file-access-e1-build.md`).
 
 ## The guarantee
 
@@ -50,7 +50,7 @@ a time can wrap its call so a denial names the field.
 
 A policy decides `FileRequest(role, access, locator, field_key)`:
 
-- `role` says what the file is for (`SOURCE`, `REFERENCE`, `CORPUS`, `SNAPSHOT`, `SECRET`, `VAULT`,
+- `role` says what the file is for (`SOURCE`, `REFERENCE`, `CORPUS`, `SNAPSHOT`, `LOOKUP`, `SECRET`, `VAULT`,
   `CONFIG`, `QUARANTINE_OUTPUT`, `TARGET_OUTPUT`, and the directory roles `CUSTOM_PROVIDER_ROOT`,
   `MODEL_PACK_ROOT` and `DISGUISE_ROOT`).
 - `locator` is the bare string from the config, scheme already stripped (`customer:` and `file:`).

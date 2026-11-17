@@ -8,6 +8,7 @@ generation code, so a green test says the refactors moved no byte of old-input o
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from typing import Any
 
@@ -24,7 +25,9 @@ def _base(tables: list[dict[str, Any]]) -> dict[str, Any]:
         "global_settings": {"seed": 4242},
         "sources": {},
         "tables": tables,
-        "targets": {t["name"]: {"type": "file", "format": "csv", "path": "o.csv"} for t in tables},
+        "targets": {
+            t["name"]: {"type": "file", "format": "csv", "path": f"{t['name']}.csv"} for t in tables
+        },
     }
 
 
@@ -78,7 +81,12 @@ CORPUS: dict[str, dict[str, Any]] = {
                         "type": "faker",
                         "faker_type": "pyint",
                     },
-                    {"name": "f", "type": "formula", "formula": "id + score"},
+                    {
+                        "name": "f",
+                        "type": "formula",
+                        "formula": "score * 2",
+                        "references": ["score"],
+                    },
                 ],
             }
         ]
@@ -180,6 +188,9 @@ CORPUS: dict[str, dict[str, Any]] = {
 
 def digests(name: str) -> dict[str, Any]:
     cfg = PipelineConfig.model_validate(CORPUS[name]).model_dump()
+    # The pinned plan bytes embed the targets as captured, one shared path; the corpus now
+    # validates with one path per table, so the pre-DUP-DEST spelling is restored here.
+    cfg["targets"] = {n: {**t, "path": "o.csv"} for n, t in cfg["targets"].items()}
     plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
     tables = generate_tables(plan)
     cells = hashlib.sha256()
@@ -203,3 +214,15 @@ def digests(name: str) -> dict[str, Any]:
 
 def corpus_digests() -> dict[str, dict[str, Any]]:
     return {name: digests(name) for name in CORPUS}
+
+
+# The pre-GEN-STRICT input: a formula that reads siblings it does not list in `references`
+# writes a null column. The plan check now refuses it, so its run-time bytes are pinned under
+# `lenient_generate_checks`, beside the valid spelling above.
+_UNLISTED = copy.deepcopy(CORPUS["all_basic_types"])
+_UNLISTED["tables"][0]["generate_columns"][-1] = {
+    "name": "f",
+    "type": "formula",
+    "formula": "id + score",
+}
+CORPUS["all_basic_types_unlisted_formula"] = _UNLISTED

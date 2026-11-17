@@ -44,12 +44,12 @@ partitionable.
 
 ## Summary
 
-- 38 catalogued draw sites (plus 43 mirror call sites: the pandas substrate,
+- 42 catalogued draw sites (plus 43 mirror call sites: the pandas substrate,
   the out-of-core batched path, the delegation handlers, and the 9 identifier
   provider adapters).
-- 23 partitionable, 15 not.
-- Family breakdown: `source_keyed_hmac` 15, `numpy_pcg64` 8, `faker_seed_instance`
-  5, `python_mt19937` 6, `per_row_reseed` 2, `per_group_stream` 1,
+- 23 partitionable, 19 not.
+- Family breakdown: `source_keyed_hmac` 15, `numpy_pcg64` 11, `faker_seed_instance`
+  5, `python_mt19937` 7, `per_row_reseed` 2, `per_group_stream` 1,
   `gen_derive_context` 1.
 - GP2 (2026-09-17) added `gen.faker_pool_build` / `gen.faker_pool_selection`: a
   generation-local pool bridge for a closed allowlist of scalar `faker_type`
@@ -108,15 +108,17 @@ emitted as `.hex()[:truncate]`. Joinability-preserving. Null/NaN rows emit null
 and consume no derivation.
 
 ### mask.tokenize
-`execution/_strategies/_tokenize.py:126` (MG-5 reversible tokenization). V0 is
+`execution/_strategies/_tokenize.py:124` (MG-5 reversible tokenization). V0 is
 string-only: a coded, value-free `tokenize_requires_string_dtype` preflight rejects
 any source column that is not string/object dtype, which sidesteps every OTHER
 `mask.hash` canonicalization branch (int-null-widening, float, tz-naive datetime)
 entirely -- none of those dtypes ever reaches this handler. Within that string-only
 domain, the fresh surrogate is drawn from an NFC-normalized value, like `mask.hash`'s
 own string branch (`_canonicalize_source`), not a raw `str(value)`:
-`derive(mask_key, namespace, nfc_normalize(str(value)).encode())`, emitted as
-`'tok_' + .hex()[:32]`. The `(plaintext, token)` pair -- `plaintext` is the SAME
+`derive(K_tok, namespace, nfc_normalize(str(value)).encode())`, emitted as
+`'tok_' + .hex()[:32]`, where `K_tok = derive(mask_key, namespace, b'tokenize-key/v1'
+|| len(scope) || scope)` binds the vault's own `derivation_scope` (B-6 D2: two vaults
+tokenize apart, and a token payload is never a `mask.hash` output). The `(plaintext, token)` pair -- `plaintext` is the SAME
 NFC-normalized string the token derives from -- is then recorded in the platform
 token vault; the vault is EXTERNAL STATE and its `lookup_existing` may override the
 freshly drawn token with a previously stored one (the vault is the identity
@@ -144,11 +146,10 @@ A keyed bijection (reversible) under the deployable profile's domain floor
 Out-of-core mirror at `_mask_group_b.py:132`.
 
 ### mask.date_shift
-`transforms/date_shift.py:120`. Keyed path:
-`min_days + (HMAC-SHA256(column_key, value)[:8] % range_size)`. The execution
-handler derives the column key via `derive(mask_key, namespace, value)`
-(`execution/_strategies/_date_shift.py:198`). Legacy no-key configs fall back to
-`md5(value)` (`transforms/date_shift.py:108`), preserved for reproducibility.
+`execution/_strategies/_date_shift.py:303`.
+`min_days + (derive(mask_key, namespace, value)[:8] % range_size)`, an
+HKDF-then-HMAC-SHA256 keyed offset. The mask key is the admitted secret; there
+is no key-free path.
 
 ### mask.bucket_perturb
 `transforms/bucket_perturb.py:119`. `derive(job_seed, namespace, _canonicalize_source(value_str))`
@@ -243,7 +244,7 @@ valid `derive` IKM lengths. Wired into output via the provider registry
 
 ---
 
-## Family: numpy_pcg64 (8 sites)
+## Family: numpy_pcg64 (11 sites)
 
 Draws from a `numpy.random.Generator` (`default_rng`, PCG64). Most are
 whole-column vector draws and are therefore NOT partitionable. The exception is
@@ -288,6 +289,13 @@ mirror at `generators/columns.py:221`.
 Numeric, categorical, and datetime samplers all draw whole-column vectors
 (`:141`, `:266`, `:386`). NOT partitionable.
 
+### gen.distribution
+`generation/kinds/_parametric.py:67`. `default_rng(base_int("dist"))` then, per batch,
+`random(size)` (uniform), scaled and shifted by separate ufuncs so there is no fused multiply-add,
+with an optional `np.clip` to `min`/`max`. The `dist` family is separate
+from `np` so the value stream never shares uniforms with `gen.null_probability`. Draws of sizes
+k and n-k concatenate to one draw of n, so batching does not change values. NOT partitionable.
+
 ### gen.pool_nondeterministic
 `generation/pool/_sampler.py:122`.
 `np.random.default_rng(int.from_bytes(seed, "big"))` then
@@ -319,7 +327,24 @@ before sampling. Build-side, not per output row. Mirrors: `_name_email.py:134`,
 
 ---
 
-## Family: python_mt19937 (6 sites)
+### mask.joint_mask_null_fallback
+`transforms/joint_mask.py:376`. In mask mode a row whose `key_by` value is null has no key to
+select by, so it draws a reference row index from one seeded stream: `default_rng(seed)
+.integers(0, row_count)` per null row, in row order. The seed is
+`seed_bytes_to_int(derive(mask_key, namespace or "joint_mask", source)[:8])` with
+`source = b"joint_mask/null_fallback/v1" + lp(table) + lp(reference) + lp("\x1f".join(columns))`
+and `lp` a 4-byte big-endian length followed by UTF-8. Each group (table, reference, target
+columns) walks its own stream. NOT partitionable: the draws are positional across the null rows.
+Non-null keys select by `mask.joint_mask_keyed_row` and draw nothing here.
+
+### mask.joint_mask_gen_row
+`transforms/joint_mask.py:415`. In gen mode every row draws its reference row index independent of
+the source: `default_rng(seed).integers(0, row_count, size=n)`, seeded like the null fallback with
+the label `b"joint_mask/gen_row/v1"`. NOT partitionable (one positional stream per group). Gen mode
+runs only on the whole-frame route: `joint_mask` is a cross-row strategy that the chunked and
+out-of-core routes decline.
+
+## Family: python_mt19937 (7 sites)
 
 Draws from a stdlib `random.Random`. All three advance one stream across the
 column (whole-column `choices(k=n)` or a per-row `choice`/`choices` loop on a
@@ -330,6 +355,12 @@ RNG mid-stream.
 `generation/synthesize.py:388`.
 `random.Random(GenDeriveContext.for_column(...).base_int("py")).choices(cats, weights=weights, k=n)`:
 one whole-column call. V1 mirror at `generators/columns.py:412`.
+
+### gen.lookup
+`generation/kinds/_lookup.py:254`. The `gen.categorical` call over a pinned lookup list:
+`random.Random(GenDeriveContext.for_column(...).base_int("py")).choices(values, weights=weights, k=n)`,
+one whole-column call. The seed fingerprint holds the file's content digest from the plan, never its
+path. NOT partitionable.
 
 ### gen.reference
 `generation/_synthesize_derived.py:156`. `random.Random(col_seed)` then per row
@@ -573,8 +604,8 @@ The `unit_float_from_bits53(raw_u64)` primitive extracts the upper 53 bits of a
 FULL 64-bit value (`(raw_u64 >> 11) / 2**53`), matching NumPy's own `random()`
 construction and always `< 1.0` (the all-ones input maps to `(2**53 - 1) / 2**53`).
 
-Registry: exactly one provider per catalogued `draw_site_id` (38 sites; 23
-partitionable, 15 not). An import-time invariant fails if the registry drifts
+Registry: exactly one provider per catalogued `draw_site_id` (42 sites; 23
+partitionable, 19 not). An import-time invariant fails if the registry drifts
 from `DRAW_SITES`.
 
 | draw_site_id                      | family              | partitionable | provider_version |
@@ -586,11 +617,14 @@ from `DRAW_SITES`.
 | mask.text_mask_faker              | faker_seed_instance | yes           | Faker (seed_instance detaches a per-instance random.Random) |
 | gen.derive_context                | gen_derive_context  | yes           | seed_protocol_v7 |
 | gen.composite_build_pool          | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
+| gen.distribution                  | numpy_pcg64         | no            | seed_protocol_v7 (GenDeriveContext); numpy NEP-19 PCG64 |
 | gen.distribution_snapshot         | numpy_pcg64         | no            | seed_protocol_v7 (GenDeriveContext); numpy NEP-19 PCG64 |
 | gen.faker_pool_selection          | numpy_pcg64         | no            | seed_protocol_v7 (GenDeriveContext.family_bytes); numpy NEP-19 PCG64 |
 | gen.identifier_nondeterministic   | numpy_pcg64         | no            | numpy NEP-19 PCG64 |
 | gen.null_probability              | numpy_pcg64         | no            | seed_protocol_v7 (GenDeriveContext); numpy NEP-19 PCG64 |
 | gen.pool_nondeterministic         | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
+| mask.joint_mask_null_fallback     | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
+| mask.joint_mask_gen_row           | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.shuffle                      | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.windowed_date                | numpy_pcg64         | yes           | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.grouped_series_monotone_walk | per_group_stream    | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
@@ -598,6 +632,7 @@ from `DRAW_SITES`.
 | gen.statistical_per_row           | per_row_reseed      | yes           | CPython Mersenne Twister (no numpy; bit-stable inverse-CDF) |
 | gen.categorical                   | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |
 | gen.reference                     | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |
+| gen.lookup                        | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |
 | gen.categorical_unique            | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |
 | gen.reference_unique              | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |
 | gen.unique_pair                   | python_mt19937      | no            | seed_protocol_v7 (GenDeriveContext); CPython Mersenne Twister |

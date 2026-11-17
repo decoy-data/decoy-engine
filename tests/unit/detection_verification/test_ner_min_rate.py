@@ -83,11 +83,11 @@ def test_ner_min_rate_is_the_calibrated_threshold() -> None:
         "2x_highest_rate": 2 * highest_rate,
         "highest_upper_95": highest_upper_95,
         "threshold": threshold,
-        "NER_MIN_RATE": expected,
+        "NER_MIN_RATES[sm]": expected,
     }
     path = os.environ.get("DECOY_NER_RATE_EVIDENCE")
     if path:
         Path(path).write_text(json.dumps(evidence, indent=1))
     print(json.dumps(evidence, indent=1))
     assert expected <= 0.25, f"moved from the accepted 0.211: report it, do not tune\n{evidence}"
-    assert expected == nr.NER_MIN_RATE
+    assert expected == nr.NER_MIN_RATES["en_core_web_sm"]

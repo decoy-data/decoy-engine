@@ -42,8 +42,10 @@ def test_the_slice_adds_exactly_these_identities_and_no_later_slice_code() -> No
         (e["namespace"], e["code"]) for e in reasons.manifest()["entries"] if e["since"] == "1.8.0"
     }
     assert added == set(IDENTITIES)
-    assert reasons.find("post_scan", "ner_blocked") is None  # M4's
-    assert reasons.find("route", "post_scan_models_unsupported") is None  # M5's
+    m4 = reasons.find("post_scan", "ner_blocked")  # M4's, in its own later minor
+    assert m4 is not None and m4.since == "1.29.0"
+    m5 = reasons.find("route", "post_scan_models_unsupported")  # M5's, in its own later minor
+    assert m5 is not None and m5.since == "1.25.0"
 
 
 def test_the_minor_is_pinned_in_its_own_fixture() -> None:

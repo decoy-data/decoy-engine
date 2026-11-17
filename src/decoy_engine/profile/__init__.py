@@ -21,7 +21,12 @@ hash-scope decision (resolution of B1 in the Dennis review).
 
 from __future__ import annotations
 
-from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source, resolve_csv_dialect
+from decoy_engine.profile._csv_reader import (
+    CsvDialect,
+    read_csv_bytes,
+    read_csv_source,
+    resolve_csv_dialect,
+)
 from decoy_engine.profile._declared_columns import (
     DeclarationFinding,
     DeclarationRequest,
@@ -33,6 +38,8 @@ from decoy_engine.profile._declared_columns import (
     source_columns,
 )
 from decoy_engine.profile._hash import profile_hash
+from decoy_engine.profile._lazy_build import build_lazy_source
+from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import (
     LazySource,
     ProfileSource,
@@ -55,6 +62,7 @@ __all__ = [
     "CsvDialect",
     "DeclarationFinding",
     "DeclarationRequest",
+    "FixedWidthLazySource",
     "LazySource",
     "PIIClass",
     "PreparedDeclaredSources",
@@ -64,6 +72,7 @@ __all__ = [
     "RowCount",
     "TableProfile",
     "build_declared_source",
+    "build_lazy_source",
     "build_profile_source",
     "check_columns_declared",
     "declaration_findings",
@@ -74,6 +83,7 @@ __all__ = [
     "profile_relationships_from_config",
     "profile_source",
     "profile_to_json",
+    "read_csv_bytes",
     "read_csv_source",
     "resolve_csv_dialect",
     "source_columns",

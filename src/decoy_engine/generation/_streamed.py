@@ -61,6 +61,7 @@ from decoy_engine.generation._column_streams import (
 )
 from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
 from decoy_engine.generation._numeric_typing import restore_declared
+from decoy_engine.generation.kinds import cast_output_values, output_types
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.progress import get_active_channel
 
@@ -92,6 +93,8 @@ class GenerationResult:
     tables: dict[str, pa.Table] | None
     peak_reserved_bytes: int
     declines: tuple[str, ...] = field(default=())
+    # F22: the streamed sink's `CommitReceipt` (typed loosely: `publication` is a tier above).
+    publication_receipt: Any = None
 
 
 def is_bounded_sink(sink: Any) -> bool:
@@ -285,18 +288,28 @@ def _table_batches(
     streams: Sequence[ColumnStream],
     widths: Mapping[str, int],
     collectors: Mapping[str, KeyPool],
+    generated: Sequence[pa.DataType | None],
 ) -> Iterator[pa.RecordBatch]:
     offset = 0
     cols = table["generate_columns"]
     names = [c["name"] for c in cols]
+    declared = output_types(cols)
     for size in sizes:
         arrays = []
         # Post-null-mask values of the columns already emitted in THIS batch, which is what the
         # legacy path's `generated` mapping holds when a windowed_date column reads its anchor.
         emitted: dict[str, list[Any]] = {}
-        for col, name, stream, field_ in zip(cols, names, streams, schema, strict=True):
-            values = restore_declared(col, draw_batch(stream, offset, size, emitted), field_.type)
-            emitted[name] = values
+        for col, name, stream, field_, gen_type in zip(
+            cols, names, streams, schema, generated, strict=True
+        ):
+            # Parse text cells to the GENERATED type; the output_type cast comes after, so the
+            # provider's text never reaches `int()` just because the column is emitted as int.
+            values = restore_declared(col, draw_batch(stream, offset, size, emitted), gen_type)
+            emitted[name] = values  # siblings read the generator's values, not the typed ones
+            if name in declared:
+                values = cast_output_values(
+                    values, declared[name], table=str(table["name"]), column=name
+                )
             arr = pa.array(values, type=field_.type)
             if name in widths:
                 _check_width(arr, widths[name], name)
@@ -345,7 +358,10 @@ def run_generation(
     receives each fidelity-gate ``QualityWarning``; it never changes the generated tables.
     """
     from decoy_engine.plan._seed import _normalize_job_seed_int
+    from decoy_engine.plan.checks import check_faker_default_locale
 
+    # Before any pool or provider: a column without `locale` runs in the platform default.
+    check_faker_default_locale(config, instance_default_locale, provider_snapshot=provider_snapshot)
     resolved_batch = batch_rows
     if ledger is None:
         if budget_bytes is None:
@@ -426,6 +442,7 @@ def run_generation(
         already released.
         """
         name = t["name"]
+        generated = admission.generated_types(name)
         streams = [
             make_column_stream(
                 c,
@@ -439,16 +456,20 @@ def run_generation(
                 ledger=ledger,
                 stage=stage,
                 faker_payload=bounds.get((name, c["name"])),
-                numeric=pa.types.is_integer(f.type),
+                numeric=g is not None and pa.types.is_integer(g),
             )
-            for c, f in zip(t["generate_columns"], schema, strict=True)
+            for c, g in zip(t["generate_columns"], generated, strict=True)
         ]
         widths: dict[str, int] = {}
         for c in t["generate_columns"]:
             width = bounds.get((name, c["name"]))
             if enforce_widths and c.get("type") == "faker" and width is not None:
                 widths[c["name"]] = width
-        consume(name, schema, _table_batches(t, schema, lay.sizes(), streams, widths, collectors))
+        consume(
+            name,
+            schema,
+            _table_batches(t, schema, lay.sizes(), streams, widths, collectors, generated),
+        )
 
     _pg = get_active_channel()
 
@@ -502,8 +523,10 @@ def run_generation(
         with OutputPublish(sink, True, False) as publish:
             publish.open()
             generate(lambda n, s, b: sink.write_batches(n, _pg.count_rows(n, b), schema=s))
-            publish.commit()
-        return GenerationResult("streamed", reason, counts, None, ledger.peak_bytes)
+            receipt = publish.commit()
+        return GenerationResult(
+            "streamed", reason, counts, None, ledger.peak_bytes, publication_receipt=receipt
+        )
 
     def accumulate(name: str, schema: pa.Schema, batches: Iterator[pa.RecordBatch]) -> None:
         batch_list = list(_pg.count_rows(name, batches))

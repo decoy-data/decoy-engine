@@ -25,6 +25,10 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import pandas as pd
 
 from decoy_engine import reasons as reason_codes
+from decoy_engine.contracts.distribution_snapshot import (
+    MAX_SAMPLED_YEAR,
+    MIN_YEAR,
+)
 from decoy_engine.errors import DecoyError
 
 if TYPE_CHECKING:
@@ -48,8 +52,6 @@ CODE_TABLE_UNKNOWN = reason_codes.runtime.GENERATION_TABLE_UNKNOWN
 CODE_WINDOW_INVALID = reason_codes.runtime.GENERATION_WINDOW_INVALID
 CODE_TIMEOUT = reason_codes.runtime.GENERATION_WINDOW_TIMEOUT
 
-_MIN_YEAR = 1
-_MAX_SAMPLED_YEAR = 9998  # datetime(year + 1, 1, 1) must be representable
 # Highest addressable row position; the default window end when a caller names none.
 _MAX_POSITION = 2**63
 
@@ -107,30 +109,12 @@ def _check_histogram(
     table: str,
     col: dict[str, Any],
     edges_key: str,
-    counts_key: str,
     stats: Mapping[str, Any],
     *,
     strictly_ordered: bool,
 ) -> list[float]:
     """The degenerate-stats and bounded-span checks shared by numeric and freetext. Returns edges."""
-    try:
-        edges = _floats(stats.get(edges_key))
-        counts = _floats(stats.get(counts_key))
-    except (TypeError, ValueError):
-        _refuse(table, col, CODE_DEGENERATE, edges_key, f"{edges_key}/{counts_key} not numeric")
-    if len(edges) < 2 or len(counts) != len(edges) - 1:
-        _refuse(
-            table,
-            col,
-            CODE_DEGENERATE,
-            edges_key,
-            f"histogram is degenerate (edges={len(edges)}, counts={len(counts)})",
-        )
-    total = sum(counts)
-    if any(c < 0 or not math.isfinite(c) for c in counts) or not math.isfinite(total) or total <= 0:
-        _refuse(
-            table, col, CODE_DEGENERATE, counts_key, "counts are negative, non-finite or sum <= 0"
-        )
+    edges = _floats(stats.get(edges_key))  # `_refuse_degenerate` already proved them numeric
     if not all(math.isfinite(e) for e in edges):
         _refuse(table, col, CODE_UNBOUNDED, edges_key, "edges are not all finite")
     if strictly_ordered and any(b <= a for a, b in pairwise(edges)):
@@ -142,25 +126,23 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
-    year_bins = spec.stats.get("year_bins") or []
-    try:
-        years = [int(b["year"]) for b in year_bins]
-        weights = [float(b["count"]) for b in year_bins]
-    except (TypeError, ValueError, KeyError):
-        _refuse(table, col, CODE_DEGENERATE, "year_bins", "year_bins entries are malformed")
-    total = sum(weights)
-    if (
-        not years
-        or any(w < 0 or not math.isfinite(w) for w in weights)
-        or not math.isfinite(total)  # two finite weights can sum to inf and pass `total > 0`
-        or not total > 0
-    ):
-        _refuse(table, col, CODE_DEGENERATE, "year_bins", "year_bins empty or counts unusable")
+    buckets = spec.datetime_buckets
+    if buckets is None:  # `_refuse_degenerate` passed, so the stats name a year outside the range
+        _refuse(
+            table,
+            col,
+            CODE_UNBOUNDED,
+            "year_bins",
+            f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+        )
+    weights = [float(b.count) for b in buckets]
     bad = sorted(
         {
             y
-            for y, w in zip(years, weights, strict=True)
-            if w > 0 and not _MIN_YEAR <= y <= _MAX_SAMPLED_YEAR
+            for b, w in zip(buckets, weights, strict=True)
+            if w > 0
+            for y in (b.start_year, b.end_year)
+            if not MIN_YEAR <= y <= MAX_SAMPLED_YEAR
         }
     )
     if bad:
@@ -169,7 +151,7 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            f"sampled year(s) {bad[:3]} outside {_MIN_YEAR}..{_MAX_SAMPLED_YEAR}",
+            f"a sampled year is outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
         )
     parsed_bounds: dict[str, datetime] = {}
     for bound in ("min", "max"):
@@ -181,16 +163,18 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             )
         if parsed_bounds[bound].tzinfo is not None:
             _refuse(table, col, CODE_UNBOUNDED, bound, "timezone-aware datetime bound")
-    # An inverted range passes the per-bound checks but makes the sampler clamp every row to
-    # `max` silently (a wrong value, not a crash), so reject it at admission.
-    if parsed_bounds["min"] > parsed_bounds["max"]:
-        _refuse(
-            table,
-            col,
-            CODE_DEGENERATE,
-            "min",
-            f"datetime min {parsed_bounds['min']} is after max {parsed_bounds['max']}",
-        )
+    # A folded range has no per-year weights to check its edge against, so a bound may not fall
+    # inside the outer range (the draw would pile up at the clamp). A bound outside it, as a
+    # flagged column's year-around bound is, never moves a draw.
+    live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
+    first, last = live[0], live[-1]
+    if first.start_year != first.end_year and parsed_bounds["min"] > datetime(
+        first.start_year, 1, 1
+    ):
+        _refuse(table, col, CODE_DEGENERATE, "min", "datetime min is inside its range")
+    last_instant = datetime(last.end_year, 12, 31, 23, 59, 59, 999999)
+    if last.start_year != last.end_year and parsed_bounds["max"] < last_instant:
+        _refuse(table, col, CODE_DEGENERATE, "max", "datetime max is inside its range")
 
 
 def _check_categorical(
@@ -200,34 +184,13 @@ def _check_categorical(
         _categorical_tables,
         _conditional_tables,
     )
-    from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
-    try:
-        values, weights = _categorical_tables(spec)
-    except StatisticalSpecError as exc:
-        _refuse(table, col, CODE_FLAG_TOKEN, "top_values", exc.message)
-    except (TypeError, ValueError, KeyError):
-        _refuse(table, col, CODE_DEGENERATE, "top_values", "top_values entries are malformed")
-    cat_total = sum(weights)
-    if (
-        not values
-        or any(w < 0 or not math.isfinite(w) for w in weights)
-        or not math.isfinite(cat_total)  # finite weights can sum to inf and pass `> 0`
-        or not cat_total > 0
-    ):
-        _refuse(table, col, CODE_DEGENERATE, "top_values", "top_values empty or counts unusable")
+    values, _ = _categorical_tables(spec)  # proved by `_refuse_degenerate`
     # BR-2: a category token is materialized per cell before any byte meter sees it.
     tokens = [str(v) for v in values]
     conditional = _conditional_tables(spec) if spec.condition_on else {}
-    for kids, wts in conditional.values():
+    for kids, _ in conditional.values():
         tokens.extend(kids)
-        cond_total = sum(wts)
-        if (
-            any(w < 0 or not math.isfinite(w) for w in wts)
-            or not math.isfinite(cond_total)  # finite weights can sum to inf
-            or not cond_total > 0
-        ):
-            _refuse(table, col, CODE_DEGENERATE, "joint", "a conditional row has no usable weight")
     if any(len(t) > max_cell_chars for t in tokens):
         _refuse(
             table,
@@ -238,13 +201,24 @@ def _check_categorical(
         )
 
 
+def _refuse_degenerate(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
+    """Refuse a snapshot the shared degenerate rule rejects, with that rule's property name."""
+    from decoy_engine.generation.statistical import StatisticalSpecError, degenerate_finding
+
+    try:
+        finding = degenerate_finding(spec)
+    except StatisticalSpecError as exc:  # a non-canonical flag token, not a degenerate snapshot
+        _refuse(table, col, CODE_FLAG_TOKEN, "top_values", exc.message)
+    if finding is not None:
+        _refuse(table, col, CODE_DEGENERATE, finding[0], finding[1])
+
+
 def _check_statistical(
     table: str, col: dict[str, Any], spec: StatisticalSpec, max_cell_chars: int
 ) -> None:
+    _refuse_degenerate(table, col, spec)
     if spec.kind == "numeric":
-        edges = _check_histogram(
-            table, col, "bin_edges", "bin_counts", spec.stats, strictly_ordered=True
-        )
+        edges = _check_histogram(table, col, "bin_edges", spec.stats, strictly_ordered=True)
         from decoy_engine.generation.statistical._sample import _is_integer_dtype
 
         # Integer outputs are clamped to [edges[0], edges[-1]] then materialized as Arrow int64;
@@ -258,20 +232,7 @@ def _check_statistical(
                 f"integer numeric edges [{edges[0]}, {edges[-1]}] exceed the int64 range",
             )
     elif spec.kind == "freetext":
-        edges = _check_histogram(
-            table, col, "length_bin_edges", "length_bin_counts", spec.stats, strictly_ordered=False
-        )
-        # Length edges must be non-negative and non-decreasing (ties allowed). A negative or any
-        # descending adjacent pair (endpoint OR interior, e.g. [0, 100, 10]) makes the sampler clamp
-        # every cell to one length, silently collapsing the distribution. Reject at admission.
-        if edges[0] < 0 or any(b < a for a, b in pairwise(edges)):
-            _refuse(
-                table,
-                col,
-                CODE_DEGENERATE,
-                "length_bin_edges",
-                f"length edges {edges} are negative or not non-decreasing",
-            )
+        edges = _check_histogram(table, col, "length_bin_edges", spec.stats, strictly_ordered=False)
         if int(edges[-1]) > max_cell_chars:
             _refuse(
                 table,
@@ -372,6 +333,7 @@ def classify_window_table(
     """Classify one generate table for a windowed read. Raises on any refusal, else A or B."""
     from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
     from decoy_engine.generation._reproducibility import reproducibility_exclusions
+    from decoy_engine.plan.checks import check_faker_default_locale
 
     spec_table = next(
         (
@@ -385,6 +347,9 @@ def classify_window_table(
         raise GenerationWindowError(
             code=CODE_TABLE_UNKNOWN, message=f"{table!r} is not a generate table of this plan"
         )
+    check_faker_default_locale(
+        config, instance_default_locale, provider_snapshot=provider_snapshot, table=table
+    )
     cols: list[dict[str, Any]] = spec_table["generate_columns"]
     rows = int(spec_table.get("row_count") or 0)
     exclusions = reproducibility_exclusions(config, provider_snapshot=provider_snapshot)

@@ -171,3 +171,39 @@ def test_restoring_either_private_import_turns_the_guard_red(
     assert needle in files[rel]
     files[rel] = files[rel].replace(needle, bad, 1)
     assert scan.facade_import_findings(_tree(tmp_path, files)) != []
+
+
+# ----- class 6: validation.post consumes the kernel and pool facades -------------------------
+
+
+def test_validation_post_imports_only_the_public_facades() -> None:
+    assert scan.consumer_facade_findings(scan.ModuleIndex()) == []
+
+
+def test_validation_post_reads_both_names_through_the_facades() -> None:
+    text = (scan.SRC / "validation" / "post" / "_checks" / "_cardinality.py").read_text()
+    assert "from decoy_engine.kernel import canonicalize_derive_source" in text
+    assert "from decoy_engine.generation.pool import effective_pool_size" in text
+
+
+@pytest.mark.parametrize(
+    ("needle", "bad"),
+    [
+        (
+            "from decoy_engine.kernel import canonicalize_derive_source",
+            "from decoy_engine.kernel._canonicalize import canonicalize_derive_source",
+        ),
+        (
+            "from decoy_engine.generation.pool import effective_pool_size",
+            "from decoy_engine.generation.pool._identity import effective_pool_size",
+        ),
+    ],
+)
+def test_restoring_a_private_import_in_validation_post_turns_the_guard_red(
+    tmp_path: Path, needle: str, bad: str
+) -> None:
+    rel = "validation/post/_checks/_cardinality.py"
+    text = (scan.SRC / rel).read_text(encoding="utf-8")
+    assert needle in text
+    index = _tree(tmp_path, {rel: text.replace(needle, bad, 1)})
+    assert scan.consumer_facade_findings(index) != []

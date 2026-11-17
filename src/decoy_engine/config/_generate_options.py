@@ -8,6 +8,7 @@ the dump: ``option_problems`` reads the extras and never writes them.
 The registry is the config layer's authority; ``tests/sentry/defects/test_generate_option_reads.py``
 checks it against the keys the generators read. It holds no pyarrow or Faker import. Whatever
 needs them (locale, provider and kwargs names, category typing) is a plan check.
+The public catalog and the editor-schema hook read it from ``_generate_option_catalog``.
 
 Refusal text is the registered reason's fixed summary, so a submitted value never reaches a
 message. Check functions return ``(relative location, reason code)`` pairs.
@@ -17,26 +18,36 @@ from __future__ import annotations
 
 import ast
 import math
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from decoy_engine import reasons
+from decoy_engine.config._generate_type_checks import (
+    OUTPUT_TYPE_KINDS,
+    clip_bound,
+    constant_value,
+    finite,
+    high_bound,
+    output_type_value,
+)
 from decoy_engine.config._generate_unique import unique_flag
+from decoy_engine.errors import PipelineValidationError
+from decoy_engine.expressions import formula_is_evaluable
 
 __all__ = [
     "COMMON_OPTIONS",
+    "CONDITIONAL_REQUIRED",
     "GENERATE_OPTIONS",
     "INTERNAL_KEYS",
-    "GenerateTypeOptions",
     "OptionSpec",
     "TypeOptions",
-    "closed_key_schema",
-    "generate_option_catalog",
+    "generate_family_problems",
     "option_problems",
     "problem_details",
+    "refuse_unlisted_generate_families",
 ]
 
 _TYPE = str(reasons.config.GENERATE_OPTION_TYPE)
@@ -47,6 +58,7 @@ _FORMULA = str(reasons.config.GENERATE_FORMULA_INVALID)
 UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 
 Problem = tuple[tuple[str | int, ...], str]
+ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
 Check = Callable[[Any, Mapping[str, Any]], list[Problem]]
 
 _OK: list[Problem] = []
@@ -54,9 +66,12 @@ _OK: list[Problem] = []
 
 @dataclass(frozen=True)
 class OptionSpec:
-    """One option: a static check and, for E2, whether the value names sibling columns.
+    """One option: a static check and whether the value names sibling columns.
 
-    ``ref_kind`` is ``None``, ``column``, ``column_list`` or ``expression``.
+    ``ref_kind`` is ``None``, ``column``, ``column_list`` or ``expression``. A key that names a
+    sibling column carries it, and the plan check refuses a name not generated earlier: a column
+    read before it exists is a null, an empty aggregate or a single group, never the value the
+    config meant.
     """
 
     check: Check | None = None
@@ -65,24 +80,26 @@ class OptionSpec:
 
 @dataclass(frozen=True)
 class TypeOptions:
-    """The keys one column type reads, and the ones it cannot run without."""
+    """The keys one column type reads, and the ones it cannot run without.
+
+    ``closed_by`` names a selector key of ``CONDITIONAL_REQUIRED`` whose chosen value also closes
+    the key set: a key listed under another value of that selector is then refused as unknown.
+
+    ``plan_required`` keys are required too, but config parse leaves them alone: the type's
+    transform refuses a missing one at plan compile with its own code (for example
+    ``derived_aggregate_op_missing``), and moving that refusal to config parse would change the
+    code a caller sees. The catalog and the editor schema still list them as required.
+
+    ``one_of`` names keys of which exactly one must be given (a `lookup` column's `file` or
+    `codeset`): none is ``missing`` on the first, and each one after the first given is
+    ``generate_option_value_unknown``.
+    """
 
     keys: Mapping[str, OptionSpec]
     required: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class GenerateTypeOptions:
-    """Public, read-only view of one generate type's option names.
-
-    Names only: the registry's validator callables stay private. `common` is the set every type
-    may carry beyond its own keys (`COMMON_OPTIONS`).
-    """
-
-    type: str
-    required: tuple[str, ...]
-    optional: tuple[str, ...]
-    common: tuple[str, ...]
+    closed_by: str | None = None
+    plan_required: tuple[str, ...] = ()
+    one_of: tuple[str, ...] = ()
 
 
 def _is_int(value: Any) -> bool:
@@ -163,14 +180,42 @@ def _formula(value: Any, _: Mapping[str, Any]) -> list[Problem]:
     if not isinstance(value, str):
         return [((), _TYPE)]
     try:
-        ast.parse(value.strip(), mode="eval")
+        tree = ast.parse(value.strip(), mode="eval")
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return [((), _FORMULA)]
-    return _OK
+    # Syntax the runtime evaluator cannot run (lambda, walrus) would generate all nulls.
+    return _OK if formula_is_evaluable(tree) else [((), _FORMULA)]
 
 
 def _categories(value: Any, _: Mapping[str, Any]) -> list[Problem]:
     return _OK if isinstance(value, list) else [((), _TYPE)]
+
+
+def _family(value: Any, _: Mapping[str, Any]) -> list[Problem]:
+    if not isinstance(value, str):
+        return [((), _TYPE)]
+    return _OK if value in CONDITIONAL_REQUIRED["distribution"]["family"] else [((), _VALUE)]
+
+
+def generate_family_problems(config: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """``(dotted path, reason code)`` for each `distribution` column of a raw config dict whose
+    `family` is missing from the table.
+
+    The one family gate for a raw dict: `compile_plan` and `run_config_only_checks` call it, so a
+    family the validator refuses (a deferred one) cannot reach a run by skipping validation. It
+    reads the same `_family` check `option_problems` runs, quotes nothing, and never raises.
+    """
+    found: list[tuple[str, str]] = []
+    tables = config.get("tables")
+    for table in tables if isinstance(tables, list) else []:
+        columns = table.get("generate_columns") if isinstance(table, dict) else None
+        for col in columns if isinstance(columns, list) else []:
+            if not isinstance(col, dict) or col.get("type") != "distribution":
+                continue
+            for _, code in _family(col.get("family"), col):
+                path = f"tables.{table.get('name', '?')}.generate_columns.{col.get('name', '?')}.family"
+                found.append((path, code))
+    return found
 
 
 def _weight_ok(w: Any) -> bool:
@@ -227,7 +272,23 @@ COMMON_OPTIONS: Mapping[str, OptionSpec] = {
 # Engine-internal keys the generators stamp or read that a config may carry. None today.
 INTERNAL_KEYS: frozenset[str] = frozenset()
 
-GENERATE_OPTIONS: Mapping[str, TypeOptions] = {
+# The one table of family-dependent keys: type -> selector key -> selector value -> the keys that
+# value requires. `option_problems` reads required keys from it (the `reference` weights rule
+# included), a closed type (`TypeOptions.closed_by`) refuses every key another value lists, the
+# catalog shows it as `required_when` and `closed_key_schema` builds its branches from it.
+CONDITIONAL_REQUIRED: Mapping[str, Mapping[str, Mapping[str, tuple[str, ...]]]] = {
+    "reference": {"distribution": {"weighted": ("weights",)}},
+    "distribution": {
+        "family": {
+            "uniform": ("low", "high"),
+        }
+    },
+}
+
+_N = OptionSpec(finite)
+_OUT = OptionSpec(output_type_value)
+
+_BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "faker": TypeOptions(
         {
             "faker_type": _S,
@@ -247,11 +308,17 @@ GENERATE_OPTIONS: Mapping[str, TypeOptions] = {
         required=("start",),
     ),
     "categorical": TypeOptions(
-        {"categories": OptionSpec(_categories), "weights": OptionSpec(_weights)},
+        {
+            "categories": OptionSpec(_categories),
+            "weights": OptionSpec(_weights),
+        },
         required=("categories",),
     ),
     "formula": TypeOptions(
-        {"formula": OptionSpec(_formula), "references": OptionSpec(_str_list)},
+        {
+            "formula": OptionSpec(_formula),
+            "references": OptionSpec(_str_list),
+        },
         required=("formula",),
     ),
     "reference": TypeOptions(
@@ -287,7 +354,11 @@ GENERATE_OPTIONS: Mapping[str, TypeOptions] = {
         required=("expression",),
     ),
     "derived_aggregate": TypeOptions(
-        {"op": _S, "column": OptionSpec(_str, ref_kind="column")},
+        {
+            "op": _S,
+            "column": OptionSpec(_str, ref_kind="column"),
+        },
+        plan_required=("op", "column"),
     ),
     "grouped_series": TypeOptions(
         {
@@ -313,6 +384,34 @@ GENERATE_OPTIONS: Mapping[str, TypeOptions] = {
         {"group_by": OptionSpec(_str, ref_kind="column"), "length": _I, "prefix": _S},
         required=("group_by",),
     ),
+    "constant": TypeOptions({"value": OptionSpec(constant_value)}, required=("value",)),
+    # GEN-TYPES E3: a weighted list from a file (pinned at compile) or a shipped code set. The
+    # code set's name is checked at plan time (`plan.checks._lookup_tables`): config sits below
+    # `transforms` in the import layers and so cannot read its registry.
+    "lookup": TypeOptions(
+        {"file": _S, "codeset": _S, "value_column": _S, "weight_column": _S},
+        one_of=("file", "codeset"),
+    ),
+    "distribution": TypeOptions(
+        {
+            "family": OptionSpec(_family),
+            "low": _N,
+            "high": OptionSpec(high_bound),
+            "min": OptionSpec(clip_bound("min")),
+            "max": OptionSpec(clip_bound("max")),
+        },
+        required=("family",),
+        closed_by="family",
+    ),
+}
+
+# `output_type` is added from `OUTPUT_TYPE_KINDS`, the one table of the types that take it, so the
+# option set and the per-type allowed kinds cannot drift apart.
+GENERATE_OPTIONS: Mapping[str, TypeOptions] = {
+    name: replace(opts, keys={**opts.keys, "output_type": _OUT})
+    if name in OUTPUT_TYPE_KINDS
+    else opts
+    for name, opts in _BASE_OPTIONS.items()
 }
 
 # Optional keys whose readers treat None as "not given" (`col.get(k)`, `col.get(k) or default`, or
@@ -334,15 +433,37 @@ _NONE_MEANS_ABSENT = frozenset(
         "condition_on",
         "other_mode",
         "source_column",
+        "min",
+        "max",
     }
 )
 
-# A required key counts as given when it is not None, so `start: 0` and `max_days: 0` are valid.
-_NONE_MEANS_MISSING = frozenset({"start", "max_days"})
+# A required key counts as given when it is not None, so `start: 0`, `max_days: 0` and a constant
+# `value: 0` or `value: false` are valid. Keys that a `CONDITIONAL_REQUIRED` value requires follow
+# the same rule (`mean: 0` is given).
+_NONE_MEANS_MISSING = frozenset({"start", "max_days", "value"})
 
 
 def _missing(key: str, value: Any) -> bool:
     return value is None if key in _NONE_MEANS_MISSING else not value
+
+
+def _family_keys(type_: str, extras: Mapping[str, Any]) -> tuple[tuple[str, ...], frozenset[str]]:
+    """The keys the chosen selector value requires, and the keys it makes foreign.
+
+    A selector that is absent or names a value outside the table adds nothing: the selector's own
+    check reports it. Foreign keys apply only to a type that is ``closed_by`` that selector.
+    """
+    required: list[str] = []
+    foreign: set[str] = set()
+    for selector, by_value in CONDITIONAL_REQUIRED.get(type_, {}).items():
+        chosen = extras.get(selector)
+        if not isinstance(chosen, str) or chosen not in by_value:
+            continue
+        required.extend(by_value[chosen])
+        if GENERATE_OPTIONS[type_].closed_by == selector:
+            foreign |= {k for keys in by_value.values() for k in keys if k not in by_value[chosen]}
+    return tuple(required), frozenset(foreign)
 
 
 def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
@@ -355,13 +476,19 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
     spec = GENERATE_OPTIONS[type_]
     found: list[Problem] = []
     check_input = {**extras, "type": type_}
+    family_required, foreign = _family_keys(type_, extras)
     for key, value in extras.items():
+        if key in foreign:
+            found.append(((key,), UNKNOWN))
+            continue
         option = spec.keys.get(key) or COMMON_OPTIONS.get(key)
         if option is None:
             if key not in INTERNAL_KEYS:
                 found.append(((key,), UNKNOWN))
             continue
         if key in spec.required and _missing(key, value):
+            continue
+        if key in family_required and value is None:
             continue
         if value is None:
             if key not in _NONE_MEANS_ABSENT:
@@ -372,56 +499,50 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
         found.extend(((key, *rel), code) for rel, code in option.check(value, check_input))
     given_missing = [k for k in spec.required if _missing(k, extras.get(k))]
     found.extend(((k,), "missing") for k in given_missing)
-    if (
-        type_ == "reference"
-        and extras.get("distribution") == "weighted"
-        and extras.get("weights") is None
-    ):
-        found.append((("weights",), "missing"))
+    found.extend(((k,), "missing") for k in family_required if extras.get(k) is None)
+    given = [k for k in spec.one_of if extras.get(k) is not None]
+    if spec.one_of and not given:
+        found.append(((spec.one_of[0],), "missing"))
+    found.extend(((k,), _VALUE) for k in given[1:])
     return found
 
 
-def problem_details(problems: list[tuple[tuple[str | int, ...], str]]) -> list[InitErrorDetails]:
-    """Pydantic line errors for ``problems``: fixed text per code, no input kept."""
+def problem_details(
+    problems: Sequence[Problem | ContextProblem],
+    templates: Mapping[str, str] | None = None,
+) -> list[InitErrorDetails]:
+    """Pydantic line errors for ``problems``: fixed text per code, no input kept.
+
+    A problem with a third member is a ``(loc, code, context)``: its text is the code's entry in
+    ``templates`` filled from ``context``, which holds config identifiers only.
+    """
     details: list[InitErrorDetails] = []
-    for loc, code in problems:
+    for problem in problems:
+        loc, code = problem[0], problem[1]
         kind: Any = "missing"
         if code != "missing":
-            kind = PydanticCustomError(code, reasons.lookup(code)[0].summary)
+            summary = reasons.lookup(code)[0].summary
+            context = problem[2] if len(problem) == 3 else None
+            template = (templates or {}).get(code, summary) if context is not None else summary
+            kind = PydanticCustomError(code, template, dict(context) if context else None)
         details.append({"type": kind, "loc": loc, "input": None})
     return details
 
 
-def closed_key_schema(schema: dict[str, Any]) -> None:
-    """JSON-schema hook: one ``if type then {closed key set}`` branch per generate type.
+def refuse_unlisted_generate_families(config: Mapping[str, Any]) -> None:
+    """Raise `PipelineValidationError` for the first `distribution` column with a listed-out family.
 
-    The schema stays open at the top (the model allows extras) and each branch closes it, so an
-    editor flags a typo-shaped key without any new model field.
+    `compile_plan` and `run_config_only_checks` call this beside their other config-only checks, so
+    a raw dict that never went through `PipelineConfig` cannot reach a draw with a deferred family.
+    It reads `generate_family_problems`, the function the validator's checker also backs. The
+    message is the registry's fixed summary (no config value is quoted) and nothing is chained.
     """
-    shared = ["name", "type", "pooled", *COMMON_OPTIONS, *sorted(INTERNAL_KEYS)]
-    schema["allOf"] = [
-        {
-            "if": {"properties": {"type": {"const": type_}}, "required": ["type"]},
-            "then": {
-                "properties": {key: {} for key in [*shared, *spec.keys]},
-                "required": list(spec.required),
-                "additionalProperties": False,
-            },
-        }
-        for type_, spec in GENERATE_OPTIONS.items()
-    ]
-
-
-def generate_option_catalog() -> Mapping[str, GenerateTypeOptions]:
-    """Every generate type with its required, optional and common option names, read from
-    `GENERATE_OPTIONS` so a new type or option shows up here with no second list."""
-    common = tuple(COMMON_OPTIONS)
-    return {
-        type_: GenerateTypeOptions(
-            type=type_,
-            required=spec.required,
-            optional=tuple(key for key in spec.keys if key not in spec.required),
-            common=common,
+    for path, code in generate_family_problems(config):
+        summary = reasons.lookup(code)[0].summary
+        if code == str(reasons.config.GENERATE_OPTION_TYPE):
+            raise PipelineValidationError(
+                summary, path=path, code=reasons.config.GENERATE_OPTION_TYPE
+            )
+        raise PipelineValidationError(
+            summary, path=path, code=reasons.config.GENERATE_OPTION_VALUE_UNKNOWN
         )
-        for type_, spec in GENERATE_OPTIONS.items()
-    }

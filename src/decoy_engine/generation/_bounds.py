@@ -22,7 +22,14 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import arrow_column_bytes
 from decoy_engine.generation._faker_pool import POOL_ELIGIBLE_LOCALE_PAIRS
+from decoy_engine.generation.kinds import (
+    constant_payload_bound,
+    output_payload_bound,
+    output_type_of,
+    parametric_payload_bound,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -193,6 +200,10 @@ def compute_payload_bounds(
             result = sequence_payload_bound(col, rows)
         elif kind == "categorical":
             result = categorical_payload_bound(col)
+        elif kind == "constant":
+            result = constant_payload_bound(col)
+        elif kind == "distribution":
+            result = parametric_payload_bound()
         elif kind == "faker":
             result = faker_payload_bound(col, provider_snapshot)
         elif kind == "reference":
@@ -210,6 +221,8 @@ def compute_payload_bounds(
             )
         else:
             result = _legacy_payload_bound(col)
+        if output_type_of(col) is not None:
+            result = output_payload_bound(result)
         out[key] = result
         return result
 
@@ -287,17 +300,10 @@ def legacy_table_bytes(rows: int, payloads: list[int]) -> int:
 
 # One pointer per row in the Python list the legacy whole-table path builds for every column.
 _LEGACY_SLOT_BYTES = 8
-# One int32 offset per row of a variable-width Arrow column.
-_OFFSET_BYTES = 4
 
 
 def _arrow_column_floor(arrow_type: pa.DataType, rows: int) -> int:
-    try:
-        bit_width = arrow_type.bit_width
-    except ValueError:  # variable-width types have no bit width
-        return _OFFSET_BYTES * rows
-    # Ceil division keeps a 1-bit boolean column an integer byte count.
-    return (rows * bit_width + 7) // 8
+    return arrow_column_bytes(arrow_type, rows, 0)
 
 
 def _floor_by_table(config: dict[str, Any], admission: PlanAdmission) -> dict[str, int]:
@@ -372,7 +378,7 @@ def generation_floor_shortfall(
 
 def detected_memory_bytes() -> int | None:
     """The whole memory ceiling (cgroup limit, else host RAM), or `None` when it cannot be read."""
-    from decoy_engine.execution import ExecutionError
+    from decoy_engine._execution_error import ExecutionError
     from decoy_engine.execution.out_of_core import _budget
 
     try:

@@ -58,6 +58,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.layout import SIZE_TERMS, loc, ratchet_verdict
+
 SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
 REPO = Path(__file__).parents[2]
 # Tooling under scripts/ is held to the same limits: moving a module out of src/
@@ -91,8 +93,6 @@ ALLOWLIST: dict[str, int] = {
     # inventories them) and the cast_run threaded through the sequential and out-of-core executors;
     # no casting logic of its own lives in these routers.
     "src/decoy_engine/execution/_pipeline_route_exec.py": 632,
-    # sampler start/finish and evidence threading in _spawn_and_classify; split the spawn/classify half into _isolated_spawn.py.
-    "src/decoy_engine/execution/_isolated_run.py": 672,
     # wiring of the fk-dtype hazard and D3a validator signals into the one routing call site, plus
     # the B4 source-type admission threading (_source_arrow_types + the source_types param); split
     # the probe-recovery resolver into its own module.
@@ -101,15 +101,14 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/execution/out_of_core/_budget.py": 622,
     # float FK key token pricing; split the disk-width helpers into _spill_widths.py.
     "src/decoy_engine/execution/out_of_core/_spill_estimate.py": 665,
-    "src/decoy_engine/detection/detectors.py": 1046,
+    "src/decoy_engine/detection/detectors.py": 920,
     "src/decoy_engine/generators/columns.py": 678,
-    "src/decoy_engine/profiling/profiler.py": 660,
     # monolithic train_and_evaluate; decompose into split/fit/calibrate/evaluate modules.
     "src/decoy_engine/profiling/model_pack/trainer.py": 712,
     # compile-check ownership table; split into per-strategy check modules once the check set stabilises.
-    "src/decoy_engine/plan/_checks.py": 712,
+    "src/decoy_engine/plan/_checks.py": 700,
     # statistical-column check threading; same per-strategy-check decomposition target as _checks.py.
-    "src/decoy_engine/plan/_compile.py": 700,
+    "src/decoy_engine/plan/_compile.py": 666,
     # dispatch entry plus the table-keyed params, the job-seed hand-off and the eager string-pool
     # check for the position-keyed faker; dense exception, the pool check itself lives in _chunk_masking.
     # OBS-2: threads the decline records and branch-call snapshot onto each chunk's evidence.
@@ -162,61 +161,16 @@ def _budgeted_files() -> list[Path]:
 
 
 def _loc(py_file: Path) -> int:
-    """Newline count, matching the `wc -l` convention the cap is stated in
-    (a final line without a trailing newline is not counted, exactly as wc -l)."""
-    return py_file.read_text(encoding="utf-8").count("\n")
+    return loc(py_file)
 
 
-def _size_verdict(rel: str, loc: int, ceiling: int | None) -> str | None:
+def _size_verdict(rel: str, measured: int, ceiling: int | None) -> str | None:
     """Pure policy decision: a failure message, or None to pass. `ceiling` is the
-    module's ALLOWLIST value (None if unrecorded). Kept side-effect-free so every
-    branch is unit-testable without planting real files."""
-    if ceiling is None:
-        if loc > MAX:
-            return (
-                f"{rel}: {loc} LOC, over the {MAX}-LOC hard max. Decompose to "
-                f"<= {MAX}; a new module cannot be grandfathered above {MAX}."
-            )
-        if loc > GOAL:
-            return (
-                f"{rel}: {loc} LOC, over the {GOAL}-LOC goal. Decompose to <= {GOAL}, "
-                f"or (if it is genuinely dense) add it to ALLOWLIST at {loc} in this "
-                f"same PR for review -- allowed up to {MAX}."
-            )
-        return None
-    if ceiling > MAX:
-        # LEGACY: exact match, shrink-only.
-        if loc == ceiling:
-            return None
-        if loc < ceiling:
-            return (
-                f"{rel}: shrank to {loc} LOC (census records {ceiling}). Ratchet the "
-                f"census down to {loc} in this PR (or delete the entry if <= {GOAL})."
-            )
-        return (
-            f"{rel}: legacy over-max module grew to {loc} LOC (census {ceiling}). "
-            f"A module over {MAX} may only shrink -- decompose, never raise a "
-            f"legacy ceiling."
-        )
-    # DENSE: the recorded value is a ceiling with bounded stale slack.
-    if loc > MAX:
-        return (
-            f"{rel}: grew to {loc} LOC, over the {MAX}-LOC hard max. Decompose to "
-            f"<= {MAX}; a dense entry's ceiling may not cross {MAX}."
-        )
-    if loc > ceiling:
-        return (
-            f"{rel}: grew to {loc} LOC (ceiling {ceiling}). Allowed (<= {MAX}); raise "
-            f"the ceiling by at most the lines this change added (never above {MAX}) "
-            f"and list the moved pin in the report."
-        )
-    if ceiling - loc > 2 * MARGIN:
-        return (
-            f"{rel}: {loc} LOC is {ceiling - loc} under its ceiling {ceiling} (more "
-            f"than {2 * MARGIN}). Ratchet the census down to {ceiling_for(loc)} in "
-            f"this PR (or delete the entry if <= {GOAL})."
-        )
-    return None
+    module's ALLOWLIST value (None if unrecorded). The policy lives in the shared
+    layout helper so the fan-out sentry applies the same ratchet."""
+    return ratchet_verdict(
+        rel, measured, ceiling, goal=GOAL, limit=MAX, margin=MARGIN, terms=SIZE_TERMS
+    )
 
 
 @pytest.mark.parametrize(
@@ -310,3 +264,19 @@ def test_sentry_catches_a_planted_violation(tmp_path: Path) -> None:
     loc = _loc(big)
     assert loc > MAX
     assert _size_verdict("planted.py", loc, None) is not None
+
+
+def test_size_messages_keep_their_wording() -> None:
+    """The verdict moved to the shared layout helper; the text must not change."""
+    assert _size_verdict("x/y.py", 701, None) == (
+        "x/y.py: 701 LOC, over the 700-LOC hard max. Decompose to <= 700; "
+        "a new module cannot be grandfathered above 700."
+    )
+    assert _size_verdict("x/y.py", 620, 661) == (
+        "x/y.py: 620 LOC is 41 under its ceiling 661 (more than 40). Ratchet the census "
+        "down to 640 in this PR (or delete the entry if <= 600)."
+    )
+    assert _size_verdict("x/y.py", 815, 809) == (
+        "x/y.py: legacy over-max module grew to 815 LOC (census 809). "
+        "A module over 700 may only shrink -- decompose, never raise a legacy ceiling."
+    )

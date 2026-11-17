@@ -14,17 +14,20 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine import reasons
 from decoy_engine.execution import _unified_slice_admission
+from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._companion_status import native_companion_status
 from decoy_engine.execution.physical._activation import build_unified_slice_activation
 from decoy_engine.execution.physical._compiler import compile_physical_plan
 from decoy_engine.execution.physical._live_inputs import build_live_physical_plan_inputs
 from decoy_engine.execution.physical._plan import PhysicalTable
 from decoy_engine.execution.physical._types import DriverId
-from decoy_engine.plan import compile_plan
+from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import profile_source
 from decoy_engine.providers_v2 import ProviderRegistry, get_default_registry
 from decoy_engine.relationships import RelationshipGraph
+from tests._declared_schema import declare_rest
 from tests.physical._shadow_helpers import build_config, write_read_only_fixture
 
 ENGINE_VERSION = "unified-slice-admission-test"
@@ -198,6 +201,9 @@ def test_cheap_admission_declines_undeclared_passthrough_column(tmp_path: Path) 
     )
     config, source = _build(tmp_path, [{"name": "c", "strategy": "passthrough"}], source)
     profile, _ = _profile_and_plan(config, source)
+    # The declaration gate refuses this config before any run, so the fixture drops the column
+    # the builder declared and calls the admission check directly: the check stays a second guard.
+    config["tables"][0]["columns"] = [{"name": "c", "strategy": "passthrough"}]
     assert _cheap_ok(config, profile, source) is None
 
 
@@ -222,7 +228,7 @@ def test_cheap_admission_declines_duplicate_column_declaration(tmp_path: Path) -
         },
         "tables": [{"name": "t", "columns": [{"name": "c", "strategy": "passthrough"}]}],
     }
-    config = PipelineConfig.model_validate(raw).model_dump()
+    config = PipelineConfig.model_validate(declare_rest(raw)).model_dump()
     # Mutate post-validation to inject the duplicate the schema itself would
     # reject at submit time -- proving the admission check is a real,
     # independent guard, not merely inherited from schema validation.
@@ -322,11 +328,21 @@ def test_cheap_admission_declines_quarantine_configured(tmp_path: Path) -> None:
     assert _cheap_ok(config, profile, source) is None
 
 
-def test_cheap_admission_declines_profile_columns(tmp_path: Path) -> None:
+def test_cheap_admission_admits_regex_integrity(tmp_path: Path) -> None:
+    # Regex-only integrity is judged by the gate on the slice's return, so it no longer declines.
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
     config, source = _build(tmp_path, [{"name": "c", "strategy": "passthrough"}], source)
     config = dict(config)
     config["post_scan"] = {"integrity": True}
+    profile, _ = _profile_and_plan(config, source)
+    assert _cheap_ok(config, profile, source) is not None
+
+
+def test_cheap_admission_declines_a_model_post_scan_ask(tmp_path: Path) -> None:
+    source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
+    config, source = _build(tmp_path, [{"name": "c", "strategy": "passthrough"}], source)
+    config = dict(config)
+    config["post_scan"] = {"integrity": True, "detectors": ["regex", "ner"]}
     profile, _ = _profile_and_plan(config, source)
     assert _cheap_ok(config, profile, source) is None
 
@@ -497,13 +513,16 @@ def test_resident_contract_admission_admits_the_golden_shape(tmp_path: Path) -> 
 
 
 def test_resident_contract_admission_declines_an_unsupported_strategy(tmp_path: Path) -> None:
-    """`fpe` has no entry in the four-operator allowlist, so its node
+    """`shuffle` has no operator in the unified-slice registry, so its node
     compiles with `execution is None` -- the resident-contract check must
-    decline, not admit a partial slice."""
+    decline, not admit a partial slice. (`fpe` is no longer the example: with a
+    namespace and the companion it is a bound operator.)"""
     source = pa.table({"c": pa.array(["12345", "23456", "34567"], type=pa.string())})
-    config, source = _build(tmp_path, [{"name": "c", "strategy": "fpe"}], source)
+    config, source = _build(tmp_path, [{"name": "c", "strategy": "shuffle"}], source)
     profile, plan = _profile_and_plan(config, source)
     physical_plan, registry = _compile(config, profile, plan, source)
+    assert "shuffle" not in OPERATORS
+    assert all(n.execution is None for t in physical_plan.tables for n in t.nodes)
     assert _resident_contract(physical_plan, plan, source, registry=registry) is None
 
 
@@ -662,19 +681,19 @@ def test_domain_matrix_declines_out_of_domain_agreement(
     [[], [None, None, None], ["a@x.com", "b@x.com", "c@x.com"]],
     ids=["empty", "all_null", "value_bearing"],
 )
-def test_unencodable_hash_namespace_declines(tmp_path: Path, values: list[str | None]) -> None:
-    """CHANGE 1: the compiled kernel consumes the namespace at every batch
-    invocation, even for an empty/all-null column (unlike the legacy
-    per-value `derive()` call, which only ever sees the namespace for a
-    non-null value) -- so an unencodable namespace must decline in all
-    three data shapes, not only the value-bearing one."""
+def test_unencodable_hash_namespace_is_refused_before_admission(
+    tmp_path: Path, values: list[str | None]
+) -> None:
+    """A namespace with an unpaired surrogate cannot be UTF-8 encoded. Plan compile now refuses
+    it with `config_value_not_json` in every data shape, so the admission decline that once
+    covered it has no config that reaches it."""
     source = pa.table({"c": pa.array(values, type=pa.string())})
     config, source = _build(
         tmp_path, [{"name": "c", "strategy": "hash", "namespace": "\ud800bad"}], source
     )
-    profile, plan = _profile_and_plan(config, source)
-    physical_plan, registry = _compile(config, profile, plan, source)
-    assert _resident_contract(physical_plan, plan, source, registry=registry) is None
+    with pytest.raises(PlanCompileError) as caught:
+        _profile_and_plan(config, source)
+    assert caught.value.code == reasons.plan.CONFIG_VALUE_NOT_JSON
 
 
 @pytest.mark.skipif(
@@ -741,12 +760,12 @@ def test_faker_large_string_source_binds_but_declines_admission(tmp_path: Path) 
     assert _resident_contract(physical_plan, plan, source, registry=registry) is None
 
 
-def test_faker_unencodable_namespace_declines(tmp_path: Path) -> None:
+def test_faker_unencodable_namespace_is_refused_before_admission(tmp_path: Path) -> None:
     source = pa.table({"c": pa.array(["a", "b", "c"], type=pa.string())})
     config, source = _build(tmp_path, [_faker_column("\ud800bad")], source)
-    profile, plan = _profile_and_plan(config, source)
-    physical_plan, registry = _compile(config, profile, plan, source)
-    assert _resident_contract(physical_plan, plan, source, registry=registry) is None
+    with pytest.raises(PlanCompileError) as caught:
+        _profile_and_plan(config, source)
+    assert caught.value.code == reasons.plan.CONFIG_VALUE_NOT_JSON
 
 
 def test_faker_declines_when_the_index_kernel_is_missing(

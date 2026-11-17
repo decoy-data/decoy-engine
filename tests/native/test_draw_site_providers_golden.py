@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from decoy_engine.determinism import IdentityDomain
+from decoy_engine.determinism import IdentityDomain, derive, seed_bytes_to_int
 from decoy_engine.execution.native._determinism_protocol import (
     DrawSiteProtocolError,
     all_providers,
@@ -54,6 +54,12 @@ def _np(gen: Any) -> list[float]:
     return [round(float(x), 12) for x in gen.random(4)]
 
 
+def _joint_mask_stream(site: str) -> Any:
+    provider = provider_for(site)
+    source = provider.source("patients", "us_zip5_city_state", ("zip", "city", "state"))
+    return (source.hex(), seed_bytes_to_int(derive(_MK, _NS, source)[:8]))
+
+
 def _faker_run(site: str) -> Any:
     faker = _FakeFaker()
     return provider_for(site).run(faker, faker.word, _ctx(), 3)
@@ -85,6 +91,8 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
         provider_for("mask.joint_mask_keyed_row").hmac_key(_MK, _NS).hex(),
         provider_for("mask.joint_mask_keyed_row").row_index(_MK, _NS, "k", 13),
     ),
+    "mask.joint_mask_null_fallback": lambda: _joint_mask_stream("mask.joint_mask_null_fallback"),
+    "mask.joint_mask_gen_row": lambda: _joint_mask_stream("mask.joint_mask_gen_row"),
     "mask.text_mask_date_shift": lambda: provider_for("mask.text_mask_date_shift").shift_days(
         _MK, "2001-01-01", -30, 30
     ),
@@ -104,6 +112,9 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
         _faker_run("gen.faker_per_row"),
     ),
     "gen.categorical": lambda: provider_for("gen.categorical").choices(
+        _ctx(), ["a", "b", "c"], [0.5, 0.3, 0.2], 6
+    ),
+    "gen.lookup": lambda: provider_for("gen.lookup").choices(
         _ctx(), ["a", "b", "c"], [0.5, 0.3, 0.2], 6
     ),
     "gen.reference": lambda: [
@@ -134,15 +145,18 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "gen.distribution_snapshot": lambda: _np(
         provider_for("gen.distribution_snapshot").col_generator(_ctx())
     ),
+    "gen.distribution": lambda: _np(provider_for("gen.distribution").col_generator(_ctx())),
     "gen.pool_deterministic": lambda: provider_for("gen.pool_deterministic").draw(
         _JOB, _NS, b"cfg", pool_size=17
     ),
     "gen.pool_nondeterministic": lambda: _np(
-        provider_for("gen.pool_nondeterministic").generator(b"\x00\x01\x02\x03")
+        provider_for("gen.pool_nondeterministic").generator(b"\x00\x00\x00\x00\x00\x01\x02\x03")
     ),
     "gen.composite_build_pool": lambda: (
-        _np(provider_for("gen.composite_build_pool").generator(b"\x09\x08")),
-        _np(provider_for("gen.composite_build_pool").generator(None)),
+        _np(
+            provider_for("gen.composite_build_pool").generator(b"\x00\x00\x00\x00\x00\x00\x09\x08")
+        ),
+        _np(provider_for("gen.composite_build_pool").generator(b"\x00" * 8)),
     ),
     "mask.faker": lambda: provider_for("mask.faker").draw(_MK, _NS, b"alice", pool_size=23),
     "gen.pool_build_faker": lambda: (
@@ -212,6 +226,7 @@ def test_unit_float_known_answers() -> None:
 
 
 _GOLDEN_OUTPUT: dict[str, str] = {
+    "gen.lookup": "1dd8bbdc10126eeb340ce6d6442b7874d88f62dd14827ddde84919610b3b3090",
     "gen.categorical": "1dd8bbdc10126eeb340ce6d6442b7874d88f62dd14827ddde84919610b3b3090",
     "gen.categorical_unique": "2a6e1e385403950a3b2b1095120ff03996eb120a7a43d88835eadbf24c6f862f",
     "gen.faker_unique_retry": "8120cf533ae61ba59a34796b5c426152a987f73e197cff99377ccd35f59da88c",
@@ -219,6 +234,7 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "gen.unique_pair": "12bb5d6bf1cb5f88bf02cc27f901d636257733275fb353619fded1fd5c50a559",
     "gen.composite_build_pool": "e804c947fbca8cbce1e13b3f6c5860e7050f6434e2b1c37f4a0278d080f521ce",
     "gen.derive_context": "7846c03077346d8ac4b081666ff721c8a7a0c74cbfb6f92e5bf8e5cabd8249dc",
+    "gen.distribution": "da8c203a890d906561c0bae8871bfe163b9936f95da4ef0634a02360384e5e6d",
     "gen.distribution_snapshot": "b73024fefa1fe793af5aee4905dc07f9d8d48930cb3f3854f04531e6579b20ad",
     "gen.faker_per_row": "28982d28b19852f557cf5f8618643d7529b02a3fd1fb0b276ae761b5a4a28166",
     "gen.faker_pool_build": "d8867409a8d2aae81b3d596c6dd91438e08bd5482c107a2def8da8711251d5c2",
@@ -245,6 +261,8 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.grouped_series_monotone_walk": "fb2192725ef26f254b1124356a13d36ece77d43e3051d4bbf1b889e99b3555c1",
     "mask.hash": "b931e4cddb5420a92e65ac3c8a1368bcf04c2d1724787ff94053377dd97fd2be",
     "mask.joint_mask_keyed_row": "0ca1fad82ed7cb5c6c40aeb27bfd029d82c3282152468d03f45cb82da746cf8d",
+    "mask.joint_mask_null_fallback": "e4c12e3f90322cbca92d7869b74b1dc2f3c1fe4dc1ac643b1de55d97e077136d",
+    "mask.joint_mask_gen_row": "c229b3842dcfa21d5ae28d89b2a15a6686a3295e6f220da57a1633fa4e906fb0",
     "mask.shuffle": "ec0fb76703bb6a80cc8ce607aefcca3941652855b79c73cad5d3b678235d0b57",
     "mask.text_mask_date_shift": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
     "mask.text_mask_faker": "eef779676d353b92d67b9797c6b3c3b020185d961487ae78af44ca7981ab8489",
@@ -252,4 +270,5 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.windowed_date": "e7155d227e2e065ea4ad6de21ddd5f12c08f5d6a9654351f208c5f6f7b2b612a",
 }
 
-_GOLDEN_REGISTRY = "7149067810ae54068bf85aa49a675cddebe914f660dc504ca8320c4731040b4a"
+# Re-captured for DUP-FREEZE E2: the two joint_mask stream providers join the registry.
+_GOLDEN_REGISTRY = "652033b853c8036c64a4cb96e081cc692f153ad7c7152616349b74c27c284317"

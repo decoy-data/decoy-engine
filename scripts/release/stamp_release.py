@@ -1,6 +1,8 @@
-"""Compile changelog fragments into CHANGELOG.md at release prep.
+"""Stamp the reason registry and compile changelog fragments into CHANGELOG.md at release prep.
 
     python scripts/release/stamp_release.py --version X.Y.Z [--date YYYY-MM-DD] [--repo PATH]
+        [--registry-minor auto|X.Y.0] --cli-pins-base PATH --cli-pins PATH [--cli-pins PATH ...]
+        --cli-version X.Y.Z [--allow-delta NAME ...]
 
 Run on the release prep branch, in a full clone. It reads every `changelog.d/<slug>.md` (not the
 README), orders them newest first by the commit that added each file, and writes one
@@ -9,12 +11,31 @@ README), orders them newest first by the commit that added each file, and writes
 deletes the fragments and adds the previous newest release to
 `tests/fixtures/changelog_released_sections.json`.
 
+In the same transaction it stamps the reason registry: the one transition
+`reason_manifest_policy.registry_transition` picks (next minor for new identities, next patch for
+a first deprecation or a marked summary correction alone, else none) replaces every
+`since=UNRELEASED` and `deprecated_in=UNRELEASED` catalog argument, sets `REGISTRY_VERSION` and
+the docs/reasons.md anchor, empties `PENDING_SUMMARY_EDITS`, writes the minor's fixture (a minor
+only), rebuilds consumer-contract.json and recaptures the v2 release pin. `--registry-minor` may
+only restate the automatic minor of an identity release.
+
+It also writes the DP certified rows (`scripts/release/dp_rows.py`) into `_CERTIFIED_STACKS`: the
+dev/CI row from `uv.lock` at `--version`, and one CLI-profile row per `--cli-pins` file at
+`--version` and `--cli-version`, each at the top of its block. `--cli-pins-base` is the previous
+certified pin file: every pin file must parse as plain `name==version` lines, and every candidate
+must name the same packages as the base, except names listed in `--allow-delta`. Existing rows are
+never removed.
+
 `parse_fragment` is the one fragment grammar; `scripts/dev/check_fragment.py` calls it too.
-Every write happens after every check, and CHANGELOG.md is replaced atomically. Messages carry
-file names, line numbers and rule names, never file content.
+Every write is planned, applied to a candidate copy of HEAD and checked there first; only then is
+the same plan applied to the clean tree, where any failure restores the owned paths and removes a
+created fixture. There is no resume path. Messages carry file names, line numbers, rule names,
+identities and versions, never file content.
 
 Exit codes: 0 done; 1 refused (a malformed fragment, a shallow clone, an uncommitted fragment, a
-bad version or date, a CHANGELOG without the expected headings).
+bad version or date, a CHANGELOG without the expected headings, a registry the pin rejects, a
+pending identity no fragment names, a candidate that fails its checks, a missing DP option, a pin
+file that does not parse, a candidate whose package names differ from the base).
 """
 
 from __future__ import annotations
@@ -32,6 +53,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 FRAGMENT_DIR = "changelog.d"
+DP_PROVENANCE = "src/decoy_engine/quality/dp_provenance.py"
+REGISTRY_PATHS = (
+    "src/decoy_engine/reasons",
+    "tests/fixtures/f29",
+    "docs/reasons.md",
+    DP_PROVENANCE,
+)
+F29 = "tests/fixtures/f29"
+REASON_PIN = f"{F29}/reason-registry-release.json"
+CONTRACT = f"{F29}/consumer-contract.json"
 README = "README.md"
 TYPES = ("Added", "Changed", "Fixed", "Deprecated", "Removed", "Security")
 PIN_FILE = Path("tests") / "fixtures" / "changelog_released_sections.json"
@@ -71,6 +102,16 @@ def _valid_date(text: str) -> bool:
 
 class FragmentError(ValueError):
     """A refusal. The message names files, lines and rules only."""
+
+
+@dataclass(frozen=True)
+class DpRequest:
+    """The DP certified-row inputs of one release prep (see `dp_rows`)."""
+
+    base: Path
+    candidates: tuple[Path, ...]
+    cli_version: str
+    allow_delta: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -224,14 +265,35 @@ def _owned_paths() -> list[str]:
     return ["CHANGELOG.md", PIN_FILE.as_posix(), FRAGMENT_DIR]
 
 
-def _dirty(root: Path) -> list[str]:
-    out = _git(root, "status", "--porcelain", "--untracked-files=all", "--", *_owned_paths())
+def _dirty(root: Path, owned: list[str]) -> list[str]:
+    out = _git(root, "status", "--porcelain", "--untracked-files=all", "--", *owned)
     return [line[3:] for line in out.splitlines()]
 
 
-def _rollback(root: Path) -> None:
-    """Put CHANGELOG.md, the pin and `changelog.d/` (deleted fragments included) back to HEAD."""
-    _git(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *_owned_paths())
+def _rollback(root: Path, owned: list[str] | None = None, created: tuple[str, ...] = ()) -> None:
+    """Put the owned paths (by default CHANGELOG.md, the pin and `changelog.d/`, deleted fragments
+    included) back to HEAD and remove the files this run created."""
+    # Created files go first: they are the one thing the restore cannot undo if it fails.
+    for rel in created:
+        (root / rel).unlink(missing_ok=True)
+    _git(
+        root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *(owned or _owned_paths())
+    )
+
+
+def _apply(root: Path, writes: dict[str, str], removes: list[str], owned=None, created=()) -> None:
+    """The one write path: replace, then delete; any failure rolls the owned paths back."""
+    try:
+        for rel, text in writes.items():
+            _replace(root / rel, text)
+        for rel in removes:
+            _remove(root / rel)
+    except BaseException:
+        if owned is None:
+            _rollback(root)
+        else:
+            _rollback(root, owned, created)
+        raise
 
 
 def _parse_all(root: Path, ordered: list[str]) -> tuple[list[Fragment], str | None]:
@@ -247,6 +309,23 @@ def _parse_all(root: Path, ordered: list[str]) -> tuple[list[Fragment], str | No
     return fragments, None
 
 
+def _preflight(root: Path, version: str, date: str, owned: list[str]) -> None:
+    if _VERSION.fullmatch(version) is None:
+        raise FragmentError("version must look like X.Y.Z")
+    if not _valid_date(date):
+        raise FragmentError("date must be a real YYYY-MM-DD date")
+    dirty = _dirty(root, owned)
+    if dirty:
+        # `git restore` leaves untracked files alone. A killed run cannot say which it created, so
+        # none is named for deletion: a file that matches a pattern may still be the operator's draft.
+        untracked = _git(root, "ls-files", "--others", "--exclude-standard", "--", *owned).split()
+        inspect = f"; untracked, inspect before removing: {' '.join(untracked)}" * bool(untracked)
+        raise FragmentError(
+            f"uncommitted changes in {', '.join(dirty)}; restore them with: git restore "
+            f"--source=HEAD --staged --worktree -- {' '.join(owned)}{inspect}"
+        )
+
+
 def compile_fragments(root: Path, version: str, date: str) -> None:
     """Fold the fragments and the old `[Unreleased]` body into a dated `version` section.
 
@@ -255,16 +334,15 @@ def compile_fragments(root: Path, version: str, date: str) -> None:
     crash that skips the rollback leaves a dirty tree, which the next run refuses; the operator runs
     the `git restore` the message names.
     """
-    if _VERSION.fullmatch(version) is None:
-        raise FragmentError("version must look like X.Y.Z")
-    if not _valid_date(date):
-        raise FragmentError("date must be a real YYYY-MM-DD date")
-    dirty = _dirty(root)
-    if dirty:
-        raise FragmentError(
-            f"uncommitted changes in {', '.join(dirty)}; restore them with: git restore "
-            f"--source=HEAD --staged --worktree -- {' '.join(_owned_paths())}"
-        )
+    _preflight(root, version, date, _owned_paths())
+    writes, removes, _ = _changelog_plan(root, version, date)
+    _apply(root, writes, removes)
+
+
+def _changelog_plan(
+    root: Path, version: str, date: str
+) -> tuple[dict[str, str], list[str], list[Fragment]]:
+    """The compile's writes and deletions, and the parsed fragments; nothing is written."""
     names = _fragment_files(root)
     ordered = _newest_first(root, names) if names else []
     fragments, problem = _parse_all(root, ordered)
@@ -285,14 +363,165 @@ def compile_fragments(root: Path, version: str, date: str) -> None:
         **{k: v for k, v in pins.items() if k != prev_version},
     }
 
+    writes = {PIN_FILE.as_posix(): json.dumps(pins, indent=2) + "\n", "CHANGELOG.md": text}
+    return writes, [f"{FRAGMENT_DIR}/{name}" for name in ordered], fragments
+
+
+def _tools():
+    """The registry policy, the v2 pin and the source-rewrite tools; only the stamp loads them."""
+    root = Path(__file__).resolve().parents[2]
+    for path in (str(root), str(root / "scripts" / "dev")):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    import registry_renumber as rr
+    from scripts.release import reason_manifest_policy as pol
+    from scripts.release import reason_release_pin as rp
+
+    return pol, rp, rr
+
+
+def _read(root: Path, rel: str) -> str:
+    return (root / rel).read_text(encoding="utf-8")
+
+
+def _extract(rr, tree: Path) -> dict:
     try:
-        _replace(pin_path, json.dumps(pins, indent=2) + "\n")
-        _replace(changelog_path, text)
-        for name in ordered:
-            _remove(root / FRAGMENT_DIR / name)
-    except BaseException:
-        _rollback(root)
-        raise
+        return rr.rg.extract(tree, contract=True)
+    except rr.rg.Refusal as err:
+        raise FragmentError(f"registry: {err.message}") from None
+
+
+def _registry_plan(
+    root: Path, live: dict, t, version: str
+) -> tuple[dict[str, str], list[str], dict]:
+    """The stamp's registry writes, the files it creates, and the manifest it must yield."""
+    pol, rp, rr = _tools()
+    stamped = pol.stamped_manifest(live, t)
+    writes: dict[str, str] = {}
+    for rel in _git(root, "ls-files", "--", "src/decoy_engine/reasons").split():
+        text = _read(root, rel) if rel.endswith(".py") else ""
+        new = rr.stamp_source(text, t.version)
+        if rel == rr.rg.REGISTRY_PY:
+            new = rr.clear_pending_summaries(rr.ANCHORS[rel].sub(rf"\g<1>{t.version}\g<3>", new))
+        if new != text:
+            writes[rel] = new
+    doc = _read(root, rr.REASONS_MD)
+    writes[rr.REASONS_MD] = rr.ANCHORS[rr.REASONS_MD].sub(rf"\g<1>{t.version}\g<3>", doc)
+    created: list[str] = []
+    if t.writes_fixture:
+        name = f"{F29}/{pol.fixture_name(t.version, pol.release_fixture_slug(version))}"
+        if (root / name).exists():
+            raise FragmentError(f"{name} already exists")
+        header = {k: v for k, v in stamped.items() if k != "entries"}
+        body = {**header, "entries": pol.entries_since(stamped, t.version)}
+        writes[name] = json.dumps(body, indent=2, sort_keys=True) + "\n"
+        created.append(name)
+    writes[REASON_PIN] = rp.pin_text(rp.build_pin(stamped, t.version))
+    return writes, created, stamped
+
+
+def _candidate_contract(root: Path, writes: dict, removes: list[str], t, stamped: dict) -> str:
+    """Apply the plan to a copy of HEAD, check every release postcondition there, and return the
+    consumer contract rebuilt from it; refuses, writing nothing real, on any problem."""
+    pol, rp, rr = _tools()
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = Path(tmp) / "cand"
+        cand.mkdir()
+        try:
+            rr.rg.archive(root, "HEAD", cand)
+        except rr.rg.Refusal as err:
+            raise FragmentError(f"registry: {err.message}") from None
+        for rel, text in writes.items():
+            (cand / rel).parent.mkdir(parents=True, exist_ok=True)
+            (cand / rel).write_text(text, encoding="utf-8")
+        for rel in removes:
+            (cand / rel).unlink()
+        built = _extract(rr, cand)
+        pending = frozenset(map(tuple, built["pending"]))
+        manifest = built["manifest"]
+        pin, problems = rp.load_pin(_read(cand, REASON_PIN))
+        fixtures = {
+            p.name: json.loads(p.read_text(encoding="utf-8"))
+            for p in (cand / F29).glob(pol.FIXTURE_GLOB)
+        }
+        anchors = [a[2] for a in rr.ANCHORS[rr.REASONS_MD].finditer(_read(cand, rr.REASONS_MD))]
+        facts = {"manifest": manifest, "pin": pin, "contract": built["contract"]}
+        facts.update(anchors=anchors, fragments=_fragment_files(cand))
+        problems += pol.release_ready_violations(manifest, pending)
+        problems += pol.minor_fixture_violations(fixtures, manifest, pol.FIXTURE_FLOOR)
+        if pin is not None:
+            problems += pol.release_pin_violations(pin, manifest, pending)
+            problems += pol.release_postcondition_violations(t, stamped, facts)
+    if problems:
+        raise FragmentError("the stamped candidate failed: " + "; ".join(problems))
+    return json.dumps(built["contract"], indent=1, sort_keys=True) + "\n"
+
+
+def _dp_plan(root: Path, version: str, dp: DpRequest) -> dict[str, str]:
+    """The write that adds this release's DP rows; nothing is written."""
+    _tools()  # puts the repository root on sys.path for `scripts.release`
+    from scripts.release import dp_rows
+
+    try:
+        text = _read(root, DP_PROVENANCE)
+        new = dp_rows.plan_rows(
+            root, text, version, dp.cli_version, dp.base, list(dp.candidates), list(dp.allow_delta)
+        )
+    except dp_rows.DpRowError as err:
+        raise FragmentError(f"dp rows: {err}") from None
+    return {DP_PROVENANCE: new} if new != text else {}
+
+
+def stamp_release(
+    root: Path,
+    version: str,
+    date: str,
+    registry_minor: str = "auto",
+    dp: DpRequest | None = None,
+) -> str:
+    """Stamp the pending registry facts, add the DP certified rows when `dp` is given and compile
+    the changelog in one transaction; returns the registry version the release ships."""
+    pol, rp, rr = _tools()
+    owned = [*_owned_paths(), *REGISTRY_PATHS]
+    _preflight(root, version, date, owned)
+    dp_writes = _dp_plan(root, version, dp) if dp is not None else {}
+    state = _extract(rr, root)
+    live, pending = state["manifest"], frozenset(map(tuple, state["pending"]))
+    writes, removes, fragments = _changelog_plan(root, version, date)
+    pin, problems = rp.load_pin(_read(root, REASON_PIN))
+    if pin is None:
+        raise FragmentError("registry: " + "; ".join(problems))
+    t = pol.registry_transition(live, pin, pending)
+    problems = pol.release_pin_violations(pin, live, pending)
+    problems += pol.registry_minor_violations(t, registry_minor)
+    problems += pol.pending_fragment_violations(live, [f.block for f in fragments])
+    if problems:
+        raise FragmentError("registry: " + "; ".join(problems))
+    registry, created, stamped = _registry_plan(root, live, t, version)
+    writes = {**registry, **writes, **dp_writes}
+    writes[CONTRACT] = _candidate_contract(root, writes, removes, t, stamped)
+    _apply(root, writes, removes, owned, tuple(created))
+    return t.version
+
+
+def _dp_request(args: argparse.Namespace) -> DpRequest:
+    """The DP options, all required; argparse would exit 2, a refusal here exits 1."""
+    missing = [
+        flag
+        for flag, value in (
+            ("--cli-pins-base", args.cli_pins_base),
+            ("--cli-pins", args.cli_pins),
+            ("--cli-version", args.cli_version),
+        )
+        if not value
+    ]
+    if missing:
+        raise FragmentError(f"missing {', '.join(missing)}")
+    if _VERSION.fullmatch(args.cli_version) is None:
+        raise FragmentError("--cli-version must look like X.Y.Z")
+    return DpRequest(
+        args.cli_pins_base, tuple(args.cli_pins), args.cli_version, tuple(args.allow_delta)
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -300,13 +529,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", required=True)
     ap.add_argument("--date", default=datetime.date.today().isoformat())
     ap.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
+    ap.add_argument("--registry-minor", default="auto")
+    ap.add_argument("--cli-pins-base", type=Path, help="the previous certified pin file")
+    ap.add_argument("--cli-pins", type=Path, action="append", default=[], help="a candidate file")
+    ap.add_argument("--cli-version", help="the decoy-cli version the candidate rows are for")
+    ap.add_argument(
+        "--allow-delta", action="append", default=[], help="a package name that may differ"
+    )
     args = ap.parse_args(argv)
     try:
-        compile_fragments(args.repo, args.version, args.date)
+        dp = _dp_request(args)
+        shipped = stamp_release(args.repo, args.version, args.date, args.registry_minor, dp)
     except FragmentError as err:
         print(f"stamp_release: refused: {err}", file=sys.stderr)
         return 1
-    print(f"stamp_release: compiled changelog fragments into [{args.version}]")
+    print(f"stamp_release: registry {shipped}; compiled changelog fragments into [{args.version}]")
     return 0
 
 

@@ -28,18 +28,21 @@ import math
 import time
 import types
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, Literal, Union, cast, get_args, get_origin
+from typing import Annotated, Any, Final, Literal, Union, cast, get_args, get_origin
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, TypeAdapter, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, model_validator
 from pydantic import ValidationError as _PydanticValidationError
 
 from decoy_engine import reason_adapter, reasons
 from decoy_engine._field_names import repeated_names
 from decoy_engine.config import PipelineConfigError, SourceDescriptor
+from decoy_engine.config._pre_scan import PreScanConfig
+from decoy_engine.detection._ner_rate import RateBucket
+from decoy_engine.detection.types import DetectorRun
 from decoy_engine.errors import DecoyError, PipelineValidationError
 from decoy_engine.fileaccess import (
     FileAccess,
@@ -49,6 +52,14 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
+from decoy_engine.profiling._model_pass import (
+    REGEX_ONLY,
+    Band,
+    ModelHit,
+    ModelPass,
+    load_pre_scan,
+    log_pre_scan,
+)
 from decoy_engine.profiling._scan_integrity import RelationshipFacts, Status
 from decoy_engine.profiling._scan_text_checks import count_leading_zeros, header_looks_like_data
 from decoy_engine.profiling.profiler import profile_columns
@@ -67,7 +78,7 @@ _DESCRIPTOR: TypeAdapter[Any] = TypeAdapter(SourceDescriptor)
 
 # Errors the file-access and CSV layers already keep value-free; wrapping them would hide
 # their codes from the caller. Any other registered engine family passes through too
-# (`_is_coded`), so only an unclassified failure is wrapped.
+# (`passes_through`), so only an unclassified failure is wrapped.
 _PASS_THROUGH = (
     FileAccessDenied,
     FileAccessReadError,
@@ -106,6 +117,34 @@ class WarningRefCore(_Core):
         return self
 
 
+class ModelRefCore(_Core):
+    id: str
+    version: str
+
+
+class ModelHitCore(_Core):
+    source: Literal["classifier", "ner"]
+    detector_id: str
+    model: ModelRefCore
+    band: Band | None
+    rate_bucket: RateBucket | None
+
+
+class RegexRunCore(_Core):
+    source: Literal["regex"]
+    model: None
+
+
+class ModelRunCore(_Core):
+    source: Literal["classifier", "ner"]
+    model: ModelRefCore
+
+
+# Tagged on `source`, so a regex run cannot carry a model and a model run cannot lack one.
+_DetectorRunCore = Annotated[Union[RegexRunCore, ModelRunCore], Field(discriminator="source")]  # noqa: UP007
+_RUN_CORE: TypeAdapter[Any] = TypeAdapter(_DetectorRunCore)
+
+
 class FieldCore(_Core):
     name: str
     dtype: str
@@ -116,6 +155,8 @@ class FieldCore(_Core):
     pii_candidate: bool
     detector_hits: list[str]
     leading_zero_count: int | None
+    # Defaults keep a record written before M3a readable and valid.
+    model_hits: list[ModelHitCore] = Field(default_factory=list)
 
 
 class TableCore(_Core):
@@ -160,6 +201,7 @@ class ScanSetCore(_Core):
     scanned_at: str
     tables: list[TableCore]
     relationships: list[RelationshipFactsCore]
+    detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
 def _relaxed(model: type[BaseModel]) -> type[BaseModel]:
@@ -205,6 +247,7 @@ class TableScan:
     key_candidates: tuple[str, ...]
     null_counts: dict[str, int]
     leading_zero_counts: dict[str, int | None]
+    model_hits: Mapping[str, tuple[ModelHit, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -214,6 +257,7 @@ class ScanSet:
     scan_schema: str
     engine_version: str
     scanned_at: str
+    detectors: tuple[DetectorRun, ...] = REGEX_ONLY
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +276,7 @@ def scan_sources(
     integrity: bool = True,
     spill_dir: Path | None = None,
     file_access: FileAccess | None = None,
+    pre_scan: PreScanConfig | None = None,
 ) -> ScanSet:
     """Scan the selected tables of `sources` and return one `ScanSet`.
 
@@ -245,8 +290,11 @@ def scan_sources(
     key, null and orphan counts (`RelationshipFacts`), read from key columns only and spilled to
     a protected directory under `spill_dir` (default: the system temp directory). The tables
     they name must be in `sources` but need not be selected. Nothing is inferred.
+
+    `pre_scan` adds model detectors to the regex ones (`None`: regex only). They load strictly,
+    once, before the first table; an unavailable model raises `ModelUnavailableError` first.
     """
-    from decoy_engine import __version__
+    from decoy_engine.release import __version__
 
     if strategy not in ("head", "random", "full"):
         raise PipelineConfigError("strategy must be 'head', 'random' or 'full'")
@@ -264,10 +312,14 @@ def scan_sources(
 
     declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
 
+    models, runs = load_pre_scan(pre_scan, file_access)
+
     scans = []
-    for name in selected:
+    for position, name in enumerate(selected, 1):
         started = time.monotonic()
-        scan = _scan_one(name, descriptors[name], sample_rows, strategy, file_access)
+        scan = _scan_one(
+            name, descriptors[name], sample_rows, strategy, file_access, (models, position)
+        )
         _LOG.info(
             "scanned table=%s rows=%d seconds=%.2f",
             name,
@@ -275,12 +327,15 @@ def scan_sources(
             time.monotonic() - started,
         )
         scans.append(scan)
+    if models is not None:
+        log_pre_scan(runs, scans)
     return ScanSet(
         tables=tuple(scans),
         relationships=_integrity_facts(descriptors, declared, spill_dir),
         scan_schema=SCAN_SET_SCHEMA,
         engine_version=__version__,
         scanned_at=datetime.now(timezone.utc).isoformat(),
+        detectors=runs,
     )
 
 
@@ -294,10 +349,10 @@ def _integrity_facts(
     cause: str | None = None
     try:
         return _scan_integrity.relationship_facts(descriptors, declared, spill_dir=spill_dir)
-    except (*_PASS_THROUGH, PipelineConfigError):
+    except PipelineConfigError:
         raise
     except Exception as exc:
-        if _is_coded(exc):
+        if passes_through(exc):
             raise
         cause = safe_error_class(type(exc).__name__)
     raise ScanSourceError("relationships", cause or "Exception")
@@ -322,22 +377,23 @@ def _scan_one(
     sample_rows: int | None,
     strategy: Strategy,
     file_access: FileAccess | None,
+    model_pass: tuple[ModelPass | None, int],
 ) -> TableScan:
     cause: str | None = None
     try:
-        return _read_and_profile(name, descriptor, sample_rows, strategy, file_access)
-    except _PASS_THROUGH:
-        raise
+        return _read_and_profile(name, descriptor, sample_rows, strategy, file_access, model_pass)
     except Exception as exc:
-        if _is_coded(exc):
+        if passes_through(exc):
             raise
         cause = safe_error_class(type(exc).__name__)
     raise ScanSourceError(name, cause or "Exception")
 
 
-def _is_coded(exc: BaseException) -> bool:
-    """True for a scan error or any engine error family the reason adapter classifies."""
-    return isinstance(exc, (ScanSourceError, *reason_adapter.registered_families()))
+def passes_through(exc: BaseException) -> bool:
+    """True when `exc` must reach the caller unchanged: the file-access and validation errors, a
+    scan error, or any engine error family the reason adapter classifies. Only an unclassified
+    failure is stripped to its class name."""
+    return isinstance(exc, (*_PASS_THROUGH, ScanSourceError, *reason_adapter.loaded_families()))
 
 
 def _read_and_profile(
@@ -346,10 +402,11 @@ def _read_and_profile(
     sample_rows: int | None,
     strategy: Strategy,
     file_access: FileAccess | None,
+    model_pass: tuple[ModelPass | None, int],
 ) -> TableScan:
     # Imported here because decoy_engine.profile imports this package.
     from decoy_engine import profile as src
-    from decoy_engine.execution import refuse_duplicate_field_names
+    from decoy_engine.execution._guards import refuse_duplicate_field_names
 
     reader = src.build_declared_source(name, descriptor)
     whole = strategy == "full" or sample_rows is None
@@ -390,8 +447,10 @@ def _read_and_profile(
         sample_row_cap=row_cap,
         file_access=file_access,
     )
+    models, position = model_pass
+    hits = {} if models is None else models.run(frame, name, position)
     del frame
-    return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts)
+    return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts, hits)
 
 
 def _text_frames(
@@ -427,6 +486,7 @@ def _table_scan(
     total: int,
     exact: bool,
     zero_counts: dict[str, int] | None,
+    hits: Mapping[str, tuple[ModelHit, ...]],
 ) -> TableScan:
     scanned = profile.row_count
     keys = tuple(
@@ -446,6 +506,7 @@ def _table_scan(
         leading_zero_counts={
             f.name: None if zero_counts is None else zero_counts.get(f.name) for f in profile.fields
         },
+        model_hits=hits,
     )
 
 
@@ -461,7 +522,9 @@ def _finite(value: float | None) -> float | None:
     return float(value)
 
 
-def _field_core(f: FieldStats, name: str, scanned: int, zeros: int | None) -> FieldCore:
+def _field_core(
+    f: FieldStats, name: str, scanned: int, zeros: int | None, hits: Sequence[ModelHit]
+) -> FieldCore:
     # Only these attributes of FieldStats are read: top_values, mode, min and max can hold
     # cell text and must not reach the core.
     return FieldCore(
@@ -474,6 +537,9 @@ def _field_core(f: FieldStats, name: str, scanned: int, zeros: int | None) -> Fi
         pii_candidate=f.pii_score >= PII_CANDIDATE_THRESHOLD,
         detector_hits=[m.detector_id for m in (f.detector_matches or [])],
         leading_zero_count=zeros,
+        model_hits=[
+            ModelHitCore(**{**asdict(h), "model": ModelRefCore(**asdict(h.model))}) for h in hits
+        ],
     )
 
 
@@ -492,7 +558,13 @@ def _table_core(t: TableScan) -> TableCore:
     p = t.profile
     core_name = _core_names(t)
     fields = [
-        _field_core(f, core_name[f.name], p.row_count, t.leading_zero_counts.get(f.name))
+        _field_core(
+            f,
+            core_name[f.name],
+            p.row_count,
+            t.leading_zero_counts.get(f.name),
+            t.model_hits.get(f.name, ()),
+        )
         for f in p.fields
     ]
     return TableCore(
@@ -519,6 +591,7 @@ def scan_set_to_dict(s: ScanSet, *, detail: bool) -> dict[str, Any]:
         scanned_at=s.scanned_at,
         tables=[_table_core(t) for t in s.tables],
         relationships=[RelationshipFactsCore.model_validate(r.to_dict()) for r in s.relationships],
+        detectors=[_RUN_CORE.validate_python(asdict(r)) for r in s.detectors],
     )
     doc: dict[str, Any] = core.model_dump()
     if detail:

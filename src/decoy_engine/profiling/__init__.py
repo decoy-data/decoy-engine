@@ -18,27 +18,59 @@ Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 `ColumnProfile`. Depends on `decoy_engine.detection`.
 """
 
-from decoy_engine.profiling._scan_integrity import ChildFacts, RelationshipFacts
+from decoy_engine.profiling._model_pass import ModelHit
+from decoy_engine.profiling._profile_document import profile_document, redact_profile_dict
+from decoy_engine.profiling._scan_integrity import (
+    KEY_BATCH_ROWS,
+    MEMORY_LIMIT,
+    ChildFacts,
+    ChildKeyFacts,
+    KeyBatches,
+    KeyFacts,
+    RelationshipFacts,
+    column_distinct,
+    key_facts,
+)
 from decoy_engine.profiling._snapshot_values import (
     distribution_snapshot_document,
     snapshot_joint_warnings,
+)
+from decoy_engine.profiling._starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    starter_config,
 )
 from decoy_engine.profiling._value_redaction import (
     MIN_RELEASE_COUNT,
     POLICY_RAW,
     POLICY_REDACTED,
     REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
     VALUE_POLICY_KEY,
     is_value_sensitive,
-    profile_document,
-    redact_profile_dict,
 )
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (
     DEFAULT_STRATEGY_BY_DETECTOR,
+    DETECTOR_DESCRIPTORS,
+    DetectorDescriptor,
+    StarterChoice,
     StrategyDefault,
     get_default_strategy,
     known_detector_ids,
+)
+from decoy_engine.profiling.scan_diff import (
+    SCAN_DIFF_SCHEMA,
+    FieldChange,
+    FieldPresence,
+    ScanDiffCore,
+    ScanDiffCoreRead,
+    ScanSetDiff,
+    TableDiff,
+    diff_scan_documents,
+    diff_scan_tables,
+    pii_bucket,
+    scan_diff_to_dict,
 )
 from decoy_engine.profiling.scan_set import (
     SCAN_SET_SCHEMA,
@@ -47,9 +79,11 @@ from decoy_engine.profiling.scan_set import (
     ScanSetCoreRead,
     ScanSourceError,
     TableScan,
+    passes_through,
     scan_set_to_dict,
     scan_sources,
 )
+from decoy_engine.profiling.scan_set_read import ScanSetReadError, read_scan_set
 from decoy_engine.profiling.types import (
     ColumnProfile,
     Distribution,
@@ -60,33 +94,62 @@ from decoy_engine.profiling.types import (
 
 __all__ = [
     "DEFAULT_STRATEGY_BY_DETECTOR",
+    "DETECTOR_DESCRIPTORS",
+    "KEY_BATCH_ROWS",
+    "MEMORY_LIMIT",
     "MIN_RELEASE_COUNT",
     "POLICY_RAW",
     "POLICY_REDACTED",
     "REDACTED_COLUMNS_KEY",
+    "REDACTED_POLICIES",
+    "SCAN_DIFF_SCHEMA",
     "SCAN_SET_SCHEMA",
     "VALUE_POLICY_KEY",
     "ChildFacts",
+    "ChildKeyFacts",
     "ColumnProfile",
+    "ColumnSuggestion",
+    "DetectorDescriptor",
     "Distribution",
+    "FieldChange",
+    "FieldPresence",
     "FieldStats",
+    "KeyBatches",
+    "KeyFacts",
+    "ModelHit",
     "RelationshipFacts",
+    "ScanDiffCore",
+    "ScanDiffCoreRead",
     "ScanSet",
     "ScanSetCore",
     "ScanSetCoreRead",
+    "ScanSetDiff",
+    "ScanSetReadError",
     "ScanSourceError",
     "SentinelFlag",
+    "StarterChoice",
+    "StarterConfig",
     "StrategyDefault",
+    "TableDiff",
     "TableScan",
     "TopValue",
+    "column_distinct",
+    "diff_scan_documents",
+    "diff_scan_tables",
     "distribution_snapshot_document",
     "get_default_strategy",
     "is_value_sensitive",
+    "key_facts",
     "known_detector_ids",
+    "passes_through",
+    "pii_bucket",
     "profile_columns",
     "profile_document",
+    "read_scan_set",
     "redact_profile_dict",
+    "scan_diff_to_dict",
     "scan_set_to_dict",
     "scan_sources",
     "snapshot_joint_warnings",
+    "starter_config",
 ]

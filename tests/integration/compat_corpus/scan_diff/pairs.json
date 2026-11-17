@@ -1,0 +1,1039 @@
+{
+  "captured_from": "decoy CLI 5b49510 src/decoy/cli/scan.py compute_scan_diff",
+  "pairs": [
+    {
+      "id": "bucket_up",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.35
+          },
+          {
+            "name": "c",
+            "pii_score": 0.0
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.4
+          },
+          {
+            "name": "b",
+            "pii_score": 0.7
+          },
+          {
+            "name": "c",
+            "pii_score": 0.2
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [
+          {
+            "name": "a",
+            "old_score": 0.1,
+            "new_score": 0.4,
+            "old_bucket": "low",
+            "new_bucket": "med"
+          },
+          {
+            "name": "b",
+            "old_score": 0.35,
+            "new_score": 0.7,
+            "old_bucket": "med",
+            "new_bucket": "high"
+          },
+          {
+            "name": "c",
+            "old_score": 0,
+            "new_score": 0.2,
+            "old_bucket": "none",
+            "new_bucket": "low"
+          }
+        ],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": true
+      }
+    },
+    {
+      "id": "bucket_down",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.9
+          },
+          {
+            "name": "b",
+            "pii_score": 0.5
+          },
+          {
+            "name": "c",
+            "pii_score": 0.2
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.5
+          },
+          {
+            "name": "b",
+            "pii_score": 0.1
+          },
+          {
+            "name": "c",
+            "pii_score": 0.0
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [
+          {
+            "name": "a",
+            "old_score": 0.9,
+            "new_score": 0.5,
+            "old_bucket": "high",
+            "new_bucket": "med"
+          },
+          {
+            "name": "b",
+            "old_score": 0.5,
+            "new_score": 0.1,
+            "old_bucket": "med",
+            "new_bucket": "low"
+          },
+          {
+            "name": "c",
+            "old_score": 0.2,
+            "new_score": 0,
+            "old_bucket": "low",
+            "new_bucket": "none"
+          }
+        ],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "added_fields",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "z_low",
+            "pii_score": 0.2
+          },
+          {
+            "name": "m_high",
+            "pii_score": 0.95
+          },
+          {
+            "name": "n_none"
+          },
+          {
+            "name": "o_null",
+            "pii_score": null
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [
+          {
+            "name": "m_high",
+            "pii_score": 0.95,
+            "pii_bucket": "high"
+          },
+          {
+            "name": "n_none",
+            "pii_score": null,
+            "pii_bucket": "none"
+          },
+          {
+            "name": "o_null",
+            "pii_score": null,
+            "pii_bucket": "none"
+          },
+          {
+            "name": "z_low",
+            "pii_score": 0.2,
+            "pii_bucket": "low"
+          }
+        ],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [
+          {
+            "name": "m_high",
+            "pii_score": 0.95,
+            "pii_bucket": "high"
+          }
+        ],
+        "drift": true
+      }
+    },
+    {
+      "id": "removed_fields",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.8
+          },
+          {
+            "name": "c"
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [
+          {
+            "name": "b",
+            "pii_score": 0.8,
+            "pii_bucket": "high"
+          },
+          {
+            "name": "c",
+            "pii_score": null,
+            "pii_bucket": "none"
+          }
+        ],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "new_high_pii_only",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "ssn",
+            "pii_score": 0.6
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [
+          {
+            "name": "ssn",
+            "pii_score": 0.6,
+            "pii_bucket": "high"
+          }
+        ],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [
+          {
+            "name": "ssn",
+            "pii_score": 0.6,
+            "pii_bucket": "high"
+          }
+        ],
+        "drift": true
+      }
+    },
+    {
+      "id": "qi_order_insensitive",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "b",
+            "a"
+          ],
+          [
+            "c",
+            "d"
+          ]
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "a",
+            "b"
+          ],
+          [
+            "d",
+            "c"
+          ],
+          [
+            "e",
+            "a"
+          ]
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [
+          [
+            "a",
+            "e"
+          ]
+        ],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": true
+      }
+    },
+    {
+      "id": "qi_removed",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "a",
+            "b"
+          ],
+          [
+            "c",
+            "d"
+          ]
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "d",
+            "c"
+          ]
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "risk_delta_up",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.9
+          }
+        ],
+        "quasi_identifier_groups": [],
+        "reid_risk_score": 20.0
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.2
+          }
+        ],
+        "quasi_identifier_groups": [],
+        "reid_risk_score": 35.5
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [
+          {
+            "name": "b",
+            "old_score": 0.9,
+            "new_score": 0.2,
+            "old_bucket": "high",
+            "new_bucket": "low"
+          }
+        ],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": 15.5,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "risk_delta_missing_old",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.7
+          }
+        ],
+        "quasi_identifier_groups": []
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [],
+        "reid_risk_score": 12.0
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [
+          {
+            "name": "b",
+            "pii_score": 0.7,
+            "pii_bucket": "high"
+          }
+        ],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "risk_delta_null_new",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          },
+          {
+            "name": "b",
+            "pii_score": 0.7
+          }
+        ],
+        "quasi_identifier_groups": [],
+        "reid_risk_score": 5.0
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [],
+        "reid_risk_score": null
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [
+          {
+            "name": "b",
+            "pii_score": 0.7,
+            "pii_bucket": "high"
+          }
+        ],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": false
+      }
+    },
+    {
+      "id": "missing_score_is_zero",
+      "old": {
+        "fields": [
+          {
+            "name": "a"
+          },
+          {
+            "name": "b",
+            "pii_score": null
+          },
+          {
+            "name": "c",
+            "pii_score": 0.9
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.7
+          },
+          {
+            "name": "b",
+            "pii_score": 0.31
+          },
+          {
+            "name": "c"
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [
+          {
+            "name": "a",
+            "old_score": 0,
+            "new_score": 0.7,
+            "old_bucket": "none",
+            "new_bucket": "high"
+          },
+          {
+            "name": "b",
+            "old_score": 0,
+            "new_score": 0.31,
+            "old_bucket": "none",
+            "new_bucket": "med"
+          }
+        ],
+        "pii_decreased": [
+          {
+            "name": "c",
+            "old_score": 0.9,
+            "new_score": 0,
+            "old_bucket": "high",
+            "new_bucket": "none"
+          }
+        ],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": true
+      }
+    },
+    {
+      "id": "bucket_boundaries",
+      "old": {
+        "fields": [
+          {
+            "name": "p",
+            "pii_score": 0.0
+          },
+          {
+            "name": "q",
+            "pii_score": 0.2999
+          },
+          {
+            "name": "r",
+            "pii_score": 0.5999
+          },
+          {
+            "name": "s",
+            "pii_score": 1e-09
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "p",
+            "pii_score": 1e-09
+          },
+          {
+            "name": "q",
+            "pii_score": 0.3
+          },
+          {
+            "name": "r",
+            "pii_score": 0.6
+          },
+          {
+            "name": "s",
+            "pii_score": 0.2999
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [
+          {
+            "name": "p",
+            "old_score": 0,
+            "new_score": 1e-09,
+            "old_bucket": "none",
+            "new_bucket": "low"
+          },
+          {
+            "name": "q",
+            "old_score": 0.2999,
+            "new_score": 0.3,
+            "old_bucket": "low",
+            "new_bucket": "med"
+          },
+          {
+            "name": "r",
+            "old_score": 0.5999,
+            "new_score": 0.6,
+            "old_bucket": "med",
+            "new_bucket": "high"
+          }
+        ],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [],
+        "drift": true
+      }
+    },
+    {
+      "id": "score_move_inside_bucket",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.65
+          },
+          {
+            "name": "b",
+            "pii_score": 0.35
+          },
+          {
+            "name": "c",
+            "pii_score": 0.1
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "reid_risk_score": 10.0
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.95
+          },
+          {
+            "name": "b",
+            "pii_score": 0.31
+          },
+          {
+            "name": "c",
+            "pii_score": 0.2
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "b",
+            "a"
+          ]
+        ],
+        "reid_risk_score": 10.0
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": 0.0,
+        "new_high_pii": [],
+        "drift": false
+      },
+      "no_drift": true
+    },
+    {
+      "id": "identical",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.5
+          },
+          {
+            "name": "b",
+            "pii_score": 0.9
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "reid_risk_score": 40.0
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.5
+          },
+          {
+            "name": "b",
+            "pii_score": 0.9
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "reid_risk_score": 40.0
+      },
+      "expected": {
+        "added_rows": [],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": 0.0,
+        "new_high_pii": [],
+        "drift": false
+      },
+      "no_drift": true
+    },
+    {
+      "id": "same_table_name_other_pair",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.1
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0.9
+          },
+          {
+            "name": "only_new",
+            "pii_score": 0.8
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [
+          {
+            "name": "only_new",
+            "pii_score": 0.8,
+            "pii_bucket": "high"
+          }
+        ],
+        "removed_rows": [],
+        "pii_increased": [
+          {
+            "name": "a",
+            "old_score": 0.1,
+            "new_score": 0.9,
+            "old_bucket": "low",
+            "new_bucket": "high"
+          }
+        ],
+        "pii_decreased": [],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [
+          {
+            "name": "only_new",
+            "pii_score": 0.8,
+            "pii_bucket": "high"
+          }
+        ],
+        "drift": true
+      }
+    },
+    {
+      "id": "legacy_int_scores",
+      "old": {
+        "fields": [
+          {
+            "name": "age",
+            "pii_score": 0
+          },
+          {
+            "name": "ssn",
+            "pii_score": 1
+          },
+          {
+            "name": "zip",
+            "pii_score": 1
+          },
+          {
+            "name": "dob",
+            "pii_score": 0
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "age",
+            "zip"
+          ]
+        ],
+        "reid_risk_score": 40
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "age",
+            "pii_score": 1
+          },
+          {
+            "name": "ssn",
+            "pii_score": 0
+          },
+          {
+            "name": "zip",
+            "pii_score": 1
+          },
+          {
+            "name": "name",
+            "pii_score": 1
+          },
+          {
+            "name": "note",
+            "pii_score": 0
+          }
+        ],
+        "quasi_identifier_groups": [
+          [
+            "age",
+            "zip"
+          ],
+          [
+            "dob",
+            "zip"
+          ]
+        ],
+        "reid_risk_score": 55
+      },
+      "expected": {
+        "added_rows": [
+          {
+            "name": "name",
+            "pii_score": 1,
+            "pii_bucket": "high"
+          },
+          {
+            "name": "note",
+            "pii_score": 0,
+            "pii_bucket": "none"
+          }
+        ],
+        "removed_rows": [
+          {
+            "name": "dob",
+            "pii_score": 0,
+            "pii_bucket": "none"
+          }
+        ],
+        "pii_increased": [
+          {
+            "name": "age",
+            "old_score": 0,
+            "new_score": 1,
+            "old_bucket": "none",
+            "new_bucket": "high"
+          }
+        ],
+        "pii_decreased": [
+          {
+            "name": "ssn",
+            "old_score": 1,
+            "new_score": 0,
+            "old_bucket": "high",
+            "new_bucket": "none"
+          }
+        ],
+        "qi_added": [
+          [
+            "dob",
+            "zip"
+          ]
+        ],
+        "qi_removed": [],
+        "risk_delta": 15.0,
+        "new_high_pii": [
+          {
+            "name": "name",
+            "pii_score": 1,
+            "pii_bucket": "high"
+          }
+        ],
+        "drift": true
+      }
+    },
+    {
+      "id": "legacy_no_qi_no_risk",
+      "old": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 1
+          }
+        ]
+      },
+      "new": {
+        "fields": [
+          {
+            "name": "a",
+            "pii_score": 0
+          },
+          {
+            "name": "b",
+            "pii_score": 1
+          }
+        ]
+      },
+      "expected": {
+        "added_rows": [
+          {
+            "name": "b",
+            "pii_score": 1,
+            "pii_bucket": "high"
+          }
+        ],
+        "removed_rows": [],
+        "pii_increased": [],
+        "pii_decreased": [
+          {
+            "name": "a",
+            "old_score": 1,
+            "new_score": 0,
+            "old_bucket": "high",
+            "new_bucket": "none"
+          }
+        ],
+        "qi_added": [],
+        "qi_removed": [],
+        "risk_delta": null,
+        "new_high_pii": [
+          {
+            "name": "b",
+            "pii_score": 1,
+            "pii_bucket": "high"
+          }
+        ],
+        "drift": true
+      }
+    }
+  ]
+}

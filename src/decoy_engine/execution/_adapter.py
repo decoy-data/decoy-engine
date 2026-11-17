@@ -35,7 +35,9 @@ if TYPE_CHECKING:
     from decoy_engine.generation.pool._cache import PoolCache
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import ColumnSeed, Plan
+    from decoy_engine.plan.checks import StrategyRequirement
     from decoy_engine.providers_v2 import ProviderRegistry
+    from decoy_engine.publication import CommitReceipt
     from decoy_engine.relationships import NamespaceRegistry, RelationshipGraph
 
 
@@ -73,6 +75,10 @@ class ExecutionResult:
     # artifact. None when no row was quarantined. Hidden from repr and never serialized into
     # evidence, because possessing it is the read right.
     quarantine_access: Any = field(default=None, repr=False)
+    sample_source_rows: dict[str, pa.Table] | None = field(default=None, repr=False, compare=False)
+    # F22: the reference sink's commit receipt (outcome, digests, counts; no path or name).
+    # None when the run published through no `ParquetTransactionalSink`.
+    publication_receipt: CommitReceipt | None = None
 
     @property
     def output(self) -> pa.Table:
@@ -97,7 +103,17 @@ class TokenVaultWriter(Protocol):
     vault itself (library code does not know its callers). Distinct from
     ``decoy_engine.vault.VaultWriter``, which is the file-based one-way
     re-identification map for ``vault: true`` columns.
+
+    ``derivation_scope`` (B-6 D2) is an opaque, non-secret, vault-unique byte
+    string of 16 to 64 bytes that the vault's owner mints once at vault creation
+    and stores with the vault. The token key is derived under it, so two vaults
+    never mint the same token for one plaintext. A writer without one (a vault
+    from before vault-scoped derivation) is refused with
+    ``token_vault_derivation_unsupported``; a malformed one with
+    ``tokenize_vault_scope_required``. Required pre-GA, with no fallback.
     """
+
+    derivation_scope: bytes
 
     def lookup_existing(self, namespace: str, plaintext: str) -> str | None:
         """The token already stored for ``(namespace, plaintext)``, or None.
@@ -358,6 +374,8 @@ class StrategyInfo:
     join_safe: bool
     options: tuple[StrategyOption, ...]  # allowed V1 wizard options; empty is valid
     offer_in_wizard: bool  # listed at the wizard's `edit` prompt
+    # Settings the plan check refuses a column for omitting; the one mapping lives in plan/checks.
+    requirements: tuple[StrategyRequirement, ...]
 
     @property
     def required_options(self) -> tuple[str, ...]:

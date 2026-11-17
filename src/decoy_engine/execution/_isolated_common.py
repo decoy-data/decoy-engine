@@ -24,35 +24,47 @@ consume.
 from __future__ import annotations
 
 import errno
+import functools
+import os
 import re
 import resource
 import signal
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import duckdb
+import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._isolated_memwatch import MemoryEvidence
 from decoy_engine.execution._row_errors import RowErrorRecord
+from decoy_engine.execution._transactional_sink import StagedParquetWriter
+from decoy_engine.fileaccess import handed_stage_dir
+from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.validation_result import CODES
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from decoy_engine.publication import CommitReceipt
+
 __all__ = [
+    "ISOLATED_OUTCOMES",
     "ISOLATED_WORKER_ENV",
     "RESULT_FILENAME",
     "RLIMIT_KINDS",
     "IsolatedRunOutcome",
     "IsolatedRunResult",
+    "StagingSink",
     "abnormal_exit_text",
     "apply_mem_cap",
     "classify_abnormal_exit",
     "commit_error_text",
     "exception_error_text",
+    "inside_isolated_worker",
     "is_memory_failure",
     "peak_rss_mb",
     "scrub_error_text",
@@ -70,6 +82,13 @@ __all__ = [
 # back to the in-process estimator, never a grandchild).
 ISOLATED_WORKER_ENV = "DECOY_INSIDE_ISOLATED_WORKER"
 
+
+def inside_isolated_worker() -> bool:
+    """True when the marker holds an accepted true spelling; an unknown spelling raises
+    `EnvFlagError`, so a stray value fails the run before any spawn."""
+    return env_flag(ISOLATED_WORKER_ENV, os.environ.get(ISOLATED_WORKER_ENV))
+
+
 # The envelope transport contract (dennis review HIGH-1): a known FILE in
 # work_root, never the last line of stdout. Any extra child stdout (atexit
 # handlers, BLAS/OpenMP teardown chatter, a chatty provider, a stray user
@@ -83,7 +102,9 @@ ISOLATED_WORKER_ENV = "DECOY_INSIDE_ISOLATED_WORKER"
 # parent directory).
 RESULT_FILENAME = "result.json"
 
-IsolatedRunOutcome = Literal["completed", "oom_killed", "crashed"]
+IsolatedRunOutcome = Literal["completed", "oom_killed", "crashed", "blocked"]
+# The envelope outcomes a driver accepts; anything else (a bool, a new token) is a dead child.
+ISOLATED_OUTCOMES: tuple[str, ...] = get_args(IsolatedRunOutcome)
 
 # Same two rlimit knobs fk_memory_probe exposes (`_RLIMITS`): 'data' (default)
 # caps brk + anonymous mmaps on Linux >= 4.7 -- the allocations that actually
@@ -175,17 +196,45 @@ def apply_mem_cap(cap_bytes: int, rlimit_kind: str) -> None:
     resource.setrlimit(RLIMIT_KINDS[rlimit_kind], (cap_bytes, cap_bytes))
 
 
+_CHAIN_DEPTH = 16
+
+
+def _is_typed_memory_error(exc: BaseException) -> bool:
+    if isinstance(exc, _MEMORY_ERRORS):
+        return True
+    return isinstance(exc, OSError) and exc.errno == errno.ENOMEM
+
+
+def _chain_has_memory_error(exc: BaseException) -> bool:
+    """True iff `exc` or a linked `__cause__`/`__context__` is a typed memory error.
+
+    Native code at the cap can surface exhaustion wrapped: an Arrow cancellation reaches
+    Python as `KeyboardInterrupt` raised while a `MemoryError` was being handled. Only the
+    exception TYPE of each link is read, never its message. Bounded and cycle-safe.
+    """
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending and len(seen) < _CHAIN_DEPTH:
+        link = pending.pop()
+        if id(link) in seen:
+            continue
+        seen.add(id(link))
+        if _is_typed_memory_error(link):
+            return True
+        pending.extend(x for x in (link.__cause__, link.__context__) if x is not None)
+    return False
+
+
 def is_memory_failure(exc: BaseException) -> bool:
     """True iff `exc` is one of the documented under-cap failure shapes.
 
-    Ported from `fk_memory_probe._is_memory_failure` unchanged: the worker
-    calls this to self-classify a caught exception as `oom_killed` (exits 0
-    with a clean diagnostic) versus `crashed` (a genuine bug, re-raised as
-    data in the result envelope but NOT hidden behind an OOM label).
+    Ported from `fk_memory_probe._is_memory_failure`: the worker calls this to self-classify
+    a caught exception as `oom_killed` (exits 0 with a clean diagnostic) versus `crashed`
+    (a genuine bug, reported as data in the result envelope but NOT hidden behind an OOM
+    label). A typed memory error anywhere in the `__cause__`/`__context__` chain counts; a
+    bare `KeyboardInterrupt` with no memory-typed link stays `crashed`.
     """
-    if isinstance(exc, _MEMORY_ERRORS):
-        return True
-    if isinstance(exc, OSError) and exc.errno == errno.ENOMEM:
+    if _chain_has_memory_error(exc):
         return True
     message = str(exc)
     if any(marker in message for marker in _MEMORY_ERROR_MARKERS):
@@ -250,13 +299,11 @@ def exception_error_text(exc: BaseException) -> str:
     return head
 
 
-def commit_error_text(exc: BaseException) -> str:
-    """Safe text for a failed output commit; the message holds the output path and OS text."""
-    cause = exc.__cause__
-    code = cause.errno if isinstance(cause, OSError) else None
-    errno_name = errno.errorcode.get(code, "") if code is not None else ""
-    detail = f" (errno={errno_name})" if errno_name else ""
-    return f"{type(exc).__name__}: staged output could not be committed{detail}"
+def commit_error_text(receipt: CommitReceipt) -> str:
+    """Safe text for an output publication that did not commit: the receipt's outcome, its
+    registered code and errno name, never a path, table name or OS message (F22 G5)."""
+    detail = f" (errno={receipt.os_error})" if receipt.os_error else ""
+    return f"publication {receipt.outcome}: {receipt.reason_code}{detail}"
 
 
 def abnormal_exit_reason(returncode: int, stderr: str) -> str:
@@ -325,7 +372,8 @@ class IsolatedRunResult:
     `isolated_execution_enabled`) consumes this directly: `outcome`
     dispatches the reroute ladder (`completed` -> publish; `oom_killed` ->
     reroute to a bounded route; `crashed` -> surface `error` to the job
-    record), `peak_rss_mb` feeds the B5 telemetry loop (a per-job, fresh-
+    record; `blocked` -> the post-scan gate withheld the output, nothing was
+    committed, and `quality_metrics` keeps the report), `peak_rss_mb` feeds the B5 telemetry loop (a per-job, fresh-
     `execve` peak -- exactly what a shared warm worker cannot produce, per
     spec §11's contamination finding), and `isolated=False` tells the
     telemetry loop this sample is NOT trustworthy (the in-process fallback
@@ -345,11 +393,10 @@ class IsolatedRunResult:
     user-facing quarantine surface (bucketize/date_shift `format_error`,
     code_set `mask_error`) -- silently dropping it would make a job's
     quarantine reporting depend on whether it happened to run isolated.
-    The worker stages it as `row_errors.json` alongside the output Parquet
-    (same staging directory, read back before commit-or-discard, same
-    discipline as `outputs`); each `RowErrorRecord` field is a plain
-    str/int, so unlike `StrategyTimingRecord`/`QualityWarning` it needs no
-    richer serialization.
+    The worker returns it in the result envelope, never as a file in the
+    stage, so the published unit holds only the tables; each `RowErrorRecord`
+    field is a plain str/int, so unlike `StrategyTimingRecord`/`QualityWarning`
+    it needs no richer serialization.
 
     Caveat for B5 (LOW-1): `outputs` round-trips through a Parquet
     write-then-read rather than being the in-memory `pa.Table` `run_pipeline`
@@ -383,6 +430,67 @@ class IsolatedRunResult:
     # The structured reason of a failed run (F29): validated registry identity, phase, retry class,
     # outcome and closed context. `None` for a completed run. Carries no message or class name.
     reason: ReasonRecord | None = None
+    # F22: the publication receipt when `output_dir` was given (published, already committed, or
+    # the outcome that kept the run from completing); None otherwise.
+    publication_receipt: CommitReceipt | None = None
     # Driver-side memory sampling of a capped isolated run; a suspicion beside an unchanged
     # outcome, never a verdict. None for uncapped and in-process runs. Stays the last field.
     memory_evidence: MemoryEvidence | None = None
+
+
+# The child runs `_isolated_worker` as `__main__`, so a sink class defined there would carry the
+# token `__main__.*`, which the post-scan gate does not recognise as readable
+# (`config/_post_scan.py`, `_READABLE_SINK_KINDS`). It lives here, a module the child imports.
+class StagingSink:
+    """The child's sink: stages each table into the parent's stage and publishes nothing.
+
+    The write half is `StagedParquetWriter` (owner-only files, replace on rewrite, stored-size
+    evidence); there is no lock, descriptor or rename here. `commit` and `abort` do nothing:
+    the parent admits, measures, describes and binds the stage, or discards it (plan 5.7)."""
+
+    bounded_write_batches = True
+
+    def __init__(self, staging_output_dir: str) -> None:
+        self._dir = Path(staging_output_dir)
+        os.makedirs(self._dir, exist_ok=True)
+        # The parent made this stage (or names one in its own scratch); the child only adds
+        # files to it, so it holds the stage by path rather than through an output capability.
+        self._stage = handed_stage_dir(self._dir, "isolated.staging")
+        # The writer only creates, opens and removes stage files: the `StageDir` half.
+        self._writer = StagedParquetWriter(lambda: self._stage)
+        self.publication_evidence = self._writer.publication_evidence
+
+    @property
+    def spill_parent(self) -> Path:
+        """A streamed run's hold-back spills beside the stage, on the same filesystem."""
+        return self._dir.parent
+
+    def committed_table_path(self, table: str) -> Path:
+        return self._dir / f"{table}.parquet"
+
+    def write(self, table: str, data: pa.Table) -> None:
+        self._writer.write(table, data)
+
+    def write_batches(
+        self, table: str, batches: Iterable[pa.RecordBatch], *, schema: pa.Schema
+    ) -> None:
+        self._writer.write_batches(table, batches, schema=schema)
+
+    def staged_names(self) -> list[str]:
+        """The table names staged so far: what the envelope tells the parent to admit."""
+        return list(self._writer.staged)
+
+    def staged_tables(self) -> Mapping[str, Callable[[], int]]:
+        """Each staged table with an opener that returns a new read-only descriptor of its file
+        (the caller closes it), opened through the stage by name: the contract the post-scan gate
+        reads a sink back through (`ParquetTransactionalSink.staged_tables`)."""
+        return {
+            table: functools.partial(self._stage.open_file, component)
+            for table, component in self._writer.staged.items()
+        }
+
+    def commit(self) -> None:
+        return None
+
+    def abort(self) -> None:
+        return None

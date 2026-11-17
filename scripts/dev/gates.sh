@@ -33,7 +33,10 @@
 #                 file_seconds of the baseline FILE; the order map is stored as order_seconds.
 #                 Without it the run keeps collection order. A compare (--baseline-file) orders
 #                 by the order_seconds of the baseline it compares with, so its mode matches.
-#   --steps LIST  comma list from: env,ruff,format,mypy,sentry,licenses,tests (default: all)
+#   --steps LIST  comma list from: env,ruff,format,mypy,sentry,layers,licenses,tests (default: all)
+#                 layers syncs .venv-layers (dev plus the `layers` extra, import-linter) and runs
+#                 only $LAYER_TEST there; the certified .venv is never touched. `--steps layers`
+#                 alone needs no ordinary .venv and no origin/main.
 #   --shard I/N   run only shard I of N of the tests step (1 <= I <= N). The selected test
 #                 paths are expanded to files, sorted, and dealt round-robin, so each shard
 #                 takes every Nth file. Every shard runs the same --steps, so give shards after
@@ -50,23 +53,45 @@
 #   min(cpus, 4), at most 2 on a host under 14 GB (1 when under 4 GB is free). The workers: line
 #   of the EVIDENCE header names the choice. A stored baseline records it and refuses a run with
 #   another count (exit 2); pin GATES_WORKERS for any baseline write or compare.
-#   test paths    default: tests touching files changed against origin/main. That is a
-#                 SELECTION, not the full suite; the header says so. Use --full (or `tests`).
+#   test paths    default: tests touching files changed against origin/main, plus the always-on
+#                 output pins listed in scripts/dev/gate_pins.txt (route baselines, golden and
+#                 digest pins, the H-1 owner test). That is a SELECTION, not the full suite; the
+#                 header says so. Use --full (or `tests`).
 set -uo pipefail
 
 # Repo config. Mirrors .github/workflows/ci.yml (ruff, mypy, regression-gate jobs).
 REPO_NAME=decoy-engine
 RUFF_PATHS=(src tests testflight scripts)
 MYPY_ARGS=(src/decoy_engine testflight)
-SENTRY_PATHS=(tests/sentry tests/secret_providers/test_leak_sentry.py)
+SENTRY_PATHS=(tests/sentry tests/secret_providers/test_leak_sentry.py tests/secret_providers/test_classifier_equivalence.py)
+# The one sentry outside the sentry step: import-linter is not in the certified profile, so the
+# layer test runs only in the `layers` step. Every other pytest route ignores it.
+LAYER_TEST=tests/sentry/layout/test_import_layers.py
+LAYER_IGNORE=(--ignore=$LAYER_TEST)
+# The one place that keeps the layer test out of every other pytest route. LAYER_IGNORE covers a
+# directory argument; a file or ::nodeid argument naming the layer test (any route: selection,
+# explicit paths, shard expansion, baseline rerun) is dropped here. Reads paths on stdin.
+drop_layer_test() {
+  local p f
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    f=${p%%::*}; f=${f#./}
+    [ "$f" = "$LAYER_TEST" ] || printf '%s\n' "$p"
+  done
+}
 LICENSE_TESTS=(tests/sentry/test_license_policy.py tests/sentry/test_sdv_import_sentry.py)
-PYTEST_ARGS=(-m 'not benchmark and not packaging and not codspeed')
+PYTEST_ARGS=(-m 'not benchmark and not packaging and not codspeed and not determinism_harness')
 PYTEST_MARK=${PYTEST_ARGS[1]}  # the same expression; the parallel and serial passes add to it
 # Everything is code unless it matches NON_CODE_GLOBS: a diff with any code path must select at
 # least one test (see code_changed). List only pure-documentation or repo-metadata paths here;
 # `*` crosses `/`, so 'docs/*' also covers docs/records.
 NON_CODE_GLOBS=('docs/*' 'docs/records/*' '*.md' 'LICENSE*' 'NOTICE*' 'CHANGELOG*'
   '.gitignore' '.gitattributes' '.aiignore' '.claude/*' '.tours/*')
+# Tests every selected PR gate runs whatever changed: one path per line, `#` comments. Name-based
+# selection misses tests that reach code only through a function-local import or that check a
+# definition, so the output-pinning tests ride along (tests/sentry/test_gate_pins.py keeps the
+# list true).
+PINS_FILE=scripts/dev/gate_pins.txt
 SRC_MATCH='src/*.py'   # changed files that map to a dotted module
 SRC_STRIP='src/'       # prefix removed before turning a path into a module
 PYPATH_DIRS=(src scripts)
@@ -77,12 +102,12 @@ DOC_WALK_ROOTS=(docs/plans/h1-wave-b/manifests)
 # Several sentries walk all of docs/ (and root *.md) under one id, so a Markdown fix on main would
 # hide a re-break on the branch. Rather than list each walker, any stored failing id under these
 # prefixes (every sentry) makes any main move stale.
-DOC_WALK_GUARDS=(tests/sentry/ tests/secret_providers/test_leak_sentry.py)
+DOC_WALK_GUARDS=(tests/sentry/ tests/secret_providers/test_leak_sentry.py tests/secret_providers/test_classifier_equivalence.py)
 
 ROOT=$(git rev-parse --show-toplevel) || exit 2
 VENV=${DECOY_VENV:-${UV_PROJECT_ENVIRONMENT:-$ROOT/.venv}}
 BIN=$VENV/bin
-KEEP=0 BASELINE=0 FULL=0 BASEFILE='' WRITEBASE='' ORDERFROM='' SHARD='' STEPS=env,ruff,format,mypy,sentry,licenses,tests PATHS=()
+KEEP=0 BASELINE=0 FULL=0 BASEFILE='' WRITEBASE='' ORDERFROM='' SHARD='' STEPS=env,ruff,format,mypy,sentry,layers,licenses,tests PATHS=()
 while [ $# -gt 0 ]; do
   case $1 in
     --keep-going) KEEP=1 ;;
@@ -102,6 +127,27 @@ done
 # A baseline verdict compares every step, so a step skipped after an early failure can never
 # read as shared with main.
 if [ $BASELINE = 1 ]; then KEEP=1; fi
+for name in ${STEPS//,/ }; do
+  case $name in env|ruff|format|mypy|sentry|layers|licenses|tests) ;; *) echo "gates: unknown step $name" >&2; exit 2 ;; esac
+done
+LAYER_VENV=$ROOT/.venv-layers
+LAYER_PY=$(bash "$ROOT/scripts/dev/lock_version.sh" --python) || exit 2
+# Deps only: the package is imported from the tree under test through PYTHONPATH, so a baseline
+# worktree never re-points this venv.
+LAYER_SYNC=(uv sync -q --project "$ROOT" --frozen --no-install-project --extra dev --extra layers --python "$LAYER_PY")
+# Synced once per run: the branch and baseline passes share these deps-only venv contents.
+LAYER_SYNCED=skip
+case ",$STEPS," in
+  *,layers,*)
+    if UV_PROJECT_ENVIRONMENT=$LAYER_VENV ${LAYER_SYNC[@]+"${LAYER_SYNC[@]}"} >&2; then LAYER_SYNCED=ok; else LAYER_SYNCED=fail; fi ;;
+esac
+LAYERS_ONLY=0
+if [ "$STEPS" = layers ]; then
+  # The layer venv is the only venv this run needs, so it also runs the reporter.
+  LAYERS_ONLY=1
+  [ $LAYER_SYNCED = ok ] || { echo "gates: FAIL: could not sync $LAYER_VENV" >&2; exit 2; }
+  VENV=$LAYER_VENV BIN=$LAYER_VENV/bin
+fi
 [ -x "$BIN/python" ] || { echo "gates: no venv at $VENV; run scripts/dev/bootstrap.sh" >&2; exit 2; }
 if [ -n "$ORDERFROM" ] && [ -z "$WRITEBASE" ]; then
   echo "gates: --order-from only applies to --write-baseline (a compare orders by the baseline it reads)" >&2; exit 2
@@ -141,24 +187,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Tags one changed path for changed_tests: t = a test file, s = a src module, o = other code, or
+# nothing for a deleted path or pure documentation. A function, not an inline case: bash 3.2 (the
+# Mac runner) cannot parse case patterns inside $( ).
+tag_changed() {
+  [ -f "$ROOT/$1" ] || return 0
+  # shellcheck disable=SC2254  # SRC_MATCH is a glob on purpose
+  case $1 in
+    tests/*test_*.py) echo "t $1" ;;
+    $SRC_MATCH) echo "s $1" ;;
+    *) non_code "$1" || echo "o $1" ;;
+  esac
+}
+
 changed_tests() {
-  local base f mod
+  local base lines f deps scanned
   base=$(git -C "$ROOT" merge-base origin/main HEAD) || return 1
-  { git -C "$ROOT" diff --name-only --no-renames "$base"; git -C "$ROOT" ls-files --others --exclude-standard; } |
-    LC_ALL=C sort -u | while read -r f; do
-      [ -f "$ROOT/$f" ] || continue
-      # shellcheck disable=SC2254  # SRC_MATCH is a glob on purpose
-      case $f in
-        tests/*test_*.py) echo "$f" ;;
-        $SRC_MATCH)
-          mod=${f#"$SRC_STRIP"}; mod=${mod%.py}; mod=${mod%/__init__}; mod=${mod//\//.}
-          (cd "$ROOT" && grep -rlE --include='test_*.py' "${mod//./\\.}([^A-Za-z0-9_]|\$)" tests || true) ;;  # no match is normal, not a failed selection
-        *)
-          # Other code (scripts, native, fixtures): select tests that name the file. No match is
-          # normal here; code_changed then makes the gate fail rather than skip.
-          non_code "$f" || (cd "$ROOT" && grep -rlF --include='test_*.py' "${f##*/}" tests || true) ;;
-      esac
-    done | LC_ALL=C sort -u
+  # Test files in the diff select themselves. Every other code file goes to the import-aware
+  # scanner (_select_tests.py), which owns all dependency matching: no grep of import spellings.
+  lines=$({ git -C "$ROOT" diff --name-only --no-renames "$base"; git -C "$ROOT" ls-files --others --exclude-standard; } |
+    LC_ALL=C sort -u | while read -r f; do tag_changed "$f"; done) || return 1
+  deps=$(printf '%s\n' "$lines" | grep -E '^[so] ' || true)  # none is normal
+  scanned=$(printf '%s\n' "$deps" |
+    "$BIN/python" "$ROOT/scripts/dev/_select_tests.py" --root "$ROOT" --src-strip "$SRC_STRIP") || return 1
+  { printf '%s\n' "$lines" | sed -n 's/^t //p'; printf '%s\n' "$scanned"; } | drop_layer_test | LC_ALL=C sort -u || true
 }
 
 # 0 when f matches NON_CODE_GLOBS (pure documentation or repo metadata).
@@ -189,6 +241,8 @@ TESTS_REQUIRED=0
 if [ $FULL = 1 ] && [ ${#PATHS[@]} -eq 0 ]; then
   PATHS=(tests)
   SELECTION="full suite (tests)"
+elif [ ${#PATHS[@]} -eq 0 ] && [ $LAYERS_ONLY = 1 ]; then
+  SELECTION="none: the layers step runs only $LAYER_TEST"
 elif [ ${#PATHS[@]} -eq 0 ]; then
   if ! git -C "$ROOT" rev-parse -q --verify origin/main >/dev/null; then
     echo "gates: origin/main missing; run: git fetch origin main" >&2; exit 2
@@ -201,14 +255,42 @@ elif [ ${#PATHS[@]} -eq 0 ]; then
   while IFS= read -r p; do [ -n "$p" ] && PATHS+=("$p"); done <<EOT
 $SELECTED
 EOT
-  SELECTION="SELECTION ONLY (changed vs origin/main, ${#PATHS[@]} file(s)); this is NOT the full suite, use --full"
+  NSEL=${#PATHS[@]}
   if [ ${#PATHS[@]} -eq 0 ]; then
     code_changed; crc=$?
     [ $crc = 2 ] && { echo "gates: could not diff against the merge base with origin/main" >&2; exit 2; }
     [ $crc = 0 ] && TESTS_REQUIRED=1
+  else
+    # A diff that selected tests also runs the pins. An empty selection stays empty: a code diff
+    # that selects nothing fails below, and a docs-only diff has nothing to pin.
+    [ -f "$ROOT/$PINS_FILE" ] || { echo "gates: FAIL: pin list missing: $PINS_FILE" >&2; exit 2; }
+    while IFS= read -r p; do
+      p=${p%%#*}; p=${p#"${p%%[![:space:]]*}"}; p=${p%"${p##*[![:space:]]}"}
+      [ -n "$p" ] || continue
+      [ -e "$ROOT/$p" ] || { echo "gates: FAIL: pinned test path not found: $p ($PINS_FILE)" >&2; exit 2; }
+      PATHS+=("$p")
+    done < "$ROOT/$PINS_FILE"
+    PINNED=$(printf '%s\n' ${PATHS[@]+"${PATHS[@]}"} | LC_ALL=C sort -u)
+    PATHS=()
+    while IFS= read -r p; do [ -n "$p" ] && PATHS+=("$p"); done <<EOT
+$PINNED
+EOT
+  fi
+  if [ $NSEL -gt 0 ]; then
+    SELECTION="SELECTION ONLY (changed vs origin/main, $NSEL file(s) + always-on pins, ${#PATHS[@]} in all); this is NOT the full suite, use --full"
+  else
+    SELECTION="SELECTION ONLY (changed vs origin/main, 0 file(s)); this is NOT the full suite, use --full"
   fi
 else
   SELECTION="explicit: ${PATHS[*]+${PATHS[*]}}"
+  KEPT=$(printf '%s\n' ${PATHS[@]+"${PATHS[@]}"} | drop_layer_test)
+  if [ -n "${PATHS[*]+x}" ] && [ -z "$KEPT" ]; then
+    echo "gates: FAIL: $LAYER_TEST runs only in the layers step: use --steps layers" >&2; exit 2
+  fi
+  PATHS=()
+  while IFS= read -r p; do [ -n "$p" ] && PATHS+=("$p"); done <<EOT
+$KEPT
+EOT
   # An explicit path that is missing from the branch is a typo or a deleted test, never a skip.
   if [[ ",$STEPS," == *,tests,* ]]; then
     for p in ${PATHS[@]+"${PATHS[@]}"}; do
@@ -249,7 +331,7 @@ if [ -n "$SHARD" ]; then
     if [ "$SHARD_I" -gt 1 ]; then echo "gates: shard $SHARD: no tests selected; shard 1 reports it"; exit 0; fi
   else
     # A git failure is a failed gate (exit 2); only grep's "no match" (exit 1) is tolerated.
-    RAW=$(shard_expand) || { echo "gates: --shard could not list the test files (git ls-files failed)" >&2; exit 2; }
+    RAW=$(shard_expand | drop_layer_test; exit "${PIPESTATUS[0]}") || { echo "gates: --shard could not list the test files (git ls-files failed)" >&2; exit 2; }
     # C locale: every shard must deal the same file order, whatever the host's LANG.
     ALL=$(printf '%s\n' "$RAW" | LC_ALL=C sort -u)
     if [ -z "$ALL" ]; then
@@ -355,6 +437,12 @@ combine_rc() {  # $1 parallel-pass rc, $2 serial-pass rc
   if [ "$a" = 1 ] || [ "$b" = 1 ]; then echo 1; else echo 0; fi
 }
 
+# The layers step: run only the layer test in the venv synced above (pytest args in $@).
+layer_step() {
+  [ "$LAYER_SYNCED" = ok ] || { echo "gates: could not sync $LAYER_VENV"; return 2; }
+  "$LAYER_VENV/bin/python" -m pytest "$@" "$LAYER_TEST"
+}
+
 # Baseline pass only: 0 when the branch passed or skipped step $1, so main is not rerun for it.
 branch_step_ok() {
   awk -F'\t' -v n="$1" '$1 == n { found = 1; if ($2 == 0 || $2 == -1) ok = 1 } END { exit !(found && ok) }' "$OUT/branch.steps"
@@ -377,7 +465,8 @@ run_steps() {  # $1 label, $2 tree
       # ratchet_check first (baselines never grow); skipped in trees that predate it (the baseline worktree)
       sentry)
         # strict: the gate venv is the certified profile, so a registry entry that cannot be verified is a failure
-        cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c 'if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"' "$BIN/python" ${junit[@]+"${junit[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"}) ;;
+        cmd=(env DECOY_GATE_VENV_STRICT=1 bash -c 'if [ -f scripts/dev/ratchet_check.py ]; then "$0" scripts/dev/ratchet_check.py || exit 1; fi; exec "$0" -m pytest "$@"' "$BIN/python" ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${SENTRY_PATHS[@]+"${SENTRY_PATHS[@]}"}) ;;
+      layers) cmd=(layer_step ${junit[@]+"${junit[@]}"}) ;;
       # strict: a venv that drifted from uv.lock fails instead of skipping the metadata check
       licenses)
         lic=(); for p in ${LICENSE_TESTS[@]+"${LICENSE_TESTS[@]}"}; do [ -e "$tree/$p" ] && lic+=("$p"); done
@@ -401,10 +490,10 @@ run_steps() {  # $1 label, $2 tree
           w=1; note=" (serial: this tree has no tests/_xdist_safe_reports.py)"
         fi
         if [ "$w" -gt 1 ]; then
-          cmd=(${pyt[@]+"${pyt[@]}"} ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${tests[@]+"${tests[@]}"})
-          cmd2=(${pyt[@]+"${pyt[@]}"} -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-tests-serial.xml" "--basetemp=$TMP_ROOT/$label-tests-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${tests[@]+"${tests[@]}"})
+          cmd=(${pyt[@]+"${pyt[@]}"} ${jbase[@]+"${jbase[@]}"} -m "($PYTEST_MARK) and not serial" -n "$w" --dist loadfile ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
+          cmd2=(${pyt[@]+"${pyt[@]}"} -p no:cacheprovider -q -rfE -o junit_family=xunit1 "--junitxml=$OUT/$label-tests-serial.xml" "--basetemp=$TMP_ROOT/$label-tests-serial" ${tmpargs[@]+"${tmpargs[@]}"} -m "($PYTEST_MARK) and serial" ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
         else
-          cmd=(${pyt[@]+"${pyt[@]}"} ${junit[@]+"${junit[@]}"} ${tests[@]+"${tests[@]}"})
+          cmd=(${pyt[@]+"${pyt[@]}"} ${junit[@]+"${junit[@]}"} ${LAYER_IGNORE[@]+"${LAYER_IGNORE[@]}"} ${tests[@]+"${tests[@]}"})
         fi ;;
       *) echo "gates: unknown step $name" >&2; exit 2 ;;
     esac
@@ -418,6 +507,7 @@ run_steps() {  # $1 label, $2 tree
       rc=-1; cmd=("(not applicable: the diff touches no code paths)")
     elif [ "$name" = tests ] && [ ${#tests[@]} -eq 0 ]; then rc=-1; cmd=("(no test paths present)")
     elif [ "$name" = licenses ] && [ ${#lic[@]} -eq 0 ]; then rc=-1; cmd=("(no license tests in this tree)")
+    elif [ "$name" = layers ] && [ ! -f "$tree/$LAYER_TEST" ]; then rc=-1; cmd=("(not applicable: this tree predates $LAYER_TEST)")
     elif [ "$name" = env ] && [ "$label" = baseline ]; then rc=-1; cmd=("(same venv as branch)")
     else
       echo "gates: [$label] $name ..." >&2

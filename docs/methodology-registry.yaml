@@ -36,15 +36,21 @@ modules:
     pattern: Check-digit validation (python-stdnum + NPPES + ISO 3779)
     source: python-stdnum (LGPL); CMS NPPES NPI Check Digit Procedure; ISO 3779 / NHTSA 49 CFR 565
 
-  - path: src/decoy_engine/transforms/date_shift.py
-    pattern: HMAC-SHA256-keyed deterministic offset
-    source: HMAC RFC 2104
+  - path: src/decoy_engine/execution/_strategies/_date_shift.py
+    pattern: HKDF-SHA256 then HMAC-SHA256 keyed deterministic offset
+    source: HKDF RFC 5869; HMAC RFC 2104; computed through determinism.derive
 
   - path: src/decoy_engine/profiling/model_pack/provenance.py
     pattern: HMAC-SHA256
     source: RFC 2104
-    note: Manifest integrity signing for ML model packs (ML3.2). Same stdlib
-      keyed-hash primitive as transforms/fpe.py and determinism/_hkdf.py.
+    note: Manifest integrity signing for ML model packs (ML3.2). Stdlib HMAC;
+      the signing key is derived through determinism/_hkdf.py.
+
+  # B-6 S1 (D7): the engine's HKDF delegates to PyCA; the module keeps the
+  # empty-salt refusal (QA-10 F12) on both entry points.
+  - path: src/decoy_engine/determinism/_hkdf.py
+    pattern: RFC 5869 HKDF-SHA256
+    source: RFC 5869; cryptography (PyCA, Apache-2.0/BSD) HKDF, HKDFExpand, HKDF.extract
 
   # SP-05 (2026-06-27): FK-integrity validators use the SDV HMA1 parent-first
   # DAG pattern: materialise parent PK set, resolve child FK values against it.
@@ -234,3 +240,23 @@ modules:
   - path: src/decoy_engine/generation/statistical/_fanout.py
     pattern: degree-sequence sampling with systematic resampling and largest-remainder apportionment
     source: Newman, Networks 2nd ed. (2018) sec. 12.1; Kitagawa, JCGS (1996); Carpenter, Clifford and Fearnhead (1999); Balinski and Young, Fair Representation (2001); Patki et al., SDV HMA1, IEEE DSAA (2016); SDMetrics CardinalityShapeSimilarity
+
+  - path: src/decoy_engine/generation/_unique.py
+    pattern: Faker unique proxy and sampling without replacement
+    source: Faker fake.unique proxy, _UNIQUE_ATTEMPTS (MIT); CPython random.Random.sample (PSF); SQL UNIQUE (a, b) and Django unique_together for junction pairs
+    note: Unique generate columns keep a seen set with 1,000 attempts per faker row, each retry
+      on its own derived seed, and sample categorical, reference and junction-pair domains
+      without replacement. Method only for the proxy; the engine does not call fake.unique.
+
+  - path: src/decoy_engine/publication/_descriptor.py
+    pattern: Git content addressing plus RFC 8785 canonical JSON
+    source: Git object model (content-addressed names); RFC 8785 JSON Canonicalization Scheme (IETF)
+    note: Keys and paths sort in Unicode code point order, as RFC 8785 sorts keys.
+
+  - path: src/decoy_engine/publication/_publish.py
+    pattern: Delta Lake idempotent transaction identifiers
+    source: Delta Lake transaction protocol (transaction identifiers, Apache-2.0); PostgreSQL SyncDataDirectory (fsync found state before trusting it)
+
+  - path: src/decoy_engine/publication/_sink_state.py
+    pattern: a table-driven finite-state machine
+    source: UML state machines and the W3C SCXML state-transition table; java.util.concurrent.FutureTask (state changed under a guard, the task run outside it)

@@ -1,9 +1,9 @@
 {
-  "engine_version": "0.20.0",
+  "engine_version": "0.27.0",
   "generated_at": "2026-06-14",
   "surface": {
     "mask": 24,
-    "generate": 12,
+    "generate": 14,
     "providers": 34
   },
   "hero": {
@@ -1242,6 +1242,7 @@
   ],
   "generation_strategies": [
     "categorical",
+    "constant",
     "derived",
     "derived_aggregate",
     "distribution",
@@ -1249,6 +1250,7 @@
     "formula",
     "group_key",
     "grouped_series",
+    "lookup",
     "reference",
     "sequence",
     "statistical",

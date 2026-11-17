@@ -23,10 +23,17 @@ Re-captured (column identity joined the seed): every fixture that draws random v
 because a column's stream now derives from (table, column) as well as its strategy config. Sequence,
 derived and other draw-free tables are unchanged. Captured with `python -m tests.parity._f0_capture`.
 
+Added 2026-11-10 (GEN-TYPES E1): the `source_free` fixture (constant and distribution columns).
+Captured under numpy 2.2.6 (identical on arm64 and x86); uniform and constant only; no existing entry moved.
+
 Re-baselined 2026-11-08 (generated numeric typing): an unformatted `sequence` and a numeric faker
 provider (annotated int or float) now declare and emit int64/float64 instead of string. Each affected
 column prints the same text per row with nulls at the same rows. Manifest and reasons:
 `tests/fixtures/phase_f_fr0/manifest.json`.
+
+Changed 2026-11-10 (fixture input): `live_faker` lost its `fallback` column, an unknown
+`faker_type` that compile now refuses (`generate_faker_type_unknown`). Only that table's schema and
+table digests moved; the other five column digests are unchanged.
 
 Shape: ``EXPECTED[fixture_id][table_name]`` is a `_f0_canonical.table_fingerprint` dict.
 ``POOL_SEAM`` is the generation pooled-faker seam (`_f0_seams.PoolCall.signature`) for the
@@ -76,17 +83,16 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
     },
     "live_faker": {
         "live": {
-            "schema": "1434a50bfef0ac821ea753928ab82960061f2496cd5ff8f92faa0d76b8ee742e",
+            "schema": "a887da5cffbcdd4936ffad62a618c9dcd5b5f13ef92c80bedfb98d5719272d75",
             "rows": 30,
             "columns": [
                 ("city", "3c662c698ec2248412e490fc3e0b2869fed7a452a2b91ecc50bdf5dbc124e379"),
                 ("email", "b503077a15137cc8ee43fb4c777d2798b684ba0863e0547ff7ffbd8e9621bcb9"),
                 ("de_name", "41f77afe03d3215973a433ce52a942a938a45db63c7c160e8b332b702808d441"),
                 ("num", "bbe70cef490a524527d1b4aed6042cb1ba24324d607b39d3a84e43a4d2ef4b8d"),
-                ("fallback", "cfc1f9a7fb56d5b16e2f6a211c1ca6932310d05d7c4fb54c7a69f9458bf61845"),
                 ("opt_out", "0639140d18601078b0f58cb03bb06d3b6fd000f54a3253671709be262ce4f969"),
             ],
-            "table": "61de7a2800710c2f26ffc95d8dd245aed4eeada6c25cc4303dd0160af254dd0d",
+            "table": "138be283ade86ae610b3be41dbd782f9ece18cc89c286257b3daf1f2790b9f91",
         }
     },
     "live_faker_default_locale": {
@@ -115,7 +121,7 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
     },
     "formula": {
         "formula": {
-            "schema": "427da4841cb278415e1bc4e010bc1773e64568481996a167d357d94bab58628d",
+            "schema": "1cec7e708bfc56d468059910dbd20c8a59dc92de68f676b5f88450a3c6348ba0",
             "rows": 25,
             "columns": [
                 ("rnd", "ea057c28fbc73800ef7f8171667cf5f5b768bfdb182fd5770fcea8935ba66e6c"),
@@ -125,9 +131,8 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
                 ("hsh", "2a6e80c753bfedbd93ba3620a27a7ef115a54cf91691c53155d994709258fb66"),
                 ("fixed_date", "adeb952fc6c10a08cca27885fdde742836bb291b49c18ad3bfae9e4aecb40477"),
                 ("empty", "1a7ced7720a8194fe783853ecc62232e944ec5e3efdf03282c78364f241005a3"),
-                ("bad", "1a7ced7720a8194fe783853ecc62232e944ec5e3efdf03282c78364f241005a3"),
             ],
-            "table": "1e934ccf90c1bc2211fdfe9f6171fdde380146d65a8f0d10aefe274e312dfdcb",
+            "table": "fa26d49b6d942d8bbc85f94536335b2cb044a5e0cc07b3a065463907603d18e5",
         }
     },
     "referenced_formula": {
@@ -239,6 +244,20 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
             "table": "42e36d728df63493caf355c0e9603f09aed5f35961d251fd1a94bd671651ee34",
         }
     },
+    "source_free": {
+        "source_free": {
+            "schema": "5a37a07095f05539f97bfbcb3138805312b385dae4d18e116c2ede55ad6ccbd9",
+            "rows": 40,
+            "columns": [
+                ("country", "fd7fcb94ae747840f9cdb66640f13400b759dc453490a836f13f23f2e6aad91e"),
+                ("age", "6684419c1cfb7568b630f9b083e345a9f8f86ac215e48f9ad728cf36b02521c9"),
+                ("score", "a5020b86563aacb7505087a05ee2daf3226e4ac3b0e042b0f9eb2dbdb0194053"),
+                ("visits", "460a780d357a0711da7bd1c3bfaf28107637fcf18f68aa5a05322527be7c0309"),
+                ("rank", "6cf7b6d4ef29fb42b4bc4e94d3d6d2e1402a34cc7b1c8f5ee4a8ed2789313439"),
+            ],
+            "table": "62e95273151b5286452a137c75186489eb772ac07c2548f0e173ef75951e88b1",
+        }
+    },
     "nulls": {
         "nulls": {
             "schema": "afa05e79b1f71aff04817653984fa103c0290616100f2970a75bee269e48973a",
@@ -269,10 +288,10 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
             "schema": "9a31618979c4ed6d06e64e9f49b1f3257b81cb47daf4cd9a4cbec30d93b3a871",
             "rows": 5,
             "columns": [
-                ("id", "8d357c1dda98e9feca23fc8e3f4dccc3807731a7815cc4c7732af69bc649d1e1"),
+                ("id", "cb04007bfe7191396e56fc572a372b162ab09b02dadb1fd99fe46f5a699c0aff"),
                 ("nm", "14408bf93c4f9bd63f915fa085c510fe949c9035b9da57b225e8be7e78b3fa90"),
             ],
-            "table": "382896f15e9848571bd6e6754b796d2bb8380e6fe7872aa3827aaffd220010e5",
+            "table": "17b88d4d1738563427a72868cd5c240a4c6db23eb4815f9ea72bf8dda36f14d4",
         },
         "accounts": {
             "schema": "d5655e336eed516a1c449bef81b0160f0e6abc5d0ae81a3e824099d0ed55db65",

@@ -1,25 +1,18 @@
-"""Public exceptions raised by decoy_engine (V2.0-C).
+"""Public exceptions raised by decoy_engine.
 
-Single canonical location for every typed exception the engine raises
-that a caller might want to catch. Pre-V2.0-C this surface was split
-across ``decoy_engine.exceptions`` (orchestration/config/connector
-errors) and ``decoy_engine.internal.validator`` (ValidationError);
-V2.0-C consolidates them here so callers depend on one module and
-neither needs to reach into ``decoy_engine.internal.*``.
-
-Anything not listed here is private and may change without a version
-bump. Internal code may still raise generic ValueError / RuntimeError;
-that is fine and will be tightened incrementally as those callsites
-move to typed exceptions.
+The one home of every typed exception a caller might catch, so no caller reaches into
+``decoy_engine.internal.*`` for one. Anything not listed in ``__all__`` is private and may change
+without a version bump. Internal code may still raise generic ValueError / RuntimeError.
 """
 
 from __future__ import annotations
 
+import types
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from decoy_engine import reasons
-from decoy_engine._error_base import DecoyError
+from decoy_engine._error_base import ConnectorErrorKind, DecoyError
 
 if TYPE_CHECKING:
     from decoy_engine.execution._row_error_summary import RowErrorSummary
@@ -66,6 +59,19 @@ class PipelineValidationError(ConfigError):
         self.path = path
         self.code = code
         super().__init__(message)
+
+
+class EnvFlagError(DecoyError, ValueError):
+    """An environment flag holds a spelling outside the accepted set; the text never shows it."""
+
+    code: str = reasons.config.ENV_FLAG_INVALID
+
+    def __init__(self, variable: str) -> None:
+        self.variable = variable
+        super().__init__(variable)
+
+    def __str__(self) -> str:
+        return f"{self.variable} must be 1, true, yes, on, 0, false, no, off or empty (any case)"
 
 
 class ValidationError(DecoyError):
@@ -115,7 +121,11 @@ class ValidationError(DecoyError):
 
 
 class ConnectorError(DecoyError):
-    """Base class for connector-related errors."""
+    """Base class for connector errors; ``kind`` is the failure class a caller may branch on."""
+
+    def __init__(self, *args: object, kind: ConnectorErrorKind = "unexpected") -> None:
+        super().__init__(*args)
+        self.kind = kind
 
 
 class ConnectorAuthError(ConnectorError):
@@ -146,17 +156,11 @@ class FlagPauseSignal(DecoyError):  # noqa: N818 -- control-flow Signal, not a r
         super().__init__(f"{prefix}conditions failed: {detail}")
 
 
-# ── FK preservation (Sprint 4, item 4) ────────────────────────────────
-#
-# Pattern: SDV HMA1 method (Patki et al., IEEE DSAA 2016; method only, no SDV
-# code: SDV is BUSL-1.1). Parent-first DAG;
-# materialize parent pool; child samples with replacement.
-#
-# Raised when a declared FK in `column_relationships` cannot be resolved
-# at runtime. The matching stable fk.* codes live in
-# validation_result.CODES.
-# Strict mode aborts the run; lenient mode drops the offending child
-# rows + writes a manifest warning.
+# ── FK preservation ──────────────────────────────────────────────────
+# Raised when a declared FK in `column_relationships` cannot be resolved at runtime; the stable
+# fk.* codes live in validation_result.CODES. Strict mode aborts the run, lenient mode drops the
+# offending child rows and writes a manifest warning. Method: SDV HMA1 (Patki et al., IEEE DSAA
+# 2016; method only, no SDV code).
 
 
 class FKPreservationError(DecoyError):
@@ -516,18 +520,66 @@ CAPACITY_REASON_CODES: frozenset[str] = frozenset(
         reasons.runtime.GENERATION_BUDGET_EXCEEDED,
         reasons.runtime.OUT_OF_CORE_INSUFFICIENT_MEMORY,
         reasons.runtime.OUT_OF_CORE_FANIN_EXCEEDS_BUDGET,
+        reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED,
+        reasons.runtime.OUT_OF_CORE_REORDER_BUDGET_TOO_SMALL,
+        reasons.runtime.POOL_EXCEEDS_CACHE_BUDGET,
+        reasons.decoy.ISOLATED_WORKER_OUT_OF_MEMORY,
+        reasons.decoy.PROCESS_OUT_OF_MEMORY,
+    }
+)
+
+# Every other registered code whose name says memory, budget, capacity or OOM, with the reason it
+# is not a capacity verdict. A test walks the registry so a new such code must land in one set.
+_ROUTING = (
+    "a routing refusal decided before any row is read; the fix is the job's shape, not memory"
+)
+_SETTING = "a rejected budget setting; the value is invalid, the machine is not too small"
+_NOT_MEMORY = "a different resource or limit; more memory does not clear it"
+_NOT_SET = "a required budget or location was not set; the machine is not too small"
+_MALFORMED = "a malformed budget declaration; the setting is wrong, not the machine"
+_SHADOW = "a shadow-run comparison finding, not a refusal that stops a job"
+_DISK = "disk or quota, not memory"
+_POOL_SHORT = "a uniqueness shortfall in the value pool, not memory"
+_UNKNOWN = "the check could not read its input; no capacity verdict was reached"
+CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
+    {
+        reasons.runtime.FK_FULL_FRAME_OOM_RISK_REJECTED: _ROUTING,
+        reasons.runtime.FK_FULL_FRAME_OOM_RISK_REJECTED_ESTIMATED: _ROUTING,
+        reasons.runtime.OUT_OF_CORE_BUDGET_INVALID: _SETTING,
+        reasons.runtime.OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID: _SETTING,
+        reasons.runtime.OUT_OF_CORE_REORDER_DISK_BUDGET_INVALID: _SETTING,
+        reasons.runtime.OUT_OF_CORE_REORDER_UNBUDGETED: _NOT_SET,
+        reasons.runtime.OUT_OF_CORE_MEMORY_DETECTION_FAILED: _UNKNOWN,
+        reasons.runtime.CAPACITY_SOURCE_UNPROFILABLE: _UNKNOWN,
+        reasons.runtime.POOL_CAPACITY_UNVERIFIABLE_NO_PROFILE: _UNKNOWN,
+        reasons.plan.POOL_CAPACITY_PRE_FLIGHT_UNIQUE: _POOL_SHORT,
+        reasons.decoy.STORAGE_CAPACITY_EXHAUSTED: _DISK,
+        reasons.plan.DP_BUDGET_EXCEEDED: _NOT_MEMORY,
+        reasons.plan.DP_BUDGET_DECLARATION_MALFORMED: _MALFORMED,
+        reasons.quality.DP_BUDGET_INFEASIBLE: _NOT_MEMORY,
+        reasons.quality.DP_BUDGET_CATEGORICAL_PAIR_UNSCHEDULED: _NOT_MEMORY,
+        reasons.subset.SUBSET_BUDGET_EXCEEDED: _NOT_MEMORY,
+        reasons.runtime.OUT_OF_CORE_TEMP_DISK_EXCEEDED: _DISK,
+        reasons.runtime.OUT_OF_CORE_REORDER_DISK_BUDGET_TOO_SMALL: _DISK,
+        reasons.runtime.OUT_OF_CORE_PREDICTED_SPILL_BYTES_INVALID: _SETTING,
+        reasons.runtime.HOLD_BACK_SPILL_UNAVAILABLE: _NOT_SET,
+        reasons.verification.CANARY_RESOURCE_LIMIT: _NOT_MEMORY,
+        reasons.physical.RESOURCE_LIMIT_BREACH: _SHADOW,
     }
 )
 
 
 __all__ = [
+    "CAPACITY_EXCLUSIONS",
     "CAPACITY_REASON_CODES",
     "ConfigError",
     "ConfigRuleError",
     "ConnectorAuthError",
     "ConnectorError",
+    "ConnectorErrorKind",
     "DecoyError",
     "EmptyParentPoolError",
+    "EnvFlagError",
     "FKPreservationError",
     "FixedWidthParseError",
     "FixedWidthRecordOverlongError",

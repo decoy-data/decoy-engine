@@ -42,11 +42,9 @@ Public exceptions (also in decoy_engine.errors):
 
 Anything not in __all__, and anything under decoy_engine.internal, is private.
 
-V2 NOTE: the V1 surface (``Masker``, ``DataGenerator``, ``run_graph``) was removed
-in S22 (2026-05-30). The engine is plan-first: validate a ``PipelineConfig``, profile
-the source, ``compile_plan``, then run the plan through an ``ExecutionAdapter`` (MASK)
-or ``generation.synthesize.generate_tables`` (GENERATE). See
-``tests/integration/golden/test_execution_e2e.py`` for the end-to-end call shape.
+V2 NOTE: the V1 surface (``Masker``, ``DataGenerator``, ``run_graph``) was removed in S22; the
+engine is plan-first (``PipelineConfig``, profile, ``compile_plan``, then an ``ExecutionAdapter``
+or ``generate_tables``). ``tests/integration/golden/test_execution_e2e.py`` shows the call shape.
 """
 
 import logging
@@ -201,6 +199,7 @@ from decoy_engine.profile._fixed_width_writer import write_fixed_width
 from decoy_engine.profiling import (
     ColumnProfile,
     FieldStats,
+    ModelHit,
     ScanSet,
     ScanSetCore,
     SentinelFlag,
@@ -288,6 +287,7 @@ from decoy_engine.relationships import (
     check_orphan_fk_policy_completeness,
 )
 from decoy_engine.release import RELEASE_PHASE, ReleasePhase, is_pre_ga
+from decoy_engine.release import __version__ as __version__
 from decoy_engine.run_result import RUN_RESULT_SCHEMA, RunResult, RunResultRead, derive_outcome
 from decoy_engine.safe_output import ConfigProblem
 
@@ -330,14 +330,11 @@ from decoy_engine.validation.post import (
     PostValidationRunner,
     QualitySummary,
 )
-from decoy_engine.validation_result import (
-    CODES as VALIDATION_CODES,
-)
-from decoy_engine.validation_result import (
-    ValidationMessage,
-    ValidationResult,
-)
+from decoy_engine.validation_result import CODES as VALIDATION_CODES
+from decoy_engine.validation_result import ValidationMessage, ValidationResult
 from decoy_engine.vault import VaultError, VaultWriter, load_vault, vault_writer_for_config
+from decoy_engine.verification.postmask._blocked import PostScanBlockedError
+from decoy_engine.verification.postmask._route_guard import PostScanRouteError
 
 # F9: names trimmed from __all__ but kept as module bindings so attribute access
 # (decoy_engine.EinValidator, ...) stays non-breaking; anchoring them here marks the
@@ -366,7 +363,6 @@ _F9_KEPT_BINDINGS = (
     SsnValidator,
 )
 
-__version__ = "0.20.0"
 
 __all__ = [
     "CAP_DRY_RUN",
@@ -439,6 +435,7 @@ __all__ = [
     "Logger",
     "MaskSecretError",
     "MissingMaskSecret",
+    "ModelHit",
     "ModelRef",
     "ModelStatus",
     "ModelUnavailableError",
@@ -460,6 +457,8 @@ __all__ = [
     "PoolBuilder",
     "PoolCapacityError",
     "PoolSampler",
+    "PostScanBlockedError",
+    "PostScanRouteError",
     "PostValidationRunner",
     "PreScanConfig",
     "PreparedDeclaredSources",

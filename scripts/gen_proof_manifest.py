@@ -146,10 +146,10 @@ def _run_hero(
             "providers": {**_CSV_IN, "path": str(tmp / "providers.csv")},
         },
         "targets": {
-            "members": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "claims": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "providers": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null"},
+            "members": {"type": "file", "format": "csv", "path": "/dev/null.members"},
+            "claims": {"type": "file", "format": "csv", "path": "/dev/null.claims"},
+            "providers": {"type": "file", "format": "csv", "path": "/dev/null.providers"},
+            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null.audit_log"},
         },
         "namespaces": {"member_identity": {"declared_by": ["members.member_id"]}},
         "tables": [
@@ -697,7 +697,7 @@ def _joint_mask_proof() -> dict:
             "key_by": "patient_id",
         }
     )
-    result = apply_joint_mask(df, cfg, mode="mask", job_seed=job_seed)
+    result = apply_joint_mask(df, cfg, mode="mask", job_seed=job_seed, table="proof")
 
     tbl = load_table("us_zip5_city_state")
     valid_tuples = {

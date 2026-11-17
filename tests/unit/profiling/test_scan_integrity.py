@@ -108,12 +108,24 @@ def test_duplicate_excess_counts_complete_keys_only(tmp_path: Path) -> None:
 def test_type_mismatch_gives_no_counts(tmp_path: Path) -> None:
     src = {
         "p": _parquet(tmp_path, "p", pa.table({"id": pa.array([1, 2], pa.int64())})),
-        "c": _csv(tmp_path, "c", "pid\n1\n9\n"),
+        "c": _csv(tmp_path, "c", "pid\nunencodable\n9\n"),
     }
     f = _facts(src, _rel(("p", ["id"]), ("c", ["pid"])))
     assert f.status == "key_type_mismatch"
     assert f.parent_rows is None and f.children[0].orphan_rows is None
     assert f.warnings == (reasons.warning.SCAN_KEY_TYPE_MISMATCH.spec.ref,)
+
+
+def test_integer_width_difference_is_measured(tmp_path: Path) -> None:
+    src = {
+        "p": _parquet(tmp_path, "p", pa.table({"id": pa.array([1, 2, 3], pa.int64())})),
+        "c": _parquet(tmp_path, "c", pa.table({"pid": pa.array([1, 3, 9, None], pa.int32())})),
+    }
+    f = _facts(src, _rel(("p", ["id"]), ("c", ["pid"])))
+    assert f.status == "checked" and f.exact
+    assert f.warnings == ()
+    c = f.children[0]
+    assert (c.rows, c.null_key_rows, c.orphan_rows, c.orphan_distinct_keys) == (4, 1, 1, 1)
 
 
 def test_undeclared_names_infer_nothing(tmp_path: Path) -> None:

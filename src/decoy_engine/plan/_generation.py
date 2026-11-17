@@ -20,6 +20,7 @@ swap (guide section 7.4's TOCTOU test).
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
 from decoy_engine.plan._errors import PlanCompileError
@@ -39,7 +41,6 @@ from decoy_engine.plan._types import (
     PinnedStatisticalSpec,
     freeze_json,
 )
-from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
 
 # HC-5 precedent (`quality/snapshot.py::_HIGH_CARDINALITY_MAX_LABEL_BYTES`):
 # a fail-closed size fence on an embedded artifact is a typed compile
@@ -117,16 +118,13 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
     expected version only: the stored text is untrusted and never echoed."""
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
-    if (
-        isinstance(parsed, dict)
-        and parsed.get("schema_version") == DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
-    ):
+    if isinstance(parsed, dict) and parsed.get("schema_version") in ACCEPTED_SCHEMA_VERSIONS:
         return None
     return StatisticalSpecError(
         code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
         message=(
             f"snapshot_file {shown!r} does not declare 'schema_version' "
-            f"{DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION!r}; this engine consumes only that version."
+            f"{' or '.join(ACCEPTED_SCHEMA_VERSIONS)}; this engine consumes only those versions."
         ),
     )
 
@@ -142,6 +140,96 @@ def _unreadable_message(
     return (
         f"snapshot_file {shown!r} could not be read at {where!r} "
         f"(a relative path is read from the config file's folder): {cause}"
+    )
+
+
+@dataclass(frozen=True)
+class PinnedRead:
+    """One artifact read: its bytes and digest, or (`raw` is None) why it could not be read.
+
+    `cause` is the error text a snapshot report carries (the locator redacted under a strict
+    policy); `cause_type` is the exception class name alone, for a report that must carry no text.
+    """
+
+    raw: bytes | None
+    sha256: str = ""
+    cause: str = ""
+    cause_type: str = ""
+    # Byte size of a file over the cap (then `raw` is None and nothing was kept).
+    oversize: int = 0
+
+
+def read_pinned_artifact(
+    role: FileRole,
+    declared: str,
+    field_key: str,
+    base_dir: str | Path | None,
+    cap: int,
+) -> PinnedRead:
+    """Read one declared file once under `role`: the one read step snapshots and lookups share.
+
+    Resolves a relative path from `base_dir`, reads through the file policy, and keeps the
+    strict/ambient failure split (a strict policy's own errors propagate; the failure is recorded
+    after the handler closes so no library error is attached). A file over `cap` comes back with
+    `oversize` set and is not kept: the caller raises its own coded refusal. Nothing is truncated.
+    """
+    shown = fileaccess.shown(declared, field_key)
+    locator = fileaccess.config_relative(declared, base_dir)
+    failure: tuple[str, str] | None = None
+    try:
+        raw = fileaccess.read_all(role, locator, field_key)
+    except OSError as exc:
+        if fileaccess.keeps_class(exc):
+            raise
+        if fileaccess.is_ambient():
+            return PinnedRead(None, cause=str(exc), cause_type=type(exc).__name__)
+        failure = (
+            fileaccess.redact_locators(str(exc), [(declared, shown), (locator, shown)]),
+            type(exc).__name__,
+        )
+    if failure is not None:
+        return PinnedRead(None, cause=failure[0], cause_type=failure[1])
+    if len(raw) > cap:
+        return PinnedRead(None, oversize=len(raw))
+    return PinnedRead(raw, sha256=hashlib.sha256(raw).hexdigest())
+
+
+def oversize_message(label: str, shown: str, size: int, cap: int) -> str:
+    """The closed text of an over-cap pinned artifact: the shown name and the two sizes."""
+    return (
+        f"{label} {shown!r} is {size} bytes, exceeding the "
+        f"{cap} byte (16 MiB) embedded-artifact cap "
+        "(HC-5 high-cardinality precedent, quality/snapshot.py). Pinning the "
+        "full artifact bytes into the Plan is required for generation to never "
+        "reopen a path; a bounded format change is a separate, reviewed "
+        "escalation, not a silent truncation or a runtime path-read fallback."
+    )
+
+
+def verified_pinned_bytes(data: dict[str, Any]) -> bytes | None:
+    """The bytes of one stored pinned artifact, or `None` when they do not match the recorded sha256.
+
+    A stored plan is untrusted input and its `sha256` is a claim, so it is recomputed from
+    `payload_b64`. Snapshots and lookups both decode through here, then raise their own coded
+    refusal with `pinned_digest_message`. A payload that is not base64 counts as a mismatch.
+    """
+    raw = b""
+    undecodable = False
+    try:
+        raw = base64.b64decode(data["payload_b64"], validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        undecodable = True  # reported by the caller, outside any handler, so nothing is chained
+    if undecodable or hashlib.sha256(raw).hexdigest() != data["sha256"]:
+        return None
+    return raw
+
+
+def pinned_digest_message(position: str) -> str:
+    """The closed text of a digest mismatch: the manifest position, never the stored path."""
+    return (
+        f"the embedded artifact at {position} does not match its recorded sha256. "
+        "A Plan's pinned bytes are verified evidence, not a trusted claim; a mismatch "
+        "means the manifest was edited or corrupted after compile."
     )
 
 
@@ -171,55 +259,40 @@ def read_and_pin_snapshots(
     there (`fileaccess.config_relative`). Both result maps stay keyed by the declared string,
     so the plan bytes and the config hash never see the resolved path.
     """
-    from decoy_engine.generation.statistical._spec import StatisticalSpecError
+    from decoy_engine.generation.statistical import StatisticalSpecError, parse_snapshot_json
 
     pinned: dict[str, ReadSnapshot] = {}
     failures: dict[str, Any] = {}
     for path, field_key in _snapshot_field_keys(config).items():
         shown = fileaccess.shown(path, field_key)
         locator = fileaccess.config_relative(path, base_dir)
-        failure: str | None = None
-        try:
-            raw = fileaccess.read_all(FileRole.SNAPSHOT, locator, field_key)
-        except OSError as exc:
-            if fileaccess.keeps_class(exc):
-                raise
-            if fileaccess.is_ambient():
-                failures[path] = StatisticalSpecError(
-                    code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                    message=_unreadable_message(shown, locator, path, base_dir, str(exc)),
-                )
-                continue
-            failure = fileaccess.redact_locators(str(exc), [(path, shown), (locator, shown)])
-        if failure is not None:
-            # Strict: the failure is recorded after the handler closes, with no library error
-            # attached (its text can name the file).
-            failures[path] = StatisticalSpecError(
-                code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=_unreadable_message(shown, locator, path, base_dir, failure),
-            )
-            continue
-        if len(raw) > EMBEDDED_SNAPSHOT_MAX_BYTES:
+        read = read_pinned_artifact(
+            FileRole.SNAPSHOT,
+            path,
+            field_key,
+            base_dir,
+            EMBEDDED_SNAPSHOT_MAX_BYTES,
+        )
+        if read.oversize:
             raise PlanCompileError(
                 code=reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE,
                 path=f"<snapshot_file={shown}>",
-                message=(
-                    f"snapshot_file {shown!r} is {len(raw)} bytes, exceeding the "
-                    f"{EMBEDDED_SNAPSHOT_MAX_BYTES} byte (16 MiB) embedded-artifact cap "
-                    "(HC-5 high-cardinality precedent, quality/snapshot.py). Pinning the "
-                    "full artifact bytes into the Plan is required for generation to never "
-                    "reopen a snapshot path; a bounded format change is a separate, reviewed "
-                    "escalation, not a silent truncation or a runtime path-read fallback."
+                message=oversize_message(
+                    "snapshot_file", shown, read.oversize, EMBEDDED_SNAPSHOT_MAX_BYTES
                 ),
             )
-        digest = hashlib.sha256(raw).hexdigest()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
+        if read.raw is None:
             failures[path] = StatisticalSpecError(
                 code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-                message=f"snapshot_file {shown!r} could not be read: {exc}",
+                message=_unreadable_message(shown, locator, path, base_dir, read.cause),
             )
+            continue
+        raw = read.raw
+        digest = read.sha256
+        try:
+            parsed = parse_snapshot_json(raw, shown=shown)
+        except StatisticalSpecError as exc:
+            failures[path] = exc
             continue
         guard = snapshot_content_guard.get()
         if guard is not None:
@@ -278,6 +351,7 @@ def build_generation_plan(
     *,
     column_specs: list[tuple[str, str, str, dict[str, Any]]],
     dp_verification: DpVerification | None,
+    lookups: tuple[PinnedSnapshot, ...] = (),
 ) -> GenerationPlan | None:
     """Assemble the frozen `GenerationPlan` from the read-once pass's
     output plus the already-validated statistical specs.
@@ -288,6 +362,8 @@ def build_generation_plan(
             that compiled successfully (in declared order). The parsed
             spec dict is the `StatisticalSpec` shape `load_spec` already
             validated; it is frozen here, not re-validated.
+        lookups: the pinned `type: lookup` files `check_lookup_tables` verified. Compile and plan
+            load both pass them here, so neither can build a plan that drops them.
 
     Returns:
         `None` when the config has no `generate_columns` at all (a pure
@@ -330,6 +406,7 @@ def build_generation_plan(
         snapshots=tuple(snapshots),
         statistical_specs=statistical_specs,
         dp_verification=dp_verification,
+        lookups=lookups,
     )
 
 
@@ -414,13 +491,14 @@ def check_generate_snapshot_columns(
 @dataclass(frozen=True)
 class SnapshotPass:
     """What one compile's snapshot pass produced: the pins, the classified read failures, the
-    DP verification verdicts and receipt, and the statistical column specs."""
+    DP verification verdicts and receipt, the statistical column specs and the pinned lookup files."""
 
     pinned: dict[str, ReadSnapshot]
     failures: dict[str, Any]
     dp_verified_columns: frozenset[tuple[str, str]]
     dp_verification: DpVerification | None
     column_specs: list[tuple[str, str, str, dict[str, Any]]]
+    lookups: tuple[PinnedSnapshot, ...] = ()
 
 
 def pin_and_check_snapshots(
@@ -434,4 +512,10 @@ def pin_and_check_snapshots(
     column_specs = check_generate_snapshot_columns(
         config, pinned, dp_verified_columns, failures=failures
     )
-    return SnapshotPass(pinned, failures, dp_verified_columns, dp_verification, column_specs)
+    # Lazy: the lookup checks live in `plan.checks`, which imports this module.
+    from decoy_engine.plan.checks._lookup_tables import pin_and_check_lookups
+
+    lookups = pin_and_check_lookups(config, base_dir=base_dir)
+    return SnapshotPass(
+        pinned, failures, dp_verified_columns, dp_verification, column_specs, lookups
+    )

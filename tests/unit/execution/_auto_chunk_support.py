@@ -13,6 +13,7 @@ import importlib.util
 import inspect
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -20,6 +21,7 @@ import pytest
 
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import run_pipeline
+from tests._declared_schema import declare_rest
 
 ENGINE_VERSION = "b2-auto-chunk-test"
 TABLE = "t"
@@ -38,15 +40,18 @@ def make_cfg(
 ) -> dict[str, Any]:
     """`path` is the parquet file `profile_source` reads; the execution reads the
     `sources` table the test passes, so the two must hold the same data."""
-    return PipelineConfig.model_validate(
-        {
-            "version": 2,
-            "global_settings": {"seed": 42},
-            "sources": {table: {"type": "file", "format": "parquet", "path": path}},
-            "tables": [{"name": table, "columns": columns}],
-            "targets": {table: {"type": "file", "format": "parquet", "path": "/dev/null"}},
-        }
-    ).model_dump()
+    raw = {
+        "version": 2,
+        "global_settings": {"seed": 42},
+        "sources": {table: {"type": "file", "format": "parquet", "path": path}},
+        "tables": [{"name": table, "columns": columns}],
+        "targets": {table: {"type": "file", "format": "parquet", "path": "/dev/null"}},
+    }
+    # A source file that already exists is declared in full; a test that writes it later
+    # calls `declare_rest` itself.
+    if Path(path).is_file():
+        declare_rest(raw)
+    return PipelineConfig.model_validate(raw).model_dump()
 
 
 def hash_col(name: str, namespace: str | None = None) -> dict[str, Any]:
@@ -271,10 +276,11 @@ def check_contract(
 def spy_lanes(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     """Count calls into every lane entry point; each wrapper forwards to the real one.
 
-    `auto_chunk_module` only exists once B2 is implemented, so it is patched when present."""
-    from decoy_engine.execution import _chunked
+    `auto_chunk_module` only exists once B2 is implemented, so it is patched when present. The
+    lane calls each entry's guard-free core, so the `entry.` and `oracle.` keys count those."""
+    from decoy_engine.execution import _chunked_oracle
     from decoy_engine.execution import _pipeline_route_exec as rx
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
     calls: dict[str, list[Any]] = {
         "route_exec.run_mask_chunked": [],
@@ -294,14 +300,14 @@ def spy_lanes(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
         rx, "run_mask_chunked", wrap("route_exec.run_mask_chunked", rx.run_mask_chunked)
     )
     monkeypatch.setattr(
-        _chunked_entry,
-        "run_mask_chunked",
-        wrap("entry.run_mask_chunked", _chunked_entry.run_mask_chunked),
+        _native_core,
+        "mask_chunked",
+        wrap("entry.run_mask_chunked", _native_core.mask_chunked),
     )
     monkeypatch.setattr(
-        _chunked,
-        "run_mask_pipeline_chunked",
-        wrap("oracle.run_mask_pipeline_chunked", _chunked.run_mask_pipeline_chunked),
+        _chunked_oracle,
+        "_mask_pipeline_chunked",
+        wrap("oracle.run_mask_pipeline_chunked", _chunked_oracle._mask_pipeline_chunked),
     )
     if importlib.util.find_spec("decoy_engine.execution._pipeline_auto_chunk") is not None:
         from decoy_engine.execution import _pipeline_auto_chunk as ac

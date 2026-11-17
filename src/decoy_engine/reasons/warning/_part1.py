@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
+    "CARDINALITY_COLLISIONS",
     "CARDINALITY_MATCH_DEVIATION",
     "FIT_JOINT_CELLS_TRUNCATED",
     "FORMAT_RULE_VIOLATION",
@@ -23,6 +25,8 @@ __all__ = [
     "ORPHAN_FK",
     "OUT_OF_CORE_CALLER_MANAGED_RESIDENCY",
     "POOL_DOMINATES_CACHE",
+    "POST_SCAN_OUTPUT_UNREADABLE",
+    "SCAN_BASELINE_MISSING",
     "SCAN_CRASHED",
     "SCAN_HEADER_SUSPECT",
     "SCAN_KEY_TYPE_MISMATCH",
@@ -36,6 +40,7 @@ __all__ = [
 
 _d = _catalog.warning("QualityWarning")
 
+CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since=UNRELEASED)
 CARDINALITY_MATCH_DEVIATION = _d("cardinality_match_deviation", "Cardinality match deviation.")
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
@@ -64,6 +69,19 @@ OUT_OF_CORE_CALLER_MANAGED_RESIDENCY = _d(
     "out_of_core_caller_managed_residency", "Out of core caller managed residency."
 )
 POOL_DOMINATES_CACHE = _d("pool_dominates_cache", "Pool dominates cache.")
+POST_SCAN_OUTPUT_UNREADABLE = _d(
+    "post_scan_output_unreadable",
+    "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not "
+    "checked on the output.",
+    since="1.27.0",
+)
+# SCAN-CHECKS: `--evidence-out` asked to hash the pipeline's scan baseline and the file is gone. The
+# run continues and the manifest records the path with a null fingerprint. Fixed, value-free text.
+SCAN_BASELINE_MISSING = _catalog.warning("EvidenceManifest")(
+    "scan_baseline_missing",
+    "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
+    since=UNRELEASED,
+)
 SCAN_CRASHED = _d("scan_crashed", "Scan crashed.")
 SCAN_HEADER_SUSPECT = _d(
     "scan_header_suspect", "First row looks like data, not a header.", since="1.10.0"

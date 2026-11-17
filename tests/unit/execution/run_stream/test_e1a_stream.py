@@ -188,7 +188,11 @@ def test_independent_multi_table_job_streams_every_table(tmp_path: Path) -> None
     for name, source in srcs["resident"].items():
         got = pq.read_table(target / f"{name}.parquet")
         want = run_pipeline(
-            {**cfg, "tables": [t for t in cfg["tables"] if t["name"] == name]},
+            {
+                **cfg,
+                "sources": {name: cfg["sources"][name]},
+                "tables": [t for t in cfg["tables"] if t["name"] == name],
+            },
             sources={name: source},
             engine_version=rs.ENGINE_VERSION,
             auto_chunk=False,
@@ -218,7 +222,7 @@ def _fk_reference(cfg: dict[str, Any], tables: dict[str, pa.Table]) -> dict[str,
 
 def test_fk_tables_that_pass_the_complete_gate_run_as_lane_units(tmp_path: Path) -> None:
     cfg, lazy, tables = rs.fk_job(tmp_path)
-    sink, target = rs.real_sink(tmp_path)
+    sink, target = rs.engine_sink(tmp_path)
     result = rs.run_stream(cfg, lazy, sink, chunk_size_rows=7)
     assert result.outputs == {}
     entries = result.quality_metrics["auto_chunk"]["tables"]
@@ -252,7 +256,7 @@ def test_complete_gate_rejection_takes_guarded_out_of_core(tmp_path: Path) -> No
     """A non-remap orphan policy fails the chunked gate (`chunked_fk_orphan_policy_not_remap`)
     on the child edge; out-of-core compatibility holds, the dtype hazard is clear."""
     cfg, lazy, tables = rs.fk_job(tmp_path, orphan_policy="preserve")
-    sink, target = rs.real_sink(tmp_path)
+    sink, target = rs.engine_sink(tmp_path)
     result = rs.run_stream(cfg, lazy, sink)
     assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
     want = _fk_reference(cfg, tables)
@@ -319,7 +323,7 @@ def test_parent_side_key_checks_belong_to_the_same_gate(
 
     monkeypatch.setattr(module, gate, reject)
     cfg, lazy, tables = rs.fk_job(tmp_path)
-    sink, target = rs.real_sink(tmp_path)
+    sink, target = rs.engine_sink(tmp_path)
     result = rs.run_stream(cfg, lazy, sink)
     assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
     want = _fk_reference(cfg, tables)

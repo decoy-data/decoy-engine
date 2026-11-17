@@ -61,12 +61,22 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("declared_casting/_eligibility.py", "declared_route_guard"): _DECISION_REASON,
     ("declared_casting/_eligibility.py", "preflight_declared_casting"): _DECISION_REASON,
     ("declared_casting/_refusals.py", "note"): _DECISION_REASON,
+    ("delivery/_plan.py", "plan_delivery"): (
+        "stores the failure ReasonCode the caller passed in `outcomes` on the failed table"
+    ),
+    ("run_result/_build.py", "_warnings"): (
+        "copies the warning codes the engine recorded on the run into the result record, "
+        "each through the registered-code rule"
+    ),
+    ("run_result/_build.py", "_route"): (
+        "forwards the route reason code of route_summary, through the registered-code rule"
+    ),
     ("declared_casting/_quarantine_local.py", "_qerror"): _HELPER,
     ("plan/_checks_declared_casting.py", "_fail"): _HELPER,
     ("plan/_serialize_declared.py", "declared_casting_from_dict"): _REWRAP,
     # -- constructors that store the caller's code -------------------------------------------
     ("_reference_date.py", "PinnedModeError.__init__"): _CTOR,
-    ("connectors/postgres_snapshot.py", "PostgresSnapshotError.__init__"): _CTOR,
+    ("connectors/_postgres_session.py", "PostgresSnapshotError.__init__"): _CTOR,
     ("detection/_model_status.py", "ModelUnavailableError.__init__"): _CTOR,
     ("detection/ner.py", "NerUnavailableError.__init__"): _CTOR,
     ("determinism/_derive.py", "DeterminismError.__init__"): _CTOR,
@@ -100,6 +110,23 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("subset/_errors.py", "SubsetError.__init__"): _CTOR,
     ("subset/_errors.py", "SubsetPreflightError.__init__"): _CTOR,
     ("vault.py", "VaultError.__init__"): _CTOR,
+    ("publication/_types.py", "_CodedOutcome.__init__"): _CTOR,
+    ("delivery/resume/_plan.py", "ResumeRefusedError.__init__"): _CTOR,
+    ("publication/_types.py", "raise_for_outcome"): (
+        "re-raises a CommitReceipt's code; the receipt accepts only a registered `decoy` code"
+    ),
+    ("publication/_sink_state.py", "recover"): (
+        "builds the RECOVERING refusal receipt from the registry symbol "
+        "`PUBLICATION_COMMIT_NOT_VISIBLE` as an exact `str` (a CommitReceipt takes no subclass)"
+    ),
+    ("execution/_transactional_sink.py", "ParquetTransactionalSink._leave"): (
+        "forwards the code of the CommitReceipt the attempt ended with to the sink state table; "
+        "the receipt accepts only a registered `decoy` code"
+    ),
+    ("publication/_sink_state.py", "SinkStateMachine._refuse"): (
+        "raises the code of a literal sink-state cell (a registry symbol) or the one the attempt "
+        "ended with; its CommitReceipt accepts only a registered `decoy` code"
+    ),
     ("validation_result.py", "ValidationResult.add_error"): _CTOR,
     ("validation_result.py", "ValidationResult.add_warning"): _CTOR,
     ("progress.py", "ProgressChannel.route"): _CTOR,
@@ -115,7 +142,13 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
     ("generation/_window_admission.py", "_refuse"): _HELPER,
     ("plan/_checks_dp.py", "_raise"): _HELPER,
+    ("plan/checks/_lookup_tables.py", "_lookup_refusal"): _HELPER,
+    ("plan/checks/_required_settings.py", "check_required_strategy_settings"): (
+        "forwards the registered plan symbol a frozen requirement descriptor holds; the descriptor "
+        "table is the only place those symbols are written"
+    ),
     ("profile/_csv_reader.py", "source_refusal"): _HELPER,
+    ("publication/_publish.py", "_receipt"): _HELPER,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _HELPER,
     # -- re-wraps of an already-registered exception code ------------------------------------
     ("execution/_chunked_when_guard.py", "PositionalWhenGuard.check_schema"): _REWRAP,
@@ -126,6 +159,10 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("execution/physical/_shadow_mixed.py", "_as_shadow_difference"): _REWRAP,
     ("plan/_checks.py", "_check_ner_available_for_strategy"): _REWRAP,
     ("plan/_checks.py", "check_statistical_columns"): _REWRAP,
+    ("plan/checks/_generate_columns.py", "_located"): (
+        "re-wraps the registered code of the ref check or parse rule it caught, with fixed text; "
+        "its other callers pass a registry symbol"
+    ),
     ("plan/_generation.py", "check_fitted_references"): _REWRAP,
     ("plan/_serialize.py", "_pinned_snapshot_from_dict"): _REWRAP,
     ("plan/validate/_consolidator.py", "validate_plan"): _REWRAP,
@@ -144,9 +181,9 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("quality/report.py", "_collect_warnings"): (
         "diagnostic check names are registry symbols in `verification`"
     ),
-    ("phase.py", "_reason_wire"): (
-        "exports the identity of a `ReasonRef` that `require_known` has just resolved against "
-        "the registry (an unknown identity fails closed before this dict is built)"
+    ("verification/postmask/_blocked.py", "PostScanBlockedError.__init__"): (
+        "the code is the identity of a ref the verdict produced, set only when that code is "
+        "registered in `post_scan`; the adapter trusts it only on that registration"
     ),
     ("safe_output/_event.py", "SafeEvent.to_dict"): (
         "exports the identity of a `ReasonRef` that `require_known` resolved against the "
@@ -330,6 +367,13 @@ _MUTANTS: dict[str, str] = {
     "module_constant": """
         MY_CODE = "adhoc_constant"
     """,
+    # The fallback of a registry-backed code table (the FPE handler's unregistered default).
+    "code_table_default": """
+        from decoy_engine import reasons
+        _ROUTES = {"a": reasons.runtime.CYCLIC_WORK_ORDERING}
+        def f(key):
+            return _ROUTES.get(key, "adhoc_default")
+    """,
     "unchecked_forward": """
         from decoy_engine.errors import ExecutionError
         def f(code):
@@ -390,6 +434,9 @@ _CLEAN = """
         raise ExecutionError(code=MY_CODE)
     def h():
         return {"code": reasons.runtime.CYCLIC_WORK_ORDERING}
+    _ROUTES = {"a": reasons.runtime.CYCLIC_WORK_ORDERING}
+    def k(key):
+        return _ROUTES.get(key, reasons.runtime.CYCLIC_WORK_ORDERING)
 """
 
 

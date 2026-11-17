@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.execution._distribution_behavior import distribution_behavior_for
+from decoy_engine.contracts.distribution_behavior import distribution_behavior_for
 from decoy_engine.execution._technique_class import technique_class_for
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
@@ -273,13 +273,11 @@ def _build_seed_envelope(
                     ner_cfg = provider_config_raw.get("ner")
                     if ner_cfg:
                         from decoy_engine.detection.ner import (
-                            DEFAULT_NER_MODEL,
                             installed_model_version,
+                            resolve_column_ner,
                         )
 
-                        ner_model = DEFAULT_NER_MODEL
-                        if isinstance(ner_cfg, dict) and ner_cfg.get("model"):
-                            ner_model = str(ner_cfg["model"])
+                        ner_model = str(resolve_column_ner(ner_cfg)[0])
                         ner_model_version = installed_model_version(ner_model)
                         if ner_model_version is None:
                             warnings.append(
