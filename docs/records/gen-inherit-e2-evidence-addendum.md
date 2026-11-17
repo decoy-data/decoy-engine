@@ -236,3 +236,38 @@ mutant's red set. The harness was rebuilt from the mutation tables above (the ea
 not kept).
 
 `generation/synthesize.py` 596 lines. Not run: the full suite, Python 3.11.
+
+## Main merge (2026-11-17, `dc2d397b`), gate and mutations on the exact head
+
+`origin/main` `dc2d397b` (7 commits after `dda1b61f`: #622, #631, #632, #633, #636, #637,
+#639) merged into `022729af` as `ab1c657d`. GEN-REL has not taken it yet, so it merges straight
+into this slice. Two conflicts, both sides kept:
+
+- `config/_generate_options.py`: main's #631 adds `ContextProblem` and a `templates` argument
+  to `problem_details` (a mapping third item fills a template). The stack's `problem_details`
+  already takes a text third item, appended after the summary (GEN-REL's table and column names;
+  this slice's quoted-key hint). The merged function takes either. Main's `import math` is not
+  kept: the weights rule that used it lives in `_generate_type_checks.py` on the stack. GEN-REL
+  will meet the same conflict; its resolution replaces this one when gen-rel-e3b is merged.
+- `CODEMAP.md`: main's `config/policy/` rows beside the stack's `config/` rows.
+
+Gate on `ab1c657d`: `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline` (1331
+paths), Python 3.10.20, baseline `origin/main` `dc2d397b`. ruff, format and mypy pass; sentry
+6130 passed, 0 failed, 2 skipped; licenses 63 passed; layers 11 passed, 4 failed; tests 43726
+passed, 115 failed or errored, 5388 skipped. The same 119 ids fail on `origin/main`;
+branch-only 0. Of the 119: 113 scratch-permission tests that error in this container
+(`tests/fileaccess/scratch`, `tests/unit/execution/scratch`, `test_scratch_root_umask.py`); 4 in
+`tests/sentry/layout/test_import_layers.py`, because `.importlinter` on main still ignores
+`profiling._snapshot_values -> generation.statistical._cell_format`, an import #632 replaced
+with the package facade, and import-linter refuses an ignore that matches nothing; 2 in
+`test_subset_run_entry_policy.py`, because #639's public `run_ner_models` is not classified
+there. None is in this chain's files.
+
+Script checks against `dc2d397b`: `registry_renumber.py --check`, `ratchet_check.py`,
+`check_fragment.py` and `reason_release_pin.py --check` each exit 0.
+
+Mutations: 29 of 29 red on `ab1c657d`, the same harness and eight files as the `bf392a09` run;
+unmutated 540 passed; every red count equals that run's.
+
+`generation/synthesize.py` 596 lines, `config/_generate_options.py` 558. Not run: the full suite,
+Python 3.11.
