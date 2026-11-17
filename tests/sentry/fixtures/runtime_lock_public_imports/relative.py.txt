@@ -1,0 +1,4 @@
+"""Planted: the relative form of a private import, written from decoy_engine.support."""
+
+from ..providers_v2 import _faker_adapter
+from ..providers_v2._faker_adapter import FakerAdapter

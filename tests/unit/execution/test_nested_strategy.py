@@ -23,7 +23,7 @@ import pytest
 
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution._strategies._nested import (
+from decoy_engine.execution._strategies.nested._handler import (
     NestedStrategyHandler,
     _has_prefix_overlap,
     _path_segments,
@@ -549,7 +549,7 @@ class TestNestedWhenGateFailClosed:
 
 # ── mutation-hardening (TQ crown-jewels, 2026-07-26) ───────────────────
 #
-# Kills the LOGIC survivors from the mutmut run on `_nested.py`. Grouped
+# Kills the LOGIC survivors from the mutmut run on `nested/_handler.py`. Grouped
 # by the invariant / method each pins. See
 # docs/quality/mutation-ledgers/execution_strategies_nested.md.
 
