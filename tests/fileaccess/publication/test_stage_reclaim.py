@@ -73,6 +73,7 @@ def test_scope_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     data = tmp_path / "data"
     data.mkdir()
     (data / "rows.csv").write_text("a,b\n")
+    data.chmod(0o700)  # a link target that would pass the type, owner and mode checks if followed
     os.symlink(data, scope / f"{PENDING}aaaaaaaaaaaa")
     (scope / f"{PENDING}bbbbbbbbbbbb").write_bytes(b"a regular file with a stage name")
     make_stage(scope, token="cccccccccccc", mode=0o755)
