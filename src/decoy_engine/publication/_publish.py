@@ -17,9 +17,11 @@ The bind takes the ``VaultCommit`` the vault module issues only after the vault'
 the order is structural. A republish needs the descriptor's vault digest on disk and this
 writer's rows (D3); nothing is written then.
 
-Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1), except a
-``VaultError`` from writing the vault (``vault_commit_failed``; the vault module's vocabulary),
-raised after the stage is aborted with nothing bound; an argument error raises. Only a bind can
+Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1), except two, both
+raised after the stage is aborted with nothing bound: a ``VaultError`` (``vault_commit_failed``
+and the other codes of the vault module's vocabulary), and a file-access error
+(``FileAccessDenied``) from the vault's ``OutputDir`` before anything is linked; an argument
+error raises. Only a bind can
 leave anything new at the destination, and every other exit aborts the stage. Receipts hold
 closed tokens, digests, counts and errno names; an exception text is never read. Contract:
 ``docs/publication.md``.
@@ -61,7 +63,13 @@ from decoy_engine.publication._descriptor import (
     encode_descriptor,
 )
 from decoy_engine.publication._types import CommitReceipt, Outcome, PublicationRequest
-from decoy_engine.publication._vault_order import VaultConflict, adopt_vault, same_rows
+from decoy_engine.publication._vault_order import (
+    FsyncFailed,
+    VaultConflict,
+    adopt_vault,
+    read_vault_leaf,
+    same_rows,
+)
 from decoy_engine.vault import VaultCommit, VaultError, VaultWriter
 
 if TYPE_CHECKING:
@@ -355,19 +363,12 @@ def _check_vault(request: PublicationRequest, bound: Descriptor) -> str | None:
     binding, stored = request.vault, bound.vault
     if binding is None or stored is None:
         return None if binding is None and stored is None else _MISMATCH
-    blob: bytes | None = None
-    code: str | None = None
-    try:
-        blob = binding.out.adopt_file(limit=stored.size)
-    except (LeafTooLarge, FileAccessDenied):  # larger than the bound vault, or not a leaf here
-        blob = None
-    except OSError as exc:
-        code = _errno_name(exc)
-    if code is not None:
-        return code
-    if blob is None or len(blob) != stored.size:
-        return _MISMATCH
-    if hashlib.sha256(blob).hexdigest() != stored.sha256 or not same_rows(blob, binding.writer):
+    read = read_vault_leaf(binding.out, stored.size)
+    if isinstance(read, FsyncFailed):
+        return read.errno_name
+    if not isinstance(read, bytes) or len(read) != stored.size:
+        return _MISMATCH  # absent, over the bound size, or not an adoptable file
+    if hashlib.sha256(read).hexdigest() != stored.sha256 or not same_rows(read, binding.writer):
         return _MISMATCH
     return None
 
