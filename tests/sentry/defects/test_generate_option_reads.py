@@ -45,6 +45,8 @@ READER_FILES = (
     "generation/kinds/_output_type.py",
     "plan/checks/_lookup_tables.py",
     "generation/kinds/_parametric.py",
+    "generation/kinds/_provider.py",
+    "plan/checks/_generate_providers.py",
     "generation/_referenced_formula.py",
     "generators/columns.py",
     "generators/derivation.py",

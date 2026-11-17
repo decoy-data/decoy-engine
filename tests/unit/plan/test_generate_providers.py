@@ -1,0 +1,211 @@
+"""`type: provider` columns are checked at validate and at compile, with fixed-text refusals.
+
+Every refusal is asserted at both sites (`run_config_only_checks`, which `decoy validate` calls,
+and `compile_plan`, which `decoy run` calls) with its code and path. Canary cells assert that no
+submitted name reaches the error text, the log or the exception chain.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import pytest
+
+from decoy_engine import reasons, run_config_only_checks
+from decoy_engine.generation import synthesize
+from decoy_engine.generation._window_admission import classify_window_table
+from decoy_engine.generation.pinned import PinnedModeError, compile_pinned_plan
+from decoy_engine.plan import PlanCompileError, compile_plan
+from decoy_engine.plan.checks import DEFERRED
+from tests.unit._dps_helpers import empty_profile
+
+CANARY = "CANARY-7731"
+
+
+def cfg(cols: list[dict[str, Any]], n: int = 5) -> dict[str, Any]:
+    return {
+        "global_settings": {"seed": 1},
+        "tables": [{"name": "t", "row_count": n, "generate_columns": cols}],
+    }
+
+
+def prov(provider: str, name: str = "x", **extra: Any) -> dict[str, Any]:
+    return {"name": name, "type": "provider", "provider": provider, **extra}
+
+
+def p(column: str, key: str | None = None) -> str:
+    base = f"tables.t.generate_columns.{column}"
+    return base if key is None else f"{base}.{key}"
+
+
+def _compile(config: dict[str, Any], **kwargs: Any) -> Any:
+    kwargs.setdefault("instance_default_locale", None)
+    return compile_plan(config, empty_profile(), decoy_engine_version="test", **kwargs)
+
+
+def refusal(config: dict[str, Any], site: Any) -> PlanCompileError:
+    with pytest.raises(PlanCompileError) as info:
+        site(config)
+    return info.value
+
+
+def assert_refused(config: dict[str, Any], code: str, path: str) -> None:
+    for site in (run_config_only_checks, _compile):
+        exc = refusal(config, site)
+        assert (exc.code, exc.path) == (code, path), site.__name__
+        assert CANARY not in str(exc) and "7731" not in str(exc)
+        assert exc.__cause__ is None and exc.__context__ is None
+
+
+def assert_accepted(config: dict[str, Any]) -> None:
+    run_config_only_checks(config)
+    _compile(config)
+
+
+def test_the_new_codes_are_plan_reasons_with_stable_text() -> None:
+    for name in (
+        "GENERATE_PROVIDER_UNKNOWN",
+        "GENERATE_PROVIDER_UNSUPPORTED",
+        "GENERATE_PROVIDER_FIELD_REQUIRED",
+        "GENERATE_PROVIDER_FIELD_UNEXPECTED",
+        "GENERATE_PROVIDER_LOCALE_UNSUPPORTED",
+        "GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER",
+        "PINNED_PROVIDER_UNSUPPORTED",
+    ):
+        assert str(getattr(reasons.plan, name)) == name.lower()
+    assert str(reasons.runtime.GENERATION_PROVIDER_FAILED) == "generation_provider_failed"
+
+
+# ---- unknown, unsupported, field and locale refusals ---------------------------------------
+
+
+def test_an_unknown_provider_is_refused_without_quoting_the_name() -> None:
+    assert_refused(cfg([prov(CANARY)]), "generate_provider_unknown", p("x", "provider"))
+
+
+def test_a_known_provider_of_each_backend_is_accepted() -> None:
+    assert_accepted(cfg([prov("synthetic_npi"), prov("person_phone", "y"), prov("uuid", "z")]))
+
+
+def test_composite_custom_is_unsupported() -> None:
+    assert_refused(
+        cfg([prov("composite_custom")]), "generate_provider_unsupported", p("x", "provider")
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["composite_person", "composite_name_email", "composite_city_state_zip", "composite_address"],
+)
+def test_every_composite_needs_a_field(name: str) -> None:
+    assert_refused(cfg([prov(name)]), "generate_provider_field_required", p("x", "field"))
+
+
+@pytest.mark.parametrize("key", ["field", "group"])
+def test_a_field_or_group_is_unexpected_on_a_scalar_provider(key: str) -> None:
+    assert_refused(
+        cfg([prov("synthetic_npi", **{key: "a"})]),
+        "generate_provider_field_unexpected",
+        p("x", key),
+    )
+
+
+def test_unique_is_refused_on_a_provider_column() -> None:
+    with pytest.raises(Exception) as info:
+        run_config_only_checks(cfg([prov("synthetic_npi", unique=True)]))
+    assert "generate_unique_unsupported" in str(info.value)
+
+
+def test_a_locale_the_provider_does_not_declare_is_refused() -> None:
+    assert_refused(
+        cfg([prov("synthetic_npi", locale="fr_FR")]),
+        "generate_provider_locale_unsupported",
+        p("x", "locale"),
+    )
+    assert_refused(
+        cfg([prov("person_phone", locale="fr_FR")]),
+        "generate_provider_locale_unsupported",
+        p("x", "locale"),
+    )
+
+
+def test_a_declared_locale_passes_and_a_locale_free_identifier_takes_any_engine_locale() -> None:
+    assert_accepted(cfg([prov("synthetic_npi", locale="en_US")]))
+    assert_accepted(cfg([prov("synthetic_iban", locale="fr_FR")]))
+    assert_accepted(cfg([prov("synthetic_cusip", locale="en_CA")]))
+
+
+def test_a_non_string_option_is_a_config_error_not_a_coercion() -> None:
+    for bad in ({"provider": 5}, {"locale": ["en_US"]}):
+        col = {**prov("synthetic_npi"), **bad}
+        with pytest.raises(Exception):
+            run_config_only_checks(cfg([col]))
+
+
+# ---- faker hint ------------------------------------------------------------------------------
+
+
+def test_a_registry_name_in_faker_type_points_at_the_provider_type() -> None:
+    col = {"name": "x", "type": "faker", "faker_type": "synthetic_npi"}
+    assert_refused(cfg([col]), "generate_faker_type_is_domain_provider", p("x", "faker_type"))
+
+
+def test_an_unknown_faker_type_keeps_the_generic_refusal() -> None:
+    col = {"name": "x", "type": "faker", "faker_type": "not_real"}
+    assert_refused(cfg([col]), "generate_faker_type_unknown", p("x", "faker_type"))
+
+
+# ---- the platform default locale -------------------------------------------------------------
+
+LOCALE_CODE = "generate_provider_locale_unsupported"
+
+
+def _plan(config: dict[str, Any]) -> Any:
+    return compile_plan(config, empty_profile(), decoy_engine_version="test")
+
+
+@pytest.mark.parametrize("default", ["fr_FR", "de_DE"])
+def test_the_instance_default_locale_is_checked_at_every_choke_point(
+    default: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = cfg([prov("synthetic_npi")])
+    for site in (run_config_only_checks, _compile):
+        with pytest.raises(PlanCompileError) as info:
+            site(config, instance_default_locale=default)
+        assert (info.value.code, info.value.path) == (LOCALE_CODE, p("x", "locale"))
+    _compile(config, instance_default_locale=DEFERRED)  # a plan generated later
+    plan = _plan(config)
+    monkeypatch.setattr(
+        "decoy_engine.generation._streamed.GenerationBudgetLedger",
+        lambda *a, **k: pytest.fail("generation started"),
+    )
+    with pytest.raises(PlanCompileError) as info:
+        synthesize.generate_tables(plan, instance_default_locale=default)
+    assert info.value.code == LOCALE_CODE and info.value.__context__ is None
+    with pytest.raises(PlanCompileError) as info:
+        classify_window_table(config, "t", statistical_specs={}, instance_default_locale=default)
+    assert info.value.code == LOCALE_CODE
+
+
+def test_a_column_locale_overrides_the_instance_default() -> None:
+    config = cfg([prov("synthetic_npi", locale="en_US")])
+    out = synthesize.generate_tables(_plan(config), instance_default_locale="fr_FR")
+    assert out["t"].num_rows == 5
+
+
+# ---- pinned ----------------------------------------------------------------------------------
+
+
+def test_pinned_compile_refuses_a_provider_column() -> None:
+    config = cfg([prov("synthetic_npi")])
+    config["global_settings"]["reference_date"] = "2026-10-22T09:30:00Z"
+    with pytest.raises(PinnedModeError) as info:
+        compile_pinned_plan(config)
+    assert info.value.code == "pinned_provider_unsupported"
+
+
+def test_a_refusal_leaves_nothing_in_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG):
+        refusal(cfg([prov(CANARY)]), _compile)
+    assert CANARY not in caplog.text
