@@ -21,7 +21,7 @@ the V1 bar (only a function break, data loss, a non-admin value leak or cascadin
 V1); the V1 threat model (accidental leaks only); owner rules: CLI V1 first, platform parked, no
 new features beyond the row.
 
-Bases: engine `origin/main` `b3206c042` (#619), CLI `origin/main` `34f6ba4e4` (#293, pins engine
+Bases: engine `origin/main` `b3206c042` (#619), CLI `origin/main` `f7deac1e3` (#293, pins engine
 0.27.0; refreshed in revision 3, every CLI line cited below re-checked there). Line numbers below
 are from those heads.
 
@@ -147,9 +147,10 @@ report model. Each is small and specific to Decoy.
 - Custom providers: `_V2_CUSTOM_PROVIDERS` is process-global (`providers_v2/_faker_adapter.py:84`).
   A probe run in a process where a custom provider overrides `person_first_name` would digest the
   custom function, not the shipped one. `run_probe` refuses that case with `ProbeError` before any
-  draw. It asks through a deliberately public accessor: `custom_provider_names() -> frozenset[str]`,
-  added to `providers_v2/_faker_adapter.py` beside the test-only `_v2_custom_provider_names`
-  (`providers_v2/_faker_adapter.py:277`) and exported from `providers_v2/__init__.py` `__all__`.
+  draw. It asks through a deliberately public accessor: the existing `_v2_custom_provider_names()`
+  (`providers_v2/_faker_adapter.py:276`) is renamed to `custom_provider_names() -> frozenset[str]`,
+  its one caller (`tests/unit/providers_v2/test_registry.py`) is updated, and it is exported from
+  `providers_v2/__init__.py` `__all__`. One accessor for that state, no second copy.
   The probe imports it from `decoy_engine.providers_v2`, never from `_faker_adapter`. The registry
   offers no default-only view today, so refusal is the smaller change.
 - `PROBE_KEY` is `sha256(b"decoy-probe/v1")`, a public constant. `PROBE_JOB_SEED` is its first 8
@@ -281,7 +282,7 @@ report model. Each is small and specific to Decoy.
   `decoy_engine.kernel.canonicalize_derive_source`, `decoy_engine.transforms.fpe`
   (`FF1_KEY_LABEL`, `build_ff1_tweak`, `fpe_encrypt_value`, `FF1_TWEAK_SCOPE_COLUMN`),
   `decoy_engine.generation.pool.PoolBuilder` and `decoy_engine.providers_v2`
-  (`get_default_registry`, the new `custom_provider_names`).
+  (`get_default_registry`, the renamed `custom_provider_names`).
 - Boundary sentry: new `tests/sentry/test_runtime_lock_public_imports.py` walks the AST of
   `support/_probe.py` and `support/_runtime_lock.py` and fails on any import whose dotted path has
   a segment starting with `_` below another engine package (for example
@@ -374,7 +375,7 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 |---|---|---|
 | Probe and golden | engine `src/decoy_engine/support/_probe.py` (new) | "Support bundles", `src/decoy_engine/support/_<concern>.py`; tier 1 beside `_runtime_lock.py`; not `execution/` (frozen for new top-level files) |
 | `probe` lock field and `_Field` descriptor | engine `src/decoy_engine/support/_runtime_lock.py` | existing module |
-| `custom_provider_names` | engine `src/decoy_engine/providers_v2/_faker_adapter.py`, exported from `providers_v2/__init__.py` | beside `_v2_custom_provider_names` and `_V2_CUSTOM_PROVIDERS`, the owner of that state |
+| `custom_provider_names` | engine `src/decoy_engine/providers_v2/_faker_adapter.py`, exported from `providers_v2/__init__.py` | the existing `_v2_custom_provider_names` renamed in place, beside `_V2_CUSTOM_PROVIDERS`, the owner of that state |
 | Boundary sentry | engine `tests/sentry/test_runtime_lock_public_imports.py` | beside `tests/sentry/test_support_no_network.py`, the other support sentry |
 | `ProbeError` reason | engine `src/decoy_engine/reasons/runtime/_part2.py` | beside `KEY_VERSION_INVALID` |
 | Exports | engine `src/decoy_engine/support/__init__.py` | existing facade; not the root (held at 600 lines) |
@@ -595,4 +596,5 @@ Assume it is 2026-12-04 and row 78 is not closed. Likely reasons, with the guard
   `tests/sentry/test_runtime_lock_public_imports.py` (AT-E2-14); 78-E2 counts 6 production files.
 - 3 (DESIGN): `_Field(name, spec, required)` descriptor read by `to_dict`, `from_dict` and compare;
   no `probe` branch; AT-E2-15 flips the flag; corpus and null-refusal cells kept.
-- 4 (V2-LOG): CLI base refreshed to `34f6ba4e4`; every cited CLI line re-checked, none moved.
+- 4 (V2-LOG): CLI base refreshed to `f7deac1e3`; every cited CLI line re-checked, none moved.
+- Codex r2 (orchestrator fix at the round cap path): DESIGN, rename the existing `_v2_custom_provider_names` to the public `custom_provider_names` instead of adding a second accessor; V2-LOG, CLI base refreshed to `f7deac1e3`.
