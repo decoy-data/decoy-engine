@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -334,9 +335,15 @@ def run_child(args: argparse.Namespace) -> int:
 def supervise(args: argparse.Namespace) -> dict[str, Any]:
     work = Path(tempfile.mkdtemp(prefix=f"f24-{args.cell}-", dir=args.work_root))
     try:
-        config = build_cell(args.cell, args.rows, work)
         config_path = work / "config.json"
-        config_path.write_text(json.dumps(config))
+        # The fixtures are built in their own process: `ru_maxrss` survives exec on Linux, so a
+        # supervisor that held the fixture arrays would inflate every measured peak.
+        subprocess.run(  # noqa: S603
+            [sys.executable, str(Path(__file__).resolve()), "--build", "--cell", args.cell,
+             "--rows", str(args.rows), "--config", str(config_path)],
+            check=True,
+        )  # fmt: skip
+        config = json.loads(config_path.read_text())
         result_path = work / "result.json"
         cmd = [
             sys.executable, str(Path(__file__).resolve()), "--child", "--cell", args.cell,
@@ -375,7 +382,9 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--work-root", default=None)
     ap.add_argument("--timeout-s", type=float, default=3600.0)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--out", default=None, help="also write the full record (with config) here")
     ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--build", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--config", help=argparse.SUPPRESS)
     ap.add_argument("--result-path", help=argparse.SUPPRESS)
     return ap
@@ -383,9 +392,15 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.build:
+        config_path = Path(args.config)
+        config_path.write_text(json.dumps(build_cell(args.cell, args.rows, config_path.parent)))
+        return 0
     if args.child:
         return run_child(args)
     record = supervise(args)
+    if args.out:
+        Path(args.out).write_text(json.dumps(record))
     print(f"BENCH_JSON {json.dumps({k: v for k, v in record.items() if k != 'config'})}")
     return 0 if record["completed"] else 1
 
