@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import NamedTuple, TypedDict
 
 from packaging.version import Version
+from scripts.release.reason_pre_ga_corrections import PRE_GA_CORRECTIONS
 
 _SEMANTIC_FIELDS = ("namespace", "code", "kind", "rules", "owner", "context", "since")
 SCHEMA_ROOTS = ("reason_schema_version", "event_schema_version")
@@ -54,6 +55,7 @@ def field_digest(value: object) -> str:
 
 
 _NULL = field_digest(None)
+_PREGA = {(i, f, field_digest(a)): field_digest(b) for i, (f, a, b) in PRE_GA_CORRECTIONS.items()}
 
 
 def is_pending(value: object) -> bool:
@@ -83,7 +85,8 @@ def append_only_violations(pinned: dict, live: dict, marked: frozenset = frozens
             problems.append(f"deleted identity {ident}")
             continue
         for field in _SEMANTIC_FIELDS:
-            if new[field] != old[field]:
+            key = (ident, field, field_digest(old[field]))
+            if new[field] != old[field] and _PREGA.get(key) != field_digest(new[field]):
                 problems.append(
                     f"{ident}: {field} changed (retry/outcome/phase semantics are frozen)"
                 )
@@ -93,11 +96,7 @@ def append_only_violations(pinned: dict, live: dict, marked: frozenset = frozens
             problems.append(f"{ident}: symbol changed")
         if old["deprecated_in"] is not None and new["deprecated_in"] != old["deprecated_in"]:
             problems.append(f"{ident}: tombstone changed")
-    if (
-        summary_changed
-        and live_version[:2] == pinned_version[:2]
-        and live_version == pinned_version
-    ):
+    if summary_changed and live_version == pinned_version:
         problems.append("a fixed safe summary changed without a registry version bump")
     numeric = {i for i, e in live_by_id.items() if not is_pending(e["since"])}
     added = numeric - {(e["namespace"], e["code"]) for e in pinned["entries"]}
@@ -488,6 +487,7 @@ def release_pin_violations(pin: dict, live: dict, marked: frozenset = frozenset(
             continue
         first = all(fields[f] == _NULL for f in PENDING_EDITS["deprecation"])
         pinned[ident], waived = entry, _waivable(first, entry, ident in marked)
+        waived |= {f for f in fields if _PREGA.get((ident, f, fields[f])) == field_digest(entry[f])}
         problems += [
             f"{ident[0]}.{ident[1]}: {f} differs from the release pin"
             for f in PIN_FIELDS
