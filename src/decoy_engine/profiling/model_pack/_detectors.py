@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.detection import ModelStatus, ner_model_state, qualified, refuse
+from decoy_engine.detection import ModelStatus, ner_min_rate, ner_model_state, qualified, refuse
 from decoy_engine.detection.types import (
     DETECTOR_ORDER,
     DetectorRun,
@@ -110,7 +110,12 @@ def load_detectors(
     ner_model: str,
     file_access: FileAccess | None = None,
 ) -> DetectorSet:
-    """Strictly load every requested model; raise `ModelUnavailableError` if any cannot run."""
+    """Strictly load every requested model; raise `ModelUnavailableError` if any cannot run.
+
+    An NER model is checked in two steps, both at load and so before any row is read: it must be
+    usable (not installed, incompatible and similar refusals come first), then it must have a
+    calibrated hit rate (`ner_min_rate`) (`provider.ner_model_uncalibrated`).
+    """
     if any(source not in DETECTOR_ORDER for source in sources):
         raise ValueError("unknown detector source")
     wanted = tuple(source for source in DETECTOR_ORDER if source in sources)
@@ -125,4 +130,7 @@ def load_detectors(
         status, ref = ner_model_state(ner_model)
         if not status.available:
             refuse(status)
+        if ner_min_rate(ner_model) is None:
+            # A scan scores a column at the model's own rate; with none, a hit would be a guess.
+            refuse(replace(status, reason=qualified(reasons.provider.NER_MODEL_UNCALIBRATED)))
     return DetectorSet(wanted, pack, ref)
