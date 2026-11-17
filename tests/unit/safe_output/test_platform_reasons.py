@@ -13,7 +13,15 @@ import pytest
 from packaging.version import Version
 
 from decoy_engine import reasons
-from decoy_engine.reasons import Kind, Outcome, Phase, RetryClass, Severity
+from decoy_engine.reasons import (
+    UNRELEASED,
+    Kind,
+    Outcome,
+    Phase,
+    ReasonRecord,
+    RetryClass,
+    Severity,
+)
 
 V = "1.5.0"
 PIN = Path(__file__).resolve().parents[2] / "fixtures" / "f29" / "reason-registry-release.json"
@@ -204,3 +212,79 @@ def test_registry_version_is_at_least_the_floor() -> None:
     current = Version(reasons.REGISTRY_VERSION)
     assert current >= Version(V)
     assert current >= Version(pin["registry_version"])
+
+
+# The retired workflow reasons: shipped at 1.5.0, tombstoned (never deleted) with a live replacement.
+WORKFLOW_TOMBSTONES = (
+    ("workflow_restart_interrupted", "startup_failed"),
+    ("workflow_step_not_run", "job_cancelled"),
+    ("workflow_step_failed", "job_failed"),
+)
+
+# The manifest entry each tombstone shipped with; only the two deprecation fields may differ.
+WORKFLOW_SHIPPED_ENTRIES = {
+    "workflow_restart_interrupted": {
+        "symbol": "WORKFLOW_RESTART_INTERRUPTED",
+        "summary": "The platform restarted while this workflow step ran. Progress was not kept; "
+        "run it again when ready.",
+        "owner": "PlatformJobLog",
+        "kind": "failure",
+        "rules": [
+            {"phase": "unknown", "severity": "error", "outcome": "execution", "retry": "unknown"}
+        ],
+    },
+    "workflow_step_not_run": {
+        "symbol": "WORKFLOW_STEP_NOT_RUN",
+        "summary": "Cancelled: the workflow run ended before this step ran.",
+        "owner": "PlatformJobLog",
+        "kind": "control",
+        "rules": [
+            {"phase": "unknown", "severity": "info", "outcome": "cancelled", "retry": "unknown"}
+        ],
+    },
+    "workflow_step_failed": {
+        "symbol": "WORKFLOW_STEP_FAILED",
+        "summary": "The workflow step failed. The server log has the details.",
+        "owner": "PlatformResponse",
+        "kind": "failure",
+        "rules": [
+            {"phase": "unknown", "severity": "error", "outcome": "execution", "retry": "unknown"}
+        ],
+    },
+}
+
+
+def test_workflow_codes_are_tombstones() -> None:
+    for code, replacement in WORKFLOW_TOMBSTONES:
+        spec = reasons.get("platform", code)
+        assert (spec.deprecated_in, spec.replaced_by) == (UNRELEASED, ("platform", replacement))
+        assert reasons.get("platform", replacement).deprecated_in is None
+
+
+def test_workflow_tombstones_still_resolve() -> None:
+    for code, _ in WORKFLOW_TOMBSTONES:
+        assert reasons.find("platform", code) is not None
+        assert getattr(reasons.platform, code.upper()) == code
+
+
+def test_workflow_tombstones_change_only_the_deprecation() -> None:
+    entries = {e["code"]: e for e in reasons.manifest()["entries"] if e["namespace"] == "platform"}
+    for code, replacement in WORKFLOW_TOMBSTONES:
+        entry = dict(entries[code])
+        assert entry.pop("deprecated_in") == "unreleased"
+        assert entry.pop("replaced_by") == ["platform", replacement]
+        assert entry == {
+            "namespace": "platform",
+            "code": code,
+            "context": [],
+            "since": "1.5.0",
+            **WORKFLOW_SHIPPED_ENTRIES[code],
+        }
+
+
+def test_a_record_naming_a_workflow_code_still_decodes() -> None:
+    for code, _ in WORKFLOW_TOMBSTONES:
+        payload = ReasonRecord.for_reason(reasons.platform.JOB_FAILED).to_payload()
+        payload.update(namespace="platform", code=code)
+        record, _written = ReasonRecord.parse_payload(payload)
+        assert (record.namespace, record.code) == ("platform", code)

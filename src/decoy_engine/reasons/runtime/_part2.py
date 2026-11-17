@@ -41,6 +41,7 @@ __all__ = [
     "INDEX_BATCH_TYPE_MISMATCH",
     "INVALID_SEED_LENGTH",
     "KEYED_STRATEGY_REQUIRES_SECRET",
+    "KEY_VERSION_INVALID",
     "MASK_KEY_DERIVATION_FAILED",
     "MASK_KEY_REQUIRED",
     "MISSING_MASK_SECRET",
@@ -413,6 +414,15 @@ BAD_SECRET_REF = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
+)
+
+KEY_VERSION_INVALID = _d(
+    "key_version_invalid",
+    "The key version label is not valid.",
+    phases=(Phase.RESOLVE,),
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("MissingMaskSecret")

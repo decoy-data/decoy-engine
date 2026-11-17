@@ -1,0 +1,1266 @@
+allergies.DESCRIPTION	24	Allergic disposition (finding)
+allergies.DESCRIPTION	7	Animal dander (substance)
+allergies.DESCRIPTION	8	Aspirin
+allergies.DESCRIPTION	4	Bee venom (substance)
+allergies.DESCRIPTION	1	Cow's milk (substance)
+allergies.DESCRIPTION	3	Eggs (edible) (substance)
+allergies.DESCRIPTION	2	Fish (substance)
+allergies.DESCRIPTION	1	Glycine max (substance)
+allergies.DESCRIPTION	6	Grass pollen (substance)
+allergies.DESCRIPTION	6	House dust mite (organism)
+allergies.DESCRIPTION	2	Ibuprofen
+allergies.DESCRIPTION	2	Latex (substance)
+allergies.DESCRIPTION	9	Mold (organism)
+allergies.DESCRIPTION	3	Peanut (substance)
+allergies.DESCRIPTION	3	Penicillin V
+allergies.DESCRIPTION	10	Shellfish (substance)
+allergies.DESCRIPTION	1	Sulfamethoxazole / Trimethoprim
+allergies.DESCRIPTION	4	Tree nut (substance)
+allergies.DESCRIPTION	5	Tree pollen (substance)
+allergies.DESCRIPTION	3	Wheat (substance)
+careplans.DESCRIPTION	8	Allergic disorder monitoring (regime/therapy)
+careplans.DESCRIPTION	8	Asthma self management (regime/therapy)
+careplans.DESCRIPTION	2	Burn care (regime/therapy)
+careplans.DESCRIPTION	7	Cancer care plan (record artifact)
+careplans.DESCRIPTION	12	Care plan (record artifact)
+careplans.DESCRIPTION	2	Chronic obstructive pulmonary disease clinical management plan (record artifact)
+careplans.DESCRIPTION	4	Dementia management (regime/therapy)
+careplans.DESCRIPTION	47	Diabetes self management plan (record artifact)
+careplans.DESCRIPTION	7	Dialysis care plan (record artifact)
+careplans.DESCRIPTION	4	Discharge care plan (record artifact)
+careplans.DESCRIPTION	12	Fracture care (regime/therapy)
+careplans.DESCRIPTION	7	Head injury rehabilitation (regime/therapy)
+careplans.DESCRIPTION	1	Heart failure self management plan (record artifact)
+careplans.DESCRIPTION	12	Hyperlipidemia clinical management plan (record artifact)
+careplans.DESCRIPTION	18	Infectious disease care plan (record artifact)
+careplans.DESCRIPTION	1	Inpatient care plan (record artifact)
+careplans.DESCRIPTION	31	Lifestyle education regarding hypertension (procedure)
+careplans.DESCRIPTION	1	Major surgery care management (procedure)
+careplans.DESCRIPTION	4	Minor surgery care management (procedure)
+careplans.DESCRIPTION	17	Musculoskeletal care (regime/therapy)
+careplans.DESCRIPTION	2	Overactivity/inattention behavior management (regime/therapy)
+careplans.DESCRIPTION	21	Physiotherapy care plan (record artifact)
+careplans.DESCRIPTION	58	Respiratory therapy (procedure)
+careplans.DESCRIPTION	46	Routine antenatal care (regime/therapy)
+careplans.DESCRIPTION	24	Self-care interventions (procedure)
+careplans.DESCRIPTION	4	Skin condition care (regime/therapy)
+careplans.DESCRIPTION	3	Terminal care (regime/therapy)
+careplans.DESCRIPTION	20	Therapy (regime/therapy)
+careplans.DESCRIPTION	5	Weight management program (regime/therapy)
+careplans.DESCRIPTION	19	Wound care (regime/therapy)
+careplans.REASONDESCRIPTION	4	Alzheimer's disease (disorder)
+careplans.REASONDESCRIPTION	1	Asthma (disorder)
+careplans.REASONDESCRIPTION	3	Atopic dermatitis (disorder)
+careplans.REASONDESCRIPTION	7	Childhood asthma (disorder)
+careplans.REASONDESCRIPTION	2	Chronic congestive heart failure (disorder)
+careplans.REASONDESCRIPTION	1	Closed fracture of hip (disorder)
+careplans.REASONDESCRIPTION	2	Concussion with loss of consciousness (disorder)
+careplans.REASONDESCRIPTION	5	Concussion with no loss of consciousness (disorder)
+careplans.REASONDESCRIPTION	1	Contact dermatitis (disorder)
+careplans.REASONDESCRIPTION	3	Diabetes mellitus type 2 (disorder)
+careplans.REASONDESCRIPTION	1	Epidermal burn of skin (disorder)
+careplans.REASONDESCRIPTION	31	Essential hypertension (disorder)
+careplans.REASONDESCRIPTION	5	Facial laceration (disorder)
+careplans.REASONDESCRIPTION	3	Fracture of ankle (disorder)
+careplans.REASONDESCRIPTION	3	Fracture of clavicle (disorder)
+careplans.REASONDESCRIPTION	2	Fracture of forearm (disorder)
+careplans.REASONDESCRIPTION	1	Fracture of rib (disorder)
+careplans.REASONDESCRIPTION	2	Fracture subluxation of wrist (disorder)
+careplans.REASONDESCRIPTION	12	Hyperlipidemia (disorder)
+careplans.REASONDESCRIPTION	1	Injury of anterior cruciate ligament (disorder)
+careplans.REASONDESCRIPTION	2	Laceration of foot (disorder)
+careplans.REASONDESCRIPTION	3	Laceration of forearm (disorder)
+careplans.REASONDESCRIPTION	4	Laceration of hand (disorder)
+careplans.REASONDESCRIPTION	5	Laceration of thigh (disorder)
+careplans.REASONDESCRIPTION	4	Localized  primary osteoarthritis of the hand (disorder)
+careplans.REASONDESCRIPTION	3	Malignant neoplasm of colon (disorder)
+careplans.REASONDESCRIPTION	5	Neoplasm of prostate (disorder)
+careplans.REASONDESCRIPTION	3	Non-small cell carcinoma of lung  TNM stage 1 (disorder)
+careplans.REASONDESCRIPTION	3	Obstructive sleep apnea syndrome (disorder)
+careplans.REASONDESCRIPTION	1	Osteoarthritis of hip (disorder)
+careplans.REASONDESCRIPTION	6	Osteoarthritis of knee (disorder)
+careplans.REASONDESCRIPTION	1	Partial thickness burn (disorder)
+careplans.REASONDESCRIPTION	44	Prediabetes (finding)
+careplans.REASONDESCRIPTION	2	Pulmonary emphysema (disorder)
+careplans.REASONDESCRIPTION	1	Sleep apnea (disorder)
+careplans.REASONDESCRIPTION	12	Sprain of ankle (disorder)
+careplans.REASONDESCRIPTION	6	Sprain of wrist (disorder)
+conditions.DESCRIPTION	20	Abnormal findings diagnostic imaging heart+coronary circulat (finding)
+conditions.DESCRIPTION	3	Acute ST segment elevation myocardial infarction (disorder)
+conditions.DESCRIPTION	3	Acute allergic reaction (disorder)
+conditions.DESCRIPTION	8	Acute bacterial sinusitis (disorder)
+conditions.DESCRIPTION	56	Acute bronchitis (disorder)
+conditions.DESCRIPTION	12	Acute infective cystitis (disorder)
+conditions.DESCRIPTION	2	Acute non-ST segment elevation myocardial infarction (disorder)
+conditions.DESCRIPTION	2	Acute pulmonary embolism (disorder)
+conditions.DESCRIPTION	1	Acute respiratory failure (disorder)
+conditions.DESCRIPTION	71	Acute viral pharyngitis (disorder)
+conditions.DESCRIPTION	2	Adolescent idiopathic scoliosis (disorder)
+conditions.DESCRIPTION	4	Alveolitis of jaw (disorder)
+conditions.DESCRIPTION	4	Alzheimer's disease (disorder)
+conditions.DESCRIPTION	48	Anemia (disorder)
+conditions.DESCRIPTION	2	Appendicitis (disorder)
+conditions.DESCRIPTION	6	Asthma (disorder)
+conditions.DESCRIPTION	3	Atopic dermatitis (disorder)
+conditions.DESCRIPTION	1	Awaiting transplantation of bone marrow (situation)
+conditions.DESCRIPTION	6	Awaiting transplantation of kidney (situation)
+conditions.DESCRIPTION	5	Blighted ovum (disorder)
+conditions.DESCRIPTION	59	Body mass index 30+ - obesity (finding)
+conditions.DESCRIPTION	2	Burn injury (morphologic abnormality)
+conditions.DESCRIPTION	4	Carcinoma in situ of prostate (disorder)
+conditions.DESCRIPTION	2	Cerebral palsy (disorder)
+conditions.DESCRIPTION	1	Cerebrovascular accident (disorder)
+conditions.DESCRIPTION	2	Child attention deficit disorder (disorder)
+conditions.DESCRIPTION	3	Childhood asthma (disorder)
+conditions.DESCRIPTION	2	Chill (finding)
+conditions.DESCRIPTION	1	Chronic congestive heart failure (disorder)
+conditions.DESCRIPTION	6	Chronic intractable migraine without aura (disorder)
+conditions.DESCRIPTION	13	Chronic kidney disease stage 1 (disorder)
+conditions.DESCRIPTION	10	Chronic kidney disease stage 2 (disorder)
+conditions.DESCRIPTION	8	Chronic kidney disease stage 3 (disorder)
+conditions.DESCRIPTION	5	Chronic kidney disease stage 4 (disorder)
+conditions.DESCRIPTION	28	Chronic low back pain (finding)
+conditions.DESCRIPTION	18	Chronic neck pain (finding)
+conditions.DESCRIPTION	37	Chronic pain (finding)
+conditions.DESCRIPTION	27	Chronic sinusitis (disorder)
+conditions.DESCRIPTION	1	Closed fracture of hip (disorder)
+conditions.DESCRIPTION	7	Concussion injury of brain (disorder)
+conditions.DESCRIPTION	2	Concussion with loss of consciousness (disorder)
+conditions.DESCRIPTION	5	Concussion with no loss of consciousness (disorder)
+conditions.DESCRIPTION	1	Congenital uterine anomaly (disorder)
+conditions.DESCRIPTION	1	Contact dermatitis (disorder)
+conditions.DESCRIPTION	8	Cough (finding)
+conditions.DESCRIPTION	15	Dental filling lost (finding)
+conditions.DESCRIPTION	5	Dependent drug abuse (disorder)
+conditions.DESCRIPTION	7	Diabetes mellitus type 2 (disorder)
+conditions.DESCRIPTION	3	Died in hospice (finding)
+conditions.DESCRIPTION	10	Disease caused by severe acute respiratory syndrome coronavirus 2 (disorder)
+conditions.DESCRIPTION	1	Dislocation of hip joint (disorder)
+conditions.DESCRIPTION	14	Disorder of kidney due to diabetes mellitus (disorder)
+conditions.DESCRIPTION	1	Dyspnea (finding)
+conditions.DESCRIPTION	1	Dystonia (disorder)
+conditions.DESCRIPTION	5	Eclampsia in pregnancy (disorder)
+conditions.DESCRIPTION	27	Educated to high school level (finding)
+conditions.DESCRIPTION	3	End-stage renal disease (disorder)
+conditions.DESCRIPTION	1	Epidermal burn of skin (disorder)
+conditions.DESCRIPTION	4	Epilepsy (disorder)
+conditions.DESCRIPTION	31	Essential hypertension (disorder)
+conditions.DESCRIPTION	1	Excessive salivation (disorder)
+conditions.DESCRIPTION	5	Facial laceration (disorder)
+conditions.DESCRIPTION	4	Fatigue (finding)
+conditions.DESCRIPTION	1	Fetus with chromosomal abnormality (disorder)
+conditions.DESCRIPTION	8	Fever (finding)
+conditions.DESCRIPTION	3	Fibromyalgia (disorder)
+conditions.DESCRIPTION	3	Fracture of ankle (disorder)
+conditions.DESCRIPTION	12	Fracture of bone (disorder)
+conditions.DESCRIPTION	3	Fracture of clavicle (disorder)
+conditions.DESCRIPTION	2	Fracture of forearm (disorder)
+conditions.DESCRIPTION	1	Fracture of rib (disorder)
+conditions.DESCRIPTION	2	Fracture subluxation of wrist (disorder)
+conditions.DESCRIPTION	15	Fractured dental filling (finding)
+conditions.DESCRIPTION	334	Full-time employment (finding)
+conditions.DESCRIPTION	2	Gastroesophageal reflux disease (disorder)
+conditions.DESCRIPTION	74	Gingival disease (disorder)
+conditions.DESCRIPTION	320	Gingivitis (disorder)
+conditions.DESCRIPTION	2	Gout
+conditions.DESCRIPTION	23	Has a criminal record (finding)
+conditions.DESCRIPTION	1	Headache (finding)
+conditions.DESCRIPTION	6	History of appendectomy (situation)
+conditions.DESCRIPTION	1	History of autologous bone marrow transplant (situation)
+conditions.DESCRIPTION	5	History of coronary artery bypass grafting (situation)
+conditions.DESCRIPTION	5	History of myocardial infarction (situation)
+conditions.DESCRIPTION	3	History of renal transplant (situation)
+conditions.DESCRIPTION	6	History of seizure (situation)
+conditions.DESCRIPTION	14	History of tubal ligation (situation)
+conditions.DESCRIPTION	2	Homeless (finding)
+conditions.DESCRIPTION	18	Housing unsatisfactory (finding)
+conditions.DESCRIPTION	4	Hyperglycemia (disorder)
+conditions.DESCRIPTION	12	Hyperlipidemia (disorder)
+conditions.DESCRIPTION	7	Hypertriglyceridemia (disorder)
+conditions.DESCRIPTION	2	Hypoxemia (disorder)
+conditions.DESCRIPTION	1	Idiopathic atrophic hypothyroidism (disorder)
+conditions.DESCRIPTION	4	Impacted molars (disorder)
+conditions.DESCRIPTION	28	Infection of tooth (disorder)
+conditions.DESCRIPTION	1	Injury of anterior cruciate ligament (disorder)
+conditions.DESCRIPTION	1	Injury of knee (disorder)
+conditions.DESCRIPTION	4	Injury of neck (disorder)
+conditions.DESCRIPTION	2	Injury of tendon of the rotator cuff of shoulder (disorder)
+conditions.DESCRIPTION	20	Ischemic heart disease (disorder)
+conditions.DESCRIPTION	1	Joint pain
+conditions.DESCRIPTION	19	Laceration - injury (disorder)
+conditions.DESCRIPTION	2	Laceration of foot (disorder)
+conditions.DESCRIPTION	3	Laceration of forearm (disorder)
+conditions.DESCRIPTION	4	Laceration of hand (disorder)
+conditions.DESCRIPTION	5	Laceration of thigh (disorder)
+conditions.DESCRIPTION	12	Lack of access to transportation (finding)
+conditions.DESCRIPTION	16	Leaking dental filling (finding)
+conditions.DESCRIPTION	119	Limited social contact (finding)
+conditions.DESCRIPTION	4	Localized  primary osteoarthritis of the hand (disorder)
+conditions.DESCRIPTION	17	Loose dental filling (finding)
+conditions.DESCRIPTION	5	Loss of taste (finding)
+conditions.DESCRIPTION	18	Loss of teeth (disorder)
+conditions.DESCRIPTION	1	Macular edema and retinopathy due to type 2 diabetes mellitus (disorder)
+conditions.DESCRIPTION	3	Malignant neoplasm of breast (disorder)
+conditions.DESCRIPTION	2	Malignant neoplasm of colon (disorder)
+conditions.DESCRIPTION	831	Medication review due (situation)
+conditions.DESCRIPTION	17	Metabolic syndrome X (disorder)
+conditions.DESCRIPTION	2	Metastatic malignant neoplasm to prostate (disorder)
+conditions.DESCRIPTION	11	Microalbuminuria due to type 2 diabetes mellitus (disorder)
+conditions.DESCRIPTION	6	Miscarriage in first trimester (disorder)
+conditions.DESCRIPTION	2	Miscarriage in second trimester (disorder)
+conditions.DESCRIPTION	4	Misuses drugs (finding)
+conditions.DESCRIPTION	1	Muscle pain (finding)
+conditions.DESCRIPTION	3	Myocardial infarction (disorder)
+conditions.DESCRIPTION	5	Neoplasm of prostate (disorder)
+conditions.DESCRIPTION	2	Neuropathy due to type 2 diabetes mellitus (disorder)
+conditions.DESCRIPTION	3	Non-small cell carcinoma of lung  TNM stage 1 (disorder)
+conditions.DESCRIPTION	3	Non-small cell lung cancer (disorder)
+conditions.DESCRIPTION	1	Nonproliferative diabetic retinopathy due to type II diabetes mellitus
+conditions.DESCRIPTION	70	Normal pregnancy (finding)
+conditions.DESCRIPTION	116	Not in labor force (finding)
+conditions.DESCRIPTION	3	Obstructive sleep apnea syndrome (disorder)
+conditions.DESCRIPTION	9	Only received primary school education (finding)
+conditions.DESCRIPTION	1	Osteoarthritis of hip (disorder)
+conditions.DESCRIPTION	6	Osteoarthritis of knee (disorder)
+conditions.DESCRIPTION	6	Osteoporosis (disorder)
+conditions.DESCRIPTION	2	Osteoporotic fracture of bone (disorder)
+conditions.DESCRIPTION	12	Otitis media (disorder)
+conditions.DESCRIPTION	13	Overdose (disorder)
+conditions.DESCRIPTION	1	Pain (finding)
+conditions.DESCRIPTION	218	Part-time employment (finding)
+conditions.DESCRIPTION	1	Partial thickness burn (disorder)
+conditions.DESCRIPTION	22	Past pregnancy history of miscarriage (situation)
+conditions.DESCRIPTION	3	Perennial allergic rhinitis (disorder)
+conditions.DESCRIPTION	1	Perennial allergic rhinitis with seasonal variation (disorder)
+conditions.DESCRIPTION	4	Pneumonia (disorder)
+conditions.DESCRIPTION	7	Polyp of colon (disorder)
+conditions.DESCRIPTION	1	Poor muscle tone (finding)
+conditions.DESCRIPTION	6	Pre-eclampsia (disorder)
+conditions.DESCRIPTION	44	Prediabetes (finding)
+conditions.DESCRIPTION	66	Primary dental caries (disorder)
+conditions.DESCRIPTION	1	Primary fibromyalgia syndrome (disorder)
+conditions.DESCRIPTION	1	Proliferative diabetic retinopathy due to type II diabetes mellitus
+conditions.DESCRIPTION	9	Proteinuria due to type 2 diabetes mellitus (disorder)
+conditions.DESCRIPTION	2	Pulmonary emphysema (disorder)
+conditions.DESCRIPTION	66	Received higher education (finding)
+conditions.DESCRIPTION	3	Recurrent rectal polyp (disorder)
+conditions.DESCRIPTION	4	Recurrent urinary tract infection (disorder)
+conditions.DESCRIPTION	1	Refugee (person)
+conditions.DESCRIPTION	1	Renal dysplasia (disorder)
+conditions.DESCRIPTION	80	Reports of violence in the environment (finding)
+conditions.DESCRIPTION	2	Resorption of alveolar process due to dental trauma (disorder)
+conditions.DESCRIPTION	2	Respiratory distress (finding)
+conditions.DESCRIPTION	30	Risk activity involvement (finding)
+conditions.DESCRIPTION	1	Rupture of appendix (disorder)
+conditions.DESCRIPTION	1	Seasonal allergic rhinitis (disorder)
+conditions.DESCRIPTION	6	Seizure disorder (disorder)
+conditions.DESCRIPTION	1	Sepsis (disorder)
+conditions.DESCRIPTION	1	Sepsis caused by virus (disorder)
+conditions.DESCRIPTION	11	Serving in military service (finding)
+conditions.DESCRIPTION	16	Severe anxiety (panic) (finding)
+conditions.DESCRIPTION	1	Shock (disorder)
+conditions.DESCRIPTION	6	Sinusitis (disorder)
+conditions.DESCRIPTION	1	Sleep apnea (disorder)
+conditions.DESCRIPTION	4	Sleep disorder (disorder)
+conditions.DESCRIPTION	2	Smokes tobacco daily (finding)
+conditions.DESCRIPTION	116	Social isolation (finding)
+conditions.DESCRIPTION	2	Sore throat (finding)
+conditions.DESCRIPTION	2	Spasticity (finding)
+conditions.DESCRIPTION	18	Sprain (morphologic abnormality)
+conditions.DESCRIPTION	12	Sprain of ankle (disorder)
+conditions.DESCRIPTION	6	Sprain of wrist (disorder)
+conditions.DESCRIPTION	1	Sputum finding (finding)
+conditions.DESCRIPTION	4	Sterilization requested (situation)
+conditions.DESCRIPTION	12	Streptococcal sore throat (disorder)
+conditions.DESCRIPTION	377	Stress (finding)
+conditions.DESCRIPTION	10	Suspected disease caused by Severe acute respiratory coronavirus 2 (situation)
+conditions.DESCRIPTION	3	Suspected lung cancer (situation)
+conditions.DESCRIPTION	7	Suspected prostate cancer (situation)
+conditions.DESCRIPTION	3	Torus palatinus (disorder)
+conditions.DESCRIPTION	11	Transport problem (finding)
+conditions.DESCRIPTION	1	Traumatic or nontraumatic brain injury (disorder)
+conditions.DESCRIPTION	1	Tubal pregnancy (disorder)
+conditions.DESCRIPTION	1	Unable to swallow saliva (finding)
+conditions.DESCRIPTION	38	Unemployed (finding)
+conditions.DESCRIPTION	19	Unhealthy alcohol drinking behavior (finding)
+conditions.DESCRIPTION	90	Victim of intimate partner abuse (finding)
+conditions.DESCRIPTION	120	Viral sinusitis (disorder)
+conditions.DESCRIPTION	1	Wheezing (finding)
+conditions.DESCRIPTION	4	Whiplash injury to neck (disorder)
+devices.DESCRIPTION	47	Blood glucose meter (physical object)
+devices.DESCRIPTION	2	Commode (physical object)
+devices.DESCRIPTION	1	Crutch  device (physical object)
+devices.DESCRIPTION	358	Dental x-ray system (physical object)
+devices.DESCRIPTION	21	Denture  device (physical object)
+devices.DESCRIPTION	24	Home continuous positive airway pressure unit (physical object)
+devices.DESCRIPTION	28	Home nebulizer (physical object)
+devices.DESCRIPTION	14	Hospital bed  device (physical object)
+devices.DESCRIPTION	15	Manual wheelchair (physical object)
+devices.DESCRIPTION	110	Operating room (environment)
+devices.DESCRIPTION	4	Oxygen concentrator (physical object)
+devices.DESCRIPTION	4	Patient lifting system (physical object)
+devices.DESCRIPTION	3	Polysomnography analyzer (physical object)
+devices.DESCRIPTION	3	Portable oxygen cylinder (physical object)
+devices.DESCRIPTION	3	Respiratory apnea monitoring system (physical object)
+devices.DESCRIPTION	24	Respiratory humidifier (physical object)
+devices.DESCRIPTION	1	Ventricular assist device (physical object)
+devices.DESCRIPTION	5	Wheelchair accessory (physical object)
+devices.DESCRIPTION	4	Wheeled walker (physical object)
+encounters.DESCRIPTION	145	Administration of vaccine to produce active immunity (procedure)
+encounters.DESCRIPTION	24	Admission to hospice (procedure)
+encounters.DESCRIPTION	1	Admission to intensive care unit (procedure)
+encounters.DESCRIPTION	15	Admission to surgical department (procedure)
+encounters.DESCRIPTION	4	Admission to surgical transplant department (procedure)
+encounters.DESCRIPTION	2	Admission to ward (procedure)
+encounters.DESCRIPTION	6	Allergic disorder follow-up assessment (regime/therapy)
+encounters.DESCRIPTION	8	Allergic disorder initial assessment (regime/therapy)
+encounters.DESCRIPTION	35	Asthma follow-up (regime/therapy)
+encounters.DESCRIPTION	167	Consultation for treatment (procedure)
+encounters.DESCRIPTION	18	Death Certification
+encounters.DESCRIPTION	2	Discussion about treatment (procedure)
+encounters.DESCRIPTION	10	Domiciliary or rest home patient evaluation and management (procedure)
+encounters.DESCRIPTION	9	Drug rehabilitation and detoxification (regime/therapy)
+encounters.DESCRIPTION	1	Emergency department patient visit (procedure)
+encounters.DESCRIPTION	23	Emergency hospital admission (procedure)
+encounters.DESCRIPTION	9	Emergency hospital admission for asthma (procedure)
+encounters.DESCRIPTION	183	Emergency room admission (procedure)
+encounters.DESCRIPTION	1201	Encounter for check up (procedure)
+encounters.DESCRIPTION	2369	Encounter for problem (procedure)
+encounters.DESCRIPTION	391	Encounter for symptom (procedure)
+encounters.DESCRIPTION	5	Follow-up consultation (procedure)
+encounters.DESCRIPTION	204	Follow-up encounter (procedure)
+encounters.DESCRIPTION	5	Follow-up visit (procedure)
+encounters.DESCRIPTION	1093	General examination of patient (procedure)
+encounters.DESCRIPTION	1	General outpatient clinic admission (procedure)
+encounters.DESCRIPTION	42	Home visit (procedure)
+encounters.DESCRIPTION	21	Hospital admission (procedure)
+encounters.DESCRIPTION	2	Hospital admission for isolation (procedure)
+encounters.DESCRIPTION	1	Non-urgent orthopedic admission (procedure)
+encounters.DESCRIPTION	42	Obstetric emergency hospital admission (procedure)
+encounters.DESCRIPTION	40	Ophthalmic examination and evaluation (procedure)
+encounters.DESCRIPTION	292	Outpatient procedure (procedure)
+encounters.DESCRIPTION	207	Patient encounter procedure (procedure)
+encounters.DESCRIPTION	2	Patient transfer to intensive care unit (procedure)
+encounters.DESCRIPTION	17	Patient-initiated encounter (procedure)
+encounters.DESCRIPTION	2	Periodic reevaluation and management of healthy individual (procedure)
+encounters.DESCRIPTION	2	Physician visit with evaluation AND/OR management service (procedure)
+encounters.DESCRIPTION	43	Postnatal visit (regime/therapy)
+encounters.DESCRIPTION	36	Postoperative follow-up visit (procedure)
+encounters.DESCRIPTION	1	Postoperative visit (finding)
+encounters.DESCRIPTION	72	Prenatal initial visit (regime/therapy)
+encounters.DESCRIPTION	408	Prenatal visit (regime/therapy)
+encounters.DESCRIPTION	1	Preoperative coordination (regime/therapy)
+encounters.DESCRIPTION	14	Screening surveillance (regime/therapy)
+encounters.DESCRIPTION	2	Telephone encounter (procedure)
+encounters.DESCRIPTION	390	Urgent care clinic (environment)
+encounters.DESCRIPTION	273	Well child visit (procedure)
+encounters.REASONDESCRIPTION	6	Abnormal findings diagnostic imaging heart+coronary circulat (finding)
+encounters.REASONDESCRIPTION	4	Acute ST segment elevation myocardial infarction (disorder)
+encounters.REASONDESCRIPTION	3	Acute allergic reaction (disorder)
+encounters.REASONDESCRIPTION	34	Acute bacterial sinusitis (disorder)
+encounters.REASONDESCRIPTION	59	Acute bronchitis (disorder)
+encounters.REASONDESCRIPTION	17	Acute infective cystitis (disorder)
+encounters.REASONDESCRIPTION	5	Acute non-ST segment elevation myocardial infarction (disorder)
+encounters.REASONDESCRIPTION	72	Acute viral pharyngitis (disorder)
+encounters.REASONDESCRIPTION	2	Adolescent idiopathic scoliosis (disorder)
+encounters.REASONDESCRIPTION	329	Allergic disposition (finding)
+encounters.REASONDESCRIPTION	4	Alveolitis of jaw (disorder)
+encounters.REASONDESCRIPTION	11	Alzheimer's disease (disorder)
+encounters.REASONDESCRIPTION	26	Anemia (disorder)
+encounters.REASONDESCRIPTION	8	Appendicitis (disorder)
+encounters.REASONDESCRIPTION	29	Asthma (disorder)
+encounters.REASONDESCRIPTION	4	Atopic dermatitis (disorder)
+encounters.REASONDESCRIPTION	3	Awaiting transplantation of bone marrow (situation)
+encounters.REASONDESCRIPTION	4	Awaiting transplantation of kidney (situation)
+encounters.REASONDESCRIPTION	11	Blighted ovum (disorder)
+encounters.REASONDESCRIPTION	3	Burn injury (morphologic abnormality)
+encounters.REASONDESCRIPTION	19	Cerebral palsy (disorder)
+encounters.REASONDESCRIPTION	2	Cerebrovascular accident (disorder)
+encounters.REASONDESCRIPTION	24	Child attention deficit disorder (disorder)
+encounters.REASONDESCRIPTION	23	Childhood asthma (disorder)
+encounters.REASONDESCRIPTION	20	Chronic congestive heart failure (disorder)
+encounters.REASONDESCRIPTION	20	Chronic intractable migraine without aura (disorder)
+encounters.REASONDESCRIPTION	1025	Chronic kidney disease stage 4 (disorder)
+encounters.REASONDESCRIPTION	115	Chronic pain (finding)
+encounters.REASONDESCRIPTION	1	Closed fracture of hip (disorder)
+encounters.REASONDESCRIPTION	7	Complete miscarriage (disorder)
+encounters.REASONDESCRIPTION	8	Concussion injury of brain (disorder)
+encounters.REASONDESCRIPTION	2	Concussion with loss of consciousness (disorder)
+encounters.REASONDESCRIPTION	5	Concussion with no loss of consciousness (disorder)
+encounters.REASONDESCRIPTION	2	Congenital uterine anomaly (disorder)
+encounters.REASONDESCRIPTION	4	Contact dermatitis (disorder)
+encounters.REASONDESCRIPTION	332	Contraception care (regime/therapy)
+encounters.REASONDESCRIPTION	1	Cow's milk (substance)
+encounters.REASONDESCRIPTION	136	Dependent drug abuse (disorder)
+encounters.REASONDESCRIPTION	3	Diabetes mellitus type 2 (disorder)
+encounters.REASONDESCRIPTION	2	Disease caused by severe acute respiratory syndrome coronavirus 2 (disorder)
+encounters.REASONDESCRIPTION	3	Eggs (edible) (substance)
+encounters.REASONDESCRIPTION	662	End-stage renal disease (disorder)
+encounters.REASONDESCRIPTION	1	Epidermal burn of skin (disorder)
+encounters.REASONDESCRIPTION	22	Essential hypertension (disorder)
+encounters.REASONDESCRIPTION	3	Excessive salivation (disorder)
+encounters.REASONDESCRIPTION	2	Fetus with chromosomal abnormality (disorder)
+encounters.REASONDESCRIPTION	3	Fish (substance)
+encounters.REASONDESCRIPTION	3	Fracture of ankle (disorder)
+encounters.REASONDESCRIPTION	15	Fracture of bone (disorder)
+encounters.REASONDESCRIPTION	3	Fracture of clavicle (disorder)
+encounters.REASONDESCRIPTION	2	Fracture of forearm (disorder)
+encounters.REASONDESCRIPTION	1	Fracture of rib (disorder)
+encounters.REASONDESCRIPTION	2	Fracture subluxation of wrist (disorder)
+encounters.REASONDESCRIPTION	308	Gingivitis (disorder)
+encounters.REASONDESCRIPTION	1	Glycine max (substance)
+encounters.REASONDESCRIPTION	4	Gout
+encounters.REASONDESCRIPTION	4	History of coronary artery bypass grafting (situation)
+encounters.REASONDESCRIPTION	10	History of renal transplant (situation)
+encounters.REASONDESCRIPTION	3	Homeless (finding)
+encounters.REASONDESCRIPTION	113	Hyperlipidemia (disorder)
+encounters.REASONDESCRIPTION	1	Idiopathic atrophic hypothyroidism (disorder)
+encounters.REASONDESCRIPTION	16	Impacted molars (disorder)
+encounters.REASONDESCRIPTION	1	Injury of anterior cruciate ligament (disorder)
+encounters.REASONDESCRIPTION	1	Injury of knee (disorder)
+encounters.REASONDESCRIPTION	4	Injury of neck (disorder)
+encounters.REASONDESCRIPTION	4	Injury of tendon of the rotator cuff of shoulder (disorder)
+encounters.REASONDESCRIPTION	30	Ischemic heart disease (disorder)
+encounters.REASONDESCRIPTION	19	Laceration - injury (disorder)
+encounters.REASONDESCRIPTION	4	Localized  primary osteoarthritis of the hand (disorder)
+encounters.REASONDESCRIPTION	54	Loss of teeth (disorder)
+encounters.REASONDESCRIPTION	82	Malignant neoplasm of breast (disorder)
+encounters.REASONDESCRIPTION	16	Malignant neoplasm of colon (disorder)
+encounters.REASONDESCRIPTION	5	Myocardial infarction (disorder)
+encounters.REASONDESCRIPTION	11	Neoplasm of prostate (disorder)
+encounters.REASONDESCRIPTION	124	Non-small cell carcinoma of lung  TNM stage 1 (disorder)
+encounters.REASONDESCRIPTION	8	Non-small cell lung cancer (disorder)
+encounters.REASONDESCRIPTION	513	Normal pregnancy (finding)
+encounters.REASONDESCRIPTION	1	Osteoarthritis of hip (disorder)
+encounters.REASONDESCRIPTION	6	Osteoarthritis of knee (disorder)
+encounters.REASONDESCRIPTION	12	Otitis media (disorder)
+encounters.REASONDESCRIPTION	19	Overdose (disorder)
+encounters.REASONDESCRIPTION	1	Partial thickness burn (disorder)
+encounters.REASONDESCRIPTION	337	Patient referral for dental care (procedure)
+encounters.REASONDESCRIPTION	9	Patient transfer to skilled nursing facility (procedure)
+encounters.REASONDESCRIPTION	5	Perennial allergic rhinitis (disorder)
+encounters.REASONDESCRIPTION	2	Perennial allergic rhinitis with seasonal variation (disorder)
+encounters.REASONDESCRIPTION	3	Pneumonia (disorder)
+encounters.REASONDESCRIPTION	7	Polyp of colon (disorder)
+encounters.REASONDESCRIPTION	3	Primary fibromyalgia syndrome (disorder)
+encounters.REASONDESCRIPTION	1	Pulmonary emphysema (disorder)
+encounters.REASONDESCRIPTION	1	Resorption of alveolar process due to dental trauma (disorder)
+encounters.REASONDESCRIPTION	2	Screening for malignant neoplasm of breast (procedure)
+encounters.REASONDESCRIPTION	59	Screening for malignant neoplasm of colon (procedure)
+encounters.REASONDESCRIPTION	3	Seasonal allergic rhinitis (disorder)
+encounters.REASONDESCRIPTION	9	Seizure disorder (disorder)
+encounters.REASONDESCRIPTION	1	Sepsis (disorder)
+encounters.REASONDESCRIPTION	6	Shellfish (substance)
+encounters.REASONDESCRIPTION	25	Sinusitis (disorder)
+encounters.REASONDESCRIPTION	9	Sleep disorder (disorder)
+encounters.REASONDESCRIPTION	18	Sprain (morphologic abnormality)
+encounters.REASONDESCRIPTION	18	Sterilization requested (situation)
+encounters.REASONDESCRIPTION	12	Streptococcal sore throat (disorder)
+encounters.REASONDESCRIPTION	2	Sudden cardiac death (disorder)
+encounters.REASONDESCRIPTION	10	Suspected disease caused by Severe acute respiratory coronavirus 2 (situation)
+encounters.REASONDESCRIPTION	6	Suspected lung cancer (situation)
+encounters.REASONDESCRIPTION	7	Suspected prostate cancer (situation)
+encounters.REASONDESCRIPTION	3	Torus palatinus (disorder)
+encounters.REASONDESCRIPTION	44	Transition from acute care to home-health care (finding)
+encounters.REASONDESCRIPTION	2	Tree nut (substance)
+encounters.REASONDESCRIPTION	5	Tubal pregnancy (disorder)
+encounters.REASONDESCRIPTION	122	Viral sinusitis (disorder)
+encounters.REASONDESCRIPTION	3	Wheat (substance)
+immunizations.DESCRIPTION	70	COVID-19  mRNA  LNP-S  PF  100 mcg/0.5mL dose or 50 mcg/0.25mL dose
+immunizations.DESCRIPTION	82	COVID-19  mRNA  LNP-S  PF  30 mcg/0.3 mL dose
+immunizations.DESCRIPTION	3	COVID-19 vaccine  vector-nr  rS-Ad26  PF  0.5 mL
+immunizations.DESCRIPTION	24	DTaP
+immunizations.DESCRIPTION	40	HPV  quadrivalent
+immunizations.DESCRIPTION	47	Hep A  adult
+immunizations.DESCRIPTION	10	Hep A  ped/adol  2 dose
+immunizations.DESCRIPTION	14	Hep B  adolescent or pediatric
+immunizations.DESCRIPTION	27	Hep B  adult
+immunizations.DESCRIPTION	14	Hib (PRP-OMP)
+immunizations.DESCRIPTION	21	IPV
+immunizations.DESCRIPTION	912	Influenza  split virus  trivalent  PF
+immunizations.DESCRIPTION	13	MMR
+immunizations.DESCRIPTION	27	Pneumococcal conjugate PCV 13
+immunizations.DESCRIPTION	88	Td (adult)  5 Lf tetanus toxoid  preservative free  adsorbed
+immunizations.DESCRIPTION	14	Tdap
+immunizations.DESCRIPTION	41	meningococcal MCV4P
+immunizations.DESCRIPTION	12	pneumococcal polysaccharide vaccine  23 valent
+immunizations.DESCRIPTION	9	rotavirus  monovalent
+immunizations.DESCRIPTION	14	varicella
+immunizations.DESCRIPTION	32	zoster vaccine  live
+medications.DESCRIPTION	2	0.25 ML Leuprolide Acetate 30 MG/ML Prefilled Syringe
+medications.DESCRIPTION	18	0.4 ML Enoxaparin sodium 100 MG/ML Prefilled Syringe
+medications.DESCRIPTION	2	1 ML DOCEtaxel 20 MG/ML Injection
+medications.DESCRIPTION	6	1 ML Enoxaparin sodium 150 MG/ML Prefilled Syringe
+medications.DESCRIPTION	1227	1 ML Epoetin Alfa 4000 UNT/ML Injection [Epogen]
+medications.DESCRIPTION	2	1 ML heparin sodium  porcine 5000 UNT/ML Injection
+medications.DESCRIPTION	5	1 ML medroxyPROGESTERone acetate 150 MG/ML Injection
+medications.DESCRIPTION	7	1 ML medroxyprogesterone acetate 150 MG/ML Injection
+medications.DESCRIPTION	20	1 ML tacrolimus 5 MG/ML Injection [Prograf]
+medications.DESCRIPTION	1	10 ML Alfentanil 0.5 MG/ML Injection
+medications.DESCRIPTION	2	10 ML Furosemide 10 MG/ML Injection
+medications.DESCRIPTION	10	10 ML oxaliplatin 5 MG/ML Injection
+medications.DESCRIPTION	2	100 ML Propofol 10 MG/ML Injection
+medications.DESCRIPTION	1	12 HR Cefaclor 500 MG Extended Release Oral Tablet
+medications.DESCRIPTION	54	12 HR Hydrocodone Bitartrate 10 MG Extended Release Oral Capsule
+medications.DESCRIPTION	19	120 ACTUAT fluticasone propionate 0.044 MG/ACTUAT Metered Dose Inhaler [Flovent]
+medications.DESCRIPTION	11	120 ACTUAT fluticasone propionate 0.11 MG/ACTUAT Metered Dose Inhaler [Flovent]
+medications.DESCRIPTION	14	120 ACTUAT mometasone furoate 0.1 MG/ACTUAT Metered Dose Inhaler [Asmanex]
+medications.DESCRIPTION	1	150 ML vancomycin 5 MG/ML Injection
+medications.DESCRIPTION	4	168 HR Ethinyl Estradiol 0.00146 MG/HR / norelgestromin 0.00625 MG/HR Transdermal System
+medications.DESCRIPTION	2	2 ML Ondansetron 2 MG/ML Injection
+medications.DESCRIPTION	1	2 ML morphine sulfate 1 MG/ML Injection
+medications.DESCRIPTION	6	21 DAY ethinyl estradiol 0.000625 MG/HR / etonogestrel 0.005 MG/HR Vaginal System [NuvaRing]
+medications.DESCRIPTION	1	24 HR Donepezil hydrochloride 10 MG / Memantine hydrochloride 28 MG Extended Release Oral Capsule
+medications.DESCRIPTION	398	24 HR Metformin hydrochloride 500 MG Extended Release Oral Tablet
+medications.DESCRIPTION	16	24 HR metoprolol succinate 100 MG Extended Release Oral Tablet
+medications.DESCRIPTION	2	24 HR nicotine 0.292 MG/HR Transdermal System
+medications.DESCRIPTION	28	24 HR tacrolimus 1 MG Extended Release Oral Tablet [Envarsus]
+medications.DESCRIPTION	2	25 ML protamine sulfate (USP) 10 MG/ML Injection
+medications.DESCRIPTION	22	4 ML bevacizumab 25 MG/ML Injection
+medications.DESCRIPTION	41	60 ACTUAT Fluticasone propionate 0.25 MG/ACTUAT / salmeterol 0.05 MG/ACTUAT Dry Powder Inhaler
+medications.DESCRIPTION	80	72 HR Fentanyl 0.025 MG/HR Transdermal System
+medications.DESCRIPTION	20	Abuse-Deterrent 12 HR Oxycodone Hydrochloride 10 MG Extended Release Oral Tablet [Oxycontin]
+medications.DESCRIPTION	18	Abuse-Deterrent 12 HR Oxycodone Hydrochloride 15 MG Extended Release Oral Tablet
+medications.DESCRIPTION	6	Acetaminophen 160 MG Chewable Tablet
+medications.DESCRIPTION	11	Acetaminophen 21.7 MG/ML / Dextromethorphan Hydrobromide 1 MG/ML / doxylamine succinate 0.417 MG/ML Oral Solution
+medications.DESCRIPTION	15	Acetaminophen 300 MG / Codeine Phosphate 15 MG Oral Tablet
+medications.DESCRIPTION	12	Acetaminophen 300 MG / HYDROcodone Bitartrate 5 MG Oral Tablet
+medications.DESCRIPTION	67	Acetaminophen 300 MG / Hydrocodone Bitartrate 5 MG Oral Tablet
+medications.DESCRIPTION	4	Acetaminophen 325 MG / HYDROcodone Bitartrate 7.5 MG Oral Tablet
+medications.DESCRIPTION	58	Acetaminophen 325 MG / Oxycodone Hydrochloride 10 MG Oral Tablet [Percocet]
+medications.DESCRIPTION	15	Acetaminophen 325 MG / Oxycodone Hydrochloride 5 MG Oral Tablet
+medications.DESCRIPTION	3	Acetaminophen 325 MG / oxyCODONE Hydrochloride 5 MG Oral Tablet
+medications.DESCRIPTION	63	Acetaminophen 325 MG Oral Tablet
+medications.DESCRIPTION	47	Acetaminophen 325 MG Oral Tablet [Tylenol]
+medications.DESCRIPTION	24	Acetaminophen 500 MG Oral Tablet
+medications.DESCRIPTION	26	Alendronic acid 10 MG Oral Tablet
+medications.DESCRIPTION	3	Allopurinol 100 MG Oral Tablet
+medications.DESCRIPTION	1	Alteplase 100 MG Injection
+medications.DESCRIPTION	32	Amoxicillin 250 MG / Clavulanate 125 MG Oral Tablet
+medications.DESCRIPTION	4	Amoxicillin 500 MG Oral Tablet
+medications.DESCRIPTION	5	Aspirin 81 MG Oral Tablet
+medications.DESCRIPTION	4	Cefuroxime 250 MG Oral Tablet
+medications.DESCRIPTION	1	Chlorpheniramine Maleate 2 MG/ML Oral Solution
+medications.DESCRIPTION	1	Chlorpheniramine Maleate 4 MG Oral Tablet
+medications.DESCRIPTION	678	Cisplatin 50 MG Injection
+medications.DESCRIPTION	13	Clopidogrel 75 MG Oral Tablet
+medications.DESCRIPTION	2	Colchicine 0.6 MG Oral Tablet
+medications.DESCRIPTION	5	Diazepam 5 MG Oral Tablet
+medications.DESCRIPTION	1	Donepezil hydrochloride 10 MG Oral Tablet
+medications.DESCRIPTION	10	Etonogestrel 68 MG Drug Implant
+medications.DESCRIPTION	5	Fexofenadine hydrochloride 30 MG Oral Tablet
+medications.DESCRIPTION	328	Furosemide 40 MG Oral Tablet
+medications.DESCRIPTION	1	Galantamine 4 MG Oral Tablet
+medications.DESCRIPTION	1	Glycopyrrolate 1.5 MG Oral Tablet [Glycate]
+medications.DESCRIPTION	712	Hydrochlorothiazide 25 MG Oral Tablet
+medications.DESCRIPTION	4	Hydrocortisone 10 MG/ML Topical Cream
+medications.DESCRIPTION	11	Ibuprofen 100 MG Oral Tablet
+medications.DESCRIPTION	15	Ibuprofen 200 MG Oral Tablet
+medications.DESCRIPTION	67	Ibuprofen 400 MG Oral Tablet [Ibu]
+medications.DESCRIPTION	10	Leucovorin 100 MG Injection
+medications.DESCRIPTION	1	Levonorgestrel 0.00354 MG/HR Drug Implant
+medications.DESCRIPTION	1	Levothyroxine Sodium 0.075 MG Oral Tablet
+medications.DESCRIPTION	1	Loratadine 10 MG Oral Tablet
+medications.DESCRIPTION	3	Loratadine 5 MG Chewable Tablet
+medications.DESCRIPTION	2	Meperidine Hydrochloride 50 MG Oral Tablet
+medications.DESCRIPTION	2	Midazolam 1 MG/ML Injectable Solution
+medications.DESCRIPTION	1	Milnacipran hydrochloride 100 MG Oral Tablet
+medications.DESCRIPTION	14	NDA020503 200 ACTUAT Albuterol 0.09 MG/ACTUAT Metered Dose Inhaler
+medications.DESCRIPTION	11	NDA020800 0.3 ML Epinephrine 1 MG/ML Auto-Injector
+medications.DESCRIPTION	11	NDA020983 200 ACTUAT albuterol 0.09 MG/ACTUAT Metered Dose Inhaler [Ventolin]
+medications.DESCRIPTION	2	Naproxen 500 MG Oral Tablet
+medications.DESCRIPTION	24	Naproxen sodium 220 MG Oral Tablet
+medications.DESCRIPTION	20	Nitroglycerin 0.4 MG/ACTUAT Mucosal Spray
+medications.DESCRIPTION	678	PACLitaxel 100 MG Injection
+medications.DESCRIPTION	1	Paclitaxel 100 MG Injection
+medications.DESCRIPTION	6	Penicillin V Potassium 250 MG Oral Tablet
+medications.DESCRIPTION	6	Penicillin V Potassium 500 MG Oral Tablet
+medications.DESCRIPTION	2	Rocuronium bromide 10 MG/ML Injectable Solution
+medications.DESCRIPTION	113	Simvastatin 10 MG Oral Tablet
+medications.DESCRIPTION	13	Simvastatin 20 MG Oral Tablet
+medications.DESCRIPTION	1	Terfenadine 60 MG Oral Tablet
+medications.DESCRIPTION	6	Vitamin B12 5 MG/ML Injectable Solution
+medications.DESCRIPTION	1	abobotulinumtoxinA 300 UNT Injection [Dysport]
+medications.DESCRIPTION	19	albuterol 0.417 MG/ML Inhalation Solution
+medications.DESCRIPTION	77	albuterol 0.83 MG/ML Inhalation Solution
+medications.DESCRIPTION	41	albuterol 5 MG/ML Inhalation Solution
+medications.DESCRIPTION	693	amLODIPine 2.5 MG Oral Tablet
+medications.DESCRIPTION	1	amlodipine / hydrochlorothiazide / olmesartan Oral Tablet [Tribenzor]
+medications.DESCRIPTION	3	aspirin 325 MG Oral Tablet
+medications.DESCRIPTION	3	aspirin 81 MG Oral Tablet
+medications.DESCRIPTION	1	atorvastatin 10 MG Oral Tablet
+medications.DESCRIPTION	29	budesonide 0.125 MG/ML Inhalation Suspension
+medications.DESCRIPTION	34	budesonide 0.25 MG/ML Inhalation Suspension
+medications.DESCRIPTION	3	carbamazepine 20 MG/ML Oral Suspension [Tegretol]
+medications.DESCRIPTION	328	carvedilol 25 MG Oral Tablet
+medications.DESCRIPTION	1	carvedilol 3.125 MG Oral Tablet
+medications.DESCRIPTION	2	cefazolin 2000 MG Injection
+medications.DESCRIPTION	3	cephalexin 500 MG Oral Tablet
+medications.DESCRIPTION	1	cetirizine hydrochloride 5 MG Oral Tablet
+medications.DESCRIPTION	3	ciprofloxacin 500 MG Oral Tablet
+medications.DESCRIPTION	2	clonazePAM 0.25 MG Oral Tablet
+medications.DESCRIPTION	2	clopidogrel 300 MG Oral Tablet
+medications.DESCRIPTION	1	cycloSPORINE  modified 100 MG Oral Capsule
+medications.DESCRIPTION	7	diphenhydrAMINE Hydrochloride 25 MG Oral Tablet
+medications.DESCRIPTION	2	doxycycline hyclate 100 MG
+medications.DESCRIPTION	1	enalapril maleate 10 MG Oral Tablet
+medications.DESCRIPTION	5	ferrous sulfate 325 MG Oral Tablet
+medications.DESCRIPTION	2	heparin sodium  porcine 100 UNT/ML Injectable Solution
+medications.DESCRIPTION	1	insulin  regular  human 100 UNT/ML Injectable Solution
+medications.DESCRIPTION	678	insulin isophane  human 70 UNT/ML / insulin  regular  human 30 UNT/ML Injectable Suspension [Humulin]
+medications.DESCRIPTION	1	isoflurane 999 MG/ML Inhalation Solution
+medications.DESCRIPTION	1	letrozole 2.5 MG Oral Tablet
+medications.DESCRIPTION	10	levonorgestrel 0.000729 MG/HR Intrauterine System [Kyleena]
+medications.DESCRIPTION	8	levonorgestrel 0.000813 MG/HR Intrauterine System [Liletta]
+medications.DESCRIPTION	10	levonorgestrel 0.000833 MG/HR Intrauterine System [Mirena]
+medications.DESCRIPTION	518	lisinopril 10 MG Oral Tablet
+medications.DESCRIPTION	320	lisinopril 20 MG Oral Tablet
+medications.DESCRIPTION	1	lisinopril 40 MG Oral Tablet
+medications.DESCRIPTION	1	losartan potassium 100 MG Oral Tablet
+medications.DESCRIPTION	1	losartan potassium 25 MG Oral Tablet
+medications.DESCRIPTION	328	losartan potassium 50 MG Oral Tablet
+medications.DESCRIPTION	1	metoprolol tartrate 100 MG Oral Tablet
+medications.DESCRIPTION	1	metoprolol tartrate 25 MG Oral Tablet
+medications.DESCRIPTION	4	nitrofurantoin  macrocrystals 25 MG / nitrofurantoin  monohydrate 75 MG Oral Capsule
+medications.DESCRIPTION	2	nitrofurantoin  macrocrystals 25 MG / nitrofurantoin  monohydrate 75 MG [Macrobid]
+medications.DESCRIPTION	3	nitroglycerin 0.4 MG Sublingual Tablet
+medications.DESCRIPTION	1	piperacillin 2000 MG / tazobactam 250 MG Injection
+medications.DESCRIPTION	4	prasugrel 10 MG Oral Tablet
+medications.DESCRIPTION	1	pravastatin sodium 20 MG Oral Tablet
+medications.DESCRIPTION	3	predniSONE 5 MG Oral Tablet
+medications.DESCRIPTION	1	pregabalin 100 MG Oral Capsule
+medications.DESCRIPTION	24	proparacaine hydrochloride 5 MG/ML Ophthalmic Solution
+medications.DESCRIPTION	1	propranolol hydrochloride 20 MG Oral Tablet
+medications.DESCRIPTION	1	remifentanil 2 MG Injection
+medications.DESCRIPTION	303	sacubitril 97 MG / valsartan 103 MG Oral Tablet [Entresto]
+medications.DESCRIPTION	1	sevoflurane 1000 MG/ML Inhalation Solution
+medications.DESCRIPTION	1	simvastatin 10 MG Oral Tablet
+medications.DESCRIPTION	1	simvastatin 40 MG Oral Tablet
+medications.DESCRIPTION	328	sodium fluoride 0.0272 MG/MG Oral Gel
+medications.DESCRIPTION	2	sulfamethoxazole 800 MG / trimethoprim 160 MG Oral Tablet
+medications.DESCRIPTION	44	tramadol hydrochloride 50 MG Oral Tablet
+medications.DESCRIPTION	40	tropicamide 5 MG/ML Ophthalmic Solution
+medications.DESCRIPTION	16	{21 (ethinyl estradiol 0.03 MG / levonorgestrel 0.15 MG Oral Tablet) / 7 (inert ingredients 1 MG Oral Tablet) } Pack [Levora 0.15/30 28 Day]
+medications.DESCRIPTION	8	{24 (drospirenone 3 MG / ethinyl estradiol 0.02 MG Oral Tablet) / 4 (inert ingredients 1 MG Oral Tablet) } Pack [Yaz 28 Day]
+medications.DESCRIPTION	17	{28 (norethindrone 0.35 MG Oral Tablet) } Pack [Camila 28 Day]
+medications.DESCRIPTION	9	{28 (norethindrone 0.35 MG Oral Tablet) } Pack [Errin 28 Day]
+medications.DESCRIPTION	10	{28 (norethindrone 0.35 MG Oral Tablet) } Pack [Jolivette 28 Day]
+medications.DESCRIPTION	10	{5 (dienogest 2 MG / estradiol valerate 2 MG Oral Tablet) / 17 (dienogest 3 MG / estradiol valerate 2 MG Oral Tablet) / 2 (estradiol valerate 1 MG Oral Tablet) / 2 (estradiol valerate 3 MG Oral Tablet) / 2 (inert ingredients 1 MG Oral Tablet) } Pack [Natazia 28 Day]
+medications.DESCRIPTION	2	{5 (ethinyl estradiol 0.02 MG / norethindrone acetate 1 MG Oral Tablet) / 7 (ethinyl estradiol 0.03 MG / norethindrone acetate 1 MG Oral Tablet) / 9 (ethinyl estradiol 0.035 MG / norethindrone acetate 1 MG Oral Tablet) / 7 (ferrous fumarate 75 MG Oral Tablet) } Pack [Estrostep Fe 28 Day]
+medications.DESCRIPTION	14	{7 (ethinyl estradiol 0.01 MG Oral Tablet) / 84 (ethinyl estradiol 0.03 MG / levonorgestrel 0.15 MG Oral Tablet) } Pack [Seasonique]
+medications.DESCRIPTION	8	{7 (ethinyl estradiol 0.035 MG / norgestimate 0.18 MG Oral Tablet) / 7 (ethinyl estradiol 0.035 MG / norgestimate 0.215 MG Oral Tablet) / 7 (ethinyl estradiol 0.035 MG / norgestimate 0.25 MG Oral Tablet) / 7 (inert ingredients 1 MG Oral Tablet) } Pack [Trinessa 28 Day]
+medications.DESCRIPTION	1	{7 (inert ingredients 1 MG Oral Tablet) / 21 (mestranol 0.05 MG / norethindrone 1 MG Oral Tablet) } Pack [Norinyl 1+50 28 Day]
+medications.REASONDESCRIPTION	2	Acute bacterial sinusitis (disorder)
+medications.REASONDESCRIPTION	56	Acute bronchitis (disorder)
+medications.REASONDESCRIPTION	14	Acute infective cystitis (disorder)
+medications.REASONDESCRIPTION	6	Acute pulmonary embolism (disorder)
+medications.REASONDESCRIPTION	1	Acute viral pharyngitis (disorder)
+medications.REASONDESCRIPTION	3	Alzheimer's disease (disorder)
+medications.REASONDESCRIPTION	1227	Anemia (disorder)
+medications.REASONDESCRIPTION	28	Asthma (disorder)
+medications.REASONDESCRIPTION	2	Atopic dermatitis (disorder)
+medications.REASONDESCRIPTION	2	Awaiting transplantation of kidney (situation)
+medications.REASONDESCRIPTION	186	Childhood asthma (disorder)
+medications.REASONDESCRIPTION	1609	Chronic congestive heart failure (disorder)
+medications.REASONDESCRIPTION	3	Contact dermatitis (disorder)
+medications.REASONDESCRIPTION	806	Diabetes mellitus type 2 (disorder)
+medications.REASONDESCRIPTION	1	Disease caused by severe acute respiratory syndrome coronavirus 2 (disorder)
+medications.REASONDESCRIPTION	1923	Essential hypertension (disorder)
+medications.REASONDESCRIPTION	2	Excessive salivation (disorder)
+medications.REASONDESCRIPTION	152	Gingivitis (disorder)
+medications.REASONDESCRIPTION	6	Gout
+medications.REASONDESCRIPTION	46	History of renal transplant (situation)
+medications.REASONDESCRIPTION	113	Hyperlipidemia (disorder)
+medications.REASONDESCRIPTION	14	Hypoxemia (disorder)
+medications.REASONDESCRIPTION	4	Localized  primary osteoarthritis of the hand (disorder)
+medications.REASONDESCRIPTION	2	Malignant neoplasm of breast (disorder)
+medications.REASONDESCRIPTION	20	Malignant neoplasm of colon (disorder)
+medications.REASONDESCRIPTION	4	Neoplasm of prostate (disorder)
+medications.REASONDESCRIPTION	1356	Non-small cell carcinoma of lung  TNM stage 1 (disorder)
+medications.REASONDESCRIPTION	1	Osteoarthritis of hip (disorder)
+medications.REASONDESCRIPTION	6	Osteoarthritis of knee (disorder)
+medications.REASONDESCRIPTION	26	Osteoporosis (disorder)
+medications.REASONDESCRIPTION	176	Patient referral for dental care (procedure)
+medications.REASONDESCRIPTION	270	Prediabetes (finding)
+medications.REASONDESCRIPTION	3	Primary fibromyalgia syndrome (disorder)
+medications.REASONDESCRIPTION	82	Pulmonary emphysema (disorder)
+medications.REASONDESCRIPTION	10	Seizure disorder (disorder)
+medications.REASONDESCRIPTION	2	Sepsis (disorder)
+medications.REASONDESCRIPTION	4	Sinusitis (disorder)
+medications.REASONDESCRIPTION	11	Streptococcal sore throat (disorder)
+medications.REASONDESCRIPTION	28	Viral sinusitis (disorder)
+observations.DESCRIPTION	10	Abuse Status [OMAHA]
+observations.DESCRIPTION	2	Activated clotting time (ACT) of Blood by Coagulation assay
+observations.DESCRIPTION	1246	Address
+observations.DESCRIPTION	5	Adenovirus A+B+C+D+E DNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	371	Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma
+observations.DESCRIPTION	371	Albumin [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	371	Alkaline phosphatase [Enzymatic activity/volume] in Serum or Plasma
+observations.DESCRIPTION	13	American house dust mite IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	989	Appearance of Urine
+observations.DESCRIPTION	1246	Are you a refugee
+observations.DESCRIPTION	10	Are you covered by health insurance or some other kind of health care plan [PhenX]
+observations.DESCRIPTION	1246	Are you worried about losing your housing [PRAPARE]
+observations.DESCRIPTION	371	Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma
+observations.DESCRIPTION	13	Bacteria [#/area] in Urine sediment by Microscopy high power field
+observations.DESCRIPTION	13	Bacteria identified in Urine by Culture
+observations.DESCRIPTION	24	Basophils [#/volume] in Blood by Automated count
+observations.DESCRIPTION	24	Basophils/Leukocytes in Blood by Automated count
+observations.DESCRIPTION	38	Bicarbonate [Moles/volume] in Arterial blood
+observations.DESCRIPTION	2	Bicarbonate [Moles/volume] in Venous blood
+observations.DESCRIPTION	371	Bilirubin.total [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	981	Bilirubin.total [Mass/volume] in Urine by Test strip
+observations.DESCRIPTION	992	Bilirubin.total [Presence] in Urine by Test strip
+observations.DESCRIPTION	1546	Body Height
+observations.DESCRIPTION	1582	Body Weight
+observations.DESCRIPTION	269	Body mass index (BMI) [Percentile] Per age and sex
+observations.DESCRIPTION	1481	Body mass index (BMI) [Ratio]
+observations.DESCRIPTION	124	Body temperature
+observations.DESCRIPTION	12	C reactive protein [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	1159	Calcium [Mass/volume] in Blood
+observations.DESCRIPTION	827	Calcium [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	1	Capillary refill [Time] of Nail bed
+observations.DESCRIPTION	1159	Carbon dioxide  total [Moles/volume] in Blood
+observations.DESCRIPTION	827	Carbon dioxide  total [Moles/volume] in Serum or Plasma
+observations.DESCRIPTION	2	Carbon dioxide  total [Moles/volume] in Venous blood
+observations.DESCRIPTION	38	Carbon dioxide [Partial pressure] in Arterial blood
+observations.DESCRIPTION	2	Carbon dioxide [Partial pressure] in Venous blood
+observations.DESCRIPTION	13	Casts [Presence] in Urine sediment by Light microscopy
+observations.DESCRIPTION	13	Cat dander IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	18	Cause of Death [US Standard Certificate of Death]
+observations.DESCRIPTION	1159	Chloride [Moles/volume] in Blood
+observations.DESCRIPTION	827	Chloride [Moles/volume] in Serum or Plasma
+observations.DESCRIPTION	620	Cholesterol [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	620	Cholesterol in HDL [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	620	Cholesterol in LDL [Mass/volume] in Serum or Plasma by Direct assay
+observations.DESCRIPTION	1	Choriogonadotropin [Presence] in Urine
+observations.DESCRIPTION	13	Cladosporium herbarum IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	981	Clarity of Urine
+observations.DESCRIPTION	13	Codfish IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	981	Color of Urine
+observations.DESCRIPTION	13	Common Ragweed IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	13	Cow milk IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	12	Creatine kinase [Enzymatic activity/volume] in Serum or Plasma
+observations.DESCRIPTION	1159	Creatinine [Mass/volume] in Blood
+observations.DESCRIPTION	827	Creatinine [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	1045	DALY
+observations.DESCRIPTION	7	DXA Radius and Ulna [T-score] Bone density
+observations.DESCRIPTION	1605	Diastolic Blood Pressure
+observations.DESCRIPTION	1246	Discharged from the U.S. Armed Forces
+observations.DESCRIPTION	2	Distant metastases.clinical [Class] Cancer
+observations.DESCRIPTION	1246	Do you feel physically and emotionally safe where you currently live [PRAPARE]
+observations.DESCRIPTION	10	Drugs of abuse 5 panel - Urine by Screen method
+observations.DESCRIPTION	2	ERBB2 gene duplication [Presence] in Breast cancer specimen by FISH
+observations.DESCRIPTION	13	Egg white IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	3	Emergency severity index [ESI]
+observations.DESCRIPTION	1246	Employment status - current
+observations.DESCRIPTION	24	Eosinophils [#/volume] in Blood by Automated count
+observations.DESCRIPTION	24	Eosinophils/Leukocytes in Blood by Automated count
+observations.DESCRIPTION	13	Epithelial cells [#/area] in Urine sediment by Microscopy high power field
+observations.DESCRIPTION	332	Erythrocyte [DistWidth] in Blood by Automated count
+observations.DESCRIPTION	13	Erythrocytes [#/area] in Urine sediment by Microscopy high power field
+observations.DESCRIPTION	332	Erythrocytes [#/volume] in Blood by Automated count
+observations.DESCRIPTION	2	Estrogen receptor Ag [Presence] in Breast cancer specimen by Immune stain
+observations.DESCRIPTION	1	Estrogen+Progesterone receptor Ag [Presence] in Tissue by Immune stain
+observations.DESCRIPTION	39	FEV1/FVC
+observations.DESCRIPTION	312	Fall risk level [Morse Fall Scale]
+observations.DESCRIPTION	312	Fall risk total [Morse Fall Scale]
+observations.DESCRIPTION	14	Ferritin [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	12	Fibrin D-dimer FEU [Mass/volume] in Platelet poor plasma
+observations.DESCRIPTION	672	Generalized anxiety disorder 7 item (GAD-7) total score [Reported.PHQ]
+observations.DESCRIPTION	315	Globulin [Mass/volume] in Serum by calculation
+observations.DESCRIPTION	1424	Glomerular filtration rate [Volume Rate/Area] in Serum or Plasma by Creatinine-based formula (MDRD)/1.73 sq M
+observations.DESCRIPTION	1159	Glucose [Mass/volume] in Blood
+observations.DESCRIPTION	827	Glucose [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	994	Glucose [Mass/volume] in Urine by Test strip
+observations.DESCRIPTION	992	Glucose [Presence] in Urine by Test strip
+observations.DESCRIPTION	1	Gram positive blood culture panel by Probe in Positive blood culture
+observations.DESCRIPTION	2	HER2 [Presence] in Breast cancer specimen by Immune stain
+observations.DESCRIPTION	10	HIV status
+observations.DESCRIPTION	1246	Has lack of transportation kept you from medical appointments  meetings  work  or from getting things needed for daily living
+observations.DESCRIPTION	1246	Has season or migrant farm work been your or your family's main source of income at any point in past 2 years [PRAPARE]
+observations.DESCRIPTION	1246	Have you or any family members you live with been unable to get any of the following when it was really needed in past 1 year [PRAPARE]
+observations.DESCRIPTION	1246	Have you spent more than 2 nights in a row in a jail  prison  detention center  or juvenile correctional facility in past 1 year [PRAPARE]
+observations.DESCRIPTION	109	Head Occipital-frontal circumference
+observations.DESCRIPTION	109	Head Occipital-frontal circumference Percentile
+observations.DESCRIPTION	1583	Heart rate
+observations.DESCRIPTION	316	Hematocrit [Volume Fraction] of Blood by Automated count
+observations.DESCRIPTION	19	Hematocrit [Volume Fraction] of Blood by calculation
+observations.DESCRIPTION	1017	Hemoglobin A1c/Hemoglobin.total in Blood
+observations.DESCRIPTION	335	Hemoglobin [Mass/volume] in Blood
+observations.DESCRIPTION	1005	Hemoglobin [Presence] in Urine by Test strip
+observations.DESCRIPTION	4	Hemoglobin.gastrointestinal.lower [Presence] in Stool by Immunoassay --1st specimen
+observations.DESCRIPTION	1246	Highest level of education
+observations.DESCRIPTION	1246	Hispanic or Latino
+observations.DESCRIPTION	10	History of Hospitalizations+Outpatient visits Narrative
+observations.DESCRIPTION	13	Honey bee IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	1256	Housing status
+observations.DESCRIPTION	1246	How many people are living or staying at this address [#]
+observations.DESCRIPTION	1246	How often do you see or talk to people that you care about and feel close to [PRAPARE]
+observations.DESCRIPTION	5	Human metapneumovirus RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	41	INR in Platelet poor plasma by Coagulation assay
+observations.DESCRIPTION	5	Influenza virus A Ag [Presence] in Upper respiratory specimen by Rapid immunoassay
+observations.DESCRIPTION	5	Influenza virus A RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	5	Influenza virus B Ag [Presence] in Upper respiratory specimen by Rapid immunoassay
+observations.DESCRIPTION	5	Influenza virus B RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	2	Iron [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	2	Iron binding capacity [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	2	Iron saturation [Mass Fraction] in Serum or Plasma
+observations.DESCRIPTION	981	Ketones [Mass/volume] in Urine by Test strip
+observations.DESCRIPTION	1005	Ketones [Presence] in Urine by Test strip
+observations.DESCRIPTION	1	Lactate [Moles/volume] in Blood
+observations.DESCRIPTION	12	Lactate dehydrogenase [Enzymatic activity/volume] in Serum or Plasma by Lactate to pyruvate reaction
+observations.DESCRIPTION	13	Latex IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	40	Left eye Diabetic retinopathy severity level by Ophthalmoscopy
+observations.DESCRIPTION	40	Left eye Intraocular pressure
+observations.DESCRIPTION	18	Left ventricular Ejection fraction
+observations.DESCRIPTION	1005	Leukocyte esterase [Presence] in Urine by Test strip
+observations.DESCRIPTION	13	Leukocytes [#/area] in Urine sediment by Microscopy high power field
+observations.DESCRIPTION	332	Leukocytes [#/volume] in Blood by Automated count
+observations.DESCRIPTION	40	LogMAR visual acuity left eye (observable entity)
+observations.DESCRIPTION	40	LogMAR visual acuity right eye (observable entity)
+observations.DESCRIPTION	1	Lymph nodes with isolated tumor cells [#] in Cancer specimen by Light microscopy
+observations.DESCRIPTION	1	Lymph nodes with macrometastases [#] in Cancer specimen by Light microscopy
+observations.DESCRIPTION	24	Lymphocytes [#/volume] in Blood by Automated count
+observations.DESCRIPTION	24	Lymphocytes/Leukocytes in Blood by Automated count
+observations.DESCRIPTION	332	MCH [Entitic mass] by Automated count
+observations.DESCRIPTION	332	MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count
+observations.DESCRIPTION	332	MCV [Entitic mean volume] in Red Blood Cells by Automated count
+observations.DESCRIPTION	3	Magnesium [Mass/volume] in Blood
+observations.DESCRIPTION	30	Magnesium [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	1	Mean blood pressure
+observations.DESCRIPTION	274	Microalbumin/Creatinine [Mass Ratio] in Urine
+observations.DESCRIPTION	24	Monocytes [#/volume] in Blood by Automated count
+observations.DESCRIPTION	24	Monocytes/Leukocytes in Blood by Automated count
+observations.DESCRIPTION	13	Mucus [Presence] in Urine sediment by Light microscopy
+observations.DESCRIPTION	3	Natriuretic peptide.B prohormone N-Terminal [Mass/volume] in Blood by Immunoassay
+observations.DESCRIPTION	2	Natriuretic peptide.B prohormone N-Terminal [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	24	Neutrophils [#/volume] in Blood by Automated count
+observations.DESCRIPTION	24	Neutrophils/Leukocytes in Blood by Automated count
+observations.DESCRIPTION	1005	Nitrite [Presence] in Urine by Test strip
+observations.DESCRIPTION	973	Odor of Urine
+observations.DESCRIPTION	7	Operative Status Value
+observations.DESCRIPTION	38	Oxygen [Partial pressure] in Arterial blood
+observations.DESCRIPTION	2	Oxygen [Partial pressure] in Venous blood
+observations.DESCRIPTION	78	Oxygen saturation in Arterial blood
+observations.DESCRIPTION	10	Oxygen/Total gas setting [Volume Fraction] Ventilator
+observations.DESCRIPTION	3215	Pain severity - 0-10 verbal numeric rating [Score] - Reported
+observations.DESCRIPTION	36	Pain severity - Reported
+observations.DESCRIPTION	14	Pain severity in the past week - 0-10 numeric rating [Reported]
+observations.DESCRIPTION	5	Parainfluenza virus 1 RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	5	Parainfluenza virus 2 RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	5	Parainfluenza virus 3 RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	992	Patient Health Questionnaire 2 item (PHQ-2) total score [Reported]
+observations.DESCRIPTION	60	Patient Health Questionnaire 9 item (PHQ-9) total score [Reported]
+observations.DESCRIPTION	73	Patient Health Questionnaire-9: Modified for Teens total score [Reported.PHQ.Teen]
+observations.DESCRIPTION	13	Peanut IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	1	Percentage area affected by eczema Head and Neck [PhenX]
+observations.DESCRIPTION	1	Percentage area affected by eczema Lower extremity - bilateral [PhenX]
+observations.DESCRIPTION	1	Percentage area affected by eczema Trunk [PhenX]
+observations.DESCRIPTION	1	Percentage area affected by eczema Upper extremity - bilateral [PhenX]
+observations.DESCRIPTION	26	Phosphate [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	50	Physical findings of Prostate
+observations.DESCRIPTION	277	Platelet [Entitic mean volume] in Blood by Automated count
+observations.DESCRIPTION	277	Platelet distribution width [Entitic volume] in Blood by Automated count
+observations.DESCRIPTION	332	Platelets [#/volume] in Blood by Automated count
+observations.DESCRIPTION	4	Polyp size greatest dimension
+observations.DESCRIPTION	1159	Potassium [Moles/volume] in Blood
+observations.DESCRIPTION	827	Potassium [Moles/volume] in Serum or Plasma
+observations.DESCRIPTION	1246	Preferred language
+observations.DESCRIPTION	70	Pregnancy status
+observations.DESCRIPTION	1246	Primary insurance
+observations.DESCRIPTION	2	Primary tumor.clinical [Class] Cancer
+observations.DESCRIPTION	7	Priority Level
+observations.DESCRIPTION	12	Procalcitonin [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	4	Procedure Narrative
+observations.DESCRIPTION	2	Progesterone receptor Ag [Presence] in Breast cancer specimen by Immune stain
+observations.DESCRIPTION	50	Prostate specific Ag [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	371	Protein [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	994	Protein [Mass/volume] in Urine by Test strip
+observations.DESCRIPTION	992	Protein [Presence] in Urine by Test strip
+observations.DESCRIPTION	38	Prothrombin time (PT)
+observations.DESCRIPTION	1045	QALY
+observations.DESCRIPTION	1045	QOLS
+observations.DESCRIPTION	1246	Race
+observations.DESCRIPTION	2	Regional lymph nodes.clinical [Class] Cancer
+observations.DESCRIPTION	1583	Respiratory rate
+observations.DESCRIPTION	5	Respiratory syncytial virus RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	5	Response to cancer treatment
+observations.DESCRIPTION	5	Rhinovirus RNA [Presence] in Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	40	Right eye Diabetic retinopathy severity level by Ophthalmoscopy
+observations.DESCRIPTION	40	Right eye Intraocular pressure
+observations.DESCRIPTION	14	SARS-CoV-2 (COVID-19) RNA panel - Respiratory system specimen by NAA with probe detection
+observations.DESCRIPTION	10	Sexual orientation
+observations.DESCRIPTION	13	Shrimp IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	2	Site of distant metastasis in Breast tumor
+observations.DESCRIPTION	2	Size.maximum dimension in Tumor
+observations.DESCRIPTION	1159	Sodium [Moles/volume] in Blood
+observations.DESCRIPTION	827	Sodium [Moles/volume] in Serum or Plasma
+observations.DESCRIPTION	13	Soybean IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	1005	Specific gravity of Urine by Test strip
+observations.DESCRIPTION	4	Stage group.clinical Cancer
+observations.DESCRIPTION	1246	Stress level
+observations.DESCRIPTION	29	Study observation Left retina by OCT
+observations.DESCRIPTION	29	Study observation Right retina by OCT
+observations.DESCRIPTION	1605	Systolic Blood Pressure
+observations.DESCRIPTION	1	Thyrotropin [Units/volume] in Serum or Plasma
+observations.DESCRIPTION	1546	Tobacco smoking status
+observations.DESCRIPTION	430	Total score [AUDIT-C]
+observations.DESCRIPTION	414	Total score [DAST-10]
+observations.DESCRIPTION	348	Total score [HARK]
+observations.DESCRIPTION	8	Total score [MMSE]
+observations.DESCRIPTION	1	Treatment status Cancer
+observations.DESCRIPTION	620	Triglyceride [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	20	Troponin I.cardiac [Mass/volume] in Serum or Plasma by High sensitivity method
+observations.DESCRIPTION	7	US Guidance for biopsy of Prostate
+observations.DESCRIPTION	26	Urea Nitrogen [Mass/volume] in Blood
+observations.DESCRIPTION	1133	Urea nitrogen [Mass/volume] in Blood
+observations.DESCRIPTION	827	Urea nitrogen [Mass/volume] in Serum or Plasma
+observations.DESCRIPTION	13	Walnut IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	1596	Weight difference [Mass difference] --pre dialysis - post dialysis
+observations.DESCRIPTION	109	Weight-for-length Per age and sex
+observations.DESCRIPTION	14	What number best describes how pain has interfered with your enjoyment of life during the past week
+observations.DESCRIPTION	14	What number best describes how pain has interfered with your general activity during the past week
+observations.DESCRIPTION	1246	What was your best estimate of the total income of all family members from all sources  before taxes  in last year [PhenX]
+observations.DESCRIPTION	13	Wheat IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	13	White oak IgE Ab [Units/volume] in Serum
+observations.DESCRIPTION	1246	Within the last year  have you been afraid of your partner or ex-partner
+observations.DESCRIPTION	29	aPTT in Blood by Coagulation assay
+observations.DESCRIPTION	38	pH of Arterial blood
+observations.DESCRIPTION	1005	pH of Urine by Test strip
+observations.DESCRIPTION	2	pH of Venous blood
+procedures.DESCRIPTION	2	Administration of anesthesia for procedure (procedure)
+procedures.DESCRIPTION	45	Administration of vaccine product containing only Bordetella pertussis and Clostridium tetani and Corynebacterium diphtheriae antigens (procedure)
+procedures.DESCRIPTION	4	Admission to orthopedic department (procedure)
+procedures.DESCRIPTION	13	Allergy screening test (procedure)
+procedures.DESCRIPTION	43	Alpha-fetoprotein test - antenatal (procedure)
+procedures.DESCRIPTION	9	Angiography of coronary artery (procedure)
+procedures.DESCRIPTION	9	Antenatal RhD antibody screening (procedure)
+procedures.DESCRIPTION	14	Antibiotic therapy (procedure)
+procedures.DESCRIPTION	47	Anticipatory guidance (procedure)
+procedures.DESCRIPTION	66	Application of composite dental filling material to dentin of tooth following fracture of tooth (procedure)
+procedures.DESCRIPTION	672	Assessment of anxiety (procedure)
+procedures.DESCRIPTION	3	Assessment of cardiac status using monitoring device (procedure)
+procedures.DESCRIPTION	1246	Assessment of health and social care needs (procedure)
+procedures.DESCRIPTION	905	Assessment of substance use (procedure)
+procedures.DESCRIPTION	430	Assessment using Alcohol Use Disorders Identification Test - Consumption (procedure)
+procedures.DESCRIPTION	61	Assessment using Car  Relax  Alone  Forget  Friends  Trouble Screening Test (procedure)
+procedures.DESCRIPTION	312	Assessment using Morse Fall Scale (procedure)
+procedures.DESCRIPTION	2	Asthma screening (procedure)
+procedures.DESCRIPTION	3	Augmentation of labor (procedure)
+procedures.DESCRIPTION	407	Auscultation of the fetal heart (procedure)
+procedures.DESCRIPTION	1	Autologous bone marrow transplant (procedure)
+procedures.DESCRIPTION	2	Biopsy of breast (procedure)
+procedures.DESCRIPTION	1	Biopsy of colon (procedure)
+procedures.DESCRIPTION	7	Biopsy of prostate (procedure)
+procedures.DESCRIPTION	46	Blood group typing (procedure)
+procedures.DESCRIPTION	11	Bone density scan (procedure)
+procedures.DESCRIPTION	8	Bone immobilization (procedure)
+procedures.DESCRIPTION	16	Brief general examination (procedure)
+procedures.DESCRIPTION	40	Camera fundoscopy (procedure)
+procedures.DESCRIPTION	2	Care regimes assessment (procedure)
+procedures.DESCRIPTION	24	Certification procedure (procedure)
+procedures.DESCRIPTION	6	Cesarean section (procedure)
+procedures.DESCRIPTION	1	Chemotherapy (procedure)
+procedures.DESCRIPTION	44	Chlamydia antigen test (procedure)
+procedures.DESCRIPTION	38	Cognitive and behavioral therapy (regime/therapy)
+procedures.DESCRIPTION	59	Colonoscopy (procedure)
+procedures.DESCRIPTION	688	Combined chemotherapy and radiation therapy (procedure)
+procedures.DESCRIPTION	2	Complete blood count (procedure)
+procedures.DESCRIPTION	2	Comprehensive interview and evaluation (procedure)
+procedures.DESCRIPTION	1	Comprehensive metabolic panel (procedure)
+procedures.DESCRIPTION	3	Computed tomography of chest and abdomen (procedure)
+procedures.DESCRIPTION	8	Consultation for treatment (procedure)
+procedures.DESCRIPTION	1	Continuous subcutaneous infusion of insulin (procedure)
+procedures.DESCRIPTION	2	Coordination of care plan (procedure)
+procedures.DESCRIPTION	17	Counseling for termination of pregnancy (procedure)
+procedures.DESCRIPTION	44	Cytopathology procedure  preparation of smear  genital source (procedure)
+procedures.DESCRIPTION	106	Dental application of desensitizing medicament (procedure)
+procedures.DESCRIPTION	644	Dental care (regime/therapy)
+procedures.DESCRIPTION	670	Dental consultation and report (procedure)
+procedures.DESCRIPTION	328	Dental fluoride treatment (procedure)
+procedures.DESCRIPTION	346	Dental plain X-ray bitewing (procedure)
+procedures.DESCRIPTION	110	Dental surgical procedure (procedure)
+procedures.DESCRIPTION	2125	Depression screening (procedure)
+procedures.DESCRIPTION	133	Depression screening using Patient Health Questionnaire Nine Item score (procedure)
+procedures.DESCRIPTION	44	Detection of chromosomal aneuploidy in prenatal amniotic fluid specimen using fluorescence in situ hybridization screening technique (procedure)
+procedures.DESCRIPTION	35	Development of individualized plan of care (procedure)
+procedures.DESCRIPTION	40	Diabetic retinal eye exam (procedure)
+procedures.DESCRIPTION	3	Diagnostic assessment (procedure)
+procedures.DESCRIPTION	50	Digital examination of rectum (procedure)
+procedures.DESCRIPTION	11	Discharge from hospital (procedure)
+procedures.DESCRIPTION	2	Discharge to ward (procedure)
+procedures.DESCRIPTION	2	Discussion about options (procedure)
+procedures.DESCRIPTION	8	Discussion about pregnancy (procedure)
+procedures.DESCRIPTION	14	Discussion about signs and symptoms (procedure)
+procedures.DESCRIPTION	2	Documentation procedure (procedure)
+procedures.DESCRIPTION	19	Echocardiography (procedure)
+procedures.DESCRIPTION	19	Electrocardiographic procedure (procedure)
+procedures.DESCRIPTION	5	Electroencephalogram (procedure)
+procedures.DESCRIPTION	1	Emergency coronary artery bypass graft (procedure)
+procedures.DESCRIPTION	11	Epidural anesthesia (procedure)
+procedures.DESCRIPTION	8	Episiotomy (procedure)
+procedures.DESCRIPTION	407	Evaluation of uterine fundal height (procedure)
+procedures.DESCRIPTION	11	Evaluation procedure (procedure)
+procedures.DESCRIPTION	644	Examination of gingivae (procedure)
+procedures.DESCRIPTION	2	Excision of appendix (procedure)
+procedures.DESCRIPTION	1	Excision of fallopian tube and surgical removal of ectopic pregnancy (procedure)
+procedures.DESCRIPTION	3	Excision of maxillary torus palatinus (procedure)
+procedures.DESCRIPTION	34	External beam radiation therapy procedure (procedure)
+procedures.DESCRIPTION	12	Extraction of wisdom tooth (procedure)
+procedures.DESCRIPTION	10	Face mask (physical object)
+procedures.DESCRIPTION	43	Fetal anatomy study (procedure)
+procedures.DESCRIPTION	1	Fiberoptic bronchoscopy (procedure)
+procedures.DESCRIPTION	2	Fine needle aspiration biopsy of lung (procedure)
+procedures.DESCRIPTION	21	Fitting of denture (procedure)
+procedures.DESCRIPTION	74	Gingivectomy or gingivoplasty  per tooth (procedure)
+procedures.DESCRIPTION	44	Gonorrhea infection titer test (procedure)
+procedures.DESCRIPTION	2	Grafting of periodontal bone defect (procedure)
+procedures.DESCRIPTION	1	Grid retinal photocoagulation (procedure)
+procedures.DESCRIPTION	14	Health risks education (procedure)
+procedures.DESCRIPTION	1	Heart failure education (procedure)
+procedures.DESCRIPTION	15	Hematologic disorder medication review (procedure)
+procedures.DESCRIPTION	89	Hemogram  automated  with red blood cells  white blood cells  hemoglobin  hematocrit  indices  platelet count  and manual white blood cell differential (procedure)
+procedures.DESCRIPTION	44	Hepatitis B surface antigen measurement (procedure)
+procedures.DESCRIPTION	44	Hepatitis C antibody  confirmatory test (procedure)
+procedures.DESCRIPTION	9	History AND physical examination (procedure)
+procedures.DESCRIPTION	9	History and physical examination  limited (procedure)
+procedures.DESCRIPTION	3	History and physical examination with evaluation and management of patient (procedure)
+procedures.DESCRIPTION	17	History taking (procedure)
+procedures.DESCRIPTION	1	Home health aide service (regime/therapy)
+procedures.DESCRIPTION	512	Hospice care (regime/therapy)
+procedures.DESCRIPTION	2	Human epidermal growth factor receptor 2 gene detection by fluorescence in situ hybridization (procedure)
+procedures.DESCRIPTION	2	Human epidermal growth factor receptor 2 gene detection by immunohistochemistry (procedure)
+procedures.DESCRIPTION	44	Human immunodeficiency virus antigen test (procedure)
+procedures.DESCRIPTION	34	Human parturition  function (observable entity)
+procedures.DESCRIPTION	16	Implantation of subcutaneous contraceptive (procedure)
+procedures.DESCRIPTION	40	Indirect gonioscopy (procedure)
+procedures.DESCRIPTION	17	Induced termination of pregnancy (procedure)
+procedures.DESCRIPTION	10	Information gathering (procedure)
+procedures.DESCRIPTION	35	Initial patient assessment (procedure)
+procedures.DESCRIPTION	1	Injection of botulinum toxin (procedure)
+procedures.DESCRIPTION	3	Injection of epinephrine (procedure)
+procedures.DESCRIPTION	2	Injection of tetanus antitoxin (procedure)
+procedures.DESCRIPTION	2	Insertion of catheter into artery (procedure)
+procedures.DESCRIPTION	33	Insertion of intrauterine contraceptive device (procedure)
+procedures.DESCRIPTION	6	Instrumental delivery (procedure)
+procedures.DESCRIPTION	110	Intramuscular injection (procedure)
+procedures.DESCRIPTION	40	Intraocular pressure test (procedure)
+procedures.DESCRIPTION	3	Intravenous blood transfusion of packed cells (procedure)
+procedures.DESCRIPTION	22	Intravitreal injection of anti-vascular endothelial growth factor (procedure)
+procedures.DESCRIPTION	2	Intubation (procedure)
+procedures.DESCRIPTION	3	Laboratory test (procedure)
+procedures.DESCRIPTION	4	Ligation of bilateral fallopian tubes (procedure)
+procedures.DESCRIPTION	1	Ligation of salivary duct (procedure)
+procedures.DESCRIPTION	1	Lumpectomy of breast (procedure)
+procedures.DESCRIPTION	3	Magnetic resonance imaging for measurement of brain volume (procedure)
+procedures.DESCRIPTION	1	Mammogram - symptomatic (procedure)
+procedures.DESCRIPTION	14	Mammography (procedure)
+procedures.DESCRIPTION	44	Measurement of Varicella-zoster virus antibody (procedure)
+procedures.DESCRIPTION	28	Measurement of respiratory function (procedure)
+procedures.DESCRIPTION	2	Median sternotomy (procedure)
+procedures.DESCRIPTION	8	Medical induction of labor (procedure)
+procedures.DESCRIPTION	792	Medication reconciliation (procedure)
+procedures.DESCRIPTION	17	Monitoring of patient (regime/therapy)
+procedures.DESCRIPTION	20	Movement therapy (regime/therapy)
+procedures.DESCRIPTION	2	Notification of treatment plan (procedure)
+procedures.DESCRIPTION	24	Notifications (procedure)
+procedures.DESCRIPTION	176	Nursing care/supplementary surveillance (regime/therapy)
+procedures.DESCRIPTION	25	Occupational therapy (regime/therapy)
+procedures.DESCRIPTION	40	Ocular slit lamp examination (procedure)
+procedures.DESCRIPTION	1	Off-pump coronary artery bypass (procedure)
+procedures.DESCRIPTION	29	Optical coherence tomography of retina (procedure)
+procedures.DESCRIPTION	648	Oral health education (procedure)
+procedures.DESCRIPTION	29	Oxygen administration by mask (procedure)
+procedures.DESCRIPTION	1	Pan retinal photocoagulation for diabetes (procedure)
+procedures.DESCRIPTION	1	Partial resection of colon (procedure)
+procedures.DESCRIPTION	20	Passive immunization (procedure)
+procedures.DESCRIPTION	14	Patient discharge (procedure)
+procedures.DESCRIPTION	706	Patient referral for dental care (procedure)
+procedures.DESCRIPTION	7	Percutaneous coronary intervention
+procedures.DESCRIPTION	1	Percutaneous mechanical thrombectomy of portal vein using fluoroscopic guidance with contrast (procedure)
+procedures.DESCRIPTION	16	Peripheral blood smear interpretation (procedure)
+procedures.DESCRIPTION	22	Physical examination  complete (procedure)
+procedures.DESCRIPTION	112	Physical examination procedure (procedure)
+procedures.DESCRIPTION	34	Physical therapy procedure (regime/therapy)
+procedures.DESCRIPTION	26	Placing subject in prone position (procedure)
+procedures.DESCRIPTION	3	Plain X-ray of ankle region (procedure)
+procedures.DESCRIPTION	25	Plain X-ray of chest (procedure)
+procedures.DESCRIPTION	3	Plain X-ray of clavicle (procedure)
+procedures.DESCRIPTION	2	Plain X-ray of humerus (procedure)
+procedures.DESCRIPTION	1	Plain X-ray of knee region (procedure)
+procedures.DESCRIPTION	1	Plain X-ray of pelvis (procedure)
+procedures.DESCRIPTION	2	Plain X-ray of wrist region (procedure)
+procedures.DESCRIPTION	7	Post anesthesia care management (procedure)
+procedures.DESCRIPTION	21	Postoperative care (regime/therapy)
+procedures.DESCRIPTION	110	Postoperative care for dental procedure (regime/therapy)
+procedures.DESCRIPTION	2	Postoperative procedure education (procedure)
+procedures.DESCRIPTION	9	Pre-discharge assessment (procedure)
+procedures.DESCRIPTION	1	Pre-operative chemotherapy (procedure)
+procedures.DESCRIPTION	2	Pre-surgery testing (procedure)
+procedures.DESCRIPTION	17	Pregnancy termination care (regime/therapy)
+procedures.DESCRIPTION	2	Premature birth of newborn (finding)
+procedures.DESCRIPTION	2	Preparation of patient for procedure (regime/therapy)
+procedures.DESCRIPTION	2	Pretransplant evaluation of kidney recipient (procedure)
+procedures.DESCRIPTION	38	Professional / ancillary services care (regime/therapy)
+procedures.DESCRIPTION	2	Prostatectomy (procedure)
+procedures.DESCRIPTION	2	Pulmonary catheterization with Swan-Ganz catheter (procedure)
+procedures.DESCRIPTION	13	Pulmonary rehabilitation (regime/therapy)
+procedures.DESCRIPTION	5	Rectal polypectomy (procedure)
+procedures.DESCRIPTION	1	Referral for further care (procedure)
+procedures.DESCRIPTION	2	Referral to cardiac surgery service (procedure)
+procedures.DESCRIPTION	12	Referral to cardiology service (procedure)
+procedures.DESCRIPTION	2	Referral to home health care service (procedure)
+procedures.DESCRIPTION	1	Referral to hypertension clinic (procedure)
+procedures.DESCRIPTION	1	Referral to service (procedure)
+procedures.DESCRIPTION	2	Referral to sleep apnea clinic (procedure)
+procedures.DESCRIPTION	7	Referral to transplant surgeon (procedure)
+procedures.DESCRIPTION	122	Rehabilitation therapy (regime/therapy)
+procedures.DESCRIPTION	2	Removal of endotracheal tube (procedure)
+procedures.DESCRIPTION	19	Removal of intrauterine contraceptive device (procedure)
+procedures.DESCRIPTION	11	Removal of subcutaneous contraceptive (procedure)
+procedures.DESCRIPTION	644	Removal of subgingival plaque and calculus from all teeth using dental instrument (procedure)
+procedures.DESCRIPTION	644	Removal of supragingival plaque and calculus from all teeth using dental instrument (procedure)
+procedures.DESCRIPTION	1596	Renal dialysis (procedure)
+procedures.DESCRIPTION	10	Renal disorder medication review (procedure)
+procedures.DESCRIPTION	7	Replacement of contraceptive intrauterine device (procedure)
+procedures.DESCRIPTION	63	Restoration of tooth with coverage of all cusps using dental filling material (procedure)
+procedures.DESCRIPTION	1	Resuscitation using intravenous fluid (procedure)
+procedures.DESCRIPTION	16	Review of systems (procedure)
+procedures.DESCRIPTION	2	Risk assessment (procedure)
+procedures.DESCRIPTION	44	Rubella screening test (procedure)
+procedures.DESCRIPTION	2	Scheduling (procedure)
+procedures.DESCRIPTION	348	Screening for domestic abuse (procedure)
+procedures.DESCRIPTION	414	Screening for drug abuse (procedure)
+procedures.DESCRIPTION	4	Screening for occult blood in feces (procedure)
+procedures.DESCRIPTION	1	Screening mammography (procedure)
+procedures.DESCRIPTION	1	Serum metabolic panel (procedure)
+procedures.DESCRIPTION	28	Simple extraction of tooth (procedure)
+procedures.DESCRIPTION	44	Skin test for tuberculosis  Tine test (procedure)
+procedures.DESCRIPTION	70	Sleep apnea assessment (procedure)
+procedures.DESCRIPTION	1	Sleep apnea monitoring with alarm (regime/therapy)
+procedures.DESCRIPTION	8	Speech and language therapy regime (regime/therapy)
+procedures.DESCRIPTION	39	Spirometry (procedure)
+procedures.DESCRIPTION	14	Sputum examination (procedure)
+procedures.DESCRIPTION	2	Stair-climbing test (procedure)
+procedures.DESCRIPTION	68	Standard pregnancy test (procedure)
+procedures.DESCRIPTION	4	Sterilization education (procedure)
+procedures.DESCRIPTION	42	Streptococcus pneumoniae group B antigen assay (procedure)
+procedures.DESCRIPTION	291	Subcutaneous immunotherapy (procedure)
+procedures.DESCRIPTION	1	Surgical manipulation of joint of knee (procedure)
+procedures.DESCRIPTION	19	Suture open wound (procedure)
+procedures.DESCRIPTION	44	Syphilis infectious titer test (procedure)
+procedures.DESCRIPTION	21	Take oral or dental impression (procedure)
+procedures.DESCRIPTION	3	Taking patient vital signs (procedure)
+procedures.DESCRIPTION	2	Telemedicine consultation with patient (procedure)
+procedures.DESCRIPTION	32	Throat culture (procedure)
+procedures.DESCRIPTION	4	Tooth socket procedure (procedure)
+procedures.DESCRIPTION	1	Transfer to stepdown unit (procedure)
+procedures.DESCRIPTION	2	Transfusion of packed red blood cells (procedure)
+procedures.DESCRIPTION	2	Transplant of kidney (procedure)
+procedures.DESCRIPTION	18	Transplantation of kidney regime (regime/therapy)
+procedures.DESCRIPTION	2	Transthoracic echocardiography (procedure)
+procedures.DESCRIPTION	1	Treatment failure risk education (procedure)
+procedures.DESCRIPTION	1	Treatment side effects education (procedure)
+procedures.DESCRIPTION	3	Triage: emergency center (procedure)
+procedures.DESCRIPTION	2	Ultrasonography of bilateral breasts (procedure)
+procedures.DESCRIPTION	67	Ultrasound scan for fetal viability (procedure)
+procedures.DESCRIPTION	44	Urinalysis  protein  qualitative (procedure)
+procedures.DESCRIPTION	16	Urinalysis with reflex to microscopy and culture (procedure)
+procedures.DESCRIPTION	44	Urine culture (procedure)
+procedures.DESCRIPTION	45	Urine screening for glucose (procedure)
+procedures.DESCRIPTION	44	Urine screening test for diabetes (procedure)
+procedures.DESCRIPTION	13	Urine specimen collection (procedure)
+procedures.DESCRIPTION	40	Visual acuity testing (procedure)
+procedures.DESCRIPTION	2	Walking exercise test (procedure)
+procedures.REASONDESCRIPTION	22	Abnormal findings diagnostic imaging heart+coronary circulat (finding)
+procedures.REASONDESCRIPTION	1	Acute ST segment elevation myocardial infarction (disorder)
+procedures.REASONDESCRIPTION	44	Acute bronchitis (disorder)
+procedures.REASONDESCRIPTION	6	Acute non-ST segment elevation myocardial infarction (disorder)
+procedures.REASONDESCRIPTION	26	Acute viral pharyngitis (disorder)
+procedures.REASONDESCRIPTION	12	Alveolitis of jaw (disorder)
+procedures.REASONDESCRIPTION	2	Appendicitis (disorder)
+procedures.REASONDESCRIPTION	1	Asthma (disorder)
+procedures.REASONDESCRIPTION	11	Awaiting transplantation of bone marrow (situation)
+procedures.REASONDESCRIPTION	21	Awaiting transplantation of kidney (situation)
+procedures.REASONDESCRIPTION	5	Blighted ovum (disorder)
+procedures.REASONDESCRIPTION	22	Child attention deficit disorder (disorder)
+procedures.REASONDESCRIPTION	1	Childhood asthma (disorder)
+procedures.REASONDESCRIPTION	2	Chronic congestive heart failure (disorder)
+procedures.REASONDESCRIPTION	910	Chronic kidney disease stage 4 (disorder)
+procedures.REASONDESCRIPTION	2	Closed fracture of hip (disorder)
+procedures.REASONDESCRIPTION	1	Congenital uterine anomaly (disorder)
+procedures.REASONDESCRIPTION	15	Dental filling lost (finding)
+procedures.REASONDESCRIPTION	122	Dependent drug abuse (disorder)
+procedures.REASONDESCRIPTION	123	Diabetes mellitus type 2 (disorder)
+procedures.REASONDESCRIPTION	577	End-stage renal disease (disorder)
+procedures.REASONDESCRIPTION	19	Excessive salivation (disorder)
+procedures.REASONDESCRIPTION	6	Facial laceration (disorder)
+procedures.REASONDESCRIPTION	1	Fetus with chromosomal abnormality (disorder)
+procedures.REASONDESCRIPTION	6	Fracture of ankle (disorder)
+procedures.REASONDESCRIPTION	3	Fracture of clavicle (disorder)
+procedures.REASONDESCRIPTION	2	Fracture of forearm (disorder)
+procedures.REASONDESCRIPTION	1	Fracture of rib (disorder)
+procedures.REASONDESCRIPTION	2	Fracture subluxation of wrist (disorder)
+procedures.REASONDESCRIPTION	15	Fractured dental filling (finding)
+procedures.REASONDESCRIPTION	222	Gingival disease (disorder)
+procedures.REASONDESCRIPTION	2302	Gingivitis (disorder)
+procedures.REASONDESCRIPTION	28	History of autologous bone marrow transplant (situation)
+procedures.REASONDESCRIPTION	8	History of coronary artery bypass grafting (situation)
+procedures.REASONDESCRIPTION	28	History of renal transplant (situation)
+procedures.REASONDESCRIPTION	4	History of tubal ligation (situation)
+procedures.REASONDESCRIPTION	48	Hypoxemia (disorder)
+procedures.REASONDESCRIPTION	84	Infection of tooth (disorder)
+procedures.REASONDESCRIPTION	2	Injury of anterior cruciate ligament (disorder)
+procedures.REASONDESCRIPTION	20	Ischemic heart disease (disorder)
+procedures.REASONDESCRIPTION	2	Laceration of foot (disorder)
+procedures.REASONDESCRIPTION	3	Laceration of forearm (disorder)
+procedures.REASONDESCRIPTION	5	Laceration of hand (disorder)
+procedures.REASONDESCRIPTION	5	Laceration of thigh (disorder)
+procedures.REASONDESCRIPTION	16	Leaking dental filling (finding)
+procedures.REASONDESCRIPTION	17	Loose dental filling (finding)
+procedures.REASONDESCRIPTION	63	Loss of teeth (disorder)
+procedures.REASONDESCRIPTION	1	Macular edema and retinopathy due to type 2 diabetes mellitus (disorder)
+procedures.REASONDESCRIPTION	82	Malignant neoplasm of breast (disorder)
+procedures.REASONDESCRIPTION	12	Malignant neoplasm of colon (disorder)
+procedures.REASONDESCRIPTION	2	Neoplasm of prostate (disorder)
+procedures.REASONDESCRIPTION	681	Non-small cell carcinoma of lung  TNM stage 1 (disorder)
+procedures.REASONDESCRIPTION	5	Nonproliferative diabetic retinopathy due to type II diabetes mellitus
+procedures.REASONDESCRIPTION	2151	Normal pregnancy (finding)
+procedures.REASONDESCRIPTION	2208	Patient referral for dental care (procedure)
+procedures.REASONDESCRIPTION	9	Polyp of colon (disorder)
+procedures.REASONDESCRIPTION	66	Primary dental caries (disorder)
+procedures.REASONDESCRIPTION	18	Proliferative diabetic retinopathy due to type II diabetes mellitus
+procedures.REASONDESCRIPTION	52	Pulmonary emphysema (disorder)
+procedures.REASONDESCRIPTION	1	Recurrent rectal polyp (disorder)
+procedures.REASONDESCRIPTION	2	Resorption of alveolar process due to dental trauma (disorder)
+procedures.REASONDESCRIPTION	14	Risk activity involvement (finding)
+procedures.REASONDESCRIPTION	2	Sepsis (disorder)
+procedures.REASONDESCRIPTION	73	Sleep disorder (disorder)
+procedures.REASONDESCRIPTION	4	Sterilization requested (situation)
+procedures.REASONDESCRIPTION	6	Streptococcal sore throat (disorder)
+procedures.REASONDESCRIPTION	10	Suspected disease caused by Severe acute respiratory coronavirus 2 (situation)
+procedures.REASONDESCRIPTION	9	Suspected lung cancer (situation)
+procedures.REASONDESCRIPTION	3	Torus palatinus (disorder)
+procedures.REASONDESCRIPTION	2	Tubal pregnancy (disorder)
+supplies.DESCRIPTION	97	Air filter  device (physical object)
+supplies.DESCRIPTION	24	Air-purifying respirator (physical object)
+supplies.DESCRIPTION	24	Alcohol disinfectant (substance)
+supplies.DESCRIPTION	24	Antiseptic towelette (physical object)
+supplies.DESCRIPTION	408	Blood glucose testing strips (physical object)
+supplies.DESCRIPTION	147	Blood lancet (physical object)
+supplies.DESCRIPTION	49	CPAP/BPAP oral mask (physical object)
+supplies.DESCRIPTION	48	Continuous positive airway pressure nasal oxygen cannula (physical object)
+supplies.DESCRIPTION	97	Continuous positive airway pressure/Bilevel positive airway pressure mask (physical object)
+supplies.DESCRIPTION	646	Conventional release periodontal gel (dose form)
+supplies.DESCRIPTION	646	Dental equipment (physical object)
+supplies.DESCRIPTION	646	Dental floss (physical object)
+supplies.DESCRIPTION	33	Dental impression material (physical object)
+supplies.DESCRIPTION	33	Dental impression tray material (physical object)
+supplies.DESCRIPTION	24	Face shield (physical object)
+supplies.DESCRIPTION	24	Isolation gown (physical object)
+supplies.DESCRIPTION	3	Kidney part (body structure)
+supplies.DESCRIPTION	97	Medical air low pressure tubing (physical object)
+supplies.DESCRIPTION	24	Nitrile examination/treatment glove  non-powdered  sterile (physical object)
+supplies.DESCRIPTION	2	Packed red blood cells (product)
+supplies.DESCRIPTION	19	Solution (substance)

@@ -249,6 +249,23 @@ class DeclarationRequest:
     _config: Mapping[str, Any]
     _descriptors: tuple[tuple[str, Mapping[str, Any]], ...]
     _inputs: tuple[DeclarationInput, ...]
+    _remote: tuple[str, ...] = ()
+
+    @property
+    def remote_sources(self) -> tuple[str, ...]:
+        """Names of the non-file sources (`s3`, `gcs`, or a type added later) a `for_validate`
+        request left unchecked."""
+        return self._remote
+
+    @classmethod
+    def for_validate(cls, config: Mapping[str, Any]) -> DeclarationRequest:
+        """The offline form of `for_descriptors`: only local file sources are read, for their
+        header or footer. Any other source type (`s3`, `gcs`, or one added later) is never opened (validate must not need cloud
+        credentials or a network); its name is in `remote_sources` so the caller can say it was
+        not checked. `decoy run` uses `for_descriptors` and still refuses before any row."""
+        local = tuple((n, d) for n, d in _config_sources(config) if d.get("type") == "file")
+        remote = tuple(n for n, d in _config_sources(config) if d.get("type") != "file")
+        return cls(config, local, (), remote)
 
     @classmethod
     def for_descriptors(cls, config: Mapping[str, Any]) -> DeclarationRequest:
