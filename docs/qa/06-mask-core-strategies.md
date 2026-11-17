@@ -45,7 +45,7 @@ The general-purpose column strategies: `hash`, `fpe`, `faker`, `categorical`,
 | MASK-07 | `fpe` with `checksum: luhn` on valid card numbers; `checksum: npi` on NPIs. | Every output passes the scheme's validator. NPI outputs start with 1 or 2. |
 | MASK-08 | `faker` with `provider: person_first_name`, `deterministic: true`, a namespace, on a column with repeats. | Equal source values get equal fake names. Rerun gives the same output. |
 | MASK-09 | Same column without `deterministic`, on a source where one value repeats on 1,000 rows. | The repeated value does not map to one fixed name: its 1,000 rows get more than one distinct name. Equal names on different source values can occur by chance. Rerun with the same seed is identical. |
-| MASK-10 | Deterministic `faker` on a column with 50,000 distinct values and the default `pool_size`. | **Exploratory.** Record how many distinct outputs come back. Slot collisions are expected (see the open point on collisions). |
+| MASK-10 | Deterministic `faker` on a column with 50,000 distinct values and the default `pool_size`, run with `--post-validate`. | The run carries one `warning.cardinality_collisions` warning for the column. `distinct_lost` equals `source_distinct` minus `output_distinct`, is above zero, and `pool_size` is 10,000. No source value appears in the warning. |
 | MASK-11 | `faker` with `cardinality_mode: unique` on more rows than `pool_size`; then `unique` with `deterministic: true`. | First fails with `runtime.uniqueness_impossible`. Second is refused as an incompatible combination. |
 | MASK-12 | `categorical` with `categories` and `weights` on a source of 100,000 distinct values. | Each output share is within 4 standard errors of its weight, √(w(1−w)/n) with n the distinct source values (about ±0.6 points for a weight of 0.7). The draw is keyed per source value, so repeated values share a category. Nulls preserved. |
 | MASK-13 | `shuffle` on a column with nulls. | Sorted non-null output equals sorted non-null input. Null positions are unchanged. Two runs are byte-identical. |
@@ -55,12 +55,6 @@ The general-purpose column strategies: `hash`, `fpe`, `faker`, `categorical`,
 
 ## Open points
 
-- **Collisions in deterministic faker.** `docs/strategies.md` says deterministic pool
-  strategies preserve cardinality by default (distinct in, distinct out).
-  `PoolSampler._deterministic` picks `derive_index(value) % pool_size`, which lets two
-  values share a slot. MASK-10 measures what actually happens. If collisions occur by
-  default, either the doc or the default is wrong, and `allow_collisions` is not really
-  an opt-in.
 - `fpe` with a charset of fewer than two characters "degrades to passthrough" per the
   docs. That is unmasked output from a masking strategy; confirm it is refused or at
   least warned about.

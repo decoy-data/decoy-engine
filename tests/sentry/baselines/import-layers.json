@@ -65,9 +65,6 @@
   "layers::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
-  "layers::decoy_engine.plan._seed_envelope -> decoy_engine.execution._distribution_behavior": {
-   "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
-  },
   "layers::decoy_engine.plan._seed_envelope -> decoy_engine.execution._technique_class": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },

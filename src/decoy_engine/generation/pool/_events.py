@@ -33,6 +33,10 @@ class QualityWarning:
       a locale outside Mimesis coverage; the adapter fell back to Faker for
       that locale + provider. `detail` carries `requested_locale` +
       `mimesis_locales`.
+    - `cardinality_collisions` (post-validation cardinality scan): a deterministic `faker` column
+      (not `unique`, no `when:`) merged distinct source values into shared outputs. `detail`
+      carries `table`, `source_distinct`, `output_distinct`, `distinct_lost` and `pool_size`
+      (the effective size, `DEFAULT_POOL_SIZE` when none is declared); names and counts only.
     - `generation_fidelity_below_threshold` (statistical fidelity gate): a generated table's
       overall score, or one comparable column's score, is below `fidelity_warn_threshold`.
       `detail` carries `table`, `snapshot_index`, `overall_score`, `threshold`, `trigger`,

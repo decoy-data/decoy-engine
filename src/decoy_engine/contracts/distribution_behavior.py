@@ -51,7 +51,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-DistributionBehavior = Literal[
+_DistributionBehavior = Literal[
     "preserves_all",
     "preserves_cardinality_only",
     "destroys_frequency",
@@ -67,7 +67,7 @@ DistributionBehavior = Literal[
 # uniform-default value; the function below resolves it dynamically.
 # nested is `inherits` -- the manifest carries the child's actual
 # behavior after plan-compile resolves it.
-_STATIC_BEHAVIOR: dict[str, DistributionBehavior] = {
+_STATIC_BEHAVIOR: dict[str, _DistributionBehavior] = {
     "passthrough": "preserves_all",
     "shuffle": "preserves_all",
     "hash": "preserves_cardinality_only",
@@ -150,7 +150,7 @@ _STATIC_BEHAVIOR: dict[str, DistributionBehavior] = {
 def distribution_behavior_for(
     strategy: str | None,
     provider_config: tuple[tuple[str, Any], ...] | None = None,
-) -> DistributionBehavior | None:
+) -> _DistributionBehavior | None:
     """Resolve the distribution-behavior label for a strategy.
 
     Returns `None` when the strategy is unknown. `provider_config`
