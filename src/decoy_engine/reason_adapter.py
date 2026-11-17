@@ -110,6 +110,8 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.validation.starter_review", "ReviewDuplicateError", "pre_scan"),
     ("decoy_engine.validation.starter_review", "ReviewStaleError", "pre_scan"),
     ("decoy_engine.validation.starter_review", "ReviewEmptyTableError", "pre_scan"),
+    ("decoy_engine.validation.finding_review", "ReviewDismissRefusedError", "post_scan"),
+    ("decoy_engine.validation.finding_review", "ReviewConflictError", "post_scan"),
 )
 # Engine exceptions that carry no code but have one fixed meaning: (module, class, reason).
 _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (

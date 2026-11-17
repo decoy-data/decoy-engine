@@ -41,6 +41,7 @@ from decoy_engine.profiling._starter_config import (
     build_entry,
     check_starter_config,
     declared_key_namespaces,
+    detector_entry,
     starter_config,
 )
 from decoy_engine.profiling._value_redaction import (
@@ -140,6 +141,7 @@ __all__ = [
     "check_starter_config",
     "column_distinct",
     "declared_key_namespaces",
+    "detector_entry",
     "diff_scan_documents",
     "diff_scan_tables",
     "distribution_snapshot_document",

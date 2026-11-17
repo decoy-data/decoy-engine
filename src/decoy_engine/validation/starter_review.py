@@ -245,7 +245,9 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
             continue
         if verdict is ReviewVerdict.DROP:
             if key is not None:
-                raise _not_join_safe(decision, "a relationship key cannot be dropped")
+                raise _not_join_safe(
+                    decision.table, decision.column, "a relationship key cannot be dropped"
+                )
             dropped.setdefault(decision.table, set()).add(decision.column)
             notes.pop(slot, None)
             continue
@@ -259,10 +261,7 @@ def apply_review(starter: StarterConfig, decisions: Sequence[ReviewDecision]) ->
         else:
             entry = _edited_entry(decision, None if key is None else key[0])
         if key is not None:
-            info = catalog.get(entry.get("strategy", ""))
-            if info is None or not info.join_safe:
-                raise _not_join_safe(decision, "a relationship key needs a join-safe strategy")
-            entry = {**entry, "namespace": key[0]}
+            entry = pin_key_entry(decision.table, decision.column, entry, key[0])
         columns[index] = entry
         notes.pop(slot, None)
     for table_name, names in dropped.items():
@@ -284,8 +283,18 @@ def _invalid(
     return ReviewEntryError(text, table=table, column=column, option=option)
 
 
-def _not_join_safe(decision: ReviewDecision, text: str) -> ReviewInputError:
-    return ReviewKeyColumnError(text, table=decision.table, column=decision.column)
+def _not_join_safe(table: str, column: str, text: str) -> ReviewKeyColumnError:
+    return ReviewKeyColumnError(text, table=table, column=column)
+
+
+def pin_key_entry(
+    table: str, column: str, entry: Mapping[str, Any], namespace: str
+) -> dict[str, Any]:
+    """`entry` for a relationship key column: join-safe strategy, the relationship's namespace."""
+    info = _catalog().get(entry.get("strategy", ""))
+    if info is None or not info.join_safe:
+        raise _not_join_safe(table, column, "a relationship key needs a join-safe strategy")
+    return {**entry, "namespace": namespace}
 
 
 def _index_of(table: Mapping[str, Any] | None, column: str) -> int | None:

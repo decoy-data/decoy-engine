@@ -38,6 +38,7 @@ from decoy_engine.config import (
 )
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
 from decoy_engine.detection.types import DetectorSource, ModelRef
+from decoy_engine.profiling import recommendations
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
@@ -48,6 +49,7 @@ __all__ = [
     "build_entry",
     "check_starter_config",
     "declared_key_namespaces",
+    "detector_entry",
     "starter_config",
 ]
 
@@ -221,6 +223,25 @@ def _suggestion(
     )
     named = dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
     return dataclasses.replace(named, entry=MappingProxyType(_entry(named)))
+
+
+def detector_entry(detector_id: str, column: str) -> dict[str, Any] | None:
+    """The column entry the starter writes for a column `detector_id` flagged, or None.
+
+    None when the detector has no starter choice. The namespace follows the same registry rule
+    as `starter_config`, so a review that takes a detector's default writes what a scan would.
+    """
+    choice = recommendations.starter_choice(detector_id)
+    if choice is None:
+        return None
+    bare = ColumnSuggestion(
+        "",
+        column,
+        choice.strategy,
+        provider=choice.provider,
+        provider_config=choice.provider_config,
+    )
+    return _entry(dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare)
 
 
 def _needs_namespace(s: ColumnSuggestion) -> bool:
