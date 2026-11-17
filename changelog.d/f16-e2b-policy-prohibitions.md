@@ -1,0 +1,5 @@
+### Added (policy prohibitions and explanation, F16-E2b, 2026-11-17)
+
+`expand_policy` now checks the `policy.prohibit` list on every decided mask field, including a column's own strategy. A `forbid` entry refuses a field whose strategy is listed, a `require` entry refuses a field whose strategy is not, and a strategy name that is not a known masking strategy is refused as `config/policy_unknown_strategy`. A prohibition that selects no field is not an error and reports `matched: 0`. All violations come back in one error with the new reason code `config/policy_prohibited`; the message names the prohibition id, the strategy and the `table.column` only.
+
+`expansion_to_dict` writes the `policy-expansion/v1` explanation: per field the strategy, level, source, overridden rule ids and a decision digest, the rules and prohibitions with their match counts, and a fingerprint of the decisions and the disguise pin. It never holds `provider_config`. Nothing calls either yet: `PipelineConfig` does not read a `policy` block until slice E3, so no config, dump or hash changes.
