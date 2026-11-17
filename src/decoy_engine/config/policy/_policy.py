@@ -8,6 +8,7 @@ are compared after normalizing to the `ColumnConfig` defaults once.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from pydantic import (
@@ -52,7 +53,7 @@ _STRICT = ConfigDict(extra="forbid", strict=True, frozen=True, hide_input_in_err
 def json_carryable(value: Any) -> bool:
     """True when `value` has a canonical JSON form (no NaN, infinity or foreign type)."""
     try:
-        canonical_json_bytes(value)
+        canonical_json_bytes(dict(value) if isinstance(value, Mapping) else value)
     except CanonicalJsonError:
         return False
     return True
