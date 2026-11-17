@@ -44,12 +44,23 @@ class Rule(enum.Enum):
     EMPTY_MAP = "empty_map"
     PREVIOUS_YEAR_START = "previous_year_start"  # re-derived from the year bins
     NEXT_YEAR_END = "next_year_end"
+    # The floor rules for a column the profiler did not flag (`SNAPSHOT_FLOOR_STATS`).
+    TOP_CODED_RANGE = "top_coded_range"  # bounds and bins from the K-th smallest and largest cell
+    K_TAIL_QUANTILES = "k_tail_quantiles"  # kept only when K rows lie on each side
+    FOLD_YEARS_UNDER_K = "fold_years_under_k"  # adjacent years merged until a range holds K rows
+    KEPT_YEAR_START = "kept_year_start"  # first instant of the first folded range
+    KEPT_YEAR_END = "kept_year_end"  # last instant of the last folded range
+    FOLD_UNDER_K = "fold_under_k"  # labels and cells under K rows move into other_count
 
 
 REDACTED: Final = "[redacted]"
 VALUE_POLICY_KEY: Final = "value_policy"
 REDACTED_COLUMNS_KEY: Final = "redacted_columns"
-POLICY_REDACTED: Final = "flagged-redacted/v1"
+# v2: every column the profiler did not flag is floored at MIN_RELEASE_COUNT as well.
+POLICY_REDACTED: Final = "flagged-redacted/v2"
+POLICY_REDACTED_V1: Final = "flagged-redacted/v1"
+# Every reader that asks "is this a redacted document" tests membership, never equality.
+REDACTED_POLICIES: Final = frozenset({POLICY_REDACTED_V1, POLICY_REDACTED})
 POLICY_RAW: Final = "raw"
 PII_CANDIDATE_THRESHOLD: Final = 0.6
 # Minimum source rows behind a released numeric interval, tail or exact value. Agencies use
@@ -132,7 +143,15 @@ SNAPSHOT_VALUE_STATS: Final[Mapping[tuple[str, str], Rule]] = types.MappingProxy
     }
 )
 SNAPSHOT_VALUE_FREE_STATS: Final[frozenset[tuple[str, str]]] = frozenset(
-    _free("document", "schema_version", "row_count", "columns", "joints")
+    _free(
+        "document",
+        "schema_version",
+        "row_count",
+        "columns",
+        "joints",
+        "value_policy",
+        "redacted_columns",
+    )
     | _free(
         "column",
         "dtype",
@@ -148,20 +167,63 @@ SNAPSHOT_VALUE_FREE_STATS: Final[frozenset[tuple[str, str]]] = frozenset(
     | _free("fanout", "rows", "keys", "degrees")
     | _free("categorical", "other_count", "high_cardinality")
     | _free("datetime", "year_bins")
-    | _free("year_bin", "year", "count")
+    | _free("year_bin", "year", "start_year", "end_year", "count")
     | _free("freetext", "length", "length_bin_edges", "length_bin_counts")
     | _free("length", "min", "max", "mean", "std")
     | _free("joint", "columns", "cell_count", "other_count")
 )
+# Rules for a column the profiler did not flag, in a plain snapshot. The flagged table above
+# withholds a key; this one keeps it at or above MIN_RELEASE_COUNT rows (Hundepool et al.,
+# Statistical Disclosure Control, Wiley 2012, sections 3.4 and 4.2: top and bottom coding, global
+# recoding, a minimum frequency rule). `("datetime", "year_bins")` is value-free for a flagged
+# column and still folded, so it sits in both registries.
+SNAPSHOT_FLOOR_STATS: Final[Mapping[tuple[str, str], Rule]] = types.MappingProxyType(
+    {
+        ("numeric", "min"): Rule.TOP_CODED_RANGE,
+        ("numeric", "max"): Rule.TOP_CODED_RANGE,
+        ("numeric", "bin_edges"): Rule.TOP_CODED_RANGE,
+        ("numeric", "bin_counts"): Rule.TOP_CODED_RANGE,
+        ("numeric", "quantiles"): Rule.K_TAIL_QUANTILES,
+        ("categorical", "top_values"): Rule.FOLD_UNDER_K,
+        ("datetime", "year_bins"): Rule.FOLD_YEARS_UNDER_K,
+        ("datetime", "min"): Rule.KEPT_YEAR_START,
+        ("datetime", "max"): Rule.KEPT_YEAR_END,
+        ("joint", "cells"): Rule.FOLD_UNDER_K,
+    }
+)
+# Flagged-table keys the floor keeps as they are: aggregates of at least 2K cells, and blocks the
+# numeric shape fit already floors at K.
+SNAPSHOT_FLOOR_KEPT_STATS: Final[frozenset[tuple[str, str]]] = frozenset(
+    _free("numeric", "mean", "std", "quantile_grid", "exact_values")
+)
 SNAPSHOT_KINDS: Final = frozenset({"numeric", "categorical", "datetime", "freetext", "empty"})
 # Rules that need the data; `_apply` performs every other rule.
-DATA_RULES: Final = frozenset({Rule.COARSE_RANGE, Rule.PREVIOUS_YEAR_START, Rule.NEXT_YEAR_END})
+DATA_RULES: Final = frozenset(
+    {
+        Rule.COARSE_RANGE,
+        Rule.PREVIOUS_YEAR_START,
+        Rule.NEXT_YEAR_END,
+        Rule.TOP_CODED_RANGE,
+        Rule.K_TAIL_QUANTILES,
+        Rule.FOLD_YEARS_UNDER_K,
+        Rule.KEPT_YEAR_START,
+        Rule.KEPT_YEAR_END,
+        Rule.FOLD_UNDER_K,
+    }
+)
 
 
 def snapshot_rules(scope: str) -> Mapping[str, Rule]:
     """Every value rule the snapshot registry holds for a scope (a column kind, `joint`)."""
     return types.MappingProxyType(
         {k: r for (s, k), r in SNAPSHOT_VALUE_STATS.items() if s == scope}
+    )
+
+
+def snapshot_floor_rules(scope: str) -> Mapping[str, Rule]:
+    """Every floor rule the registry holds for a scope (a column kind, `joint`)."""
+    return types.MappingProxyType(
+        {k: r for (s, k), r in SNAPSHOT_FLOOR_STATS.items() if s == scope}
     )
 
 

@@ -18,15 +18,17 @@ from decoy_engine.quality.snapshot import (
     compute_distribution_snapshot,
 )
 
-_WEIGHTS = (20, 15, 12, 10, 9, 8, 7, 6, 5, 4, 3, 1)
+_WEIGHTS = (20, 15, 12, 10, 9, 8, 7, 6, 5, 4, 3, 2)
 _PAIR = [("parent", "kid")]
-# Digests of both writers at the default cap, recorded at origin/main 1a5b36e5 (AT-1).
-_DIGEST_COMPUTE = "796fa21ab05e1f3024eefd6b9523d18e55e76561c9510cb5ead91e4e66d8e3be"
-_DIGEST_DOCUMENT = "263822eea1d98cbf3d48c4bf22103b5ad7fa24ce99c613014c1fe6dcb1c77b5e"
+# Digests of both writers at the default cap. The compute digest was recorded at origin/main
+# 1a5b36e5 and re-recorded when the smallest cell grew to K rows (the document writer floors cells
+# under 10 rows); the document digest is re-recorded for `distribution-snapshot/v2` (fit E1).
+_DIGEST_COMPUTE = "b8091e209645fcd3fc042c9a60e059c3107e9fc05208d9e29df901151ece3dc6"
+_DIGEST_DOCUMENT = "7ca961c0882dbbeb2dea430fd4f267e2f3d2e5623c9171780eac76bb17e32073"
 
 
 def _cond_frame() -> pd.DataFrame:
-    """6,000 rows, 36 parent/kid pairs; built without an RNG."""
+    """6,060 rows, 36 parent/kid pairs; built without an RNG."""
     parents: list[str] = []
     kids: list[str] = []
     for i, w in enumerate(_WEIGHTS):
@@ -55,7 +57,7 @@ def test_at1_default_bytes_unchanged() -> None:
 
 def test_fixture_shape() -> None:
     (joint,) = compute_distribution_snapshot(_cond_frame(), joint_columns=_PAIR)["joints"]
-    assert (joint["cell_count"], len(joint["cells"]), joint["other_count"]) == (36, 25, 366)
+    assert (joint["cell_count"], len(joint["cells"]), joint["other_count"]) == (36, 25, 414)
 
 
 @pytest.mark.parametrize("writer", [compute_distribution_snapshot, distribution_snapshot_document])
@@ -77,7 +79,7 @@ def test_at3a_default_cap_reports_the_cut() -> None:
         "cells_kept": 25,
         "cap_dropped": 11,
         "policy_dropped": 0,
-        "other_count": 366,
+        "other_count": 414,
     }
     _scan([repr(w.detail), str(w.column)])
 
