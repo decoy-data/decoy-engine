@@ -458,3 +458,20 @@ def test_relation_columns_attach_interrupt_with_the_deadline_set_is_deadline_exc
         )
     assert ei.value.code == "deadline_exceeded"
     _assert_value_free(ei.value, caplog)
+
+
+class _ElsewhereConn:
+    """A connection whose postgres extension loaded from outside the bundled directory."""
+
+    def execute(self, sql, params=None):
+        class _Result:
+            def fetchone(self):
+                return (True, "/somewhere/else/postgres_scanner")
+
+        return _Result()
+
+
+def test_extension_loaded_from_outside_the_bundled_directory_is_refused(tmp_path):
+    with pytest.raises(PostgresSnapshotError) as ei:
+        session.load_postgres_extension(_ElsewhereConn(), tmp_path / "ext")
+    assert ei.value.code == "extension_untrusted_location"
