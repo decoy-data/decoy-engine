@@ -216,15 +216,26 @@ Python-object terms price the fixed-width paths:
 - Write: `I + sum(arrow(inputs)) + sum(arrow(outputs)) + transient_out(t*)`, where outputs are
   priced with the input specs and `t*` is the output with the largest transient:
   - CSV target: `frame(t)`.
-  - fixed_width target: `frame(t) + max(refs(t), lists(t))`, the larger of the two moments in G3
-    (the Arrow output is already in the sum). During coercion the original frame costs `frame`
-    and the copy `refs`; during the list conversion the copy, now the only owner of the str
-    objects, costs `frame` and the lists `lists`. With the cell costs above `lists >= refs` for
-    every column type (8 against 8 for a string cell; a slot plus an int or float object against
-    an item size of at most 9 for a numeric cell), so the term equals `frame + lists` today. The
-    code keeps the `max` so a change to either cost stays correct.
-  - The per-column `Int64` series `_coerce_int_columns` builds is one column at a time and
-    replaces the copy's column; it is not priced (below the copy it replaces plus one column).
+  - fixed_width target: `max(coerce_moment(t), list_moment(t))`, the larger of the two moments in
+    G3 (the Arrow output is already in the sum).
+    - `coerce_moment(t) = frame(t) + refs(t) + max over c in int_cols(t) of coerce(c)`. During
+      `_coerce_int_columns` (CLI `_targets.py:316-355`) the original frame costs `frame`, the
+      copy `refs`, and the column being coerced builds a Python list of ints and then an `Int64`
+      series from it (`_targets.py:273-293`, `:316-321`), both live while the series is built:
+      `coerce(c) = rows * (8 + int_object + 9)` (a list slot, one int object sized with
+      `sys.getsizeof` at import, and the `Int64` value plus its mask byte). Coercion is one
+      column at a time, so only the largest such column is added. `int_cols(t)` is the set of
+      columns the target layout types `int` whose priced type is not already an integer type
+      (an integer column takes the `astype` path and is covered by `refs`).
+    - `list_moment(t) = frame(t) + lists(t)`, where `lists` prices every column in `int_cols(t)`
+      as a list slot plus an int object, whatever its input spec, because the engine writer's
+      `.tolist()` (`_fixed_width_writer.py:310`) turns the `Int64` column into Python ints. The
+      other columns keep the cell costs above. `frame(t)` still prices those columns with the
+      input spec; that over-prices a coerced string column (its strings are freed with the
+      original frame) and is accepted as the conservative side.
+    - The int-column set comes from the fixed_width target layout in the pipeline config, read by
+      the same loader the CLI uses; a layout that cannot be read leaves the write term unpriced
+      with a note (one of the constant note texts, AT-E1-21).
   - Parquet target: 0.
 - Lifecycle peak is the largest phase peak; the limiting phase is its token. Ties go to the
   earlier phase.
@@ -363,7 +374,8 @@ devbox. Accuracy cells are `benchmark`-marked and run on a test VM through `~/bi
 | AT-E1-16 | Transforms: a mask table with a declared transform adds one `arrow(t)` to execute | module does not exist | drop the transform copy |
 | AT-E1-20 | Format registry: the lifecycle rule table's keys equal `FILE_FORMATS` keys; a descriptor with an unknown format gives lifecycle defaults and a note | rule table does not exist | remove `fixed_width` from the rule table |
 | AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned | notes block does not exist | build a note with an inline f-string |
-| AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column adds exactly `frame + max(refs, lists)` for the largest output (not `frame + refs + lists`, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum `refs` and `lists` instead of taking the larger |
+| AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column (the int column already integer-typed) adds exactly `max(coerce_moment, list_moment)` as section 4.2 defines it (not the summed form, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum the two moments instead of taking the larger |
+| AT-E1-28 | Fixed-width integer coercion: a CSV-sourced string column the target layout types `int` adds `coerce(c) = rows * (8 + int_object + 9)` to the coerce moment for the largest such column only, and `lists` prices it as an int object per cell, not as its input string spec; an integer-typed column adds no coerce term; an unreadable layout leaves the write term unpriced with the constant note | module does not exist | (a) drop the `coerce(c)` term; (b) price `int_cols` lists with the input spec; (c) add `coerce` for every int column instead of the largest |
 | AT-E1-22 | Helper parity: `arrow_column_bytes(t, rows, 0)` equals the base head's `_arrow_column_floor(t, rows)` for a matrix of types (bool, int8 to int64, float32/64, string, large_string, timestamp, date32); `generation_floor_bytes` is unchanged on the merged generation fixtures | helper does not exist | drop the ceil division for bool |
 
 ### 8.2 84-E1, accuracy (`tests/perf/test_f24_lifecycle_accuracy.py`, `benchmark` marker, test VM only)
@@ -407,7 +419,7 @@ slope.
 | AT-E1-19 | numeric_fk, out_of_core (slope 0.95) | 500k / 1M | 1.24 / 1.32 | 1.5 |
 | AT-E1-23 | numeric_single, full_frame (slope 3.45) | 1M / 2M | 1.26 / 1.28 | 1.5 |
 | AT-E1-25 | native route, not in TB-4 | any | unknown | lower only |
-| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term `frame + max(refs, lists)` | 1M / 3M | execute about 1.26 / 1.28; write is a direct sum with no slope | 1.5 if the model predicts write as the limiting phase (expected: write), else lower only |
+| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term `max(coerce_moment, list_moment)` (section 4.2) | 1M / 3M | execute about 1.26 / 1.28; write is a direct sum with no slope | 1.5 if the model predicts write as the limiting phase (expected: write), else lower only |
 
 The ingest and write terms are direct sums with no slope, so a cell whose predicted limiting phase
 is ingest or write also takes the 1.5 bound. Under the pinned slopes only AT-E1-27 is expected to
@@ -637,7 +649,7 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
   from `_sequential.py:443`; AT-E1-3 pins it; AT-E1-18 is the lower-bound check.
 - The fixed-width write term missed a live copy or summed copies that are never live together.
   Guard: section 4.2 states the two moments from the CLI code; AT-E1-26 pins the formula and
-  kills the summed form; AT-E1-27 checks the bounds on a real fixed-width write.
+  kills the summed form; AT-E1-28 pins the integer-coercion term; AT-E1-27 checks the bounds on a real fixed-width write.
 - The upper bound failed on a string cell. Guard: string execute cells are lower bound only, from
   the TB-4 ratios in 8.3.
 - The upper bound failed on a cell that went native. Guard: realized route recorded; FM-6.
@@ -703,5 +715,10 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
     G3, section 4.2, AT-E1-26 and the 8.3 row are updated; `lists >= refs` per cell is stated.
   - V1-2: AT-E1-27 claims only the bound check; the named mutation (summed `refs` and `lists`)
     sits on unit cell AT-E1-26. No accuracy cell carries a mutation.
+- Codex round 3 (head 5059ef33a), V1: the per-column `Int64` coercion was left unpriced, and an
+  int-declared string column was priced with its string spec at the list moment. Fixed by the
+  orchestrator after the round cap: section 4.2 adds `coerce_moment` with the largest
+  `coerce(c)` and prices `int_cols` lists as int objects; new unit cell AT-E1-28 with three
+  named mutations.
   - CLI citations: CSV conversion `_sources.py:418-419`, fixed-width conversion `:423-424`.
 - Next: Codex round 3 of 3 (last) on revision 4.
