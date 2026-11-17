@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -23,6 +24,14 @@ __all__ = [
     "LOADER_TABLE_UNDECLARED",
     "NAMESPACE_PLACEHOLDER_UNSET",
     "PIPELINE_NAME_INVALID",
+    "POLICY_BLOCK_INVALID",
+    "POLICY_COLUMN_PARTIAL",
+    "POLICY_FIELD_UNDECIDED",
+    "POLICY_RULE_CONFLICT",
+    "POLICY_SELECTOR_INVALID",
+    "POLICY_SELECTOR_UNMATCHED",
+    "POLICY_UNKNOWN_CLASSIFICATION",
+    "POLICY_UNKNOWN_STRATEGY",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -147,4 +156,50 @@ NAMESPACE_PLACEHOLDER_UNSET = _d(
     "namespace_placeholder_unset",
     "A namespace still holds the placeholder a starter pipeline writes; set a real namespace.",
     since="1.27.0",
+)
+
+# Pipeline `policy` block refusals. Summaries name no config value; the error text adds rule ids
+# and `table.column` names only.
+_d = _catalog.config("PipelineValidationError")
+
+POLICY_SELECTOR_INVALID = _d(
+    "policy_selector_invalid",
+    "A policy selector is empty, has an unknown key or holds a value outside the grammar.",
+    since=UNRELEASED,
+)
+POLICY_UNKNOWN_CLASSIFICATION = _d(
+    "policy_unknown_classification",
+    "A classification is not one the engine knows.",
+    since=UNRELEASED,
+)
+POLICY_UNKNOWN_STRATEGY = _d(
+    "policy_unknown_strategy",
+    "A policy names a masking strategy the engine does not know.",
+    since=UNRELEASED,
+)
+POLICY_SELECTOR_UNMATCHED = _d(
+    "policy_selector_unmatched",
+    "A policy rule selects no mask column.",
+    since=UNRELEASED,
+)
+POLICY_RULE_CONFLICT = _d(
+    "policy_rule_conflict",
+    "Two policy sources decide one column differently at the same precedence level.",
+    since=UNRELEASED,
+)
+POLICY_FIELD_UNDECIDED = _d(
+    "policy_field_undecided",
+    "No policy level decides a mask column.",
+    since=UNRELEASED,
+)
+POLICY_COLUMN_PARTIAL = _d(
+    "policy_column_partial",
+    "A column without a strategy sets keys that only a strategy can use.",
+    since=UNRELEASED,
+)
+POLICY_BLOCK_INVALID = _d(
+    "policy_block_invalid",
+    "The policy block has a duplicate id, a prohibition without exactly one of forbid and "
+    "require, or a value JSON cannot carry.",
+    since=UNRELEASED,
 )
