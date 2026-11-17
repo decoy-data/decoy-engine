@@ -158,8 +158,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess
+from decoy_engine.execution import _strategies
 from decoy_engine.execution._mem_estimate import _FIXED_WIDTH_DTYPE_BYTES, is_fixed_width_dtype
-from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.out_of_core._budget import (
     DiskSpillPreflight,
     _nearest_existing_ancestor,
@@ -328,9 +328,7 @@ def _declared_output_width(strategy: str | None, params: dict[str, Any]) -> int 
     """The UTF-8 byte width the strategy handler declares for its output cells (hash, redact),
     from the same config shape `run` reads; None when it declares none or the config makes it
     unknown. Spill stages bytes, so the handler's byte width is the right unit."""
-    handler = SCALAR_HANDLERS.get(strategy) if strategy is not None else None
-    width_of = getattr(handler, "output_string_width", None)
-    return width_of(tuple(params.items())) if callable(width_of) else None
+    return _strategies.output_declaration(strategy, tuple(params.items())).string_width
 
 
 def _strategy_output_width_bytes(strategy: str | None, params: dict[str, Any]) -> float:

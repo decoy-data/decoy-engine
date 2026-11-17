@@ -18,6 +18,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.execution import _strategies
 from decoy_engine.execution._mem_estimate import ColumnSizeSpec
 from decoy_engine.execution._mem_estimate_arrow import (
     _is_string_family,
@@ -25,7 +26,6 @@ from decoy_engine.execution._mem_estimate_arrow import (
     source_nullable_columns,
 )
 from decoy_engine.execution._mem_estimate_schema import table_size_spec_from_profile
-from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.pipeline import _lifecycle as lc
 from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect
 from decoy_engine.profile._lazy_build import build_lazy_source, descriptor_path
@@ -205,13 +205,12 @@ def _declared_output(
 ) -> tuple[ColumnSizeSpec, pa.DataType] | None:
     """The column as its strategy writes it, from the handler's own declaration, or None when
     the handler declares nothing for this column."""
-    handler = SCALAR_HANDLERS.get(strategy) if strategy is not None else None
     if strategy is None:
         return column.spec, column.arrow_type
-    if getattr(handler, "output_is_input", False):
+    declared = _strategies.output_declaration(strategy, provider_config)
+    if declared.is_input:
         return column.spec, column.arrow_type
-    width_of = getattr(handler, "output_string_width", None)
-    width = width_of(provider_config) if callable(width_of) else None
+    width = declared.string_width
     if width is None:
         return None
     spec = ColumnSizeSpec(column.name, "object", string_width_bytes=float(width))
