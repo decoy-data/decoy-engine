@@ -6,7 +6,10 @@ hosts and compared. ``compare_runtime_locks`` names each field that differs.
 
 One field list (``_FIELDS``) is both the writer and the reader, so the writer cannot emit what the
 reader refuses. The reader refuses an unknown tag, a missing tag, a missing field and a wrong
-type, and ignores a field added under ``lock/v1`` (compatibility contract 3.1). Versions come from
+type, and ignores a field added under ``lock/v1`` (compatibility contract 3.1). One field,
+``probe``, is optional: absent reads as ``None`` and ``None`` is omitted on write, so a lock
+written before the probe existed still reads and rewrites to the same bytes. The flag lives on
+the field descriptor, so no function names a field. Versions come from
 ``runtime_identity`` and distribution metadata; digests go through the canonical JSON writer.
 Pattern: lock files of resolved inputs (``uv.lock``) diffed as environment reports.
 """
@@ -40,6 +43,7 @@ from decoy_engine._canonical import (
 from decoy_engine.generation import runtime_identity
 from decoy_engine.keyprovider import KEY_VERSION_PATTERN, MaskSecretError, is_key_version_label
 from decoy_engine.publication import is_hex64
+from decoy_engine.support._probe import run_probe
 
 __all__ = [
     "LOCK_SCHEMA",
@@ -124,21 +128,31 @@ class _DependenciesSpec:
         return "dependencies"
 
 
-_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
-    ("schema", ExactSpec(LOCK_SCHEMA)),
-    ("engine", _VERSION),
-    ("numpy", _VERSION),
-    ("pandas", _VERSION),
-    ("pyarrow", _VERSION),
-    ("python", _VERSION),
-    ("seed_protocol", CountSpec(_MAX_SEED_PROTOCOL)),
-    ("tz", _VERSION),
-    ("compat_phase", OneOfSpec(("pre-ga", "ga"))),
-    ("faker", _VERSION),
-    ("providers_digest", _DIGEST),
-    ("data_digest", _DIGEST),
-    ("dependencies", _DependenciesSpec()),
-    ("key_version", _KEY_VERSION),
+@dataclass(frozen=True)
+class _Field:
+    """One ``lock/v1`` field. ``required=False`` means absent reads as ``None`` and ``None`` is omitted."""
+
+    name: str
+    spec: Spec
+    required: bool = True
+
+
+_FIELDS: Final[tuple[_Field, ...]] = (
+    _Field("schema", ExactSpec(LOCK_SCHEMA)),
+    _Field("engine", _VERSION),
+    _Field("numpy", _VERSION),
+    _Field("pandas", _VERSION),
+    _Field("pyarrow", _VERSION),
+    _Field("python", _VERSION),
+    _Field("seed_protocol", CountSpec(_MAX_SEED_PROTOCOL)),
+    _Field("tz", _VERSION),
+    _Field("compat_phase", OneOfSpec(("pre-ga", "ga"))),
+    _Field("faker", _VERSION),
+    _Field("providers_digest", _DIGEST),
+    _Field("data_digest", _DIGEST),
+    _Field("dependencies", _DependenciesSpec()),
+    _Field("key_version", _KEY_VERSION),
+    _Field("probe", _DIGEST, required=False),
 )
 
 
@@ -168,6 +182,7 @@ class RuntimeLock:
     data_digest: str
     dependencies: tuple[tuple[str, str], ...]
     key_version: str | None = None
+    probe: str | None = None
     schema: str = LOCK_SCHEMA
 
     def __post_init__(self) -> None:
@@ -177,8 +192,11 @@ class RuntimeLock:
                 code=reasons.runtime.KEY_VERSION_INVALID, message=_KEY_VERSION_MESSAGE
             )
         refused = None
-        for name, spec in _FIELDS:
-            _, refused = attempt(_round_trip(spec), getattr(self, name))
+        for field in _FIELDS:
+            value = getattr(self, field.name)
+            if value is None and not field.required:
+                continue
+            _, refused = attempt(_round_trip(field.spec), value)
             if refused is not None:
                 break
         if refused is not None:
@@ -186,7 +204,11 @@ class RuntimeLock:
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON form of the lock."""
-        return {name: spec.dump(getattr(self, name)) for name, spec in _FIELDS}
+        return {
+            f.name: f.spec.dump(getattr(self, f.name))
+            for f in _FIELDS
+            if f.required or getattr(self, f.name) is not None
+        }
 
     def to_json(self) -> str:
         """The canonical JSON text of the lock: sorted keys, compact, the same in every process."""
@@ -194,13 +216,16 @@ class RuntimeLock:
 
     @classmethod
     def from_dict(cls, raw: Any) -> RuntimeLock:
-        """Read a parsed lock document. A field added under ``lock/v1`` is ignored."""
+        """Read a parsed lock document. A field added under ``lock/v1`` is ignored; an absent
+        optional field reads as ``None`` and a present one must be valid."""
         if type(raw) is not dict:
             _refuse("not_object")
         if "schema" not in raw:
             _refuse("schema_missing")
-        known = {name: raw[name] for name, _ in _FIELDS if name in raw}
-        lock, refused = attempt(ObjectSpec(cls, _FIELDS).load, known)
+        # An absent optional field is left out of the spec, so the dataclass default (None) fills it.
+        wanted = tuple((f.name, f.spec) for f in _FIELDS if f.required or f.name in raw)
+        known = {name: raw[name] for name, _ in wanted if name in raw}
+        lock, refused = attempt(ObjectSpec(cls, wanted).load, known)
         if refused is not None:
             _refuse(refused)
         return lock
@@ -304,6 +329,7 @@ def build_runtime_lock(*, key_version: str | None = None) -> RuntimeLock:
         data_digest=_data_digest(),
         dependencies=_dependency_versions(),
         key_version=key_version,
+        probe=run_probe(),
     )
 
 
@@ -313,7 +339,8 @@ def compare_runtime_locks(locks: Sequence[RuntimeLock]) -> tuple[LockDifference,
         raise TypeError("compare_runtime_locks takes RuntimeLock values")
     documents = [lock.to_dict() for lock in locks]
     return tuple(
-        LockDifference(name, tuple(doc[name] for doc in documents))
-        for name, _ in _FIELDS
-        if name != "schema" and len({canonical_json_bytes(doc[name]) for doc in documents}) > 1
+        LockDifference(f.name, tuple(doc.get(f.name) for doc in documents))
+        for f in _FIELDS
+        if f.name != "schema"
+        and len({canonical_json_bytes(doc.get(f.name)) for doc in documents}) > 1
     )

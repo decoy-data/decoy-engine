@@ -74,6 +74,7 @@ SENTRIES = (
     "tests/sentry/test_record_export_rules.py",
     "tests/sentry/test_reason_registry.py",
     "tests/sentry/test_run_result_constructor.py",
+    "tests/sentry/test_runtime_lock_public_imports.py",
     "tests/sentry/test_script_call_kwargs.py",
     "tests/sentry/test_sdv_import_sentry.py",
     "tests/sentry/test_secret_material_census.py",
