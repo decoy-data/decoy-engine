@@ -2,7 +2,7 @@ Status: plan
 
 # F07: bounded path-observation discovery, nested-path relations and JSONB coverage (roadmap row 82)
 
-Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 1 (not yet reviewed).
+Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 2 (Dennis round 1 GO-WITH-FIXES applied; see section 20).
 Scope: engine only (the row says engine). Slices 82-E1, 82-E2a, 82-E2b, 82-E3a, 82-E3b, 82-E4 and
 82-E5. CLI exposure is a follow-up row (OQ-8).
 
@@ -161,56 +161,107 @@ token, and no new dependency is added), and the rule model. Each is small and sp
 
 ### 4.1 Bounded cell reading and serialization (82-E1)
 
-New private bottom-tier package `src/decoy_engine/_nested_json/` (stdlib only, plus `reasons`).
+One strict JSON reader in the engine. `strict_json_loads` (`src/decoy_engine/_canonical/_json.py:173`)
+already refuses duplicate keys with a recording hook, raises after the `except` block with a
+closed token vocabulary (`STRICT_JSON_TOKENS`, `src/decoy_engine/_canonical/_json.py:155`) and is
+used by `records/_codec.py` and the native faker admission. 82-E1 grows it instead of adding a
+second reader:
 
-- `read_cell(text, *, max_bytes, max_depth) -> ParsedCell | CellFault`. `CellFault` is a closed
-  enum: `oversized`, `malformed`, `too_deep`, `duplicate_key`. Size is the UTF-8 byte length,
-  checked before parsing. Parsing uses `json.loads` with `object_pairs_hook` (refuses a repeated
-  name in one object) and `parse_float` and `parse_int` returning `JsonNumber` (the numeric value
-  plus its lexeme), then an iterative depth walk. A `RecursionError` or `ValueError` from the
-  parser maps to `too_deep` or `malformed`, raised after the `except` block closes (class 3).
-  `NaN`, `Infinity` and `-Infinity` literals keep today's behavior (accepted and written back as
-  the same token; follow-up F-4).
-- `ParsedCell.lossless` is true when every `JsonNumber` lexeme equals `json.dumps` of its value.
-- `write_cell(cell) -> str`: for a lossless cell, `json.dumps(value)` with today's defaults (same
-  bytes as today); otherwise a small serializer with the same separators and `ensure_ascii`
-  escaping that writes each untouched `JsonNumber` by its lexeme. A leaf the child strategy
-  replaced is written as the child's output value.
-- Child strategies receive leaf values as today: `JsonNumber` leaves are handed over as plain
-  `int` or `float`, so child behavior does not change.
-- Constants (OQ-3): `MASK_CELL_BYTES = 16 MiB`, `MASK_MAX_DEPTH = 64`.
-- `_nested.py` calls `read_cell` and `write_cell` in place of `json.loads` and `json.dumps`. Each
-  fault becomes a `RowError` with trigger `format_error` and a new runtime reason code
-  (`nested_cell_oversized`, `nested_cell_too_deep`, `nested_cell_duplicate_key`; `malformed`
-  keeps the existing warning code). The fixed reason text names the fault, never the cell.
+- `strict_json_read(text, *, max_bytes, max_depth, non_finite, keep_lexemes, max_int_digits)` in
+  `_canonical/_json.py` is the bounded mode. `strict_json_loads` becomes a call into it with its
+  current defaults (no bound, `non_finite="refuse"`, `keep_lexemes=False`, 20 digits), so its
+  callers and tests do not change. `STRICT_JSON_TOKENS` gains `oversized` and `too_deep`; the
+  tokens stay the only fault names (`not_json`, `duplicate_key`, `non_finite`, `out_of_range`,
+  `oversized`, `too_deep`).
+- **Size.** `len(text) > max_bytes` is `oversized` at once (each character is at least one UTF-8
+  byte). Otherwise, when `len(text) * 4 > max_bytes`, the text is encoded and the byte length
+  checked. An encode failure (a lone surrogate) is `not_json`, and no character of the input
+  reaches the error.
+- **Depth.** An iterative walk after the parse; deeper than `max_depth` is `too_deep`. A
+  `RecursionError` from the parser is also `too_deep`.
+- **Numbers.** With `keep_lexemes=True`, `parse_float` and `parse_int` return `JsonNumber`, a
+  frozen dataclass `JsonNumber(value: int | float | None, lexeme: str)`. An integer longer than
+  4300 digits (the CPython `int` string limit) keeps `value=None` and its lexeme; it is written
+  back unchanged, and a rule that selects it gives a row error with token `out_of_range`.
+- **Non-finite.** `non_finite="keep"` (the nested mode) keeps today's behavior: `NaN`,
+  `Infinity` and `-Infinity` literals are accepted and written back as the same token
+  (follow-up F-4). `non_finite="refuse"` is the existing strict behavior.
+- **Writer.** `strict_json_write(value)` in the same module: when every `JsonNumber` lexeme equals
+  `json.dumps` of its value (the cell is lossless), it returns `json.dumps` of the plain value with
+  today's defaults, so the bytes equal today's output. Otherwise a small serializer with the same
+  separators and `ensure_ascii` escaping writes each `JsonNumber` by its lexeme.
+- **Leaves to the child.** A matched scalar `JsonNumber` is handed to the child as its plain
+  `int` or `float`. A matched object or array is deep-converted to plain Python before the child
+  sees it. JSON null leaves are not passed to the child at all: they stay JSON null in the output.
+  The leaf column given to the child is built with `dtype=object`, so `[1, null, 3]` reaches a
+  `hash` child as the integers `1` and `3` and never as `float64` `1.0`, `NaN`, `3.0` (today the
+  leaf frame at `src/decoy_engine/execution/_strategies/_nested.py:415` infers `float64`).
+- **Child output.** A child that returns a non-finite float for a leaf gives a `mask_error` row
+  error (`nested_child_non_finite`); the value is never written.
+- Constants (OQ-3): `MASK_CELL_BYTES = 16 MiB`, `MASK_MAX_DEPTH = 64`, in the nested handler.
+- **Carrier for the fault code.** `RowError` has no code field
+  (`src/decoy_engine/execution/_row_errors.py:29`), and the existing carrier for
+  `nested_cell_json_parse_error` is a `QualityWarning` emitted beside the row error
+  (`src/decoy_engine/execution/_strategies/_nested.py:346`). Each new fault follows that pattern:
+  one `RowError` (trigger `format_error` or `mask_error`, fixed reason text that names the fault,
+  never the cell) plus one `QualityWarning` per fault code per column, with codes
+  `nested_cell_oversized`, `nested_cell_too_deep`, `nested_cell_duplicate_key`,
+  `nested_cell_number_out_of_range` and `nested_child_non_finite`. `not_json` keeps
+  `nested_cell_json_parse_error`. No `RowError` or `RowErrorRecord` field changes. The builder adds
+  the new codes wherever `src/decoy_engine/execution/_mixed_admission.py:92` lists the nested
+  cell-fault code.
+- **Handler split.** `_nested.py` is at 585 of 600 lines and `execution/_strategies` is frozen at
+  29 direct modules. 82-E1 moves the handler into the sub-package
+  `execution/_strategies/nested/` (`__init__.py`, `_handler.py`, `_leaves.py` for leaf collection,
+  object-dtype leaf frame and writeback), deletes `_nested.py`, moves its importers, and lowers the
+  fan-out freeze for `execution/_strategies` from 29 to 28 (a ratchet moving down). Later rule
+  code goes to `nested/_apply.py` (82-E3b). This follows the CODEMAP target "next family:
+  `execution/_strategies/<family>/`".
 
 ### 4.2 Path-observation discovery (82-E2a, 82-E2b)
 
 82-E2a moves the persisted scan-set core models (`_Core` through `ScanSetCoreRead`,
 `src/decoy_engine/profiling/scan_set.py:104` to `:228`) unchanged into
-`src/decoy_engine/profiling/_scan_core.py`, and moves the importers to the new module (no
-re-export left behind, per `architecture.md` Layout; `scan_set` keeps exporting the public names
-it exports today because they are frozen API). `scan_set.py` (600 lines, no census entry) then has
-room for the wiring without a ceiling.
+`src/decoy_engine/profiling/_scan_core.py`. No re-export is left behind (`architecture.md`
+Layout): importers of private names move to `_scan_core`, including
+`tests/unit/profiling/test_scan_set.py:31` and `tests/unit/profiling/test_scan_integrity.py:421`
+(`TableCore`, `RelationshipFactsCore`). `scan_set.py` imports only the classes it uses itself.
+Names listed in the frozen-surface map stay importable from the module the map names, and
+`decoy_engine.profiling` exports them from `_scan_core`. `scan_set.py` (600 lines, no census
+entry) then has room for the wiring without a ceiling.
 
 82-E2b adds `src/decoy_engine/profiling/paths/`:
 
 - **Which columns.** In each scanned table, a column qualifies when at least half of its sampled
   non-null values are `str` values that parse (under the scan bounds) to a JSON object or array,
-  or Python `dict` or `list` values. Other columns get no `nested` member.
+  or Python `dict` or `list` values. A string whose first non-whitespace character is not `{` or
+  `[` is counted as `cells_scalar` without parsing. Other columns get no `nested` member. Parsing
+  uses `strict_json_read` with the scan bounds, `keep_lexemes=False`.
+- **Cells cap.** At most `SCAN_MAX_CELLS` cells per column are walked, also when the scan reads
+  every row (`sample_rows=None` or `strategy="full"`); this is the DuckDB `sample_size` analogue.
+- **Two passes.** Pass 1 counts, per level, the distinct keys (capped at `SCAN_MAP_KEYS + 1` per
+  level) and the number of cells in which each key appears, and decides each level's collapse.
+  Pass 2 walks again and emits paths with the collapse already applied, so the path cap is never
+  spent on keys that are later collapsed.
 - **Walk.** For each qualifying cell, an iterative walk records per path pattern: present, JSON
   null, and the JSON kind (`string`, `integer`, `number`, `boolean`, `object`, `array`). Array
   items become `[*]`; only the first `SCAN_ARRAY_ITEMS` items of each array are walked
   (`arrays_truncated` counts the rest). Below `SCAN_MAX_DEPTH` the walk stops and counts
   `depth_truncated_cells`. When the column already has `SCAN_MAX_PATHS` patterns, new patterns are
   not added and `paths_truncated` is set.
-- **Key rule (value-free path text).** An object key is written into a pattern only when it
-  matches `re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", key)` and the regex detectors do not hit
-  the level's key set. Otherwise the segment becomes `*` and `key_suspect_collapsed` counts it. A
-  level with more than `SCAN_MAP_KEYS` distinct keys across the sample becomes `*` and
-  `map_collapsed` counts it. Stated limit, the same as the column-header guard: a single
-  identifier-shaped key that is a value (for example a first name) and that no detector hits is
-  written as a name.
+- **Key rule (value-free path text).** An object key is written into a pattern only when all of
+  these hold:
+  1. it matches `re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", key)`;
+  2. no regex detector hits that key (detectors run per key, and a hit on one key collapses that
+     key);
+  3. it appears in at least 2 cells, and in at least `SCAN_KEY_APPEARANCE` (0.1) of the cells in
+     which its parent object appears (the DuckDB `field_appearance_threshold` analogue).
+
+  Otherwise the segment becomes `*` and `key_suspect_collapsed` counts it. A level with more than
+  `SCAN_MAP_KEYS` distinct keys becomes `*` and `map_collapsed` counts it. Rule 3 means keys that
+  are data (a first name per cell, an id per cell) collapse even when no detector hits them.
+  Stated limit: a key that is a value, repeats in at least 10% of cells, and that no detector hits
+  is written as a name.
 - **Detection.** For each pattern, the first `SCAN_LEAF_SAMPLE` non-null scalar leaves are passed
   as strings to `run_all_detectors`, with the last named segment as the name hint (empty for `*`).
   Only `detector_id` crosses the boundary; `sample_misses` is dropped.
@@ -219,7 +270,8 @@ room for the wiring without a ceiling.
   `depth_truncated_cells`, `arrays_truncated`, `key_suspect_collapsed`, `map_collapsed`,
   `paths_truncated: bool`, and `paths: list[PathObservationCore]` sorted by `path`. Each
   `PathObservationCore` has `path`, `present_count`, `null_count`, `kinds` (sorted closed kind
-  tokens) and `detector_hits` (sorted ids). `TableScan.nested` maps column name to the in-memory
+  tokens; the write model is a `Literal` list, the read model accepts any `str`, as
+  `WarningRefCore` does) and `detector_hits` (sorted ids). `TableScan.nested` maps column name to the in-memory
   observation. Header-suspect tables keep writing positional column names; the paths sit under
   them.
 - **Warnings.** New `warning` codes on the table: `nested_paths_truncated`,
@@ -227,15 +279,19 @@ room for the wiring without a ceiling.
 - **Switch.** `scan_sources(..., nested_paths: bool = True)` (OQ-4). `False` skips qualification
   and the walk.
 - Constants (OQ-3): `SCAN_CELL_BYTES = 1 MiB`, `SCAN_MAX_DEPTH = 16`, `SCAN_ARRAY_ITEMS = 16`,
-  `SCAN_MAX_PATHS = 256`, `SCAN_MAP_KEYS = 64`, `SCAN_LEAF_SAMPLE = 1000`.
+  `SCAN_MAX_PATHS = 256`, `SCAN_MAP_KEYS = 64`, `SCAN_LEAF_SAMPLE = 1000`,
+  `SCAN_MAX_CELLS = 20480`, `SCAN_KEY_APPEARANCE = 0.1`.
 
 ### 4.3 Several rules per column (82-E3a, 82-E3b)
 
-82-E3a (behavior-preserving): one function `nested_children(entry) -> tuple[NestedChild, ...]` in
+82-E3a (behavior-preserving): one function
+`nested_children(provider_config: Mapping[str, Any]) -> tuple[NestedChild, ...]` in
 `_nested_json/_rules.py` is the only reader of a nested column's child strategy and child config.
 Every site that today reads `provider_config.strategy` or `strategy_config` of a `nested` column
-calls it (section 6). With only the single form it returns one child, and every site behaves as
-before.
+calls it (section 6). It takes the provider-config mapping, not a column entry, because
+`src/decoy_engine/execution/_pipeline_multi_table.py:103` reads the child from a seed's provider
+config, not from a config column. With only the single form it returns one child, and every site
+behaves as before.
 
 82-E3b adds the list form to `nested` `provider_config`:
 
@@ -255,13 +311,24 @@ before.
 
 - `rules` and the single form (`target` plus `strategy`) are mutually exclusive; the required
   settings row accepts either (`nested_rules_and_target_both_set`, `nested_rules_empty`).
-- Each rule may set `namespace`; absent means the column's namespace. A rule namespace must be
-  declared elsewhere in the config (`nested_rule_namespace_unknown`).
+- Each rule may set `namespace`; absent means the column's namespace. Namespaces are free names in
+  the engine (the registry creates them on use), so no "unknown namespace" check is added.
 - Two rules with the same target text are refused at plan time (`nested_rule_target_duplicate`).
-- At run time the cell is parsed once, rules apply in declared order, and the cell is written
-  once. A leaf position written by an earlier rule and matched again by a later rule fails the
-  column closed (`nested_rules_overlap`, a `StrategyError` naming the column and the two rule
-  indexes, never a value).
+- **Per-rule identity.** Children whose draws or evidence are keyed on (table, outer column)
+  (`execution/_strategies/_adapter.py:503` and `:506`, `_shuffle.py:70`, `_faker_positional.py:49`,
+  `_code_set.py:194` and `:265`, `_adapter.py:296`) get a per-rule identity: the single form keeps
+  the outer column name, so its output is byte-identical; rule `i` uses `<column>.rules[<i>]`. The
+  handler passes it through the same channel that carries the outer column name to the child
+  today, so no child module changes. If the builder finds a child keyed on another source, the
+  slice stops and reports before review.
+- **Matching before writing.** At run time the cell is parsed once. Every rule's matches are
+  collected on the parsed tree before any write. Two rules whose matched positions are equal, or
+  where one position is a prefix of another (an ancestor and its descendant), fail the column
+  closed (`nested_rules_overlap`, a `StrategyError` naming the column and the two rule indexes,
+  never a value). Then the children run, rules write in declared order, and the cell is written
+  once.
+- **Preflight.** The handler's `preflight()` is forwarded to every rule's child, not only the
+  first, so a child that needs a preflight (for example `code_set`) works in `rules[1]`.
 - The all-zero-match rule applies per rule: a rule that matches nothing in a column with a
   parseable cell fails closed, as the single form does today.
 
@@ -277,6 +344,9 @@ A rule may set `references: {table: customers, column: id}`:
   (`src/decoy_engine/relationships/_namespace.py:119`). Codes: `nested_reference_parent_unknown`,
   `nested_reference_strategy_not_join_safe`, `nested_reference_strategy_mismatch`,
   `nested_reference_namespace_mismatch`. `fpe` is refused because its tweak is column-scoped.
+- **Gated parent.** A parent column with a `when` condition is refused
+  (`nested_reference_parent_conditional`): rows the condition skips keep their source key, and the
+  path leaf would not match them.
 - **Key type.** The source profile's type for the parent column fixes the leaf kind: an integer
   parent needs JSON integer leaves, a text parent needs JSON string leaves. A leaf of another kind,
   or an object or array, is a row error `nested_reference_leaf_type_mismatch` (fail closed). This
@@ -288,7 +358,12 @@ A rule may set `references: {table: customers, column: id}`:
   (`src/decoy_engine/verification/postmask/_keys.py:128`) reads `path_relations(config)` beside
   `relationships`. Both load the child end through `path_key_batches(batches, path)`, which
   extracts the leaf from each cell under the scan bounds and yields an Arrow key column; an
-  unreadable cell is counted, never loaded. `ChildFactsCore` gains `path: str | None = None` and
+  unreadable cell is counted, never loaded. A leaf of the wrong kind for the parent (a string in
+  an integer relation) is counted in `unreadable_rows` and not loaded, so the Arrow key column
+  always has one type. `check_keys` keeps its `relationships: Sequence[RelationshipConfig]`
+  argument and gains the keyword `path_relations: Sequence[PathRelation] = ()`.
+  `KeyResult.as_dict()` gains a `path` member (`None` for column relations, the path text for a
+  path relation). `ChildFactsCore` gains `path: str | None = None` and
   `unreadable_rows: int | None = None` (additive).
 - **Execution.** Path relations are never added to `relationships`, so no FK route, subset or
   orphan remap sees them.
@@ -320,25 +395,39 @@ JSONPath subset, the serialization contract, the bounds and the route matrix.
 | F15 | Path relation reaches FK execution and breaks a route | Not in `relationships` by construction | AT-E4-6 |
 | F16 | Pre-scan and post-scan count path keys differently | One extractor for both | AT-E4-5 |
 | F17 | JSONB values round-trip differently from JSON text | JSONB acceptance cells | AT-E5-1 to AT-E5-3 |
+| F18 | Mixed integer and null leaves become `float64`, so `hash` keys change and `NaN` or `3.0` is written | Nulls kept out of the child; object-dtype leaf column | AT-E1-8, AT-E4-1 |
+| F19 | Two rules share one draw or evidence slot | Per-rule identity | AT-E3b-6, AT-E3b-7 |
+| F20 | Keys that are data (names, ids) appear in path text | Per-key detectors and the appearance rule | AT-E2-10 |
+| F21 | Child returns `inf` or `nan` and the cell is no longer JSON | `mask_error` row error, nothing written | AT-E1-9 |
 
 ## 6. Design notes and choke points
 
 Design principles applied (`architecture.md`): one place per fact (bounds constants, the key rule,
 the child reader, the relation list and the leaf extractor each live in one module); typed context
 objects (`ParsedCell`, `NestedChild`, `PathRelation`) instead of raw dicts across modules; no flag
-arguments that switch behavior (`write_cell` reads `lossless` from the parsed cell, it is not a
-caller choice). Established pattern for the new foundation package: `_canonical/`
-(`CODEMAP.md:269`), a private bottom-tier sub-package, chosen because the engine root is at its
-fan-out cap and because the reader is shared by `execution`, `profiling` and `verification`;
-placing it in `profiling/` would make `execution/_strategies/_nested.py` import the `profiling`
-package init (which imports `scan_set`, which already back-imports `execution._guards`), an import
-cycle risk.
+arguments that switch behavior (`strict_json_write` reads losslessness from the values, it is not a
+caller choice). One strict JSON reader: the bounded mode grows `_canonical/_json.py`, it does not
+copy it. The rule model and the path-key extractor go in a new private bottom-tier package
+`_nested_json/`, following the `_canonical/` precedent (`CODEMAP.md:269`): the engine root is at
+its fan-out cap, and the code is shared by `plan`, `secret_providers`, `execution`, `profiling`
+and `verification`. Placing it in `profiling/` would make the nested handler import the
+`profiling` package init (which imports `scan_set`, which already back-imports
+`execution._guards`), an import cycle risk.
+
+Allowed dependencies per package (import-linter enforces the internal ones):
+
+| Package | May import |
+|---|---|
+| `_canonical` | stdlib only (unchanged) |
+| `_nested_json` | stdlib, `_canonical`, `reasons`, `jsonpath_ng` (`_rules.py`, singular-path check), `pyarrow` (`_paths.py` only) |
+| `profiling/paths` | stdlib, `_canonical`, `detection`, `reasons` |
+| `execution/_strategies/nested` | what `_nested.py` imports today, plus `_canonical` and `_nested_json` |
 
 Choke points:
 
 | Rule | Enforced in | Guard test | Mutation that turns it red |
 |---|---|---|---|
-| Every nested cell is read with the bounds and written with the serialization contract | `_nested_json.read_cell` and `write_cell`; `_nested.py` is the only masking caller | `tests/sentry/defects/test_nested_json_choke_point.py`: no `json.loads` or `json.dumps` call in `execution/_strategies/_nested.py`; plus AT-E1-1 | put back `json.dumps(parsed)` at `_nested.py:527` |
+| Every JSON cell is read by the one strict reader and nested cells are written with the serialization contract | `_canonical.strict_json_read` and `strict_json_write`; the nested sub-package and `profiling/paths` are the callers | `tests/sentry/defects/test_nested_json_choke_point.py`: no `json.loads` or `json.dumps` call in `execution/_strategies/nested/`, `_nested_json/` or `profiling/paths/`; plus AT-E1-1 | put back `json.dumps(parsed)` in `nested/_leaves.py` |
 | Every reader of a nested child goes through `nested_children` | `_nested_json/_rules.py` | `tests/sentry/defects/test_nested_child_choke_point.py` walks the syntax tree: a module that compares a strategy to the literal `"nested"` (`==`, `in (...)`, dict key) and reads `.get("strategy")`, `["strategy"]`, `.get("strategy_config")` or `["strategy_config"]` must import `nested_children`; seeded red case per shape. Plus AT-E3b-4 behavior cells | revert `plan/_checks_top_code.py:146` to `pc.get("strategy")` |
 | Discovery output carries no value | `profiling/paths/_observe.py` builds `PathObservationCore` from counts, kind tokens, ids and checked segments only | AT-E2-2 canary scan of the whole core dict and caplog | write the raw key into the segment |
 | Path relations are listed in one place | `_nested_json.path_relations(config)` | AT-E4-5 (pre and post scan agree) and AT-E4-6 | read references in `_keys.py` with a local loop that skips `rules` |
@@ -347,7 +436,7 @@ Choke points:
 The site list for the child choke point at the base: `plan/_checks_top_code.py:146`,
 `plan/_checks_date_shift.py:120` and `:242`, `plan/_checks_bucket_perturb.py:70`,
 `secret_providers/_requirements.py:217`, `execution/_column_access.py:179`,
-`execution/_pipeline_multi_table.py:103`, and `_nested.py` itself. `plan/_checks_when.py:66` reads
+`execution/_pipeline_multi_table.py:103`, and the nested handler itself. `plan/_checks_when.py:66` reads
 no child (comment only); the sentry confirms it. Registries that name `"nested"` without reading
 the child (`execution/native/_capabilities.py:359`, `execution/out_of_core/_compat.py:124`,
 `execution/native/_determinism_protocol.py:84`, `validators/_leak_check.py:78`,
@@ -370,18 +459,19 @@ Each cell is written first and must fail on the slice base before the change. Mu
 the final head of each slice (class 9) and the head is recorded. No tests run on the devbox;
 builders use the test VMs or the Mac.
 
-### 82-E1 (`tests/unit/nested_json/test_read_write.py`, cells in `tests/unit/execution/test_nested_strategy.py`)
+### 82-E1 (`tests/unit/canonical/test_strict_json_read.py`, cells in `tests/unit/execution/test_nested_strategy.py`)
 
 - AT-E1-1: cell `{"ssn":"123-45-6789","amt":1.10,"big":12345678901234567890.5,"e":1e400}` with
   target `$.ssn` and child `redact`: output keeps `1.10`, `12345678901234567890.5` and `1e400`
-  and parses under `json.loads` with a `parse_constant` that refuses. Mutation: `write_cell`
-  always calls `json.dumps`.
+  and parses under `json.loads` with a `parse_constant` that refuses. Mutation:
+  `strict_json_write` always calls `json.dumps`.
 - AT-E1-2: 200 seeded cells with only float-exact numbers, non-ASCII keys and escaped surrogates
   give bytes equal to `json.dumps(parsed)` after masking (today's form). Mutation: use the lexeme
   serializer for every cell with compact separators.
-- AT-E1-3: `{"a":1,"a":2}` gives a `format_error` row error with code
-  `nested_cell_duplicate_key`; under `quarantine:` the row is quarantined and absent from main
-  output; without it the job fails. Mutation: drop the `object_pairs_hook` check.
+- AT-E1-3: `{"a":1,"a":2}` gives one `RowError` with trigger `format_error` for that row and one
+  `QualityWarning` with code `nested_cell_duplicate_key` for the column (the chosen carrier);
+  under `quarantine:` the row is quarantined and absent from main output; without it the job
+  fails. Mutation: drop the duplicate check in the pairs hook.
 - AT-E1-4: a cell of `MASK_CELL_BYTES + 1` UTF-8 bytes built from 3-byte characters (character
   count under the limit) is `nested_cell_oversized`, and a spy proves the parser was not called;
   exactly `MASK_CELL_BYTES` passes. Mutation: measure `len(text)`.
@@ -391,7 +481,22 @@ builders use the test VMs or the Mac.
   error, warning detail, `StrategyError` text or caplog record; every new error has no
   `__cause__` or `__context__`. Mutation: add `str(exc)` to the row error reason.
 - AT-E1-7: trailing whitespace is valid and trailing text (`{"a":1}x`, `{"a":1}\nx`) is
-  `malformed`. Mutation: strip and cut the text at the first newline before parsing (class 1).
+  `not_json`. Mutation: strip and cut the text at the first newline before parsing (class 1).
+- AT-E1-8: a `hash` child over leaves `[1, null, 3]` in three cells gives the tokens a flat `hash`
+  column gives for integers `1` and `3`, and the null cell keeps JSON `null`; no output cell holds
+  `NaN`, `1.0` or `3.0`. Mutation: build the leaf frame without `dtype=object`.
+- AT-E1-9: a stub child that returns `float("inf")` gives a `mask_error` row error and a
+  `nested_child_non_finite` warning, and the output cell is not written with `Infinity`.
+  Mutation: drop the finite check.
+- AT-E1-10: a cell with a lone surrogate escape that cannot be encoded is `not_json` and the
+  error text holds no character of the cell; a 4301-digit integer leaf is written back with the
+  same lexeme, and a rule that selects it gives `nested_cell_number_out_of_range`. Mutation: call
+  `int()` on every integer lexeme.
+- AT-E1-11: a rule that matches an object hands the child plain `dict`, `int` and `float`
+  values, never `JsonNumber`. Mutation: skip the deep conversion.
+- AT-E1-12: every existing `strict_json_loads` test (records codec, native faker admission,
+  `_canonical`) passes unchanged, and `STRICT_JSON_TOKENS` keeps its first four tokens in order.
+  Mutation: change the default `max_int_digits` of `strict_json_loads`.
 
 ### 82-E2a (`tests/unit/profiling/test_scan_core_move.py`)
 
@@ -412,18 +517,27 @@ builders use the test VMs or the Mac.
 - AT-E2-4: 65 distinct keys at one level collapse to `*`; 64 keep names. Mutation: threshold off
   by one.
 - AT-E2-5: one fixture per bound (path 257, array item 17 holding a new key, depth 17, cell
-  `SCAN_CELL_BYTES + 1`): each sets its count or flag and the right warning. Mutations: remove
-  each bound check (four mutations).
+  `SCAN_CELL_BYTES + 1`, cell `SCAN_MAX_CELLS + 1` under `strategy="full"`): each sets its count
+  or flag and the right warning. One more fixture hits the map collapse and the path cap in the
+  same column and shows the collapsed keys did not use path slots. Mutations: remove each bound
+  check (five mutations), and emit paths in pass 1.
 - AT-E2-6: a fixture with missing, null, malformed and mixed integer and string values at one
   path gives distinct `present_count`, `null_count`, `cells_malformed` and
   `kinds == ["integer", "string"]`. Mutation: count JSON null as missing.
 - AT-E2-7: a record without `nested` validates on write and read; a record with it reads under a
   read model built without the field; strict cells refuse `present_count=True`, `"5"` and an
-  unknown kind token on write (classes 2 and 4). Mutation: `kinds: list[str]`.
+  unknown kind token on write (classes 2 and 4), while the read model accepts an unknown kind
+  token. Mutation: `kinds: list[str]` on the write model.
 - AT-E2-8: a plain text column and a column with under half JSON cells get `nested=None`; two runs
   give identical bytes with sorted paths. Mutation: iterate a set unsorted.
 - AT-E2-9: `nested_paths=False` gives no `nested` members and the walker spy is never called.
   Mutation: ignore the switch.
+- AT-E2-10: 20 cells, each an object keyed by a different first name (`{"Maria": {...}}`), with no
+  detector hit, give the single path `$.*` and `key_suspect_collapsed == 20`; a key seen in 1 of
+  20 cells collapses, a key seen in 2 of 20 is kept; a key that a detector hits collapses while
+  its sibling keys at the same level are kept. Mutation: remove the appearance rule.
+- AT-E2-11: a column of plain strings never calls the parser (first-character prefilter).
+  Mutation: parse every string.
 
 ### 82-E3a (`tests/sentry/defects/test_nested_child_choke_point.py`, existing nested plan-check tests)
 
@@ -437,43 +551,58 @@ builders use the test VMs or the Mac.
 - AT-E3b-1: two rules (email via faker, id via hash with its own namespace) mask both leaves in
   one pass; the id leaf equals a flat `hash` column under the same namespace. Mutation: use the
   column namespace for every rule.
-- AT-E3b-2: overlapping rules (`$.a` and `$..a`) fail the column with `nested_rules_overlap`.
-  Mutation: skip the written-position set.
-- AT-E3b-3: `rules` plus `target`, empty `rules`, duplicate targets and an unknown rule namespace
-  are refused with their codes in both `compile_plan` and `run_config_only_checks`. Mutation: drop
-  the duplicate-target check.
+- AT-E3b-2: rules `$.a` and `$..a` (equal positions) and rules `$.a` and `$.a.b` (prefix) each
+  fail the column with `nested_rules_overlap`, and no cell is written. Mutation: check only equal
+  positions.
+- AT-E3b-3: `rules` plus `target`, empty `rules` and duplicate targets are refused with their
+  codes in both `compile_plan` and `run_config_only_checks`. Mutation: drop the duplicate-target
+  check.
 - AT-E3b-4: each existing child refusal (top_code, date_shift `group_by`, bucket_perturb, `when`
   in a child) is still refused when the child sits in `rules[1]`. Mutation: `nested_children`
   returns only the first rule.
 - AT-E3b-5: a rule matching nothing in a column with parseable cells fails closed per rule.
   Mutation: check zero matches across all rules together.
+- AT-E3b-6: two non-deterministic `shuffle` rules in one column give independent permutations,
+  and the single form gives bytes equal to the base on a seeded fixture. Mutation: pass the outer
+  column name for every rule.
+- AT-E3b-7: two `code_set` rules both record evidence, under distinct identities. Mutation: as
+  AT-E3b-6.
+- AT-E3b-8: `code_set` in `rules[1]` under a `when` that matches no row preflights and runs
+  without error. Mutation: forward `preflight()` to the first rule only.
 
 ### 82-E4 (`tests/unit/nested_json/test_path_relations.py`, `tests/integration/test_nested_path_relations.py`)
 
 - AT-E4-1: parent `customers.id` (hash, namespace `customer`) and a rule `$.customer_id` with
   `references` give equal masked keys for equal source keys; joining the outputs on the masked
-  values returns every source match. Mutation: give the rule the column namespace.
+  values returns every source match; a row whose leaf is JSON null keeps `null`, and an integer
+  leaf in a cell beside a null cell still equals the parent's token (the AT-E1-8 dtype case).
+  Mutation: give the rule the column namespace.
 - AT-E4-2: plan refusals for an unknown parent, `fpe`, a strategy mismatch, a namespace mismatch,
-  path `$.items[*].id` and path `$..id`. Mutation: allow `fpe`.
+  a `when`-gated parent, path `$.items[*].id` and path `$..id`. Mutation: allow `fpe`.
 - AT-E4-3: an integer parent with a string leaf `"42"` is `nested_reference_leaf_type_mismatch`;
   an object leaf too. Mutation: coerce the leaf with `int()`.
 - AT-E4-4: a missing or JSON null leaf is a null key, not counted as orphan before or after the
   run (`MATCH SIMPLE`). Mutation: load null as the string `"null"`.
 - AT-E4-5: a fixture with 3 orphan path keys gives `orphan_rows == 3` in pre-scan
   `RelationshipFacts` and the same count in the post-scan finding; an unreadable child cell is in
-  `unreadable_rows` and not loaded. Mutation: one site loads the raw JSON text as the key.
+  `unreadable_rows` and not loaded; a string leaf in an integer relation is counted in
+  `unreadable_rows` and the key column stays integer. Mutation: one site loads the raw JSON text as
+  the key.
 - AT-E4-6: a config with a path relation compiles a plan whose `relationships` equal those of the
   same config without it, and runs on the full-frame and sequential routes with identical
   non-nested output. Mutation: append the path relation to `relationships`.
 - AT-E4-7: a `scan-set/v1` record with `path` and `unreadable_rows` on a child reads back; a record
   without them reads with `None`. Mutation: make `path` required.
+- AT-E4-8: the post-scan `KeyResult.as_dict()` for a path relation has `path` equal to the rule
+  target and reads back through the post-scan report reader; for a column relation `path` is
+  `None`. Mutation: drop `path` from `as_dict`.
 
 ### 82-E5 (`tests/connectors/test_postgres_snapshot_jsonb.py`, `pg_integration`)
 
 - AT-E5-1: a `jsonb` column holding `{"ssn": "...", "amt": 1.10, "big": 12345678901234567890.5,
   "e": 1e400}` (Postgres keeps them as `numeric`): snapshot, then `run_pipeline` with a two-rule
   `nested` column; unselected numbers come out as the text Postgres returned and the output
-  parses as JSON. Mutation: revert `write_cell` to `json.dumps`.
+  parses as JSON. Mutation: revert `strict_json_write` to `json.dumps`.
 - AT-E5-2: `scan_sources` over the staged Parquet reports the expected paths and detector ids for
   the `jsonb` column. Mutation: skip qualification for Parquet text columns.
 - AT-E5-3: a `jsonb` reference to a parent table masks to the parent's identity and the post-scan
@@ -485,14 +614,18 @@ builders use the test VMs or the Mac.
 
 - Goldens: a golden that holds a `nested` cell with a non-round-trip number changes (a bug fix).
   The builder lists each such golden by name; AT-E1-2 proves ordinary cells do not move.
-- Size ceilings: none raised. `_nested.py` stays at or under 600 lines (it shrinks in 82-E1 and
-  grows in 82-E3b and 82-E4; the builder reports the count per slice). `scan_set.py` drops by about
+- Size ceilings: none raised. `_nested.py` is replaced in 82-E1 by the `nested/` sub-package;
+  each of its modules stays at or under 600 lines, and rule code goes to `nested/_apply.py`, not
+  the handler (the builder reports the counts per slice). `_canonical/_json.py` (209 lines) grows
+  to about 380. `scan_set.py` drops by about
   130 lines in 82-E2a. `plan/_compile.py` (656 lines against its 666 ceiling,
   `tests/sentry/test_module_size.py:111`) takes at most 3 lines in 82-E3b; if that is not enough,
   the new check is called from an existing check function instead.
-- Fan-out: `execution/_strategies` (29, frozen) gets no module. `profiling` goes from 18 to 19
-  direct modules (`_scan_core.py`), under 25. The new sub-packages start well under 25.
-- Layer contract: `_nested_json` joins the bottom tier of `.importlinter` and the snapshot in
+- Fan-out: `execution/_strategies` goes from 29 to 28 direct modules in 82-E1 (`_nested.py` moves
+  into `nested/`), and its freeze in `tests/sentry/layout/test_package_fanout.py:34` is lowered to
+  28 (the ratchet moves down; nothing is raised). `profiling` goes from 18 to 19 direct modules
+  (`_scan_core.py`), under 25. The new sub-packages start well under 25.
+- Layer contract: in 82-E3a, `_nested_json` joins the bottom tier of `.importlinter` and the snapshot in
   `tests/sentry/layout/test_import_layers.py`. This is a placement, not a widened allowance; no
   ignore line is added.
 - Reason registry: every new code is `since=UNRELEASED`; the registry version moves at merge by the
@@ -504,23 +637,30 @@ builders use the test VMs or the Mac.
 
 | New file | Directory | Map row | Beside |
 |---|---|---|---|
-| `__init__.py`, `_read.py`, `_write.py` (E1), `_rules.py` (E3a), `_paths.py` (E4) | `src/decoy_engine/_nested_json/` | Map change: new row "Nested JSON cell foundation", worded like the `_canonical/` row (`CODEMAP.md:269`); bottom layer | `src/decoy_engine/_canonical/` |
+| No new file; `strict_json_read`, `strict_json_write`, `JsonNumber` added to `_json.py` (E1) | `src/decoy_engine/_canonical/` | "Foundation: `_canonical/`" (`CODEMAP.md:269`), unchanged row | `_canonical/_json.py` |
+| `nested/__init__.py`, `nested/_handler.py` (moved from `_nested.py`), `nested/_leaves.py` (E1), `nested/_apply.py` (E3b) | `src/decoy_engine/execution/_strategies/nested/` | "Masking strategy family: `execution/_strategies/<family>/`" (`CODEMAP.md:253`), the target the fan-out freeze names | `execution/_strategies/_hash.py` |
+| `__init__.py`, `_rules.py` (E3a), `_paths.py` (E4) | `src/decoy_engine/_nested_json/` | Map change: new row "Nested JSON cell foundation", worded like the `_canonical/` row (`CODEMAP.md:269`); bottom layer | `src/decoy_engine/_canonical/` |
 | `_scan_core.py` (E2a) | `src/decoy_engine/profiling/` | "Detectors, profiling" (`CODEMAP.md:262`) | `profiling/scan_set.py` |
 | `paths/__init__.py`, `paths/_walk.py`, `paths/_observe.py` (E2b) | `src/decoy_engine/profiling/paths/` | "Detectors, profiling"; map text gains "path observation in `profiling/paths/`" | `profiling/features/` |
 | `_nested_rules.py` (E3b) | `src/decoy_engine/plan/checks/` | "Plan compile and checks: new checks in `plan/checks/`" (`CODEMAP.md:251`) | `plan/checks/_relationship_keys.py` |
-| `runtime/_nested_json.py` (E1), `warning/_nested_paths.py` (E2b), `plan/_nested_rules.py` (E3b) | `src/decoy_engine/reasons/` | "Reason codes" (`CODEMAP.md:265`) | `reasons/runtime/_f06.py` |
+| `warning/_nested_cells.py` (E1), `warning/_nested_paths.py` (E2b), `plan/_nested_rules.py` (E3b) | `src/decoy_engine/reasons/` | "Reason codes" (`CODEMAP.md:265`) | `reasons/runtime/_f06.py` |
 | `nested-json.md` (E5) | `docs/` | "Feature and contract docs" (`CODEMAP.md:273`) | `docs/publication.md` |
-| tests | `tests/unit/nested_json/`, `tests/unit/profiling/paths/`, `tests/unit/plan/checks/`, `tests/sentry/defects/`, `tests/connectors/` | "Unit tests", "Sentry test" (`CODEMAP.md:270`, `CODEMAP.md:280`) | existing siblings |
+| tests | `tests/unit/canonical/`, `tests/unit/nested_json/`, `tests/unit/profiling/paths/`, `tests/unit/plan/checks/`, `tests/sentry/defects/`, `tests/connectors/` | "Unit tests", "Sentry test" (`CODEMAP.md:270`, `CODEMAP.md:280`) | existing siblings |
 
 `src/decoy_engine/_MAP.md` gains rows for `_nested_json/` and `profiling/paths/`. Present
-consumers: `_read.py` and `_write.py` are used by `_nested.py` in E1; `_rules.py` by the eight
-sites in E3a; `_paths.py` by `_nested.py`, `_scan_integrity.py` and `_keys.py` in E4;
+consumers: `strict_json_read` and `strict_json_write` are used by the nested handler in E1 and by
+`profiling/paths` in E2b; `_rules.py` by the seven sites and the handler in E3a; `_paths.py` by
+the handler, `_scan_integrity.py` and `_keys.py` in E4;
 `profiling/paths/` by `scan_set.py` in E2b. No module merges before its consumer.
 
 ## 11. Reuse inventory
 
 - `jsonpath-ng` for `target` matching and writeback (unchanged), and its parsed node types
   (`Root`, `Child`, `Fields`) for the singular-path check.
+- `strict_json_loads` (`src/decoy_engine/_canonical/_json.py:173`), the engine's one strict JSON
+  reader (recording hooks, `STRICT_JSON_TOKENS`, raise after `except`), used today by
+  `records/_codec.py` and the native faker admission. 82-E1 grows it into the bounded,
+  lexeme-keeping reader; no second reader is written.
 - Python `json` hooks for duplicate detection and number lexemes (no new dependency).
 - `run_all_detectors` (`src/decoy_engine/detection/detectors.py:648`) for leaf detection.
 - The scan sample already read by `_read_and_profile` (`src/decoy_engine/profiling/scan_set.py:399`);
@@ -529,7 +669,8 @@ sites in E3a; `_paths.py` by `_nested.py`, `_scan_integrity.py` and `_keys.py` i
   orphan counts; the `fk_tokens` key identity is unchanged.
 - The namespace registry `for_column` (`src/decoy_engine/relationships/_namespace.py:119`) for the
   reference namespace check.
-- `RowError` and the existing quarantine policy for every cell fault.
+- `RowError`, the existing `QualityWarning` carrier for nested cell-fault codes, and the existing
+  quarantine policy for every cell fault.
 - `_relaxed` read-model derivation (moved, not copied) for the additive scan fields.
 - `StrategyRequirement` rows for the `rules` form.
 
@@ -537,7 +678,10 @@ sites in E3a; `_paths.py` by `_nested.py`, `_scan_integrity.py` and `_keys.py` i
 
 | Surface | Change | Rule followed |
 |---|---|---|
-| `scan-set/v1` (`docs/compatibility-contract.md:251`) | Additive: `FieldCore.nested`, `ChildFactsCore.path`, `ChildFactsCore.unreadable_rows`, all defaulted `None`; strict write models; read model ignores unknowns | Same precedent as SCAN-ML M3a `model_hits`; contract text, frozen-surface map row and a corpus sample in the same slice |
+| `scan-set/v1` (`docs/compatibility-contract.md:251`) | Additive: `FieldCore.nested`, `ChildFactsCore.path`, `ChildFactsCore.unreadable_rows`, all defaulted `None`; strict write models; read model ignores unknowns. The contract text says every field in a new record carries `"nested": null` when it is not a JSON column, and every child fact carries `"path": null` and `"unreadable_rows": null` for column relations | Same precedent as SCAN-ML M3a `model_hits`; contract text, frozen-surface map row and a corpus sample in the same slice |
+| Post-scan key findings (`KeyResult.as_dict()`, `src/decoy_engine/verification/postmask/_keys.py:92`) | Additive `path` member, `None` for column relations; `check_keys` gains keyword `path_relations=()` | Additive; read-back covered by AT-E4-8 |
+| `strict_json_loads` and `STRICT_JSON_TOKENS` | Behavior unchanged; the token tuple gains `oversized` and `too_deep` at the end | Internal foundation; AT-E1-12 pins the existing callers |
+| Module path of the nested handler | `execution/_strategies/_nested.py` becomes `execution/_strategies/nested/_handler.py` | Private module; the strategy registry name `nested` is unchanged |
 | `scan_sources` signature | Additive keyword-only `nested_paths=True`, `path_relations=()` | Contract section 3.1: new keyword-only parameters are additive |
 | `nested` `provider_config` (`docs/compatibility-contract.md:1016`) | Additive `rules` list with per-rule `namespace` and `references`; the single form is unchanged | Required-settings text updated |
 | `nested` output bytes | Change only for cells with non-round-trip numbers (bug fix) | Recorded as a pre-GA semantic change in the contract and the changelog |
@@ -556,7 +700,7 @@ sites in E3a; `_paths.py` by `_nested.py`, `_scan_integrity.py` and `_keys.py` i
 | 6 | Untrusted producer data | JSON cells are untrusted: byte, depth and duplicate bounds before use; key rule before any key text is written | AT-E1-3, AT-E1-4, AT-E1-5, AT-E2-5 | remove the byte check |
 | 7 | Check then use (TOCTOU) | Size checked on the same in-memory text that is parsed; no re-read of the source | AT-E1-4 | re-read the cell after the size check |
 | 8 | Weak tests and overclaimed evidence | Red-first cells with named mutations on the final head; JSONB cells run on a Postgres node and a skip is reported, never counted as a pass | AT-E5-1 to AT-E5-3, AT-E1-2 | assert only that output parses |
-| 9 | Behavior-preserving refactor drift | 82-E2a is a pure move with a schema snapshot; 82-E3a keeps every existing assertion unchanged | AT-E2a-1, AT-E3a-1 | rename a field in the move |
+| 9 | Behavior-preserving refactor drift | 82-E2a is a pure move with a schema snapshot; the 82-E1 handler move and 82-E3a keep every existing assertion unchanged; the single form stays byte-identical | AT-E2a-1, AT-E3a-1, AT-E1-12, AT-E3b-6 | rename a field in the move |
 | 10 | Frozen contract drift | Additive defaulted fields only; contract text, frozen-surface map row and corpus sample in the same slice | AT-E2-7, AT-E4-7, `tests/sentry/release/test_frozen_surface_map.py` | make a new field required |
 
 Class 11 (no raised caps): nothing in this plan raises a size ceiling, fan-out allowlist,
@@ -571,7 +715,8 @@ ignore line is added.
   failure (`src/decoy_engine/execution/_strategies/_nested.py:325`).
 - Rule overlap, a rule that matches nothing, an unknown child: `StrategyError`, the job fails and
   nothing is published (`src/decoy_engine/execution/_strategies/_nested.py:400`).
-- Reference leaf kind mismatch: row error (new).
+- Reference leaf kind mismatch, selected integer over 4300 digits, child non-finite output: row
+  error plus a warning code (new).
 - Plan refusals (rules shape, reference checks): `PlanCompileError` before any read, on both the
   compile path and the config-only path (`src/decoy_engine/plan/_compile.py:477`).
 - Scan: a qualifying column whose cells all fail still returns counts; a scan error keeps today's
@@ -618,30 +763,32 @@ ignore line is added.
 
 | Slice | What | Production files (max 10) | Lines (about) | Risk and gate | After |
 |---|---|---|---|---|---|
-| 82-E1 | `_nested_json` reader and writer, bounds, row errors in `_nested.py`, contract and CODEMAP rows | 7: `_nested_json/__init__.py`, `_read.py`, `_write.py`, `_nested.py`, `reasons/runtime/_nested_json.py`, `reasons/runtime/__init__.py`, `.importlinter` | 450 | R2 (data handling): Dennis then Codex | none |
+| 82-E1 | Bounded lexeme-keeping mode of the one strict reader, writer, object-dtype leaves, null leaves kept, warning codes; handler moved into `nested/` | 9: `_canonical/_json.py`, `_canonical/__init__.py`, `nested/__init__.py`, `nested/_handler.py` (moved), `nested/_leaves.py`, `_strategies/__init__.py` (registry import), `execution/_mixed_admission.py`, `reasons/warning/_nested_cells.py`, `reasons/warning/__init__.py` (plus `_nested.py` deleted) | 600 new or changed, plus 585 moved | R2 (data handling): Dennis then Codex | none |
 | 82-E2a | Move the scan-set core models to `profiling/_scan_core.py`, importers moved | 3: `_scan_core.py`, `scan_set.py`, `profiling/__init__.py` | 280 (moved) | R1: Codex | none |
-| 82-E2b | `profiling/paths/`, `NestedCore`, scan wiring, warning codes, contract text | 8: `paths/__init__.py`, `paths/_walk.py`, `paths/_observe.py`, `_scan_core.py`, `scan_set.py`, `profiling/__init__.py`, `reasons/warning/_nested_paths.py`, `reasons/warning/__init__.py` | 650 | R2 (value leaks): Dennis then Codex | 82-E1, 82-E2a |
-| 82-E3a | `nested_children` choke point, migrate the child readers, sentry | 9: `_rules.py`, `_nested_json/__init__.py`, `_nested.py`, `plan/_checks_top_code.py`, `plan/_checks_date_shift.py`, `plan/_checks_bucket_perturb.py`, `secret_providers/_requirements.py`, `execution/_column_access.py`, `execution/_pipeline_multi_table.py` | 350 | R2 (cross-cutting refactor): Dennis then Codex | 82-E1 |
-| 82-E3b | `rules` form, per-rule namespace, overlap refusal, plan checks | 8: `_rules.py`, `_nested.py`, `plan/checks/_nested_rules.py`, `plan/checks/__init__.py`, `plan/_compile.py`, `contracts/strategy_requirements.py`, `reasons/plan/_nested_rules.py`, `reasons/plan/__init__.py` | 600 | R2 (masking identity): Dennis then Codex | 82-E3a |
-| 82-E4 | References, `path_relations`, `path_key_batches`, pre and post scan counts, additive child facts | 9: `_nested_json/_paths.py`, `_rules.py`, `_nested.py`, `plan/checks/_nested_rules.py`, `profiling/_scan_integrity.py`, `profiling/scan_set.py`, `profiling/_scan_core.py`, `verification/postmask/_keys.py`, `reasons/plan/_nested_rules.py` | 700 | R2 (referential integrity): Dennis then Codex | 82-E2b, 82-E3b |
+| 82-E2b | `profiling/paths/` (two-pass walk, key rule with per-key detectors and appearance, cells cap), `NestedCore`, scan wiring, warning codes, contract text | 8: `paths/__init__.py`, `paths/_walk.py`, `paths/_observe.py`, `_scan_core.py`, `scan_set.py`, `profiling/__init__.py`, `reasons/warning/_nested_paths.py`, `reasons/warning/__init__.py` | 750 | R2 (value leaks): Dennis then Codex | 82-E1, 82-E2a |
+| 82-E3a | `nested_children(provider_config)` choke point, migrate the seven child readers, sentry, layer contract | 10: `_nested_json/__init__.py`, `_nested_json/_rules.py`, `.importlinter`, `nested/_handler.py`, `plan/_checks_top_code.py`, `plan/_checks_date_shift.py`, `plan/_checks_bucket_perturb.py`, `secret_providers/_requirements.py`, `execution/_column_access.py`, `execution/_pipeline_multi_table.py` | 400 | R2 (cross-cutting refactor): Dennis then Codex | 82-E1 |
+| 82-E3b | `rules` form, per-rule identity, match-all-before-write overlap refusal, preflight to every child, plan checks | 9: `_nested_json/_rules.py`, `nested/_handler.py`, `nested/_apply.py`, `plan/checks/_nested_rules.py`, `plan/checks/__init__.py`, `plan/_compile.py`, `contracts/strategy_requirements.py`, `reasons/plan/_nested_rules.py`, `reasons/plan/__init__.py` | 700 | R2 (masking identity): Dennis then Codex | 82-E3a |
+| 82-E4 | References, gated-parent refusal, `path_relations`, `path_key_batches`, pre and post scan counts, additive child facts and `KeyResult.path` | 9: `_nested_json/_paths.py`, `_nested_json/_rules.py`, `nested/_apply.py`, `plan/checks/_nested_rules.py`, `profiling/_scan_integrity.py`, `profiling/scan_set.py`, `profiling/_scan_core.py`, `verification/postmask/_keys.py`, `reasons/plan/_nested_rules.py` | 750 | R2 (referential integrity): Dennis then Codex | 82-E2b, 82-E3b |
 | 82-E5 | JSONB `pg_integration` acceptance, `docs/nested-json.md`, changelog, roadmap note | 0 | 400 (tests and docs) | R1: Codex | 82-E4 |
 
-Expected size in total: about 3,400 changed lines including tests. New public names:
+Expected size in total: about 3,900 changed lines including tests, plus the 585-line handler move. New public names:
 `NestedCore`, `PathObservationCore`, `PathRelation`, `TableScan.nested`, `FieldCore.nested`, and
 the `scan_sources` keywords `nested_paths` and `path_relations` (exported from
 `decoy_engine.profiling`). A slice that runs well past its line budget stops and explains before
 review.
 
 Test depth per slice: T0 and T1 by the builder on a test VM or the Mac, never the devbox; T2 at
-the gate on the exact head with the mutations above. Full-suite triggers: 82-E1 (layer contract is
-test configuration), 82-E2a, 82-E2b and 82-E4 (serialization of a frozen contract). These run once
+the gate on the exact head with the mutations above. Full-suite triggers: 82-E1 (moved module and a
+fan-out freeze change), 82-E3a (layer contract is test configuration), 82-E2a, 82-E2b and 82-E4
+(serialization of a frozen contract). These run once
 per merge-batch head under the merge-train rule.
 
 ## 16. Dependencies, release and repin
 
 - 82-E1 and 82-E2a start at once (no shared file). 82-E2b after both. 82-E3a after 82-E1
-  (`_nested.py`). 82-E3b after 82-E3a. 82-E4 after 82-E2b and 82-E3b. 82-E5 last.
-- One writer at a time on `_nested.py` (82-E1, 82-E3a, 82-E3b, 82-E4 in that order) and on
+  (the handler move). 82-E3b after 82-E3a. 82-E4 after 82-E2b and 82-E3b. 82-E5 last.
+- One writer at a time on the nested handler sub-package (82-E1, 82-E3a, 82-E3b, 82-E4 in that
+  order), on `_nested_json/_rules.py` (82-E3a, 82-E3b, 82-E4) and on
   `profiling/scan_set.py` and `_scan_core.py` (82-E2a, 82-E2b, 82-E4).
 - Each merged slice ships in the next daily engine release. No CLI repin is required for this row;
   the CLI follow-up row (OQ-8) waits for the release that carries 82-E4.
@@ -657,7 +804,8 @@ per merge-batch head under the merge-train rule.
   Alternative: keep last-wins and add a warning.
 - **OQ-3. Bounds as engine constants or config?** Recommended: constants for V1
   (`MASK_CELL_BYTES` 16 MiB, `MASK_MAX_DEPTH` 64, `SCAN_CELL_BYTES` 1 MiB, `SCAN_MAX_DEPTH` 16,
-  `SCAN_ARRAY_ITEMS` 16, `SCAN_MAX_PATHS` 256, `SCAN_MAP_KEYS` 64, `SCAN_LEAF_SAMPLE` 1000),
+  `SCAN_ARRAY_ITEMS` 16, `SCAN_MAX_PATHS` 256, `SCAN_MAP_KEYS` 64, `SCAN_LEAF_SAMPLE` 1000,
+  `SCAN_MAX_CELLS` 20480, `SCAN_KEY_APPEARANCE` 0.1),
   documented in `docs/nested-json.md`; config knobs are V2.
 - **OQ-4. Discovery on by default?** Recommended: yes for qualifying columns, with
   `nested_paths=False` to switch it off; the fields are additive and bounded.
@@ -686,8 +834,13 @@ per merge-batch head under the merge-train rule.
   follow-up, not a blocker.
 - JSONB cells skip in CI because no Postgres is present, and the slice merges on skips. Guard: the
   82-E5 gate needs the `pg_integration` run log with the cells passed, from a node with docker.
-- `_nested.py` grows past 600 lines across 82-E3b and 82-E4. Guard: per-slice line report; rule
-  helpers live in `_nested_json/_rules.py`, not in the handler.
+- A nested module grows past 600 lines across 82-E3b and 82-E4. Guard: the 82-E1 split into
+  `nested/`, per-slice line reports, rule application in `nested/_apply.py` and the rule model in
+  `_nested_json/_rules.py`, not in the handler.
+- Growing `strict_json_loads` changes behavior for its existing callers (records codec, native
+  faker admission). Guard: AT-E1-12 runs their tests unchanged and pins the defaults.
+- A child keys draws or evidence on something other than the column name the handler passes, so
+  two rules still share a slot. Guard: AT-E3b-6 and AT-E3b-7, and the stop rule in section 4.3.
 - The 82-E2a move breaks an importer outside the engine (CLI imports `ScanSetCoreRead`). Guard:
   the names stay exported from `decoy_engine.profiling` and `profiling.scan_set` (frozen API), and
   AT-E2a-1 pins identity.
@@ -705,4 +858,26 @@ per merge-batch head under the merge-train rule.
 
 ## 20. Review record
 
-None yet.
+- Revision 1 (`917571fee`), Dennis round 1: GO-WITH-FIXES, 4 HIGH, 8 MEDIUM, 5 LOW, all plan edits.
+  Owner answers kept as recommended. Revision 2 applies all of them:
+  - HIGH-1: one strict reader; the bounded mode grows `_canonical/_json.py` (section 4.1, section 11).
+  - HIGH-2: per-rule draw and evidence identity (section 4.3; AT-E3b-6, AT-E3b-7).
+  - HIGH-3: null leaves kept out of the child, object-dtype leaf column (section 4.1; AT-E1-8,
+    AT-E4-1).
+  - HIGH-4: per-key detectors and the appearance rule (section 4.2; AT-E2-10).
+  - MEDIUM-1: `QualityWarning` beside the `RowError` is the code carrier (section 4.1; AT-E1-3).
+  - MEDIUM-2: `JsonNumber` defined, deep conversion, size check order, surrogates, long integers,
+    non-finite child output (section 4.1; AT-E1-9 to AT-E1-11).
+  - MEDIUM-3: two-pass walk and `SCAN_MAX_CELLS` (section 4.2; AT-E2-5).
+  - MEDIUM-4: match all rules before writing, equal or prefix overlap, preflight to every child
+    (section 4.3; AT-E3b-2, AT-E3b-8).
+  - MEDIUM-5: gated parent refused, wrong-kind leaf counted unreadable (section 4.4; AT-E4-2,
+    AT-E4-5).
+  - MEDIUM-6: `KeyResult.path` and the `check_keys` keyword (sections 4.4 and 12; AT-E4-8).
+  - MEDIUM-7: handler split into `execution/_strategies/nested/` in 82-E1, freeze lowered to 28
+    (sections 4.1, 9, 10).
+  - MEDIUM-8: allowed dependencies per package; `nested_children` takes a provider-config
+    mapping (sections 4.3 and 6).
+  - LOW-1: importers moved, no re-export. LOW-2: read model accepts `str` kinds. LOW-3: contract
+    text names the null members. LOW-4: `nested_rule_namespace_unknown` dropped. LOW-5:
+    first-character prefilter (AT-E2-11).
