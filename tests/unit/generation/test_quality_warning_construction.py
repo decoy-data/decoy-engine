@@ -54,7 +54,7 @@ def test_non_string_detail_key_is_refused() -> None:
 
 def test_the_refusal_never_echoes_the_value() -> None:
     with pytest.raises(TypeError) as caught:
-        QualityWarning(code="c", provider="p", detail={"k": ["SECRET-VALUE"]})
+        QualityWarning(code="c", provider="p", detail={"k": [["SECRET-VALUE"]]})
     assert "SECRET-VALUE" not in str(caught.value)
 
 
