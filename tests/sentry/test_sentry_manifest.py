@@ -114,6 +114,7 @@ SENTRIES = (
     "tests/sentry/post_scan/test_post_scan_choke_points.py",
     "tests/sentry/profiling/test_generated_at_shape.py",
     "tests/sentry/profiling/test_profile_value_registry.py",
+    "tests/sentry/profiling/test_snapshot_datetime_contract.py",
     "tests/sentry/profiling/test_snapshot_value_registry.py",
     "tests/sentry/release/test_frozen_surface_map.py",
     "tests/sentry/source_config/test_declaration_gate.py",
