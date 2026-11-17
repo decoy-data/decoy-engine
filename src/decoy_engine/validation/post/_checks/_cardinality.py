@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 _NAME = "cardinality"
 
 
+def _source_name(seed: ColumnSeed) -> str:
+    """The warning's `provider`: the provider, or the strategy for a scalar transform."""
+    return seed.provider or seed.strategy
+
+
 def run_cardinality(ctx: ScanContext) -> ScanOutcome:
     distinct_counts: dict[str, DistinctCount] = {}
     warnings: list[QualityWarning] = []
@@ -60,9 +65,7 @@ def run_cardinality(ctx: ScanContext) -> ScanOutcome:
                 warnings.append(
                     QualityWarning(
                         code=reasons.warning.CARDINALITY_MATCH_DEVIATION,
-                        # Scalar-transform columns carry no provider; the
-                        # warning records the column, so "" is the empty marker.
-                        provider=seed.provider or "",
+                        provider=_source_name(seed),
                         column=col_name,
                         detail={
                             "table": table_name,
@@ -124,7 +127,7 @@ def _collision_warning(
         return None
     return QualityWarning(
         code=reasons.warning.CARDINALITY_COLLISIONS,
-        provider=seed.provider or "",
+        provider=_source_name(seed),
         column=col_name,
         detail={
             "table": table_name,

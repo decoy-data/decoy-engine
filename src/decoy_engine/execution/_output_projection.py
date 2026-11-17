@@ -141,6 +141,6 @@ def enforce_output_projection(
             code=reasons.warning.UNDECLARED_OUTPUT_COLUMNS,
             provider=_PROJECTION_WARNING_SOURCE,
             column=None,
-            detail={"table": table, "undeclared_columns": undeclared},
+            detail={"table": table, "undeclared_columns": ", ".join(undeclared)},
         )
     ]

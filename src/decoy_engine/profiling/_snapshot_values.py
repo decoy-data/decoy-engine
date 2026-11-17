@@ -496,7 +496,7 @@ def snapshot_joint_warnings(doc: dict[str, Any], *, contingency_top_k: int) -> l
                 provider="snapshot",
                 column=",".join(joint["columns"]),
                 detail={
-                    "columns": list(joint["columns"]),
+                    "columns": ", ".join(joint["columns"]),
                     "cell_count": cell_count,
                     "cells_kept": cells_kept,
                     "cap_dropped": cap_dropped,

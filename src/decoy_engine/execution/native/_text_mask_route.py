@@ -23,8 +23,7 @@ __all__ = [
     "text_mask_sub_floor_warning",
 ]
 
-# The exact note `TextMaskHandler.run` attaches, so the native warning's detail is byte-identical
-# to the oracle's (the warning is compared field for field against the oracle's on both routes).
+# The note every route attaches to the warning.
 _SUB_FLOOR_NOTE = (
     "these spans' domain was below the FF1 minimum admissible "
     "domain, or failed checksum validation, and could not be "
@@ -54,16 +53,16 @@ def text_mask_sub_floor_warning(
 ) -> QualityWarning:
     """The one aggregate `text_mask_sub_floor_span_handled` warning for `notices`.
 
-    Byte-identical to the warning `TextMaskHandler.run` builds for the same per-detector counts
-    and policy, at the oracle's scope: the whole column (unified, counts summed across batches) or
-    one oracle-equivalent chunk (chunked)."""
+    Every route builds it here: `TextMaskHandler.run`, the native unified and chunked routes and
+    the out-of-core runners, so the warnings cannot drift. `by_detector` is `name=count` pairs
+    joined with ", " in name order, because `detail` holds scalars only."""
     return QualityWarning(
         code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
         provider="text_mask",
         column=column,
         detail={
             "policy": policy,
-            "by_detector": dict(notices),
+            "by_detector": ", ".join(f"{name}={count}" for name, count in sorted(notices.items())),
             "total": sum(notices.values()),
             "note": _SUB_FLOOR_NOTE,
         },

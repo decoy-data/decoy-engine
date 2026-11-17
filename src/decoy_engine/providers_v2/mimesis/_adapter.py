@@ -203,7 +203,7 @@ class MimesisAdapter:
                 provider=provider,
                 detail={
                     "requested_locale": requested_locale,
-                    "mimesis_locales": list(_SUPPORTED_LOCALES),
+                    "mimesis_locales": ", ".join(_SUPPORTED_LOCALES),
                 },
             )
         )

@@ -455,8 +455,9 @@ class TestH3NonTopLabelCascadeWarning:
             f"Expected exactly one cascade warning when all rows cascade below top level. "
             f"Got: {cascade_warnings}"
         )
-        decisions = cascade_warnings[0].detail["cascade_decisions"]
+        detail = cascade_warnings[0].detail
         # The decision must be 'suppressed' (not h3_resolution_7, which is the top level).
-        assert all(v == "suppressed" for v in decisions.values()), (
-            f"Expected all decisions to be 'suppressed', got: {decisions}"
+        assert detail["cascade_decisions"] == "suppressed=1", (
+            f"Expected one 'suppressed' decision, got: {detail['cascade_decisions']}"
         )
+        assert detail["rows_generalized"] == 1

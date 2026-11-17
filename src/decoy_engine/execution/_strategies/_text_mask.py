@@ -51,6 +51,7 @@ from decoy_engine.execution._strategies._ner_config import (
     enforce_ner_model_version,
     resolve_ner_config,
 )
+from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.text_mask import mask_cell
@@ -235,21 +236,8 @@ class TextMaskHandler:
             # channel counterpart, mirroring how the fpe strategy aggregates
             # `fpe_partial_plaintext_disclosure`).
             warnings.append(
-                QualityWarning(
-                    code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-                    provider="text_mask",
-                    column=column,
-                    detail={
-                        "policy": sub_floor_span_policy,
-                        "by_detector": dict(sub_floor_notices),
-                        "total": sum(sub_floor_notices.values()),
-                        "note": (
-                            "these spans' domain was below the FF1 minimum admissible "
-                            "domain, or failed checksum validation, and could not be "
-                            "FF1-encrypted; they were handled under the configured "
-                            "sub_floor_span policy instead (non-reversible)."
-                        ),
-                    },
+                text_mask_sub_floor_warning(
+                    sub_floor_notices, policy=sub_floor_span_policy, column=column
                 )
             )
         return df, warnings
