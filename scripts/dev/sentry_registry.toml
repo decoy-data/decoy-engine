@@ -147,3 +147,7 @@ baseline = "tests/sentry/baselines/post-scan-readability.json"
 [[sentry]]
 id = "post-scan-route-coverage"
 baseline = "tests/sentry/baselines/post-scan-route-coverage.json"
+
+[[sentry]]
+id = "strategy-docs-agree"
+baseline = "tests/sentry/baselines/strategy-docs-agree.json"

@@ -305,7 +305,7 @@ def test_a_run_blocked_only_by_ner_raises_mains_error_coded_ner_blocked(tmp_path
 def test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from decoy_engine.detection._ner_rate import NerRate
+    from decoy_engine.detection._ner_rate import NER_MIN_RATE, NerRate
     from decoy_engine.execution.pipeline._post_scan import PostScanGate
 
     mf = importlib.import_module(_FINDINGS)
@@ -313,7 +313,7 @@ def test_a_run_with_a_regex_fail_and_an_ner_fail_leads_with_finding_blocked(
     monkeypatch.setattr(
         mf,
         "ner_rates",
-        lambda values, *, model: {"person_name": NerRate("person_name", 300, ROWS)},
+        lambda values, *, model: {"person_name": NerRate("person_name", 300, ROWS, NER_MIN_RATE)},
     )
     frame = pd.DataFrame({"email": [f"user{i}@example.com" for i in range(ROWS)]})
     table = pa.Table.from_pandas(frame, preserve_index=False)

@@ -224,7 +224,7 @@ SOURCES: tuple[Source, ...] = (
     Source(
         "wave-b-string-target-exempt",
         "test_engine_string_targets.py",
-        in_code("test_engine_string_targets.py", "EXEMPT", ("_REMOVED",)),
+        in_code("test_engine_string_targets.py", "EXEMPT"),
     ),
     Source(
         "wave-b-e0-test-files",
@@ -349,6 +349,15 @@ SOURCES: tuple[Source, ...] = (
         "tests/sentry/baselines/post-scan-route-coverage.json",
         lambda: set(
             json.loads((BASELINES / "post-scan-route-coverage.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(
+        "strategy-docs-agree",
+        "tests/sentry/baselines/strategy-docs-agree.json",
+        lambda: set(
+            json.loads((BASELINES / "strategy-docs-agree.json").read_text(encoding="utf-8"))[
                 "entries"
             ]
         ),
