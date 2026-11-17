@@ -8,6 +8,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 |---|---|
 | `__init__.py` | Public API (`__all__` is the contract) |
 | `config/` | `PipelineConfig` and the source/target/table/relationship models |
+| `config/policy/` | The pipeline `policy` block: selector grammar, 5-level precedence, pure expansion (F16; wired into `PipelineConfig` in slice E3) |
 | `plan/` | `compile_plan` -> frozen `Plan`, seed envelope, plan-time checks |
 | `execution/` | `run_pipeline` spine, routes (full-frame oracle, unified slice, chunked dispatcher, sequential and out-of-core FK), strategy handlers, native companion bridge, transactional sink, capacity |
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
