@@ -227,10 +227,15 @@ def test_a_joint_cell_under_k_is_folded_into_other_count() -> None:
     assert sum(c["count"] for c in joint["cells"]) + joint["other_count"] == len(df)
 
 
-def test_a_joint_of_two_bool_columns_is_not_folded() -> None:
+def test_a_joint_of_two_bool_columns_still_folds_a_cell_under_k() -> None:
     df = pd.DataFrame({"a": [True] * 99 + [False], "b": [True] * 98 + [False, False]})
+    raw = compute_distribution_snapshot(df, joint_columns=[("a", "b")])
     joint = _doc(df, flagged=[], joint_columns=[("a", "b")])["joints"][0]
-    assert min(c["count"] for c in joint["cells"]) == 1
+    assert min(c["count"] for c in raw["joints"][0]["cells"]) == 1
+    assert all(c["count"] >= K for c in joint["cells"])
+    assert sum(c["count"] for c in joint["cells"]) + joint["other_count"] == len(df)
+    # the one-column bool vocabulary is still kept
+    assert _tops(_doc(df, flagged=[]), "a")["False"] == 1
 
 
 # AT-4
@@ -250,7 +255,11 @@ def test_a_short_sentence_column_is_free_text_with_a_blank_count() -> None:
 
 
 def test_a_joint_naming_a_free_text_column_is_withheld() -> None:
-    doc = _doc(_qa_frame(), joint_columns=[("note", "state")])
+    df = _qa_frame()
+    df["state"] = [_STATES[(i % 30) % 8] for i in range(len(df))]  # every note-state cell holds K
+    raw = compute_distribution_snapshot(df, joint_columns=[("note", "state")])
+    assert min(c["count"] for c in raw["joints"][0]["cells"]) >= K
+    doc = _doc(df, joint_columns=[("note", "state")])
     assert doc["joints"][0]["cells"] == []
 
 
