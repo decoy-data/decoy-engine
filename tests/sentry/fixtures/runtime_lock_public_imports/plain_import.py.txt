@@ -1,0 +1,3 @@
+"""Planted: dotted `import` of a private module of another engine package."""
+
+import decoy_engine.providers_v2._faker_adapter
