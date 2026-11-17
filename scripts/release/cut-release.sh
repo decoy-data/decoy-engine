@@ -38,7 +38,7 @@ root="$(git -C "$here" rev-parse --show-toplevel)" || die "not inside a git chec
 cd "$root"
 
 remote=${RELEASE_REMOTE:-origin}
-remote_re=${EXPECTED_REMOTE_RE:-'^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)louiskeep/decoy-engine(\.git)?$'}
+remote_re=${EXPECTED_REMOTE_RE:-'^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)decoy-data/decoy-engine(\.git)?$'}
 # Every URL fetch reads and every URL push writes (several `url`/`pushurl` entries, and
 # insteadOf/pushInsteadOf rewrites, as git itself resolves them) must be the engine repository.
 remote_destinations_ok() {

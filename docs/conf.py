@@ -141,7 +141,7 @@ html_static_path = ["_static"]
 html_show_sourcelink = False  # the GitHub-link button below replaces this
 
 html_theme_options = {
-    "source_repository": "https://github.com/louiskeep/decoy-engine/",
+    "source_repository": "https://github.com/decoy-data/decoy-engine/",
     "source_branch": "main",
     "source_directory": "docs/",
     # Keep accent colors aligned with the CLI's semantic-token palette

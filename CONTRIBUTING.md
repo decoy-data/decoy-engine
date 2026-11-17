@@ -4,14 +4,14 @@ Thanks for considering a contribution. The engine is pre-1.0; the public API and
 
 ## Reporting bugs and requesting features
 
-[GitHub Issues](https://github.com/louiskeep/decoy-engine/issues) is the right channel for both. A good bug report includes the engine version (`python -c "import decoy_engine; print(decoy_engine.__version__)"`), a minimal `PipelineConfig` or pandas DataFrame that reproduces the issue, and the full traceback.
+[GitHub Issues](https://github.com/decoy-data/decoy-engine/issues) is the right channel for both. A good bug report includes the engine version (`python -c "import decoy_engine; print(decoy_engine.__version__)"`), a minimal `PipelineConfig` or pandas DataFrame that reproduces the issue, and the full traceback.
 
 For security issues, do not file a public issue: see [`SECURITY.md`](SECURITY.md).
 
 ## Local development
 
 ```
-git clone https://github.com/louiskeep/decoy-engine
+git clone https://github.com/decoy-data/decoy-engine
 cd decoy-engine
 python -m venv .venv
 source .venv/bin/activate    # PowerShell: .venv\Scripts\Activate.ps1
