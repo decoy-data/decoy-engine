@@ -10,12 +10,20 @@ engine `CLAUDE.md`, `CODEMAP.md` ("Where Things Go"), `docs/frozen-surfaces.md`,
 CLI `docs/ROADMAP.md` rows 24c, 24f and 24zm; the row 24f plan
 (`origin/plan/fit-unflagged-values:docs/plans/2026-11-16-fit-unflagged-values.md`, revision 4).
 
+Revision 3, after Codex on revision 2 (`bf8e1483f`, NO-GO). Every finding is taken.
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | V1: a null cell and a literal `(null)` cell both show as `(null)` (`profiler.py:94-105`), so the null count could prove a literal mode or label | the step 3 count map skips `(null)` as well as `[redacted]`; a `(null)` top-value entry proves no other slot (4.3 step 3); new AT-13: 999 nulls plus one literal `(null)` |
+| 2 | V1 (orchestrator ruling): sentinels are kept only where `value` and `note` come from the fixed tables | verified against `sentinels.py` (section 1.1): every profiled `value` and `note` is table text or a count; new rule `SENTINEL_TABLE` keeps a sentinel only when `sentinels.py` matches it to its table, else the count floor (P6, 4.2, 4.3 step 10); new AT-14 and mutations |
+| 3 | DESIGN: no `_placeholder_at` | `_apply` owns whole-slot and per-index decisions: a rules value may be `PlaceholderAt(indexes)` (4.2); the shared guard forbids any other placeholder write in both files (choke point) |
+
 Revision 2, after Dennis round 1 on revision 1 (`334971cfb`). Every finding is taken.
 
 | # | Finding | Change |
 |---|---|---|
 | 1 | HIGH: distribution bin counts are floats, so a strict int reader would fold nothing | one bin-count reading (finite float, `>= 0`, `is_integer()`), summed counts written back as floats (4.3 step 2, step 8); AT-11 adds the fixed-point property over random date frames |
-| 2 | HIGH (design): `_floor_field` wrote null, `[redacted]` and `[]` itself, a second applier | `_floor_field` resolves each key to an `_apply` rule or a computed value and calls `_apply`; one per-index helper `_placeholder_at` sits beside `_apply` (4.2, 4.3); AT-10 points the forbidden-shape guard at `_profile_document.py`; mutation: an inline `field["mode_value"] = None` |
+| 2 | HIGH (design): `_floor_field` wrote null, `[redacted]` and `[]` itself, a second applier | `_floor_field` resolves each key to an `_apply` rule or a computed value and calls `_apply`; per-index replacement goes through `_apply` too (revision 3, finding 3); AT-10 points the forbidden-shape guard at `_profile_document.py`; mutation: an inline `field["mode_value"] = None` |
 | 3 | MEDIUM: the free-text sample and count map could hold `[redacted]`, `(null)` and the aggregate; the fixed-point argument was loose | sample is the distinct kept labels without those three; the count map skips `[redacted]`; the argument is restated (4.3 step 5); AT-3 adds a heavily null column |
 | 4 | MEDIUM: AT-1 fixture had 1,001 rows and relied on tie order; AT-2's 10-row and 9-row labels were not pinned in the top 5 | fixture counts fixed in sections 5 and 7 so the minimum has the largest count and both labels sit in the top 5 |
 | 5 | MEDIUM: the AT-10 twin cannot build an unflagged `DetectorMatch` or pattern entry | those rows are covered by the flagged path; AT-10 asserts an entry with a `DetectorMatch` is flagged and tests the pattern and unknown-kind fallback on a loaded dict with empty `detector_matches` |
@@ -66,7 +74,7 @@ slots of an unflagged column, all filled by `profiling/profiler.py` and `_distri
 | `Distribution.labels` (numeric) | 10 equal-width bin edges from the exact min and max, so two edges give both extremes; a constant column's label is the cell | `_distributions.py:27-65` |
 | `Distribution.labels` (date) | decades, a decade held by 1 row included | `_distributions.py:68-81` |
 | `Distribution.min`, `max`, `mean` | exact numeric or date extremes and the mean | `_distributions.py:38-44`, `:78-79` |
-| `SentinelFlag.value`, `note` | a placeholder from four closed tables | `sentinels.py:36-73`, `:197-258` |
+| `SentinelFlag.value`, `note` | table text or a count, never the raw cell: date `value` is the table key's `isoformat()` and `note` the table text (`sentinels.py:196-202`); out-of-range `value` is `"<n> value(s)"` and `note` one of two fixed strings (`:206-216`); numeric `value` is the formatted table key and `note` the table text (`:233-239`); string `value` is the lowercased, stripped cell only when it is a member of `_STRING_SENTINELS`, so it equals the table member, and `note` is built from it (`:244-260`) | `sentinels.py:36-73`, `:196-260` |
 
 The CLI writes this document in one place: `decoy demo` writes `scan.json` through
 `profile_document` (CLI `src/decoy/cli/demo.py:163-167`). The `decoy.scan()` docstring tells
@@ -113,8 +121,11 @@ the floor:
   still holds K rows.
 - P5. A column whose released labels read as sentences (row 24f's 3-word median test, applied to
   the labels P1 and P2 keep) releases no label, mode or bound text.
-- P6. `sample_invalid` is empty. Sentinel values and notes are kept: every engine version writes
-  them from the four closed tables in `sentinels.py` (unchanged since `16dba4f1`).
+- P6. `sample_invalid` is empty. A sentinel's `value` and `note` are kept only when
+  `sentinels.py` matches the pair to its fixed table for that `kind` (the table text, never the raw
+  cell). Every profiled sentinel matches (section 1.1). A pair that does not match, which only a
+  loaded document can hold, goes through the count floor: kept when the flag's own `count` is at
+  least K, else both slots are replaced.
 - P7. A key that no profile type declares, or a value-free key with the wrong type, is replaced
   inside an unflagged column, as it is today inside a flagged one (`_value_redaction.py:445-470`,
   the default-deny at `:461`).
@@ -176,8 +187,15 @@ summed bin counts, a decade edge, as `_year_edge` does for the snapshot,
 - a registry sentry requires every `VALUE_FIELDS` pair (per distribution kind) to be in exactly
   one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`.
 
+Placeholder writes have one owner, `_apply`. The shared guard checks, run on `_profile_document.py`
+and `_snapshot_values.py`, flag a subscript assignment of `None`, `REDACTED`, `{}` or `[]`, and any
+use of the name `REDACTED` or the text `[redacted]` other than as an operand of a comparison or
+membership test (so `[REDACTED] * n` and `labels[i] = REDACTED` are both caught). Neither file
+holds such a write at the base.
+
 Mutations that must turn them red: delete the `_floor_field` call; delete one
-`PROFILE_FLOOR_FIELDS` row; write `field["mode_value"] = None` inline in `_floor_field`. The CLI
+`PROFILE_FLOOR_FIELDS` row; write `field["mode_value"] = None` inline in `_floor_field`; replace
+one label with `labels[i] = REDACTED` in `_floor_field`. The CLI
 sentry `tests/sentry/io_policy/test_profile_document_route.py` already refuses a raw `to_dict()`
 write.
 
@@ -197,8 +215,8 @@ per kind (`Distribution.<kind>`):
 
 - `PROFILE_FLOOR_FIELDS`, the rule for each value slot of an unflagged column. New `Rule`
   members join the one enum: `HELD_BY_K`, `UNDER_K_PLACEHOLDER`, `AGGREGATE_2K`, `FOLD_DECADES`,
-  `DECADE_START`, `DECADE_END`. All six join `DATA_RULES`: `_floor_field` resolves them to an
-  existing `_apply` rule or a computed value, and `_apply` never receives them.
+  `DECADE_START`, `DECADE_END`, `SENTINEL_TABLE`. All seven join `DATA_RULES`: `_floor_field`
+  resolves them to an existing `_apply` rule or a computed value, and `_apply` never receives them.
 - `PROFILE_FLOOR_KEEP`, a frozenset of the value slots an unflagged column keeps unchanged. It is
   not a `Rule`, so nothing can route it to `_apply`'s placeholder branch.
 
@@ -214,22 +232,30 @@ per kind (`Distribution.<kind>`):
 | `Distribution.date` `labels` / `min` / `max` | `FOLD_DECADES` / `DECADE_START` / `DECADE_END` |
 | `Distribution.pattern` (any field) | the `VALUE_FIELDS` rule |
 | `Distribution.freetext` `labels`, `min`, `max`, `mean` | `PROFILE_FLOOR_KEEP` (length buckets and length statistics) |
-| `SentinelFlag` `value`, `note` | `PROFILE_FLOOR_KEEP` (closed tables, P6) |
+| `SentinelFlag` `value`, `note` | `SENTINEL_TABLE` (P6) |
 
 A distribution `kind` outside the five gets the `VALUE_FIELDS` rules (fail closed). The
 `DetectorMatch` and `Distribution.pattern` rows exist for completeness: a profiled column holds
 either only when a detector fired, and a detector hit flags the column (`_value_redaction.py:290-303`),
 so the flagged path covers them. They matter only for a loaded document.
 
-One helper joins `_apply` in `_value_redaction.py`: `_placeholder_at(container, key, indexes)`
-replaces the listed entries of one list slot with the placeholder and leaves the others. It is
-the only per-index writer; `_apply` keeps the whole-slot rules.
+`_apply` owns per-index decisions too. A value in its `rules` mapping may be a `Rule` or
+`PlaceholderAt(indexes: frozenset[int])`, a frozen dataclass in `_value_redaction.py`. With
+`PlaceholderAt`, `_apply` replaces the listed entries of a list slot and leaves the others; a
+slot that is not a list is replaced whole (fail closed). Existing callers pass only `Rule`
+values, so their behaviour is unchanged. There is no other placeholder writer.
+
+`sentinels.py` gains `is_table_sentinel(kind, value, note) -> bool`, built from the same four
+tables and the same formatting the scanners use. The string note and the numeric value text move
+to one helper each (`_string_note`, `_numeric_text`), and the two out-of-range notes become named
+constants, so the scanners and the check share one source (Fowler "Extract Function"). The
+out-of-range `value` matches `re.fullmatch(r"[1-9]\d* value\(s\)", value)`.
 
 ### 4.3 E1b: rules (all in `_profile_document.py`)
 
 `_floor_field(field)` runs on one unflagged entry. It reads a copy taken before any change, works
-out a decision per slot, then applies all decisions through `_apply`, `_placeholder_at` or a
-computed assignment:
+out a decision per slot, then applies all decisions through `_apply` or a
+computed assignment. Every replacement goes through `_apply` (a `Rule` or a `PlaceholderAt`):
 
 1. Default-deny keys (P7): reuse `_field_plan` containers with a keep test that admits the
    type's value-free shapes (`_shape_keep`) and its `VALUE_FIELDS` names.
@@ -241,7 +267,10 @@ computed assignment:
    only when `_conforms(x, float)` and `x >= 0`. A value that fails proves nothing. `n` is
    `row_count - null_count`.
 3. Proven counts by text: from `top_values`, `{value: count}`, keeping the larger count if a text
-   repeats. An entry whose text is `REDACTED` is skipped, so a placeholder never proves itself.
+   repeats. An entry whose text is `REDACTED` or the null marker `(null)` is skipped. The profiler
+   writes a null cell and a literal `(null)` cell the same way (`profiler.py:94-105`), so the
+   null count must never prove a mode, bound or label that reads `(null)`. A `(null)` top-value
+   entry is still judged in step 4 by its own count, like any other entry.
 4. `UNDER_K_PLACEHOLDER`: a top value is kept when its own count is at least K. A categorical
    label is kept when its proven count is at least K, or, with no proven count, when the P2 lower
    bound on `data[i]` is at least K. The bound uses `Decimal(repr(x))`, so float error cannot
@@ -249,11 +278,11 @@ computed assignment:
    aggregate and is kept. When `len(data) != len(labels)`, every label is replaced. The 0.05
    margin is one named constant beside the categorical builder's rounding in `_distributions.py`
    (the forbidden-shape guard bans a float literal from 0 to 1 in `_profile_document.py`).
-   Replacements go through `_placeholder_at`.
+   Label replacements are one `PlaceholderAt` per list.
 5. Free text (P5). The sample is the distinct texts step 4 keeps, from top values and categorical
    labels, without `REDACTED`, the `(null)` marker (`profiler.py:100`) and the trailing aggregate.
    An empty sample is not free text. If row 24f's word-count test says the sample reads as
-   sentences, every top value and categorical label is replaced (`_placeholder_at` over all
+   sentences, every top value and categorical label is replaced (`PlaceholderAt` over all
    indexes) and `mode_value`, `min_value`, `max_value` resolve to `NULL`.
    Fixed point: on a second pass the counts are unchanged and step 3 skips placeholders, so step 4
    keeps exactly the texts the first pass kept. If the first pass found free text, nothing is kept,
@@ -277,7 +306,11 @@ computed assignment:
    `YYYY-01-01T00:00:00` and `YYYY-12-31T23:59:59.999999` for `FieldStats` (`YYYY` is the start
    decade, or the end decade plus 9), and `YYYY-01-01` / `YYYY-12-31` for the distribution. With
    no date distribution, or a fold that failed, `NULL`.
-10. Bool columns skip steps 4 to 6 (P1).
+10. `SENTINEL_TABLE`: for each sentinel flag, `value` and `note` are kept when
+    `is_table_sentinel(kind, value, note)` holds. Otherwise both are kept only when the flag's own
+    `count` passes step 2 and is at least K; else both resolve to `PLACEHOLDER`. `kind` and
+    `count` are value-free shapes and stay.
+11. Bool columns skip steps 4 to 6 (P1).
 
 Shared helpers, one owner each: row 24f E1 owns the word-count test and the contiguous fold. If
 E1 merges them inline in `_snapshot_values.py`, E1b extracts each to one named function in
@@ -394,7 +427,8 @@ masking choosers) do not change: they never read the document.
 | Floor constant | `MIN_RELEASE_COUNT` | no |
 | Unflagged selection | `_sensitive_entries`, `is_value_sensitive` | no |
 | Default-deny keys | `_field_plan`, `_containers`, `_shape_keep`, `_shapes` | no |
-| Rule enum, flagged applier | `Rule`, `_apply` | six members; `_placeholder_at` beside `_apply` |
+| Rule enum, flagged applier | `Rule`, `_apply` | seven members; `_apply` also accepts `PlaceholderAt` |
+| Sentinel tables | `sentinels.py` tables and scanners | `is_table_sentinel` and two extracted formatters |
 | Strict count test | `_conforms` | no |
 | Forbidden-shape guard | `_guard_findings` | shared checks split from the snapshot-only one |
 | Marker | `stamp_value_policy`, `POLICY_REDACTED` (v2 from row 24f E1) | no |
@@ -418,10 +452,12 @@ asserted unflagged first.
 | AT-6 | fail closed: top-value counts as `True`, `"20"`, `20.0` or `-1` prove nothing; date bin counts as `True`, `20`, `2.5`, NaN or `-1.0` prove nothing; categorical `data` shorter than `labels` redacts every label; `top_values` missing; a decade label `1920s ` (trailing space), `1920s\n`, out of order or overlapping; an unknown distribution kind; an unknown key in an unflagged entry. Each yields the replacement in section 6 | ill-typed counts and keys pass through |
 | AT-7 | `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` on the floor frame and on the case "two 1-word labels under K, one 3-word label over K"; the input dict is not mutated; `profile_document(p) == redact_profile_dict(p.to_dict())` | the free-text case flips on a second pass if the test reads all labels |
 | AT-8 | `include_values=True` equals `to_dict()` plus the two keys on the floor frame (existing `test_include_values_is_to_dict_plus_the_two_keys` extended); flagged columns of the existing canary fixture are byte-identical to the pre-change document | not fail-before: pins what must not change |
-| AT-9 | guards that stay green: `is_active` keeps its count-1 `False`; unflagged sentinels keep `value` and `note`; `test_a_column_that_is_not_value_sensitive_keeps_its_values` unchanged | not fail-before |
-| AT-10 | sentry (`tests/sentry/profiling/test_profile_value_registry.py`): every `VALUE_FIELDS` pair, for each of the five kinds, is in exactly one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`, and nothing else is; every `PROFILE_FLOOR_FIELDS` value is a `Rule`; `PROFILE_FLOOR_KEEP` is exactly the freetext and sentinel slots of 4.2. `test_every_value_rule_is_applied` gains a twin that builds an unflagged canary entry (count 1, no detector) and asserts each floor rule removes it. The twin cannot build an unflagged `DetectorMatch` or `Distribution.pattern` entry, so it asserts instead that a profiled entry with a `DetectorMatch` is flagged, and tests the pattern rows and the unknown-kind fallback on a loaded dict with `detector_matches: []`. `test_snapshot_value_registry.py` runs the shared `_guard_findings` checks on `_profile_document.py` | unflagged canaries survive |
+| AT-9 | guards that stay green: `is_active` keeps its count-1 `False`; profiled sentinels of unflagged columns keep `value` and `note`; `test_a_column_that_is_not_value_sensitive_keeps_its_values` unchanged | not fail-before |
+| AT-10 | sentry (`tests/sentry/profiling/test_profile_value_registry.py`): every `VALUE_FIELDS` pair, for each of the five kinds, is in exactly one of `PROFILE_FLOOR_FIELDS` and `PROFILE_FLOOR_KEEP`, and nothing else is; every `PROFILE_FLOOR_FIELDS` value is a `Rule`; `PROFILE_FLOOR_KEEP` is exactly the freetext slots of 4.2, and the sentinel slots map to `SENTINEL_TABLE`. `test_every_value_rule_is_applied` gains a twin that builds an unflagged canary entry (count 1, no detector) and asserts each floor rule removes it. The twin cannot build an unflagged `DetectorMatch` or `Distribution.pattern` entry, so it asserts instead that a profiled entry with a `DetectorMatch` is flagged, and tests the pattern rows and the unknown-kind fallback on a loaded dict with `detector_matches: []`. `test_snapshot_value_registry.py` runs the shared `_guard_findings` checks on `_profile_document.py` | unflagged canaries survive |
 | AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K. On random datetime frames, `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` and the folded `data` entries are floats | fails on the first count-1 label; the fixed point fails if summed counts are written as ints |
 | AT-12 | the demo's 10-row sample through `profile_document`: `gender` labels and top values `[redacted]`, mode null; `redacted_columns` unchanged; no exception | `F`, `M` stored |
+| AT-13 | `nullish`: 999 null cells and one literal `(null)` cell (1,000 rows). Non-vacuity: the raw `to_dict()` has `mode_value "(null)"` and a top-value entry `(null)` with count 1. The document has `mode_value`, `min_value` and `max_value` null, no categorical label `(null)`, and the count-1 top-value entry `[redacted]`; the only `(null)` left in the column is the top-value entry with count 999, the null marker | the null count proves the literal mode |
+| AT-14 | sentinels. Profiled: a frame where one row holds ` N/A ` and one row holds `-999`; the flags read `value "n/a"` and `"-999"` with their table notes and `is_table_sentinel` holds for each; the text ` N/A ` and `N/A` is not in the JSON. Loaded dict: a `string_sentinel` flag with `value "Jane Q Example"`, a free-form note and count 1 has both slots `[redacted]`; the same flag with count 12 keeps them; a table `value` with a changed note is floored | a loaded raw sentinel text is stored |
 
 Mutations that must turn a test red: delete the `_floor_field` call (AT-1 to AT-4); delete one
 `PROFILE_FLOOR_FIELDS` row (AT-10); `>` instead of `>=` K (AT-2); read label counts from `pct`
@@ -431,7 +467,10 @@ free-text sample (AT-3 `comment`); apply steps 4 to 6 to bool columns (AT-9); le
 decade unmerged (AT-4); `isinstance` for counts (AT-6); read bin counts with the int test (AT-4,
 AT-11); write summed bin counts as ints (AT-11); ignore a `data`/`labels` length mismatch (AT-6);
 `match` for the decade grammar (AT-6); read `top_values` after replacement (AT-1 `min_value`);
-write `field["mode_value"] = None` inline in `_floor_field` (AT-10 guard); floor flagged or raw
+write `field["mode_value"] = None` inline in `_floor_field` (AT-10 guard); let `(null)` into the
+step 3 count map (AT-13); keep sentinel slots without `is_table_sentinel` (AT-14, loaded dict);
+write the string sentinel `value` from the raw cell instead of the normalized table member (AT-14,
+profiled); floor flagged or raw
 output (AT-8).
 
 E1a: no new test. The existing suite and the moved sentry stay green; `git diff -M` shows the
@@ -461,8 +500,9 @@ the 24f C1 builder moves the marker to v2. C1 here adds the AT-C1 cells to the s
 | Change | File and directory | CODEMAP placement | Existing neighbour or reason |
 |---|---|---|---|
 | profile writer (moved), `_floor_field` and its rules | `src/decoy_engine/profiling/_profile_document.py` (new) | "Detectors, profiling" row: by profiling concern | beside `_snapshot_values.py`, the snapshot writer over the same registry; `profiling/` holds 18 modules, under the fan-out limit of 25 |
-| `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, six `Rule` members, `DATA_RULES`, `_placeholder_at` | `src/decoy_engine/profiling/_value_redaction.py` | "Detectors, profiling" row | the one value registry; net smaller after E1a |
+| `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, seven `Rule` members, `DATA_RULES`, `PlaceholderAt` and its `_apply` branch | `src/decoy_engine/profiling/_value_redaction.py` | "Detectors, profiling" row | the one value registry; net smaller after E1a |
 | re-export path | `src/decoy_engine/profiling/__init__.py` | existing | public names unchanged |
+| `is_table_sentinel`, `_string_note`, `_numeric_text`, out-of-range note constants | `src/decoy_engine/profiling/sentinels.py` | "Detectors, profiling" row | the owner of the four tables; no new file |
 | shared fold and word test, if row 24f merged them inline | `src/decoy_engine/profiling/_snapshot_values.py` | "Detectors, profiling" row | row 24f's owner; no new file |
 | floor tests | `tests/unit/profiling/test_profile_floor.py` (new) | "Unit tests" row: mirror `src/` under `tests/unit/<package>/` | beside `test_value_redaction.py` |
 | sentry changes | `tests/sentry/profiling/test_profile_value_registry.py`, `test_snapshot_value_registry.py` | "Sentry test" row: existing rules | existing files |
@@ -470,10 +510,11 @@ the 24f C1 builder moves the marker to v2. C1 here adds the AT-C1 cells to the s
 | CLI docstring, help text, tests, docs | CLI `src/decoy/api.py`, `src/decoy/cli/explain.py`, `tests/e2e/first_user/test_items_privacy.py`, `docs/qa/cli-v1-checklist.md` (SCAN-04), roadmap, shipped log, `CHANGELOG.md` | existing files; no new module in the frozen flat `src/decoy/cli/` | C1 rides the engine repin PR |
 
 Expected size. E1a: 2 production files plus the init, about 60 source lines moved (about 130
-diff lines with the sentry path and CODEMAP text). E1b: 2 production files (3 with the 4.3
-extraction); about 200 source lines, 350 test lines and 30 doc lines, below 800.
+diff lines with the sentry path and CODEMAP text). E1b: 3 production files (4 with the 4.3
+extraction); about 240 source lines, 390 test lines and 30 doc lines, below 800.
 `_profile_document.py` ends near 260 lines; `_value_redaction.py` near 470. New names: the
-module, `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, six `Rule` members, `_placeholder_at` and
+module, `PROFILE_FLOOR_FIELDS`, `PROFILE_FLOOR_KEEP`, seven `Rule` members, `PlaceholderAt`,
+`is_table_sentinel`, `_string_note`, `_numeric_text` and
 `_floor_field`; no new public export.
 C1: no production logic; about 80 docstring, help, test and doc lines.
 
@@ -498,7 +539,7 @@ C1: no production logic; about 80 docstring, help, test and doc lines.
 | Slice | Content | Risk | Size | Depends on | Tests at T1 |
 |---|---|---|---|---|---|
 | E1a | 4.1 move, sentry path, CODEMAP row text | R1 | 3 production files; about 130 diff lines | none (may merge before or after row 24f E1) | `tests/unit/profiling/test_value_redaction.py`, `tests/sentry/profiling/`, `tests/unit/test_public_api.py`, import layers, module size |
-| E1b | 4.2 to 4.4 floor, tests, QA checklist, fragment | R2 | 2 production files (3 with the 4.3 extraction); about 580 diff lines | E1a and row 24f E1 merged | AT-1 to AT-12, `tests/unit/profiling/`, `tests/sentry/profiling/`, `tests/sentry/test_module_size.py`, `tests/sentry/layout/test_package_fanout.py` |
+| E1b | 4.2 to 4.4 floor, tests, QA checklist, fragment | R2 | 3 production files (4 with the 4.3 extraction); about 660 diff lines | E1a and row 24f E1 merged | AT-1 to AT-14, `tests/unit/profiling/`, `tests/sentry/profiling/`, `tests/sentry/test_module_size.py`, `tests/sentry/layout/test_package_fanout.py` |
 | C1 | AT-C1, AT-C2, `decoy.scan()` docstring, `decoy explain security` line for the demo `scan.json`, SCAN-04 text, roadmap row, shipped log, changelog | R1 | about 80 lines | E1b released and pinned (repin checklist) | AT-C1, AT-C2, `tests/e2e/first_user/test_items_privacy.py`, `tests/sentry/io_policy/` |
 
 E1b changes the bytes of a frozen surface, an escalation trigger: its merge head gets the full
@@ -541,8 +582,9 @@ Each is taken under standing approval ("go with recommended") on 2026-11-17.
    its notes say profile documents are floored from the next release. No CLI release carries the
    24f repin without 24zm C1: the CLI pins the first engine release that holds both, or holds its
    release until it does. Row 24f's C1 already moves the `test_items_privacy.py` marker to v2.
-5. Sentinels of unflagged columns: (a) keep (closed tables); (b) redact. Recommended and taken:
-   (a).
+5. Sentinels of unflagged columns: (a) keep only a `value` and `note` that match the fixed table
+   for their `kind`, and floor any other at K; (b) redact. Recommended and taken: (a), as the
+   orchestrator ruled on revision 2. Every profiled sentinel matches its table (section 1.1).
 
 ## 13. Unresolved
 
