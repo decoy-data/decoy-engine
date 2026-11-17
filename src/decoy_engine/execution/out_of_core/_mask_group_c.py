@@ -83,11 +83,12 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
 from decoy_engine.execution._strategies._ner_config import enforce_ner_model_version
+from decoy_engine.execution.native._text_mask_route import text_mask_unsupported_pair_error
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
 from decoy_engine.generation.pool._events import QualityWarning
@@ -286,6 +287,7 @@ def _text_mask_array(
 
             ner_spans_by_pos = iter_ner_spans_batch(texts, model=ner_model, entities=ner_entities)
 
+        unsupported = False
         try:
             for i, pos in enumerate(non_null_positions):
                 out[pos] = mask_cell(
@@ -300,6 +302,10 @@ def _text_mask_array(
                     sub_floor_span_policy=sub_floor_span_policy,
                     sub_floor_notices=sub_floor_notices,
                 )
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             # Matches the full-frame handler's fail-closed mapping
             # (`_strategies/_text_mask.TextMaskHandler.run`) so a consumer keying
@@ -312,6 +318,9 @@ def _text_mask_array(
                     "silently choose a sub_floor_span fallback."
                 ),
             ) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
         return pa.array(out, type=pa.string())
     except BaseException:
         del job_seed

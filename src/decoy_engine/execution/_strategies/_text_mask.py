@@ -242,11 +242,13 @@ class TextMaskHandler:
             ) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
-            raise StrategyError(
-                code=reasons.runtime.UNSUPPORTED_STRATEGY,
-                strategy="text_mask",
-                message=f"column {column!r}: a span's detector cannot take its strategy.",
+            # Imported here: the native package imports the execution guards, which import this
+            # module, so a top-level import is a cycle.
+            from decoy_engine.execution.native._text_mask_route import (
+                text_mask_unsupported_pair_error,
             )
+
+            raise text_mask_unsupported_pair_error(column)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
 

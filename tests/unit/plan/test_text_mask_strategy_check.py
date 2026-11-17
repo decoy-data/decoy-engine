@@ -93,6 +93,29 @@ def test_non_string_ids_and_strategies_are_refused_not_coerced(bad: Any) -> None
         run_config_only_checks(_config({"per_detector_strategy": {"ssn": bad}}))
 
 
+@pytest.mark.parametrize("bad", ["ssn", 7, {"ssn": 1}, {"ssn"}])
+def test_non_list_detectors_is_refused_not_ignored(bad: Any) -> None:
+    err = _refusal({"detectors": bad})
+    assert err.code == _UNKNOWN
+    assert err.path is not None and err.path.endswith("provider_config.detectors")
+    assert err.__cause__ is None and err.__context__ is None
+
+
+@pytest.mark.parametrize("bad", ["ssn=fpe", ["ssn", "fpe"], 7, [("ssn", "fpe")], True])
+def test_non_dict_per_detector_strategy_is_refused_not_ignored(bad: Any) -> None:
+    err = _refusal({"per_detector_strategy": bad})
+    assert err.code == _UNSUPPORTED
+    assert err.path is not None and err.path.endswith("provider_config.per_detector_strategy")
+    assert err.__cause__ is None and err.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "pc", [{"detectors": None}, {"detectors": ()}, {"per_detector_strategy": None}]
+)
+def test_absent_or_empty_selectors_still_compile(pc: dict[str, Any]) -> None:
+    run_config_only_checks(_config(pc))
+
+
 def test_a1c_compile_plan_refuses_unknown_detector(simple_profile: Profile) -> None:
     cfg = _config({"detectors": ["emial"]})
     with pytest.raises(PlanCompileError) as exc:
