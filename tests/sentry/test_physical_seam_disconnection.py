@@ -589,7 +589,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # C8-iii-d: positional draws under `when:` key on the full-table row. The nested handler
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
-            "src/decoy_engine/execution/_strategies/_nested.py",
+            "src/decoy_engine/execution/_strategies/nested/_handler.py",
+            # Package marker for the nested handler move: a one-line re-export, no physical work.
+            "src/decoy_engine/execution/_strategies/nested/__init__.py",
             "src/decoy_engine/execution/_strategies/_windowed_date.py",
             # Cross-column dependency PR1: joint_mask reads its key_by driver from the pre-mask
             # source snapshot (ctx.group_anchor_snapshots), and derived gains a docstring note for
@@ -844,7 +846,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # bucket_perturb date_format guard: the oracle handler and the nested handler validate the
             # format before any early return, and the out-of-core kernel validates before its autodetect
             # check. All three call the shared rule in `transforms/bucket_perturb.py` and import nothing
-            # from `execution.physical`. (`_strategies/_nested.py` is permitted above.)
+            # from `execution.physical`. (`_strategies/nested/_handler.py` is permitted above.)
             "src/decoy_engine/execution/_strategies/_bucket_perturb.py",
             "src/decoy_engine/execution/out_of_core/_mask_group_c.py",
             # D1a (out-of-core hash on the compiled companion): `_hash_native.py` (eligibility + the

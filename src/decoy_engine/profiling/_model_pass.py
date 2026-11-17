@@ -30,6 +30,7 @@ from decoy_engine.detection import (
     log_detector_run,
     ner_rates,
 )
+from decoy_engine.detection.ner import NerSurface
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.profiling.model_pack import DetectorSet, classify_frame, load_detectors
 from decoy_engine.profiling.recommendations import classifier_detector_id
@@ -136,7 +137,10 @@ def load_pre_scan(
     if pre_scan is None:
         return None, REGEX_ONLY
     loaded = load_detectors(
-        pre_scan.detectors, ner_model=pre_scan.ner_model, file_access=file_access
+        pre_scan.detectors,
+        ner_model=pre_scan.ner_model,
+        surface=NerSurface.PRE_SCAN,
+        file_access=file_access,
     )
     return ModelPass(loaded, pre_scan.ner_model), loaded.runs()
 
