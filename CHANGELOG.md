@@ -21,6 +21,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - ten connector reasons now carry outcome `configuration` and retry class `configuration_repair`: `ambiguous_name`, `column_name_unsupported`, `column_not_found`, `duplicate_relation`, `extension_unavailable`, `extension_untrusted_location`, `relation_not_found`, `relation_shape_changed`, `unsupported_column_type` and `value_not_representable`
 - the `group_key` distribution-behavior label is now `destroys_frequency` instead of `preserves_cardinality_only`, in newly compiled plan YAML and the strategy manifest
 - `build_fingerprint` adds a `decoy-ner:<surface>` component per NER surface, so a run resumed under a different NER model is refused with `resume.fingerprint_changed`, and a caller component named `decoy-ner:...` raises `ValueError`
+- `estimate_job` changes three values on a mask job with string columns that used to be unpriceable: `priceable` goes from False to True, `peak_bytes` from None to a number and `runtime` from None to a band, and it adds the note texts `row counts estimated from file size` and `lifecycle not priced: ...`, which a consumer keeping a closed set of known note shapes must add
 
 ### Added (full-lifecycle estimate for mask jobs, F24 84-E1, 2026-11-17)
 
