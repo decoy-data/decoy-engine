@@ -363,7 +363,15 @@ _MASK: dict[str, _Ortho] = {
         False,
         False,
         row_error_modes=("format_error", "mask_error"),
-        warning_codes=("nested_cell_json_parse_error", "nested_jsonpath_path_overlap"),
+        warning_codes=(
+            "nested_cell_json_parse_error",
+            "nested_jsonpath_path_overlap",
+            "nested_cell_oversized",
+            "nested_cell_too_deep",
+            "nested_cell_duplicate_key",
+            "nested_cell_number_out_of_range",
+            "nested_child_non_finite",
+        ),
         uncertain=True,
         notes=(
             "Delegates to a config-resolved child handler: its effective surface "
