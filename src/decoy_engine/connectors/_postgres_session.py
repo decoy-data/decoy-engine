@@ -39,6 +39,7 @@ __all__ = [
     "open_read_session",
     "quote_ident",
     "raise_for_interrupt",
+    "raise_setup_failure",
     "read_session",
     "sql_literal",
     "validate_identifier",
@@ -150,6 +151,18 @@ def raise_for_interrupt(deadline: Deadline, cause_type: str) -> None:
         raise KeyboardInterrupt
 
 
+def raise_setup_failure(deadline: Deadline | None, code: str, cause_type: str) -> None:
+    """Map a failed setup step. Call it after the ``except`` block has closed.
+
+    One path for connect, extension load, attach and catalog read: a DuckDB interrupt is routed
+    through ``raise_for_interrupt`` first (deadline passed: ``deadline_exceeded``; otherwise the
+    operator's ``KeyboardInterrupt``), and any other failure becomes ``code``. The coded error is
+    raised outside the handler, so it carries no ``__cause__`` or ``__context__``.
+    """
+    raise_for_interrupt(deadline if deadline is not None else Deadline(0), cause_type)
+    raise PostgresSnapshotError(code, cause_type=cause_type)
+
+
 def _extension_directory_settings(directory: Path) -> dict[str, Any]:
     """DuckDB 1.x takes ``extension_directory``; 2.x prefers the list ``extension_directories``."""
     import duckdb
@@ -163,7 +176,9 @@ def _extension_directory_settings(directory: Path) -> dict[str, Any]:
     return {"extension_directory": str(directory)}
 
 
-def open_connection(config: SessionSettings, spill_dir: Path) -> Any:
+def open_connection(
+    config: SessionSettings, spill_dir: Path, deadline: Deadline | None = None
+) -> Any:
     open_protected_dir(spill_dir, create=True, parents=True)
     cause_type = ""
     conn: Any = None
@@ -190,11 +205,13 @@ def open_connection(config: SessionSettings, spill_dir: Path) -> Any:
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise PostgresSnapshotError(reasons.connector.DUCKDB_UNAVAILABLE, cause_type=cause_type)
+        raise_setup_failure(deadline, reasons.connector.DUCKDB_UNAVAILABLE, cause_type)
     return conn
 
 
-def load_postgres_extension(conn: Any, extension_directory: Path) -> None:
+def load_postgres_extension(
+    conn: Any, extension_directory: Path, deadline: Deadline | None = None
+) -> None:
     cause_type = ""
     row: Any = None
     try:
@@ -205,7 +222,7 @@ def load_postgres_extension(conn: Any, extension_directory: Path) -> None:
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise PostgresSnapshotError(reasons.connector.EXTENSION_UNAVAILABLE, cause_type=cause_type)
+        raise_setup_failure(deadline, reasons.connector.EXTENSION_UNAVAILABLE, cause_type)
     if not row or not row[0]:
         raise PostgresSnapshotError(reasons.connector.EXTENSION_UNAVAILABLE)
     installed_under = str(row[1] or "")
@@ -215,7 +232,9 @@ def load_postgres_extension(conn: Any, extension_directory: Path) -> None:
         raise PostgresSnapshotError(reasons.connector.EXTENSION_UNTRUSTED_LOCATION)
 
 
-def attach_read_only(conn: Any, dsn: SecretStr, statement_timeout_s: int) -> None:
+def attach_read_only(
+    conn: Any, dsn: SecretStr, statement_timeout_s: int, deadline: Deadline | None = None
+) -> None:
     cause_type = ""
     try:
         conn.execute("SET TimeZone = 'UTC'")
@@ -227,25 +246,26 @@ def attach_read_only(conn: Any, dsn: SecretStr, statement_timeout_s: int) -> Non
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise PostgresSnapshotError(reasons.connector.SOURCE_UNREACHABLE, cause_type=cause_type)
+        raise_setup_failure(deadline, reasons.connector.SOURCE_UNREACHABLE, cause_type)
 
 
 def open_read_session(
     config: SessionSettings,
     spill_dir: Path,
     on_connect: Callable[[Any], None] | None = None,
+    deadline: Deadline | None = None,
 ) -> Any:
     """Open a connection with the extension loaded and the database attached read-only.
 
     ``on_connect`` runs once the extension is loaded and before the attach, so a deadline timer
     also covers a connect that hangs. A failure closes the connection before it propagates.
     """
-    conn = open_connection(config, spill_dir)
+    conn = open_connection(config, spill_dir, deadline)
     try:
-        load_postgres_extension(conn, config.extension_directory)
+        load_postgres_extension(conn, config.extension_directory, deadline)
         if on_connect is not None:
             on_connect(conn)
-        attach_read_only(conn, config.dsn, config.statement_timeout_s)
+        attach_read_only(conn, config.dsn, config.statement_timeout_s, deadline)
     except BaseException:
         _close(conn)
         raise
@@ -266,7 +286,7 @@ def read_session(config: SessionSettings, deadline: Deadline) -> Iterator[Any]:
     spill_dir = config.temp_directory / f"spill-{uuid.uuid4().hex}"
     conn: Any = None
     try:
-        conn = open_read_session(config, spill_dir, on_connect=deadline.arm)
+        conn = open_read_session(config, spill_dir, on_connect=deadline.arm, deadline=deadline)
         yield conn
     finally:
         deadline.cancel()
