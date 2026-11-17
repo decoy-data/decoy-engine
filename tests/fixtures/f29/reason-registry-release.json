@@ -12704,40 +12704,6 @@
     },
     {
       "namespace": "route",
-      "code": "run_storm",
-      "fields": {
-        "code": "fb53bf1a6485800335e689f389165b552cf6546ee0f7e8017b4e6fff8e2e6150",
-        "context": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "deprecated_in": "39fe4a40977d0585fd5704359e3685b0ada5cf5ee061e5d97385601d120cd0ec",
-        "kind": "0807ce842aee519403b764131eee1dc3a4848c949a635ffabbf343abab61198e",
-        "namespace": "e050efd0a0e23d85c6a1f4dc256aaf88bc6179d0a5a69a50fe274c3e414ddda7",
-        "owner": "1f7bdd0cbc14ae70b20f0eb91f0d18f4d752257d6d4bf38ca9fa8d5534bb2db5",
-        "replaced_by": "c9ff16f8c5d79d3baa4dae43b2a3abd0d604f47bec65fdea84e3dbf945aa24b4",
-        "rules": "e72be9aad7a243dae1a67e4924a4b8f28459325b84fb09b9c13b62a22284b69a",
-        "since": "39fe4a40977d0585fd5704359e3685b0ada5cf5ee061e5d97385601d120cd0ec",
-        "summary": "69d1d423b33d42170a14228db24d3be24a70779c3549662a6ab6096aaf431f57",
-        "symbol": "1a30388d1a6c2a2e0315069289f072a0d401c6564b9870c9c0bfde95a9544dbc"
-      }
-    },
-    {
-      "namespace": "route",
-      "code": "run_storm_requested",
-      "fields": {
-        "code": "6d2fca25c83755db83be9867287897924a65cfd0feb352e686e3418de2ee575b",
-        "context": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "deprecated_in": "39fe4a40977d0585fd5704359e3685b0ada5cf5ee061e5d97385601d120cd0ec",
-        "kind": "0807ce842aee519403b764131eee1dc3a4848c949a635ffabbf343abab61198e",
-        "namespace": "e050efd0a0e23d85c6a1f4dc256aaf88bc6179d0a5a69a50fe274c3e414ddda7",
-        "owner": "5362bfe8e33b8e8f622ae148a47bb0480dd389b0de8b4878e90e11ad9562fd1f",
-        "replaced_by": "67a38f42049cf68b319cfead5dac4b0d5160ca4598fbcc53651705610c7438a6",
-        "rules": "e72be9aad7a243dae1a67e4924a4b8f28459325b84fb09b9c13b62a22284b69a",
-        "since": "39fe4a40977d0585fd5704359e3685b0ada5cf5ee061e5d97385601d120cd0ec",
-        "summary": "1ba2f70e4981462ef851d9812aeaac04d9cf843d801e2387845d13d9c814948f",
-        "symbol": "4eb93f8643222934e608d0224f17159cd6ff9433be20d0d469c867f79e13612e"
-      }
-    },
-    {
-      "namespace": "route",
       "code": "sequential_bucket_perturb_date_out_of_native_range",
       "fields": {
         "code": "369e90b3e816aedbfc46515d4372b75577f4b09cdeaf6d4e8ce58b216382e99f",
@@ -19725,7 +19691,7 @@
     }
   ],
   "since_counts": {
-    "1.0.0": 884,
+    "1.0.0": 882,
     "1.1.0": 7,
     "1.2.0": 2,
     "1.3.0": 12,
