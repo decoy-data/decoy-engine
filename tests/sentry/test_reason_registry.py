@@ -76,7 +76,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("plan/_serialize_declared.py", "declared_casting_from_dict"): _REWRAP,
     # -- constructors that store the caller's code -------------------------------------------
     ("_reference_date.py", "PinnedModeError.__init__"): _CTOR,
-    ("connectors/postgres_snapshot.py", "PostgresSnapshotError.__init__"): _CTOR,
+    ("connectors/_postgres_session.py", "PostgresSnapshotError.__init__"): _CTOR,
     ("detection/_model_status.py", "ModelUnavailableError.__init__"): _CTOR,
     ("detection/ner.py", "NerUnavailableError.__init__"): _CTOR,
     ("determinism/_derive.py", "DeterminismError.__init__"): _CTOR,

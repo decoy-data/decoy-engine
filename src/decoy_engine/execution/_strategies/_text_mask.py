@@ -49,6 +49,7 @@ from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
+    resolve_ner_config,
 )
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
@@ -120,19 +121,7 @@ class TextMaskHandler:
         # installed spaCy model no longer matches the version stamped at compile
         # (plan.ner_model_version). Runs before any iter_ner_spans call, so it
         # needs no spaCy pipeline; skipped when no version was stamped.
-        ner_cfg = cfg.get("ner")
-        ner_model: str | None = None
-        ner_entities: list[str] | None = None
-        if ner_cfg:
-            from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-            if isinstance(ner_cfg, dict):
-                ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-                raw_entities = ner_cfg.get("entities")
-                if isinstance(raw_entities, (list, tuple)) and raw_entities:
-                    ner_entities = [str(e) for e in raw_entities]
-            else:
-                ner_model = DEFAULT_NER_MODEL
+        ner_model, ner_entities = resolve_ner_config(cfg)
 
         enforce_ner_model_version(
             ner_model=ner_model,

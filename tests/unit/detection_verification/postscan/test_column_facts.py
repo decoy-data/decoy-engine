@@ -120,6 +120,28 @@ def test_facts_equal_whole_table_pandas(n: int, batch_rows: int, tmp_path: Path)
     assert facts["email"].detectors, "the email column must fire so the rate check has teeth"
 
 
+def _assert_same_facts(split: dict, whole: dict) -> None:
+    """Every count is equal; the output moments are floats, so they agree to 1e-9, not bit for
+    bit (the merge order differs with the batch cuts)."""
+    assert split.keys() == whole.keys()
+    for name in whole:
+        a, b = split[name], whole[name]
+        assert replace(a, output_values=None) == replace(b, output_values=None), name
+        assert (a.output_values is None) == (b.output_values is None), name
+        if a.output_values is None or b.output_values is None:
+            continue
+        assert (a.output_values.rows, a.output_values.nulls) == (
+            b.output_values.rows,
+            b.output_values.nulls,
+        ), name
+        ma, mb = a.output_values.moments, b.output_values.moments
+        assert (ma is None) == (mb is None), name
+        if ma is not None and mb is not None:
+            assert ma.count == mb.count, name
+            assert ma.mean == pytest.approx(mb.mean, rel=1e-9), name
+            assert ma.m2 == pytest.approx(mb.m2, rel=1e-9), name
+
+
 def test_batch_layout_changes_nothing(tmp_path: Path) -> None:
     """Nulls only in the second batch, one batch against uneven batches on both sides."""
     src, out = _pair(100)
@@ -132,7 +154,7 @@ def test_batch_layout_changes_nothing(tmp_path: Path) -> None:
         scratch=tmp_path,
         memory_limit=LIMIT,
     )
-    assert split == whole
+    _assert_same_facts(split, whole)
     assert whole["num"].comparable_rows < 100  # nulls exist, so the second-batch case is real
     # Five-digit ints read as zip codes only while they are rendered without a ".0" suffix.
     assert [d.detector_id for d in whole["num"].detectors] == ["us_zip"]
@@ -172,7 +194,7 @@ def test_large_table_uneven_batches(tmp_path: Path) -> None:
         scratch=tmp_path,
         memory_limit=LIMIT,
     )
-    assert split == whole
+    _assert_same_facts(split, whole)
 
 
 def test_nullable_integers_are_read_as_whole_numbers(tmp_path: Path) -> None:

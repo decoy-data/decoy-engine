@@ -3,61 +3,30 @@
 ``tests/_dp_cert.py`` turns a failed ``check_fit_environment`` into a skip of every ``dp_certified``
 test, so a lock change that skips the re-pin would hide those tests on the VMs and the Mac. This
 guard computes the profile fingerprint from ``uv.lock`` alone (``uv export`` plus PEP 508 markers
-evaluated for the certified platform) and fails on every gate host instead. It never skips.
+evaluated for the certified platform, in ``scripts/release/dp_rows.py``, which release prep also uses
+to write the row) and fails on every gate host instead. It never skips.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
-from packaging.markers import Marker
-from packaging.utils import canonicalize_name
+from scripts.release import dp_rows
 
 from decoy_engine.quality import dp_provenance as dp
 from tests.sentry._ci_lock_scan import ROOT
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
-
-_BOOTSTRAP = re.compile(r"EXTRAS=\((--extra \w+(?: --extra \w+)*)\)")
 _RELEASE = re.compile(r"^\s*((?:--extra \w+ )+)--python ", re.MULTILINE)
-_NEED_UV = "uv is required on every gate host to check the lock against the certified DP rows"
+_NEED_UV = dp_rows.NEED_UV
+target_env = dp_rows.target_env
 
 
 def lock_profile_python() -> str:
-    script = ROOT / "scripts/dev/lock_version.sh"
-    run = subprocess.run(  # noqa: S603 -- static argv (bash + repo script)
-        ["bash", str(script), "--python"],  # noqa: S607
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return run.stdout.strip()
-
-
-def target_env(python_full: str) -> dict[str, str]:
-    """Every PEP 508 key, fixed to the certified platform; nothing falls through from the host."""
-    return {
-        "implementation_name": "cpython",
-        "implementation_version": python_full,
-        "os_name": "posix",
-        "platform_machine": "x86_64",
-        "platform_release": "",
-        "platform_system": "Linux",
-        "platform_version": "",
-        "platform_python_implementation": "CPython",
-        "python_version": python_full.rsplit(".", 1)[0],
-        "python_full_version": python_full,
-        "sys_platform": "linux",
-    }
+    return dp_rows.lock_profile_python(ROOT)
 
 
 def _names(flags: str) -> list[str]:
@@ -65,10 +34,10 @@ def _names(flags: str) -> list[str]:
 
 
 def bootstrap_extras(text: str) -> list[str]:
-    line = next(ln for ln in text.splitlines() if "EXTRAS=(" in ln)
-    match = _BOOTSTRAP.fullmatch(line)
-    assert match, "bootstrap.sh EXTRAS declaration is not exactly --extra <name> items"
-    return _names(match.group(1))
+    try:
+        return dp_rows.bootstrap_extras(text)
+    except dp_rows.DpRowError as err:
+        raise AssertionError(str(err)) from None
 
 
 def _lock_env_extras(workflow: str, job: str | None) -> list[str]:
@@ -96,25 +65,7 @@ def other_copies() -> dict[str, list[str]]:
 
 def profile_fingerprint(root: Path, extras: list[str], python_full: str, uv: str | None) -> str:
     assert uv, _NEED_UV
-    flags = [f for e in extras for f in ("--extra", e)]
-    cmd = [uv, "export", "--frozen", "--no-emit-project", "--no-hashes", "--no-header", *flags]
-    run = subprocess.run(  # noqa: S603 -- uv from which(), static flags
-        cmd, cwd=root, capture_output=True, text=True, check=True
-    )
-    out = run.stdout
-    env = target_env(python_full)
-    pins: set[tuple[str, str]] = set()
-    for line in out.splitlines():
-        if not line or line.startswith((" ", "#")):
-            continue
-        spec, _, marker = line.partition(" ; ")
-        if marker and not Marker(marker).evaluate(env):
-            continue
-        name, _, version = spec.partition("==")
-        pins.add((str(canonicalize_name(name)), version))
-    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    pins.add(("decoy-engine", project["version"]))
-    return dp.compute_lock_fingerprint(pins)
+    return dp_rows.profile_fingerprint(root, extras, python_full, uv)
 
 
 def test_lock_profile_is_a_certified_row() -> None:

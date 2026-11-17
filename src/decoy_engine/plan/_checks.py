@@ -331,7 +331,7 @@ def check_statistical_columns(
     case (a `faker`/`sequence`/... column carrying a stray `high_cardinality`
     key) is caught here instead.
     """
-    from decoy_engine.generation.statistical import load_spec, spec_to_dict
+    from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
     from decoy_engine.plan._generation import resolve_pinned_snapshot
 
@@ -379,6 +379,7 @@ def check_statistical_columns(
                         dp_verified=dp_verified,
                         snapshot_digest=read.sha256 if read is not None else None,
                     )
+                    check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     raise PlanCompileError(
                         code=exc.code,
@@ -417,11 +418,9 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
             ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
             if not ner_cfg:
                 continue
-            model = ner.DEFAULT_NER_MODEL
-            if isinstance(ner_cfg, dict) and ner_cfg.get("model"):
-                model = str(ner_cfg["model"])
             col_name = col_entry.get("name", "?")
             try:
+                model = str(ner.resolve_column_ner(ner_cfg)[0])
                 ner.ensure_ner_available(model)
             except ner.NerUnavailableError as exc:
                 raise PlanCompileError(
