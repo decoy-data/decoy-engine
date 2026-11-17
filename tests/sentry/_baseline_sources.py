@@ -224,7 +224,7 @@ SOURCES: tuple[Source, ...] = (
     Source(
         "wave-b-string-target-exempt",
         "test_engine_string_targets.py",
-        in_code("test_engine_string_targets.py", "EXEMPT", ("_REMOVED",)),
+        in_code("test_engine_string_targets.py", "EXEMPT"),
     ),
     Source(
         "wave-b-e0-test-files",
