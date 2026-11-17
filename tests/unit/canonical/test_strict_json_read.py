@@ -115,6 +115,15 @@ def test_depth_at_the_limit_passes_and_one_more_is_too_deep() -> None:
     assert _token('{"a":' * 5 + "1" + "}" * 5, max_depth=4) == "too_deep"
 
 
+def test_the_depth_walk_accepts_exactly_the_limit_when_the_bracket_count_calls_for_it() -> None:
+    # Brackets over the limit force the walk; the deepest chain is exactly at the limit.
+    at_limit = "[" + _nest(MASK_MAX_DEPTH - 1) + ",[],[]]"
+    assert at_limit.count("[") > MASK_MAX_DEPTH
+    assert strict_json_read(at_limit, **_NESTED) is not None
+    over = "[" + _nest(MASK_MAX_DEPTH) + ",[],[]]"
+    assert _token(over, **_NESTED) == "too_deep"
+
+
 def test_a_very_deep_cell_is_too_deep_in_bounded_mode_and_not_json_without_a_bound() -> None:
     assert _token(_nest(5000), **_NESTED) == "too_deep"
     assert _token(_nest(100_000)) == "not_json"
