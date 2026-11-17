@@ -14,8 +14,8 @@ import pytest
 
 from decoy_engine.config import PostScanConfig, PreScanConfig
 from decoy_engine.detection import ner
-from decoy_engine.execution._strategies import _ner_config, _text_mask
-from decoy_engine.execution.out_of_core import _mask_group_c
+from decoy_engine.execution._strategies import _ner_config, _text_mask, _text_redact
+from decoy_engine.execution.out_of_core import _mask_group_b, _mask_group_c
 from decoy_engine.plan import _checks, compile_plan
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.verification.postmask import _model_findings
@@ -49,10 +49,10 @@ class _EnteredError(Exception):
     """Raised by a recorder to stop a route once it has resolved its model."""
 
 
-def _seed(ner_value: object) -> ColumnSeed:
+def _seed(ner_value: object, strategy: str = "text_mask") -> ColumnSeed:
     return ColumnSeed(
         namespace=None,
-        strategy="text_mask",
+        strategy=strategy,
         provider=None,
         backend_type="decoy_native",
         backend_version="1",
@@ -120,6 +120,42 @@ def test_text_mask_resident(
     df = pd.DataFrame({"c": ["x"]})
     with pytest.raises(_EnteredError):
         _text_mask.TextMaskHandler().run(df, "c", _seed(ner_value), object())  # type: ignore[arg-type]
+    assert seen == [expected]
+    assert routed, "the route never called the resolver"
+
+
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
+def test_text_redact_resident(
+    routed: list[str | None],
+    monkeypatch: pytest.MonkeyPatch,
+    ner_value: object,
+    expected: str,
+) -> None:
+    seen = _record_enforce(monkeypatch, _text_redact)
+    df = pd.DataFrame({"c": ["x"]})
+    with pytest.raises(_EnteredError):
+        _text_redact.TextRedactHandler().run(
+            df,
+            "c",
+            _seed(ner_value, "text_redact"),
+            object(),  # type: ignore[arg-type]
+        )
+    assert seen == [expected]
+    assert routed, "the route never called the resolver"
+
+
+@pytest.mark.parametrize(("ner_value", "expected"), [(True, ROUTED), ({"model": NAMED}, NAMED)])
+def test_out_of_core_group_b(
+    routed: list[str | None],
+    monkeypatch: pytest.MonkeyPatch,
+    ner_value: object,
+    expected: str,
+) -> None:
+    seen = _record_enforce(monkeypatch, _mask_group_b)
+    with pytest.raises(_EnteredError):
+        _mask_group_b.text_redact_array(
+            pa.array(["x"]), plan=_seed(ner_value, "text_redact"), column="c"
+        )
     assert seen == [expected]
     assert routed, "the route never called the resolver"
 
