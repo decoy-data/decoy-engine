@@ -51,9 +51,9 @@ def orphan_fk_warning(edge: RelationshipEdge, orphan_count: int) -> QualityWarni
         column=",".join(edge.child_columns),
         detail={
             "parent_table": edge.parent_table,
-            "parent_columns": list(edge.parent_columns),
+            "parent_columns": ",".join(edge.parent_columns),
             "child_table": edge.child_table,
-            "child_columns": list(edge.child_columns),
+            "child_columns": ",".join(edge.child_columns),
             "orphan_rows": orphan_count,
         },
     )

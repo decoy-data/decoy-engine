@@ -6423,7 +6423,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': ['id'], 'child_table': 'child', 'child_columns': ['parent_id'], 'orphan_rows': 4})",
+   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': 'id', 'child_table': 'child', 'child_columns': 'parent_id', 'orphan_rows': 4})",
    "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source. Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
@@ -7860,7 +7860,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': ['id'], 'child_table': 'child', 'child_columns': ['parent_id'], 'orphan_rows': 4})"
+   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': 'id', 'child_table': 'child', 'child_columns': 'parent_id', 'orphan_rows': 4})"
   ]
  },
  "seq_fk_sink": {
