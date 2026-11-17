@@ -455,23 +455,23 @@ def sample_column(
         return out
 
     if spec.kind == "datetime":
-        year_bins = spec.stats.get("year_bins") or []
-        years = [int(b["year"]) for b in year_bins]
-        weights = [float(b["count"]) for b in year_bins]
+        buckets = spec.datetime_buckets or ()
+        weights = [float(b.count) for b in buckets]
         # Drop zero-weight bins before drawing: random.choices can round a draw up to the cumulative
-        # total and land on a trailing zero-weight year, so a year admission ignored (weight 0, e.g.
+        # total and land on a trailing zero-weight range, so a range admission ignored (weight 0, e.g.
         # 9999) could still be picked and crash datetime(year + 1). Non-empty since sum(weights) > 0.
-        kept = [(y, w) for y, w in zip(years, weights, strict=True) if w > 0]
-        years = [y for y, _ in kept]
+        kept = [(b, w) for b, w in zip(buckets, weights, strict=True) if w > 0]
+        ranges = [b for b, _ in kept]
         weights = [w for _, w in kept]
         lo = datetime.fromisoformat(str(spec.stats["min"]))
         hi = datetime.fromisoformat(str(spec.stats["max"]))
         out = []
         for i in range(n):
             rng.seed(col_seed + start + i)
-            year = rng.choices(years, weights=weights, k=1)[0]
-            year_start = datetime(year, 1, 1)
-            year_seconds = (datetime(year + 1, 1, 1) - year_start).total_seconds()
+            chosen = rng.choices(ranges, weights=weights, k=1)[0]
+            year_start = datetime(chosen.start_year, 1, 1)
+            # Uniform over the whole range, so a multi-year bucket spreads across its years.
+            year_seconds = (datetime(chosen.end_year + 1, 1, 1) - year_start).total_seconds()
             ts = min(max(year_start + timedelta(seconds=rng.random() * year_seconds), lo), hi)
             value = floor_datetime(ts, fmt.resolution, lo) if fmt and fmt.resolution else ts
             out.append(None if null_rate and rng.random() < null_rate else value)

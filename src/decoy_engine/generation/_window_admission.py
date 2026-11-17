@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import pandas as pd
 
 from decoy_engine import reasons as reason_codes
+from decoy_engine.contracts.distribution_snapshot import (
+    MAX_SAMPLED_YEAR,
+    MIN_YEAR,
+    names_unsupported_year,
+)
 from decoy_engine.errors import DecoyError
 
 if TYPE_CHECKING:
@@ -48,8 +53,6 @@ CODE_TABLE_UNKNOWN = reason_codes.runtime.GENERATION_TABLE_UNKNOWN
 CODE_WINDOW_INVALID = reason_codes.runtime.GENERATION_WINDOW_INVALID
 CODE_TIMEOUT = reason_codes.runtime.GENERATION_WINDOW_TIMEOUT
 
-_MIN_YEAR = 1
-_MAX_SAMPLED_YEAR = 9998  # datetime(year + 1, 1, 1) must be representable
 # Highest addressable row position; the default window end when a caller names none.
 _MAX_POSITION = 2**63
 
@@ -124,14 +127,23 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
-    year_bins = spec.stats.get("year_bins") or []
-    years = [int(b["year"]) for b in year_bins]  # shape proved by `_refuse_degenerate`
-    weights = [float(b["count"]) for b in year_bins]
+    buckets = spec.datetime_buckets
+    if buckets is None:  # `_refuse_degenerate` passed, so the stats name a year outside the range
+        _refuse(
+            table,
+            col,
+            CODE_UNBOUNDED,
+            "year_bins",
+            f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+        )
+    weights = [float(b.count) for b in buckets]
     bad = sorted(
         {
             y
-            for y, w in zip(years, weights, strict=True)
-            if w > 0 and not _MIN_YEAR <= y <= _MAX_SAMPLED_YEAR
+            for b, w in zip(buckets, weights, strict=True)
+            if w > 0
+            for y in (b.start_year, b.end_year)
+            if not MIN_YEAR <= y <= MAX_SAMPLED_YEAR
         }
     )
     if bad:
@@ -140,7 +152,7 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            f"sampled year(s) {bad[:3]} outside {_MIN_YEAR}..{_MAX_SAMPLED_YEAR}",
+            f"a sampled year is outside {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
         )
     parsed_bounds: dict[str, datetime] = {}
     for bound in ("min", "max"):
@@ -152,6 +164,15 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             )
         if parsed_bounds[bound].tzinfo is not None:
             _refuse(table, col, CODE_UNBOUNDED, bound, "timezone-aware datetime bound")
+    # A folded range has no per-year weights to check its edge against, so its outer year must be
+    # the bound's year; otherwise the draw would pile up at the clamp.
+    live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
+    for bound, year, edge in (
+        ("min", live[0].start_year, live[0]),
+        ("max", live[-1].end_year, live[-1]),
+    ):
+        if edge.start_year != edge.end_year and parsed_bounds[bound].year != year:
+            _refuse(table, col, CODE_DEGENERATE, bound, f"datetime {bound} is outside its range")
 
 
 def _check_categorical(
