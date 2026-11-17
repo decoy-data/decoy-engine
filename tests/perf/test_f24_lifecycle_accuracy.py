@@ -47,7 +47,7 @@ def _run(cell: str, rows: int, tmp_path: Path) -> dict[str, Any]:
     out = tmp_path / "record.json"
     subprocess.run(  # noqa: S603
         [sys.executable, str(_SCRIPTS / "bench_worker_lifecycle.py"), "--cell", cell,
-         "--rows", str(rows), "--work-root", str(tmp_path), "--out", str(out)],
+         "--rows", str(rows), "--work-root", str(tmp_path), "--keep", "--out", str(out)],
         check=False, capture_output=True,
     )  # fmt: skip
     return json.loads(out.read_text())  # type: ignore[no-any-return]
