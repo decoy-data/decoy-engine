@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -166,46 +165,46 @@ _d = _catalog.config("PipelineValidationError")
 POLICY_SELECTOR_INVALID = _d(
     "policy_selector_invalid",
     "A policy selector is empty, has an unknown key or holds a value outside the grammar.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_UNKNOWN_CLASSIFICATION = _d(
     "policy_unknown_classification",
     "A classification is not one the engine knows.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_UNKNOWN_STRATEGY = _d(
     "policy_unknown_strategy",
     "A policy names a masking strategy the engine does not know.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_SELECTOR_UNMATCHED = _d(
     "policy_selector_unmatched",
     "A policy rule selects no mask column.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_RULE_CONFLICT = _d(
     "policy_rule_conflict",
     "Two policy sources decide one column differently at the same precedence level.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_FIELD_UNDECIDED = _d(
     "policy_field_undecided",
     "No policy level decides a mask column.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_COLUMN_PARTIAL = _d(
     "policy_column_partial",
     "A column without a strategy sets keys that only a strategy can use.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_BLOCK_INVALID = _d(
     "policy_block_invalid",
     "The policy block has a duplicate id, a prohibition without exactly one of forbid and "
     "require, or a value JSON cannot carry.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 POLICY_PROHIBITED = _d(
     "policy_prohibited",
     "A mask column's decided strategy breaks a policy prohibition.",
-    since=UNRELEASED,
+    since="1.30.0",
 )

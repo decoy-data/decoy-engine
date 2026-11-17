@@ -77,11 +77,19 @@ _V0_26_0_ROWS = (
     "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
     "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
 )
-# The two rows this release certifies: the dev/CI lock with the engine at 0.27.0, and the CLI
+# The two rows v0.27.0 certified: the dev/CI lock with the engine at 0.27.0, and the CLI
 # runtime profile on engine 0.27.0.
 _V0_27_0_ROWS = (
     "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
     "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
+)
+# The three rows this release certifies: the dev/CI lock with the engine at 0.28.0, the CLI
+# runtime profile on engine 0.28.0, and row F (that profile with certifi 2026.10.18, cryptography
+# 50.0.0, pyasn1 0.6.5 and urllib3 2.8.0, roadmap row 24zc).
+_V0_28_0_ROWS = (
+    "da1a743343925aa00e7c59c64338a2ba49354a7f75f7f623a158a3c9a8208f5b",
+    "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+    "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
 )
 _ALL_ROWS = (
     _V0_17_0_ROWS
@@ -96,6 +104,7 @@ _ALL_ROWS = (
     + _V0_25_0_ROWS
     + _V0_26_0_ROWS
     + _V0_27_0_ROWS
+    + _V0_28_0_ROWS
 )
 
 

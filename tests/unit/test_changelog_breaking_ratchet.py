@@ -32,6 +32,69 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.0", "`estimate_job` now returns three more fields on `JobEstimate"): (
+        "new fields; the estimate is advisory and never raises, gates or changes a route"
+    ),
+    ("0.28.0", "`expand_policy` now checks the `policy.prohibit` list on eve"): (
+        "new package not read by any config yet; the refusals named are its own"
+    ),
+    ("0.28.0", "`expansion_to_dict` writes the `policy-expansion/v1` explana"): (
+        "new writer not called yet; the refusal is its own"
+    ),
+    ("0.28.0", "`PublicationRequest(vault=VaultBinding(writer, out))` is acc"): (
+        "new opt-in binding; the refusals named are its own"
+    ),
+    ("0.28.0", "A missing NER model is now refused with one message for ever"): (
+        "same refusal with one message across surfaces; no run that passed before is refused"
+    ),
+    ("0.28.0", "`build_fingerprint` now adds one engine-owned `decoy-ner:<su"): (
+        "Breaking: a run resumed under a different NER model is refused and a `decoy-ner:` caller component raises"
+    ),
+    ("0.28.0", "New package `decoy_engine.config.policy` with the models of "): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `run_probe()`, `probe_status()` "): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.28.0", "`lock/v1` gains an optional `probe` field. `build_runtime_lo"): (
+        "new optional field; a lock written without it still reads, and the refusal is for a null value no engine wrote"
+    ),
+    ("0.28.0", "The Postgres snapshot primitive now shares its session helpe"): (
+        "new shape guard on a new snapshot primitive; the refusal is its own"
+    ),
+    ("0.28.0", "`decoy_engine.profiling` gains `scan-diff/v1`, the drift rul"): (
+        "new document; the refusals named are its own"
+    ),
+    ("0.28.0", "A statistical snapshot with a negative or non-finite weight "): (
+        "the Breaking bullet on a negative or non-finite weight or count covers it"
+    ),
+    ("0.28.0", "`DeclarationRequest.for_validate(config)` reads the header o"): (
+        "new constructor; `decoy run` keeps its existing refusal"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `build_runtime_lock()`, `Runtime"): (
+        "new function and reader; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.keyprovider.is_key_version_label()` is the one"): (
+        "new check of an existing label rule; the new reason is raised only by the new lock"
+    ),
+    ("0.28.0", "The NER hit threshold is now per model (`NER_MIN_RATES`): en"): (
+        "the Breaking bullet on an NER model without a calibrated rate covers it"
+    ),
+    ("0.28.0", "A distribution snapshot may now store a datetime column as y"): (
+        "new opt-in v2 form no writer emits yet; the refusal is for a malformed bucket list"
+    ),
+    ("0.28.0", "A source-hygiene sentry now fails on any MD5 call or `noqa: "): (
+        "test-only sentry; the failure is a CI failure, not a consumer-visible one"
+    ),
+    ("0.28.0", "A relationship whose parent and child tables are both genera"): (
+        "relaxation: a relationship between generated tables now runs; the refusal for a mask-table edge is unchanged"
+    ),
+    ("0.28.0", "The `cli-local-1` evidence payload takes an optional `scan_b"): (
+        "new optional payload member and config key; an older reader refusing them is why the CLI writes them only after it pins this engine"
+    ),
+    ("0.28.0", "`VaultWriter.publish(out)` writes the vault and returns a `V"): (
+        "new method; the refusals named are its own"
+    ),
     ("0.27.0", "`run_pipeline_isolated` publishes `output_dir` through `publ"): (
         "the Breaking bullet on `run_pipeline_isolated` covers it"
     ),
