@@ -18,8 +18,6 @@ from decoy_engine.verification.postmask.residual_pii import (
     residual_pii_findings,
 )
 
-_GATED_FIXED_MESSAGES = ("only through its column name",)
-
 
 def _cfg(strategy: str, column: str = "customer_id") -> dict:
     return {
@@ -106,15 +104,16 @@ def test_gated_message_has_no_rate_or_value(identical, comparable):
 def test_text_redact_hint_gated_hit_still_fails():
     """Every cell changed (identity 0), but text_redact does not cover name-hint-only spans, so
     the name can survive: the finding is today's non-gated fail."""
-    names = [f"Alice Smith{i}, a{i}@x.com" for i in range(20)]
-    outputs = [f"Alice Smith{i}, [REDACTED]" for i in range(20)]
+    sources = [f"Alice Smith a{i}@x.com" for i in range(20)]
+    outputs = ["Alice Smith REDACTED"] * 20
     findings = check_residual_pii(
-        {"t": pd.DataFrame({"contact": outputs})},
-        _cfg("text_redact", "contact"),
-        source_frames={"t": pd.DataFrame({"contact": names})},
+        {"t": pd.DataFrame({"full_name": outputs})},
+        _cfg("text_redact", "full_name"),
+        source_frames={"t": pd.DataFrame({"full_name": sources})},
     )
     finding = _one(findings)
     assert finding.source_identity_rate == 0.0
+    assert finding.detector_id == "person_name"
     assert finding.severity == "fail"
     assert "only through its column name" not in finding.message
     assert "should destroy the pattern" in finding.message
