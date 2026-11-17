@@ -429,7 +429,8 @@ def _floor_document(
     for joint in doc["joints"]:
         if withheld & set(joint["columns"]):
             _withhold(joint, "joint")
-        elif not all(_is_bool(df[labels[c]].dropna()) for c in joint["columns"]):
+        else:
+            # A joint cell is a combination, not a vocabulary word, so bool columns get no exemption.
             for key in snapshot_floor_rules("joint"):
                 _collapse_counted_items(joint, key, keep=_held_by_k)
     doc["schema_version"] = SCHEMA_VERSION_V2
