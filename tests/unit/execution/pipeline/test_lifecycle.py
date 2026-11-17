@@ -283,6 +283,7 @@ def test_the_note_constants_are_pinned() -> None:
         "lifecycle not priced: source {table} has a format with no rule",
         "lifecycle not priced: target {table} has a format with no rule",
         "lifecycle not priced: layout of target {table} not readable",
+        "lifecycle not priced: column {column} has an output width its strategy does not declare",
         "lifecycle not priced ({error})",
     } == lc.NOTE_SHAPES
 
@@ -299,3 +300,54 @@ def test_the_note_constants_are_pinned() -> None:
 )
 def test_note_shape_matcher(note: str, expected: bool) -> None:
     assert lc.note_matches_shape(note) is expected
+
+
+# --- AT-E1-29 (arithmetic side): working specs and output tables -------------------------
+
+
+def _hashed_int(name: str, width: float) -> lc.ColumnInputs:
+    out = ColumnSizeSpec(name, "object", string_width_bytes=width)
+    return lc.ColumnInputs(
+        name,
+        pa.int64(),
+        False,
+        ColumnSizeSpec(name, "int64"),
+        output_spec=out,
+        output_arrow_type=pa.string(),
+    )
+
+
+def test_execute_is_priced_on_the_larger_of_the_input_and_output_cell() -> None:
+    table = _table("t", 1000, (_hashed_int("n", 64.0),))
+    wide = ColumnSizeSpec("n", "object", string_width_bytes=64.0)
+    expected = estimate_peak_bytes((TableSizeSpec("t", 1000, (wide,)),), "full_frame")
+    assert _phase(_peak((table,)), "execute") == expected.estimated_bytes
+
+
+def test_a_narrower_output_keeps_the_input_cell_in_execute() -> None:
+    column = lc.ColumnInputs(
+        "s",
+        pa.string(),
+        False,
+        ColumnSizeSpec("s", "object", string_width_bytes=20.0),
+        output_spec=ColumnSizeSpec("s", "object", string_width_bytes=8.0),
+        output_arrow_type=pa.string(),
+    )
+    table = _table("t", 1000, (column,))
+    kept = estimate_peak_bytes((TableSizeSpec("t", 1000, (column.spec,)),), "full_frame")
+    assert _phase(_peak((table,)), "execute") == kept.estimated_bytes
+
+
+def test_write_prices_the_outputs_in_their_output_form() -> None:
+    table = _table("t", 1000, (_hashed_int("n", 64.0),))
+    # Inputs are int64 (8 bytes a row); outputs are strings (4 offset + 64 payload a row).
+    assert _phase(_peak((table,)), "write") == INTERCEPT + 8_000 + 68_000
+
+
+def test_the_resident_input_term_keeps_the_input_form() -> None:
+    table = _table("t", 1000, (_hashed_int("n", 64.0),))
+    base = estimate_peak_bytes(
+        (TableSizeSpec("t", 1000, (ColumnSizeSpec("n", "object", string_width_bytes=64.0),)),),
+        "out_of_core",
+    )
+    assert _phase(_peak((table,), "out_of_core"), "execute") == base.estimated_bytes + 8_000

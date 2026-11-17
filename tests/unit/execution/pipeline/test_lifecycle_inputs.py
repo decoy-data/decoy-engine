@@ -375,3 +375,141 @@ def _profile_tables(cfg: dict[str, Any], base: Path) -> list[Any]:
 
     prepared = prepare_declared_execution_sources(DeclarationRequest.for_descriptors(cfg))
     return list(profile_source(cfg, seed=7, declared=prepared).tables)
+
+
+# --- AT-E1-29: output specs from the plan -------------------------------------------------
+
+ROWS = 2000
+
+
+def _int_job(tmp_path: Path, column: dict[str, Any]) -> dict[str, Any]:
+    table = pa.table({"n": pa.array(list(range(ROWS)), type=pa.int64())})
+    path = tmp_path / "t.parquet"
+    pq.write_table(table, path)
+    return _config(tmp_path, fmt="parquet", src=str(path), column=column)
+
+
+def _string_cell_execute(width: float) -> int | None:
+    from decoy_engine.execution._mem_estimate import (
+        ColumnSizeSpec,
+        TableSizeSpec,
+        estimate_peak_bytes,
+    )
+
+    spec = ColumnSizeSpec("n", "object", string_width_bytes=width)
+    return estimate_peak_bytes((TableSizeSpec("t", ROWS, (spec,)),), "full_frame").estimated_bytes
+
+
+@pytest.mark.parametrize(
+    ("column", "width"),
+    [
+        ({"name": "n", "strategy": "hash", "namespace": "ns"}, 64.0),
+        ({"name": "n", "strategy": "hash", "namespace": "ns", "truncate": 12}, 12.0),
+        ({"name": "n", "strategy": "hash", "namespace": "ns", "truncate": 100}, 64.0),
+        ({"name": "n", "strategy": "redact"}, 8.0),
+        ({"name": "n", "strategy": "redact", "redact_with": "XX"}, 2.0),
+    ],
+    ids=["hash", "hash-truncate-12", "hash-truncate-100", "redact", "redact-xx"],
+)
+def test_an_int_column_is_priced_as_the_string_its_strategy_writes(
+    tmp_path: Path, column: dict[str, Any], width: float
+) -> None:
+    est = estimate_job(_int_job(tmp_path, column), tmp_path)
+    assert est.lifecycle_peak_bytes is not None, est.notes
+    phases = dict(est.phase_bytes)
+    assert phases["execute"] == _string_cell_execute(width)
+    from decoy_engine.execution._mem_estimate import route_intercept_bytes
+
+    # Inputs 8 bytes a row; outputs a 4-byte offset plus the payload a row.
+    expected_write = route_intercept_bytes("full_frame") + 8 * ROWS + int(ROWS * (4 + width))
+    assert phases["write"] == expected_write
+
+
+def test_passthrough_keeps_the_input_cell(tmp_path: Path) -> None:
+    est = estimate_job(_int_job(tmp_path, {"name": "n", "strategy": "passthrough"}), tmp_path)
+    from decoy_engine.execution._mem_estimate import (
+        ColumnSizeSpec,
+        TableSizeSpec,
+        estimate_peak_bytes,
+    )
+
+    spec = ColumnSizeSpec("n", "int64")
+    base = estimate_peak_bytes((TableSizeSpec("t", ROWS, (spec,)),), "full_frame")
+    assert dict(est.phase_bytes)["execute"] == base.estimated_bytes
+
+
+def test_a_strategy_that_declares_nothing_leaves_an_int_column_unpriced(tmp_path: Path) -> None:
+    est = estimate_job(_int_job(tmp_path, {"name": "n", "strategy": "shuffle"}), tmp_path)
+    assert est.lifecycle_peak_bytes is None and est.phase_bytes == ()
+    assert lc.NOTE_OUTPUT_WIDTH.format(column="t.n") in est.notes
+
+
+def test_peak_bytes_and_route_ignore_the_output_specs(tmp_path: Path) -> None:
+    from decoy_engine.execution._mem_estimate import (
+        ColumnSizeSpec,
+        TableSizeSpec,
+        estimate_peak_bytes,
+    )
+
+    est = estimate_job(
+        _int_job(tmp_path, {"name": "n", "strategy": "hash", "namespace": "ns"}), tmp_path
+    )
+    inputs = estimate_peak_bytes(
+        (TableSizeSpec("t", ROWS, (ColumnSizeSpec("n", "int64"),)),), "full_frame"
+    )
+    assert est.peak_bytes == inputs.estimated_bytes
+    assert est.route == "full_frame"
+
+
+def test_an_fk_child_column_takes_its_parent_keys_output(tmp_path: Path) -> None:
+    parent = pa.table({"id": pa.array(list(range(1000)), type=pa.int64())})
+    child = pa.table(
+        {
+            "id": pa.array(list(range(2000)), type=pa.int64()),
+            "pid": pa.array([i % 1000 for i in range(2000)], type=pa.int64()),
+        }
+    )
+    pq.write_table(parent, tmp_path / "p.parquet")
+    pq.write_table(child, tmp_path / "c.parquet")
+    hashed = {"strategy": "hash", "namespace": "ns_p"}
+    raw = {
+        "version": 2,
+        "global_settings": {"seed": 7},
+        "sources": {
+            n: {"type": "file", "path": str(tmp_path / f"{n}.parquet"), "format": "parquet"}
+            for n in ("p", "c")
+        },
+        "targets": {
+            n: {"type": "file", "path": str(tmp_path / f"{n}.out.parquet"), "format": "parquet"}
+            for n in ("p", "c")
+        },
+        "tables": [
+            {"name": "p", "columns": [{"name": "id", **hashed}]},
+            {
+                "name": "c",
+                "columns": [
+                    {"name": "id", "strategy": "passthrough"},
+                    # A shorter truncate than the parent's: the edge decides the child's output.
+                    {"name": "pid", **hashed, "truncate": 12},
+                ],
+            },
+        ],
+        "relationships": [
+            {
+                "parent": {"table": "p", "columns": ["id"]},
+                "children": [{"table": "c", "columns": ["pid"]}],
+                "orphan_policy": "preserve",
+                "namespace": "ns_p",
+            }
+        ],
+    }
+    est = estimate_job(PipelineConfig.model_validate(raw).model_dump(), tmp_path)
+    assert est.lifecycle_peak_bytes is not None, est.notes
+    from decoy_engine.execution._mem_estimate import route_intercept_bytes
+
+    arrow_in = 8 * 1000 + 8 * 2000 + 8 * 2000
+    # Outputs: parent id and child pid are 64-byte tokens; the child's own id stays int64.
+    arrow_out = (1000 * 68) + 8 * 2000 + (2000 * 68)
+    assert (
+        dict(est.phase_bytes)["write"] == route_intercept_bytes("full_frame") + arrow_in + arrow_out
+    )

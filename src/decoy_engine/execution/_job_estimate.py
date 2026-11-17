@@ -216,7 +216,7 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
     notes: tuple[str, ...] = ()
     if route not in _PEAK_PATHS:
         notes = (f"route {route!r} priced as full_frame (no dedicated model)",)
-    life = _lifecycle_stage(sampled, config, path)
+    life = _lifecycle_stage(sampled, config, path, plan)
     return JobEstimate(
         route,
         priceable=peak.estimated_bytes is not None,
@@ -253,7 +253,9 @@ class _LifecycleFields:
     notes: tuple[str, ...] = ()
 
 
-def _lifecycle_stage(sampled: Any, config: dict[str, Any], path: str) -> _LifecycleFields:
+def _lifecycle_stage(
+    sampled: Any, config: dict[str, Any], path: str, plan: Any
+) -> _LifecycleFields:
     """The lifecycle fields for a mask job, or defaults plus a note. Never raises."""
     from decoy_engine.execution.pipeline import _lifecycle, _lifecycle_inputs
 
@@ -263,8 +265,11 @@ def _lifecycle_stage(sampled: Any, config: dict[str, Any], path: str) -> _Lifecy
         attached = _lifecycle_inputs.attach_targets(sampled.tables, config)
         if attached.tables is None:
             return _LifecycleFields(notes=attached.notes)
+        outputs = _lifecycle_inputs.attach_outputs(attached.tables, plan)
+        if outputs.tables is None:
+            return _LifecycleFields(notes=outputs.notes)
         result = _lifecycle.lifecycle_peak(
-            _lifecycle.PhaseInputs(path=path, tables=attached.tables)  # type: ignore[arg-type]
+            _lifecycle.PhaseInputs(path=path, tables=outputs.tables)  # type: ignore[arg-type]
         )
         estimated = any(not t.rows_exact for t in attached.tables)
     except Exception as exc:

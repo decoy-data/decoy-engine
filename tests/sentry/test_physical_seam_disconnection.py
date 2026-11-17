@@ -353,6 +353,12 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # config resolver, and nothing under `execution.physical`.
             "src/decoy_engine/execution/_throughput_calibration.py",
             "src/decoy_engine/execution/_job_estimate.py",
+            # F24 lifecycle estimate: phase arithmetic and bounded sample reads behind
+            # `estimate_job`. `_lifecycle.py` imports `_mem_estimate` and `_arrow_types` only;
+            # `_lifecycle_inputs.py` imports the profile readers and `_mem_estimate*` only.
+            # Neither imports anything under `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_lifecycle.py",
+            "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",

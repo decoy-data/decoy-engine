@@ -24,6 +24,7 @@ from decoy_engine.execution._mem_estimate_arrow import (
     source_nullable_columns,
 )
 from decoy_engine.execution._mem_estimate_schema import table_size_spec_from_profile
+from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.pipeline import _lifecycle as lc
 from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect
 from decoy_engine.profile._lazy_build import build_lazy_source, descriptor_path
@@ -203,3 +204,67 @@ def attach_targets(tables: tuple[lc.TableInputs, ...], config: Mapping[str, Any]
 def table_specs(tables: Sequence[lc.TableInputs]) -> tuple[Any, ...]:
     """The `TableSizeSpec` of each table, priced from its sample."""
     return tuple(lc.table_spec(t) for t in tables)
+
+
+def _declared_output(
+    column: lc.ColumnInputs, strategy: str | None, provider_config: Any
+) -> tuple[ColumnSizeSpec, pa.DataType] | None:
+    """The column as its strategy writes it, from the handler's own declaration, or None when
+    the handler declares nothing for this column."""
+    handler = SCALAR_HANDLERS.get(strategy) if strategy is not None else None
+    if strategy is None:
+        return column.spec, column.arrow_type
+    if getattr(handler, "output_is_input", False):
+        return column.spec, column.arrow_type
+    width_of = getattr(handler, "output_string_width", None)
+    width = width_of(provider_config) if callable(width_of) else None
+    if width is None:
+        return None
+    spec = ColumnSizeSpec(column.name, "object", string_width_bytes=float(width))
+    return spec, pa.string()
+
+
+def attach_outputs(tables: tuple[lc.TableInputs, ...], plan: Any) -> Outcome:
+    """Each column with its output form, read from the plan's column seeds and the strategy
+    handlers' declarations. An FK child column takes its parent key column's output. A handler
+    that declares nothing keeps a string input as it is and leaves a non-string input unpriced."""
+    seeds = {
+        (table, name): seed
+        for table, table_seed in plan.seed_envelope.per_table
+        for name, seed in table_seed.per_column
+    }
+    parent_of = {
+        (child.table, column): (rel.parent.table, parent_column)
+        for rel in plan.relationships
+        for child in rel.children
+        for column, parent_column in zip(child.columns, rel.parent.columns, strict=False)
+    }
+    by_key = {(t.name, c.name): c for t in tables for c in t.columns}
+    resolved: dict[tuple[str, str], tuple[ColumnSizeSpec, pa.DataType] | None] = {}
+
+    def output_of(key: tuple[str, str]) -> tuple[ColumnSizeSpec, pa.DataType] | None:
+        if key not in resolved:
+            resolved[key] = None  # a cycle in the edges resolves to "undeclared"
+            parent = parent_of.get(key)
+            if parent is not None and parent in by_key:
+                resolved[key] = output_of(parent)
+            else:
+                seed = seeds.get(key)
+                strategy = None if seed is None else seed.strategy
+                config = () if seed is None else seed.provider_config
+                resolved[key] = _declared_output(by_key[key], strategy, config)
+            if resolved[key] is None and by_key[key].spec.string_width_bytes is not None:
+                resolved[key] = (by_key[key].spec, by_key[key].arrow_type)
+        return resolved[key]
+
+    out: list[lc.TableInputs] = []
+    for t in tables:
+        columns: list[lc.ColumnInputs] = []
+        for c in t.columns:
+            declared = output_of((t.name, c.name))
+            if declared is None:
+                note = lc.NOTE_OUTPUT_WIDTH.format(column=f"{t.name}.{c.name}")
+                return Outcome(None, (note,))
+            columns.append(replace(c, output_spec=declared[0], output_arrow_type=declared[1]))
+        out.append(replace(t, columns=tuple(columns)))
+    return Outcome(tuple(out))

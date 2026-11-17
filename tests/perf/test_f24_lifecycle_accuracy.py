@@ -30,12 +30,12 @@ from decoy_engine import PipelineConfig, estimate_job  # noqa: E402
 _MIB = 1024 * 1024
 UPPER_BOUND = 1.5
 TIERS = {"1M": 1_000_000, "3M": 3_000_000}
-# Bound class per cell (plan 8.3): "lower" cells carry the TB-4 string slope margin.
+# Bound class per cell (plan 8.3). "lower" cells are string output or carry the TB-4 string margin.
 BOUND = {
     "AT-E1-17": "lower",
     "AT-E1-18": "lower",
-    "AT-E1-19": "bounded",
-    "AT-E1-23": "bounded",
+    "AT-E1-19": "lower",
+    "AT-E1-23": "lower",
     "AT-E1-24": "lower",
     "AT-E1-25": "lower",
     "AT-E1-27": "bounded",
