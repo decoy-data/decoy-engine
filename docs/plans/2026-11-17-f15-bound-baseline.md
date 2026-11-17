@@ -10,8 +10,9 @@ v1-bar-blocking-criteria, v1-threat-model-accidental-leaks, plan-defines-accepta
 develop-correctly-registries-and-sizing, best-practice-becomes-a-sentry, v1-scope-no-new-features,
 v1-pragmatic-gate-priorities, engine-repin-checklist, decoy-parallel-ledger-files.
 
-Revision 2 (Dennis round 1 on `e034c27c`). Section 17 lists each finding and its change. The CLI
-half is rebuilt on drift plan revision 3 (`origin/plan/drift` `8f2d78bd`, section 13.1 ruling).
+Revision 3 (Codex on `4207d7bb`): the baseline is parsed by the engine's one strict JSON parser;
+section 18. Revision 2 (Dennis round 1 on `e034c27c`): section 17. The CLI half is built on drift
+plan revision 3 (`origin/plan/drift` `8f2d78bd`, section 13.1 ruling).
 
 Bases (2026-11-17): engine `origin/main` `902968682` (last tag `v0.27.0`, `REGISTRY_VERSION`
 1.29.0); CLI `origin/main` `419572a` (pins `decoy-engine==0.27.0`). Inputs read: CLI
@@ -78,14 +79,14 @@ Non-goals (a review finding here becomes a follow-up item, not a blocker):
 - The run-result `scan_drift` entry: RESULT C1 (row 62) builds it from `ctx.drift_verdict`, whose
   type becomes the engine `DriftVerdict` in C1 (section 3.3).
 
-Expected size: engine about 1,320 lines in 2 slices, 8 production files touched, 3 new
+Expected size: engine about 1,400 lines in 2 slices, 9 production files touched, 3 new
 (`profiling/scan_diff.py`, `profiling/scan_set_read.py`, `profiling/bound_baseline.py`). CLI about
 1,350 lines in 2 slices, 1 new production file (`scanning/_bind.py`). New public engine names,
 exported from `decoy_engine.profiling` (as `ScanSetCoreRead` and `ScanSourceError` are today) and
 not from the top-level package, whose `__init__.py` is at 599 lines against the 600-line module cap:
 `SCAN_DIFF_SCHEMA`, `pii_bucket`, `diff_scan_tables`, `diff_scan_documents`, `TableDiff`,
 `ScanSetDiff`, `FieldChange`, `FieldPresence`, `scan_diff_to_dict`, `ScanDiffCore`,
-`ScanDiffCoreRead`, `read_scan_set`, `check_scan_finite`, `ScanSetReadError`, `BoundBaseline`,
+`ScanDiffCoreRead`, `read_scan_set`, `ScanSetReadError`, `BoundBaseline`,
 `bind_baseline`, `BaselineBindingError`, `DriftVerdict`, `DriftFinding`, `evaluate_drift`. New
 reason codes: `pre_scan.baseline_digest_mismatch`, `pre_scan.baseline_unreadable`,
 `config.scan_baseline_unbound`, each since UNRELEASED.
@@ -128,6 +129,12 @@ Found:
   and reports anomalies of later data against it; Soda's schema check fails "when schema changes";
   dbt model contracts refuse a build whose columns differ from the declared contract. All three keep
   the baseline as a reviewed artifact and the comparison as a fixed rule set.
+- **Strict JSON parsing.** RFC 8259 leaves duplicate member names undefined and has no NaN or
+  Infinity; Python's `json` accepts both. The engine already has one strict parser,
+  `strict_json_loads` (`src/decoy_engine/_canonical/_json.py:173`), which refuses duplicate keys,
+  the `NaN`/`Infinity` constants and oversized integers with a closed `StrictJsonError.token`, and a
+  sentry (`tests/sentry/test_strict_json_single_parser.py`) that fails on any second parser with
+  those hooks outside `_canonical/`. The records codec and the faker admission already use it.
 - **In the engine and CLI.** CLI `compute_scan_diff` (`src/decoy/cli/scan.py:865`, moved by D-2a to
   `scanning/_diff.py`) is the one rule set today. Engine `profiling/scan_set.py` already has the
   strict-writer, relaxed-reader pattern (`ScanSetCore`, `_relaxed` at
@@ -191,11 +198,20 @@ New module `src/decoy_engine/profiling/scan_set_read.py`:
 - `read_scan_set(data) -> dict`: the tag rule the CLI applies today
   (`src/decoy/cli/io/_scan_set.py:122`, `scan-set/v1` or a `scan-set/v1.<minor>` tag), then
   `ScanSetCoreRead`. Every refusal is `ScanSetReadError` (a `ValueError`) with a `kind` member
-  (`missing_tag`, `unsupported_tag`, `invalid`, `non_finite`) and fixed text, raised after the
-  `except` block closes.
-- `check_scan_finite(data) -> None`: the one non-finite walk (NaN and Infinity anywhere in the
-  document), raising `ScanSetReadError(kind="non_finite")`. `read_scan_set` calls it first; the CLI
-  calls it once before its core-or-legacy branch, so legacy documents get the same check.
+  (`missing_tag`, `unsupported_tag`, `invalid`) and fixed text, raised after the `except` block
+  closes. It takes an already-parsed document; it does not parse and adds no non-finite walk.
+
+Non-finite policy (one per repo, no new walker):
+
+- Engine: `strict_json_loads` is the one policy. `bind_baseline` parses with it (3.2). Today it
+  refuses the `NaN` and `Infinity` constants but not an overflowed literal such as `1e999`, which
+  Python reads as infinity. E2 closes that gap at the parser: a `parse_float` hook that records the
+  existing `non_finite` token when the parsed float is not finite (Q17). No engine walker is added.
+- CLI: `decoy scan diff`, `fields` and `show` read scan files with plain `json.loads` and keep the
+  existing `_has_non_finite` walk in `io/_scan_set.py`, unchanged, for both core and legacy
+  documents. The CLI cannot import the private `_canonical` package (recurring defect 6), and moving
+  `scan` file reading to a strict parser changes user-visible behaviour (duplicate keys refused), so
+  it is V2-LOG, not row 80.
 
 Document shape (`scan-diff/v1`):
 
@@ -255,8 +271,11 @@ scan_baseline:
 - New module `src/decoy_engine/profiling/bound_baseline.py`:
   - `bind_baseline(raw: bytes, block) -> BoundBaseline`, in this order: SHA-256 of `raw`; when
     `block.sha256` is set and differs, `BaselineBindingError` with
-    `pre_scan.baseline_digest_mismatch`; then `json.loads(raw)` and `read_scan_set`, any failure
-    `BaselineBindingError` with `pre_scan.baseline_unreadable` (a legacy profile without
+    `pre_scan.baseline_digest_mismatch`; then `strict_json_loads(raw)` (the engine's one strict
+    parser: a duplicate key, a non-finite number, an oversized integer or bytes that are not UTF-8
+    JSON each raise `StrictJsonError`) and `read_scan_set`. Either failure sets a flag inside the
+    `except` block, and `BaselineBindingError` with `pre_scan.baseline_unreadable` is raised after
+    it closes, so the token and the parser text never chain (a legacy profile without
     `scan_schema` is unreadable here: it records no sampling or detectors). Both errors carry the
     code and fixed text naming `scan_baseline.sha256` or `scan_baseline.path` (the config keys),
     never the file path, the bytes or either digest, and have no `__cause__` or `__context__`.
@@ -332,8 +351,8 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
   guard D-T14 is updated in C1 for exactly this case.
 - `decoy ci check` drift (`src/decoy/ci/adapters.py:158`) keeps its D-2a import of
   `diff_scan_sets`; rule ids, message ids and counts are unchanged.
-- CLI `io/_scan_set.py`: `scan_set_from_data` calls `check_scan_finite` once before the core-or-legacy
-  branch; `_from_core` delegates to `read_scan_set`. It catches `ScanSetReadError` and maps its
+- CLI `io/_scan_set.py`: `scan_set_from_data` keeps its `_has_non_finite` walk before the
+  core-or-legacy branch, unchanged (3.1); `_from_core` delegates to `read_scan_set`. It catches `ScanSetReadError` and maps its
   `kind` to the CLI's current messages (`scan_schema ... not supported` and the others), so no user
   text changes (M3). The legacy-profile branch stays in the CLI.
 
@@ -346,7 +365,9 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
 | `on_drift: fail` with no `sha256` | refused at config load, `config.scan_baseline_unbound`; `decoy validate` reports it |
 | `sha256` uppercase, 63 chars, a trailing newline, or an unquoted all-digit value | refused at config load (anchored match, strict string) |
 | Baseline is a legacy profile or `scan-set/v2` | `pre_scan.baseline_unreadable`, exit 1 |
-| Baseline or a `scan diff` input holds NaN or Infinity | `check_scan_finite` refuses, core and legacy alike, with today's CLI message |
+| Baseline holds a duplicate key, `NaN`, `Infinity` or an overflowed literal (`1e999`) | `strict_json_loads` refuses; `pre_scan.baseline_unreadable`, exit 1 |
+| A `scan diff` input holds NaN or Infinity | the CLI's existing walk refuses, core and legacy alike, with today's message |
+| A `scan diff` input holds a duplicate key | as today: the last value wins (V2-LOG) |
 | Config has a table the baseline lacks | `table_added` finding; drift |
 | Baseline has a table the config lacks | `tables_removed`; not drift |
 | No table in common | one `no_common_table` finding; drift |
@@ -364,7 +385,7 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
 
 - New structure: three pure engine modules beside `scan_set.py` and one small CLI command module.
   One place per rule: buckets, drift kinds and table matching in `scan_diff.py`; the scan tag and
-  non-finite rules in `scan_set_read.py`; the verdict in `evaluate_drift`; the digest check in
+  read-model rules in `scan_set_read.py`; JSON parsing of the baseline in `strict_json_loads`; the verdict in `evaluate_drift`; the digest check in
   `bind_baseline`. Design principle applied: single responsibility (the diff rules change for
   drift-policy reasons and now live apart from both the CLI command and the rescan); no variant
   registry, since the drift kinds are a closed set of five.
@@ -385,9 +406,12 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
 - Choke point, baseline binding: `bind_baseline` is the only builder of `BoundBaseline`, and
   `evaluate_drift` takes only a `BoundBaseline`, so a verdict cannot be computed on unbound bytes.
   Guard: F15-T7 constructor cell. Mutation MF-7b: allow direct construction.
-- Choke point, scan tag and non-finite rules: `read_scan_set` and `check_scan_finite`. Guard: the
-  existing G-ONE-SCAN-READER sentry (`tests/sentry/test_scan_reader.py`) keeps holding, and F15-T4
-  pins the rules.
+- Choke point, scan tag rule: `read_scan_set`. Guard: the existing G-ONE-SCAN-READER sentry
+  (`tests/sentry/test_scan_reader.py`) keeps holding, and F15-T4 pins the rule.
+- Choke point, baseline JSON parsing: `strict_json_loads`. Guard: the existing
+  `tests/sentry/test_strict_json_single_parser.py`, which fails on any `object_pairs_hook=` or
+  `parse_constant=` call outside `_canonical/`, so `bound_baseline.py` cannot grow a second strict
+  parser; F15-T7 fails if it uses plain `json.loads`. Mutation MF-7d: swap in `json.loads`.
 
 ## 6. Reuse inventory
 
@@ -405,6 +429,7 @@ Errors exit 1 (`EXIT_USAGE`). It never edits a YAML file (Q9).
 | Drift codes and check id | D-1 (`drift_detected`, `drift_blocked`, `scan_drift`) | new drift codes |
 | Config refusal shape | `PydanticCustomError` with a reason code, as `post_scan_inactive` | a custom exception path |
 | Digest | `hashlib.sha256` over raw bytes, as B-2 | a canonical re-serialization |
+| Strict JSON parse of the baseline | `strict_json_loads` and its single-parser sentry | a second strict parser or a non-finite walker |
 | Corpus pinning across repos | CLI `ci/vendored.toml` byte pins | a hand-kept second fixture |
 | Sentry | drift's `test_one_drift_rescan.py` | a second sentry file |
 
@@ -418,9 +443,11 @@ E2 adds at most 4 lines there).
 | File | New or changed | Where things go line | Sits beside | Slice |
 |---|---|---|---|---|
 | `src/decoy_engine/profiling/scan_diff.py` | new (~320): `pii_bucket`, `diff_scan_tables`, `diff_scan_documents` with the matching, types, `ScanDiffCore`, `ScanDiffCoreRead`, `scan_diff_to_dict` | Detectors, profiling | `scan_set.py` | E1 |
-| `src/decoy_engine/profiling/scan_set_read.py` | new (~90): `read_scan_set`, `check_scan_finite`, `ScanSetReadError` (`scan_set.py` is at the 600-line cap and is not edited) | Detectors, profiling | `scan_set.py` | E1 |
+| `src/decoy_engine/profiling/scan_set_read.py` | new (~60): `read_scan_set`, `ScanSetReadError` (`scan_set.py` is at the 600-line cap and is not edited) | Detectors, profiling | `scan_set.py` | E1 |
 | `src/decoy_engine/profiling/__init__.py` | changed (127 lines): exports; the top-level `decoy_engine/__init__.py` (599 lines) is not edited | Public API | `ScanSetCoreRead` export | E1, E2 |
 | `src/decoy_engine/profiling/bound_baseline.py` | new (~180): `BoundBaseline`, `bind_baseline`, `BaselineBindingError`, `DriftVerdict`, `DriftFinding`, `evaluate_drift` | Detectors, profiling | `scan_diff.py` | E2 |
+| `src/decoy_engine/_canonical/_json.py` | changed (~6 lines): `parse_float` hook records `non_finite` for an overflowed float (Q17) | canonical JSON (the one strict parser) | `constant` hook | E2 |
+| `tests/unit/canonical/test_json.py` | changed: overflow cell | unit tests | `non_finite` cells | E2 |
 | `src/decoy_engine/config/_scan_baseline.py` | changed: `sha256`, unbound rule, dump omission | Config models | `on_drift` | E2 |
 | `src/decoy_engine/plan/_compile.py` | changed: hash `sha256` with `on_drift` | Plan compile and checks | the `on_drift` hash rule | E2 |
 | `src/decoy_engine/profiling/_starter_config.py` | changed: `baseline_sha256` | Detectors, profiling | `baseline_path` | E2 |
@@ -433,8 +460,7 @@ E2 adds at most 4 lines there).
 | `src/decoy_engine/_MAP.md`, `CODEMAP.md` | changed: one line each for the three modules | package map | `scan_set.py` line | E2 |
 | `changelog.d/<slice-slug>.md` | new fragment per slice; E2's is marked breaking | Changelog fragments | other fragments | E1, E2 |
 
-`pii_bucket`, `diff_scan_tables`, `diff_scan_documents`, `read_scan_set` and `check_scan_finite`
-merge in E1 before their CLI callers (C1, after the release); `diff_scan_documents` also gets its
+`pii_bucket`, `diff_scan_tables`, `diff_scan_documents` and `read_scan_set` merge in E1 before their CLI callers (C1, after the release); `diff_scan_documents` also gets its
 engine caller `evaluate_drift` in E2. This is the plan-named pair across the release boundary that
 proportionality allows: the consumer slice C1 is named here and lands before row 80 closes.
 
@@ -448,7 +474,7 @@ All CLI rows assume D-2a, D-2b and (for C2) D-2c have merged.
 | `src/decoy/cli/scanning/_drift.py` | changed (D-2b file): CLI matching deleted; `bind_baseline` in `check_drift`; `evaluate_drift`; facade `DriftVerdict` is the engine type (C1); finding-line formatter (C2) | `decoy scan` internals | `_diff.py` | C1, C2 |
 | `src/decoy/cli/scanning/__init__.py` | changed: `pii_bucket` re-export (C1), `bind` command export (C2) | `decoy scan` internals | D-2's exports | C1, C2 |
 | `src/decoy/cli/scan.py` | changed: payload builder moved out and `scan_diff` member added (C1, net shrink of about 20 lines); `bind` registered (C2, about 4 lines). It may only shrink against `tests/sentry/baselines/module-size.json`: C1 lowers the max D-2a set, and C2 stays at or below it | Command module (legacy, over the cap) | `_diff` | C1, C2 |
-| `src/decoy/cli/io/_scan_set.py` | changed: `read_scan_baseline` returns bytes only; `check_scan_finite` before the branch; `_from_core` on `read_scan_set` with the message map | Source readers | `load_scan_set` | C1 |
+| `src/decoy/cli/io/_scan_set.py` | changed: `read_scan_baseline` returns bytes only; `_from_core` on `read_scan_set` with the message map; the `_has_non_finite` walk unchanged | Source readers | `load_scan_set` | C1 |
 | `src/decoy/cli/exit_codes.py` | changed: `BaselineBindingError` in `usage_error_types()` | exit codes | `PlanCompileError` | C1 |
 | `src/decoy/cli/scanning/_bind.py` | new (~90): `decoy scan bind` | `decoy scan` internals | `scanning/_diff.py` | C2 |
 | `tests/sentry/run/test_one_drift_rescan.py` | changed: wider walk, engine-name rules, two allowlisted paths | Sentry test (`tests/sentry/run/`) | D-2c's rules | C1 |
@@ -540,7 +566,7 @@ did), and D-2b's rescan runs with `integrity=False`.
 | 3 | Shared state across calls | diff and verdict | pure functions over immutable inputs; frozen dataclasses | F15-T1 repeat-call cell over two pairs sharing a table name | MF-1c: module-level cache keyed by table name |
 | 4 | Route parity and silent fallback | `scan diff`, `ci check`, `run`, `mask()` | one engine rule set behind two facade modules; `check_drift` is the only binding site | F15-C-T1, F15-C-T2 sentry, F15-C-T9 | MC-2, MC-9 |
 | 5 | Referential counts across tables | baseline vs current table sets | engine matching: `table_added` drift, `tables_removed` reported, one `no_common_table` | F15-T2 | MF-2, MF-2c |
-| 6 | Untrusted producer | hand-edited baseline, YAML digest, foreign diff documents | anchored digest match on a strict string; `read_scan_set` strict tag and model; strict `scan-diff/v1` types; unknown kind refused | F15-T4, F15-T6, F15-T3 | MF-4, MF-6, MF-3c |
+| 6 | Untrusted producer | hand-edited baseline, YAML digest, foreign diff documents | anchored digest match on a strict string; `strict_json_loads` (duplicate keys, non-finite numbers); `read_scan_set` strict tag and model; strict `scan-diff/v1` types; unknown kind refused | F15-T4, F15-T6, F15-T3, F15-T7 | MF-4, MF-6, MF-3c, MF-7d |
 | 7 | Check then use (TOCTOU) | baseline digest then parse | one read returning bytes; digest and parse over the same bytes inside `bind_baseline` | F15-T7, F15-C-T7 (one open spy) | MF-7: parse a second read |
 | 8 | Weak tests | parity passing vacuously | corpus pairs each with a non-empty change list unless marked `no_drift`; a pair per drift kind; a legacy pair | F15-C-T1 corpus check | MC-1 |
 | 9 | Refactor drift | moving the rules and the matching | line-for-line port with a vendored parity corpus captured from the CLI before the call-through | F15-T1, F15-C-T1, D-T12 | MC-1, MF-2c |
@@ -563,10 +589,10 @@ merged. Each has a named mutation that must turn it red; mutations run on the sl
 | F15-T1 | E1 | `diff_scan_tables` over the parity corpus equals the expected rows captured from CLI `compute_scan_diff` at `5b49510` (bucket up and down, added, removed, new high PII, QI added and removed order-insensitive, risk delta `None` when either side lacks it, missing score compared as `0.0`, a legacy pair with int scores and no `scan_schema`); the function reads no other member (a table holding only the four members diffs); two different pairs sharing a table name give their own results in either call order | module absent | MF-1: compare raw scores, not buckets; MF-1b: treat a missing score as `low`; MF-1c: cache by table name |
 | F15-T2 | E1 | `diff_scan_documents`: a table only in `current` is `table_added` drift; one only in `baseline` is in `tables_removed` and not drift; no common table gives exactly one `no_common_table` kind and an empty `tables_added`; `tables=` selects; a different `engine_version` or detector run sets `detectors_changed` and not drift | absent | MF-2: count `tables_removed` as drift; MF-2b: count `detectors_changed` as drift; MF-2c: one `table_added` per table when nothing matches |
 | F15-T3 | E1 | `scan_diff_to_dict` round trips through `ScanDiffCoreRead`; the write model refuses an unknown member, `True` or `"0.5"` as a score, free text as a drift kind; the read model accepts `scan-diff/v1.1` and ignores an unknown member, refuses a missing tag, `scan-diff/v2`, `"scan-diff/v1\n"` and an unknown drift kind with fixed text; a canary string in an unknown table member of the input never reaches the document; the corpus samples read | absent | MF-3: lax model; MF-3b: copy unknown table members through; MF-3c: drop an unknown drift kind instead of refusing |
-| F15-T4 | E1 | `read_scan_set` accepts `scan-set/v1` and `scan-set/v1.3`, refuses `scan-set/v2`, `scan-set/v10`, a missing tag and a tag with a trailing newline, each with its `kind`; `check_scan_finite` refuses NaN and Infinity nested in a field and in a legacy document; no `__cause__` or `__context__` | absent | MF-4: `startswith("scan-set/v1")` without the `.` boundary; MF-4b: check only top-level members for non-finite values |
+| F15-T4 | E1 | `read_scan_set` accepts `scan-set/v1` and `scan-set/v1.3`, refuses `scan-set/v2`, `scan-set/v10`, a missing tag and a tag with a trailing newline, each with its `kind`; no `__cause__` or `__context__` | absent | MF-4: `startswith("scan-set/v1")` without the `.` boundary |
 | F15-T5 | E1 | the frozen-surface map sentry lists `scan-diff/v1` with its pinning test; `decoy_engine.profiling.__all__` holds every E1 name and `decoy_engine.__all__` is unchanged | row absent | MF-5: drop the `scan-diff/v1` row |
 | F15-T6 | E2 | `sha256` 64 lowercase hex accepted; uppercase, 63 chars, a trailing newline, `True` and an int refused; `on_drift: fail` without it refused with `config.scan_baseline_unbound` naming the field; `warn` without it accepted; absent `sha256` keeps the dump and plan hash byte-equal for configs with no `on_drift` and with `on_drift: warn`; setting `sha256` with `on_drift` moves the hash; `sha256` without `on_drift` does not; the schema snapshot holds the key | key unknown | MF-6: `re.match` with `$`; MF-6b: hash `sha256` when `on_drift` is absent; MF-6c: accept `fail` without a digest |
-| F15-T7 | E2 | `bind_baseline` with matching bytes returns a bound `BoundBaseline`; one changed byte raises `pre_scan.baseline_digest_mismatch` before any parse (a non-JSON body with the wrong digest gives the mismatch code); a reformatted file with the same content also mismatches; non-JSON, a legacy profile and `scan-set/v2` with no digest set raise `pre_scan.baseline_unreadable`; error text holds neither digest nor path; no `__cause__` or `__context__`; `BoundBaseline(...)` outside `bind_baseline` raises `TypeError` | absent | MF-7: hash `json.dumps(json.loads(raw))`; MF-7b: allow direct construction; MF-7c: parse before the digest check |
+| F15-T7 | E2 | `bind_baseline` with matching bytes returns a bound `BoundBaseline`; one changed byte raises `pre_scan.baseline_digest_mismatch` before any parse (a non-JSON body with the wrong digest gives the mismatch code); a reformatted file with the same content also mismatches; non-JSON, a document with a duplicate key (two `scan_schema` members, and two `tables` members where the second hides a drifted table), `NaN`, `Infinity`, `1e999`, a legacy profile and `scan-set/v2` with no digest set each raise `pre_scan.baseline_unreadable`; error text holds neither digest nor path; no `__cause__` or `__context__`; `BoundBaseline(...)` outside `bind_baseline` raises `TypeError` | absent | MF-7: hash `json.dumps(json.loads(raw))`; MF-7b: allow direct construction; MF-7c: parse before the digest check; MF-7d: swap `strict_json_loads` for `json.loads` (the duplicate-key and `NaN` cells go red); MF-7e: drop the `parse_float` hook (the `1e999` cell goes red) |
 | F15-T8 | E2 | `evaluate_drift` matrix: no drift `passed` with no code; drift under `warn` `warned` with `drift_detected`; under `fail` `failed` with `drift_blocked`; findings sorted by (table, column, kind) and hold names only; `drifted_tables` groups them per table; `no_common_table` gives one finding with table `None`; an unbound `warn` baseline reports `bound: false` | absent | MF-8: map `fail` to `warned` |
 | F15-T9 | E2 | reason fixtures hold the three new codes with since UNRELEASED; `REGISTRY_VERSION` unchanged; the f29 producer inventory resolves every new site | codes absent | MF-9: bump the registry version |
 | F15-T10 | E2 | `starter_config(baseline_sha256=...)` writes the bound block and the result passes `_check`; a non-hex value is refused | parameter absent | MF-10: write the digest without checking it |
@@ -620,10 +646,10 @@ At most 10 production files and about 800 lines each (tests counted). Risk per
 
 | Slice | Repo | Content | Prod files | ~Lines | Risk | Waits on |
 |---|---|---|---|---|---|---|
-| E1 | engine | prep folded in: `scan_set_read.py` (`read_scan_set`, `check_scan_finite`); `scan_diff.py` (port, matching, document, models, minor rule); parity corpus captured from CLI `5b49510`; profiling exports; frozen-surface row, contract 3.1 tag and paragraph; changelog fragment; F15-T1 to F15-T5 | 3 | 740 | R2 (new frozen format) | none |
-| E2 | engine | `scan_baseline.sha256` and unbound rule; plan-hash rule; `bound_baseline.py`; three reason codes and the f29 inventory; `starter_config(baseline_sha256=)`; schema snapshot; contract note on the pre-GA tightening, `_MAP.md` and CODEMAP lines; breaking changelog fragment; F15-T6 to F15-T10 | 7 | 660 | R2 (config schema, blocking verdict) | E1 |
+| E1 | engine | prep folded in: `scan_set_read.py` (`read_scan_set`); `scan_diff.py` (port, matching, document, models, minor rule); parity corpus captured from CLI `5b49510`; profiling exports; frozen-surface row, contract 3.1 tag and paragraph; changelog fragment; F15-T1 to F15-T5 | 3 | 720 | R2 (new frozen format) | none |
+| E2 | engine | `scan_baseline.sha256` and unbound rule; overflow hook in `strict_json_loads`; plan-hash rule; `bound_baseline.py`; three reason codes and the f29 inventory; `starter_config(baseline_sha256=)`; schema snapshot; contract note on the pre-GA tightening, `_MAP.md` and CODEMAP lines; breaking changelog fragment; F15-T6 to F15-T10 | 8 | 680 | R2 (config schema, blocking verdict, shared parser) | E1 |
 | Release | engine | daily train with E2 (planned 0.29.0) | n/a | n/a | per train | E2 |
-| C1 | CLI | repin to the E2 release (repin checklist); `_diff.py` call-through with the payload builder; `_drift.py` engine matching, `bind_baseline` in `check_drift`, engine `DriftVerdict`; `read_scan_baseline` bytes only; `check_scan_finite` and `read_scan_set` in the reader; `usage_error_types()` entry; `scan diff` `scan_diff` member; sentry extension; vendored corpus; D-2 fixture and cell updates; shape snapshot and CHANGELOG; F15-C-T1 to F15-C-T5, F15-C-T7, F15-C-T9 | 7 | 790 | R2 (frozen `--json` shape, refuses runs, library API) | the release; D-2a and D-2b merged |
+| C1 | CLI | repin to the E2 release (repin checklist); `_diff.py` call-through with the payload builder; `_drift.py` engine matching, `bind_baseline` in `check_drift`, engine `DriftVerdict`; `read_scan_baseline` bytes only; `read_scan_set` in the reader; `usage_error_types()` entry; `scan diff` `scan_diff` member; sentry extension; vendored corpus; D-2 fixture and cell updates; shape snapshot and CHANGELOG; F15-C-T1 to F15-C-T5, F15-C-T7, F15-C-T9 | 7 | 790 | R2 (frozen `--json` shape, refuses runs, library API) | the release; D-2a and D-2b merged |
 | C2 | CLI | finding lines (one formatter in `_drift.py`) for `decoy run` and `decoy.mask()`; `decoy scan bind`; D-T3, D-T6 and D-T11 updates; docs last (cli-reference, drift guide with a worked bind example and the resume note, `decoy explain exit-codes` text if it lists drift, ROADMAP row 80, CHANGELOG); F15-C-T6, F15-C-T8, F15-C-T10 | 4 | 560 | R2 (user-facing refusal text, new command) | C1; D-2c merged |
 
 Order: E1 then E2 (E2 imports `diff_scan_documents`). C1 then C2 (both write `scan.py` and
@@ -666,6 +692,7 @@ on D-2a).
 | Q14 | Row 80's After lists STORM rename and SCAN-LIB. Keep? | Replace with "row 32 D-2a and D-2b (C1), D-2c (C2)". Row 80 adds no STORM-named surface and needs only a `scan-set/v1` file, not the library |
 | Q15 | Fewer slices? | No. E1 plus E2 is about 1,400 lines and C1 plus C2 about 1,350, both over the 800-line cap. Prep is folded into E1 and C1; docs go in E2 (contract) and C2 (user docs) |
 | Q16 | A `scan-diff/v1.N` document with a drift kind this reader does not know: refuse or tolerate? | Refuse with fixed text. Dropping the kind could report a drifted diff as clean |
+| Q17 | `strict_json_loads` reads `1e999` as infinity. Close it at the parser, or add a walker in `bind_baseline`? | At the parser, in E2: a `parse_float` hook records the existing `non_finite` token. One non-finite policy in the engine. The records codec and faker admission then also refuse `1e999`; neither has a writer that can produce it (the canonical encoder refuses non-finite values), so no stored document changes meaning |
 
 Q13 (revision 1: `decoy.mask()` refuses `on_drift`) is withdrawn: `decoy.mask()` runs the drift
 check through `check_drift` (drift plan Q-F) and gets the binding with it.
@@ -680,6 +707,9 @@ check through `check_drift` (drift plan Q-F) and gets the binding with it.
 - A per-match detector version on `DetectorMatch` (row-detail note); V1 identifies the detector set
   by `engine_version` and the `detectors` runs, and the diff reports a change.
 - `decoy validate` checking the baseline digest without a run.
+- A public strict scan-file loader for the CLI (`scan diff`, `fields`, `show`, `ci check`) built on
+  `strict_json_loads`, which would refuse duplicate keys there too and replace the CLI's
+  `_has_non_finite` walk.
 - `decoy ci check` using `diff_scan_documents` matching instead of its one-table compare (drift plan
   section 16).
 
@@ -718,5 +748,13 @@ check through `check_drift` (drift plan Q-F) and gets the binding with it.
 | L4 resume after re-bind | documented as a consequence of the plan-hash rule | 3.2, 4, 12 |
 | L5 D-T14 byte equality | named as updated by C1 for `0` to `0.0` | 3.4, 7 |
 
-Slice sizes after the moves: E1 about 740, E2 about 660, C1 about 790 (with a named C1b split if
+## 18. Revision 3: Codex resolutions (on `4207d7bb`)
+
+| Finding | Change | Sections |
+|---|---|---|
+| `bind_baseline` parsed with plain `json.loads` (duplicate keys and non-finite values accepted) | `bind_baseline` parses with `strict_json_loads`; its `StrictJsonError` maps to `pre_scan.baseline_unreadable` after the `except` block; duplicate-key, `NaN`, `Infinity` and `1e999` cells in F15-T7; MF-7d swaps in `json.loads`, MF-7e drops the overflow hook | 3.2, 4, 5, 11 |
+| Two non-finite policies | the engine walker `check_scan_finite` is removed; the engine policy is the strict parser, extended in E2 to refuse an overflowed literal (Q17); the CLI keeps its existing `_has_non_finite` walk unchanged because it cannot import the private parser and a strict CLI loader is a user-visible change (V2-LOG). This replaces revision 2's H6 export | 3.1, 3.4, 7, 14, 15 |
+| Strict parser missing from the research | added to established solutions, reuse inventory and the choke points with its sentry | 2, 5, 6 |
+
+Slice sizes after the moves: E1 about 720, E2 about 680, C1 about 790 (with a named C1b split if
 it passes the cap), C2 about 560.
