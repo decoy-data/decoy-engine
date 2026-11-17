@@ -2,10 +2,11 @@ Status: plan
 
 # F24 engine half: full-lifecycle estimate including the ingestion peak (roadmap row 84)
 
-Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 4 (Dennis round 1 on
+Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 5 (Dennis round 1 on
 `f7c5065f4` applied in revision 2; Codex round 1 on `1181509d7` applied in revision 3; Codex
-round 2 on `d03677750`, two V1 findings on the fixed-width write term, applied here; the review
-record is in section 20).
+round 2 on `d03677750` applied in revision 4; revision 5 is the orchestrator amendment after the
+84-E1 build stopped on four accuracy cells (FM-12): output specs in the execute and write terms,
+section 4.2a; the review record is in section 20).
 Scope: engine slices 84-E1 and 84-E2. Advisory only. No CLI or platform change in this row.
 
 Rules consulted: `dev-rules/README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1
@@ -105,10 +106,14 @@ the same time in that phase for a caller that reads every file source whole thro
 readers and holds inputs and outputs until it has written the last target. It names the phase
 that sets the peak. On the measured fixtures in section 8 (run on test VMs), the lifecycle peak
 is never below the measured peak RSS. It is at most 1.5 times the measured peak for the cells
-section 8.3 marks "bounded": numeric cells, and cells whose predicted limiting phase is ingest or
-write, where the realized route equals the predicted route and the job has at least 1,000,000
-rows (OQ-4). String cells limited by the execute phase carry the TB-4 slope margin (up to 2.2
-times on the pooled shape) and are checked against the lower bound only. It stays advisory: it
+section 8.3 marks "bounded": type-preserving numeric-led cells (every masked column keeps its
+input type, so its output spec equals its input spec, section 4.2a), and cells whose predicted
+limiting phase is ingest or write, where the realized route equals the predicted route and the
+job has at least 1,000,000 rows (OQ-4). Cells whose execute phase is priced on string cells
+(string inputs, or numeric inputs that a strategy turns into strings, such as `hash` and
+`redact`) carry the TB-4 string slope margin and the native-route gap (section 4.2a), measured
+or expected at 1.1 to 5.9 times (section 8.3), and are checked against the lower bound only. It
+stays advisory: it
 never raises, never refuses a job, never changes a route, and its output holds byte counts, phase
 tokens, table and column names only, never a cell value, a path or exception text.
 
@@ -121,8 +126,12 @@ tokens, table and column names only, never a cell value, a path or exception tex
 - The `--chunked` CLI path and lazy (platform) handoff: the estimate assumes whole-file resident
   handoff, which over-predicts both (the safe direction). Stated in the docstring and the docs.
 - Subset jobs (still "not applicable: subset").
-- Per-strategy output widths (a hash output is wider than its input). Outputs are priced with the
-  input widths. V2-LOG.
+- Output widths for strategies other than `passthrough`, `hash` and `redact` (section 4.2a prices
+  those three). A string column under another strategy is priced at its input width; a
+  non-string column under another strategy leaves the lifecycle unpriced with a note (FM-13).
+  V2-LOG: an output spec per strategy, each with a measured cell.
+- A native-aware execute term. The estimate prices the pandas form of a string output even when
+  the native unified slice keeps it in Arrow at run time (FM-14). V2-LOG.
 - Vault maps, the post-scan baseline tables (`tee` in `_pipeline_sources.py:127`) and quarantine
   frames. They are live at the same time as the route's working set on jobs that use them, and
   none has a measured size model. V2-LOG; the docs name them as unpriced.
@@ -167,7 +176,8 @@ For each mask source, in config `sources` order (the CLI reads in that order):
 - Per column: the Arrow type and null flag come from `column_arrow_types(sample, profile_table)`
   (`_mem_estimate_arrow.py:254`), and the mean width from the existing `_mask_specs` with the
   sample as `caller_sources`. Each `PhaseInputs` column carries `(arrow_type, has_nulls, width)`;
-  there is no table that maps a pandas label to an Arrow type.
+  there is no table that maps a pandas label to an Arrow type. Each column also carries its
+  output spec (section 4.2a).
 - A string column whose sample holds no non-null value is unpriced with a note naming it (it is
   not priced as `Declared(0.0)`).
 - The sample is dropped after the inputs are built.
@@ -203,8 +213,9 @@ Python-object terms price the fixed-width paths:
     `from_pandas` builds the Arrow table.
   - Parquet: `arrow(k)` plus the largest row group's `total_byte_size` from the footer.
   - The ingest peak is the largest of these.
-- Execute: the existing `estimate_peak_bytes(specs, route)`, plus a resident-input term that does
-  not repeat what TB-4 already measured (G2):
+- Execute: the existing `estimate_peak_bytes(working_specs, route)`, where each column's working
+  spec is the larger of its input spec and its output spec (section 4.2a), plus a resident-input
+  term that does not repeat what TB-4 already measured (G2):
   - `full_frame`: nothing added; TB-4 held every input.
   - `sequential`: `sum(arrow(inputs)) - max(arrow(inputs))`. TB-4 held one input at a time, so the
     measured peak already holds the largest input's Arrow table (the two largest tables in the
@@ -214,7 +225,8 @@ Python-object terms price the fixed-width paths:
   - A mask table that declares transforms adds one `arrow(t)`: `transform_resolved_source`
     builds a new table beside the resident one.
 - Write: `I + sum(arrow(inputs)) + sum(arrow(outputs)) + transient_out(t*)`, where outputs are
-  priced with the input specs and `t*` is the output with the largest transient:
+  priced with the output specs (section 4.2a) and `t*` is the output with the largest transient;
+  `frame`, `refs`, `lists` and `int_cols` of an output read its output specs:
   - CSV target: `frame(t)`.
   - fixed_width target: `max(coerce_moment(t), list_moment(t))`, the larger of the two moments in
     G3 (the Arrow output is already in the sum).
@@ -246,6 +258,100 @@ Python-object terms price the fixed-width paths:
   - Parquet target: 0.
 - Lifecycle peak is the largest phase peak; the limiting phase is its token. Ties go to the
   earlier phase.
+
+### 4.2a Output specs and the execute term (revision 5, after the 84-E1 calibration)
+
+What the build measured (`docs/records/2026-11-17-f24-lifecycle-calibration.md`, head
+`b1213e83a`): AT-E1-19 came in at 0.46 (1M) and 0.32 (3M) and AT-E1-23 at 0.96 and 0.95. No
+constant was tuned (FM-12). Both fixtures mask int64 columns with strategies that write strings:
+AT-E1-19 hashes the int64 keys (`hash`) and redacts the int64 payload (`redact`); AT-E1-23 redacts
+six int64 columns. The TB-4 shapes the slopes come from masked their numeric columns with
+`passthrough` (`scripts/tb4_calibration.py:196-202`, `:234`), so in TB-4 an output cell has the
+input cell's type and cost. The revision 4 basis priced every column at its input spec, which is
+right only under that condition.
+
+What the sequential route holds (AT-E1-19, three tables P 0.2N, C 0.4N, G 0.4N rows, read from
+`execution/_sequential.py:225-580` and `execution/_pandas_adapter.py:355-666`):
+
+- The frame is pandas. `hash` writes one 64-character hex token per cell, `derive(...).hex()`
+  (`kernel/_scalar.py:57`; the native sequential hash returns the same tokens as a Python list,
+  `_sequential_native.py:302`), so a masked key cell is a pointer plus a Python str: 8 + 49 + 64
+  bytes, the `raw_data_bytes` cost `57 + 64`. `redact` takes `redact_array(...).to_pylist()`
+  (`_strategies/_redact.py:46-47`), one new Python str per cell: `57 + 8` bytes.
+- The parent key map (`_parent_map`, `_pandas_adapter.py:596`) maps a 1-tuple of the source key
+  to a 1-tuple of the masked token, and is kept until the last child that references it is done
+  (`_sequential.py:580-589`). After the parent frame is evicted the map holds the only reference
+  to the tokens.
+- With no sink, every masked table is kept as Arrow in `outputs` (`_sequential.py:564`): 68 bytes
+  a token cell (64 data plus a 4-byte offset), 12 bytes a redacted cell.
+
+At N = 1M the largest live set is when the grandchild table is converted to Arrow: caller-held
+inputs 22.4 MB, outputs P and C 75.2 MB, the C key map about 123 MB (400k keys: a dict slot near
+52 bytes, two 48-byte tuples, a 32-byte int, a 128-byte token after pymalloc rounding), the G
+frame about 86 MB (tokens, pointers into the map's tokens, redacted strs) and the G output 59.2
+MB: about 372 MB a million rows. The measured slope is (1435 - 625) / 2 = 405 MiB, about 425 MB a
+million rows. The rest is transients freed before that moment but still held by the allocators
+(the FK resolve lists of 40 to 56 bytes a row, the hash and redact intermediates), which a bare
+liveness sum cannot see. That is why the term keeps the measured TB-4 slope and corrects its
+basis, instead of replacing the slope with a liveness sum. The revision 4 basis was the two
+largest tables at input width, 19.2 MB a million rows; it does not contain the token and str
+cells at all, which is the whole of the miss.
+
+What the full_frame cell shows (AT-E1-23): the measured slope is 198 MiB a million rows, about
+208 bytes a row for six cells. The pandas path would hold at least 6 x 65 = 390 bytes a row of
+redacted strs, so this run kept the outputs in Arrow (12 bytes a cell): the native unified slice
+(`execution/_pipeline_full_frame.py`, `maybe_run_unified_slice`). The revision 4 term priced 4.0
+x 48 = 192 bytes a row on the inputs alone; the 72 bytes a row of new Arrow strings were not in
+it. The estimate cannot know before the run whether the unified slice admits the plan, and when
+it declines, the pandas route holds the str cells; so the estimate prices the pandas form, the
+same over-predict-by-design rule as FM-6 (FM-14).
+
+The rule:
+
+- Each mask column gets an output spec from its compiled plan seed (`ColumnSeed.strategy` and
+  `provider_config` through `provider_config_to_dict`, the values the handlers read):
+  - `passthrough`, and a column the plan leaves unconfigured: the input spec.
+  - `hash`: a string of width `truncate` when it is a positive int (the handler's own test,
+    `_strategies/_hash.py:56-57`), else `2 * hashlib.sha256().digest_size` (64), the hex length
+    of the HMAC-SHA256 digest `derive` returns.
+  - `redact`: a string of width `len(redact_with.encode("utf-8"))`, with the default read from
+    `_DEFAULT_REDACT_WITH` (`_strategies/_redact.py:23`), not restated.
+  - An FK child column (an edge in the relationship graph names it): the output spec of the parent
+    key column, because `_resolve_fk_node` writes the parent's masked values into the child.
+  - Any other strategy: a string input keeps its input spec (the revision 4 rule, V2-LOG); a
+    non-string input leaves the lifecycle unpriced with `NOTE_OUTPUT_WIDTH` naming `table.column`
+    (FM-13). Never a guessed width.
+  - The output keeps the input's null flag (`hash` and `redact` keep nulls).
+- The working spec of a column is whichever of its input and output specs has the larger
+  `raw_data_bytes` per cell.
+- Execute: `estimate_peak_bytes(working_specs, route)` with the TB-4 slopes and intercepts
+  unchanged. On sequential the two-largest-tables basis is taken over the working specs, so the
+  key-map tokens and str cells the route holds are in the basis. The resident-input term and the
+  transform copy keep the input specs (they are the caller's input tables).
+- Write: outputs are priced with their output specs (section 4.2).
+- Ingest keeps the input specs. `peak_bytes` and the route keep the input specs: `peak_bytes` is
+  the router's own model (section 4.5), and the router must not see sampled or output widths
+  (AT-E1-12).
+
+Checked against the calibration (arithmetic from the record's row counts; MiB as the record
+prints them):
+
+| Cell | Rows | Revision 4 predicted | Revision 5 predicted | Measured | Revision 5 ratio |
+|---|---|---|---|---|---|
+| AT-E1-19 | 1M | 285 | 1149 | 625 | 1.84 |
+| AT-E1-19 | 3M | 456 | 3047 | 1435 | 2.12 |
+| AT-E1-23 | 1M | 383 | 1688 | 397 | 4.25 |
+| AT-E1-23 | 3M | 749 | 4663 | 793 | 5.88 |
+
+The revision 4 column reproduces the record's predictions exactly, so the arithmetic matches the
+build. On AT-E1-19 the corrected data term is 4.0 x 245.6 MB = 982 MB a million rows, against the
+372 MB liveness tally and the 425 MB measured slope. Every other cell's basis can only grow (a
+working spec is never smaller than the input spec), so no cell that passed its lower bound can
+fail it; AT-E1-27 masks with `passthrough` only and is unchanged (1.13 and 1.24). AT-E1-19 and
+AT-E1-23 are string-output cells and move to the lower bound only (section 8.3). Why this is the
+right term and not a fit: no constant changes; the slope stays the TB-4 measured value; the only
+change is that the basis prices the cells the route holds after the strategy runs, read from the
+strategy code, which is the condition under which TB-4 measured the slope.
 
 ### 4.3 Generate and mixed jobs (84-E2)
 
@@ -283,7 +389,8 @@ profiled row count is an estimate (CSV), `notes` gains "row counts estimated fro
 
 Every note text the lifecycle adds is a constant in one block in `_lifecycle.py`, with a
 placeholder only for a table or column name or an exception type name. A shape test pins the set
-(AT-E1-21).
+(AT-E1-21). Revision 5 adds one constant, `NOTE_OUTPUT_WIDTH` ("lifecycle not priced: output
+width of column {table} unknown", filled with `table.column`, FM-13).
 
 ### 4.5 Value changes on existing fields (84-E1)
 
@@ -295,6 +402,10 @@ With sampled widths (OQ-5), a mask job with string columns that was unpriceable 
 
 All three are named in section 12 and in the changelog fragment. The merged cell that pinned the
 old answer changes as listed in AT-E1-9.
+
+`peak_bytes` stays the router's TB-4 model on input specs; output specs (section 4.2a) feed only
+the lifecycle phases. A job whose strategies turn numbers into strings therefore has a lifecycle
+execute phase above `peak_bytes`; the docstring and the docs section say which number is which.
 
 ## 5. Failure modes
 
@@ -311,7 +422,9 @@ old answer changes as listed in AT-E1-9.
 | FM-9 | A string column is all null in the sample | Unpriced with a note naming it; never priced as width 0 |
 | FM-10 | Very wide config (thousands of columns) | Sample read is bounded in rows, not columns or bytes; same cost class as the existing profile read |
 | FM-11 | A format added to `FILE_FORMATS` without a lifecycle rule | Guard test fails (AT-E1-20); at run time the lifecycle is unpriced with a note |
-| FM-12 | A builder tunes a constant to make a cell green | Forbidden: no new constant without a measured record; a cell outside its bound stops the slice and goes back to the plan |
+| FM-12 | A builder tunes a constant to make a cell green | Forbidden: no new constant without a measured record; a cell outside its bound stops the slice and goes back to the plan (this happened on 84-E1; revision 5 is the plan answer) |
+| FM-13 | A strategy other than `passthrough`, `hash` or `redact` masks a non-string column, so its output width is unknown | Lifecycle unpriced; `NOTE_OUTPUT_WIDTH` names `table.column`; never priced at the input width. A string column under such a strategy keeps its input width (documented; V2-LOG per-strategy output specs) |
+| FM-14 | The native unified slice keeps string outputs in Arrow, so the run holds less than the pandas form the estimate prices | Over-prediction by design (as FM-6); string-output cells assert the lower bound only; AT-E1-23 records the gap (about 4 to 6 times); V2-LOG native-aware term |
 
 ## 6. Design notes and choke points
 
@@ -331,6 +444,10 @@ old answer changes as listed in AT-E1-9.
   - Widths: `_mask_specs` or the generate adapters.
   - Format names: `FILE_FORMATS` keys.
   - Note texts: one constants block.
+  - Output specs (section 4.2a): one function in `_lifecycle_inputs.py` reads each column's
+    compiled plan seed. The hash width comes from `hashlib.sha256().digest_size`, the redact
+    default from `_DEFAULT_REDACT_WITH`, the `truncate` and `redact_with` values through
+    `provider_config_to_dict`, as the handlers read them. No width is restated as a literal.
 - No private reach across packages: execution code imports generation only through
   `decoy_engine.generation` (catalog class 6). The guard test may read `FILE_FORMATS` from its
   private module; production code keys on the literal format names, and the guard pins them equal.
@@ -365,22 +482,23 @@ devbox. Accuracy cells are `benchmark`-marked and run on a test VM through `~/bi
 |---|---|---|---|
 | AT-E1-1 | Two CSV specs A then B: ingest peak equals `I + arrow(A) + frame(B) + arrow(B)` when B is larger, and `I + frame(A) + arrow(A)` when A is larger | module does not exist | drop the earlier tables' `arrow` from the live sum |
 | AT-E1-2 | Parquet spec: ingest transient is `arrow + largest row group bytes`, not `frame + arrow`; fixed_width transient is `max(records + refs, frame + arrow)` | module does not exist | price Parquet like CSV |
-| AT-E1-3 | Execute input term: full_frame adds 0 (equals `estimate_peak_bytes` exactly); sequential adds `sum - max` of input Arrow; out_of_core adds the sum | module does not exist | add the full sum on sequential |
+| AT-E1-3 | Execute input term: full_frame adds 0 (equals `estimate_peak_bytes` on the working specs exactly); sequential adds `sum - max` of input Arrow; out_of_core adds the sum; with only `passthrough` columns the working specs equal the input specs | module does not exist | add the full sum on sequential |
 | AT-E1-4 | Write: CSV target adds `frame` of the largest output; Parquet target adds 0 | module does not exist | use the smallest output |
 | AT-E1-5 | `lifecycle_peak_bytes == max(phase_bytes)` and `limiting_phase` names it; ties pick the earlier phase | module does not exist | return the last phase on a tie |
 | AT-E1-6 | A CSV mask job over real files: `lifecycle_peak_bytes` set, `phase_bytes` in order ingest, execute, write, note "row counts estimated" present | field does not exist | omit the estimated-rows note |
-| AT-E1-7 | A Parquet source with a `list<int64>` column: lifecycle fields at defaults, note names `t.col`, no raise (the builder first confirms `classify_column` returns `Unpriceable` for it, `_mem_estimate_arrow.py:184`) | field does not exist | price an unpriceable column at 0 |
+| AT-E1-7 | A Parquet source with a dictionary-encoded column: lifecycle fields at defaults, note names `t.col`, no raise (`classify_column` returns `Unpriceable` for it, `_mem_estimate_arrow.py:184`). A `list<int64>` column never reaches pricing: the profiler raises first and `estimate_job` reports route "unknown"; a separate cell asserts that it does not raise (revision 5, accepted builder divergence) | field does not exist | price an unpriceable column at 0 |
 | AT-E1-8 | Sample bounded: a 30,000-row CSV and Parquet source; patched readers record `nrows <= 10_000` and the Parquet batch size; `to_frame` never called | sample read does not exist | read the whole file for the sample |
 | AT-E1-9 | Edit list for merged cells in `tests/unit/execution/test_job_estimate.py`: `test_string_without_sample_is_unpriceable_not_a_raise` (`:55`) becomes "a string mask job is priced from a bounded sample" (priceable True, `peak_bytes` set, `runtime` set); its unpriceable check moves to AT-E1-7. No other merged cell is edited | merged cell asserts the old answer | keep `_mask_specs(mask_tables, {})` |
 | AT-E1-10 | Value-free: a CSV whose cells hold a seeded marker and a source path holding a second marker; a reader patched to raise `ValueError(marker)`; neither marker appears in `repr(est)` or any note; the raise case gives a note with `ValueError` only | sample read does not exist | format `str(exc)` into the note |
 | AT-E1-11 | Never raises: every new-module function patched in turn to raise `RuntimeError`; `estimate_job` returns a `JobEstimate` whose `route`, `priceable`, `peak_bytes` and `runtime` equal the result with the lifecycle code patched out, lifecycle fields at defaults, and a note holding `RuntimeError` only | fields do not exist | let a lifecycle error escape the outer try |
-| AT-E1-12 | No route change: for the merged fixtures, `est.route` equals its value with the lifecycle code patched out | fields do not exist | pass sampled widths into `decide_execution_route` |
-| AT-E1-13 | Sentries pass with no raised cap: fan-out (`execution/` stays at the sentry's 103, `execution/pipeline/` under 25), module size, import layers with no new ignore line, physical-seam permit list naming the new modules | guard | add an ignore line |
+| AT-E1-12 | No route change: for the merged fixtures, `est.route` equals its value with the lifecycle code patched out | fields do not exist | take the route from the lifecycle stage instead of the router (revision 5: the builder's mutation; sampled widths never reach `decide_execution_route` because the route is decided before the sample is read) |
+| AT-E1-13 | Sentries pass with no raised cap: fan-out (`execution/` stays at the sentry's 103, `execution/pipeline/` under 25), module size, import layers with no new ignore line, the physical-seam permit set and the declaration-gate `READERS` holding exactly the rows in section 9 | guard | add an ignore line |
 | AT-E1-14 | All-null sample column: a CSV string column empty in its first 10,000 rows gives lifecycle defaults and a note naming it | sample read does not exist | price the column at width 0 |
 | AT-E1-15 | Column types come from the sample schema: a Parquet `int32` column with nulls is priced at its Arrow width plus validity, not as a pandas float | sample read does not exist | price every non-string column at 8 bytes |
 | AT-E1-16 | Transforms: a mask table with a declared transform adds one `arrow(t)` to execute | module does not exist | drop the transform copy |
 | AT-E1-20 | Format registry: the lifecycle rule table's keys equal `FILE_FORMATS` keys; a descriptor with an unknown format gives lifecycle defaults and a note | rule table does not exist | remove `fixed_width` from the rule table |
-| AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned | notes block does not exist | build a note with an inline f-string |
+| AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned (it includes `NOTE_OUTPUT_WIDTH`) | notes block does not exist | build a note with an inline f-string |
+| AT-E1-29 | Output specs (section 4.2a): an int64 column under `hash` is priced in execute and write as a string of width 64, and of width `truncate` when set; under `redact` as a string of `len(redact_with)` (default from `_DEFAULT_REDACT_WITH`); under `passthrough` with its input spec; an FK child column takes its parent key column's output spec; an int64 column under another strategy (`bucketize`) leaves the lifecycle at defaults with `NOTE_OUTPUT_WIDTH`; on sequential the basis is the two largest tables over working specs; `peak_bytes` and `route` equal their values with output specs off | output specs do not exist | (a) price execute with the input specs; (b) ignore `truncate`; (c) price an unknown-strategy int64 column at its input spec; (d) feed output specs into `peak_bytes` |
 | AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column (the int column already integer-typed) adds exactly `max(coerce_moment, list_moment)` as section 4.2 defines it (not the summed form, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum the two moments instead of taking the larger |
 | AT-E1-28 | Fixed-width integer coercion: a CSV-sourced string column the target layout types `int` adds `coerce(c) = rows * (8 + int_object + 9)` to the coerce moment for the largest such column only, and `lists` prices it as an int object per cell, not as its input string spec; an integer-typed column adds no coerce term; with two int-declared string columns the coerce moment adds `converted` for both (the first column stays resident as `Int64` while the second is coerced); an unreadable layout leaves the write term unpriced with the constant note | module does not exist | (a) drop the `coerce(c)` term; (b) price `int_cols` lists with the input spec; (c) add `coerce` for every int column instead of the largest; (d) drop `converted` |
 | AT-E1-22 | Helper parity: `arrow_column_bytes(t, rows, 0)` equals the base head's `_arrow_column_floor(t, rows)` for a matrix of types (bool, int8 to int64, float32/64, string, large_string, timestamp, date32); `generation_floor_bytes` is unchanged on the merged generation fixtures | helper does not exist | drop the ceil division for bool |
@@ -395,7 +513,13 @@ realized route. It passes `run_pipeline` the same keyword set the CLI passes at
 `decoy/cli/run/_execute.py:354` that changes memory: resource limits (as the CLI's `_resources`
 helper builds them, with defaults) and the native gate result. It does not pass the vault writer,
 quarantine path or report flags (out of scope, section 2), and the record says so. The supervisor
-(`scripts/fk-scale/_supervisor.py:65`) reads `ru_maxrss` from outside.
+(`scripts/fk-scale/_supervisor.py:65`) reads `ru_maxrss` from outside. The fixture files are
+written by a separate process before the measured child starts (accepted builder divergence,
+revision 5), so fixture construction never reaches the measured peak.
+
+Open on the 84-E1 rerun: the calibration record says the worker passes neither the resource
+limits nor the native gate result. The paragraph above requires both. The rerun passes them, or
+the orchestrator records the divergence and its reason before the gate.
 
 Every cell asserts `measured <= predicted`. A cell marked "bounded" in 8.3 also asserts
 `predicted <= 1.5 * measured` when the realized route equals the predicted route and rows are at
@@ -406,11 +530,11 @@ the unit cells above.
 |---|---|---|---|
 | AT-E1-17 | CSV, one table, 6 unique ASCII string columns, `redact` (pandas route) | string, execute | lower |
 | AT-E1-18 | CSV, three tables, FK chain, string keys and attributes, sequential route | string, execute | lower |
-| AT-E1-19 | Parquet, numeric FK, out_of_core route, CSV targets | numeric | bounded |
-| AT-E1-23 | Parquet, one numeric table, full_frame, Parquet target | numeric | bounded |
+| AT-E1-19 | Parquet, numeric FK chain of three tables (P 0.2N, C 0.4N, G 0.4N rows), int64 keys under `hash`, int64 payload under `redact`; the router picks sequential at 1M and 3M (revision 4 assumed out_of_core); CSV targets | string output (numbers turned into strings), execute | lower |
+| AT-E1-23 | Parquet, one table of 6 int64 columns under `redact`, full_frame, Parquet target | string output, execute (native slice at run time, FM-14) | lower |
 | AT-E1-24 | CSV with Latin-1 text (FM-5) | string, execute | lower |
 | AT-E1-25 | CSV, single table, `hash` (native auto-chunk eligible, FM-6) | realized route may differ | lower |
-| AT-E1-27 | Parquet, one table of 4 int and 2 short string columns, full_frame, fixed_width target | numeric-led, write-limited by the model | bounded (bound check only; it does not separate the old and new write formulas, AT-E1-26 does) |
+| AT-E1-27 | Parquet, one table of 4 int and 2 short string columns, all `passthrough`, full_frame, fixed_width target | type-preserving numeric-led; execute-limited as measured | bounded (bound check only; it does not separate the old and new write formulas, AT-E1-26 does) |
 
 ### 8.3 Expected ratios from TB-4 (execute term; predicted over measured)
 
@@ -423,19 +547,30 @@ slope.
 | AT-E1-17, AT-E1-24 | unique_single, full_frame (slope 2.43) | 1M / 2M / 3M | 1.36 / 1.45 / about 1.50 | lower only |
 | AT-E1-18 | pooled_fk, sequential (slope 1.65) | 400k / 800k | 2.00 / 2.17 | lower only |
 | (pooled string on full_frame, for reference) | pooled_fk, full_frame (slope 2.11) | 800k | 1.79 | lower only |
-| AT-E1-19 | numeric_fk, out_of_core (slope 0.95) | 500k / 1M | 1.24 / 1.32 | 1.5 |
-| AT-E1-23 | numeric_single, full_frame (slope 3.45) | 1M / 2M | 1.26 / 1.28 | 1.5 |
+| AT-E1-19 | none: TB-4 has no string-output numeric shape; sequential, working-spec basis (section 4.2a) | 1M / 3M | 1.84 / 2.12 (computed from the calibration record) | lower only |
+| AT-E1-23 | none: string output on the native slice (FM-14); full_frame, working-spec basis | 1M / 3M | 4.25 / 5.88 (computed from the calibration record) | lower only |
 | AT-E1-25 | native route, not in TB-4 | any | unknown | lower only |
-| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term `max(coerce_moment, list_moment)` (section 4.2) | 1M / 3M | execute about 1.26 / 1.28; write is a direct sum with no slope | 1.5 if the model predicts write as the limiting phase (expected: write), else lower only |
+| AT-E1-27 | numeric_single, full_frame, plus the fixed-width write term `max(coerce_moment, list_moment)` (section 4.2) | 1M / 3M | measured 1.13 / 1.24, execute-limited (unchanged by revision 5: `passthrough` only) | 1.5 (type-preserving numeric-led) |
 
 The ingest and write terms are direct sums with no slope, so a cell whose predicted limiting phase
-is ingest or write also takes the 1.5 bound. Under the pinned slopes only AT-E1-27 is expected to
-be write-limited: per int cell the write term holds 8 (input Arrow) + 8 (output Arrow) + 8
-(frame) + 8 plus an int object (lists, the larger of `refs` and `lists`), about 60 bytes with a
-28-byte int, against about 32 for the execute term. The
-cell asserts its bound from the phase the model predicts at run time, and all cells record the
-predicted and measured phase peaks. The resident-input term on out_of_core (AT-E1-19) is a direct
-sum and keeps that cell inside the bound by construction if the Arrow sizes are right.
+is ingest or write also takes the 1.5 bound. The cell asserts its bound from the phase the model
+predicts at run time, and all cells record the predicted and measured phase peaks.
+
+Revision 5 corrections from the 84-E1 calibration record (head `b1213e83a`):
+
+- Revision 4 expected AT-E1-27 to be write-limited. It was not: the execute term prices the two
+  string columns at `4.0 * (57 + width)` a cell, which outweighs the int cells' write cost; the
+  model put execute at 794 and 1983 MiB against write at 596 and 1388. The measured peak (701 and
+  1605) lies between the two, and `ru_maxrss` is one number for the whole process, so the cell
+  cannot show which phase set it; it checks the lifecycle peak only. The fixed-width write formula
+  stays pinned by the unit cells AT-E1-26 and AT-E1-28.
+- AT-E1-19 runs on sequential, not out_of_core, so no accuracy cell checks the out_of_core
+  resident-input term with a matching route (AT-E1-18 realized out_of_core against a predicted
+  sequential, FM-6). AT-E1-3 pins that term's arithmetic.
+- Measured ratios of the string cells before revision 5: AT-E1-17 2.99 / 3.76, AT-E1-24 1.78 /
+  1.95, AT-E1-18 1.50 / 1.97, AT-E1-25 1.09 / 1.26. Revision 5 leaves AT-E1-17 and AT-E1-24 as
+  they are (redact width 8 is not above their input width) and raises AT-E1-18 and AT-E1-25 (hash
+  width 64). The rerun records the new values.
 
 ### 8.4 84-E2 (`tests/unit/execution/pipeline/test_lifecycle_generate.py`, accuracy cells in the same perf file)
 
@@ -453,11 +588,29 @@ sum and keeps that cell inside the bound by construction if the Arrow sizes are 
 
 - One merged test cell changes, listed in AT-E1-9; it follows the new contract and its unpriceable
   check moves to AT-E1-7.
-- `tests/sentry/test_physical_seam_disconnection.py` `permitted_non_physical` gains the two new
-  `execution/pipeline/` modules (E1) and the third (E2), each with a one-line why. This is a
-  per-file permit list that the sentry requires for every changed execution module (vault memory
-  `physical-seam-sentry-allowlist`); the guarded property (no `execution.physical` import) stays
-  checked by the import sweeps. `_job_estimate.py` is already listed.
+- Sentry registrations. Each row below is the registration the sentry is built to receive: the
+  sentry fails on every new site until the site is listed with its reason. Adding a row is not
+  raising a cap; each row names one file or one call site.
+
+| Sentry and list | Row added | Reason recorded beside it |
+|---|---|---|
+| `tests/sentry/test_physical_seam_disconnection.py`, the inline set in `permitted_non_physical` (beside `_job_estimate.py`) | `src/decoy_engine/execution/pipeline/_lifecycle.py` (E1) | lifecycle phase arithmetic for `estimate_job`; imports `_mem_estimate` and `_arrow_types` only, nothing under `execution.physical` |
+| same | `src/decoy_engine/execution/pipeline/_lifecycle_inputs.py` (E1) | bounded sample reads and phase inputs for `estimate_job`; imports profile readers and `_mem_estimate*` only, nothing under `execution.physical` |
+| same | `src/decoy_engine/execution/pipeline/_lifecycle_generate.py` (E2) | generate and mixed lifecycle terms; imports `decoy_engine.generation` and `_lifecycle` only, nothing under `execution.physical` |
+| `tests/sentry/source_config/test_declaration_gate.py`, `READERS` | `("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "resolve_csv_dialect")` | the estimate's bounded sample read; `estimate_job._estimate` runs `prepare_declared_execution_sources` and `profile_source` (the gate) before `_sample_stage` reaches it |
+| same | `("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "read_csv_source")` | same: a sample of at most 10,000 rows, after the gate in `_estimate` |
+| same | `("execution/pipeline/_lifecycle_inputs.py", "_read_parquet", "build_lazy_source")` | same: first batch only, after the gate in `_estimate` |
+| same | `("execution/pipeline/_lifecycle_inputs.py", "_read_fixed_width", "build_profile_source")` | same: `sample_frame(10_000)`, after the gate in `_estimate` |
+
+  The four `READERS` rows are the reader calls in the 84-E1 diff (`git diff origin/main...HEAD` on
+  `feat/f24-84-e1`, `_lifecycle_inputs.py:60-89`); revision 4 missed them. The guarded property of
+  each sentry stays checked: the import sweeps still prove no `execution.physical` import, and the
+  gate walk still sees every reader. A builder who adds another reader call adds its row the same
+  way, or the plan is amended first.
+- `src/decoy_engine/profile/_readers.py` `FooterFacts` gains `max_row_group_bytes: int = 0`, a
+  defaulted field filled by `footer_facts_of` from the footer's row groups (accepted builder
+  divergence, revision 5). `FooterFacts` is not a public or frozen name; existing callers are
+  unchanged.
 - No cap, ceiling, ratchet, fan-out pin, sentry baseline, determinism golden or `_mem_estimate`
   constant is raised or changed. `execution/` stays at 103 direct modules, the sentry's max in
   `tests/sentry/baselines/package-fanout.json` (the CODEMAP row's "104" is the count when the
@@ -475,6 +628,9 @@ sum and keeps that cell inside the bound by construction if the Arrow sizes are 
 | `arrow_column_bytes` | `src/decoy_engine/_arrow_types.py` (existing, 49 lines) | bottom leaf "shared across layers"; imports only pyarrow |
 | Payload-aware generation bytes and export | `src/decoy_engine/generation/_bounds.py`, `src/decoy_engine/generation/__init__.py` | existing generation modules; export follows `resident_floor_shortfall` |
 | Result fields and wiring | `src/decoy_engine/execution/_job_estimate.py` | existing module (214 lines, ends near 300) |
+| Output specs (revision 5) | `src/decoy_engine/execution/pipeline/_lifecycle_inputs.py` (new in E1) | same row; it already reads the config and samples, so the plan-seed read sits beside them |
+| Largest row group bytes | `src/decoy_engine/profile/_readers.py` `FooterFacts` (existing) | the footer facts owner; one defaulted field |
+| Sentry registrations | `tests/sentry/test_physical_seam_disconnection.py`, `tests/sentry/source_config/test_declaration_gate.py` (existing) | the rows in section 9, one per new module or reader site |
 | Unit tests | `tests/unit/execution/pipeline/` (new folder), `tests/unit/test_arrow_types.py` | "Unit tests" row: mirror `src/` |
 | Accuracy worker | `scripts/fk-scale/bench_worker_lifecycle.py` (new) | "Dev tooling" row, topic folder `scripts/fk-scale/` (9 modules), beside `bench_worker_gen.py` |
 | Accuracy cells | `tests/perf/test_f24_lifecycle_accuracy.py` (new) | existing perf suite, `benchmark` marker, beside `test_fr0_bounded_generation_rss.py` |
@@ -527,7 +683,7 @@ All additive.
 | 1 | Value-bearing output | Notes carry names, counts and exception type names only, from one constants block; sample frames dropped after inputs are built | AT-E1-10, AT-E1-21 | format `str(exc)` into a note |
 | 2 | Cleanup missing on an exit path | Sample reads go through the file-access handles' context managers; no temp files are created | AT-E1-8, AT-E1-11 | open a Parquet file without closing it on the error path |
 | 3 | State and concurrency | Pure functions over frozen inputs; no cache or module global | AT-E1-1 to AT-E1-5 run twice in one process with equal results | memoize inputs in a module global |
-| 4 | Route parity and silent fallback | The route comes from the unchanged router call; the lifecycle never feeds routing; native realized routes are asserted lower-bound only, never silently passed | AT-E1-12, AT-E1-25 | pass sampled widths into `decide_execution_route` |
+| 4 | Route parity and silent fallback | The route comes from the unchanged router call; the lifecycle never feeds routing; native realized routes are asserted lower-bound only, never silently passed | AT-E1-12, AT-E1-25, AT-E1-29 | take the route from the lifecycle stage instead of the router |
 | 5 | Referential integrity | N/A: the estimate reads samples and writes nothing; FK shape only selects the route term | N/A, covered by AT-E1-3 for the sequential term | N/A |
 | 6 | Untrusted producer | Source files are user data: bounded sample, typed classifier, unpriced on any unknown type or format, never raises | AT-E1-7, AT-E1-8, AT-E1-11, AT-E1-20 | price an unknown type at 0 |
 | 7 | Check then use on a path (TOCTOU) | The estimate is advisory and reads each file once for its sample; a file that changes before the run only makes the estimate stale, which the docs state | AT-E1-8 | re-open the file after the stat for the sample |
@@ -556,7 +712,8 @@ Recurring-defects catalog classes, as they apply to this plan:
 10. Allowlisted helpers are still checked: the new physical-seam permit entries are still covered
     by the import sweeps (section 9).
 11. No raised caps: nothing in this plan raises a cap, ceiling, pin, baseline or allowlist count;
-    the physical-seam permit entries are per-file rationale lines the sentry requires.
+    the physical-seam permit entries and the declaration-gate `READERS` rows are per-file and
+    per-site rationale lines the two sentries require (section 9).
 
 ## 14. Enumerations
 
@@ -603,7 +760,7 @@ Recurring-defects catalog classes, as they apply to this plan:
 
 | Slice | Repo | Production files | Count | Lines | Depends on | Risk |
 |---|---|---|---|---|---|---|
-| 84-E1 | engine | `execution/pipeline/_lifecycle.py` (new), `execution/pipeline/_lifecycle_inputs.py` (new), `execution/_job_estimate.py`, `_arrow_types.py`, `generation/_bounds.py` (helper call only); plus the worker, unit and perf tests, permit entries, CODEMAP rows, frozen-surface sentence, calibration record, changelog fragment | 5 | about 600 production | #328 (merged) | R2 (reads source values for widths, a value-leak surface; changes values on a public result) |
+| 84-E1 | engine | `execution/pipeline/_lifecycle.py` (new), `execution/pipeline/_lifecycle_inputs.py` (new), `execution/_job_estimate.py`, `_arrow_types.py`, `generation/_bounds.py` (helper call only), `profile/_readers.py` (one defaulted `FooterFacts` field); plus the worker, unit and perf tests, the section 9 sentry rows, CODEMAP rows, frozen-surface sentence, calibration record, changelog fragment | 6 | about 650 production (revision 5 adds the output specs, about 50) | #328 (merged) | R2 (reads source values for widths, a value-leak surface; changes values on a public result) |
 | 84-E2 | engine | `execution/pipeline/_lifecycle_generate.py` (new), `execution/_job_estimate.py`, `execution/pipeline/_lifecycle.py`, `generation/_bounds.py`, `generation/__init__.py`; plus tests, docs section, compatibility entry, changelog fragment | 5 | about 350 production | 84-E1 merged | R1 (no source values; one additive export) |
 
 Gates: R2 is Dennis then Codex on the exact head; R1 is Codex only. Tests: T0 per edit, T1 per
@@ -638,7 +795,10 @@ Conventional Commits subject, no body unless it says why, final line `cam`.
   bound only?** Recommended: yes. Under-prediction is the unsafe direction. The TB-4 records put
   the string execute ratio at 1.36 to 2.17 with the pinned slopes (section 8.3), so a 1.5 cap there
   would fail on the existing model, not on this row's code. Tightening it needs string-shape
-  slopes (V2-LOG).
+  slopes (V2-LOG). Revision 5: a cell whose strategies turn numbers into strings (`hash`,
+  `redact`) is a string-output cell and takes the lower bound only (section 4.2a); the
+  recommendation stands, since the 1.5 cap still applies to every cell whose basis is the one
+  TB-4 measured.
 - **OQ-5. Price string mask columns from the bounded sample in `peak_bytes` too, not only in the
   lifecycle fields?** Recommended: yes. Every CSV job is unpriceable today; one merged cell
   changes (AT-E1-9) and `priceable`, `peak_bytes` and `runtime` change values (section 4.5). The
@@ -652,6 +812,19 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
 - An accuracy cell came in under the measured peak because the execute term for `full_frame`
   misses a copy the CLI makes (declared-type casting of CSV inputs). Guard: the cell fails red;
   the slice stops and the plan is amended with a measured term (FM-12), not a tuned constant.
+- It happened (84-E1, revision 5): AT-E1-19 and AT-E1-23 came in under because their strategies
+  turn int64 columns into strings, and the basis priced the 8-byte inputs. The amendment prices the
+  output cells the route holds (section 4.2a), with no constant changed. Remaining risk: another
+  strategy turns numbers into wide strings. Guard: FM-13 leaves such a column unpriced rather than
+  priced at its input width; AT-E1-29 mutation (c) kills the input-width fallback.
+- The rerun shows a string-output cell under its lower bound even with output specs (an allocator
+  effect larger than the TB-4 slope margin). Guard: the slice stops again (FM-12); the margin
+  today is 1.84 or more on the measured cells.
+- Review rejects the 4 to 6 times over-prediction on AT-E1-23. Guard: FM-14 states it is the
+  native-slice gap, the same by-design direction as FM-6, with a V2-LOG for a native-aware term;
+  the advisory contract is never below, not tight.
+- The rerun fails the declaration-gate sentry on the sample readers. Guard: section 9 lists the
+  four `READERS` rows.
 - The sequential input term double counted or missed a table. Guard: section 4.2 states the rule
   from `_sequential.py:443`; AT-E1-3 pins it; AT-E1-18 is the lower-bound check.
 - The fixed-width write term missed a live copy or summed copies that are never live together.
@@ -669,7 +842,12 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
 
 ## 19. Follow-ups (recorded, not in this row)
 
-- V2-LOG: per-strategy output widths for the write phase.
+- V2-LOG: output specs for strategies other than `passthrough`, `hash` and `redact` (FM-13), each
+  with a measured cell.
+- V2-LOG: a native-aware execute term that prices string outputs as Arrow when the unified slice
+  admits the plan (FM-14).
+- V2-LOG: per-phase peaks in the accuracy worker (reset `VmHWM` between phases through
+  `/proc/self/clear_refs`), so a cell can check each phase and not only the whole process.
 - V2-LOG: string width per CPython encoding kind (FM-5).
 - V2-LOG: a spread sample across the file (FM-8).
 - V2-LOG: string-shape execute slopes so string cells can take an upper bound.
@@ -733,3 +911,28 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
   coercions and `refs` prices them at their original cost. Fixed by the orchestrator: section 4.2
   adds `converted(t)`; AT-E1-28 gains a two-column cell and mutation (d). V2-LOG: the integer
   dtype note now says integer columns are not coerced at all.
+- Orchestrator amendment after 84-E1 build, calibration (revision 5, plan head before it
+  `65f7bff6e`). The build (draft PR #635, `feat/f24-84-e1`, record
+  `docs/records/2026-11-17-f24-lifecycle-calibration.md` at `b1213e83a`) stopped under FM-12 with
+  four cells below the measured peak and no constant tuned. Applied:
+  - Accuracy: section 4.2a. Root cause read from the strategy and sequential code: `hash` and
+    `redact` turn int64 cells into Python str cells (and, on sequential, key-map tokens and Arrow
+    outputs) that a basis priced on the 8-byte inputs does not contain; TB-4 measured its slopes
+    on `passthrough` numerics, where output and input cells cost the same. The execute basis now
+    takes each column's working spec (the larger of input and output spec), with the TB-4 slopes
+    and intercepts unchanged; the write phase prices outputs with output specs. Checked against
+    the record: AT-E1-19 1.84 / 2.12, AT-E1-23 4.25 / 5.88, AT-E1-27 unchanged. AT-E1-19 is
+    re-described on sequential (the router's choice at 1M and 3M); AT-E1-19 and AT-E1-23 move to
+    lower-only as string-output cells; AT-E1-27 stays bounded and is recorded as execute-limited.
+    New FM-13 and FM-14, new note constant, new unit cell AT-E1-29, pre-mortem and follow-ups
+    updated.
+  - Sentries: section 9 is now a table, one row per registration with its reason: the three
+    physical-seam permit rows and the four declaration-gate `READERS` rows for the sample readers
+    in `_lifecycle_inputs.py` (missed in revision 4). No other allowlist, cap, pin or baseline
+    moves.
+  - Accepted builder divergences: AT-E1-7 uses a dictionary column (a `list<int64>` column makes
+    the profiler raise before pricing, route "unknown", covered by its own cell); `FooterFacts`
+    gains a defaulted `max_row_group_bytes`; the accuracy worker builds fixtures in a separate
+    process; the AT-E1-12 mutation is "route taken from lifecycle".
+  - Open for the rerun: the worker must pass the resource limits and the native gate result
+    (section 8.2), which the calibration record says it does not.
