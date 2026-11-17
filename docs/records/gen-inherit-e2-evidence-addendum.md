@@ -187,3 +187,52 @@ fan-out sentry: 5022 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-17, `dda1b61f`), gate and mutations on the exact head
+
+`origin/main` `dda1b61f` (16 commits after `85429533`: #609 to #634) merged into `e9a209d1` as
+`bf392a09`. GEN-REL has not taken this main yet, so the merge goes straight into this slice and
+the PR diff against `feat/gen-rel-e3b` shows main's 16 commits until gen-rel-e3b holds them too.
+Three conflicts, both sides kept:
+
+- `execution/native/_draw_sites_gen.py`: main's #628 keys call sites by `path::function[#n]`.
+  The two `gen.reference` mirrors GEN-REL added (`_cardinality.py:198`,
+  `_self_reference.py:86`) became `generation/relational/_cardinality.py::apply_cardinality_bounds`
+  and `generation/relational/_self_reference.py::self_reference`; both resolve under main's
+  `call_site_problems`.
+- `generation/statistical/__init__.py`: main's `degenerate_finding` beside `fallback_counts`.
+- `tests/native/test_draw_sites_catalogue_pinned.py`: main's per-id layout; the `gen.reference`
+  entry digest and the whole-catalogue digest re-pinned by the file's procedure. No other entry
+  or map digest moved.
+
+Main's changes to this slice's anchor files are outside the mutated code: `statistical/_sample.py`
+gains `check_degenerate` in `sample_column` (not `select_table` or `fallback_counts`), and
+`pool/_events.py` a docstring line.
+
+Gate on `bf392a09`: `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline` (the
+selection against `origin/main`, 1319 paths), Python 3.10.20. ruff, format and mypy pass; sentry
+6082 passed, 0 failed, 2 skipped; layers 15 passed; licenses 63 passed; tests 43342 passed, 26
+failed, 112 errors, 5384 skipped. Baseline `origin/main` `dda1b61f` on the same path list: the
+same 138 ids fail. Branch-only failures: 0. The 138 are main's red `reason_release_pin` (8
+`connector.*` rules from #624 differ from the release pin; `test_reason_release_pin.py`,
+`test_stamp_release_compile.py`) and the scratch-permission tests (`tests/fileaccess/scratch`,
+`tests/unit/execution/scratch`, `test_scratch_root_umask.py`), which error in this container on
+main too.
+
+Script checks against `origin/main` `dda1b61f`: `registry_renumber.py --check` 0;
+`ratchet_check.py` 0; `check_fragment.py` 0; `reason_release_pin.py --check` 1 with the same 8
+`connector.*` lines as `origin/main`, none from this chain.
+
+Mutations: 29 of 29 red on `bf392a09` (M1 to M22, B1 to B4, F1 to F3), detached worktree
+importing its own `src`, Python 3.10.20, every anchor matched once, the tree clean after each.
+Each mutant ran the eight slice files (`test_conditional_categorical.py`,
+`test_generate_options.py`, `test_generate_columns.py`, `test_generate_columns_late_formula.py`,
+`test_mem_estimate.py`, `test_condition_fallback.py`, `test_aggregate_input.py`,
+`test_reason_minor_fixtures.py`); unmutated 540 passed. Red counts: M1 3, M2 8, M3 10, M4 5,
+M5 16, M6 1, M7 19, M8 2, M9 11, M10 3, M11 2, M12 2, M13 2, M14 1, M15 6, M16 1, M17 2, M18 1,
+M19 1, M20 6, M21 2, M22 1, B1 1, B2 1, B3 4, B4 1, F1 4, F2 1, F3 3. Counts are over the eight
+files, so several exceed the per-witness counts recorded earlier; every earlier witness is in its
+mutant's red set. The harness was rebuilt from the mutation tables above (the earlier harness was
+not kept).
+
+`generation/synthesize.py` 596 lines. Not run: the full suite, Python 3.11.
