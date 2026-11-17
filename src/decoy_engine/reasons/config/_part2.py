@@ -9,6 +9,7 @@ __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
     "CONFIG_VALUE_NOT_JSON",
     "DECLARED_TABLE_DROPPED",
+    "ENTRY_INVALID",
     "ENV_FLAG_INVALID",
     "GENERATE_COLUMN_DUPLICATE",
     "GENERATE_FORMULA_INVALID",
@@ -21,6 +22,7 @@ __all__ = [
     "GENERATE_UNIQUE_DOMAIN_TOO_SMALL",
     "GENERATE_UNIQUE_UNSUPPORTED",
     "GENERATE_WEIGHTS_INVALID",
+    "KEY_COLUMN_NOT_JOIN_SAFE",
     "LOADER_TABLE_UNDECLARED",
     "NAMESPACE_PLACEHOLDER_UNSET",
     "PIPELINE_NAME_INVALID",
@@ -207,5 +209,22 @@ POLICY_BLOCK_INVALID = _d(
 POLICY_PROHIBITED = _d(
     "policy_prohibited",
     "A mask column's decided strategy breaks a policy prohibition.",
+    since=UNRELEASED,
+)
+
+# INIT-WIZARD E1: the review's entry writer and its key-column rule. Both are repaired by the
+# caller's input and name a column or an option key, never a value.
+_d = _catalog.config("ReviewInputError")
+
+ENTRY_INVALID = _d(
+    "entry_invalid",
+    "A column entry names an unknown strategy or option, or gives an option the wrong type or "
+    "a value outside its choices, or leaves a required setting out.",
+    since=UNRELEASED,
+)
+KEY_COLUMN_NOT_JOIN_SAFE = _d(
+    "key_column_not_join_safe",
+    "A column of a declared relationship cannot take a strategy that is not join-safe, or be "
+    "dropped.",
     since=UNRELEASED,
 )

@@ -38,6 +38,9 @@ from decoy_engine.profiling._snapshot_values import (
 from decoy_engine.profiling._starter_config import (
     ColumnSuggestion,
     StarterConfig,
+    build_entry,
+    check_starter_config,
+    declared_key_namespaces,
     starter_config,
 )
 from decoy_engine.profiling._value_redaction import (
@@ -133,7 +136,10 @@ __all__ = [
     "TableDiff",
     "TableScan",
     "TopValue",
+    "build_entry",
+    "check_starter_config",
     "column_distinct",
+    "declared_key_namespaces",
     "diff_scan_documents",
     "diff_scan_tables",
     "distribution_snapshot_document",

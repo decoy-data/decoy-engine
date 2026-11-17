@@ -34,7 +34,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `quarantine.py` | Quarantine-row routing (`quarantine:` block) |
 | `contracts/` | Versioned engine-owned contracts consumed by CLI/platform: `declared_casting.py` (F06 per-column parse/sentinel/policy/output contract), `_declared_base.py`, `_declared_formats.py` (the closed format shapes) |
 | `declared_casting/` | F06 casting boundary: `_catalog.py` (the only format registry + capability manifest), `_numeric.py`/`_date.py`/`_cobol.py` kernels, `_boundary.py` (`DeclaredCastRun`: pre-mask cast, post-mask format), `_counts.py`, `_eligibility.py` (`evaluate_declared_casting`, `declared_route_guard`), `_quarantine_protocol.py`, `_quarantine_local.py` (Fernet reference sink) |
-| `validation/`, `validation_result.py` | `validate_config` and the validation wire shape |
+| `validation/`, `validation_result.py` | `validate_config`, the validation wire shape, and the starter-config review (`validation/starter_review.py`) |
 | `relationships/` | Relationship graph, namespace registry, orphan policy |
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
 | `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
