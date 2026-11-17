@@ -22,7 +22,6 @@ from decoy_engine.connectors._postgres_session import (
     PostgresSnapshotError,
     SessionSettings,
     raise_for_interrupt,
-    read_session,
     sql_literal,
     validate_identifier,
 )
@@ -107,6 +106,9 @@ def relation_columns(
     keys = [f"{s}.{t}" for s, t in relations]
     if len(set(keys)) != len(keys):
         raise PostgresSnapshotError(reasons.connector.DUPLICATE_RELATION)
+    # Imported here: postgres_snapshot imports this module, and it owns the ambient session.
+    from decoy_engine.connectors.postgres_snapshot import read_session
+
     out: dict[str, list[str]] = {}
     failure: PostgresSnapshotError | None = None
     cause_type = ""

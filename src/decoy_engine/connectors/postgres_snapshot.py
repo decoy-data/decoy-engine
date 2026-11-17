@@ -49,6 +49,8 @@ import os
 import re
 import shutil
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +68,11 @@ from decoy_engine.connectors._postgres_session import (
     ATTACH_ALIAS,
     Deadline,
     PostgresSnapshotError,
+    SessionSettings,
+    close_connection,
+    open_read_session,
     quote_ident,
     raise_for_interrupt,
-    read_session,
     sql_literal,
     validate_identifier,
 )
@@ -412,3 +416,19 @@ def snapshot_tables_to_parquet(
         shutil.rmtree(stage_dir, ignore_errors=True)
         if not published:
             shutil.rmtree(final_dir, ignore_errors=True)
+
+
+@contextmanager
+def read_session(config: SessionSettings, deadline: Deadline) -> Iterator[Any]:
+    """A read-only session with its spill directory, closed and removed on every exit."""
+    fileaccess.require_ambient("the Postgres read session")
+    spill_dir = config.temp_directory / f"spill-{uuid.uuid4().hex}"
+    conn: Any = None
+    try:
+        conn = open_read_session(config, spill_dir, on_connect=deadline.arm, deadline=deadline)
+        yield conn
+    finally:
+        deadline.cancel()
+        if conn is not None:
+            close_connection(conn)
+        shutil.rmtree(spill_dir, ignore_errors=True)

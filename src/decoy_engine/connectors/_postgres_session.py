@@ -13,17 +13,14 @@ so ``__cause__`` and ``__context__`` are both ``None``.
 from __future__ import annotations
 
 import re
-import shutil
 import threading
-import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import SecretStr
 
-from decoy_engine import fileaccess, reasons
+from decoy_engine import reasons
 from decoy_engine.fileaccess import open_protected_dir
 from decoy_engine.sdk import PermanentError
 
@@ -34,13 +31,13 @@ __all__ = [
     "PostgresSnapshotError",
     "SessionSettings",
     "attach_read_only",
+    "close_connection",
     "load_postgres_extension",
     "open_connection",
     "open_read_session",
     "quote_ident",
     "raise_for_interrupt",
     "raise_for_setup_interrupt",
-    "read_session",
     "sql_literal",
     "validate_identifier",
 ]
@@ -260,7 +257,8 @@ def open_read_session(
     """Open a connection with the extension loaded and the database attached read-only.
 
     ``on_connect`` runs once the extension is loaded and before the attach, so a deadline timer
-    also covers a connect that hangs. A failure closes the connection before it propagates.
+    armed there covers the attach and every later step. It does not cover the connect or the
+    extension load. A failure closes the connection before it propagates.
     """
     conn = open_connection(config, spill_dir, deadline)
     try:
@@ -269,29 +267,13 @@ def open_read_session(
             on_connect(conn)
         attach_read_only(conn, config.dsn, config.statement_timeout_s, deadline)
     except BaseException:
-        _close(conn)
+        close_connection(conn)
         raise
     return conn
 
 
-def _close(conn: Any) -> None:
+def close_connection(conn: Any) -> None:
     try:
         conn.close()
     except Exception:
         pass
-
-
-@contextmanager
-def read_session(config: SessionSettings, deadline: Deadline) -> Iterator[Any]:
-    """A read-only session with its spill directory, closed and removed on every exit."""
-    fileaccess.require_ambient("the Postgres read session")
-    spill_dir = config.temp_directory / f"spill-{uuid.uuid4().hex}"
-    conn: Any = None
-    try:
-        conn = open_read_session(config, spill_dir, on_connect=deadline.arm, deadline=deadline)
-        yield conn
-    finally:
-        deadline.cancel()
-        if conn is not None:
-            _close(conn)
-        shutil.rmtree(spill_dir, ignore_errors=True)
