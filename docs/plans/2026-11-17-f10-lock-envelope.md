@@ -2,8 +2,10 @@ Status: plan
 
 # F10: lock envelope remainder, synthetic probe, CLI environment report and fleet comparison (roadmap row 78)
 
-Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 1. Scope: engine slice 78-E2, the
-engine release and CLI repin that carry it (a row 76 RD-n stop), then CLI slice 78-C1.
+Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 2 (Dennis r1 GO-WITH-FIXES, H1 to
+L12 applied in place; record in section 20; owner answers OQ-1 to OQ-4 taken as recommended).
+Scope: engine slice 78-E2, the engine release and CLI repin that carry it (a row 76 RD-n stop),
+then CLI slice 78-C1.
 
 Rules consulted: `dev-rules/README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1
 and R2 tiers), `development-loop.md` (PLAN: guarantee, size, design notes, choke point, Placement,
@@ -65,7 +67,7 @@ The real remainder, which this plan covers:
   comparison, in file form).
 
 This plan supersedes release-chain section 7 for 78-E2 and 78-C1 only. Deltas from it: the `probe`
-field is optional on read (OQ-1); the engine exports `check_probe()` so the CLI holds no golden;
+field is optional on read (OQ-1); the engine exports `probe_status()` so the CLI holds no golden;
 the report nests the engine lock whole (OQ-2); `env compare` refuses duplicate labels.
 
 Roadmap note: row 78 still says NOT STARTED although E1 merged. The roadmap update that records E1
@@ -77,9 +79,11 @@ and points at this plan is a docs-only CLI change after this plan is gated.
 
 For one installed engine, `build_runtime_lock()` returns the same canonical bytes in every process
 on hosts with the same installed versions and shipped data, and its `probe` field is a SHA-256 over
-fixed public inputs run through the engine's own keyed-hash, FF1 and seeded Faker pool code. A host
-whose probe digest differs from the engine's golden for the current seed protocol is reported as
-`mismatch`, never as `ok`. No lock, report, comparison line or error carries a key, a key check
+fixed public inputs run through the engine's Python reference code for the keyed hash, FF1 and the
+seeded Faker pool. A host whose probe digest differs from the engine's golden for the current seed
+protocol is reported as `mismatch`, never as `ok`. The probe does not cover the native companion
+route; that route is covered by the companion's own known-answer vectors (`HASH_KAT`, `FPE_KAT`),
+whose result the report carries as `native_selfcheck`, and `env compare` shows both. No lock, report, comparison line or error carries a key, a key check
 value, a cell value, a host name or an absolute path. `decoy env compare` names every field that
 differs between two or more reports and exits non-zero when any does.
 
@@ -124,46 +128,55 @@ report model. Each is small and specific to Decoy.
 `src/decoy_engine/support/_probe.py`:
 
 - `run_probe() -> str`: 64 lowercase hex characters. It runs three fixed parts and returns
-  `sha256(canonical_json_bytes({"hash": [...], "fpe": [...], "pool": [...]}))`.
+  `sha256(canonical_json_bytes({"hash": [...], "fpe": [...], "pool": [...]}))`. Its engine imports
+  are lazy, inside the function, so importing `decoy_engine.support` stays cheap.
   1. Keyed hash: for each of 8 fixed ASCII inputs, `derive(PROBE_KEY, "probe/hash",
      canonicalize_derive_source(value)).hex()` (`determinism/_derive.py:260`,
      `kernel/__init__.py:8`), the same core the `hash` strategy uses.
-  2. FF1: for each of 4 fixed digit strings, `fpe_encrypt_value(value, derive(PROBE_KEY,
-     "probe/fpe", FF1_KEY_LABEL), "0123456789", build_ff1_tweak(FF1_TWEAK_SCOPE_COLUMN,
-     "probe.fpe"))` (`transforms/fpe.py:152`, `:155`, `:468`).
-  3. Seeded Faker pool: `PoolBuilder(providers_v2.get_default_registry()).build("first_name",
-     size=16, job_seed=PROBE_JOB_SEED, locale="en_US")` (`generation/pool/_builder.py:163`), then
-     the pool values in order.
+  2. FF1: for each of 4 fixed digit strings of 6 to 10 digits (FF1 needs at least 6 numerals at
+     radix 10), `fpe_encrypt_value(value, derive(PROBE_KEY, "probe/fpe", FF1_KEY_LABEL),
+     "0123456789", build_ff1_tweak(FF1_TWEAK_SCOPE_COLUMN, "probe.fpe"))`
+     (`transforms/fpe.py:152`, `:155`, `:468`).
+  3. Seeded Faker pool: `PoolBuilder(providers_v2.get_default_registry()).build("person_first_name", size=16,
+     job_seed=PROBE_JOB_SEED, locale="en_US")` (`generation/pool/_builder.py:163`), then the pool
+     values in order. The pool build seeds Faker with `seed_instance`
+     (`providers_v2/_faker_adapter.py:214`); `person_first_name` maps to Faker's `first_name`
+     (`providers_v2/_faker_adapter.py:50`).
+- Custom providers: `_V2_CUSTOM_PROVIDERS` is process-global (`providers_v2/_faker_adapter.py:84`).
+  A probe run in a process where a custom provider overrides `person_first_name` would digest the
+  custom function, not the shipped one. `run_probe` refuses that case with `ProbeError` before any
+  draw (the registry offers no default-only view today, so refusal is the smaller change).
 - `PROBE_KEY` is `sha256(b"decoy-probe/v1")`, a public constant. `PROBE_JOB_SEED` is its first 8
   bytes. The probe never reads a key provider, an environment variable or a file.
-- Module contract: no NumPy or pandas distribution draw, no file, socket or subprocess. The builder
-  confirms at build time that the `first_name` pool build seeds Faker with `seed_instance` and
-  draws no NumPy distribution (`providers_v2/_faker_adapter.py:214`). If it does draw one, the pool
-  part uses `internal.faker_setup.make_faker("en_US")` with `seed_instance` and 16 calls to
-  `first_name()` instead, and the slice records the change.
+- Module contract: no NumPy or pandas distribution draw, no file, socket or subprocess.
 - `PROBE_GOLDEN: Mapping[int, str]` maps `SEED_PROTOCOL_VERSION` to the expected digest. Today one
   row, for protocol 7. The golden changes only in a PR that bumps the seed protocol or repins
-  Faker, and that PR's changelog fragment names the change (OQ-4).
-- `check_probe() -> ProbeResult`: a frozen dataclass of `digest: str` and `status: Literal["ok",
-  "mismatch"]`. `mismatch` when the protocol has no golden row or the digest differs. Any
-  exception inside the probe becomes `ProbeError` with the new reason `runtime/probe_failed`
-  (since=UNRELEASED) and fixed text, raised outside the handler so `__cause__` and `__context__`
-  are None.
+  Faker, and that PR's changelog fragment names the change (OQ-4). It complements, and does not
+  replace, the Faker determinism digests in `scripts/faker-determinism/golden_digests.json`: those
+  pin many providers in a script check, the probe pins one small answer every host can compute.
+- `run_probe` raises `ProbeError` itself on any failure inside a part: new reason
+  `runtime/probe_failed` (since=UNRELEASED), fixed text, raised outside the handler so `__cause__`
+  and `__context__` are None.
+- `probe_status(digest: str | None) -> Literal["ok", "mismatch"]`: a pure function of the digest.
+  `mismatch` when the digest is `None`, the protocol has no golden row, or the digest differs. The
+  probe runs once per report: the CLI calls `build_runtime_lock()` (which runs the probe) and
+  derives `probe_status` from `lock.probe`.
 
 ### 4.2 The `probe` field in `lock/v1` (78-E2)
 
 - `RuntimeLock` gains `probe: str | None = None`, spec `NullableSpec(_DIGEST)`, placed last in
   `_FIELDS` (`_runtime_lock.py:127`). `build_runtime_lock()` always sets it from `run_probe()`.
-- Read rule (OQ-1): a lock that has no `probe` key reads as `probe=None`. This keeps a lock written
-  by an engine that carries E1 but not E2 readable, whatever the release order. Every other field
-  stays required. The read change sits in `from_dict` (`_runtime_lock.py:202`): fill `probe` with
-  `None` when absent, before `ObjectSpec.load`.
+- Read and write are symmetric (OQ-1). Read: a lock with no `probe` key reads as `probe=None`
+  (`from_dict`, `_runtime_lock.py:202`, fills it before `ObjectSpec.load`). Write: `to_dict` omits
+  `probe` when it is `None`. So a lock written by an engine with E1 but not E2 reads, and rewrites
+  to the same bytes, whatever the release order. A `probe` key whose value is JSON `null` is
+  refused, so there is one spelling of "no probe". Every other field stays required.
 - `compare_runtime_locks` names `probe` like any other field; `None` against a digest is a
   difference.
-- The existing corpus sample `lock-v1.json` is not edited. A second hand-written sample,
-  `lock-v1-probe.json`, carries a `probe` digest.
-- Contract 3.1 and the frozen-surface row for `lock/v1` gain one sentence each: `probe` is optional
-  on read and always written.
+- The existing corpus sample `lock-v1.json` is not edited and still rewrites byte-identically. A
+  second hand-written sample, `lock-v1-probe.json`, carries a `probe` digest.
+- Contract 3.1 and the frozen-surface row for `lock/v1` change one sentence each: the reader
+  "refuses a missing field, except `probe`, which is optional and omitted when absent".
 
 ### 4.3 CLI environment report (78-C1)
 
@@ -172,7 +185,8 @@ report model. Each is small and specific to Decoy.
 - Builds `decoy-env-report/v1`: `{"schema": "decoy-env-report/v1", "label", "cli_version",
   "target", "native_selfcheck": {"present", "ok", "reason"}, "probe_status", "lock": <lock/v1
   object>}`. The engine lock is nested whole (OQ-2), so the CLI holds no second field list.
-- `lock` comes from `build_runtime_lock(key_version=...)`; `probe_status` from `check_probe()`.
+- `lock` comes from `build_runtime_lock(key_version=...)`; `probe_status` is
+  `probe_status(lock.probe)`, so the probe runs once.
   `cli_version` from the installed `decoy-cli` metadata; `target` from
   `decoy.distribution.targets.detect_target()` (null when unknown); `native_selfcheck` from the
   existing safe reader `_companion_report()` (`src/decoy/cli/info.py:72`), keeping only `present`,
@@ -186,7 +200,9 @@ report model. Each is small and specific to Decoy.
 - Exit 0 when `probe_status` is `ok`. A mismatch prints `probe: MISMATCH` in human mode, writes the
   complete report in either mode, and exits 3 (`EXIT_RUNTIME`, `src/decoy/cli/exit_codes.py:66`;
   OQ-3). A `ProbeError` prints `probe: failed (runtime/probe_failed)`, writes no report and exits
-  3.
+  3. `ProbeError` and an `OSError` from the `--out` write go through the one exception-to-exit map,
+  `exit_code_for` (`src/decoy/cli/exit_codes.py:163`), which returns 3 for both; the env package
+  holds no exit map of its own.
 
 ### 4.4 Fleet comparison (78-C1)
 
@@ -194,10 +210,15 @@ report model. Each is small and specific to Decoy.
 
 - Reads 2 to 64 report files. Each is read once into memory with a 64 KiB cap, parsed by the strict
   `decoy-env-report/v1` reader, and its `lock` member by the engine's `RuntimeLock.from_dict`.
-  Duplicate labels exit 1, so each line names one host.
+  Duplicate labels exit 1, so each line names one host. The parse boundary catches `ValueError`
+  (the engine's `runtime_lock_refused:<check>` and the CLI reader's refusals) and `MaskSecretError`
+  (a bad `key_version` inside a report) and exits `EXIT_USAGE` with fixed text naming the file's
+  position, never its content.
 - Prints one line per differing field: `<field>: <label>=<value>, <label>=<value>, ...`. Lock fields
   come from `compare_runtime_locks` and keep their engine names (`faker`, `probe`, `data_digest`);
-  the CLI fields compared are `cli_version`, `target`, `native_selfcheck` and `probe_status`.
+  the CLI fields compared are `cli_version`, `target`, `native_selfcheck` and `probe_status`. So a
+  host whose Python path matches but whose native companion fails its KATs shows up as a
+  `native_selfcheck` difference.
   `label` is never compared.
 - `--json` prints `{"reports": <n>, "differences": [{"field", "values": {<label>: <value>}}]}`.
 - Exit 0 when all match, 4 (`EXIT_FINDINGS`, `exit_codes.py:74`) when any field differs, 1 when a
@@ -211,7 +232,9 @@ report model. Each is small and specific to Decoy.
 | FM-2 | Probe reads the user's key | probe wired to a key provider | public `PROBE_KEY` constant; no provider import | AT-E2-5 |
 | FM-3 | Probe passes on a host whose Faker draws changed | pool part dropped or not seeded | golden covers the pool part | AT-E2-3 |
 | FM-4 | Probe slow or does I/O | file read, network, large pool | 16-value pool, I/O guard test | AT-E2-6 |
-| FM-5 | A lock written before E2 cannot be read after E2 | `probe` made required | absent reads as `None` | AT-E2-7 |
+| FM-5 | A lock written before E2 cannot be read, or rewrites differently, after E2 | `probe` made required, or `None` written as `null` | absent reads as `None`, `None` omitted on write | AT-E2-7, AT-E2-10 |
+| FM-13 | Probe digests a user's custom provider | process-global `_V2_CUSTOM_PROVIDERS` overrides `person_first_name` | refuse with `ProbeError` | AT-E2-13 |
+| FM-14 | Probe says `ok` while the native route is broken | probe covers the Python reference path only | report carries `native_selfcheck` (companion KATs); compare shows both | AT-C1-5, AT-C1-2 |
 | FM-6 | Probe exception text reaches the user | raw `str(exc)` | `ProbeError` with fixed text, no context | AT-E2-8, AT-C1-6 |
 | FM-7 | Protocol bump with no golden row reports `ok` | default to ok | missing row is `mismatch` | AT-E2-4 |
 | FM-8 | Report carries a path or host name | companion `cause` or `detail`, host name as default label | three companion fields only; default label `host` | AT-C1-4, AT-C1-5 |
@@ -225,7 +248,8 @@ report model. Each is small and specific to Decoy.
 - New structure: one engine module in an existing package, one CLI command sub-package. Principles:
   one place per fact. Versions come from `runtime_identity()`, digests go through `_canonical`, the
   label rule is `keyprovider.is_key_version_label`, the lock field list is
-  `_runtime_lock._FIELDS`, the probe answer is `PROBE_GOLDEN`. The CLI reads all of them through
+  `_runtime_lock._FIELDS`, the probe answer is `PROBE_GOLDEN`, the ok-or-mismatch rule is
+  `probe_status`. The CLI reads all of them through
   `decoy_engine.support` and `decoy_engine.keyprovider` and copies none.
 - Choke point: the lock field list. The CLI compares lock fields only through
   `compare_runtime_locks`; AT-C1-2 turns red when a CLI-held list misses `probe`.
@@ -239,7 +263,12 @@ report model. Each is small and specific to Decoy.
   `decoy_engine.generation.pool.PoolBuilder` and `decoy_engine.providers_v2`.
 - The support no-network sentry (`tests/sentry/test_support_no_network.py`) already covers the new
   module.
-- CLI: new sub-package `src/decoy/cli/env/` (the flat `src/decoy/cli/` is frozen at 30 modules).
+- Platform coverage: the cross-Python probe check runs on Linux CI (`ci.yml` `import-smoke`,
+  3.11.9 and 3.12.7, `.github/workflows/ci.yml:64`); macOS is covered by the two-host QA run
+  (AT-C1-11); Windows is not checked by this row. Windows is in V1, so the Windows chain (rows 6
+  and 89) adds the same step to its Windows CI job; recorded in section 19.
+- CLI: new sub-package `src/decoy/cli/env/` (the flat `src/decoy/cli/` is pinned at 29 direct
+  modules by `tests/sentry/layout/test_package_fanout.py`).
   Registered in `src/decoy/__main__.py` beside `doctor` (`__main__.py:288`), panel "Start".
 - Size: engine 4 production files, about 320 lines, 4 public names; CLI 5 production files, about
   520 lines, 2 commands.
@@ -262,18 +291,19 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 
 | Id | Test | Fails before | Named mutation |
 |---|---|---|---|
-| AT-E2-1 | `run_probe()` returns 64 lowercase hex and equals `PROBE_GOLDEN[SEED_PROTOCOL_VERSION]`; `check_probe().status == "ok"` | module does not exist | return a constant digest |
+| AT-E2-1 | `run_probe()` returns 64 lowercase hex and equals `PROBE_GOLDEN[SEED_PROTOCOL_VERSION]`; `probe_status(run_probe()) == "ok"`; `probe_status(None) == "mismatch"` | module does not exist | return a constant digest |
 | AT-E2-2 | `run_probe()` in two subprocesses with different `PYTHONHASHSEED` returns equal digests | module does not exist | build the digest from a `set` of outputs |
 | AT-E2-3 | Changing one byte of the hash namespace, of the FF1 tweak identity, or of the pool `job_seed` each changes the digest (three cells) | module does not exist | drop the pool part from the digest input |
 | AT-E2-4 | Patched `SEED_PROTOCOL_VERSION` with no golden row gives `status == "mismatch"`; a patched golden gives `mismatch` | module does not exist | treat a missing row as `ok` |
 | AT-E2-5 | With a seeded mask secret in the environment and a configured key provider, `run_probe()` is unchanged and no key-provider function is called (spy) | module does not exist | derive `PROBE_KEY` from the resolved mask key |
-| AT-E2-6 | `run_probe()` opens no file and no socket (patched `open` and `socket.socket` raise) and a warm call finishes under 2 seconds on the VM | module does not exist | read a codesets parquet inside the probe |
-| AT-E2-7 | `build_runtime_lock().probe == run_probe()`; the existing `lock-v1.json` sample (no `probe`) reads with `probe is None`; the new `lock-v1-probe.json` reads and rewrites byte-identically; `compare_runtime_locks` names `probe` when one side is `None` | `probe` field does not exist | make `probe` required on read |
-| AT-E2-8 | A probe part patched to raise `ValueError("/home/x/secret")` gives `ProbeError` with code `runtime/probe_failed`, fixed message, `__cause__` and `__context__` None, and the marker absent from `str(err)` | `ProbeError` does not exist | `raise ProbeError(...) from exc` |
+| AT-E2-6 | `run_probe()` opens no file and no socket (patched `open` and `socket.socket` raise) | module does not exist | read a codesets parquet inside the probe |
+| AT-E2-7 | `build_runtime_lock().probe == run_probe()`; the existing `lock-v1.json` sample (no `probe`) reads with `probe is None` and rewrites byte-identically; the new `lock-v1-probe.json` reads and rewrites byte-identically; a lock with `"probe": null` is refused; `compare_runtime_locks` names `probe` when one side is `None` | `probe` field does not exist | write `None` as `"probe": null` |
+| AT-E2-8 | A probe part patched to raise `ValueError("/home/x/secret")` makes `run_probe()` raise `ProbeError` with code `runtime/probe_failed`, fixed message, `__cause__` and `__context__` None, and the marker absent from `str(err)` | `ProbeError` does not exist | `raise ProbeError(...) from exc` |
 | AT-E2-9 | `probe` refuses `True`, an integer, 63 hex, uppercase hex and `"<64 hex>\n"` on write and on read | `probe` field does not exist | use `$` instead of `fullmatch` |
-| AT-E2-10 | Every existing `test_runtime_lock.py` cell passes unedited, including `test_each_source_changes_exactly_its_named_field` | guard, green before | edit an E1 cell to pass |
-| AT-E2-11 | `.github/workflows/dps-dependency-matrix.yml` `fingerprint-matrix` runs `pytest tests/unit/support/test_probe.py -k golden` in every Python cell (a sentry reads the workflow YAML) | step does not exist | remove the step |
+| AT-E2-10 | Edit list for the merged E1 cells in `tests/unit/support/test_runtime_lock.py`, each red before E2 lands its half and green after: `:71` (`test_lock_has_exactly_the_declared_fields_and_round_trips`) gains `probe` in the expected key set; `:398` (`test_an_added_field_under_lock_v1_is_ignored`) uses another added-field name (`added_later_2`) in place of `probe`; `:406` (`test_the_hand_written_corpus_sample_reads_and_rewrites`) stays unedited and must still pass (the symmetric write rule); a new cell pins that a `probe` key is read, not ignored. No other E1 cell is edited, including `test_each_source_changes_exactly_its_named_field` | E1 cells fail once `probe` is written; the new cell fails before | treat `probe` as an ignored added field |
+| AT-E2-11 | `.github/workflows/ci.yml` job `import-smoke` (3.11.9 and 3.12.7) runs one step after the import, `python -c` that asserts `probe_status(run_probe()) == "ok"`; a sentry reads `ci.yml` and finds the step in that job | step does not exist | remove the step |
 | AT-E2-12 | Import-layer sentry passes with no new ignore line; `runtime/probe_failed` is in the reason catalog with since=UNRELEASED | guard and catalog | add an ignore line |
+| AT-E2-13 | With a custom provider registered for `person_first_name` in `_V2_CUSTOM_PROVIDERS` (fixture removes it after), `run_probe()` raises `ProbeError` before any draw; the custom function is never called (spy) | module does not exist | skip the custom-provider check |
 
 ### 78-C1, CLI (`tests/unit/cli/env/`, `tests/e2e/env/test_env_commands.py`)
 
@@ -286,19 +316,21 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | AT-C1-5 | A patched `native_companion_status()` carries a seeded path marker in `cause` and `abi_actual`: the report shows `ok: false` and a reason code, and the marker is absent from every output | command does not exist | copy `abi_actual` into the report |
 | AT-C1-6 | Probe golden patched wrong: human mode prints `probe: MISMATCH`, `--json` prints the complete report with `probe_status: "mismatch"`, both exit 3; probe patched to raise: exit 3, fixed line, no report written | command does not exist | exit 0 on mismatch |
 | AT-C1-7 | `--label` values `"a\n"`, `""`, 33 characters, `"a b"` and `--key-version` values `"v1\n"`, `""`, 65 characters, `"a/b"` exit 1 without echoing the value | command does not exist | `re.match` instead of `fullmatch` |
-| AT-C1-8 | Strict `decoy-env-report/v1` reader matrix on write and read: `cli_version`, `target`, `label`, `probe_status` refuse wrong types; `native_selfcheck.present` and `.ok` refuse `0`, `1`, `"true"`, `null` and a list; `probe_status` refuses every token but `ok` and `mismatch`; an unknown top-level key and a wrong `schema` tag are refused | command does not exist | accept `1` as `True` in `native_selfcheck.ok` |
-| AT-C1-9 | `--out FILE` writes through `write_atomic`; an existing file is replaced whole; a write failure exits 3 and leaves no partial file | command does not exist | write with `open(..., "w")` |
+| AT-C1-8 | Strict `decoy-env-report/v1` reader matrix on write and read: `cli_version`, `target`, `label`, `probe_status` refuse wrong types; `native_selfcheck.present` and `.ok` refuse `0`, `1`, `"true"`, `null` and a list; `probe_status` refuses every token but `ok` and `mismatch`; an unknown top-level key and a wrong `schema` tag are refused; a report whose `lock.key_version` is `"a/b"` makes `env compare` exit 1 with fixed text (the engine's `MaskSecretError` is caught at the parse boundary) | command does not exist | accept `1` as `True` in `native_selfcheck.ok`; let `MaskSecretError` escape |
+| AT-C1-9 | `--out FILE` writes through `write_atomic`; an existing file is replaced whole; a write failure exits 3 and leaves no partial file; `exit_code_for(ProbeError(...)) == 3` | command does not exist | write with `open(..., "w")`; map `ProbeError` to 1 |
 | AT-C1-10 | `tests/unit/test_cli_surface.py` lists `env report` and `env compare`; the `--json` snapshot rows exist; the CLI fan-out sentry passes with the new CODEMAP row | guard | omit the CODEMAP row |
 | AT-C1-11 | QA INST-18 on two hosts (a Linux VM and the Mac): reports from both compare and name each differing field | run at QA | none (QA) |
 
 ## 9. Goldens, pins and sentries that move
 
 - New golden: `PROBE_GOLDEN[7]` in `support/_probe.py`, computed once on the build head from the
-  locked environment and checked in every `fingerprint-matrix` cell.
+  locked environment and checked in both `ci.yml` `import-smoke` cells.
 - New corpus sample: `tests/integration/compat_corpus/runtime-lock/lock-v1-probe.json`. The
   existing `lock-v1.json` is not edited.
+- Three merged E1 test cells change, listed in AT-E2-10. Each change follows the new contract
+  sentence; none loosens an assertion.
 - No determinism golden, cap, ceiling, pin, sentry baseline or allowlist is raised. The CLI
-  `src/decoy/cli/` fan-out stays at 30; `env/` is a sub-package.
+  `src/decoy/cli/` fan-out pin stays at 29; `env/` is a sub-package.
 - The CLI engine pin moves forward at the RD-n stop that carries E2 (row 76), with the repin
   checklist.
 
@@ -312,7 +344,7 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | Exports | engine `src/decoy_engine/support/__init__.py` | existing facade; not the root (held at 600 lines) |
 | Support row text | engine `CODEMAP.md:125` | update to name `_runtime_lock.py` and `_probe.py` |
 | Engine tests | `tests/unit/support/test_probe.py` | "Support bundles" tests |
-| Workflow cell | `.github/workflows/dps-dependency-matrix.yml`, job `fingerprint-matrix` | existing job |
+| Workflow step | `.github/workflows/ci.yml`, job `import-smoke` (`ci.yml:64`) | existing job; not `dps-dependency-matrix.yml`, which runs on schedule and dispatch only and gates no merge |
 | Env commands | CLI `src/decoy/cli/env/__init__.py` (Typer group), `_report.py`, `_compare.py`, `_model.py` (strict report writer and reader), all new | "Command module": new commands in a named sub-package, like `setup/` and `library/`; new CODEMAP row |
 | Registration | CLI `src/decoy/__main__.py` | beside `doctor`, `__main__.py:288` |
 | Report schema | CLI `docs/schemas/decoy-env-report-v1.schema.json` | beside `decoy-ci-v1.schema.json`; row in `docs/release/frozen-surfaces.md` |
@@ -339,9 +371,10 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 
 All additive.
 
-- Engine `lock/v1`: new `probe` field, optional on read. Contract 3.1 text and the frozen-surface
-  row gain one sentence; the new corpus sample pins the read rule.
-- Engine public names: `run_probe`, `check_probe`, `ProbeResult`, `ProbeError` in
+- Engine `lock/v1`: new `probe` field, optional on read and omitted on write when absent. Contract
+  3.1 "refuses a missing field" gains "except `probe`"; the frozen-surface row matches; the new
+  corpus sample pins the read rule.
+- Engine public names: `run_probe`, `probe_status`, `ProbeError` in
   `decoy_engine.support.__all__`, each in one Public names row of `docs/frozen-surfaces.md`.
 - Engine reason `runtime/probe_failed`, since=UNRELEASED.
 - CLI command set: `decoy env report`, `decoy env compare`; `docs/cli-reference.md` and
@@ -357,12 +390,12 @@ All additive.
 | 1 | Value-bearing output | Fixed refusal text; three companion fields only; label default `host`; `ProbeError` raised outside the handler | AT-E2-8, AT-C1-4, AT-C1-5, AT-C1-7 | copy `abi_actual` or `str(exc)` into output |
 | 2 | Cleanup missing on an exit path | `--out` only through `write_atomic`; a probe failure writes no report | AT-C1-9, AT-C1-6 | write with `open(..., "w")` |
 | 3 | State and concurrency | Probe is a pure function of constants; no cache, no global state | AT-E2-2 | memoize the digest in a module global |
-| 4 | Route parity and silent fallback | N/A: the probe runs no masking route; it calls the shared primitives every route calls, so there is no second path to drift | AT-E2-3 | drop the pool part |
+| 4 | Route parity and silent fallback | The probe checks the Python reference path only; the native route is checked by the companion's `HASH_KAT` and `FPE_KAT` and reported as `native_selfcheck`; compare shows both, so a broken native route is never hidden behind a probe `ok` | AT-E2-3, AT-C1-5, AT-C1-2 | drop `native_selfcheck` from the compared fields |
 | 5 | Referential integrity | N/A: no table data or relationships are read or written | N/A | N/A |
 | 6 | Untrusted producer | Report files from other hosts are untrusted: 64 KiB cap, strict report reader, engine strict lock reader | AT-C1-3, AT-C1-8, AT-E2-9 | accept `1` as `True` |
 | 7 | Check then use on a path (TOCTOU) | Compare reads each file once into memory and parses those bytes; no re-open | AT-C1-3 | re-open the file after the size check |
-| 8 | Weak tests and overclaimed evidence | Red-first cells with named mutations; golden checked in every matrix cell; golden change only with a protocol bump or Faker repin | AT-E2-1, AT-E2-11 | return a constant digest |
-| 9 | Behavior-preserving refactor drift | N/A: no refactor in this row; the E1 tests stay unedited as a guard | AT-E2-10 | edit an E1 cell to pass |
+| 8 | Weak tests and overclaimed evidence | Red-first cells with named mutations; golden checked in merge-gating CI; coverage stated per platform (Linux CI, macOS QA, Windows not checked); golden change only with a protocol bump or Faker repin | AT-E2-1, AT-E2-11 | return a constant digest |
+| 9 | Behavior-preserving refactor drift | N/A: no refactor in this row; the three E1 cell edits are listed one by one and change no assertion's strength | AT-E2-10 | edit an E1 cell beyond the list |
 | 10 | Frozen contract drift | One frozen-surface map; one engine field list read by the CLI | AT-E2-7, AT-C1-10, `tests/sentry/release/test_frozen_surface_map.py` | omit the map row |
 
 Class 11 (no raised caps): nothing in this plan raises a cap, ceiling, pin, baseline or allowlist.
@@ -371,20 +404,27 @@ Class 11 (no raised caps): nothing in this plan raises a cap, ceiling, pin, base
 
 ### Exit paths
 
-- `run_probe` returns a digest or raises; `check_probe` returns `ok` or `mismatch`, or raises
-  `ProbeError` (`src/decoy_engine/support/_probe.py`, new).
+- `run_probe` returns a digest or raises `ProbeError` (a failed part or a custom
+  `person_first_name` provider); `probe_status` returns `ok` or `mismatch` and never raises
+  (`src/decoy_engine/support/_probe.py`, new).
 - `read_runtime_lock` and `RuntimeLock.from_dict` refuse with `runtime_lock_refused:<check>`
   (`src/decoy_engine/support/_runtime_lock.py:196`, `src/decoy_engine/support/_runtime_lock.py:217`).
 - `env report`: 0 ok, 1 bad `--label` or `--key-version`, 3 probe mismatch, probe failure or write
   failure (`src/decoy/cli/exit_codes.py:66`).
-- `env compare`: 0 all match, 1 bad input, 4 a difference (`src/decoy/cli/exit_codes.py:74`).
+- `env compare`: 0 all match, 1 bad input (including a caught `ValueError` or `MaskSecretError`),
+  4 a difference (`src/decoy/cli/exit_codes.py:74`).
+- `ProbeError` and an `--out` `OSError` exit 3 through `exit_code_for`
+  (`src/decoy/cli/exit_codes.py:163`).
 
 ### Routes
 
-- N/A for masking routes: no sequential, chunked, out-of-core or native route runs. The probe calls
-  the shared primitives below them: `derive` (`src/decoy_engine/determinism/_derive.py:260`),
+- Python reference path: the probe calls `derive` (`src/decoy_engine/determinism/_derive.py:260`),
   `fpe_encrypt_value` (`src/decoy_engine/transforms/fpe.py:468`) and `PoolBuilder.build`
-  (`src/decoy_engine/generation/pool/_builder.py:163`).
+  (`src/decoy_engine/generation/pool/_builder.py:163`). No sequential, chunked or out-of-core
+  masking run happens.
+- Native companion path: not run by the probe; its own known-answer vectors (`HASH_KAT`,
+  `FPE_KAT`, `src/decoy_engine/execution/native/_crypto_ext.py:245`) produce the
+  `native_selfcheck` result the report carries.
 - CLI: one route per command, in-process; no subprocess.
 
 ### FK shapes
@@ -393,13 +433,13 @@ N/A: no slice reads, writes or plans table data or relationships.
 
 ### Fields
 
-- `lock/v1`: the 13 E1 fields (`src/decoy_engine/support/_runtime_lock.py:127`) plus `probe`
-  (nullable 64 hex, optional on read, always written).
+- `lock/v1`: the 13 E1 fields (`src/decoy_engine/support/_runtime_lock.py:127`) plus `probe` (64
+  hex; optional on read; omitted on write when absent; `null` refused).
 - `decoy-env-report/v1`: `schema`, `label`, `cli_version`, `target` (string or null),
   `native_selfcheck` (`present` bool, `ok` bool, `reason` string or null), `probe_status` (`ok` or
   `mismatch`), `lock` (a `lock/v1` object).
 - `env compare --json`: `reports` (int), `differences[]` (`field`, `values` map of label to value).
-- `ProbeResult`: `digest`, `status`.
+- `probe_status` return: `ok` or `mismatch`.
 
 ### Output surfaces
 
@@ -429,11 +469,11 @@ no body unless it says why, final line `cam`.
 3. The CLI repin to that release follows the repin checklist (compat, fences, frozen map, doc,
    `PIN_PREFIX`, Dockerfile ARG, catalog).
 4. 78-C1 builds on the repinned CLI main.
-5. Row 88-P (upgrade preflight, release-chain plan) depends on 78-C1 and will read `check_probe`
+5. Row 88-P (upgrade preflight, release-chain plan) depends on 78-C1 and will read `probe_status`
    and `compare_runtime_locks` from the staged runtime; nothing here waits on it.
 6. F09 (row 79) does not depend on this remainder: the `key_version` field it needs merged in E1.
 
-## 17. Owner questions (recommended answer first)
+## 17. Owner questions (answered 2026-11-17: OQ-1 to OQ-4 as recommended)
 
 - **OQ-1. `probe` in `lock/v1`: optional on read (absent reads as null) rather than required?**
   Recommended: optional on read, always written. E1 is unreleased today, but the daily release
@@ -457,9 +497,10 @@ no body unless it says why, final line `cam`.
 
 Assume it is 2026-12-04 and row 78 is not closed. Likely reasons, with the guard for each:
 
-- The Faker pool part drew from NumPy and the golden differed across matrix cells. Guard: the
-  builder confirms the seeding path first (section 4.1) and switches to direct `seed_instance`
-  draws if needed; AT-E2-11 runs in every cell before merge.
+- The golden differed between Python 3.11 and 3.12. Guard: AT-E2-11 runs in both `ci.yml`
+  `import-smoke` cells, which gate every merge, so the slice cannot land with a split golden.
+- A test or notebook registered a custom `person_first_name` provider and the probe digested it.
+  Guard: AT-E2-13 refusal.
 - The golden was hand-edited to make a red cell green and hid a real drift. Guard: FM-12; the gate
   diffs `PROBE_GOLDEN` and refuses a change without a protocol bump or Faker repin.
 - 78-C1 waited for a release. Guard: cut the RD-n stop the day E2 merges.
@@ -473,5 +514,33 @@ Assume it is 2026-12-04 and row 78 is not closed. Likely reasons, with the guard
   keeping a parallel shape (release-chain section 20).
 - V2-LOG: frozen synthetic pools shipped with a lock; a project lock file and an opt-in run-time
   refusal (release-chain OQ-2).
+- V2-LOG: the `support/` package now holds two concerns (support bundles and the runtime lock and
+  probe); split into its own package if it grows a third.
+- V2-LOG: an older CLI reading a newer report drops lock fields it does not know (the `lock/v1`
+  reader ignores added fields), so compare across CLI versions can miss a new field. Compare
+  reports from one CLI version for now.
+- Windows chain (rows 6 and 89): add the AT-E2-11 probe step to the Windows CI job.
 - Platform V1: worker inventory and admission that compare `lock/v1` documents (parked).
-- CLI roadmap row 78: record E1 merged and point at this plan.
+- CLI roadmap row 78: record E1 merged and point at this plan. The release-chain plan section 7
+  gains a one-line pointer to this plan for 78-E2 and 78-C1.
+
+## 20. Review record
+
+### Dennis r1 (GO-WITH-FIXES), resolved in revision 2
+
+- H1: the E1 cells at `test_runtime_lock.py:71`, `:398`, `:406` would break. Read and write made
+  symmetric (absent reads `None`, `None` omitted on write); AT-E2-10 is now an explicit edit list;
+  contract 3.1 sentence names the `probe` exception.
+- H2: `dps-dependency-matrix.yml` gates nothing. The check moved to `ci.yml` `import-smoke`; coverage
+  stated per platform; Windows recorded for the Windows chain; pre-mortem fixed.
+- M3: provider key is `person_first_name`; NumPy fallback removed (the pool build seeds Faker);
+  custom-provider refusal and AT-E2-13 added.
+- M4: one probe run; `run_probe` raises `ProbeError`; `probe_status(digest)` replaces
+  `check_probe` and `ProbeResult`.
+- M5: guarantee, Class 4 and Routes now say the probe covers the Python reference path and the
+  native route is covered by the companion KATs through `native_selfcheck`.
+- M6: compare catches `ValueError` and `MaskSecretError` at the parse boundary (exit 1);
+  `ProbeError` and `OSError` go through `exit_code_for` (exit 3); cells added to AT-C1-8 and
+  AT-C1-9.
+- L7 FF1 inputs 6 to 10 digits. L8 CLI flat pin is 29. L9 wall-clock assertion dropped. L10
+  `support/` drift V2-LOG and the Faker digest note. L11 older-CLI V2-LOG. L12 lazy imports.
