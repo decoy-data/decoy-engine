@@ -304,6 +304,15 @@ self-reference with a null root), is compared as an integer key. A column with a
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
 The tag stayed `v2` for that change; the field set only grew.
 
+`distribution-snapshot/v2` (row 24f, 2026-11) is what a plain `decoy fit` now writes
+(`distribution_snapshot_document` with `include_values=False`). Only the datetime bucket changed:
+`year_bins` entries are `{start_year, end_year, count}` year ranges instead of `{year, count}`.
+The raw writer, the DP writer and `include_values=True` keep writing v1, and every reader accepts
+both (`decoy_engine.contracts.distribution_snapshot`). The same change moves `value_policy` to
+`flagged-redacted/v2` (every unflagged column is also floored at 10 rows); readers accept v1 and
+v2. A column too small to floor is listed in `redacted_columns`. Generated output of a statistical
+column fitted from a new plain snapshot changes; an old snapshot generates as before.
+
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
 `match_rate` can now be `null`. The engine's verdict reader accepts v2 and v3. Each `residual_pii` finding gains `source` (`regex`, `classifier` or `ner`), `model`
