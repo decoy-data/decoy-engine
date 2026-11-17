@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine.contracts.distribution_snapshot import ACCEPTED_SCHEMA_VERSIONS
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
 from decoy_engine.plan._errors import PlanCompileError
@@ -40,7 +41,6 @@ from decoy_engine.plan._types import (
     PinnedStatisticalSpec,
     freeze_json,
 )
-from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
 
 # HC-5 precedent (`quality/snapshot.py::_HIGH_CARDINALITY_MAX_LABEL_BYTES`):
 # a fail-closed size fence on an embedded artifact is a typed compile
@@ -118,16 +118,13 @@ def snapshot_schema_failure(parsed: Any, shown: str) -> Any:
     expected version only: the stored text is untrusted and never echoed."""
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
-    if (
-        isinstance(parsed, dict)
-        and parsed.get("schema_version") == DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
-    ):
+    if isinstance(parsed, dict) and parsed.get("schema_version") in ACCEPTED_SCHEMA_VERSIONS:
         return None
     return StatisticalSpecError(
         code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
         message=(
             f"snapshot_file {shown!r} does not declare 'schema_version' "
-            f"{DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION!r}; this engine consumes only that version."
+            f"{' or '.join(ACCEPTED_SCHEMA_VERSIONS)}; this engine consumes only those versions."
         ),
     )
 

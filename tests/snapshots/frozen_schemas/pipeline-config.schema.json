@@ -1778,6 +1778,22 @@
     "ScanBaselineConfig": {
       "additionalProperties": false,
       "properties": {
+        "on_drift": {
+          "anyOf": [
+            {
+              "enum": [
+                "warn",
+                "fail"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Drift"
+        },
         "path": {
           "title": "Path",
           "type": "string"

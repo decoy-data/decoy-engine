@@ -1,5 +1,8 @@
 # Mutation grading: `transforms/date_shift.py` -- LIVE SURFACE LOGIC-100% (rest dead)
 
+Update (row 24zb): the dead V1 class and helpers named below were deleted. The ledger scope is
+`_detect_format` only; the dead-code figures are the record from the grading date.
+
 TQ step-4 pass, graded 2026-07-26. **Scoped grade.** The active engine-v2 S9
 date_shift is `execution/_strategies/_date_shift.DateShiftStrategyHandler`; the V1
 `DateShiftStrategy` class in this module (`apply`, `_column_key`, `__init__`,

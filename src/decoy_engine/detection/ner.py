@@ -70,6 +70,14 @@ NER_MODEL_WHEELS: Mapping[tuple[str, str], NerModelWheel] = MappingProxyType(
             sha256="1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
             spacy_range=">=3.8.0,<3.9.0",
         ),
+        ("en_core_web_md", "3.8.0"): NerModelWheel(
+            url=(
+                "https://github.com/explosion/spacy-models/releases/download/"
+                "en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl"
+            ),
+            sha256="5e6329fe3fecedb1d1a02c3ea2172ee0fede6cea6e4aefb6a02d832dba78a310",
+            spacy_range=">=3.8.0,<3.9.0",
+        ),
     }
 )
 

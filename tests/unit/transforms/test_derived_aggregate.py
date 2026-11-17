@@ -470,6 +470,6 @@ class TestDerivedAggregateMetadata:
         assert technique_class_for("derived_aggregate") == "pseudonymisation"
 
     def test_distribution_behavior_is_coarsens(self) -> None:
-        from decoy_engine.execution._distribution_behavior import distribution_behavior_for
+        from decoy_engine.contracts.distribution_behavior import distribution_behavior_for
 
         assert distribution_behavior_for("derived_aggregate") == "coarsens"

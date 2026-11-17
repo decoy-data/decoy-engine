@@ -125,6 +125,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from decoy_engine.contracts.distribution_snapshot import with_year_weights
 from decoy_engine.quality._distribution_gof import (
     chi_square_cramers_v,
     ks_complement_binned,
@@ -162,8 +163,8 @@ def compute_fidelity(
         similarity, method, comparable}`. `comparable: false`
         excludes the entry from the aggregate score.
     """
-    src_cols = source_snapshot.get("columns", {})
-    out_cols = output_snapshot.get("columns", {})
+    src_cols = with_year_weights(source_snapshot)
+    out_cols = with_year_weights(output_snapshot)
     shared_columns = sorted(set(src_cols.keys()) & set(out_cols.keys()))
 
     # A DP null_count is released-rows minus noised bins, so a rate gap there is
@@ -252,18 +253,12 @@ def _datetime_gof_inputs(
 
 
 def _year_histogram(stats: dict[str, Any]) -> dict[str, Any]:
-    """`year_bins` (a list of `{year, count}`) -> a contiguous unit-width
+    """The decoded per-year weights -> a contiguous unit-width
     histogram, one bin per calendar year across the observed span, with
     zero-count bins for years with no mass. Each bin `[y, y + 1)` is a
     normal (non-degenerate) interval, so the ECDF ramps continuously within
     a year and jumps only across years."""
-    bins = stats.get("year_bins") or []
-    counts_by_year: dict[int, int] = {}
-    for b in bins:
-        try:
-            counts_by_year[int(b["year"])] = int(b["count"])
-        except (KeyError, TypeError, ValueError):
-            return {}
+    counts_by_year: dict[int, float] = stats.get("year_weights") or {}
     if not counts_by_year:
         return {}
     y_min, y_max = min(counts_by_year), max(counts_by_year)
@@ -493,18 +488,18 @@ def _datetime_similarity(
     src_stats: dict[str, Any],
     out_stats: dict[str, Any],
 ) -> dict[str, Any]:
-    src_bins = src_stats.get("year_bins", [])
-    out_bins = out_stats.get("year_bins", [])
-    src_total = sum(int(b["count"]) for b in src_bins)
-    out_total = sum(int(b["count"]) for b in out_bins)
+    src_weights = src_stats.get("year_weights") or {}
+    out_weights = out_stats.get("year_weights") or {}
+    src_total = sum(src_weights.values())
+    out_total = sum(out_weights.values())
     if src_total == 0 or out_total == 0:
         return {
             "similarity": None,
             "method": "no_data",
             "comparable": False,
         }
-    src_probs = {b["year"]: int(b["count"]) / src_total for b in src_bins}
-    out_probs = {b["year"]: int(b["count"]) / out_total for b in out_bins}
+    src_probs = {y: w / src_total for y, w in src_weights.items()}
+    out_probs = {y: w / out_total for y, w in out_weights.items()}
     keys = set(src_probs) | set(out_probs)
     tvd = 0.5 * sum(abs(src_probs.get(k, 0.0) - out_probs.get(k, 0.0)) for k in keys)
     similarity = max(0.0, 1.0 - tvd)

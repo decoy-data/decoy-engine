@@ -18,6 +18,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING, NoReturn
 
 from decoy_engine import reasons
+from decoy_engine.contracts.distribution_snapshot import names_unsupported_year
 
 if TYPE_CHECKING:
     from decoy_engine.generation.statistical._spec import StatisticalSpec
@@ -102,13 +103,15 @@ def _categorical_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
 
 
 def _datetime_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
-    try:
-        bins = spec.stats.get("year_bins") or []
-        years = [int(b["year"]) for b in bins]
-        weights = [float(b["count"]) for b in bins]
-    except (TypeError, ValueError, KeyError, OverflowError):
+    buckets = spec.datetime_buckets
+    if buckets is None:
+        # A year outside the sampled range is unbounded, which window admission reports; any
+        # other shape the decoder refused is a malformed block.
+        if names_unsupported_year(spec.stats):
+            return None
         return "year_bins", "year_bins entries are malformed"
-    if not years:
+    weights = [float(b.count) for b in buckets]
+    if not buckets:
         return "year_bins", "snapshot has no year_bins"
     if _weights_unusable(weights):
         return "year_bins", "year_bins counts are negative, not finite or all zero"
