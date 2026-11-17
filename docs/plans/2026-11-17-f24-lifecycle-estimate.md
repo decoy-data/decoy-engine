@@ -218,7 +218,12 @@ Python-object terms price the fixed-width paths:
   - CSV target: `frame(t)`.
   - fixed_width target: `max(coerce_moment(t), list_moment(t))`, the larger of the two moments in
     G3 (the Arrow output is already in the sum).
-    - `coerce_moment(t) = frame(t) + refs(t) + max over c in int_cols(t) of coerce(c)`. During
+    - `coerce_moment(t) = frame(t) + refs(t) + converted(t) + max over c in int_cols(t) of coerce(c)`,
+      where `converted(t) = sum over c in int_cols(t) of rows * max(0, 9 - refs_cell(c))`. Each
+      column already coerced stays in the copy as `Int64` (9 bytes a row, `_targets.py:355`)
+      while later columns are coerced, and `refs` still prices it at its original cell cost, so
+      the positive difference is added for every int column (the column being coerced is counted
+      too, which only over-prices). During
       `_coerce_int_columns` (CLI `_targets.py:316-355`) the original frame costs `frame`, the
       copy `refs`, and the column being coerced builds a Python list of ints and then an `Int64`
       series from it (`_targets.py:273-293`, `:316-321`), both live while the series is built:
@@ -226,7 +231,9 @@ Python-object terms price the fixed-width paths:
       `sys.getsizeof` at import, and the `Int64` value plus its mask byte). Coercion is one
       column at a time, so only the largest such column is added. `int_cols(t)` is the set of
       columns the target layout types `int` whose priced type is not already an integer type
-      (an integer column takes the `astype` path and is covered by `refs`).
+      (`_coerce_int_columns` enters coercion only for float and object dtypes; an integer column
+      is left as it is and is covered by `refs`). A float column takes `astype("Int64")`, which
+      the generic `coerce(c)` term over-prices; that is accepted as the conservative side.
     - `list_moment(t) = frame(t) + lists(t)`, where `lists` prices every column in `int_cols(t)`
       as a list slot plus an int object, whatever its input spec, because the engine writer's
       `.tolist()` (`_fixed_width_writer.py:310`) turns the `Int64` column into Python ints. The
@@ -375,7 +382,7 @@ devbox. Accuracy cells are `benchmark`-marked and run on a test VM through `~/bi
 | AT-E1-20 | Format registry: the lifecycle rule table's keys equal `FILE_FORMATS` keys; a descriptor with an unknown format gives lifecycle defaults and a note | rule table does not exist | remove `fixed_width` from the rule table |
 | AT-E1-21 | Note shapes: every lifecycle note matches one of the constants in the notes block after its placeholder is filled; the set of constants is pinned | notes block does not exist | build a note with an inline f-string |
 | AT-E1-26 | Fixed-width write: a fixed_width target with one string and one int column (the int column already integer-typed) adds exactly `max(coerce_moment, list_moment)` as section 4.2 defines it (not the summed form, not `frame` alone); `lists` gives the int column an int object per cell and the string column a slot only; a CSV target of the same table adds `frame` only | module does not exist | sum the two moments instead of taking the larger |
-| AT-E1-28 | Fixed-width integer coercion: a CSV-sourced string column the target layout types `int` adds `coerce(c) = rows * (8 + int_object + 9)` to the coerce moment for the largest such column only, and `lists` prices it as an int object per cell, not as its input string spec; an integer-typed column adds no coerce term; an unreadable layout leaves the write term unpriced with the constant note | module does not exist | (a) drop the `coerce(c)` term; (b) price `int_cols` lists with the input spec; (c) add `coerce` for every int column instead of the largest |
+| AT-E1-28 | Fixed-width integer coercion: a CSV-sourced string column the target layout types `int` adds `coerce(c) = rows * (8 + int_object + 9)` to the coerce moment for the largest such column only, and `lists` prices it as an int object per cell, not as its input string spec; an integer-typed column adds no coerce term; with two int-declared string columns the coerce moment adds `converted` for both (the first column stays resident as `Int64` while the second is coerced); an unreadable layout leaves the write term unpriced with the constant note | module does not exist | (a) drop the `coerce(c)` term; (b) price `int_cols` lists with the input spec; (c) add `coerce` for every int column instead of the largest; (d) drop `converted` |
 | AT-E1-22 | Helper parity: `arrow_column_bytes(t, rows, 0)` equals the base head's `_arrow_column_floor(t, rows)` for a matrix of types (bool, int8 to int64, float32/64, string, large_string, timestamp, date32); `generation_floor_bytes` is unchanged on the merged generation fixtures | helper does not exist | drop the ceil division for bool |
 
 ### 8.2 84-E1, accuracy (`tests/perf/test_f24_lifecycle_accuracy.py`, `benchmark` marker, test VM only)
@@ -721,4 +728,8 @@ Assume it is 2026-12-05 and row 84 is not closed. Likely reasons, with the guard
   `coerce(c)` and prices `int_cols` lists as int objects; new unit cell AT-E1-28 with three
   named mutations.
   - CLI citations: CSV conversion `_sources.py:418-419`, fixed-width conversion `:423-424`.
-- Next: Codex round 3 of 3 (last) on revision 4.
+- Codex round 3 ran on revision 4 (NO-GO, entry below the round-3 fix).
+- Codex delta (head d1b794a4), V1: already-converted `Int64` columns stay resident during later
+  coercions and `refs` prices them at their original cost. Fixed by the orchestrator: section 4.2
+  adds `converted(t)`; AT-E1-28 gains a two-column cell and mutation (d). V2-LOG: the integer
+  dtype note now says integer columns are not coerced at all.
