@@ -611,6 +611,30 @@ the mutation tables above (the earlier harness was not kept).
 
 `generation/synthesize.py` 597 lines. Not run: the full suite, Python 3.11.
 
+## Main merge (2026-11-17, `dc2d397b`), gate and mutations on the exact head
+
+`origin/feat/gen-inherit-e2` `ab1c657d` (holding `origin/main` `dc2d397b`: #622, #631, #632,
+#633, #636, #637, #639) merged into `22825a87` as `d5908c79`, without a conflict. The
+`problem_details` and `CODEMAP.md` resolutions are in gen-inherit-e2's record. This slice's
+refusals pass no third item to `problem_details`, so main's template form does not touch them.
+
+Gate on `d5908c79`: `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline` (1336
+paths), Python 3.10.20, baseline `origin/main` `dc2d397b`. ruff, format and mypy pass; sentry
+6141 passed, 0 failed, 2 skipped; licenses 63 passed; layers 11 passed, 4 failed; tests 43870
+passed, 115 failed or errored, 5388 skipped. The same 119 ids fail on `origin/main`;
+branch-only 0. They are the ids gen-inherit-e2's record names: 113 scratch-permission tests
+that error in this container, 4 layer tests (main's `.importlinter` keeps an ignore #632 made
+stale) and 2 in `test_subset_run_entry_policy.py` (#639's `run_ner_models` unclassified).
+
+Script checks against `dc2d397b`: `registry_renumber.py --check`, `ratchet_check.py`,
+`check_fragment.py` and `reason_release_pin.py --check` each exit 0.
+
+Mutations: 15 of 15 red on `d5908c79`, the same harness and test files as the `1479f413` run;
+every red count equals that run's.
+
+`generation/synthesize.py` 597 lines, `config/_generate_options.py` 583. Not run: the full
+suite, Python 3.11.
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
