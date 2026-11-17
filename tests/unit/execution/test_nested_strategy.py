@@ -1221,5 +1221,5 @@ def test_the_new_cell_codes_are_declared_for_the_mixed_route_and_the_capability_
         "nested_cell_number_out_of_range",
         "nested_child_non_finite",
     }
-    assert new <= CHUNK_VARIANT_WARNING_CODES
-    assert new <= set(capabilities_for("nested").warning_codes)
+    assert new.issubset(CHUNK_VARIANT_WARNING_CODES)
+    assert new.issubset(capabilities_for("nested").warning_codes)

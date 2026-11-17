@@ -24,36 +24,15 @@ from decoy_engine.generation.pool._events import QualityWarning
 
 __all__ = ["leaf_frame", "read_cell", "record_fault", "written_leaf"]
 
-# token -> (trigger, warning code, fixed reason). `not_json` keeps its original code and text.
-_FAULTS: dict[str, tuple[str, str, str]] = {
-    "not_json": (
-        "format_error",
-        reasons.warning.NESTED_CELL_JSON_PARSE_ERROR,
-        "cell is not valid JSON under nested masking",
-    ),
-    "duplicate_key": (
-        "format_error",
-        reasons.warning.NESTED_CELL_DUPLICATE_KEY,
-        "cell repeats an object key under nested masking",
-    ),
-    "oversized": (
-        "format_error",
-        reasons.warning.NESTED_CELL_OVERSIZED,
-        "cell is larger than the nested byte limit",
-    ),
-    "too_deep": (
-        "format_error",
-        reasons.warning.NESTED_CELL_TOO_DEEP,
-        "cell is deeper than the nested depth limit",
-    ),
-    "out_of_range": (
-        "mask_error",
-        reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE,
-        "a selected number is too long to read as an integer",
-    ),
+# token -> (trigger, fixed reason). `not_json` keeps its original text.
+_FAULTS: dict[str, tuple[str, str]] = {
+    "not_json": ("format_error", "cell is not valid JSON under nested masking"),
+    "duplicate_key": ("format_error", "cell repeats an object key under nested masking"),
+    "oversized": ("format_error", "cell is larger than the nested byte limit"),
+    "too_deep": ("format_error", "cell is deeper than the nested depth limit"),
+    "out_of_range": ("mask_error", "a selected number is too long to read as an integer"),
     "child_non_finite": (
         "mask_error",
-        reasons.warning.NESTED_CHILD_NON_FINITE,
         "a nested child returned a value that is not a finite number",
     ),
 }
@@ -80,11 +59,27 @@ def record_fault(
     ctx: Any, warnings: list[QualityWarning], column: str, pos: int, token: str
 ) -> None:
     """Fail the row closed: one row error and one warning, neither holding any cell text."""
-    trigger, code, reason = _FAULTS[token]
+    trigger, reason = _FAULTS[token]
     ctx.row_errors.append(RowError(column=column, row_index=pos, trigger=trigger, reason=reason))
-    warnings.append(
-        QualityWarning(code=code, provider="nested", column=column, detail={"row_pos": str(pos)})
-    )
+    warnings.append(_warning(token, column, pos))
+
+
+def _warning(token: str, column: str, pos: int) -> QualityWarning:
+    """The warning beside the row error; each code is a registry symbol, never a forwarded value."""
+    detail = {"row_pos": str(pos)}
+    if token == "duplicate_key":
+        code = reasons.warning.NESTED_CELL_DUPLICATE_KEY
+    elif token == "oversized":
+        code = reasons.warning.NESTED_CELL_OVERSIZED
+    elif token == "too_deep":
+        code = reasons.warning.NESTED_CELL_TOO_DEEP
+    elif token == "out_of_range":
+        code = reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE
+    elif token == "child_non_finite":
+        code = reasons.warning.NESTED_CHILD_NON_FINITE
+    else:
+        code = reasons.warning.NESTED_CELL_JSON_PARSE_ERROR
+    return QualityWarning(code=code, provider="nested", column=column, detail=detail)
 
 
 def leaf_frame(name: str, leaves: list[Any]) -> pd.DataFrame:
