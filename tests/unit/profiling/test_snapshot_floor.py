@@ -292,9 +292,12 @@ def _check_ranges(doc: dict[str, Any], name: str, df: pd.DataFrame) -> None:
     assert all(r["count"] >= K for r in ranges)
     assert sum(r["count"] for r in ranges) == int(df[name].notna().sum())
     assert all(r["start_year"] in years and r["end_year"] in years for r in ranges)
-    assert ranges[0]["start_year"] == years[0] and ranges[-1]["end_year"] == years[-1]
+    # Bottom and top coded: the outer edges are the years of the K-th row from each end.
+    rows = sorted(df[name].dropna().dt.year)
+    assert ranges[0]["start_year"] == rows[K - 1] and ranges[-1]["end_year"] == rows[-K]
+    coded = [y for y in years if rows[K - 1] <= y <= rows[-K]]
     for before, after in pairwise(ranges):
-        assert after["start_year"] == years[years.index(before["end_year"]) + 1]
+        assert after["start_year"] == coded[coded.index(before["end_year"]) + 1]
 
 
 def test_datetime_years_fold_into_contiguous_ranges_of_at_least_k() -> None:
@@ -307,17 +310,18 @@ def test_datetime_years_fold_into_contiguous_ranges_of_at_least_k() -> None:
         _check_ranges(doc, name, df)
     assert doc["redacted_columns"] == ["forced", "sparse"]
     first, last = _ranges(doc, "visit")[0], _ranges(doc, "visit")[-1]
-    assert first["start_year"] == 1921 and first["end_year"] > 1951
+    assert first["start_year"] == 2012 and first["end_year"] >= 2012  # not the 1921 outlier
+    assert "1921" not in json.dumps(doc["columns"]["visit"]["stats"])
     visit = _col(doc, "visit")["stats"]
-    assert visit["min"] == "1921-01-01T00:00:00"
+    assert visit["min"] == "2012-01-01T00:00:00"
     assert visit["max"] == f"{last['end_year']:04d}-12-31T23:59:59.999999"
 
 
-def test_a_short_last_range_joins_the_one_before_it() -> None:
+def test_a_short_last_year_is_coded_into_the_one_before_it() -> None:
     years = [2000] * 12 + [2001] * 3
     df = pd.DataFrame({"d": pd.to_datetime([f"{y}-02-02" for y in years])})
     assert _ranges(_doc(df, flagged=[]), "d") == [
-        {"start_year": 2000, "end_year": 2001, "count": 15}
+        {"start_year": 2000, "end_year": 2000, "count": 15}
     ]
 
 
@@ -327,9 +331,12 @@ def _wide_years(years: list[int]) -> pd.DataFrame:
 
 
 def test_a_year_past_the_sampled_range_never_gets_a_bucket_of_its_own() -> None:
-    df = _wide_years([2000] * 12 + [9998] * 3 + [9999])
+    df = _wide_years([2000] * 12 + [9998] * 10 + [9999])
     ranges = _ranges(_doc(df, flagged=[]), "d")
-    assert ranges == [{"start_year": 2000, "end_year": 9998, "count": 16}]
+    assert ranges == [
+        {"start_year": 2000, "end_year": 2000, "count": 12},
+        {"start_year": 9998, "end_year": 9998, "count": 11},
+    ]
     assert _draw(_doc(df, flagged=[]), "d", 50, 1)
 
 
@@ -393,7 +400,7 @@ def test_windowed_generation_admits_plain_fit_datetimes_with_short_outer_years()
     doc = _doc(df)  # the real profiler flags both datetime columns
     assert {"visit_date", "sparse"} <= set(doc["redacted_columns"])
     first = _ranges(doc, "visit_date")[0]
-    assert first["start_year"] == 1921 and first["end_year"] > first["start_year"]
+    assert first["start_year"] > 1921 and first["end_year"] >= first["start_year"]
     assert _window_verdict(doc, ["visit_date", "sparse"]).is_class_a
     unflagged = _doc(df, flagged=[])
     assert _window_verdict(unflagged, ["visit_date"]).is_class_a
@@ -677,8 +684,11 @@ def test_year_edge_reads_coded_bounds() -> None:
 
 
 def test_plain_min_max_read_coded_bounds() -> None:
-    _, low, _ = _span(_coded([1850, *range(1990, 2020)]))
-    assert low == "1998-01-01T00:00:00"
-    _, _, high = _span(_coded([*range(1990, 2020), 2090]))
-    assert high == "2011-12-31T23:59:59.999999"
-    assert "1850" not in json.dumps(_coded([1850, *range(1990, 2020)]))
+    # A year holding K rows keeps the column out of the too-small-to-release path (G5), which
+    # would bound it by the flagged edges instead of the plain ones.
+    low_doc = _coded([1850, *[1990] * K, *range(1991, 2020)])
+    assert _span(low_doc)[1] == "1990-01-01T00:00:00"
+    assert "1850" not in json.dumps(low_doc)
+    high_doc = _coded([2090, *[2019] * K, *range(1990, 2019)])
+    assert _span(high_doc)[2] == "2019-12-31T23:59:59.999999"
+    assert "2090" not in json.dumps(high_doc)
