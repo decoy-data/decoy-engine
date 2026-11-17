@@ -10,6 +10,8 @@ engine `CLAUDE.md`, `CODEMAP.md` ("Where Things Go"), `docs/frozen-surfaces.md`,
 CLI `docs/ROADMAP.md` rows 24c, 24f and 24zm; the row 24f plan
 (`origin/plan/fit-unflagged-values:docs/plans/2026-11-16-fit-unflagged-values.md`, revision 4).
 
+Round-cap fix (orchestrator, after Codex on `5a6d68570`): `is_table_sentinel` takes the flag's `count`, and an out-of-range `value` must equal `f"{count} value(s)"`; AT-14 gains the mismatch cell and the mutation list drops the count comparison.
+
 Revision 3, after Codex on revision 2 (`bf8e1483f`, NO-GO). Every finding is taken.
 
 | # | Finding | Change |
@@ -245,11 +247,11 @@ so the flagged path covers them. They matter only for a loaded document.
 slot that is not a list is replaced whole (fail closed). Existing callers pass only `Rule`
 values, so their behaviour is unchanged. There is no other placeholder writer.
 
-`sentinels.py` gains `is_table_sentinel(kind, value, note) -> bool`, built from the same four
+`sentinels.py` gains `is_table_sentinel(kind, value, note, count) -> bool`, built from the same four
 tables and the same formatting the scanners use. The string note and the numeric value text move
 to one helper each (`_string_note`, `_numeric_text`), and the two out-of-range notes become named
 constants, so the scanners and the check share one source (Fowler "Extract Function"). The
-out-of-range `value` matches `re.fullmatch(r"[1-9]\d* value\(s\)", value)`.
+out-of-range `value` must equal `f"{count} value(s)"` for the flag's own `count` (a strict int at least 1, read through `_conforms`), so a loaded flag cannot carry a stored count text that its count does not produce.
 
 ### 4.3 E1b: rules (all in `_profile_document.py`)
 
@@ -307,7 +309,7 @@ computed assignment. Every replacement goes through `_apply` (a `Rule` or a `Pla
    decade, or the end decade plus 9), and `YYYY-01-01` / `YYYY-12-31` for the distribution. With
    no date distribution, or a fold that failed, `NULL`.
 10. `SENTINEL_TABLE`: for each sentinel flag, `value` and `note` are kept when
-    `is_table_sentinel(kind, value, note)` holds. Otherwise both are kept only when the flag's own
+    `is_table_sentinel(kind, value, note, count)` holds. Otherwise both are kept only when the flag's own
     `count` passes step 2 and is at least K; else both resolve to `PLACEHOLDER`. `kind` and
     `count` are value-free shapes and stay.
 11. Bool columns skip steps 4 to 6 (P1).
@@ -457,7 +459,7 @@ asserted unflagged first.
 | AT-11 | property (hypothesis): random string, integer, datetime and bool frames; for every unflagged column of the document, each released top value, label, mode and numeric bound is held by at least K rows of the frame, and each date bucket count is at least K. On random datetime frames, `redact_profile_dict(redact_profile_dict(raw)) == redact_profile_dict(raw)` and the folded `data` entries are floats | fails on the first count-1 label; the fixed point fails if summed counts are written as ints |
 | AT-12 | the demo's 10-row sample through `profile_document`: `gender` labels and top values `[redacted]`, mode null; `redacted_columns` unchanged; no exception | `F`, `M` stored |
 | AT-13 | `nullish`: 999 null cells and one literal `(null)` cell (1,000 rows). Non-vacuity: the raw `to_dict()` has `mode_value "(null)"` and a top-value entry `(null)` with count 1. The document has `mode_value`, `min_value` and `max_value` null, no categorical label `(null)`, and the count-1 top-value entry `[redacted]`; the only `(null)` left in the column is the top-value entry with count 999, the null marker | the null count proves the literal mode |
-| AT-14 | sentinels. Profiled: a frame where one row holds ` N/A ` and one row holds `-999`; the flags read `value "n/a"` and `"-999"` with their table notes and `is_table_sentinel` holds for each; the text ` N/A ` and `N/A` is not in the JSON. Loaded dict: a `string_sentinel` flag with `value "Jane Q Example"`, a free-form note and count 1 has both slots `[redacted]`; the same flag with count 12 keeps them; a table `value` with a changed note is floored | a loaded raw sentinel text is stored |
+| AT-14 | sentinels. Profiled: a frame where one row holds ` N/A ` and one row holds `-999`; the flags read `value "n/a"` and `"-999"` with their table notes and `is_table_sentinel` holds for each; the text ` N/A ` and `N/A` is not in the JSON. Loaded dict: a `string_sentinel` flag with `value "Jane Q Example"`, a free-form note and count 1 has both slots `[redacted]`; the same flag with count 12 keeps them; a table `value` with a changed note is floored Loaded out-of-range mismatch: a `date_out_of_range` flag with `count: 1`, a fixed note and `value: "12 value(s)"` is floored (both slots `[redacted]`), while `value: "1 value(s)"` with `count: 1` is kept. | a loaded raw sentinel text is stored |
 
 Mutations that must turn a test red: delete the `_floor_field` call (AT-1 to AT-4); delete one
 `PROFILE_FLOOR_FIELDS` row (AT-10); `>` instead of `>=` K (AT-2); read label counts from `pct`
@@ -468,7 +470,7 @@ decade unmerged (AT-4); `isinstance` for counts (AT-6); read bin counts with the
 AT-11); write summed bin counts as ints (AT-11); ignore a `data`/`labels` length mismatch (AT-6);
 `match` for the decade grammar (AT-6); read `top_values` after replacement (AT-1 `min_value`);
 write `field["mode_value"] = None` inline in `_floor_field` (AT-10 guard); let `(null)` into the
-step 3 count map (AT-13); keep sentinel slots without `is_table_sentinel` (AT-14, loaded dict);
+step 3 count map (AT-13); keep sentinel slots without `is_table_sentinel` (AT-14, loaded dict); drop the `count` comparison for out-of-range values (AT-14 mismatch cell);
 write the string sentinel `value` from the raw cell instead of the normalized table member (AT-14,
 profiled); floor flagged or raw
 output (AT-8).
