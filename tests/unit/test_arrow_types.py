@@ -22,3 +22,47 @@ _TABLE = [
 def test_text_predicates_truth_table(typ: pa.DataType, text: bool, text_or_null: bool) -> None:
     assert is_text(typ) is text
     assert is_text_or_null(typ) is text_or_null
+
+
+# --- F24 84-E1: the shared Arrow column byte helper ----------------------------------------
+
+
+def _base_head_floor(arrow_type: pa.DataType, rows: int) -> int:
+    # The rule `generation/_bounds.py` held before it became this helper.
+    try:
+        bit_width = arrow_type.bit_width
+    except ValueError:
+        return 4 * rows
+    return (rows * bit_width + 7) // 8
+
+
+@pytest.mark.parametrize(
+    "arrow_type",
+    [
+        pa.bool_(),
+        pa.int8(),
+        pa.int16(),
+        pa.int32(),
+        pa.int64(),
+        pa.float32(),
+        pa.float64(),
+        pa.string(),
+        pa.large_string(),
+        pa.timestamp("us"),
+        pa.date32(),
+    ],
+)
+@pytest.mark.parametrize("rows", [0, 1, 7, 8, 9, 1000])
+def test_arrow_column_bytes_with_no_payload_matches_the_generation_floor_rule(
+    arrow_type: pa.DataType, rows: int
+) -> None:
+    from decoy_engine._arrow_types import arrow_column_bytes
+
+    assert arrow_column_bytes(arrow_type, rows, 0) == _base_head_floor(arrow_type, rows)
+
+
+def test_arrow_column_bytes_adds_the_string_payload() -> None:
+    from decoy_engine._arrow_types import arrow_column_bytes
+
+    assert arrow_column_bytes(pa.string(), 1000, 10.0) == 14_000
+    assert arrow_column_bytes(pa.bool_(), 9, 10.0) == 2

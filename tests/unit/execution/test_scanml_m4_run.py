@@ -214,7 +214,7 @@ def test_a_raising_ner_pass_blocks_and_keeps_the_regex_findings(
 def _fake_ner(monkeypatch: pytest.MonkeyPatch, hit_cells: int | None) -> None:
     import importlib
 
-    from decoy_engine.detection._ner_rate import NER_MIN_RATE, NerRate
+    from decoy_engine.detection._ner_rate import NER_MIN_RATES, NerRate
     from decoy_engine.detection.types import ModelRef
     from decoy_engine.profiling.model_pack import DetectorSet
 
@@ -229,8 +229,8 @@ def _fake_ner(monkeypatch: pytest.MonkeyPatch, hit_cells: int | None) -> None:
         if hit_cells is None:
             raise RuntimeError("fake pass failure")
         return {
-            "location": NerRate("location", 0, ROWS, NER_MIN_RATE),
-            "person_name": NerRate("person_name", hit_cells, ROWS, NER_MIN_RATE),
+            "location": NerRate("location", 0, ROWS, NER_MIN_RATES["en_core_web_sm"]),
+            "person_name": NerRate("person_name", hit_cells, ROWS, NER_MIN_RATES["en_core_web_sm"]),
         }
 
     monkeypatch.setattr(mf, "ner_rates", rates)

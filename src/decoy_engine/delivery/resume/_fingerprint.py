@@ -17,9 +17,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from decoy_engine.detection.ner import installed_model_version
 from decoy_engine.internal.crypto import hmac_hex
 from decoy_engine.keyprovider import KeyProvider, mask_key_from_provider
-from decoy_engine.plan import job_seed_for_config, pipeline_config_hash
+from decoy_engine.plan import job_seed_for_config, pipeline_config_hash, run_ner_models
 from decoy_engine.records import payload_digest
 
 __all__ = ["RunFingerprint", "binding_digest", "build_fingerprint"]
@@ -28,6 +29,17 @@ _KEY_CHECK_LABEL = "decoy-resume-key-check/v1"
 _KEY_CHECK_HEX = 16
 # The version of a key the engine derives from the job seed, mirroring `SeedKeyProvider`.
 _SEED_KEY_VERSION = "seed"
+# Engine-owned component names: a caller cannot supply one, so it cannot forge or hide a model.
+_NER_PREFIX = "decoy-ner:"
+
+
+def _ner_components(config: dict[str, Any]) -> list[tuple[str, str]]:
+    """One `(decoy-ner:<surface>, model==version[,...])` pair per NER surface the run uses."""
+    by_surface: dict[str, list[str]] = {}
+    for surface, model in run_ner_models(config):
+        version = installed_model_version(model) or "unavailable"
+        by_surface.setdefault(surface, []).append(f"{model}=={version}")
+    return [(_NER_PREFIX + surface, ",".join(sorted(ids))) for surface, ids in by_surface.items()]
 
 
 @dataclass(frozen=True)
@@ -86,9 +98,11 @@ def build_fingerprint(
     given = [tuple(pair) for pair in components]
     if any(len(pair) != 2 or not all(type(part) is str for part in pair) for pair in given):
         raise TypeError("each component must be a (distribution, version) pair of strings")
-    pairs = tuple(sorted((pair[0], pair[1]) for pair in given))
-    if not pairs:
+    if any(pair[0].startswith(_NER_PREFIX) for pair in given):
+        raise ValueError("component names starting with decoy-ner: are reserved")
+    if not given:
         raise ValueError("a resume fingerprint needs at least one component version")
+    pairs = tuple(sorted((pair[0], pair[1]) for pair in [*given, *_ner_components(config)]))
     config_hash = pipeline_config_hash(config)
     version = key_provider.key_version if key_provider is not None else _SEED_KEY_VERSION
     # The key goes straight into the reviewed `hmac_hex` frame, so no frame here ever names it.
