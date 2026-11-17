@@ -501,3 +501,59 @@ def test_moved_from_must_keep_the_bound_name(repo: Path) -> None:
     _write(repo, "src/p/new.py", "def g(signing_key):\n    pass\n")
     _census(repo, {new: MOVED})
     _assert_red(repo, new)
+
+
+# --- ordinal-suffixed keys (``<file>.py::<qualname>::<name>::<n>``) of gcs-call-kwargs ------
+
+G_ID, G = "gcs-call-kwargs", "tests/sentry/baselines/g.json"
+G_OLD = "p/old.py::f::update::0"
+G_NEW = "p/new.py::g::update::0"
+CALL_F = "def f(x):\n    return x.update(1)\n"
+CALL_G = "def g(x):\n    return x.update(1)\n"
+
+
+def _gcs(repo: Path, entries: dict[str, dict[str, object]]) -> None:
+    _write(repo, REG, _registry({"a": A, G_ID: G}))
+    body = {k: {"reason": REASON, **v} for k, v in entries.items()}
+    _write(repo, G, json.dumps({"sentry_id": G_ID, "created_in": "X4d", "entries": body}))
+
+
+def _commit_gcs(repo: Path) -> None:
+    _write(repo, "src/p/old.py", CALL_F)
+    _gcs(repo, {G_OLD: {}})
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gcs")
+
+
+def test_an_ordinal_key_moving_with_its_file_passes(repo: Path) -> None:
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {"moved_from": G_OLD}})
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"re-homed {G_OLD} -> {G_NEW}" in res.stdout
+
+
+def test_an_ordinal_key_without_moved_from_fails(repo: Path) -> None:
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {}})
+    _assert_red(repo, G_NEW)
+
+
+def test_an_ordinal_key_whose_old_site_still_exists_fails(repo: Path) -> None:
+    _commit_gcs(repo)
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {"moved_from": G_OLD}})
+    _assert_red(repo, G_NEW)
+
+
+def test_an_ordinal_move_must_keep_the_method_name(repo: Path) -> None:
+    new = "p/new.py::g::open::0"
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", "def g(x):\n    return x.open()\n")
+    _gcs(repo, {new: {"moved_from": G_OLD}})
+    _assert_red(repo, new)
