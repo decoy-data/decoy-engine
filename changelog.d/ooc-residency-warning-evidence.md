@@ -1,0 +1,3 @@
+### Fixed (out-of-core residency warning passes the evidence model, 2026-11-17)
+
+The `out_of_core_caller_managed_residency` warning carried an empty `provider` and a list in `detail`. `EvidencePayload` refuses both, so the CLI stored no evidence record for runs on that route. The warning now names the route (`provider="out_of_core_route"`) and `detail` holds only scalars: one `True` flag per caller-managed shape (`resident_source`, `no_sink`, `source_loader`) and the fixed `message`. The `quality_metrics["residency"]` record is unchanged. A new test checks that every warning from the out-of-core routes and the R3 route baseline is accepted by `EvidencePayload`.
