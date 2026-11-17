@@ -438,3 +438,11 @@ def test_a_generate_table_is_ignored():
     assert codes(refusal(raw, {**unmatched, "default": {"strategy": "redact"}})) == [
         "policy_selector_unmatched"
     ]
+
+
+def test_non_json_provider_config_in_any_mapping_is_refused():
+    from collections import UserDict
+
+    column = col("c", strategy="hash", provider_config=UserDict({"k": float("nan")}))
+    exc = refusal(raw_config([table("t", column)]), {})
+    assert codes(exc) == ["policy_block_invalid"]
