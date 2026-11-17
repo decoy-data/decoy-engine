@@ -353,6 +353,15 @@ SOURCES: tuple[Source, ...] = (
             ]
         ),
     ),
+    Source(
+        "strategy-docs-agree",
+        "tests/sentry/baselines/strategy-docs-agree.json",
+        lambda: set(
+            json.loads((BASELINES / "strategy-docs-agree.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
 )
 
 # Committed data a sentry reads that is a pinned contract, not an allowlist that could grow.
