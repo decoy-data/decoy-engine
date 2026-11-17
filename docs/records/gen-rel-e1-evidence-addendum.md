@@ -433,3 +433,25 @@ fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
 
 Not run: the full T1 gate on this head, mutations and the full suite.
+
+## Main merge (2026-11-16, `85429533`)
+
+`origin/main` moved again after the merge above. `origin/main` `85429533` (#611, the
+distribution behavior table moved from `execution/_distribution_behavior.py` to
+`contracts/distribution_behavior.py`) merged into `82f83a56` as `1c3d70af`, without a conflict.
+No source or test file of this slice imports the moved module. Main's move lowers the
+`execution/` fan-out ceiling from 104 to 103 and drops the import-layer baseline key for the old
+path; this slice adds no module to `execution/`, so nothing of this slice's grows. Main does not
+touch `uv.lock`, `generation/` or the draw-site catalogue. Main's changelog fragment arrives
+beside this slice's, which is kept.
+
+Checks on `1c3d70af`, Python 3.10.20, `origin/main` `85429533`: ruff, format and mypy pass;
+`tests/sentry` 5914 passed, 0 failed, 2 skipped; layers 15 passed; `tests/unit/generation` with
+the tests of this slice and the slices below it, the two draw-site catalogue tests and the
+fan-out sentry: 3686 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph_invariants.py`
+35 passed. Script checks (`registry_renumber.py --check --main origin/main`,
+`ratchet_check.py --base origin/main`, `check_fragment.py --base origin/main`,
+`reason_release_pin.py --check`): each exit 0. `generation/synthesize.py` 600 lines,
+`generation/_streamed.py` 600; the engine root and `config/` hold 25 modules.
+
+Not run: the full T1 gate on this head, mutations and the full suite.
