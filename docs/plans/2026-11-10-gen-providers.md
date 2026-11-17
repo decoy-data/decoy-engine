@@ -56,9 +56,14 @@ adapters declare `supported_locales=("en_US",)`. Four (`_ein.py:158`, `_ndc.py:9
 (`_cusip.py:151`, `_iban.py:203`, `_icd10.py:88`, `_mrn.py:87`, `_pan.py:97`) ignore it. Generation
 reads the declaration at compile, so a false declaration becomes a wrong refusal or a silent
 acceptance. Resolution (E1 commit 1):
-- The four US-issued identifiers (SSN, EIN, NPI, NDC) keep `("en_US",)` and keep refusing.
-- The five whose output does not depend on locale (MRN, IBAN, CUSIP, ICD-10, PAN) declare every
-  locale the engine accepts. That set already has one owner: Faker's `AVAILABLE_LOCALES`, which
+The owner chose the scope per provider on 2026-11-12 (go-recommended, recorded in CLI roadmap
+#212): SSN, EIN, NPI and NDC `en_US` only; IBAN, PAN and ICD-10 locale-free; CUSIP `en_US` and
+`en_CA`. MRN was not named; its kernel says it is locale-agnostic (`_mrn.py:95`), so it follows
+the locale-free group.
+- SSN, EIN, NPI and NDC keep `("en_US",)` and keep refusing.
+- CUSIP declares `("en_CA", "en_US")` and refuses any other locale (it does not today).
+- IBAN, PAN, ICD-10 and MRN, whose output does not depend on locale, declare every locale the
+  engine accepts. That set already has one owner: Faker's `AVAILABLE_LOCALES`, which
   `_FakerView` validates against (`plan/checks/_generate_columns.py:230`). A new
   `providers_v2/identifiers/_locale.py` holds `ENGINE_LOCALES` (the sorted tuple of that set) and
   `require_locale(label, locale, supported)`. Each adapter's `capability_matrix` and its
@@ -465,7 +470,7 @@ tables:
 | AT-16 | A monkeypatched adapter or pool that raises `ProviderError`, `CompositeError`, `IdentifierError`, `DeterminismError`, `PoolCapacityError` or the existing pool `GenerationError` with a sentinel message gives fixed-text `GenerationError` with `runtime.generation_provider_failed`. The sentinel is absent from `str(exc)` and the log, and the exception chain is empty. A registry override that removes a name, or replaces a capability with one that drops the locale, between the step-6 check and the draw gives the same code | red on base; mutants: `raise ... from exc`; `raise ... from None` inside the `except` block (keeps `__context__`); omit the pool errors; omit the runtime locale check |
 | AT-17 | `tests/sentry/defects/test_generate_option_reads.py` `READER_FILES` lists the new modules and passes | mutant: read `provider_options` in `_provider.py`; the sentry goes red |
 | AT-18 | `tests/native/test_draw_site_inventory_coverage.py` passes with `provider` mapped to existing `gen.derive_context`, so its static key source is generation rather than `mask_key`. The provider capability row stays conservative for the mixed branches. The providers golden and draw-site count are unchanged because no draw primitive was added | mutants: map to `gen.identifier_deterministic`; mark the capability row-local; add a duplicate provider draw site |
-| AT-19 | A9 declarations: for each of the nine identifiers in the live registry and each of `en_US` and `fr_FR`, `generate_random` returns a value exactly when the locale is in the provider's `CapabilityMatrix.supported_locales`, else raises `ProviderError(UNSUPPORTED_LOCALE)`. For a declared non-`en_US` locale, the value from `default_rng(7)` equals the `en_US` value. SSN, EIN, NPI and NDC declare only `en_US`; the other five declare `ENGINE_LOCALES` | red on base (five accept `fr_FR` while declaring only `en_US`); mutants: drop the `require_locale` call in `_ein.py`; declare `_mrn.py` as `("en_US",)`; hand-copy a shorter locale tuple into `_iban.py` |
+| AT-19 | A9 declarations: for each of the nine identifiers in the live registry and each of `en_US` and `fr_FR`, `generate_random` returns a value exactly when the locale is in the provider's `CapabilityMatrix.supported_locales`, else raises `ProviderError(UNSUPPORTED_LOCALE)`. For a declared non-`en_US` locale, the value from `default_rng(7)` equals the `en_US` value. SSN, EIN, NPI and NDC declare only `en_US`; CUSIP declares `en_CA` and `en_US` and refuses `fr_FR`; IBAN, PAN, ICD-10 and MRN declare `ENGINE_LOCALES` | red on base (five accept `fr_FR` while declaring only `en_US`); mutants: drop the `require_locale` call in `_ein.py`; declare `_mrn.py` as `("en_US",)`; hand-copy a shorter locale tuple into `_iban.py` |
 
 ## Class table
 
@@ -574,7 +579,7 @@ needed. The only new code is wiring and one pure age function.
 | Draw-site kind map | + `provider` mapped to existing `gen.derive_context`; catalogue and `PROVIDER_IDENTIFIER_SITES` unchanged | additive mapping only |
 | Masking composite output | unchanged bytes, pinned by the new digest test (AT-13, AT-14) | none |
 | `composite_person` canonical columns and masking wiring | unchanged; `age` and `sex` are optional columns only | none |
-| Identifier `CapabilityMatrix.supported_locales` values | E1: MRN, IBAN, CUSIP, ICD-10 and PAN widen from `("en_US",)` to `ENGINE_LOCALES`; SSN, EIN, NPI and NDC unchanged; no field added | additive (accepts more) |
+| Identifier `CapabilityMatrix.supported_locales` values | E1: MRN, IBAN, ICD-10 and PAN widen from `("en_US",)` to `ENGINE_LOCALES`; CUSIP widens to `("en_CA", "en_US")` and starts refusing other locales in `generate_random`; SSN, EIN, NPI and NDC unchanged; no field added | additive, except CUSIP's new refusal of non-North-American locales (owner scope) |
 | Root `decoy_engine/__init__.py` | no new export | none |
 
 ## Placement
@@ -683,10 +688,9 @@ checked by `scripts/dev/check_fragment.py`.
 5. **`sex` values.** Recommend `F` and `M` in V1. Alternative: a configurable label map (V2-LOG).
 
 Questions 1 to 5 were taken on the recommended answers under standing approval (2026-11-10), as
-roadmap row 24p records. Revision 3 adds no owner question. A9's choice between "refuse in all"
-and "drop the gate" is settled by the owner's 2026-11-12 wording ("each identifier provider
-declares its real locale scope, with a guard test"): which identifiers are locale-independent is a
-fact about their kernels, checked by AT-19, not a product choice.
+roadmap row 24p records. Revision 3 adds no owner question. A9 was answered by the owner on 2026-11-12
+(go-recommended): SSN, EIN, NPI and NDC `en_US` only; IBAN, PAN and ICD-10 locale-free; CUSIP
+`en_US` and `en_CA`. MRN, not named there, follows its locale-agnostic kernel.
 
 ## V2-LOG / deferred
 
@@ -702,7 +706,7 @@ fact about their kernels, checked by AT-19, not a product choice.
 
 - Throughput of per-row identifier `generate` in generation. No tests were run for this plan. T2
   measures it.
-- How `docs/capability-matrix.md` renders a long `supported_locales` tuple for the five
+- How `docs/capability-matrix.md` renders a long `supported_locales` tuple for the four
   locale-independent identifiers. If the render is unreadable, the generator prints the
   `ENGINE_LOCALES` name for that tuple; the builder checks at E1.
 - Whether any platform or CLI code reads an identifier's `supported_locales`. A search of the
@@ -784,7 +788,8 @@ refreshed citations.
 
 1. Base moved from `57d44a9a` to `8796ef69`. GEN-STRICT E2, GEN-TYPES and the one-seed-path fix are
    merged facts. Every line citation was re-read on `8796ef69`.
-2. A9 joins E1 as commit 1: `providers_v2/identifiers/_locale.py`, nine adapters read it, AT-19,
+2. A9 joins E1 as commit 1, using the owner's per-provider scope from 2026-11-12 (CUSIP `en_US`
+   and `en_CA`): `providers_v2/identifiers/_locale.py`, nine adapters read it, AT-19,
    P17, a frozen-contract row for the widened declarations.
 3. The instance-default locale check moves from a run-time `runtime.generation_provider_failed`
    to the existing compile-side choke point `check_faker_default_locale`, giving
