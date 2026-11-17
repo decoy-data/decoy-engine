@@ -18,11 +18,12 @@ depth, full-suite triggers), `documentation.md`, `workspace-and-vcs.md` (Commit 
 `src/decoy_engine/_MAP.md`, `.importlinter`, `tests/sentry/layout/test_package_fanout.py`,
 `tests/sentry/test_module_size.py`, `docs/compatibility-contract.md` (scan-set/v1 at
 `docs/compatibility-contract.md:251`, required strategy settings at
-`docs/compatibility-contract.md:1016`); the V1 bar (only a function break, data loss, a non-admin
+`docs/compatibility-contract.md:1029`); the V1 bar (only a function break, data loss, a non-admin
 value leak or cascading design blocks V1); the V1 threat model (accidental leaks only); owner
 rules: CLI V1 first, no new features beyond the row, no raised caps.
 
-Base: engine `origin/main` `3bddfc9ff` (#610). Line numbers below are from that head.
+Base: engine `origin/main` `62353dc0b` (#630). Line numbers below are from that head; every
+citation was re-checked against it in revision 4 (Codex round 1).
 
 ## 1. Source and what is already done
 
@@ -114,7 +115,9 @@ The real remainder, which this plan covers:
    strategy, so equal source keys give equal masked keys. The plan refuses a reference it cannot
    make join-safe. The pre-scan and post-scan key checks count orphans for the path end with the
    same key identity as column ends. A leaf that is missing or JSON null is a null key, not an
-   orphan. Path-relation orphans are report-only: they never block a run or a post-scan verdict.
+   orphan. A declared path relation makes the post-scan gate apply on its own, so a job whose
+   only relation is a path relation still gets its path-key counts and findings. Path-relation
+   orphans are report-only: they never block a run or a post-scan verdict.
 5. **Routes.** `nested` keeps today's route set (full-frame and sequential pandas; native,
    chunked and out-of-core decline or fall back with their existing reasons). This row adds no
    route.
@@ -179,8 +182,11 @@ re-keyed by path alone, with equal entry counts before and after as evidence:
   `tests/unit/execution/test_categorical_seeded_nondet.py`,
   `tests/unit/execution/test_faker_positional_nondet.py`,
   `tests/unit/execution/test_row_error_producers.py` (module path only);
-- keyed baselines: `tests/fixtures/f29/reason-baseline.json:637` to `:644` (eight `sources`
-  entries), `tests/fixtures/f29/producer-inventory.json:227` to `:236` (`file` field),
+- keyed baselines: `tests/fixtures/f29/reason-baseline.json:637` to `:644` (eight runtime
+  `sources` entries) and `:835` to `:836` (the two warning entries `nested_cell_json_parse_error`
+  and `nested_jsonpath_path_overlap`, whose `sources` lists name `_nested.py` beside
+  `_mixed_admission.py`; only the `_nested.py` string changes, the list keeps its length and
+  order), ten entries in all, `tests/fixtures/f29/producer-inventory.json:227` to `:236` (`file` field),
   `tests/sentry/baselines/f29-producer-inventory.json:599` onward (key prefix),
   `tests/sentry/baselines/gcs-call-kwargs.json:128` (key prefix),
   `tests/sentry/test_physical_seam_disconnection.py:591` (allowlisted path; the comment at `:846`
@@ -300,7 +306,7 @@ second reader:
 in `scan_set.py`. No re-export is left in `scan_set.py` (`architecture.md` Layout): it imports
 only the classes it uses itself, and every importer of a moved name moves to `_scan_core`:
 
-- `src/decoy_engine/profiling/__init__.py:75` (`ScanSetCore`, `ScanSetCoreRead`);
+- `src/decoy_engine/profiling/__init__.py:77` (`ScanSetCore`, `ScanSetCoreRead`);
 - `src/decoy_engine/profiling/scan_set_read.py:19` (`ScanSetCoreRead`);
 - `src/decoy_engine/profiling/scan_diff.py:30` (`_relaxed`);
 - `tests/unit/profiling/test_scan_set.py:31` (`TableCore`);
@@ -512,13 +518,18 @@ today's path text exactly.
   three nested warning-code registries (section 4.1).
 - **Execution.** Path relations are never added to `relationships`, so no FK route, subset or
   orphan remap sees them.
+- **Relation list and extractor (defined here, wired in 82-E4b).** 82-E4a adds the relation
+  list and the path-key extractor described below (`path_relations` in `_nested_json/_rules.py`,
+  `path_key_batches` in the new `_nested_json/_paths.py`) with unit cells (AT-E4a-6). Nothing
+  reads them in 82-E4a: no scan, gate or finding changes, and `post_scan_gate_applies` is
+  unchanged until 82-E4b wires post-scan. This keeps 82-E4b within ten production files.
 
 **82-E4b: integrity, report-only.** One function
-`path_relations(config) -> tuple[PathRelation, ...]` in `_nested_json/_rules.py` derives the
-relations from the rules (choke point). `PathRelation` is a frozen dataclass: parent table, parent
+`path_relations(config) -> tuple[PathRelation, ...]` in `_nested_json/_rules.py` (82-E4a) derives
+the relations from the rules (choke point). `PathRelation` is a frozen dataclass: parent table, parent
 column, child table, child (payload) column, and `path` (the rule target). Both sides load the
 child end through one extractor, `path_key_batches(batches, path, parent_type)` in
-`_nested_json/_paths.py`: it reads the payload column, extracts the leaf under the scan bounds,
+`_nested_json/_paths.py` (82-E4a): it reads the payload column, extracts the leaf under the scan bounds,
 and yields an Arrow key column of the parent key column's Arrow type (integer types take JSON
 integers, string types take JSON strings). An unreadable cell, and a leaf of the wrong kind for
 the parent, is counted in `unreadable_rows` and never loaded, so the key column always has one
@@ -547,11 +558,28 @@ the existing `key_type_mismatch` status, as for column ends.
   each path relation; `_decide` (`:206`) writes column-relation rows to `report["keys"]` as today
   and path rows to a new member `report["path_keys"]`, present only when the config has a path
   relation. The file must stay at or under 600 lines with no census entry; if the change does not
-  fit, the merge of declared ends moves into `_keys.py`. A path relation does not make the gate
-  apply: `post_scan_gate_applies` (`src/decoy_engine/config/_post_scan.py:139`) is unchanged, so
-  path keys are counted when the gate runs for its existing reasons (a declared relationship or
-  `post_scan.integrity` on). On a route where the gate is deferred, path keys get no check, the
-  same as column keys today (`_post_scan.py:264`). The leaf type logic stays in
+  fit, the merge of declared ends moves into `_keys.py`. On a route where the gate is deferred,
+  path keys get no check, the same as column keys today (`_post_scan.py:264`).
+- **Gate applies for a path relation.** `post_scan_gate_applies`
+  (`src/decoy_engine/config/_post_scan.py:139`, 221 lines) gains a third reason, read through the
+  one choke point: `bool(config.get("relationships")) or post_scan_integrity_requested(config) or
+  bool(path_relations(config))`. The import is lazy inside the function (`config` sits above the
+  bottom tier, so `config` to `_nested_json` is a downward import and needs no ignore line). It
+  changes in 82-E4b, the slice that wires post-scan, so the gate never applies before it can
+  count path keys. Every caller already asks this one function: the gate's `required` flag
+  (`execution/pipeline/_post_scan.py:106`), the source-fact capture in `bind_gate` (`:501`) and
+  the lazy-input choice (`execution/pipeline/_lazy_input.py:95`). A job whose only relation is a
+  path relation therefore runs the gate the way a job with only a declared relationship does
+  today: source facts are captured, a lazy transform-bearing mask table is kept off the lazy set,
+  and the report carries `keys` (empty) and `path_keys`. The suite still runs only with
+  `post_scan.integrity` on, so the integrity refusal for transformed tables (`_post_scan.py:327`)
+  does not reach a path-only job.
+- **Report-only under a gate that applies only for a path relation.** Path rows and path
+  findings never block (next bullets). The existing gate faults keep their behaviour for every
+  gate that applies: a required gate that never ran when the route ends, and a failure outside
+  the per-end catch of `check_keys` (`verification/postmask/_keys.py:175`, which turns any error
+  of one end into that end's `error` row, so a path end that fails becomes a capped path row).
+  These are wiring faults, not findings, and fail closed as they do for a relationship-only job. The leaf type logic stays in
   `_nested_json/_paths.py`, outside the `post-scan-key-core` sentry's scope
   (`tests/sentry/post_scan/_scan.py:187`), so `_keys.py` and `_post_scan.py` add no type compare
   and no baseline entry there.
@@ -568,7 +596,7 @@ the existing `key_type_mismatch` status, as for column ends.
   `policy_validation`; it never reads `path_keys`, and a `warning` finding never blocks, so
   `_blocked.py` does not change. AT-E4b-4 proves a run whose path relation has introduced orphans
   is not blocked.
-- **Contract text.** `post-scan-integrity/v3` (`docs/compatibility-contract.md:282`) gains, as
+- **Contract text.** `post-scan-integrity/v3` (`docs/compatibility-contract.md:295`) gains, as
   additive members only: `fk_preservation[].path` (`null` for column relations), and the report
   member `path_keys`, present only when the config declares a path relation, whose rows have the
   `keys` row shape plus `path` and `unreadable_rows`. The tag stays `v3`.
@@ -608,6 +636,7 @@ JSONPath subset, the serialization contract, the bounds and the route matrix.
 | F23 | A new nested warning code is missing from a registry, so a route admits or declines wrongly | Codes added to all three registries in the same slice | AT-E1-14, AT-E4a-3 |
 | F24 | Pass 1 holds every distinct key of a map-of-maps column | Online collapse, key rules 1 and 2 before storing, tracked-level cap | AT-E2-12 |
 | F25 | The post-scan gate never counts path keys (wired at a site that does not read config) | `_post_scan.py` and `fk_preservation.py` call `path_relations(config)` | AT-E4b-3, AT-E4b-7 |
+| F29 | A job whose only relation is a path relation runs no gate, so no path-key counts exist | `post_scan_gate_applies` reads `path_relations(config)` | AT-E4b-8 |
 | F26 | A path-relation orphan blocks a run | Finding capped at `warning`; path rows in `path_keys`, which the verdict does not read | AT-E4b-4 |
 | F27 | Rules `$.a` and `$.ab` reported as overlapping | Overlap on structured path tuples | AT-E3b-2 |
 | F28 | The handler move changes a keyed baseline entry count or a line | Move only, re-key by path, equal counts | AT-E1a-1 |
@@ -642,7 +671,7 @@ Choke points:
 | Every JSON cell is read by the one strict reader and nested cells are written with the serialization contract | `_canonical.strict_json_read` and `strict_json_write`; the nested sub-package and `profiling/paths` are the callers | `tests/sentry/defects/test_nested_json_choke_point.py`: no `json.loads` or `json.dumps` call in `execution/_strategies/nested/`, `_nested_json/` or `profiling/paths/`; plus AT-E1-1 | put back `json.dumps(parsed)` in `nested/_leaves.py` |
 | Every reader of a nested child goes through `nested_children` | `_nested_json/_rules.py` | `tests/sentry/defects/test_nested_child_choke_point.py` walks the syntax tree: a module that compares a strategy to the literal `"nested"` (`==`, `in (...)`, dict key) and reads `.get("strategy")`, `["strategy"]`, `.get("strategy_config")` or `["strategy_config"]` must import `nested_children`; seeded red case per shape. Plus AT-E3b-4 behavior cells | revert `plan/_checks_top_code.py:146` to `pc.get("strategy")` |
 | Discovery output carries no value | `profiling/paths/_observe.py` builds `PathObservationCore` from counts, kind tokens, ids and checked segments only | AT-E2-2 canary scan of the whole core dict and caplog | write the raw key into the segment |
-| Path relations are listed in one place | `_nested_json.path_relations(config)`, called by the three modules that read the config for relations: `profiling/scan_set.py` (through the `scan_sources` keyword), `execution/pipeline/_post_scan.py` and `verification/postmask/fk_preservation.py` | AT-E4b-2 (pre and post scan agree), AT-E4b-3 (gate, through `run_pipeline`), AT-E4b-7 (`run_post_mask` over frames), AT-E4a-5 | in `_post_scan._PostScanGate._keys`, pass `path_relations=()` instead of `self._path_relations()`; second mutation: drop `path_relations(config)` from `fk_findings` |
+| Path relations are listed in one place | `_nested_json.path_relations(config)`, called by the four modules that read the config for relations: `profiling/scan_set.py` (through the `scan_sources` keyword), `config/_post_scan.py` (`post_scan_gate_applies`), `execution/pipeline/_post_scan.py` and `verification/postmask/fk_preservation.py` | AT-E4b-2 (pre and post scan agree), AT-E4b-3 (gate, through `run_pipeline`), AT-E4b-7 (`run_post_mask` over frames), AT-E4b-8 (gate applies for a path relation alone), AT-E4a-5, AT-E4a-6 | in `_post_scan._PostScanGate._keys`, pass `path_relations=()` instead of `self._path_relations()`; second mutation: drop `path_relations(config)` from `fk_findings`; third mutation: `post_scan_gate_applies` ignores path relations |
 | Path keys are extracted in one place | `_nested_json.path_key_batches`, called by `_scan_integrity._open_keys` and `_keys._Run._lookup` | AT-E4b-2 | load the raw JSON text as the key in `_keys._Run._lookup` |
 
 The site list for the child choke point at the base: `plan/_checks_top_code.py:146`,
@@ -677,8 +706,12 @@ builders use the test VMs or the Mac.
   assertion edited); `git diff -M --stat` shows `_nested.py` renamed to `nested/_handler.py` at
   100% similarity; each re-keyed baseline file has the same entry count as the base and differs
   from the base only in the path text (checked by a diff of the files with the path substituted
-  back); the fan-out sentry and the CODEMAP sub-package check pass at 28. Mutation: leave one
-  `reason-baseline.json` `sources` entry on the old path (the F29 baseline test goes red).
+  back); in `reason-baseline.json` the ten entries that name `_nested.py` at the base (`:637` to
+  `:644` and the warning entries at `:835` and `:836`) name `nested/_handler.py` after, and the
+  count of entries naming either path is 10 before and after; the fan-out sentry and the CODEMAP
+  sub-package check pass at 28. Mutation: leave one `reason-baseline.json` `sources` entry on the
+  old path, once for a runtime entry and once for a warning entry (the F29 baseline test goes
+  red each time).
 
 ### 82-E1 (`tests/unit/canonical/test_strict_json_read.py`, cells in `tests/unit/execution/test_nested_strategy.py`)
 
@@ -827,7 +860,7 @@ builders use the test VMs or the Mac.
   `...provider_config.rules[1].target`. Mutation: drop the `unless_present` test in
   `requirement_applies`.
 
-### 82-E4a (`tests/unit/plan/checks/test_nested_references.py`, `tests/unit/execution/test_nested_references.py`)
+### 82-E4a (`tests/unit/plan/checks/test_nested_references.py`, `tests/unit/execution/test_nested_references.py`, `tests/unit/nested_json/test_path_keys.py`)
 
 - AT-E4a-1: parent `customers.id` (hash, namespace `customer`) and a rule `$.customer_id` with
   `references` give equal masked keys for equal source keys; joining the outputs on the masked
@@ -851,6 +884,13 @@ builders use the test VMs or the Mac.
 - AT-E4a-5: a config with a reference compiles a plan whose `relationships` equal those of the
   same config without it, and runs on the full-frame and sequential routes with identical
   non-nested output. Mutation: append the path relation to `relationships`.
+- AT-E4a-6: `path_relations(config)` returns one `PathRelation` per `references` rule (parent
+  table and column, child table and payload column, `path`) in config order, and `()` for a
+  config with no reference; `path_key_batches` over an integer parent yields an integer key
+  column where a missing or JSON null leaf is null, and a malformed cell, a string leaf `"42"`
+  and an object leaf are counted in `unreadable_rows` and not loaded. Mutations: skip rules
+  given in the `rules` form in `path_relations`; coerce `"42"` with `int()` in
+  `path_key_batches`.
 
 ### 82-E4b (`tests/unit/nested_json/test_path_keys.py`, `tests/unit/detection_verification/postscan/test_path_relations.py`, `tests/integration/test_nested_path_relations.py`)
 
@@ -867,8 +907,7 @@ builders use the test VMs or the Mac.
   `fk_preservation` finding has the same `path`, and `report["keys"]` is byte-equal to the same
   run without the rule. Mutations: in `_post_scan._PostScanGate._keys`, pass `path_relations=()`;
   in `tee_reader`, call `key_columns` without the path relations (the payload column is not teed
-  and the row is not `checked`). A third cell: the same config with `post_scan` off and no
-  `relationships` runs no gate (`post_scan_gate_applies` unchanged).
+  and the row is not `checked`).
 - AT-E4b-4 (report-only): the same `run_pipeline` setup where the run introduces path orphans
   (the builder drops parent rows with a row filter that path relations do not steer, for example
   `subset` on `customers` alone): the path finding has severity `warning` and the orphan count,
@@ -884,6 +923,15 @@ builders use the test VMs or the Mac.
 - AT-E4b-7: `run_post_mask` over pandas frames (no gate, no `keys` passed) gives a
   `fk_preservation` finding with `path` for a path relation and the right orphan count.
   Mutation: drop `path_relations(config)` from `fk_findings`.
+- AT-E4b-8 (gate applies for a path relation alone, red first): `run_pipeline` on the AT-E4b-3
+  CSV sources with no `relationships`, no `post_scan` block and one `references` rule whose
+  output has 2 orphan path keys: `post_scan_gate_applies(config)` is true, the result's report
+  holds `path_keys` with one row (`path == "$.customer_id"`, status `checked`, the orphan
+  count) and an `fk_preservation` finding with the same `path`, severity `warning`, the verdict
+  does not block, and the run publishes. Control: the same config without the `references` rule
+  gives `post_scan_gate_applies(config)` false and no post-scan report, as on the base. On the
+  82-E4b base the first cell is red (no gate runs, no report). Mutation: `post_scan_gate_applies`
+  ignores path relations (the report is absent).
 
 ### 82-E5 (`tests/connectors/test_postgres_snapshot_jsonb.py`, `pg_integration`)
 
@@ -905,7 +953,7 @@ builders use the test VMs or the Mac.
   pre-GA semantic change). The builder lists each moved golden or fixture by name; AT-E1-2 and
   AT-E1-13 prove ordinary cells and null-free leaves do not move.
 - Keyed baselines re-keyed by path only in 82-E1a, with equal entry counts (section 4.1):
-  `tests/fixtures/f29/reason-baseline.json`, `tests/fixtures/f29/producer-inventory.json`,
+  `tests/fixtures/f29/reason-baseline.json` (ten entries: `:637` to `:644` and `:835` to `:836`), `tests/fixtures/f29/producer-inventory.json`,
   `tests/sentry/baselines/f29-producer-inventory.json`,
   `tests/sentry/baselines/gcs-call-kwargs.json:128`, the allowlisted path in
   `tests/sentry/test_physical_seam_disconnection.py:591`. Later slices add entries for new
@@ -984,11 +1032,12 @@ consumers: `strict_json_read` and `strict_json_write` are used by the nested han
 | Surface | Change | Rule followed |
 |---|---|---|
 | `scan-set/v1` (`docs/compatibility-contract.md:251`) | Additive: `FieldCore.nested`, `ChildFactsCore.path`, `ChildFactsCore.unreadable_rows`, all defaulted `None`; strict write models; read model ignores unknowns. The contract text says every field in a new record carries `"nested": null` when it is not a JSON column, and every child fact carries `"path": null` and `"unreadable_rows": null` for column relations | Same precedent as SCAN-ML M3a `model_hits`; contract text, frozen-surface map row and a corpus sample in the same slice |
-| `post-scan-integrity/v3` (`docs/compatibility-contract.md:282`) | Additive only: `fk_preservation[].path` (`null` for column relations); report member `path_keys`, present only when a path relation is declared, rows shaped as `keys` rows plus `path` and `unreadable_rows`; `keys` rows of column relations keep their exact members; `check_keys` gains keyword `path_relations=()` | Additive; same precedent as SCAN-ML M4 `residual_pii` fields; contract text in 82-E4b; read-back covered by AT-E4b-6 |
+| `post-scan-integrity/v3` (`docs/compatibility-contract.md:295`) | Additive only: `fk_preservation[].path` (`null` for column relations); report member `path_keys`, present only when a path relation is declared, rows shaped as `keys` rows plus `path` and `unreadable_rows`; `keys` rows of column relations keep their exact members; `check_keys` gains keyword `path_relations=()` | Additive; same precedent as SCAN-ML M4 `residual_pii` fields; contract text in 82-E4b; read-back covered by AT-E4b-6 |
 | `strict_json_loads` and `STRICT_JSON_TOKENS` | Behavior unchanged; the token tuple gains `oversized` and `too_deep` at the end | Internal foundation; AT-E1-12 pins the existing callers |
 | Module path of the nested handler | `execution/_strategies/_nested.py` becomes `execution/_strategies/nested/_handler.py` (82-E1a, move only) | Private module; the strategy registry name `nested` is unchanged |
+| `post_scan_gate_applies` (exported from `decoy_engine.config`) | Also true when the config declares a path relation (82-E4b). Configs without a `references` rule get the same answer as today | Additive reason for an existing gate; a path-only job had no integrity check before, and the new check is report-only for path rows; AT-E4b-8 with its control cell |
 | `scan_sources` signature | Additive keyword-only `nested_paths=True`, `path_relations=()` | Contract section 3.1: new keyword-only parameters are additive |
-| `nested` `provider_config` (`docs/compatibility-contract.md:1016`) | Additive `rules` list with per-rule `namespace` and `references`; the single form is unchanged | Required-settings text updated |
+| `nested` `provider_config` (`docs/compatibility-contract.md:1029`) | Additive `rules` list with per-rule `namespace` and `references`; the single form is unchanged | Required-settings text updated |
 | `nested` output bytes | Change only for cells with non-round-trip numbers (bug fix), for integer leaves with a null (object dtype), and for a child `NaN` output (now JSON `null`) | Recorded as pre-GA semantic changes in the contract and the changelog in 82-E1 |
 | `StrategyRequirement` | Additive field `unless_present` (default `None`) | Internal contract; existing rows unchanged |
 | `StrategyContext` | Additive field `nested_draw_column` (default `""`) | Internal; empty keeps every draw identity unchanged |
@@ -1003,7 +1052,7 @@ consumers: `strict_json_read` and `strict_json_write` are used by the nested han
 | 2 | Cleanup missing on an exit path | No new files or scratch; path keys use the existing protected spill dir and its cleanup in `_scan_integrity` | AT-E4b-2 plus the existing spill cleanup tests | open a second DuckDB spill outside the allocator |
 | 3 | State and concurrency | Reader, walker and rules are pure functions; constants are module `Final`; no cache | AT-E2-8 determinism | memoize observations in a module global |
 | 4 | Route parity and silent fallback | `nested` keeps today's route set; path relations never enter `relationships`; route matrix in the doc | AT-E4a-5, existing route-decline tests | append the path relation to `relationships` |
-| 5 | Referential integrity | Reference identity checked at plan time (namespace, strategy, key kind bound from the profile) and at run time (leaf kind); one extractor for pre and post scan; path orphans report-only | AT-E4a-1, AT-E4a-3, AT-E4a-4, AT-E4b-2, AT-E4b-4 | coerce `"42"` to `42` |
+| 5 | Referential integrity | Reference identity checked at plan time (namespace, strategy, key kind bound from the profile) and at run time (leaf kind); one extractor for pre and post scan; path orphans report-only | AT-E4a-1, AT-E4a-3, AT-E4a-4, AT-E4a-6, AT-E4b-2, AT-E4b-4, AT-E4b-8 | coerce `"42"` to `42` |
 | 6 | Untrusted producer data | JSON cells are untrusted: byte, depth and duplicate bounds before use; key rule before any key text is written | AT-E1-3, AT-E1-4, AT-E1-5, AT-E2-5 | remove the byte check |
 | 7 | Check then use (TOCTOU) | Size checked on the same in-memory text that is parsed; no re-read of the source | AT-E1-4 | re-read the cell after the size check |
 | 8 | Weak tests and overclaimed evidence | Red-first cells with named mutations on the final head; JSONB cells run on a Postgres node and a skip is reported, never counted as a pass | AT-E5-1 to AT-E5-3, AT-E1-2 | assert only that output parses |
@@ -1083,17 +1132,24 @@ baselines are re-keyed by path with equal counts (82-E1a). The list pin in
 | 82-E2b | `profiling/paths/` (two-pass walk with bounded pass-1 state, key rule with per-key detectors and appearance, cells cap), `SCAN_*` constants, `NestedCore`, scan wiring, scan warning codes, contract text | 10: `paths/__init__.py`, `paths/_walk.py`, `paths/_observe.py`, `_scan_core.py`, `scan_set.py`, `profiling/__init__.py`, `_canonical/_json.py`, `_canonical/__init__.py`, `reasons/warning/_nested_paths.py`, `reasons/warning/__init__.py` | 800 | R2 (value leaks): Dennis then Codex | 82-E1, 82-E2a |
 | 82-E3a | `nested_children(provider_config)` choke point with `config_path`, migrate the seven child readers, sentry, layer contract | 10: `_nested_json/__init__.py`, `_nested_json/_rules.py`, `.importlinter`, `nested/_handler.py`, `plan/_checks_top_code.py`, `plan/_checks_date_shift.py`, `plan/_checks_bucket_perturb.py`, `secret_providers/_requirements.py`, `execution/_column_access.py`, `execution/_pipeline_multi_table.py` | 400 | R2 (cross-cutting refactor): Dennis then Codex | 82-E1 |
 | 82-E3b | `rules` form, either-form requirement rows, separate per-rule draw identity, one `code_set` rule per column, match-all-before-write overlap on path tuples, preflight to every child, plan checks | 10: `_nested_json/_rules.py`, `nested/_handler.py`, `nested/_apply.py`, `plan/checks/_nested_rules.py`, `plan/checks/__init__.py`, `plan/_compile.py`, `contracts/strategy_requirements.py`, `execution/_adapter.py`, `reasons/plan/_nested_rules.py`, `reasons/plan/__init__.py` | 750 | R2 (masking identity): Dennis then Codex | 82-E3a |
-| 82-E4a | References: path shape, identity and gated-parent refusals, key kind bound at compile, leaf-kind row error and its warning code in the three registries | 9: `_nested_json/_rules.py`, `nested/_handler.py`, `nested/_apply.py`, `plan/checks/_nested_rules.py`, `plan/_compile.py`, `reasons/plan/_nested_rules.py`, `reasons/warning/_nested_cells.py`, `execution/_mixed_admission.py`, `execution/native/_capabilities.py` | 550 | R2 (referential integrity): Dennis then Codex | 82-E3b |
-| 82-E4b | `path_relations`, `path_key_batches`, pre-scan facts, post-scan gate and findings, report-only cap, additive child facts, `KeyResult.path`, `FKPreservationFinding.path`, `path_keys`, contract text | 10: `_nested_json/_paths.py`, `_nested_json/_rules.py`, `profiling/_scan_integrity.py`, `profiling/scan_set.py`, `profiling/_scan_core.py`, `profiling/__init__.py`, `verification/postmask/_keys.py`, `execution/pipeline/_post_scan.py`, `verification/postmask/fk_preservation.py`, `verification/postmask/types.py` | 700 | R2 (referential integrity, frozen report): Dennis then Codex | 82-E4a, 82-E2b |
+| 82-E4a | References: path shape, identity and gated-parent refusals, key kind bound at compile, leaf-kind row error and its warning code in the three registries; `path_relations` and `path_key_batches` defined, not yet read | 10: `_nested_json/_rules.py`, `_nested_json/_paths.py`, `nested/_handler.py`, `nested/_apply.py`, `plan/checks/_nested_rules.py`, `plan/_compile.py`, `reasons/plan/_nested_rules.py`, `reasons/warning/_nested_cells.py`, `execution/_mixed_admission.py`, `execution/native/_capabilities.py` | 700 | R2 (referential integrity): Dennis then Codex | 82-E3b |
+| 82-E4b | Pre-scan facts, post-scan gate and findings, gate applies for a path relation, report-only cap, additive child facts, `KeyResult.path`, `FKPreservationFinding.path`, `path_keys`, contract text | 9: `config/_post_scan.py`, `profiling/_scan_integrity.py`, `profiling/scan_set.py`, `profiling/_scan_core.py`, `profiling/__init__.py`, `verification/postmask/_keys.py`, `execution/pipeline/_post_scan.py`, `verification/postmask/fk_preservation.py`, `verification/postmask/types.py` | 600 | R2 (referential integrity, frozen report, gate activation): Dennis then Codex | 82-E4a, 82-E2b |
 | 82-E5 | JSONB `pg_integration` acceptance, `docs/nested-json.md`, changelog, roadmap note | 0 | 400 (tests and docs) | R1: Codex | 82-E4b |
+
+The ten-file limit counts production files under `src/` and `.importlinter` only. Tests,
+baselines, fixtures, sentry maps, `CODEMAP.md` and docs are listed in a row where they move but
+are not counted.
 
 The split of row 82-E4 follows the ten-file limit. Dennis round 2 proposed references plus
 pre-scan in 82-E4a and post-scan in 82-E4b; that puts 12 files in 82-E4a. The split above keeps
 pre-scan and post-scan together in 82-E4b, because AT-E4b-2 (both sides count the same orphans
-through one extractor) needs both in one slice, and gives each slice 10 files or fewer.
+through one extractor) needs both in one slice. Revision 4 adds `config/_post_scan.py` to
+82-E4b (the gate applies for a path relation) and moves the two pure definitions
+`path_relations` and `path_key_batches` into 82-E4a, so 82-E4a has 10 production files and
+82-E4b has 9.
 `verification/postmask/_blocked.py` does not change (section 4.4).
 
-Expected size in total: about 4,300 changed lines including tests, plus the 585-line handler move. New public names:
+Expected size in total: about 4,350 changed lines including tests, plus the 585-line handler move. New public names:
 `NestedCore`, `PathObservationCore`, `PathRelation`, `path_relations`, `TableScan.nested`,
 `FieldCore.nested`, and the `scan_sources` keywords `nested_paths` and `path_relations` (exported
 from `decoy_engine.profiling`). A slice that runs well past its line budget stops and explains before
@@ -1111,7 +1167,7 @@ per merge-batch head under the merge-train rule.
   82-E2a. 82-E3a after 82-E1. 82-E3b after 82-E3a. 82-E4a after 82-E3b. 82-E4b after 82-E4a and
   82-E2b. 82-E5 last.
 - One writer at a time on the nested handler sub-package (82-E1a, 82-E1, 82-E3a, 82-E3b, 82-E4a
-  in that order), on `_nested_json/_rules.py` (82-E3a, 82-E3b, 82-E4a, 82-E4b), on
+  in that order), on `_nested_json/_rules.py` (82-E3a, 82-E3b, 82-E4a), on
   `_canonical/_json.py` (82-E1, 82-E2b), on the nested warning-code registries (82-E1, 82-E4a) and
   on `profiling/scan_set.py` and `_scan_core.py` (82-E2a, 82-E2b, 82-E4b).
 - Each merged slice ships in the next daily engine release. No CLI repin is required for this row;
@@ -1190,8 +1246,6 @@ per merge-batch head under the merge-train rule.
 - F-6 (V2-LOG): custom detectors (`run_all_detectors(custom=)`) and the `pre_scan` model detector
   are not run on path leaves; path `detector_hits` come from the built-in regex detectors only
   (section 4.2).
-- F-7: a path relation makes the post-scan gate apply on its own (today it runs only when the gate
-  already applies, section 4.4).
 
 ## 20. Review record
 
@@ -1258,3 +1312,24 @@ per merge-batch head under the merge-train rule.
     re-export from `scan_set.py`. L7: custom and model detectors dropped on paths, recorded as
     F-6. L8: `StrategyRequirement.unless_present` either-form (AT-E3b-9), `NestedChild.config_path`
     prefix (AT-E3a-1), single-cell collapse documented (AT-E2-10).
+- Revision 4, Codex round 1: NO-GO, 1 V1 and 3 V2-LOG findings, all plan edits, all applied.
+  Base refreshed to `62353dc0b`.
+  - V1-1: a path relation now makes the post-scan gate apply on its own. `post_scan_gate_applies`
+    reads `path_relations(config)` through the one choke point, in 82-E4b with the post-scan
+    wiring, so the gate never applies before it can count path keys. Report-only kept: path rows
+    and findings never block; existing gate wiring faults fail closed as for a relationship-only
+    job (sections 2, 4.4, 5 F29, 6, 12; AT-E4b-8 red first, mutation "gate ignores path
+    relations"; the old AT-E4b-3 cell that pinned the gate as unchanged is removed). F-7 removed
+    from the follow-ups. To keep 82-E4b within ten production files, `path_relations` and
+    `path_key_batches` are defined (not yet read) in 82-E4a (AT-E4a-6): 82-E4a has 10 production
+    files, 82-E4b has 9.
+  - V2-LOG-2: 82-E1a lists the two warning entries `nested_cell_json_parse_error` and
+    `nested_jsonpath_path_overlap` (`reason-baseline.json:835` to `:836`) beside the eight runtime
+    entries; AT-E1a-1 counts ten entries and its mutation covers a warning entry (sections 4.1, 9).
+  - V2-LOG-3: the slice-table note states the ten-file limit counts production files only
+    (`src/` and `.importlinter`); tests, baselines, maps, `CODEMAP.md` and docs are listed, not
+    counted (section 15).
+  - V2-LOG-4: base moved from `3bddfc9ff` to `62353dc0b`. Citations re-checked: the contract
+    lines move to `docs/compatibility-contract.md:295` and `:1029`, `profiling/__init__.py:75`
+    moves to `:77`; the nested handler, the keyed baselines, `CODEMAP.md` rows and the other cited
+    lines are unchanged.
