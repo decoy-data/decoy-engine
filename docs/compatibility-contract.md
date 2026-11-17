@@ -203,7 +203,7 @@ composite/v1  custom/v1   ... (every disguise spec)
 subset-manifest/v1         decoy-run-result/v1
 decoy-record/v1            sample-run/v1         decoy-library-export/v1
 decoy-job-log/v1
-scan-set/v1
+scan-set/v1             scan-diff/v1
 decoy-resume-run/v1    decoy-resume-table/v1
 lock/v1
 ```
@@ -247,6 +247,19 @@ that looks like data, the core writes positional names (`c0..cn`) instead. A mis
 the guard cannot recognise (a person name, an address) is the stated limit. The core holds no
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
+
+`scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
+`diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
+refused, scores strict floats, drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The
+tag is required. A reader accepts `scan-diff/v1` and `scan-diff/v1.<minor>`, and refuses another major, a missing tag
+and text after the tag. A drift kind this reader does not know (one a later minor could add) is refused with fixed
+text, because a reader that dropped a kind could report a drifted diff as clean. The five kinds are, per table,
+`pii_bucket_increased`, `new_high_pii_field` and `new_quasi_identifier_group`, and, per set, `table_added` and
+`no_common_table` (the one kind when no table matches). `tables_removed` and `detectors_changed` are information, not
+drift. The document holds table and column names, PII scores, buckets, quasi-identifier group names, a risk delta and
+engine versions, never a cell value. `read_scan_set` is the one reader of a parsed `scan-set/v1` or
+`scan-set/v1.<minor>` document, with the same tag rule. The new names are exported from `decoy_engine.profiling`, not
+from `decoy_engine`. Corpus samples and the parity pairs are in `tests/integration/compat_corpus/scan_diff/`.
 
 `post-scan-integrity/v3` is the report `run_post_mask` returns (v2 until SCAN-ML M4). Recorded pre-GA semantic change
 (POSTSCAN-STREAM PS-4, 2026-11-12): each `fk_preservation[]` finding now derives from the declared
