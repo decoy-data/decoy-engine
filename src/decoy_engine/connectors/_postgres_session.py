@@ -39,7 +39,7 @@ __all__ = [
     "open_read_session",
     "quote_ident",
     "raise_for_interrupt",
-    "raise_setup_failure",
+    "raise_for_setup_interrupt",
     "read_session",
     "sql_literal",
     "validate_identifier",
@@ -151,16 +151,15 @@ def raise_for_interrupt(deadline: Deadline, cause_type: str) -> None:
         raise KeyboardInterrupt
 
 
-def raise_setup_failure(deadline: Deadline | None, code: str, cause_type: str) -> None:
-    """Map a failed setup step. Call it after the ``except`` block has closed.
+def raise_for_setup_interrupt(deadline: Deadline | None, cause_type: str) -> None:
+    """The one interrupt mapping for every setup step (connect, extension load, attach).
 
-    One path for connect, extension load, attach and catalog read: a DuckDB interrupt is routed
-    through ``raise_for_interrupt`` first (deadline passed: ``deadline_exceeded``; otherwise the
-    operator's ``KeyboardInterrupt``), and any other failure becomes ``code``. The coded error is
-    raised outside the handler, so it carries no ``__cause__`` or ``__context__``.
+    Call it after the ``except`` block has closed and before raising the step's own coded
+    error: a DuckDB interrupt becomes ``deadline_exceeded`` (deadline passed) or
+    ``KeyboardInterrupt``, and any other failure falls through to the caller's code. The coded
+    error is raised outside the handler, so it carries no ``__cause__`` or ``__context__``.
     """
     raise_for_interrupt(deadline if deadline is not None else Deadline(0), cause_type)
-    raise PostgresSnapshotError(code, cause_type=cause_type)
 
 
 def _extension_directory_settings(directory: Path) -> dict[str, Any]:
@@ -205,7 +204,8 @@ def open_connection(
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise_setup_failure(deadline, reasons.connector.DUCKDB_UNAVAILABLE, cause_type)
+        raise_for_setup_interrupt(deadline, cause_type)
+        raise PostgresSnapshotError(reasons.connector.DUCKDB_UNAVAILABLE, cause_type=cause_type)
     return conn
 
 
@@ -222,7 +222,8 @@ def load_postgres_extension(
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise_setup_failure(deadline, reasons.connector.EXTENSION_UNAVAILABLE, cause_type)
+        raise_for_setup_interrupt(deadline, cause_type)
+        raise PostgresSnapshotError(reasons.connector.EXTENSION_UNAVAILABLE, cause_type=cause_type)
     if not row or not row[0]:
         raise PostgresSnapshotError(reasons.connector.EXTENSION_UNAVAILABLE)
     installed_under = str(row[1] or "")
@@ -246,7 +247,8 @@ def attach_read_only(
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:
-        raise_setup_failure(deadline, reasons.connector.SOURCE_UNREACHABLE, cause_type)
+        raise_for_setup_interrupt(deadline, cause_type)
+        raise PostgresSnapshotError(reasons.connector.SOURCE_UNREACHABLE, cause_type=cause_type)
 
 
 def open_read_session(
