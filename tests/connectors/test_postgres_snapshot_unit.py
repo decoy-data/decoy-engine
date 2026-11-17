@@ -371,3 +371,44 @@ def test_a_partial_selection_is_not_shape_checked(fake_pg, tmp_path):
 def test_whole_relation_rejects_a_non_bool():
     with pytest.raises(ValidationError):
         _sel(whole_relation=1)
+
+
+# ----- relation_columns: the catalog read before any row --------------------------------------
+
+from decoy_engine.connectors.postgres_catalog import relation_columns  # noqa: E402
+
+
+def test_relation_columns_returns_names_in_table_order(fake_pg, tmp_path):
+    fake_pg(catalog=(("z", "text", "b"), ("a", "text", "b")))
+    cols = relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t")])
+    assert cols == {"public.t": ["z", "a"]}
+
+
+def test_a_catalog_column_name_that_fails_the_rule_is_refused_by_position(fake_pg, tmp_path):
+    fake_pg(catalog=(("a", "text", "b"), ('a"b', "text", "b")))
+    with pytest.raises(PostgresSnapshotError) as ei:
+        relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t")])
+    assert ei.value.code == "column_name_unsupported"
+    assert ei.value.location == "public.t#2"
+    assert 'a"b' not in str(ei.value) + repr(ei.value)
+    assert ei.value.__context__ is None and ei.value.__cause__ is None
+
+
+def test_relation_columns_refuses_a_relation_named_twice(fake_pg, tmp_path):
+    fake_pg()
+    with pytest.raises(PostgresSnapshotError) as ei:
+        relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t"), ("public", "t")])
+    assert ei.value.code == "duplicate_relation"
+
+
+def test_relation_columns_reports_a_missing_relation(fake_pg, tmp_path):
+    fake_pg()
+    with pytest.raises(PostgresSnapshotError) as ei:
+        relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "other")])
+    assert ei.value.code == "relation_not_found"
+
+
+def test_relation_columns_interrupt_is_keyboard_interrupt(fake_pg, tmp_path):
+    fake_pg(fail={"AS q(nspname": "interrupt"})
+    with pytest.raises(KeyboardInterrupt):
+        relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t")])
