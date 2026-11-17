@@ -334,7 +334,7 @@ def test_at2_a_flipped_digest_nibble_under_the_live_value_fails_the_pin_cli(tree
     assert re.search(r"[0-9a-f]{64}", res.stderr) is None, "messages name fields, never digests"
 
 
-def test_pin_cli_check_and_release_ready_accept_the_checked_in_tree(tree) -> None:
-    for mode in ("--check", "--release-ready"):
-        res = pin_cli(tree, mode)
-        assert res.returncode == 0, res.stderr[-800:]
+def test_pin_cli_check_accepts_the_checked_in_tree(tree) -> None:
+    # --release-ready holds only after release prep stamps pending reasons; release_checks.sh runs it.
+    res = pin_cli(tree, "--check")
+    assert res.returncode == 0, res.stderr[-800:]
