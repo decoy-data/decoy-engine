@@ -29,18 +29,20 @@ from pydantic_core import PydanticCustomError
 from decoy_engine.profiling.scan_set import PII_CANDIDATE_THRESHOLD, _relaxed
 
 SCAN_DIFF_SCHEMA: Final = "scan-diff/v1"
-PiiBucket = Literal["none", "low", "med", "high"]
-TableDriftKind = Literal["pii_bucket_increased", "new_high_pii_field", "new_quasi_identifier_group"]
-SetDriftKind = Literal["table_added", "no_common_table"]
+_PiiBucket = Literal["none", "low", "med", "high"]
+_TableDriftKind = Literal[
+    "pii_bucket_increased", "new_high_pii_field", "new_quasi_identifier_group"
+]
+_SetDriftKind = Literal["table_added", "no_common_table"]
 
 _MED_THRESHOLD: Final = 0.3
 _RANK: Final[dict[str, int]] = {"none": 0, "low": 1, "med": 2, "high": 3}
 _TAG: Final = re.compile(re.escape(SCAN_DIFF_SCHEMA) + r"(\.[0-9]+)?")
-_KINDS: Final = frozenset(get_args(TableDriftKind)) | frozenset(get_args(SetDriftKind))
+_KINDS: Final = frozenset(get_args(_TableDriftKind)) | frozenset(get_args(_SetDriftKind))
 _UNKNOWN_KIND: Final = "scan-diff document holds an unknown drift kind"
 
 
-def pii_bucket(score: float | None) -> PiiBucket:
+def pii_bucket(score: float | None) -> _PiiBucket:
     """The bucket of a PII score: `high` is the engine's PII candidate threshold."""
     if score is None:
         return "none"
@@ -65,8 +67,8 @@ class FieldChange:
     name: str
     old_score: float
     new_score: float
-    old_bucket: PiiBucket
-    new_bucket: PiiBucket
+    old_bucket: _PiiBucket
+    new_bucket: _PiiBucket
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -84,7 +86,7 @@ class FieldPresence:
 
     name: str
     pii_score: float | None
-    pii_bucket: PiiBucket
+    pii_bucket: _PiiBucket
 
     def as_dict(self) -> dict[str, Any]:
         return {"name": self.name, "pii_score": self.pii_score, "pii_bucket": self.pii_bucket}
@@ -105,8 +107,8 @@ class TableDiff:
     table: str = ""
 
     @property
-    def drift_kinds(self) -> tuple[TableDriftKind, ...]:
-        kinds: list[TableDriftKind] = []
+    def drift_kinds(self) -> tuple[_TableDriftKind, ...]:
+        kinds: list[_TableDriftKind] = []
         if self.pii_increased:
             kinds.append("pii_bucket_increased")
         if self.new_high_pii:
@@ -147,8 +149,8 @@ class ScanSetDiff:
     no_common_table: bool
 
     @property
-    def drift_kinds(self) -> tuple[SetDriftKind, ...]:
-        kinds: list[SetDriftKind] = []
+    def drift_kinds(self) -> tuple[_SetDriftKind, ...]:
+        kinds: list[_SetDriftKind] = []
         if self.tables_added:
             kinds.append("table_added")
         if self.no_common_table:
@@ -287,22 +289,22 @@ class _Core(BaseModel):
 
 
 _Score = Annotated[float, Field(allow_inf_nan=False)]
-_TableKind = Annotated[TableDriftKind, BeforeValidator(_known_kind)]
-_SetKind = Annotated[SetDriftKind, BeforeValidator(_known_kind)]
+_TableKind = Annotated[_TableDriftKind, BeforeValidator(_known_kind)]
+_SetKind = Annotated[_SetDriftKind, BeforeValidator(_known_kind)]
 
 
 class FieldPresenceCore(_Core):
     name: str
     pii_score: _Score | None
-    pii_bucket: PiiBucket
+    pii_bucket: _PiiBucket
 
 
 class FieldChangeCore(_Core):
     name: str
     old_score: _Score
     new_score: _Score
-    old_bucket: PiiBucket
-    new_bucket: PiiBucket
+    old_bucket: _PiiBucket
+    new_bucket: _PiiBucket
 
 
 class TableDiffCore(_Core):
