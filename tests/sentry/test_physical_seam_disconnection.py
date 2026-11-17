@@ -45,6 +45,7 @@ modification.
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -52,6 +53,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.layout._reexport_init import is_pure_reexport_init
 from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
@@ -596,8 +598,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
             "src/decoy_engine/execution/_strategies/nested/_handler.py",
-            # Package marker for the nested handler move: a one-line re-export, no physical work.
-            "src/decoy_engine/execution/_strategies/nested/__init__.py",
             "src/decoy_engine/execution/_strategies/_windowed_date.py",
             # Cross-column dependency PR1: joint_mask reads its key_by driver from the pre-mask
             # source snapshot (ctx.group_anchor_snapshots), and derived gains a docstring note for
@@ -1021,6 +1021,8 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
         # tree was deleted; permit those deletions wholesale rather than enumerate.
         and "/execution/polars/" not in name
         and name not in permitted_non_physical
+        # A new or changed pure re-export `__init__.py` needs no hand entry.
+        and not is_pure_reexport_init(REPO_ROOT / name)
     ]
     assert not unexpected, (
         "Files under src/decoy_engine/execution changed versus origin/main outside "
@@ -1062,3 +1064,62 @@ def test_compile_physical_plan_is_unreachable_from_a_fresh_import_of_run_pipelin
         "pulled in execution.physical module(s), which must stay unreachable "
         "from production until Task 4.5+:\n  - " + "\n  - ".join(hits)
     )
+
+
+def test_pure_reexport_init_is_detected(tmp_path: Path) -> None:
+    init = tmp_path / "__init__.py"
+    init.write_text(
+        '"""Doc."""\n\nfrom __future__ import annotations\n\nimport os\n'
+        "from a.b import C\n\n"
+        '__all__ = ["C"]\n'
+    )
+    assert is_pure_reexport_init(init)
+    init.write_text("from a import B\n__all__ = ('B',)\n")
+    assert is_pure_reexport_init(init)
+    init.write_text("")
+    assert is_pure_reexport_init(init)
+    other = tmp_path / "mod.py"
+    other.write_text("from a import B\n")
+    assert not is_pure_reexport_init(other)  # only __init__.py files
+    assert not is_pure_reexport_init(tmp_path / "missing" / "__init__.py")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def f(): pass\n",
+        "class C: pass\n",
+        "from a import B\nregister(B)\n",
+        "from a import B\nX = 1\n",
+        "from a import B\n__all__ = build_exports()\n",
+        "from a import B\n__all__ = [n for n in dir()]\n",
+        "from a import B\n__all__ = [B]\n",
+        "from a import B\n__all__ += ['B']\n",
+        "try:\n    from a import B\nexcept ImportError:\n    B = None\n",
+        "from a import B\n'stray string'\n",
+        "def broken(:\n",
+    ],
+)
+def test_init_with_code_is_not_pure(tmp_path: Path, body: str) -> None:
+    init = tmp_path / "__init__.py"
+    init.write_text(body)
+    assert not is_pure_reexport_init(init)
+
+
+def test_no_hand_entry_is_a_pure_reexport_init() -> None:
+    """A hand entry for a pure re-export is dead: the rule already permits the file."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    entries = [
+        n.value
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant)
+        and isinstance(n.value, str)
+        and n.value.endswith("/__init__.py")
+        and "execution/" in n.value
+    ]
+    dead = []
+    for entry in entries:
+        rel = entry if entry.startswith("src/") else f"src/decoy_engine/{entry}"
+        if is_pure_reexport_init(REPO_ROOT / rel):
+            dead.append(rel)
+    assert dead == [], f"remove these hand entries, the rule covers them: {dead}"
