@@ -323,6 +323,34 @@ def test_interrupt_with_the_deadline_set_is_deadline_exceeded(fake_pg, tmp_path)
     _no_leftovers(tmp_path)
 
 
+@pytest.mark.parametrize("fragment", ["ATTACH", "LOAD postgres", "SET TimeZone"])
+def test_setup_interrupt_without_deadline_is_keyboard_interrupt(fake_pg, tmp_path, fragment):
+    conn = fake_pg(fail={fragment: "interrupt"})
+    with pytest.raises(KeyboardInterrupt) as ei:
+        _run(tmp_path, tmp_path / "ext")
+    assert ei.value.__cause__ is None
+    assert conn.closed
+    _no_leftovers(tmp_path)
+
+
+def test_attach_interrupt_with_the_deadline_set_is_deadline_exceeded(fake_pg, tmp_path, caplog):
+    conn = fake_pg(fail={"ATTACH": "block"})
+    with pytest.raises(PostgresSnapshotError) as ei:
+        _run(tmp_path, tmp_path / "ext", deadline_s=1)
+    assert ei.value.code == "deadline_exceeded"
+    assert conn.closed
+    _assert_value_free(ei.value, caplog)
+    _no_leftovers(tmp_path)
+
+
+def test_attach_failure_still_maps_to_source_unreachable(fake_pg, tmp_path, caplog):
+    fake_pg(fail={"ATTACH": "raise"})
+    with pytest.raises(PostgresSnapshotError) as ei:
+        _run(tmp_path, tmp_path / "ext")
+    assert ei.value.code == "source_unreachable"
+    _assert_value_free(ei.value, caplog)
+
+
 # ----- AT-E6 (unit half): the shape guard -----------------------------------------------------
 
 _TWO = (("a", "text", "b"), ("b", "text", "b"))
@@ -412,3 +440,21 @@ def test_relation_columns_interrupt_is_keyboard_interrupt(fake_pg, tmp_path):
     fake_pg(fail={"AS q(nspname": "interrupt"})
     with pytest.raises(KeyboardInterrupt):
         relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t")])
+
+
+def test_relation_columns_attach_interrupt_is_keyboard_interrupt(fake_pg, tmp_path):
+    fake_pg(fail={"ATTACH": "interrupt"})
+    with pytest.raises(KeyboardInterrupt):
+        relation_columns(_cfg(tmp_path / "ext", tmp_path), [("public", "t")])
+
+
+def test_relation_columns_attach_interrupt_with_the_deadline_set_is_deadline_exceeded(
+    fake_pg, tmp_path, caplog
+):
+    fake_pg(fail={"ATTACH": "block"})
+    with pytest.raises(PostgresSnapshotError) as ei:
+        relation_columns(
+            _cfg(tmp_path / "ext", tmp_path).model_copy(update={"deadline_s": 1}), [("public", "t")]
+        )
+    assert ei.value.code == "deadline_exceeded"
+    _assert_value_free(ei.value, caplog)
