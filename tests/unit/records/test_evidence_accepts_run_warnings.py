@@ -22,6 +22,7 @@ import pytest
 
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._residency_warning import (
+    _SHAPE_FLAGS,
     residency_quality_warning,
 )
 from decoy_engine.generation.pool._events import QualityWarning
@@ -30,11 +31,7 @@ from tests.unit.execution.test_out_of_core_routing import _fk_ooc_config, _sourc
 from tests.unit.records._helpers import corpus, make
 
 _BASELINE = Path(__file__).parents[1] / "execution" / "r3_within_route_baseline.json"
-_ALL_SHAPES = (
-    "a resident pa.Table source",
-    "no sink (the whole output is held resident)",
-    "a source_loader (returns an unbounded resident table)",
-)
+_ALL_SHAPES = tuple(_SHAPE_FLAGS)
 
 
 def _as_manifest_warning(w: QualityWarning) -> dict[str, Any]:
@@ -121,3 +118,9 @@ def test_every_baseline_route_warning_is_accepted() -> None:
     assert {w.code for w in warnings} >= {"out_of_core_caller_managed_residency", "orphan_fk"}
     for w in warnings:
         _accepted([w])
+
+
+def test_residency_warning_refuses_an_unknown_shape() -> None:
+    # A new shape must get a flag in `_SHAPE_FLAGS`; dropping it silently would hide the shape.
+    with pytest.raises(KeyError):
+        residency_quality_warning(("a shape with no flag",))

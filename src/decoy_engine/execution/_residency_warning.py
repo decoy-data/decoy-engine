@@ -101,7 +101,7 @@ def residency_quality_warning(shapes: tuple[str, ...]) -> QualityWarning:
     Route-level: `provider` names the route, not a masking provider. `detail` holds scalars
     only (one `True` flag per shape, plus the message) so the evidence record accepts it.
     """
-    detail: dict[str, Any] = {_SHAPE_FLAGS[s]: True for s in shapes if s in _SHAPE_FLAGS}
+    detail: dict[str, Any] = {_SHAPE_FLAGS[s]: True for s in shapes}
     detail["message"] = residency_warning_message(shapes)
     return QualityWarning(
         code=RESIDENCY_WARNING_CODE, provider=RESIDENCY_WARNING_PROVIDER, detail=detail

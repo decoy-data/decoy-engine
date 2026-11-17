@@ -49,6 +49,7 @@ __all__ = [
     "cascade_row_errors",
     "gather_errored_parent_keys",
     "orphan_fk_violation_error",
+    "orphan_fk_warning",
     "resolve_fk_keys",
 ]
 
@@ -68,6 +69,26 @@ def orphan_fk_violation_error(edge: RelationshipEdge, orphan_count: int) -> Exec
             f"{edge.child_table}.{edge.child_columns} reference no parent key in "
             f"{edge.parent_table}.{edge.parent_columns} (orphan_policy=fail)."
         ),
+    )
+
+
+def orphan_fk_warning(edge: RelationshipEdge, orphan_count: int) -> QualityWarning:
+    """The WARN-policy warning, built in one place for every route.
+
+    `detail` holds scalars only (composite column lists are comma-joined, as `column`
+    is), so the evidence record accepts it.
+    """
+    return QualityWarning(
+        code=reasons.warning.ORPHAN_FK,
+        provider=edge.namespace,
+        column=",".join(edge.child_columns),
+        detail={
+            "parent_table": edge.parent_table,
+            "parent_columns": ",".join(edge.parent_columns),
+            "child_table": edge.child_table,
+            "child_columns": ",".join(edge.child_columns),
+            "orphan_rows": orphan_count,
+        },
     )
 
 
@@ -157,20 +178,7 @@ def resolve_fk_keys(
         masked[pos] = key
     warnings: list[QualityWarning] = []
     if policy is OrphanPolicy.WARN:
-        warnings.append(
-            QualityWarning(
-                code=reasons.warning.ORPHAN_FK,
-                provider=edge.namespace,
-                column=",".join(edge.child_columns),
-                detail={
-                    "parent_table": edge.parent_table,
-                    "parent_columns": ",".join(edge.parent_columns),
-                    "child_table": edge.child_table,
-                    "child_columns": ",".join(edge.child_columns),
-                    "orphan_rows": len(orphan_positions),
-                },
-            )
-        )
+        warnings.append(orphan_fk_warning(edge, len(orphan_positions)))
     return masked, warnings, cascade
 
 
