@@ -125,11 +125,10 @@ def _judged(
 ) -> DistributionFinding:
     """A defined change: `warning` above the tolerance, `info` inside it. A change too large to
     represent (infinite) is a breach with no delta; one that is not a number is undefined, so `info`."""
-    if math.isinf(delta):
-        # A finite change too large to represent is still a change: a breach with no ratio.
-        return _finding(table, column, fact, "warning", None)
     if math.isnan(delta):
         return _finding(table, column, fact, "info", None)
+    # An infinite delta (a finite change too large to represent) compares above any tolerance and
+    # is a breach; `_finding` writes it with no ratio.
     return _finding(table, column, fact, "warning" if delta > tolerance_pct else "info", delta)
 
 
