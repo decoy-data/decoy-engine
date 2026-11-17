@@ -143,7 +143,9 @@ def _own_decision(column: Mapping[str, Any]) -> tuple[ColumnDecision | None, boo
     reports them. The flag is set for a `provider_config` JSON cannot carry.
     """
     own = {k: column[k] for k in _DECISION_KEYS if k in column}
-    if isinstance(own.get("provider_config"), dict) and not json_carryable(own["provider_config"]):
+    if isinstance(own.get("provider_config"), Mapping) and not json_carryable(
+        own["provider_config"]
+    ):
         return None, True
     try:
         return ColumnDecision.model_validate(own, strict=False), False
