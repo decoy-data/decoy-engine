@@ -23,8 +23,8 @@ import pytest
 
 from decoy_engine.execution._strategies._categorical import CategoricalStrategyHandler
 from decoy_engine.execution._strategies._hash import HashStrategyHandler
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
 from decoy_engine.execution._strategies._text_redact import TextRedactHandler
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.plan._types import ColumnSeed
 
 # Per-cell budgets are calibrated 2x the observed dev-box wall-clock

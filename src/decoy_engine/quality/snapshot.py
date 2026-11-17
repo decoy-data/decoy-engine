@@ -288,7 +288,7 @@ def _stats_for(
     if distinct <= CATEGORICAL_DISTINCT_CAP:
         stats = _categorical_stats(non_null.astype(str), top_k=top_k)
         return "categorical", stats
-    return "freetext", _freetext_stats(non_null.astype(str), bins=numeric_bins)
+    return "freetext", freetext_stats(non_null.astype(str), bins=numeric_bins)
 
 
 def _high_cardinality_categorical_stats(non_null: pd.Series) -> dict[str, Any]:
@@ -501,7 +501,7 @@ def _datetime_stats(non_null: pd.Series) -> dict[str, Any]:
     }
 
 
-def _freetext_stats(non_null: pd.Series, *, bins: int) -> dict[str, Any]:
+def freetext_stats(non_null: pd.Series, *, bins: int) -> dict[str, Any]:
     lens = non_null.astype(str).str.len().to_numpy(dtype=int)
     if lens.size == 0:
         return {}

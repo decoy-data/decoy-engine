@@ -141,6 +141,25 @@ def test_admission_requires_the_outer_range_edges_to_agree_with_min_and_max() ->
     assert exc.value.code == "statistical_stats_degenerate"
 
 
+@pytest.mark.parametrize(
+    ("key", "value"), [("min", "2000-06-01T00:00:00"), ("max", "2007-06-01T00:00:00")]
+)
+def test_admission_refuses_a_bound_inside_the_edge_year_of_a_folded_range(
+    key: str, value: str
+) -> None:
+    spec = _spec()
+    bad = spec_from_dict({**spec_to_dict(spec), "stats": {**spec.stats, key: value}})
+    with pytest.raises(GenerationAdmissionError) as exc:
+        _verdict(bad)
+    assert exc.value.code == "statistical_stats_degenerate"
+
+
+def test_admission_accepts_bounds_one_year_outside_the_folded_range() -> None:
+    spec = _spec()
+    wide = {**spec.stats, "min": "1999-01-01T00:00:00", "max": "2008-12-31T23:59:59"}
+    assert _verdict(spec_from_dict({**spec_to_dict(spec), "stats": wide})).is_class_a
+
+
 def test_load_spec_refuses_a_range_outside_the_supported_years_with_a_coded_error() -> None:
     from decoy_engine.generation.statistical import StatisticalSpecError
 

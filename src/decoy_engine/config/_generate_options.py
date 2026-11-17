@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ast
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -63,6 +63,7 @@ _FORMULA = str(reasons.config.GENERATE_FORMULA_INVALID)
 UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 
 Problem = tuple[tuple[str | int, ...], str]
+ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
 Check = Callable[[Any, Mapping[str, Any]], list[Problem]]
 
 _OK: list[Problem] = []
@@ -524,13 +525,24 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
     return found
 
 
-def problem_details(problems: list[tuple[tuple[str | int, ...], str]]) -> list[InitErrorDetails]:
-    """Pydantic line errors for ``problems``: fixed text per code, no input kept."""
+def problem_details(
+    problems: Sequence[Problem | ContextProblem],
+    templates: Mapping[str, str] | None = None,
+) -> list[InitErrorDetails]:
+    """Pydantic line errors for ``problems``: fixed text per code, no input kept.
+
+    A problem with a third member is a ``(loc, code, context)``: its text is the code's entry in
+    ``templates`` filled from ``context``, which holds config identifiers only.
+    """
     details: list[InitErrorDetails] = []
-    for loc, code in problems:
+    for problem in problems:
+        loc, code = problem[0], problem[1]
         kind: Any = "missing"
         if code != "missing":
-            kind = PydanticCustomError(code, reasons.lookup(code)[0].summary)
+            summary = reasons.lookup(code)[0].summary
+            context = problem[2] if len(problem) == 3 else None
+            template = (templates or {}).get(code, summary) if context is not None else summary
+            kind = PydanticCustomError(code, template, dict(context) if context else None)
         details.append({"type": kind, "loc": loc, "input": None})
     return details
 
