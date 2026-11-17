@@ -14,6 +14,7 @@ import re
 from collections.abc import Callable, Iterable
 from typing import Any, Final, NoReturn
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 
@@ -109,3 +110,13 @@ def table_to_pandas_exact_ints(
     if failed is not None and on_unconvertible is not None:
         on_unconvertible(failed)  # raised outside the except block, so no exception context
     return df
+
+
+def numeric_cells(series: pd.Series) -> np.ndarray[Any, np.dtype[np.float64]]:
+    return np.asarray(pd.to_numeric(series, errors="coerce").dropna(), dtype=float)
+
+
+def finite_numeric_cells(series: pd.Series) -> np.ndarray[Any, np.dtype[np.float64]]:
+    """The series' numeric cells as floats with nan and +-inf dropped."""
+    arr = numeric_cells(series)
+    return np.extract(np.isfinite(arr), arr)
