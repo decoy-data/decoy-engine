@@ -36,9 +36,10 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
-from decoy_engine.fileaccess import _openat2
+from decoy_engine.fileaccess import _fdtree, _openat2
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
+from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
 
 # The only names a caller can influence: a closed label picks a prefix, never a path.
@@ -53,6 +54,9 @@ STAGE_PREFIX: dict[str, str] = {
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
 }
+STAGE_MARKER = ".decoy-publication-stage"  # F26 G1(d) proof, kept in a bound unit as metadata
+STAGE_MAGIC = b"decoy-publication-stage-v1:"
+STAGE_HEX = "[0-9a-f]{12}"  # the token_hex(6) a stage name carries
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 # Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
 PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
@@ -72,7 +76,6 @@ T = TypeVar("T")
 # Denial key for a bad name given straight to a creator; it names the capability, never the name.
 _CREATOR_KEY = "fileaccess.stage"
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
@@ -218,23 +221,24 @@ def _dup(held_fd: int) -> int:
     return os.dup(held_fd)
 
 
-def _close(fd: int) -> None:
-    with contextlib.suppress(OSError):
-        os.close(fd)
-
-
-def _rmtree_fd(dir_fd: int) -> None:
-    """Remove everything beneath `dir_fd` without following any link."""
-    for entry in list(os.scandir(dir_fd)):
-        if entry.is_dir(follow_symlinks=False):
-            child = os.open(entry.name, _DIR_FLAGS, dir_fd=dir_fd)
-            try:
-                _rmtree_fd(child)
-            finally:
-                _close(child)
-            os.rmdir(entry.name, dir_fd=dir_fd)
-        else:
-            os.unlink(entry.name, dir_fd=dir_fd)
+def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
+    """Lock stage `name` (held until `stage_fd` closes; unlocked where the filesystem refuses) and
+    write its marker, proved by the one reader (F26 G1); on failure remove the stage and raise."""
+    try:
+        _fdtree.hold_stage_lock(stage_fd)
+        token, marker = name.removeprefix(STAGE_PREFIX["publication"]), -1
+        try:
+            marker = create_private_at(stage_fd, STAGE_MARKER)
+            _fdtree._write_marker(marker, STAGE_MAGIC, token)
+        finally:
+            _close(marker)
+        if _fdtree._prove_marker(stage_fd, STAGE_MARKER, STAGE_MAGIC, STAGE_HEX) != token:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            _rmtree_fd(stage_fd)
+            os.rmdir(name, dir_fd=parent_fd)
+        raise
 
 
 class _State:
@@ -265,9 +269,9 @@ def _discard(state: _State) -> None:
             if state.stage_fd >= 0:
                 with contextlib.suppress(OSError):
                     _rmtree_fd(state.stage_fd)
-                _close(state.stage_fd)
             with contextlib.suppress(OSError):
                 os.rmdir(state.stage_name, dir_fd=state.parent_fd)
+            _close(state.stage_fd)  # after the rmdir: the liveness lock outlives the name
         else:
             with contextlib.suppress(OSError):
                 os.unlink(state.stage_name, dir_fd=state.parent_fd)
@@ -373,8 +377,10 @@ class RootedOutputTxn(_StageDir):
                 state.chain_fds.append(_dup(fd))
             if kind == "dir":
                 state.stage_fd = make_stage_dir_at(state.parent_fd, name)
+            if label == "publication":
+                _mark_publication_stage(state.parent_fd, name, state.stage_fd)
         except BaseException:
-            _close_all([*state.chain_fds, state.parent_fd])
+            _close_all([*state.chain_fds, state.stage_fd, state.parent_fd])
             raise
         self._private = label in PRIVATE_LABELS
         super().__init__(state.stage_fd, display, state, 0o600 if self._private else 0o666)

@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.fileaccess._output import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import Recorder, anchor_at, key
 from tests.unit.publication._exits import EXITS, binding_after, run_exit
 from tests.unit.publication._publish_support import (
@@ -73,10 +74,10 @@ def test_retry_already_committed(
         )
         assert again.artifacts == first.artifacts
         # D2 before the receipt: the unit tree (files, then the leaf), then the chain to the anchor.
-        files = {key(leaf / "customers.parquet"), key(leaf / DESCRIPTOR)}
+        files = {key(leaf / "customers.parquet"), key(leaf / DESCRIPTOR), key(leaf / STAGE_MARKER)}
         synced = rec.synced()
-        assert set(synced[:2]) == files  # non-vacuity: the spy saw the unit files
-        assert synced[2:] == [key(leaf), key(parent), key(base)]
+        assert set(synced[:3]) == files  # non-vacuity: the spy saw the unit files
+        assert synced[3:] == [key(leaf), key(parent), key(base)]
         assert snapshot(leaf) == before and stages_left(parent) == []
 
         # a unit of 0400 files and 0500 directories is still fsynced (O_RDONLY descriptors)
@@ -116,7 +117,10 @@ def test_refused_overwrite_survivor(base: Path, policy: str, prior: str) -> None
         before = snapshot(leaf)
         bound_result = descriptor(leaf)["result_id"]
         if prior == "zero_tables":  # the unit holds only its descriptor (probe P4's empty unit)
-            assert descriptor(leaf)["artifacts"] == [] and sorted(os.listdir(leaf)) == [DESCRIPTOR]
+            assert descriptor(leaf)["artifacts"] == [] and sorted(os.listdir(leaf)) == [
+                STAGE_MARKER,
+                DESCRIPTOR,
+            ]
         other = tables("two")
         for op, outcome, code in (
             ("op-1", "operation_conflict", "publication_operation_conflict"),

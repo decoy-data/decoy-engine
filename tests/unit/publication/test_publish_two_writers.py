@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.fileaccess._output import STAGE_MARKER
 from tests.unit.publication._publish_support import (
     POLICIES,
     close_root,
@@ -100,7 +101,11 @@ def test_two_writers_different_result(
     assert (receipt.outcome, receipt.reason_code) == (outcome, code)
     bound = descriptor(leaf)
     assert bound["operation_id"] == "op-1" and receipt.result_id != bound["result_id"]
-    assert sorted(os.listdir(leaf)) == ["_decoy_publication.json", "customers.parquet"]
+    assert sorted(os.listdir(leaf)) == [
+        STAGE_MARKER,
+        "_decoy_publication.json",
+        "customers.parquet",
+    ]
     assert snapshot(leaf)["entries"]  # exactly one binding, the winner's
     assert stages_left(leaf.parent) == []
 
@@ -119,6 +124,10 @@ def test_two_writers_same_result(
         True,
     )
     assert descriptor(leaf)["result_id"] == receipt.result_id
-    assert sorted(os.listdir(leaf)) == ["_decoy_publication.json", "customers.parquet"]
+    assert sorted(os.listdir(leaf)) == [
+        STAGE_MARKER,
+        "_decoy_publication.json",
+        "customers.parquet",
+    ]
     assert [p.name for p in leaf.parent.iterdir() if p.name.startswith("out")] == ["out"]
     assert stages_left(leaf.parent) == []

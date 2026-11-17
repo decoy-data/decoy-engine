@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ import pytest
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.fileaccess._fdtree import _prove_marker
+from decoy_engine.fileaccess._output import STAGE_HEX, STAGE_MAGIC, STAGE_MARKER
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests._declared_schema import declare_rest
@@ -81,7 +84,16 @@ def _record(result: Any, tmp: Path, published: Path | None = None) -> dict[str, 
 
 def _published(path: Path) -> Any:
     """A table's digest; for the F22 descriptor, its fields that do not depend on the Parquet
-    writer (its sizes and digests carry the footer's pyarrow version, as file bytes do)."""
+    writer (its sizes and digests carry the footer's pyarrow version, as file bytes do); for the
+    reserved stage marker (F26), whether it proves (its token is random per stage)."""
+    if path.name == STAGE_MARKER:
+        unit = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            return {
+                "stage_marker": _prove_marker(unit, path.name, STAGE_MAGIC, STAGE_HEX) is not None
+            }
+        finally:
+            os.close(unit)
     if path.name != DESCRIPTOR_NAME:
         return _digest(pq.read_table(path))
     doc = json.loads(path.read_bytes())

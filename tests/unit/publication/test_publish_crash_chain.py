@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.fileaccess._output import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import Recorder, anchor_at, key
 from tests.unit.publication._publish_support import (
     DESCRIPTOR,
@@ -60,7 +61,7 @@ def test_adopt_syncs_ancestor_chain(
     if policy == "ambient":
         anchor_at(monkeypatch, base)
     chain = {"b": key(b), "a": key(a), "anchor": key(base)}
-    unit = {key(leaf / "customers.parquet"), key(leaf / DESCRIPTOR)}
+    unit = {key(leaf / "customers.parquet"), key(leaf / DESCRIPTOR), key(leaf / STAGE_MARKER)}
     out, root_fd = make_out(policy, base, "a/b/out")
     try:
         with monkeypatch.context() as patch:
@@ -68,8 +69,8 @@ def test_adopt_syncs_ancestor_chain(
             receipt = publish_tables(out, tables("one"), PublicationRequest("op-1"))
         assert (receipt.outcome, receipt.durable) == ("already_committed", True)
         synced = rec.synced()
-        assert set(synced[:2]) == unit
-        assert synced[2:] == [key(leaf), chain["b"], chain["a"], chain["anchor"]]
+        assert set(synced[:3]) == unit
+        assert synced[3:] == [key(leaf), chain["b"], chain["a"], chain["anchor"]]
 
         for name, failing in chain.items():
             with monkeypatch.context() as patch:

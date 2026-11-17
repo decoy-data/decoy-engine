@@ -27,6 +27,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -36,9 +37,11 @@ from decoy_engine.fileaccess import _durable
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._local_chain import (
+    HeldStage,
     _ensure_dirs,
     _make_stage_dir,
     _open_dir,
+    _publish_durable_dir,
 )
 from decoy_engine.fileaccess._output import (
     CREATES_PARENTS,
@@ -303,6 +306,7 @@ class LocalOutputTxn(_LocalStageDir):
         # A durable stage is created and published through its parent's descriptor, opened
         # before the stage exists, so no step after the link can fail for want of one.
         self._parent_fd = -1
+        self._held = HeldStage()  # a publication stage's descriptor, holding its lock
         stage: Path | None = None
         if kind == "dir":
             if sys.platform == "win32":
@@ -310,12 +314,15 @@ class LocalOutputTxn(_LocalStageDir):
                     target.parent.mkdir(parents=True, exist_ok=True)
                 stage = Path(tempfile.mkdtemp(prefix=STAGE_PREFIX[label], dir=target.parent))
             else:
-                stage = _make_stage_dir(
+                stage, self._held.fd = _make_stage_dir(
                     target.parent,
                     STAGE_PREFIX[label],
                     create_parents=label in CREATES_PARENTS,
                     created=self._created,
                 )
+                if label != "publication":
+                    self._held.close()
+                weakref.finalize(self, self._held.close)
         # Other private labels keep main's 0666 here; only a durable unit is owner-only (Q8).
         super().__init__(
             stage if stage is not None else target.parent, str(target), private=self._durable_dir
@@ -418,7 +425,10 @@ class LocalOutputTxn(_LocalStageDir):
             if self._stage is None:  # pragma: no cover - a dir stage always has one
                 raise FileAccessUnavailable("output transaction is finished")
             if self._durable_dir:
-                self._publish_durable_dir(self._stage)
+                _publish_durable_dir(self._stage, self._held, self._target)
+                self._stage, self._finished = None, True
+                strict = len(self._created) + 1
+                _durable._sync_bound(lambda: _sync_up(self._target.parent, strict))
                 return
             if sys.platform == "win32":
                 self._target.parent.mkdir(parents=True, exist_ok=True)
@@ -462,20 +472,6 @@ class LocalOutputTxn(_LocalStageDir):
                 type(exc).__name__,
             )
 
-    def _publish_durable_dir(self, stage: Path) -> None:
-        """Fsync the stage tree, rename it onto the leaf, then fsync the parent (the commit point)
-        and the chain above it. Before the rename a failure keeps the stage for `abort()`."""
-        stage_fd = _open_dir(stage)
-        try:
-            _durable._sync_tree(stage_fd)
-        finally:
-            _close(stage_fd)
-        _call(os.replace, stage, self._target)
-        self._stage = None
-        self._finished = True
-        strict = len(self._created) + 1
-        _durable._sync_bound(lambda: _sync_up(self._target.parent, strict))
-
     def abort(self) -> None:
         if self._finished:
             return
@@ -483,6 +479,7 @@ class LocalOutputTxn(_LocalStageDir):
         if self._stage is not None:
             shutil.rmtree(self._stage, ignore_errors=True)
             self._stage = None
+        self._held.close()  # after the stage is gone: the lock outlives the name
         if self._label in DURABLE_LABELS:
             self._unlink_stage()
             self._close_parent()

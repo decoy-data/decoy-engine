@@ -23,6 +23,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.fileaccess._output import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRefused
 
 TABLE = pa.table({"a": [1, 2, 3]})
@@ -49,7 +50,11 @@ def test_publish_into_absent_target(tmp_path: Path) -> None:
     assert not target.exists()
     assert len(_stages(target.parent)) == 1
     sink.commit()
-    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, "orders.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [
+        STAGE_MARKER,
+        DESCRIPTOR_NAME,
+        "orders.parquet",
+    ]
     assert pq.read_table(target / "orders.parquet").equals(TABLE)
     assert _stages(target.parent) == []
 
@@ -60,7 +65,11 @@ def test_publish_into_empty_directory(tmp_path: Path) -> None:
     sink = ParquetTransactionalSink(target)
     sink.write("orders", TABLE)
     sink.commit()
-    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, "orders.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [
+        STAGE_MARKER,
+        DESCRIPTOR_NAME,
+        "orders.parquet",
+    ]
 
 
 def test_non_empty_destination_is_refused_and_left_unchanged(tmp_path: Path) -> None:
@@ -85,7 +94,10 @@ def test_non_empty_destination_is_refused_and_left_unchanged(tmp_path: Path) -> 
 def test_zero_write_commit_binds_a_descriptor_only_unit(tmp_path: Path) -> None:
     target = tmp_path / "x" / "out"
     assert ParquetTransactionalSink(target).commit().outcome == "published"
-    assert target.is_dir() and [p.name for p in target.iterdir()] == [DESCRIPTOR_NAME]
+    assert target.is_dir() and sorted(p.name for p in target.iterdir()) == [
+        STAGE_MARKER,
+        DESCRIPTOR_NAME,
+    ]
     assert _stages(target.parent) == []
 
 
@@ -189,7 +201,9 @@ def test_accepted_table_names_publish_under_the_same_leaf(tmp_path: Path, name: 
     sink = ParquetTransactionalSink(target)
     sink.write(name, TABLE)
     sink.commit()
-    assert sorted(p.name for p in target.iterdir()) == sorted([DESCRIPTOR_NAME, f"{name}.parquet"])
+    assert sorted(p.name for p in target.iterdir()) == sorted(
+        [STAGE_MARKER, DESCRIPTOR_NAME, f"{name}.parquet"]
+    )
 
 
 @pytest.mark.parametrize("name", REJECTED_VALUE)
