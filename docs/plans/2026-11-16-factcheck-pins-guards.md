@@ -10,6 +10,8 @@ Rules consulted: `/home/cam/dev-rules/README.md`, `00-universal.md`, `risk-and-e
 (2026-11-16), PLAN defines acceptance tests, develop correctly (registries and sizing), sentry
 over prose, dev-loop review 2026-11-11.
 
+Revision 4.1: answers the Codex GO-WITH-FIXES on `e89e81ad0`. AT-Z5 now uses an NFC-equivalent string pair so raw-value counting fails (new mutation MZ8); AT-Z2 pins the warning-detail key set, int-only values and the absence of masked output values, so MZ3 is killed.
+
 Revision 4: resolves the Codex review NO-GO on `c28daf62b` (V1 H1, DESIGN H2 and
 V2-LOG production-file count). Revision 3 resolved Dennis round 2 on `d1479c3a8`.
 
@@ -402,10 +404,10 @@ evidence. The builder records each fail-before result in the PR body.
 |---|---|---|---|
 | AT-Z0 | Z-E1 | No-regression in `ET:unit/validation/test_structural_scans.py`: compile a deterministic `faker` column with no declared `pool_size`; assert its `ColumnSeed.pool_size is None` and `faker_pool_precondition_met_seed(seed) is False`. This pins the observed `origin/main` behavior at `13c95c7de` | no-regression: green before and after |
 | AT-Z1 | Z-E1 | `ET:unit/validation/test_structural_scans.py`: a deterministic `faker` column, `pool_size: 10`, 200 distinct sources, post-validation on: `quality_warnings` holds `cardinality_collisions` with `distinct_lost == source_distinct - output_distinct > 0` and `pool_size == 10`. A second column with no declared `pool_size` reports `pool_size == DEFAULT_POOL_SIZE` | no such warning |
-| AT-Z2 | Z-E1 | Same run with a marker source value: the marker is absent from the JSON of `quality_summary`, from `str()` of each warning and from the captured run log | no warning to check; written red with AT-Z1 |
+| AT-Z2 | Z-E1 | Same run with a marker source value: the marker is absent from the JSON of `quality_summary`, from `str()` of each warning and from the captured run log. The `cardinality_collisions` detail has exactly the keys the contract names and every value is an `int`, and no masked output value of the column appears in any of those surfaces | no warning to check; written red with AT-Z1 |
 | AT-Z3 | Z-E1 | A `when:`-gated deterministic `faker` column: no `cardinality_collisions` entry; its `DistinctCount` is still recorded | the `DistinctCount` half is no-regression; the absence is pinned after Z-E1 (MZ2 turns it red) |
 | AT-Z4 | Z-E1 | Quarantine on, one row removed by another column's `format_error`: `source_distinct` counts the aligned rows only | no warning |
-| AT-Z5 | Z-E1 | An integer column: `source_distinct` equals the count over `_canonicalize_source` forms, compared with a direct call of the sampler's canonicalizer | no warning |
+| AT-Z5 | Z-E1 | A string column whose sources include `"caf\u00e9"` (composed) and `"cafe\u0301"` (decomposed) plus distinct others: the two count as one source value (NFC in `_canonicalize_source`), so `source_distinct` equals the count over canonical forms from a direct call of the sampler's canonicalizer and is one less than the raw distinct count. An integer column gives the same equality (no-regression) | no warning |
 | AT-Z6 | Z-E1 | `run_pipeline` with `execution_mode="full_frame"` and with `"out_of_core"` on the AT-Z1 config: equal warning detail | no warning on either route |
 | AT-Z6b | Z-E1 | A deterministic `faker` column with `cardinality_mode: scale_source_cardinality` and a small pool emits `cardinality_collisions`. A `match_source_cardinality` column emits both `CARDINALITY_MATCH_DEVIATION` and `cardinality_collisions` | collision rule absent |
 | AT-Z6c | Z-E1 | Extend the existing class-6 private-import sentry in `ET:sentry/defects/test_exception_context.py` and `_defect_scan.py` for the new `validation.post` consumer. The real tree imports `canonicalize_derive_source` from `decoy_engine.kernel` and `effective_pool_size` from `decoy_engine.generation.pool`. Seeded copies that change either import to `decoy_engine.kernel._canonicalize` or `decoy_engine.generation.pool._identity` fail. The existing import-linter layer test stays green with no new `.importlinter` ignore | no `validation.post` consumer exists yet |
@@ -428,7 +430,8 @@ evidence. The builder records each fail-before result in the PR body.
 
 **Named mutations** (each must turn a test red on the slice head): MZ1 compute `distinct_lost` on
 the unaligned source (AT-Z4); MZ2 drop the `when` skip (AT-Z3); MZ3 put `out_non_null[:3]` into the
-detail (AT-Z2); MA1 delete the `tokenize` section (AT-A1); MA2 restore "Non-numeric and null values
+detail (AT-Z2, by the key set, the int types and the output-value check); MZ8 count raw source values instead of
+`_canonicalize_source` forms (AT-Z5, the composed and decomposed pair); MA1 delete the `tokenize` section (AT-A1); MA2 restore "Non-numeric and null values
 pass through" (AT-A2); MA3 restore the `code_set` "same job_seed" sentence at `:695` (AT-A3); the earlier 24zc plan's M1 to M5, plus MC6 leave line 5 at 0.26.0 (AT-C7);
 MG1 to MG7 the scratch violations above; MG8 revert one entry to `path:line` (AT-G8 shape check);
 MG9 has the script skip the second `--cli-pins` (AT-G9). MG10 compares a candidate's name set to
