@@ -409,12 +409,10 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # RUN-STREAM E1b: the host CPU probe (new sub-package `execution/pipeline/`), the
             # conservative budget export and the run-scoped DuckDB thread cap. None imports
             # `execution.physical`.
-            "src/decoy_engine/execution/out_of_core/__init__.py",
             "src/decoy_engine/execution/pipeline/_cgroup.py",
             "src/decoy_engine/execution/pipeline/_host.py",
             # SCAN-ML M5: the guard-free core of native `run_mask_chunked` that `run_pipeline`'s
             # auto-chunk lane calls (new private sub-package). Neither imports `execution.physical`.
-            "src/decoy_engine/execution/native/chunked/__init__.py",
             "src/decoy_engine/execution/native/chunked/_core.py",
             # SUB-RUN E2: the subset stage imports the public `decoy_engine.subset` surface only.
             "src/decoy_engine/execution/pipeline/_subset_stage.py",
@@ -519,11 +517,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # and the determinism-mirror sites for the deleted polars strategy files.
             # The pandas execution path is unchanged. None is under execution/physical/.
             # The deleted execution/polars/ tree itself is carved out of the filter below.
-            "src/decoy_engine/execution/__init__.py",
             "src/decoy_engine/execution/_chunked.py",
             # The chunked entries' progress helper (new sub-package); it is in GUARDED_MODULES,
             # so it imports nothing from `execution.physical`.
-            "src/decoy_engine/execution/chunked/__init__.py",
             "src/decoy_engine/execution/chunked/_progress.py",
             "src/decoy_engine/execution/_chunked_adapter_gate.py",
             "src/decoy_engine/execution/_planner.py",
@@ -565,7 +561,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # masking-side, generation-side); `_draw_site_providers.py` keeps the registry and
             # re-exports, and its gen-pool sibling repoints its base-class import. Pure moves;
             # none imports `execution.physical`.
-            "src/decoy_engine/execution/native/protocol/__init__.py",
             "src/decoy_engine/execution/native/protocol/providers_base.py",
             "src/decoy_engine/execution/native/protocol/providers_gen.py",
             "src/decoy_engine/execution/native/protocol/providers_gen_unique.py",
@@ -754,7 +749,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # `execution/pipeline/`) and its threading through the routing, lane and sink modules
             # listed here. Routing code that reads config, the plan and source footers; it imports
             # nothing from `execution.physical` (GUARDED_MODULES covers `_stream.py`).
-            "src/decoy_engine/execution/pipeline/__init__.py",
             "src/decoy_engine/execution/pipeline/_stream.py",
             # B7 also corrects the module docstring of `_pipeline_chunk_route.py`, which said
             # auto-chunk routing was single-table only (a docstring-only edit).
