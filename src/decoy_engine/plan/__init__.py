@@ -37,7 +37,6 @@ from __future__ import annotations
 from decoy_engine.plan._compile import _hash_config as pipeline_config_hash
 from decoy_engine.plan._compile import compile_plan, run_config_only_checks
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.plan._ner_models import run_ner_models
 from decoy_engine.plan._seed import job_seed_for_config
 from decoy_engine.plan._serialize import plan_from_yaml, plan_to_yaml
 from decoy_engine.plan._types import (
@@ -52,6 +51,7 @@ from decoy_engine.plan._types import (
     SeedEnvelope,
     TableSeed,
 )
+from decoy_engine.plan.checks._ner_models import run_ner_models
 
 __all__ = [
     "ColumnSeed",

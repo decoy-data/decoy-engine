@@ -16,6 +16,7 @@ from decoy_engine.delivery.resume import (
     ResumeRefusedError,
     RunRecord,
     TableEntry,
+    _fingerprint,
     build_fingerprint,
     plan_resume,
 )
@@ -63,7 +64,7 @@ def _fp(config: dict[str, Any]) -> Any:
 
 @pytest.fixture
 def versions(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ner, "installed_model_version", lambda model="": "3.8.0")
+    monkeypatch.setattr(_fingerprint, "installed_model_version", lambda model="": "3.8.0")
 
 
 def _stored(fingerprint: Any) -> RunRecord:
@@ -102,7 +103,7 @@ def test_the_pairs_name_surfaces_and_models_only(versions: None) -> None:
 def test_a_model_that_is_not_installed_is_recorded_as_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(ner, "installed_model_version", lambda model="": None)
+    monkeypatch.setattr(_fingerprint, "installed_model_version", lambda model="": None)
     pairs = dict(_fp(_config()).components)
     assert pairs["decoy-ner:pre_scan"].endswith("==unavailable")
 
