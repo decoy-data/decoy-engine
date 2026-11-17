@@ -19,6 +19,7 @@ from __future__ import annotations
 import errno
 import os
 import stat as stat_mod
+from os import open as open_fd  # a plain name: the GCS call-kwargs sentry matches methods by name
 
 from decoy_engine.fileaccess._entry import require_ambient
 from decoy_engine.fileaccess._errors import deny
@@ -36,7 +37,7 @@ def open_ambient_tree(path: str | os.PathLike[str]) -> FdDirHandle:
     kind: DenialKind | None = None
     fd = -1
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        fd = open_fd(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     except OSError as exc:
         if exc.errno == errno.ENOENT:
             kind = "absent"

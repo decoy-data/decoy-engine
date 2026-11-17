@@ -24,7 +24,6 @@ from typing import Any
 
 from decoy_engine import fileaccess
 from decoy_engine.fileaccess import DirHandle, FileAccessDenied
-from decoy_engine.reasons import ReasonCode
 from decoy_engine.reasons import evidence as ev
 
 from ._artifacts import require_supported_platform
@@ -73,19 +72,20 @@ class SignedBundle:
 
 def _read_member(root: DirHandle, name: str, limit: int) -> bytes:
     """One member through the held handle, bounded, with only a closed identity on refusal."""
-    refusal: ReasonCode | None = None
+    absent = unavailable = False
     data = b""
     try:
         with root.open_file(name) as member:
             data = member.read_all(limit + 1)
     except FileAccessDenied as denial:
-        refusal = (
-            ev.BUNDLE_MEMBER_MISSING if denial.kind == "absent" else ev.BUNDLE_MEMBER_UNAVAILABLE
-        )
+        absent = denial.kind == "absent"
+        unavailable = not absent
     except OSError:
-        refusal = ev.BUNDLE_MEMBER_UNAVAILABLE
-    if refusal is not None:
-        raise SignedEvidenceError(refusal)
+        unavailable = True
+    if absent:
+        raise SignedEvidenceError(ev.BUNDLE_MEMBER_MISSING)
+    if unavailable:
+        raise SignedEvidenceError(ev.BUNDLE_MEMBER_UNAVAILABLE)
     if len(data) > limit:
         raise SignedEvidenceError(ev.INPUT_TOO_LARGE)
     return data
@@ -95,24 +95,22 @@ def open_signed_bundle(path: str | os.PathLike[str]) -> SignedBundle:
     """Open the bundle directory ``path`` once and read its statement and signature."""
     require_supported_platform()
     root: DirHandle | None = None
-    refusal: ReasonCode | None = None
+    root_kind: str | None = None
     try:
         root = fileaccess.open_ambient_tree(path)
     except FileAccessDenied as denial:
-        refusal = {
-            "absent": ev.BUNDLE_ROOT_MISSING,
-            "not_regular": ev.BUNDLE_ROOT_NOT_DIRECTORY,
-        }.get(denial.kind or "", ev.INPUT_UNAVAILABLE)
+        root_kind = denial.kind or ""
     if root is None:
-        raise SignedEvidenceError(refusal or ev.INPUT_UNAVAILABLE)
-    failed: ReasonCode | None = None
-    statement = signature = b""
+        if root_kind == "absent":
+            raise SignedEvidenceError(ev.BUNDLE_ROOT_MISSING)
+        if root_kind == "not_regular":
+            raise SignedEvidenceError(ev.BUNDLE_ROOT_NOT_DIRECTORY)
+        raise SignedEvidenceError(ev.INPUT_UNAVAILABLE)
+    # A member refusal closes the held handle, then propagates unchanged (it names no input).
     try:
         statement = _read_member(root, EVIDENCE_FILENAME, MAX_STATEMENT_BYTES)
         signature = _read_member(root, SIGNATURE_FILENAME, MAX_SIGNATURE_BYTES)
-    except SignedEvidenceError as error:
-        failed = error.identity
-    if failed is not None:
+    except SignedEvidenceError:
         root.close()
-        raise SignedEvidenceError(failed)
+        raise
     return SignedBundle(_TOKEN, root, statement, signature)

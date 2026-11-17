@@ -45,10 +45,6 @@ _TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[\[\]{}]', re.DOTALL)
 _SURROGATE = re.compile("[\ud800-\udfff]")
 
 
-def _err(code: ReasonCode) -> SignedEvidenceError:
-    return SignedEvidenceError(code)
-
-
 def _check_depth(text: str) -> None:
     depth = 0
     for m in _TOKEN.finditer(text):
@@ -56,7 +52,7 @@ def _check_depth(text: str) -> None:
         if c in "[{":
             depth += 1
             if depth > MAX_DEPTH:
-                raise _err(ev.TOO_DEEP)
+                raise SignedEvidenceError(ev.TOO_DEEP)
         elif c in "]}":
             depth = max(0, depth - 1)
 
@@ -68,29 +64,29 @@ def _walk(root: Any) -> None:
         node = stack.pop()
         nodes += 1
         if nodes > MAX_NODES:
-            raise _err(ev.TOO_MANY_NODES)
+            raise SignedEvidenceError(ev.TOO_MANY_NODES)
         if isinstance(node, dict):
             for key, value in node.items():
                 if _SURROGATE.search(key):
-                    raise _err(ev.INVALID_UNICODE)
+                    raise SignedEvidenceError(ev.INVALID_UNICODE)
                 stack.append(value)
         elif isinstance(node, bool):
             continue
         elif isinstance(node, int):
             if abs(node) > MAX_SAFE_INT:
-                raise _err(ev.INTEGER_OUT_OF_DOMAIN)
+                raise SignedEvidenceError(ev.INTEGER_OUT_OF_DOMAIN)
         elif isinstance(node, list):
             stack.extend(node)
         elif isinstance(node, str) and _SURROGATE.search(node):
-            raise _err(ev.INVALID_UNICODE)
+            raise SignedEvidenceError(ev.INVALID_UNICODE)
 
 
 def parse_strict(data: bytes | bytearray | memoryview, *, max_bytes: int = MAX_BYTES) -> Any:
     raw = bytes(data)
     if len(raw) > max_bytes:
-        raise _err(ev.TOO_LARGE)
+        raise SignedEvidenceError(ev.TOO_LARGE)
     if raw.startswith(b"\xef\xbb\xbf"):
-        raise _err(ev.BOM)
+        raise SignedEvidenceError(ev.BOM)
     text = ""
     undecodable = False
     try:
@@ -98,17 +94,17 @@ def parse_strict(data: bytes | bytearray | memoryview, *, max_bytes: int = MAX_B
     except UnicodeDecodeError:
         undecodable = True
     if undecodable:
-        raise _err(ev.NOT_UTF8)
+        raise SignedEvidenceError(ev.NOT_UTF8)
     _check_depth(text)
-    token: ReasonCode | None = None
+    owner_token: str | None = None
     value: Any = None
     try:
         value = strict_json_loads(
             text, max_int_digits=MAX_INT_DIGITS, forbid_float=True, forbid_negative_zero=True
         )
     except _OwnerError as exc:
-        token = OWNER_TOKEN_MAP[exc.token]
-    if token is not None:
-        raise _err(token)
+        owner_token = exc.token
+    if owner_token is not None:
+        raise SignedEvidenceError(OWNER_TOKEN_MAP[owner_token])
     _walk(value)
     return value

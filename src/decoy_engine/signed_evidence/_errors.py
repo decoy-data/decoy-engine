@@ -45,8 +45,15 @@ class SignedEvidenceError(DecoyError):
         return f"SignedEvidenceError({self.code!r})"
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (_rebuild, (self.code, self.status))
+        return (_restore, (self.code, self.status))
 
 
-def _rebuild(code: str, status: str | None) -> SignedEvidenceError:
-    return SignedEvidenceError(code, status=status)
+def _restore(code: str, status: str | None) -> SignedEvidenceError:
+    """Rebuild from the frozen wire token without a constructor call (the token is the identity)."""
+    error = SignedEvidenceError.__new__(SignedEvidenceError)
+    identity = evidence.WIRE_IDENTITY[code]
+    error.identity = identity
+    error.code = evidence.WIRE_TOKEN[identity]
+    error.status = status
+    Exception.__init__(error, code)
+    return error

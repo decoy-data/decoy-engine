@@ -55,12 +55,24 @@ _BIG = re.compile(r"^[1-9][0-9]{0,29}\Z")
 _DECIMAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?\Z")
 
 
-def _bad(code: ReasonCode, status: str = "MALFORMED") -> SignedEvidenceError:
-    return SignedEvidenceError(code, status=status)
+# One literal row per strict-reader code, so every raise names a registered identity.
+_WIRE: dict[ReasonCode, ReasonCode] = {
+    ev.BOM: ev.STATEMENT_BOM,
+    ev.DUPLICATE_MEMBER: ev.STATEMENT_DUPLICATE_MEMBER,
+    ev.FLOAT_NOT_ALLOWED: ev.STATEMENT_FLOAT_NOT_ALLOWED,
+    ev.INTEGER_OUT_OF_DOMAIN: ev.STATEMENT_INTEGER_OUT_OF_DOMAIN,
+    ev.INVALID_UNICODE: ev.STATEMENT_INVALID_UNICODE,
+    ev.NON_FINITE_NUMBER: ev.STATEMENT_NON_FINITE_NUMBER,
+    ev.NOT_JSON: ev.STATEMENT_NOT_JSON,
+    ev.NOT_UTF8: ev.STATEMENT_NOT_UTF8,
+    ev.TOO_DEEP: ev.STATEMENT_TOO_DEEP,
+    ev.TOO_LARGE: ev.STATEMENT_TOO_LARGE,
+    ev.TOO_MANY_NODES: ev.STATEMENT_TOO_MANY_NODES,
+}
 
 
 def _schema() -> SignedEvidenceError:
-    return _bad(ev.STATEMENT_SCHEMA_INVALID)
+    return SignedEvidenceError(ev.STATEMENT_SCHEMA_INVALID, status="MALFORMED")
 
 
 # ------------------------------------------------------------------ typed carriers
@@ -168,9 +180,9 @@ def _obj(value: Any, members: tuple[str, ...]) -> dict[str, Any]:
         raise _schema()
     extra = set(value) - set(members)
     if extra:
-        raise _bad(ev.STATEMENT_UNKNOWN_FIELD)
+        raise SignedEvidenceError(ev.STATEMENT_UNKNOWN_FIELD, status="MALFORMED")
     if set(members) - set(value):
-        raise _bad(ev.STATEMENT_MISSING_FIELD)
+        raise SignedEvidenceError(ev.STATEMENT_MISSING_FIELD, status="MALFORMED")
     return value
 
 
@@ -226,9 +238,9 @@ def check_relative_path(value: Any) -> str:
 
 def _safe_path(value: Any) -> str:
     if not isinstance(value, str) or not 0 < len(value) <= MAX_PATH_CHARS:
-        raise _bad(ev.STATEMENT_PATH_INVALID)
+        raise SignedEvidenceError(ev.STATEMENT_PATH_INVALID, status="MALFORMED")
     if value.startswith("/") or "\\" in value:
-        raise _bad(ev.STATEMENT_PATH_INVALID)
+        raise SignedEvidenceError(ev.STATEMENT_PATH_INVALID, status="MALFORMED")
     for comp in value.split("/"):
         if (
             not fileaccess.is_valid_component(comp)
@@ -237,7 +249,7 @@ def _safe_path(value: Any) -> str:
             or ":" in comp
             or any(unicodedata.category(ch).startswith("C") for ch in comp)
         ):
-            raise _bad(ev.STATEMENT_PATH_INVALID)
+            raise SignedEvidenceError(ev.STATEMENT_PATH_INVALID, status="MALFORMED")
     return value
 
 
@@ -267,7 +279,7 @@ def _named_fingerprints(node: Any) -> tuple[NamedFingerprint, ...]:
         )
     names = [f.name for f in out]
     if names != sorted(set(names)):
-        raise _bad(ev.STATEMENT_ARRAY_ORDER)
+        raise SignedEvidenceError(ev.STATEMENT_ARRAY_ORDER, status="MALFORMED")
     return tuple(out)
 
 
@@ -282,7 +294,7 @@ def _warnings(node: Any) -> tuple[str, ...]:
         raise _schema()
     codes = [_match(c, _CODE) for c in node]
     if codes != sorted(set(codes)):
-        raise _bad(ev.STATEMENT_ARRAY_ORDER)
+        raise SignedEvidenceError(ev.STATEMENT_ARRAY_ORDER, status="MALFORMED")
     return tuple(codes)
 
 
@@ -295,7 +307,7 @@ def _publication(node: Any) -> Publication:
     if reason is not None:
         _match(reason, _CODE)
     if (state == "PUBLISHED") != (reason is None):
-        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
+        raise SignedEvidenceError(ev.STATEMENT_PUBLICATION_INCOHERENT, status="MALFORMED")
     return Publication(state, reason)
 
 
@@ -322,16 +334,16 @@ def _artifacts(node: Any) -> tuple[ArtifactEntry, ...]:
     if not isinstance(node, list):
         raise _schema()
     if len(node) > MAX_ARTIFACTS:
-        raise _bad(ev.STATEMENT_TOO_MANY_ARTIFACTS)
+        raise SignedEvidenceError(ev.STATEMENT_TOO_MANY_ARTIFACTS, status="MALFORMED")
     out = [_artifact(a) for a in node]
     ids = [a.id for a in out]
     if len(set(ids)) != len(ids):
-        raise _bad(ev.STATEMENT_ARTIFACT_ID_DUPLICATE)
+        raise SignedEvidenceError(ev.STATEMENT_ARTIFACT_ID_DUPLICATE, status="MALFORMED")
     paths = [a.path for a in out]
     if len(set(paths)) != len(paths):
-        raise _bad(ev.STATEMENT_PATH_DUPLICATE)
+        raise SignedEvidenceError(ev.STATEMENT_PATH_DUPLICATE, status="MALFORMED")
     if ids != sorted(ids):
-        raise _bad(ev.STATEMENT_ARRAY_ORDER)
+        raise SignedEvidenceError(ev.STATEMENT_ARRAY_ORDER, status="MALFORMED")
     return tuple(out)
 
 
@@ -339,7 +351,7 @@ def _coverage(node: Any) -> Coverage:
     o = _obj(node, ("rows_scanned", "rows_total", "columns"))
     cov = Coverage(_count(o["rows_scanned"]), _count(o["rows_total"]), _count(o["columns"]))
     if cov.rows_scanned > cov.rows_total:
-        raise _bad(ev.STATEMENT_COVERAGE_INVALID)
+        raise SignedEvidenceError(ev.STATEMENT_COVERAGE_INVALID, status="MALFORMED")
     return cov
 
 
@@ -374,17 +386,17 @@ def _check(node: Any) -> CheckOutcome:
     if not isinstance(metrics, dict) or len(metrics) > MAX_METRICS:
         raise _schema()
     return CheckOutcome(
-        check_id=_match(o["check_id"], _NAME),
-        subject_kind=subject["kind"],
-        subject_id=_match(subject["id"], _ID),
-        method=_match(o["method"], _METHOD),
-        method_version=_match(o["method_version"], _ID),
-        status=o["status"],
-        severity=o["severity"],
-        reason_code=reason,
-        coverage=_coverage(o["coverage"]),
-        limits=Limits(limits["sampled"], _opt_count(limits["sample_rows"])),
-        metrics=MappingProxyType({_match(k, _NAME): _metric(v) for k, v in metrics.items()}),
+        _match(o["check_id"], _NAME),
+        subject["kind"],
+        _match(subject["id"], _ID),
+        _match(o["method"], _METHOD),
+        _match(o["method_version"], _ID),
+        o["status"],
+        o["severity"],
+        reason,
+        _coverage(o["coverage"]),
+        Limits(limits["sampled"], _opt_count(limits["sample_rows"])),
+        MappingProxyType({_match(k, _NAME): _metric(v) for k, v in metrics.items()}),
     )
 
 
@@ -392,11 +404,11 @@ def _checks(node: Any) -> tuple[CheckOutcome, ...]:
     if not isinstance(node, list):
         raise _schema()
     if len(node) > MAX_CHECKS:
-        raise _bad(ev.STATEMENT_TOO_MANY_CHECKS)
+        raise SignedEvidenceError(ev.STATEMENT_TOO_MANY_CHECKS, status="MALFORMED")
     out = [_check(c) for c in node]
     keys = [(c.check_id, c.subject_kind, c.subject_id) for c in out]
     if keys != sorted(keys):
-        raise _bad(ev.STATEMENT_ARRAY_ORDER)
+        raise SignedEvidenceError(ev.STATEMENT_ARRAY_ORDER, status="MALFORMED")
     return tuple(out)
 
 
@@ -426,10 +438,10 @@ def _validate(doc: Any, statement_id: str) -> EvidenceStatementV1:
     schema = doc.get("schema")
     if schema is None:
         if doc.get("schema_version") in LEGACY_SCHEMA_VERSIONS:
-            raise _bad(ev.LEGACY_INTEGRITY_ONLY, "UNSUPPORTED")
-        raise _bad(ev.STATEMENT_MISSING_FIELD)
+            raise SignedEvidenceError(ev.LEGACY_INTEGRITY_ONLY, status="UNSUPPORTED")
+        raise SignedEvidenceError(ev.STATEMENT_MISSING_FIELD, status="MALFORMED")
     if schema != SCHEMA_ID:
-        raise _bad(ev.STATEMENT_SCHEMA_UNSUPPORTED, "UNSUPPORTED")
+        raise SignedEvidenceError(ev.STATEMENT_SCHEMA_UNSUPPORTED, status="UNSUPPORTED")
     o = _obj(doc, _TOP)
     issuer = _obj(o["issuer"], ("tenant", "signer"))
     engine = _obj(o["engine"], ("name", "version"))
@@ -440,9 +452,9 @@ def _validate(doc: Any, statement_id: str) -> EvidenceStatementV1:
     included = [a for a in artifacts if a.disposition == "INCLUDED"]
     # PUBLISHED carries every artifact; REJECTED carries none (it may carry zero artifacts).
     if publication.state == "PUBLISHED" and len(included) != len(artifacts):
-        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
+        raise SignedEvidenceError(ev.STATEMENT_PUBLICATION_INCOHERENT, status="MALFORMED")
     if publication.state == "REJECTED" and included:
-        raise _bad(ev.STATEMENT_PUBLICATION_INCOHERENT)
+        raise SignedEvidenceError(ev.STATEMENT_PUBLICATION_INCOHERENT, status="MALFORMED")
     return EvidenceStatementV1(
         statement_id=statement_id,
         bundle_id=_match(o["bundle_id"], _ID),
@@ -481,7 +493,7 @@ def parse_statement_ex(raw: bytes) -> tuple[EvidenceStatementV1, bool]:
     except SignedEvidenceError as exc:
         inner = exc.identity
     if inner is not None:
-        raise SignedEvidenceError(ev.wire_for(ev.Prefix.STATEMENT, inner), status="MALFORMED")
+        raise SignedEvidenceError(_WIRE[inner], status="MALFORMED")
     parsed = _validate(doc, "sha256:" + hashlib.sha256(raw).hexdigest())
     return parsed, canonical_bytes(doc) == bytes(raw)
 
@@ -489,7 +501,7 @@ def parse_statement_ex(raw: bytes) -> tuple[EvidenceStatementV1, bool]:
 def parse_statement(raw: bytes) -> EvidenceStatementV1:
     parsed, canonical = parse_statement_ex(raw)
     if not canonical:
-        raise _bad(ev.STATEMENT_NOT_CANONICAL, "NON_CANONICAL")
+        raise SignedEvidenceError(ev.STATEMENT_NOT_CANONICAL, status="NON_CANONICAL")
     return parsed
 
 

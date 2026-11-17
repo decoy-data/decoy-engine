@@ -37,7 +37,7 @@ from . import _strict_json as sj
 from ._catalog import RequiredCatalog
 from ._context import ExpectedArtifact, Purpose, VerificationContext
 from ._errors import SignedEvidenceError
-from ._trust import TrustPolicy, _check_pinned_digest
+from ._trust import TrustPolicy, _pin_verdict
 
 MAX_EXPECTATIONS_BYTES = sj.MAX_BYTES
 
@@ -90,8 +90,23 @@ class _CatalogSpec:
         return "required_catalog"
 
 
+# One literal row per strict-reader code, so every raise names a registered identity.
+_WIRE: dict[ReasonCode, ReasonCode] = {
+    ev.BOM: ev.EXPECTATIONS_BOM,
+    ev.DUPLICATE_MEMBER: ev.EXPECTATIONS_DUPLICATE_MEMBER,
+    ev.FLOAT_NOT_ALLOWED: ev.EXPECTATIONS_FLOAT_NOT_ALLOWED,
+    ev.INTEGER_OUT_OF_DOMAIN: ev.EXPECTATIONS_INTEGER_OUT_OF_DOMAIN,
+    ev.INVALID_UNICODE: ev.EXPECTATIONS_INVALID_UNICODE,
+    ev.NON_FINITE_NUMBER: ev.EXPECTATIONS_NON_FINITE_NUMBER,
+    ev.NOT_JSON: ev.EXPECTATIONS_NOT_JSON,
+    ev.NOT_UTF8: ev.EXPECTATIONS_NOT_UTF8,
+    ev.TOO_DEEP: ev.EXPECTATIONS_TOO_DEEP,
+    ev.TOO_LARGE: ev.EXPECTATIONS_TOO_LARGE,
+    ev.TOO_MANY_NODES: ev.EXPECTATIONS_TOO_MANY_NODES,
+}
+
 #: One registered identity per closed spec check (``SpecCheck``), so a refusal names no input.
-_CHECK_CODES: dict[str, ReasonCode] = {
+_SPEC_REFUSALS: dict[str, ReasonCode] = {
     "schema_unknown": ev.EXPECTATIONS_SCHEMA_UNKNOWN,
     "missing_field": ev.EXPECTATIONS_MISSING_FIELD,
     "unknown_field": ev.EXPECTATIONS_UNKNOWN_FIELD,
@@ -165,12 +180,11 @@ class Expectations:
 
 def parse_expectations(raw: bytes, *, pinned_sha256: str) -> Expectations:
     """Load the expectations only if their digest equals the pin, then read them strictly."""
-    _check_pinned_digest(
-        raw,
-        pinned_sha256,
-        invalid=ev.EXPECTATIONS_PIN_INVALID,
-        mismatch=ev.EXPECTATIONS_DIGEST_MISMATCH,
-    )
+    verdict, _ = _pin_verdict(raw, pinned_sha256)
+    if verdict == "invalid":
+        raise SignedEvidenceError(ev.EXPECTATIONS_PIN_INVALID)
+    if verdict == "mismatch":
+        raise SignedEvidenceError(ev.EXPECTATIONS_DIGEST_MISMATCH)
     inner: ReasonCode | None = None
     doc: Any = None
     try:
@@ -178,10 +192,10 @@ def parse_expectations(raw: bytes, *, pinned_sha256: str) -> Expectations:
     except SignedEvidenceError as exc:
         inner = exc.identity
     if inner is not None:
-        raise SignedEvidenceError(ev.wire_for(ev.Prefix.EXPECTATIONS, inner))
+        raise SignedEvidenceError(_WIRE[inner])
     loaded, check = attempt(_SPEC.load, doc)
     if check is not None:
-        raise SignedEvidenceError(_CHECK_CODES[check])
+        raise SignedEvidenceError(_SPEC_REFUSALS[check])
     ids = [a.id for a in loaded.artifacts]
     if not ids:
         raise SignedEvidenceError(ev.EXPECTATIONS_ARTIFACTS_EMPTY)

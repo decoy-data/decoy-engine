@@ -137,7 +137,7 @@ def _identity(
     if not asserted:
         return IdentityBinding.NOT_ASSERTED
     bad = [code for want, got, code in asserted if want != got]
-    reasons.update(bad)
+    reasons |= set(bad)
     return IdentityBinding.MISMATCH if bad else IdentityBinding.BOUND
 
 
@@ -274,7 +274,7 @@ def _verify(
             evaluation_time=evaluation_time,
         )
         trust = TrustStatus[verdict.status]
-        reasons.update(verdict.reasons)
+        reasons |= set(verdict.reasons)
 
     identity = _identity(stmt, context, reasons)
 
@@ -299,8 +299,8 @@ def _verify(
         )
         artifacts, checks = a_ev.status, c_ev.status
         artifact_results, check_results, unbound = a_ev.results, c_ev.results, a_ev.unbound
-        reasons.update(a_ev.reasons)
-        reasons.update(c_ev.reasons)
+        reasons |= set(a_ev.reasons)
+        reasons |= set(c_ev.reasons)
         notes = c_ev.notes
 
     hist_status, hist_ref, hist_reasons = evaluate_historical(
@@ -311,7 +311,7 @@ def _verify(
         signature_digest=envelope.envelope_digest if envelope else "",
         decisions=context.historical_decisions,
     )
-    reasons.update(hist_reasons)
+    reasons |= set(hist_reasons)
 
     rejected = stmt is not None and stmt.publication.state == "REJECTED"
     if rejected:

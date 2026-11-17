@@ -210,13 +210,13 @@ def _calls(node: ast.AST) -> set[str]:
 def test_both_loaders_call_the_one_pin_helper_and_nothing_else_compares_a_pin() -> None:
     trust = _functions(PKG / "_trust.py")
     expectations = _functions(PKG / "_expectations.py")
-    assert "_check_pinned_digest" in _calls(trust["from_bytes"])
-    assert "_check_pinned_digest" in _calls(expectations["parse_expectations"])
+    assert "_pin_verdict" in _calls(trust["from_bytes"])
+    assert "_pin_verdict" in _calls(expectations["parse_expectations"])
     for name, fn in {**trust, **expectations}.items():
-        if name == "_check_pinned_digest":
+        if name == "_pin_verdict":
             continue
         assert not ({"compare_digest"} & _calls(fn)) or "pinned" not in ast.unparse(fn), name
     for path in PKG.glob("*.py"):
         for name, fn in _functions(path).items():
-            if name != "_check_pinned_digest" and "pinned_sha256" in ast.unparse(fn):
+            if name != "_pin_verdict" and "pinned_sha256" in ast.unparse(fn):
                 assert "compare_digest" not in _calls(fn), (path.name, name)

@@ -90,12 +90,6 @@ def _arg_ok(arg: ast.AST, typed: set[str], dicts: set[str], aliases: set[str]) -
         if arg.attr == "identity":
             return True
         return isinstance(arg.value, ast.Name) and arg.value.id == "ev" and arg.attr in SYMBOLS
-    if isinstance(arg, ast.Call):
-        func = arg.func
-        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-        return name == "wire_for"
-    if isinstance(arg, ast.Name):
-        return arg.id in typed
     if isinstance(arg, ast.BoolOp):
         return all(_arg_ok(v, typed, dicts, aliases) for v in arg.values)
     if isinstance(arg, ast.Subscript):
@@ -152,8 +146,7 @@ def test_the_walk_catches_each_seeded_raw_string(source: str) -> None:
     "source",
     [
         "def f():\n    raise SignedEvidenceError(ev.SIGNING_FAILED)\n",
-        "def _bad(code: ReasonCode):\n    return SignedEvidenceError(code)\n",
-        "def f(inner):\n    raise SignedEvidenceError(ev.wire_for(ev.Prefix.STATEMENT, inner))\n",
+        "_W: dict[ReasonCode, ReasonCode] = {ev.BOM: ev.STATEMENT_BOM}\ndef f(inner):\n    raise SignedEvidenceError(_W[inner])\n",
     ],
 )
 def test_the_walk_accepts_registered_symbols(source: str) -> None:
@@ -269,3 +262,23 @@ def test_every_identified_entry_names_its_defining_module() -> None:
 
     for module, name in reason_adapter._IDENTIFIED:
         assert getattr(importlib.import_module(module), name).__module__ == module
+
+
+def test_each_module_table_equals_the_wire_for_product() -> None:
+    from decoy_engine.signed_evidence import _catalog, _envelope, _expectations, _statement, _trust
+
+    mods = {
+        evidence.Prefix.STATEMENT: _statement,
+        evidence.Prefix.TRUST_POLICY: _trust,
+        evidence.Prefix.CATALOG: _catalog,
+        evidence.Prefix.EXPECTATIONS: _expectations,
+        evidence.Prefix.ENVELOPE: _envelope,
+    }
+    for prefix, mod in mods.items():
+        expected = {}
+        for inner in evidence.INNER_CODES:
+            try:
+                expected[inner] = evidence.wire_for(prefix, inner)
+            except KeyError:
+                continue
+        assert expected == mod._WIRE, prefix
