@@ -47,3 +47,21 @@ def exact_key_cast(chunk: pa.Array, target: pa.DataType) -> pa.Array:
     except pa.ArrowException as exc:
         failed = type(exc)
     raise failed(f"cannot cast a key chunk {chunk.type} -> {target} exactly")
+
+
+# One int32 offset per row of a variable-width Arrow column.
+_OFFSET_BYTES = 4
+
+
+def arrow_column_bytes(arrow_type: pa.DataType, rows: int, width: float) -> int:
+    """Bytes of one Arrow column's data buffers (no validity bitmap).
+
+    A fixed-width column is `bit_width` bits a value, rounded up to whole bytes so a 1-bit
+    boolean stays an integer count. A variable-width column holds one int32 offset a value
+    plus `width` payload bytes a value (`width` is the mean, 0 when the caller has none).
+    """
+    try:
+        bit_width = arrow_type.bit_width
+    except ValueError:  # variable-width types have no bit width
+        return int(rows * (_OFFSET_BYTES + width))
+    return (rows * bit_width + 7) // 8
