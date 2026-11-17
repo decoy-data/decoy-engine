@@ -577,6 +577,40 @@ fan-out sentry: 5149 passed, 0 failed, 43 skipped; `tests/property/test_ri_graph
 `generation/_streamed.py` 600; the engine root and `config/` hold 25 modules. Not run on this
 head: the full T1 gate, mutations and the full suite.
 
+## Main merge (2026-11-17, `dda1b61f`), gate and mutations on the exact head
+
+`origin/feat/gen-inherit-e2` `bf392a09` (holding `origin/main` `dda1b61f`, #609 to #634)
+merged into `7212b047` as `1479f413`, without a conflict. gen-inherit-e2 merged that main
+directly, because GEN-REL has not taken it yet; its record lists the three conflicts. The draw-site
+catalogue arrives with `gen.reference` in main's `path::function` form and re-pinned there; this
+slice's `GEN_KIND_TO_SITE` map pin is unchanged and both catalogue tests pass. Main touches none
+of the files the 15 mutations anchor in.
+
+Gate on `1479f413`: `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --baseline` (the selection
+against `origin/main`, 1324 paths), Python 3.10.20. ruff, format and mypy pass; sentry 6093
+passed, 0 failed, 2 skipped; layers 15 passed; licenses 63 passed; tests 43486 passed, 138
+failed or errored, 5384 skipped. Baseline `origin/main` `dda1b61f` on the same paths: 139 fail.
+Branch-only test failures: 0. The 138 are the same ids gen-inherit-e2 records: main's red
+release pin and the scratch-permission tests that error in this container on main. The env step
+failed once because the shared venv's editable install pointed at the gen-inherit-e2 worktree
+(tests import each tree's `src` through `PYTHONPATH`); after `bootstrap.sh` in this tree, `--steps
+env` passes.
+
+Script checks against `origin/main` `dda1b61f`: `registry_renumber.py --check` 0;
+`ratchet_check.py` 0; `check_fragment.py` 0; `reason_release_pin.py --check` 1 with the same 8
+`connector.*` lines as `origin/main`, none from this chain.
+
+Mutations: 15 of 15 red on `1479f413`, detached worktree importing its own `src`, Python 3.10.20,
+every anchor matched once, the tree clean after each. M1 to M14 ran the four slice files
+(`test_inherit.py`, `test_generate_options.py`, `test_reference_pool_choke_point.py`,
+`test_generate_input_edges.py`; unmutated 361 passed); M15 those plus `test_formula_types.py`
+(399 passed). Red counts (the `a27a82c5` run in brackets): M1 13 (10), M2 1, M3 27, M4 6 (3),
+M5 8 (7), M6 5, M7 3, M8 3, M9 1, M10 1, M11 3 (2; AT-1 also red), M12 2, M13 1, M14 4, M15 14
+(2; the 12 more are `test_formula_types.py` cells, now in its run). The harness was rebuilt from
+the mutation tables above (the earlier harness was not kept).
+
+`generation/synthesize.py` 597 lines. Not run: the full suite, Python 3.11.
+
 ## T1 paths (154: slice 5's 126, 27 importers, 1 changed test)
 
 ```
