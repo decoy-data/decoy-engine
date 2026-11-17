@@ -36,7 +36,7 @@ class TestPerStrategyLabel:
             ("hash", "preserves_cardinality_only"),
             ("fpe", "preserves_cardinality_only"),
             ("tokenize", "preserves_cardinality_only"),
-            ("group_key", "preserves_cardinality_only"),
+            ("group_key", "destroys_frequency"),
             ("faker", "destroys_frequency"),
             ("grouped_series", "destroys_frequency"),
             ("bucketize", "coarsens"),

@@ -120,6 +120,7 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.sdk", "PermanentError", reasons.decoy.CONNECTOR_PERMANENT_FAILURE),
     ("decoy_engine.fileaccess._types", "FileAccessDenied", reasons.decoy.FILE_ACCESS_DENIED),
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
+    ("decoy_engine.profiling.scan_set_read", "ScanSetReadError", reasons.config.UNTAGGED),
     # F22 errno-only file-access errors: one meaning each, whoever raised them.
     (
         "decoy_engine.fileaccess._types",
