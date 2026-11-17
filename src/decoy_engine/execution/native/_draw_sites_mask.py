@@ -83,8 +83,8 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "plan category pool (execution/out_of_core/_mask_group_b.py:336)."
         ),
         mirror_call_sites=(
-            "execution/out_of_core/_mask_group_b.py::_categorical_config",
-            "execution/out_of_core/_mask_group_b.py::_categorical_config",
+            "execution/out_of_core/_mask_group_b.py::categorical_array#1",
+            "execution/out_of_core/_mask_group_b.py::categorical_array#2",
         ),
     ),
     DrawSite(

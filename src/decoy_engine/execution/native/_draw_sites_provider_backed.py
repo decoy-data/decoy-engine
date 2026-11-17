@@ -43,7 +43,7 @@ PROVIDER_BACKED_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.pool_build_faker",
         family="faker_seed_instance",
-        call_site="generation/pool/_builder.py::PoolBuilder.identity_for",
+        call_site="generation/pool/_builder.py::PoolBuilder.build",
         entropy_root="job_seed",
         seed_derivation=(
             "pool_seed = derive(job_seed, 'pool/{provider}/{locale}/{namespace}', "

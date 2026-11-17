@@ -9,7 +9,12 @@ determinism protocol Task 0.3 builds on. The scan reads the SAME
 
 from __future__ import annotations
 
+import ast
+import re
+from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -39,8 +44,6 @@ from decoy_engine.providers_v2.identifiers import (
     PanAdapter,
     SsnAdapter,
 )
-from tests.native import _draw_site_locator as locator
-from tests.native._draw_site_locator import DRAW_TOKEN, strip_prose
 
 _IDENTIFIER_ADAPTERS = (
     SsnAdapter,
@@ -115,9 +118,9 @@ def test_every_required_field_populated_and_from_allowed_enum() -> None:
         assert isinstance(s.partitionable, bool)
         assert isinstance(s.uncertain, bool)
         # call_site is "path::qualified_function[#n]", never a line number.
-        locator.parse(s.call_site)
+        parse_call_site(s.call_site)
         for mirror in s.mirror_call_sites:
-            locator.parse(mirror)
+            parse_call_site(mirror)
 
 
 def test_unseeded_sites_are_not_partitionable() -> None:
@@ -199,10 +202,31 @@ _SCAN_ROOTS = (
     "providers_v2",
 )
 
-# Call-level tokens that indicate an actual randomness draw: `DRAW_TOKEN` and `strip_prose` live in
-# `_draw_site_locator`, which the call-site resolution tests share.
-_DRAW_TOKEN = DRAW_TOKEN
-_strip_prose = strip_prose
+# Call-level tokens that indicate an actual randomness draw. Includes the three
+# keyed primitives (derive / derive_index / derive_value), the numpy and Python
+# RNG constructors, Faker.seed_instance, the whole-column numpy ops, and the
+# Mimesis Generic() seeded constructor. Prose is stripped before matching (see
+# _strip_prose) so a docstring mention of `derive(...)` does not count.
+_DRAW_TOKEN = re.compile(
+    r"np\.random\.default_rng\(|np\.random\.RandomState\(|random\.Random\(|"
+    r"\.seed_instance\(|\.permutation\(|\.shuffle\(|\.choices\(|"
+    r"derive_index\(|derive_value\(|\bderive\(|Generic\("
+)
+
+_TRIPLE_QUOTED = re.compile(r"(\"\"\".*?\"\"\"|'''.*?''')", re.DOTALL)
+
+
+def _strip_prose(text: str) -> str:
+    """Remove triple-quoted blocks and line comments so the scan matches code.
+
+    Bare `derive(` also appears in docstrings and comments describing the keyed
+    primitive; stripping prose keeps the scan matching real call sites, not
+    documentation. Single-line string literals are intentionally left in (a
+    handful are handled by the allowlist), since removing them reliably needs a
+    real tokenizer.
+    """
+    without_docstrings = _TRIPLE_QUOTED.sub("", text)
+    return "\n".join(re.sub(r"#.*$", "", line) for line in without_docstrings.splitlines())
 
 
 # RNG-token-bearing files that are NOT masked/generated-output draw sites:
@@ -278,7 +302,7 @@ def _catalogued_paths() -> set[str]:
     paths: set[str] = set()
     for s in DRAW_SITES:
         for entry in (s.call_site, *s.mirror_call_sites):
-            paths.add(locator.parse(entry).path)
+            paths.add(parse_call_site(entry).path)
     return paths
 
 
@@ -322,15 +346,115 @@ def test_catalogued_call_sites_point_at_real_files() -> None:
     # Every call_site file (not the drifting line number) must exist in the tree.
     for s in DRAW_SITES:
         for entry in (s.call_site, *s.mirror_call_sites):
-            rel = locator.parse(entry).path
+            rel = parse_call_site(entry).path
             assert (_PKG_DIR / rel).is_file(), f"{s.draw_site_id}: missing file {rel}"
+
+
+# --------------------------------------------------------------------------
+# Resolving `path::qualified_function[#n]` call sites (row 24ze G1).
+# --------------------------------------------------------------------------
+# A catalogued function may reach the keyed primitive through an alias or a helper (a
+# `derive_func` parameter, `DeriveContext.derive_sources`, `hmac_hex`, a batch kernel), so the
+# per-entry check also counts those spellings. The tree-wide scan keeps the narrower DRAW_TOKEN.
+ENTRY_DRAW_TOKEN = re.compile(
+    _DRAW_TOKEN.pattern
+    + r"|\bderive_sources?\(|\bderive_func\(|\bhmac_hex\(|\w*hmac\w*\.new\(|"
+    + r"derive_index_batch\(|\bpositional_pool_indices\(|\.sample\(|\.integers\(|\.random\("
+)
+
+_CALL_SITE = re.compile(r"(?P<path>[\w/]+\.py)::(?P<qual>\w+(?:\.\w+)*)(?:#(?P<n>[1-9]\d*))?\Z")
+
+
+class CallSite(NamedTuple):
+    path: str
+    qualified: str
+    ordinal: int | None
+
+    @property
+    def base(self) -> str:
+        return f"{self.path}::{self.qualified}"
+
+
+def parse_call_site(reference: str) -> CallSite:
+    match = _CALL_SITE.match(reference)
+    if match is None:
+        raise ValueError(f"call site {reference!r} is not path::function[#n]")
+    n = match.group("n")
+    return CallSite(match.group("path"), match.group("qual"), int(n) if n else None)
+
+
+def _functions(tree: ast.AST) -> Iterable[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
+    def walk(node: ast.AST, prefix: tuple[str, ...]) -> Iterable[tuple[str, ast.AST]]:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names = (*prefix, child.name)
+                if not isinstance(child, ast.ClassDef):
+                    yield ".".join(names), child
+                yield from walk(child, names)
+            else:
+                yield from walk(child, prefix)
+
+    return walk(tree, ())  # type: ignore[return-value]
+
+
+def call_site_token_count(package_dir: Path, ref: CallSite) -> int:
+    """Draw tokens in the referenced function's body. Raises LookupError if it is missing."""
+    path = package_dir / ref.path
+    if not path.is_file():
+        raise LookupError(f"module {ref.path} does not exist")
+    text = path.read_text(encoding="utf-8")
+    for qualified, node in _functions(ast.parse(text)):
+        if qualified == ref.qualified:
+            lines = text.splitlines()[node.lineno - 1 : node.end_lineno]
+            return len(ENTRY_DRAW_TOKEN.findall(_strip_prose("\n".join(lines))))
+    raise LookupError(f"function {ref.qualified} does not exist in {ref.path}")
+
+
+def call_site_function_source(package_dir: Path, ref: CallSite) -> str:
+    """The referenced function's source text (for tests that look for a call in it)."""
+    text = (package_dir / ref.path).read_text(encoding="utf-8")
+    for qualified, node in _functions(ast.parse(text)):
+        if qualified == ref.qualified:
+            return "\n".join(text.splitlines()[node.lineno - 1 : node.end_lineno])
+    raise LookupError(f"function {ref.qualified} does not exist in {ref.path}")
+
+
+def call_site_problems(package_dir: Path, sites: Iterable[object]) -> list[str]:
+    """Every defect in the catalogue's references, as `draw_site_id: reason` lines."""
+    found: list[str] = []
+    claimed: dict[str, list[tuple[str, int | None]]] = defaultdict(list)
+    for site in sites:
+        sid = site.draw_site_id  # type: ignore[attr-defined]
+        refs = (site.call_site, *site.mirror_call_sites)  # type: ignore[attr-defined]
+        drawing = False
+        for raw in refs:
+            try:
+                ref = parse_call_site(raw)
+                count = call_site_token_count(package_dir, ref)
+            except (ValueError, LookupError) as exc:
+                found.append(f"{sid}: {exc}")
+                continue
+            claimed[ref.base].append((sid, ref.ordinal))
+            if ref.ordinal is not None and count < ref.ordinal:
+                found.append(f"{sid}: {ref.base}#{ref.ordinal} has only {count} draw tokens")
+            elif count:
+                drawing = True
+        if not drawing:
+            found.append(f"{sid}: no referenced function holds a draw token")
+    for base, uses in claimed.items():
+        if len(uses) > 1:
+            ordinals = [ordinal for _, ordinal in uses]
+            if None in ordinals or len(ordinals) != len(set(ordinals)):
+                owners = sorted({sid for sid, _ in uses})
+                found.append(f"{base}: used {len(uses)} times by {owners} without distinct #n")
+    return found
 
 
 # --------------------------------------------------------------------------
 # Call sites name a function, not a line (row 24ze G1).
 # --------------------------------------------------------------------------
 def test_every_call_site_resolves_to_a_function_that_draws() -> None:
-    assert locator.problems(_PKG_DIR, DRAW_SITES) == []
+    assert call_site_problems(_PKG_DIR, DRAW_SITES) == []
 
 
 def _scratch_copy(tmp_path: Path, transform) -> Path:  # type: ignore[no-untyped-def]
@@ -338,7 +462,7 @@ def _scratch_copy(tmp_path: Path, transform) -> Path:  # type: ignore[no-untyped
     scratch = tmp_path / "decoy_engine"
     for site in DRAW_SITES:
         for entry in (site.call_site, *site.mirror_call_sites):
-            rel = locator.parse(entry).path
+            rel = parse_call_site(entry).path
             target = scratch / rel
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -352,24 +476,24 @@ def test_a_blank_line_above_every_draw_keeps_every_entry_resolving(tmp_path: Pat
     def add_blank_lines(_rel: str, text: str) -> str:
         out: list[str] = []
         for line in text.splitlines():
-            if locator.ENTRY_DRAW_TOKEN.search(locator.strip_prose(line)):
+            if ENTRY_DRAW_TOKEN.search(_strip_prose(line)):
                 out.append("")
             out.append(line)
         return "\n".join(out) + "\n"
 
     scratch = _scratch_copy(tmp_path, add_blank_lines)
-    assert locator.problems(scratch, DRAW_SITES) == []
+    assert call_site_problems(scratch, DRAW_SITES) == []
 
 
 def test_renaming_a_catalogued_function_fails(tmp_path: Path) -> None:
-    victim = locator.parse(DRAW_SITES[0].call_site)
+    victim = parse_call_site(DRAW_SITES[0].call_site)
     leaf = victim.qualified.rsplit(".", 1)[-1]
 
     def rename(rel: str, text: str) -> str:
         return text.replace(f"def {leaf}(", f"def {leaf}_renamed(") if rel == victim.path else text
 
     scratch = _scratch_copy(tmp_path, rename)
-    found = locator.problems(scratch, DRAW_SITES)
+    found = call_site_problems(scratch, DRAW_SITES)
     assert any(line.startswith(f"{DRAW_SITES[0].draw_site_id}:") for line in found)
 
 
@@ -383,10 +507,10 @@ def test_two_sites_in_one_function_need_distinct_ordinals() -> None:
         }
     )
     base = DRAW_SITES[0].call_site.split("#")[0]
-    found = locator.problems(_PKG_DIR, (DRAW_SITES[0], clash))
+    found = call_site_problems(_PKG_DIR, (DRAW_SITES[0], clash))
     assert any(base in line and "distinct" in line for line in found)
 
 
 def test_a_line_number_call_site_is_refused() -> None:
     with pytest.raises(ValueError):
-        locator.parse("generation/synthesize.py:491")
+        parse_call_site("generation/synthesize.py:491")
