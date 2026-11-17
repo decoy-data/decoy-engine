@@ -17,6 +17,7 @@ import pytest
 from scripts.release.reason_manifest_policy import append_only_violations
 
 from decoy_engine import reasons
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME, RETIRED_PATTERN
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "f29"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sentry"))
@@ -694,3 +695,42 @@ def test_gen_types_e3_codes_are_registered() -> None:
         assert not re.search(r"[{}%]", spec.summary)
         assert getattr(getattr(reasons, ns), code.upper()) == code
     assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 24, 0)
+
+
+# The two route tombstones removed before GA (one-time exception to the append-only rule).
+REMOVED_ROUTE_CODES = (f"run_{RETIRED_NAME}_requested", f"run_{RETIRED_NAME}")
+REMOVED_IDS = ["requested-check", "resident-output"]
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_removed_route_codes_no_longer_resolve(code: str) -> None:
+    assert reasons.find("route", code) is None
+
+
+def test_no_registered_reason_carries_the_retired_name() -> None:
+    for entry in reasons.manifest()["entries"]:
+        for field in ("code", "summary", "owner", "symbol"):
+            assert not RETIRED_PATTERN.search(str(entry[field])), (entry["namespace"], field)
+
+
+def _record_naming(namespace: str, code: str) -> dict[str, object]:
+    payload = reasons.ReasonRecord.for_reason(reasons.runtime.MISSING_MASK_SECRET).to_payload()
+    return {**payload, "registry_version": "1.29.0", "namespace": namespace, "code": code}
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_a_record_naming_a_removed_code_reads_as_an_unknown_reason(code: str) -> None:
+    record, written = reasons.ReasonRecord.parse_payload(_record_naming("route", code))
+    assert (record.namespace, record.code) == ("decoy", "unknown_reason_from_future")
+    assert record.context.original_identity == ("route", code)
+    assert written == "1.29.0"
+
+
+def test_a_malformed_identity_beside_a_removed_code_is_dropped() -> None:
+    for namespace, code in (
+        ("route\n", REMOVED_ROUTE_CODES[0]),
+        ("route", REMOVED_ROUTE_CODES[1] + "\n"),
+    ):
+        record, _ = reasons.ReasonRecord.parse_payload(_record_naming(namespace, code))
+        assert record.code == "unknown_reason_from_future"
+        assert record.context.original_identity is None
