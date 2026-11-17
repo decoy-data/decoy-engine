@@ -76,6 +76,37 @@ def _scan(tmp_path: Path, rel: str, body: str) -> bool:
         ("execution/x.py", "from .physical import (\n    a,\n)\n"),
         ("execution/x.py", "from . import (\n    physical,\n)\n"),
         ("execution/x.py", "from physical import (\n  a\n  # physical syntax error\n"),
+        (
+            "execution/x.py",
+            'import importlib\nimportlib.import_module("decoy_engine.execution.physical")\n',
+        ),
+        (
+            "execution/x.py",
+            'import importlib as loader\nloader.import_module("decoy_engine.execution.physical._types")\n',
+        ),
+        (
+            "execution/x.py",
+            'import importlib.util\nimportlib.import_module("decoy_engine.execution.physical")\n',
+        ),
+        (
+            "execution/x.py",
+            'from importlib import import_module\nimport_module("decoy_engine.execution.physical")\n',
+        ),
+        (
+            "execution/x.py",
+            'from importlib import import_module as load\nload(name="decoy_engine.execution.physical")\n',
+        ),
+        (
+            "execution/x.py",
+            'import importlib\nif flag:\n    importlib.import_module(".physical", "decoy_engine.execution")\n',
+        ),
+        (
+            "execution/sub/x.py",
+            'import importlib\nimportlib.import_module("..physical", package="decoy_engine.execution.sub")\n',
+        ),
+        ("execution/x.py", '__import__("decoy_engine.execution.physical")\n'),
+        ("execution/x.py", 'if flag:\n    __import__(name="decoy_engine.execution.physical")\n'),
+        ("execution/x.py", '__import__("decoy_engine.execution", fromlist=["physical"])\n'),
     ],
 )
 def test_every_spelling_of_the_seam_import_is_found(tmp_path: Path, rel: str, body: str) -> None:
@@ -91,6 +122,20 @@ def test_every_spelling_of_the_seam_import_is_found(tmp_path: Path, rel: str, bo
         ("execution/__init__.py", "from .other import physical_plan\n"),
         ("execution/x.py", '"""mentions physical in prose"""\n'),
         ("sub/x.py", "from .physical import a\n"),  # sub/physical is not the seam
+        (
+            "execution/x.py",
+            'import importlib\nimportlib.import_module("decoy_engine.execution.chunked")\n',
+        ),
+        (
+            "execution/x.py",
+            'import importlib\nimportlib.import_module(".chunked", "decoy_engine.execution")\n',
+        ),
+        ("execution/x.py", '__import__("decoy_engine.execution", fromlist=["chunked"])\n'),
+        ("execution/x.py", 'import json\njson.import_module("decoy_engine.execution.physical")\n'),
+        (
+            "execution/x.py",
+            'import importlib\nimportlib.import_module("decoy_engine.exec" + "ution.physical")\n',
+        ),  # built up: V2-LOG
     ],
 )
 def test_other_imports_are_not_the_seam(tmp_path: Path, rel: str, body: str) -> None:
