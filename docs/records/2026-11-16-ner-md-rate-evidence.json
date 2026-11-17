@@ -1,0 +1,328 @@
+{
+ "rows": [
+  {
+   "column": "redacted_notes",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "redacted_notes",
+   "detector_id": "person_name",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "faker_sentences",
+   "detector_id": "location",
+   "hits": 3,
+   "cells": 2000,
+   "rate": 0.0015,
+   "upper_95": 0.003872223150157523
+  },
+  {
+   "column": "faker_sentences",
+   "detector_id": "person_name",
+   "hits": 15,
+   "cells": 2000,
+   "rate": 0.0075,
+   "upper_95": 0.011525178568058531
+  },
+  {
+   "column": "faker_catch_phrases",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "faker_catch_phrases",
+   "detector_id": "person_name",
+   "hits": 1,
+   "cells": 2000,
+   "rate": 0.0005,
+   "upper_95": 0.002369713367656843
+  },
+  {
+   "column": "faker_bs",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "faker_bs",
+   "detector_id": "person_name",
+   "hits": 12,
+   "cells": 2000,
+   "rate": 0.006,
+   "upper_95": 0.009703194529571085
+  },
+  {
+   "column": "prose_company_product",
+   "detector_id": "location",
+   "hits": 71,
+   "cells": 2000,
+   "rate": 0.0355,
+   "upper_95": 0.043082385219264156
+  },
+  {
+   "column": "prose_company_product",
+   "detector_id": "person_name",
+   "hits": 47,
+   "cells": 2000,
+   "rate": 0.0235,
+   "upper_95": 0.029870487579257518
+  },
+  {
+   "column": "prose_cities",
+   "detector_id": "person_name",
+   "hits": 24,
+   "cells": 2000,
+   "rate": 0.012,
+   "upper_95": 0.01683500722080399
+  },
+  {
+   "column": "prose_streets",
+   "detector_id": "person_name",
+   "hits": 87,
+   "cells": 2000,
+   "rate": 0.0435,
+   "upper_95": 0.05176630079885355
+  },
+  {
+   "column": "clinical_allergies.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_allergies.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_careplans.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_careplans.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 56,
+   "cells": 2000,
+   "rate": 0.028,
+   "upper_95": 0.034857571148501056
+  },
+  {
+   "column": "clinical_careplans.REASONDESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_careplans.REASONDESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 122,
+   "cells": 2000,
+   "rate": 0.061,
+   "upper_95": 0.07054148954068647
+  },
+  {
+   "column": "clinical_conditions.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 11,
+   "cells": 2000,
+   "rate": 0.0055,
+   "upper_95": 0.009087352469332526
+  },
+  {
+   "column": "clinical_conditions.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 14,
+   "cells": 2000,
+   "rate": 0.007,
+   "upper_95": 0.010921660754660173
+  },
+  {
+   "column": "clinical_devices.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_devices.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 5,
+   "cells": 2000,
+   "rate": 0.0025,
+   "upper_95": 0.005249275286933494
+  },
+  {
+   "column": "clinical_encounters.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_encounters.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 15,
+   "cells": 2000,
+   "rate": 0.0075,
+   "upper_95": 0.011525178568058531
+  },
+  {
+   "column": "clinical_encounters.REASONDESCRIPTION",
+   "detector_id": "location",
+   "hits": 1,
+   "cells": 2000,
+   "rate": 0.0005,
+   "upper_95": 0.002369713367656843
+  },
+  {
+   "column": "clinical_encounters.REASONDESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 48,
+   "cells": 2000,
+   "rate": 0.024,
+   "upper_95": 0.030426954715855138
+  },
+  {
+   "column": "clinical_immunizations.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 17,
+   "cells": 2000,
+   "rate": 0.0085,
+   "upper_95": 0.01272250976343753
+  },
+  {
+   "column": "clinical_immunizations.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 60,
+   "cells": 2000,
+   "rate": 0.03,
+   "upper_95": 0.03706036385779997
+  },
+  {
+   "column": "clinical_medications.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 15,
+   "cells": 2000,
+   "rate": 0.0075,
+   "upper_95": 0.011525178568058531
+  },
+  {
+   "column": "clinical_medications.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 10,
+   "cells": 2000,
+   "rate": 0.005,
+   "upper_95": 0.00846634820551852
+  },
+  {
+   "column": "clinical_medications.REASONDESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_medications.REASONDESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 41,
+   "cells": 2000,
+   "rate": 0.0205,
+   "upper_95": 0.026517370309813472
+  },
+  {
+   "column": "clinical_observations.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 1,
+   "cells": 2000,
+   "rate": 0.0005,
+   "upper_95": 0.002369713367656843
+  },
+  {
+   "column": "clinical_observations.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 25,
+   "cells": 2000,
+   "rate": 0.0125,
+   "upper_95": 0.01741470614717782
+  },
+  {
+   "column": "clinical_procedures.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_procedures.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 9,
+   "cells": 2000,
+   "rate": 0.0045,
+   "upper_95": 0.007839446211579703
+  },
+  {
+   "column": "clinical_procedures.REASONDESCRIPTION",
+   "detector_id": "location",
+   "hits": 4,
+   "cells": 2000,
+   "rate": 0.002,
+   "upper_95": 0.004570865405067662
+  },
+  {
+   "column": "clinical_procedures.REASONDESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_supplies.DESCRIPTION",
+   "detector_id": "location",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  },
+  {
+   "column": "clinical_supplies.DESCRIPTION",
+   "detector_id": "person_name",
+   "hits": 0,
+   "cells": 2000,
+   "rate": 0.0,
+   "upper_95": 0.0014967448951882837
+  }
+ ],
+ "2x_highest_rate": 0.122,
+ "highest_upper_95": 0.07054148954068647,
+ "threshold": 0.122,
+ "NER_MIN_RATES[md]": 0.122
+}

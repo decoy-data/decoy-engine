@@ -10,10 +10,21 @@ identifier and treats a repeat as already committed; here equality of content de
 ``operation_id`` alone never does). State found on disk is fsynced along its whole chain before
 it is reported, as PostgreSQL's ``SyncDataDirectory`` does at startup (F22 rule D, D2).
 
-Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1); an argument error
-raises. Only a bind can leave anything new at the destination, and every other exit aborts the
-stage. Receipts hold closed tokens, digests, counts
-and errno names; an exception text is never read. Contract: ``docs/publication.md``.
+Rule V (F22 5.5), write-ahead ordering as in PostgreSQL's WAL (the log record is durable before
+the page it describes): a unit with a vault is bound only after its vault is durable, written by
+``VaultWriter.publish`` or adopted by ``adopt_vault``, in this call, under the destination lock.
+The bind takes the ``VaultCommit`` the vault module issues only after the vault's chain fsync, so
+the order is structural. A republish needs the descriptor's vault digest on disk and this
+writer's rows (D3); nothing is written then.
+
+Once its arguments are accepted, every exit is a ``CommitReceipt`` (plan 4.1), except two, both
+raised after the stage is aborted with nothing bound: a ``VaultError`` (``vault_commit_failed``
+and the other codes of the vault module's vocabulary), and a file-access error
+(``FileAccessDenied``) from the vault's ``OutputDir`` before anything is linked; an argument
+error raises. Only a bind can
+leave anything new at the destination, and every other exit aborts the stage. Receipts hold
+closed tokens, digests, counts and errno names; an exception text is never read. Contract:
+``docs/publication.md``.
 """
 
 from __future__ import annotations
@@ -45,12 +56,21 @@ from decoy_engine.publication._descriptor import (
     MAX_DESCRIPTOR_BYTES,
     Artifact,
     Descriptor,
+    DescriptorVault,
     build_descriptor,
     decode_descriptor,
     descriptor_digest,
     encode_descriptor,
 )
 from decoy_engine.publication._types import CommitReceipt, Outcome, PublicationRequest
+from decoy_engine.publication._vault_order import (
+    FsyncFailed,
+    VaultConflict,
+    adopt_vault,
+    read_vault_leaf,
+    same_rows,
+)
+from decoy_engine.vault import VaultCommit, VaultError, VaultWriter
 
 if TYPE_CHECKING:
     from decoy_engine.fileaccess import OutputDir, OutputTxn
@@ -59,6 +79,8 @@ if TYPE_CHECKING:
 __all__ = ["publish_tables", "publish_unit"]
 
 _OCCUPIED = reasons.decoy.PUBLICATION_TARGET_OCCUPIED
+_MISMATCH = reasons.decoy.PUBLICATION_VAULT_MISMATCH
+_UNCERTAIN = reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN
 
 
 def _after_judge() -> None:
@@ -176,8 +198,8 @@ def check_request(request: PublicationRequest, tables: Sequence[str] = ()) -> li
     any I/O; return the table list."""
     if type(request) is not PublicationRequest:
         raise TypeError("request must be a PublicationRequest")
-    if request.vault is not None:  # binding without its vault would break rule V
-        raise NotImplementedError("a vault-bound publication needs vault ordering")
+    if request.vault is not None and not isinstance(request.vault.writer, VaultWriter):
+        raise TypeError("request.vault.writer must be a VaultWriter")
     names = list(tables)
     if any(type(n) is not str for n in names) or len(set(names)) != len(names):
         raise ValueError("invalid tables")
@@ -267,26 +289,53 @@ def _judge(
             )
         return _receipt(request, "refused", _OCCUPIED, descriptor=mine)
     _after_judge()
-    return _bind(txn, request, new)
+    vault = _commit_vault(request, mine)
+    if isinstance(vault, CommitReceipt):
+        return vault
+    return _bind(txn, request, new, vault)
+
+
+def _commit_vault(
+    request: PublicationRequest, mine: Descriptor
+) -> VaultCommit | CommitReceipt | None:
+    """Rule V steps 1 to 3 (5.5): this request's vault durable before anything is bound.
+
+    Written, or on ``vault_exists`` adopted only when it holds this writer's rows (D1); other
+    rows are a ``publication_vault_conflict`` refusal. Any other ``VaultError`` is raised as the
+    vault module raised it: nothing is bound and a linked vault is kept for the retry to adopt."""
+    binding = request.vault
+    if binding is None:
+        return None
+    try:
+        return binding.writer.publish(binding.out)
+    except VaultError as exc:
+        if exc.code != reasons.runtime.VAULT_EXISTS:
+            raise
+    adopted = adopt_vault(binding.out, binding.writer)
+    if isinstance(adopted, VaultConflict):
+        return _receipt(
+            request, "refused", reasons.decoy.PUBLICATION_VAULT_CONFLICT, descriptor=mine
+        )
+    return adopted
 
 
 def _already(
     out: OutputDir, request: PublicationRequest, bound: Descriptor, digest: str | None
 ) -> CommitReceipt:
-    if bound.vault is not None:  # this request carries no vault (a3), so the units differ
-        return _receipt(
-            request, "refused", reasons.decoy.PUBLICATION_VAULT_MISMATCH, descriptor=bound
-        )
-    code: str | None = None
-    try:
-        out.sync_chain()  # D2: the unit tree and its chain to the anchor, before the report
-    except OSError as exc:
-        code = _errno_name(exc)
+    verdict = _check_vault(request, bound)  # D3, before D2: nothing is written either way
+    if verdict == _MISMATCH:
+        return _receipt(request, "refused", _MISMATCH, descriptor=bound)
+    code = verdict
+    if code is None:
+        try:
+            out.sync_chain()  # D2: the unit tree and its chain to the anchor, before the report
+        except OSError as exc:
+            code = _errno_name(exc)
     if code is not None:
         return _receipt(
             request,
             "commit_uncertain",
-            reasons.decoy.PUBLICATION_COMMIT_UNCERTAIN,
+            _UNCERTAIN,
             descriptor=bound,
             digest=digest,
             visible=True,
@@ -303,7 +352,39 @@ def _already(
     )
 
 
-def _bind(txn: OutputTxn, request: PublicationRequest, new: _Measured) -> CommitReceipt:
+def _check_vault(request: PublicationRequest, bound: Descriptor) -> str | None:
+    """D3 (5.5): ``None`` when the bound unit's vault is this request's, ``_MISMATCH`` when it is
+    not, or the errno name of a failed fsync (``commit_uncertain``).
+
+    Presence must match both ways (LOW-1). The leaf is read by ``adopt_file``, which fsyncs it and
+    its chain first; its size and SHA-256 must be the descriptor's, and its rows this writer's,
+    since equal output can carry a different reverse map (V1-3). ``writer.publish`` is never
+    called, so a retry makes no second vault."""
+    binding, stored = request.vault, bound.vault
+    if binding is None or stored is None:
+        return None if binding is None and stored is None else _MISMATCH
+    read = read_vault_leaf(binding.out, stored.size)
+    if isinstance(read, FsyncFailed):
+        return read.errno_name
+    if not isinstance(read, bytes) or len(read) != stored.size:
+        return _MISMATCH  # absent, over the bound size, or not an adoptable file
+    if hashlib.sha256(read).hexdigest() != stored.sha256 or not same_rows(read, binding.writer):
+        return _MISMATCH
+    return None
+
+
+def _bind(
+    txn: OutputTxn, request: PublicationRequest, new: _Measured, vault: VaultCommit | None
+) -> CommitReceipt:
+    if (vault is None) != (request.vault is None):  # rule V: no vault request binds without one
+        raise ValueError("a vault-bound unit needs its VaultCommit")
+    if vault is not None:
+        mine = build_descriptor(
+            operation_id=request.operation_id,
+            artifacts=new.descriptor.artifacts,
+            vault=DescriptorVault(vault.sha256, vault.size, vault.entry_count),
+        )
+        new = _Measured(mine, encode_descriptor(mine))
     mine, digest = new.descriptor, descriptor_digest(new.data)
     code: str | None = None
     uncertain = False

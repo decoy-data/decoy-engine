@@ -74,6 +74,7 @@ SENTRIES = (
     "tests/sentry/test_record_export_rules.py",
     "tests/sentry/test_reason_registry.py",
     "tests/sentry/test_run_result_constructor.py",
+    "tests/sentry/test_runtime_lock_public_imports.py",
     "tests/sentry/test_script_call_kwargs.py",
     "tests/sentry/test_sdv_import_sentry.py",
     "tests/sentry/test_secret_material_census.py",
@@ -104,6 +105,7 @@ SENTRIES = (
     "tests/sentry/defects/test_lazy_builder_registry.py",
     "tests/sentry/defects/test_ner_mismatch_single_site.py",
     "tests/sentry/defects/test_rng_construction.py",
+    "tests/sentry/defects/test_strategy_docs_agree.py",
     "tests/sentry/defects/test_target_destination_choke_point.py",
     "tests/sentry/defects/test_validation_sites.py",
     "tests/sentry/generation/test_pooled_read_choke_point.py",
@@ -114,6 +116,7 @@ SENTRIES = (
     "tests/sentry/post_scan/test_post_scan_choke_points.py",
     "tests/sentry/profiling/test_generated_at_shape.py",
     "tests/sentry/profiling/test_profile_value_registry.py",
+    "tests/sentry/profiling/test_snapshot_datetime_contract.py",
     "tests/sentry/profiling/test_snapshot_value_registry.py",
     "tests/sentry/release/test_frozen_surface_map.py",
     "tests/sentry/source_config/test_declaration_gate.py",
@@ -123,6 +126,7 @@ SENTRIES = (
     "tests/sentry/tooling/test_pytest_timeout.py",
     # Named sentries that live outside tests/sentry/.
     "tests/secret_providers/test_leak_sentry.py",
+    "tests/secret_providers/test_classifier_equivalence.py",
 )
 
 

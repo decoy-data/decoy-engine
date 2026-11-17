@@ -113,8 +113,10 @@ class ColumnConfig(BaseModel):
     # alias for Delphix Secure Lookup's collision-allowed semantics: at compile it
     # forces `cardinality_mode = reuse` + `deterministic = true`, yielding a stable
     # many-to-one masked mapping (distinct sources may share a masked value, the way
-    # natural data recurs). Requires a namespace (the derive key) and conflicts with
-    # any non-`reuse` cardinality_mode; the planner enforces both.
+    # natural data recurs). A plain deterministic faker column gets the same selection,
+    # so this key states the many-to-one mapping and does not opt into it. Requires a
+    # namespace (the derive key) and conflicts with any non-`reuse` cardinality_mode;
+    # the planner enforces both.
     allow_collisions: bool = False
     # DE-10 reland (2026-07-13): declared dtype FAMILY of this column's raw
     # source value (e.g. "int64", "float64", "string" -- coarsened by

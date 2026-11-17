@@ -31,7 +31,7 @@ Invariant sources (cite-the-source-pattern, per repo CLAUDE.md):
   mutant that corrupts the round arithmetic breaks the round trip.
 - DETERMINISM: the fpe strategy's keyed-determinism contract ("same input +
   same key -> same output"), the same contract `HashStrategy` and
-  `DateShiftStrategy` share.
+  date_shift handler share.
 - KEY/TWEAK SENSITIVITY: implied by the cipher being keyed at all (a PRF that
   ignores its key is not a PRF); NIST SP 800-38G treats the tweak as part of
   the encryption's identity for the same reason. Domain is gated to the FF1

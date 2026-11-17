@@ -52,8 +52,10 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 | `decoy-library-export/v1` | contract 3.1 | `src/decoy_engine/records/_export.py` | `tests/unit/records/test_corpus.py`, `tests/unit/records/test_export.py` |
 | `decoy-job-log/v1` | contract 3.1 | `src/decoy_engine/records/_joblog.py` | `tests/unit/records/test_corpus.py`, `tests/unit/records/test_joblog.py` |
 | `scan-set/v1` | contract 3.1 | `src/decoy_engine/profiling/scan_set.py` | `tests/unit/profiling/test_scan_set.py` |
+| `scan-diff/v1` | contract 3.1 | `src/decoy_engine/profiling/scan_diff.py` | `tests/unit/profiling/test_scan_diff.py`, `tests/integration/compat_corpus/scan_diff/` |
 | `decoy-resume-run/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-run-v1.json` |
 | `decoy-resume-table/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-table-v1.json` |
+| `lock/v1` | contract 3.1 | `src/decoy_engine/support/_runtime_lock.py` | `tests/unit/support/test_runtime_lock.py`, `tests/unit/support/test_probe.py`, `tests/integration/compat_corpus/runtime-lock/lock-v1.json`, `tests/integration/compat_corpus/runtime-lock/lock-v1-probe.json` |
 
 ## Public names (contract 3.4)
 
@@ -61,7 +63,8 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 to its expected set. Names exported again by `decoy_engine.sdk` are listed as `sdk.<name>`; this
 page's sentry is what holds `sdk.__all__`, because a name added to or dropped from it fails the
 row check. Both pin that a name exists, not its signature or fields; rows that cite `RGF1-KL-4`
-have nothing more.
+have nothing more. `JobEstimate` gained three defaulted fields after `notes` (`lifecycle_peak_bytes`,
+`limiting_phase`, `phase_bytes`); the row pins the name, not the fields.
 
 | Surface | Completeness source | Owning code | Pinning test or snapshot |
 |---|---|---|---|

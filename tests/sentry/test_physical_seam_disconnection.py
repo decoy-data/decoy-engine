@@ -52,6 +52,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
+
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 REPO_ROOT = ENGINE_ROOT.parents[1]
 
@@ -230,10 +232,6 @@ def _git(*args: str) -> str:
     ).stdout
 
 
-# The retired package name, spelled in two parts so the residual sentry has no literal to flag.
-_RETIRED = "sto" + "rm"
-
-
 def _only_these_line_changes(base: str, path: str, allowed: dict[str, str]) -> bool:
     """True when the file's diff against `base` is exactly the removed->added pairs in `allowed`."""
     lines = [
@@ -355,6 +353,13 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # config resolver, and nothing under `execution.physical`.
             "src/decoy_engine/execution/_throughput_calibration.py",
             "src/decoy_engine/execution/_job_estimate.py",
+            # F24 lifecycle estimate: phase arithmetic and bounded sample reads behind
+            # `estimate_job`. `_lifecycle.py` imports `_mem_estimate` and `_arrow_types` only;
+            # `_lifecycle_inputs.py` imports the profile readers, `_mem_estimate*` and
+            # `execution._strategies` (the handlers' output declarations) only.
+            # Neither imports anything under `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_lifecycle.py",
+            "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",
@@ -590,7 +595,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # C8-iii-d: positional draws under `when:` key on the full-table row. The nested handler
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
-            "src/decoy_engine/execution/_strategies/_nested.py",
+            "src/decoy_engine/execution/_strategies/nested/_handler.py",
+            # Package marker for the nested handler move: a one-line re-export, no physical work.
+            "src/decoy_engine/execution/_strategies/nested/__init__.py",
             "src/decoy_engine/execution/_strategies/_windowed_date.py",
             # Cross-column dependency PR1: joint_mask reads its key_by driver from the pre-mask
             # source snapshot (ctx.group_anchor_snapshots), and derived gains a docstring note for
@@ -845,7 +852,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # bucket_perturb date_format guard: the oracle handler and the nested handler validate the
             # format before any early return, and the out-of-core kernel validates before its autodetect
             # check. All three call the shared rule in `transforms/bucket_perturb.py` and import nothing
-            # from `execution.physical`. (`_strategies/_nested.py` is permitted above.)
+            # from `execution.physical`. (`_strategies/nested/_handler.py` is permitted above.)
             "src/decoy_engine/execution/_strategies/_bucket_perturb.py",
             "src/decoy_engine/execution/out_of_core/_mask_group_c.py",
             # D1a (out-of-core hash on the compiled companion): `_hash_native.py` (eligibility + the

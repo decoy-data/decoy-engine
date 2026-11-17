@@ -125,8 +125,9 @@
     "decoy_engine/execution/_strategies/_fpe.py::FpeStrategyHandler.run.encrypt_one::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
-    "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0": {
-      "reason": "jsonpath_ng JSONPath.update on a parsed document"
+    "decoy_engine/execution/_strategies/nested/_handler.py::NestedStrategyHandler.run::update::0": {
+      "reason": "jsonpath_ng JSONPath.update on a parsed document",
+      "moved_from": "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0"
     },
     "decoy_engine/execution/_transactional_sink.py::ParquetTransactionalSink._cleanup_staging::exists::0": {
       "reason": "pathlib Path.exists on a local path"
@@ -373,12 +374,6 @@
     },
     "decoy_engine/transforms/_ff1.py::_prf::update::0": {
       "reason": "cryptography AES CipherContext.update"
-    },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
-    },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::1": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
     "decoy_engine/transforms/joint_mask.py::_pick_rows_mask::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"

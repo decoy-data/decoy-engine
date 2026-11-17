@@ -123,12 +123,14 @@ def test_ner_rows_carry_rate_hit_cells_and_the_model_that_ran() -> None:
     report, columns = _run("warn")
     (row,) = _person_rows(report, "notes_none")
     rate = nr.ner_rates(columns["notes_none"][1])["person_name"]
-    assert row["match_rate"] == rate.rate and row["match_rate"] >= nr.NER_MIN_RATE
+    assert (
+        row["match_rate"] == rate.rate and row["match_rate"] >= nr.NER_MIN_RATES["en_core_web_sm"]
+    )
     assert row["sample_match_count"] == rate.hit_cells
     assert row["model"] == {"id": "en_core_web_sm", "version": "3.8.0"}
     assert row["band"] is None
     (few,) = _person_rows(report, "notes_low")
-    assert 0 < few["match_rate"] < nr.NER_MIN_RATE
+    assert 0 < few["match_rate"] < nr.NER_MIN_RATES["en_core_web_sm"]
 
 
 @needs_ner

@@ -596,8 +596,11 @@ def test_at8_a_release_with_nothing_pending_recaptures_the_pin(
      ("summary", "auto", True), ("noop", "next", False), ("noop", "auto", True)],
 )  # fmt: skip
 def test_at8_the_cli_accepts_only_the_automatic_registry_minor(
-    engine_seed: Path, tmp_path: Path, case: str, flag: str, ok: bool
+    engine_seed: Path, tmp_path: Path, case: str, flag: str, ok: bool, monkeypatch
 ) -> None:
+    # The DP rows are required on the command line and covered by test_dp_rows.py (AT-G9); the
+    # engine seed holds no dp_provenance.py or uv.lock, so this case runs without them.
+    monkeypatch.setattr(sr, "_dp_request", lambda args: None)
     r = engine_clone(engine_seed, tmp_path)
     v = versions(engine_seed)
     flag = {"next": v.next, "after": bump(v.next, minor=1)}.get(flag, flag)

@@ -1,0 +1,12 @@
+{
+ "sentry_id": "strategy-docs-agree",
+ "created_in": "A-E1",
+ "entries": {
+  "`job_seed` (above) drives reproducibility for *generation*.": {
+   "reason": "names job_seed to contrast it with mask_key; generation does draw from job_seed"
+  },
+  "There is no `job_seed` fallback in any release phase: a keyed plan with no admitted secret of at least 32 bytes is refused with `keyed_strategy_requires_secret` before any source is read.": {
+   "reason": "states the no-fallback rule, so it must name job_seed"
+  }
+ }
+}

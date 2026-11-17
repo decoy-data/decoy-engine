@@ -20,6 +20,8 @@ class PassthroughHandler:
     join_safe: bool = False
     wizard_options: tuple[StrategyOption, ...] = ()
     offer_in_wizard: bool = True
+    # `run` returns the frame unchanged, so an output cell is the input cell (lifecycle estimate).
+    output_is_input: bool = True
 
     def run(
         self,
