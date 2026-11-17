@@ -125,8 +125,10 @@ call. `write` fsyncs the chain too. When the leaf already exists (`vault_exists`
 fsyncs the leaf and its chain, then `same_rows` opens the bytes under the writer's key
 (`BytesHandle`, constant display `<vault>`) and compares the rows and the dropped-key count.
 Equal rows give `VaultCommit(..., adopted=True)` and the leaf is never rewritten. A leaf that
-cannot be read or made durable raises `VaultError` with `vault_commit_failed`; other rows,
-another key's data or a leaf over twice this vault's size plus 64 KiB returns a `VaultConflict`
+cannot be read or made durable (an fsync failure, or a leaf deleted out of band) raises
+`VaultError` with `vault_commit_failed`; other rows, another key's data, a leaf over twice this
+vault's size plus 64 KiB, or a leaf that is not an adoptable file (`ELOOP`, `EINVAL`, `ENOTDIR`,
+`EISDIR`) returns a `VaultConflict`
 (never `None`, which `adopt_file` uses for an absent leaf), and `publish_unit` refuses with
 `publication_vault_conflict`. No error text carries a path, key or row.
 
@@ -217,7 +219,9 @@ unit, its bytes and its inode numbers are unchanged. A zero-table publish binds 
 only its descriptor, so an empty unit is never silently replaced either. Every exit but a bind
 aborts the stage.
 
-Every exit is a `CommitReceipt`, except a vault that cannot be written durably (below):
+Every exit is a `CommitReceipt`, except two. Each raises after the stage is aborted, with nothing
+bound: a `VaultError` (below), or a file-access error from the vault's `OutputDir` before anything
+is linked:
 
 | Exit | `outcome` | `reason_code` | `visible` | `durable` |
 |---|---|---|---|---|
@@ -264,7 +268,9 @@ A republish (the same `result_id` already bound) checks the vault before reporti
 or both have none; the vault leaf is read through `adopt_file` (fsynced with its chain first), and
 its size and SHA-256 must be the descriptor's and its rows this writer's (equal output can carry
 a different reverse map). Absent, larger, another digest, other rows or another key's data:
-`publication_vault_mismatch`. An fsync failure: `commit_uncertain`. `writer.publish` is never
+`publication_vault_mismatch`, as is a leaf that is not an adoptable file (`ELOOP`, `EINVAL`,
+`ENOTDIR`, `EISDIR`). An fsync failure: `commit_uncertain`. One reader,
+`publication._vault_order.read_vault_leaf`, classifies the leaf for both this check and adoption. `writer.publish` is never
 called on a republish, so a retry makes no second vault.
 
 Engine sinks still refuse a request with a vault (rule B0): a vault job publishes resident output
