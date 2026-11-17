@@ -881,6 +881,15 @@ No `SEED_PROTOCOL_VERSION` change.
   written before M3a still validates and reads back with empty lists, `ScanSetCoreRead` ignores
   unknown keys, and no stored field can hold a cell value (a source, a detector id, a model id and
   version, a band and a rate bucket). The starter config ignores model hits.
+  SCAN-ML-MD M-1 (2026-11) makes the NER hit rate per model: `decoy_engine.detection._ner_rate`
+  gains `NER_MIN_RATES` (sm 0.211, md 0.122) and `NerRate.min_rate`, and `NER_MODEL_WHEELS` gains
+  the `en_core_web_md` 3.8.0 wheel. The default model is unchanged. `load_detectors` now refuses an
+  installed NER model that has no entry in `NER_MIN_RATES` with `ModelUnavailableError`
+  (`provider.ner_model_uncalibrated`, registry unreleased), so a config that names
+  `en_core_web_lg`, `en_core_web_trf` or a non-English model for `pre_scan` or `post_scan` is
+  refused at load, before any row is read, where it used to run on sm's 0.211. A model that is
+  absent or incompatible keeps its own earlier reason. `text_redact` and `text_mask` `ner` columns
+  read no rate and are not refused for any model name.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and
