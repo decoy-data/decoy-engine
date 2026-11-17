@@ -1346,7 +1346,7 @@ reason = "the Postgres snapshot child stages Parquet beside a platform-chosen de
 ambient_only = true
 
 [[entry]]
-module = "decoy_engine/connectors/_postgres_session.py"
+module = "decoy_engine/connectors/postgres_snapshot.py"
 function = "read_session"
 sink = "shutil.rmtree"
 ordinal = 0

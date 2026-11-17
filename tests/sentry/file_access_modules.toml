@@ -38,7 +38,6 @@ local_constructors = [
 # Modules whose registry entries may be `ambient_only`: they act on a caller path only after
 # the entry point refused every policy but the ambient CLI one.
 ambient_only_modules = [
-  "decoy_engine/connectors/_postgres_session.py",
   "decoy_engine/connectors/postgres_snapshot.py",
   "decoy_engine/execution/_isolated_commit.py",
   # F29 commit evidence: called only from _isolated_run.py with its staging_dir, after the guard.
@@ -50,7 +49,6 @@ ambient_only_modules = [
 
 # Modules that must call `fileaccess.require_ambient`, the guard the ambient-only entries rely on.
 ambient_guards = [
-  "decoy_engine/connectors/_postgres_session.py",
   "decoy_engine/connectors/postgres_snapshot.py",
   "decoy_engine/execution/_isolated_run.py",
   # F06 local quarantine store: opens beneath the caller-given root only after the guard.
