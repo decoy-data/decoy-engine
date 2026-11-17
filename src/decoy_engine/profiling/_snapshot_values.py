@@ -232,10 +232,12 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
 
     The years are then bottom and top coded, as numeric columns are: every row below the year of
     the K-th lowest row counts under that year, and likewise above the K-th highest, so the
-    outer edges of the released ranges never name one of the K-1 rows at either end. With fewer
-    than 2K-1 rows the two tails overlap and one range between the K-th highest and K-th lowest
-    row's years is released. Top and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al.,
-    Statistical Disclosure Control (Wiley, 2012), section 3.4.
+    outer edges of the released ranges are the years of the K-th row from each end and never name
+    one of the K-1 rows at either end. When the two K-th rows cross (fewer than 2K-1 rows, so the
+    K-th highest year is below the K-th lowest year) no range can be released without an edge at
+    one of the K-1 rows, so none is: the 2K-1 floor numeric columns already have. Top and bottom
+    coding: R sdcMicro `topBotCoding`; Hundepool et al., Statistical Disclosure Control (Wiley,
+    2012), section 3.4.
     """
     raw = stats.get("year_bins")
     if not raw:
@@ -244,20 +246,18 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     for b in raw:
         by_year[min(b["year"], MAX_SAMPLED_YEAR)] += b["count"]
     total = sum(by_year.values())
+    years = sorted(by_year.items())
     if total < MIN_RELEASE_COUNT:
+        low, high = 1, 0
+    else:
+        low, high = _kth_year(years), _kth_year(years[::-1])
+    if low > high:
         stats["year_bins"] = encode_datetime_buckets([])
         return
-    years = sorted(by_year.items())
-    low = _kth_year(years)
-    high = _kth_year(years[::-1])
-    kept: list[tuple[int, int, int | float]]
-    if low > high:
-        kept = [(high, low, total)]
-    else:
-        coded: Counter[int] = Counter()
-        for year, count in years:
-            coded[min(max(year, low), high)] += count
-        kept = fold_ranges_under_k([(y, y, c) for y, c in sorted(coded.items())])
+    coded: Counter[int] = Counter()
+    for year, count in years:
+        coded[min(max(year, low), high)] += count
+    kept = fold_ranges_under_k([(y, y, c) for y, c in sorted(coded.items())])
     stats["year_bins"] = encode_datetime_buckets([DatetimeBucket(*r) for r in kept])
 
 
