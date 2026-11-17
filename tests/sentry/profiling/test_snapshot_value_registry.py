@@ -403,10 +403,15 @@ def test_the_guard_bites_on_each_forbidden_shape(snippet: str) -> None:
 
 
 def test_the_profile_redactor_uses_the_same_selection_stamp_and_applier() -> None:
-    tree = _tree(_SRC / "profiling" / "_value_redaction.py")
-    by_name = {
-        fn.name: set(_call_names(fn)) for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
-    }
-    assert {"_sensitive_entries", "stamp_value_policy"} <= by_name["redact_profile_dict"]
-    assert "_apply" in by_name["redact_profile_dict"] | by_name["_redact_field"]
-    assert "_sensitive_entries" in by_name["value_sensitive_names"]
+    def calls(path: str) -> dict[str, set[str]]:
+        return {
+            fn.name: set(_call_names(fn))
+            for fn in ast.walk(_tree(_SRC / "profiling" / path))
+            if isinstance(fn, ast.FunctionDef)
+        }
+
+    writer = calls("_profile_document.py")
+    registry = calls("_value_redaction.py")
+    assert {"_sensitive_entries", "stamp_value_policy"} <= writer["redact_profile_dict"]
+    assert "_apply" in writer["redact_profile_dict"] | registry["_redact_field"]
+    assert "_sensitive_entries" in registry["value_sensitive_names"]

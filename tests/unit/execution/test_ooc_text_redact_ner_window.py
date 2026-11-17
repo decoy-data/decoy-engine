@@ -174,13 +174,13 @@ class TestNerConfigResolution:
         assert resolve_ner_config({"ner": True}) == (DEFAULT_NER_MODEL, None)
 
     def test_ner_dict_model_and_entities(self) -> None:
-        assert resolve_ner_config({"ner": {"model": "m", "entities": ["person_name"]}}) == (
-            "m",
+        assert resolve_ner_config({"ner": {"model": "xx_m", "entities": ["person_name"]}}) == (
+            "xx_m",
             ["person_name"],
         )
 
     def test_ner_dict_empty_entities_is_all(self) -> None:
-        assert resolve_ner_config({"ner": {"model": "m", "entities": []}}) == ("m", None)
+        assert resolve_ner_config({"ner": {"model": "xx_m", "entities": []}}) == ("xx_m", None)
 
     def test_empty_ner_dict_is_off(self) -> None:
         # An empty `ner: {}` dict is falsy, so NER stays off -- preserving the

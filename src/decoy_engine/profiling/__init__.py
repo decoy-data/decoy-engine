@@ -19,6 +19,7 @@ Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 """
 
 from decoy_engine.profiling._model_pass import ModelHit
+from decoy_engine.profiling._profile_document import profile_document, redact_profile_dict
 from decoy_engine.profiling._scan_integrity import (
     KEY_BATCH_ROWS,
     MEMORY_LIMIT,
@@ -47,8 +48,6 @@ from decoy_engine.profiling._value_redaction import (
     REDACTED_POLICIES,
     VALUE_POLICY_KEY,
     is_value_sensitive,
-    profile_document,
-    redact_profile_dict,
 )
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (

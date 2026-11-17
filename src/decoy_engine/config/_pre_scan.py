@@ -22,7 +22,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
-from decoy_engine.detection.ner import DEFAULT_NER_MODEL, NerModelNameError
+from decoy_engine.detection.ner import DEFAULT_NER_MODEL, NerModelNameError, is_default_ner_model
 from decoy_engine.detection.types import (
     DETECTOR_ORDER,
     DetectorSource,
@@ -87,7 +87,7 @@ class PreScanConfig(BaseModel):
     def _omit_default_model(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         # An explicit default model would re-validate as "a set ner_model" and trip the rule above.
         data: dict[str, Any] = handler(self)
-        if data.get("ner_model") == DEFAULT_NER_MODEL:
+        if is_default_ner_model(data.get("ner_model", "")):
             data.pop("ner_model")
         return data
 

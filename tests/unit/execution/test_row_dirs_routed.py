@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import fileaccess
+from decoy_engine.connectors import _postgres_session as ps_session
 from decoy_engine.connectors import postgres_snapshot as ps
 from decoy_engine.execution import _isolated_run
 from decoy_engine.execution.out_of_core import _runner, _scratch, run_fk_out_of_core
@@ -180,7 +181,7 @@ def test_pg_spill_dir_comes_from_open_protected_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     pytest.importorskip("duckdb")
-    calls = _spy(monkeypatch, ps, "open_protected_dir")
+    calls = _spy(monkeypatch, ps_session, "open_protected_dir")
     spill = tmp_path / "a" / "spill-1"
     config = ps.PostgresSnapshotConfig(
         dsn="postgresql://u:p@localhost/db",  # type: ignore[arg-type]
@@ -195,7 +196,7 @@ def test_pg_spill_dir_comes_from_open_protected_dir(
     old = os.umask(0)
     try:
         try:
-            conn = ps._open_connection(config, spill)
+            conn = ps_session.open_connection(config, spill)
         except ps.PostgresSnapshotError:
             conn = None  # connecting may fail offline; the directory was made first
     finally:
@@ -220,7 +221,7 @@ def test_pg_symlinked_spill_dir_is_refused(tmp_path: Path) -> None:
         deadline_s=1,
     )
     with pytest.raises(ProtectedDirUnsafe):
-        ps._open_connection(config, tmp_path / "spill")
+        ps_session.open_connection(config, tmp_path / "spill")
 
 
 # -- the runner removes what it made -------------------------------------------------------------
