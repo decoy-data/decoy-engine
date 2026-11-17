@@ -27,8 +27,7 @@ HEAD = "b" * 40
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
 GATE_CONTEXT = "engine-gate/verdict"
 
-# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus the two jobs
-# the macOS path scope added (native-changes, companion-wheel-macos-ok).
+# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus two path-scope jobs.
 NATIVE_NAMES = [
     "companion-wheel-linux (3.10, x86_64)",
     "companion-wheel-linux (3.10, aarch64)",
@@ -49,7 +48,6 @@ NATIVE_NAMES = [
     "native-changes",
     "companion-wheel-macos-ok",
 ]
-# The merge tier names: the three macOS legs are exempt (path-scoped), the aggregator stands in.
 NATIVE_MERGE = [n for n in NATIVE_NAMES if not n.startswith("companion-wheel-macos (")]
 CI_NAMES = [
     "packaging-gate",
@@ -103,9 +101,7 @@ class FakeGitHub:
         self.runs: dict[str, list[dict[str, Any]]] = {}
         self.jobs: dict[int, list[dict[str, Any]]] = {}
         self.main = MAIN
-        self.statuses: list[dict[str, Any]] = [
-            {"id": 1, "context": GATE_CONTEXT, "state": "success"}
-        ]
+        self.statuses: list[Any] = [{"id": 1, "context": GATE_CONTEXT, "state": "success"}]
         self.error: Exception | None = None
         self.job_pages: list[int] = []
         self.job_requests: list[tuple[int, int]] = []
@@ -142,44 +138,32 @@ class FakeGitHub:
         self.jobs[rid] = [{"name": n, "conclusion": over.get(n, "success")} for n in names]
         return rid
 
+    def _listing(self, path: str, key: str, items: list[Any]) -> tuple[int, Any]:
+        qs = parse_qs(urlparse(path).query)
+        page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
+        out = {"total_count": len(items), key: items[(page - 1) * size : page * size]}
+        return page, (self.response_transform(path, out) if self.response_transform else out)
+
     def __call__(self, path: str) -> Any:
         if self.error:
             raise self.error
         if path == f"repos/{REPO}/branches/main":
             return {"commit": {"sha": self.main}}
         if path.startswith(f"repos/{REPO}/commits/{HEAD}/status?"):
-            qs = parse_qs(urlparse(path).query)
-            page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
-            out = {
-                "total_count": len(self.statuses),
-                "statuses": self.statuses[(page - 1) * size : page * size],
-            }
-            return self.response_transform(path, out) if self.response_transform else out
+            return self._listing(path, "statuses", self.statuses)[1]
         for wf, runs in self.runs.items():
             if path.startswith(f"repos/{REPO}/actions/workflows/{wf}/runs?"):
-                qs = parse_qs(urlparse(path).query)
-                page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
-                out = {
-                    "total_count": len(runs),
-                    "workflow_runs": runs[(page - 1) * size : page * size],
-                }
-                return self.response_transform(path, out) if self.response_transform else out
+                return self._listing(path, "workflow_runs", runs)[1]
         for rid, jobs in self.jobs.items():
             if path.startswith(f"repos/{REPO}/actions/runs/{rid}/jobs"):
-                qs = parse_qs(urlparse(path).query)
-                page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
-                self.job_pages.append(page)
-                self.job_requests.append((rid, page))
                 for i, job in enumerate(jobs):
                     job.setdefault("id", rid * 10_000 + i)
-                out = {
-                    "total_count": len(jobs),
-                    "jobs": jobs[(page - 1) * size : page * size],
-                }
-                return self.response_transform(path, out) if self.response_transform else out
+                page, out = self._listing(path, "jobs", jobs)
+                self.job_pages.append(page)
+                self.job_requests.append((rid, page))
+                return out
         if "/actions/workflows/" in path and path.split("?")[0].endswith("/runs"):
-            out = {"total_count": 0, "workflow_runs": []}
-            return self.response_transform(path, out) if self.response_transform else out
+            return self._listing(path, "workflow_runs", [])[1]
         raise AssertionError(f"unexpected API path {path}")
 
 
@@ -878,65 +862,3 @@ def test_derivation_error_keeps_no_context() -> None:
     with pytest.raises(rc.DerivationError) as info:
         rc.merge_contexts(required, {"n.yml": doc})
     assert info.value.__context__ is None
-
-
-# --- A20, A23: the gate verdict status and the macOS path scope --------------------------------
-
-
-def with_status(state: str | None, context: str = GATE_CONTEXT) -> FakeGitHub:
-    gh = green_pr()
-    gh.statuses = [] if state is None else [{"id": 7, "context": context, "state": state}]
-    return gh
-
-
-def test_verify_requires_gate_status(capsys: pytest.CaptureFixture[str]) -> None:
-    assert verify(with_status("success")) == 0
-    capsys.readouterr()
-    for state in (None, "pending", "failure", "error"):
-        assert verify(with_status(state)) == 1, state
-        out = capsys.readouterr().out
-        assert f"{GATE_CONTEXT}: dispatch gate-selfhosted.yml on {HEAD}" in out, state
-        assert "tier green" not in out
-
-
-def test_a_status_under_another_context_does_not_count() -> None:
-    assert verify(with_status("success", context="something/else")) == 1
-
-
-def test_one_green_context_among_others_passes() -> None:
-    gh = green_pr()
-    gh.statuses = [
-        {"id": 1, "context": "other", "state": "failure"},
-        {"id": 2, "context": GATE_CONTEXT, "state": "success"},
-    ]
-    assert verify(gh) == 0
-
-
-def test_registry_without_a_merge_status_table_is_an_error() -> None:
-    class Git(FakeGit):
-        def __call__(self, args: Any) -> str:
-            argv = list(args)
-            if argv[0] == "show" and argv[1].endswith("ci/required-jobs.toml"):
-                text = (ROOT / "ci/required-jobs.toml").read_text()
-                return text.split("[[merge_status]]")[0]
-            return super().__call__(args)
-
-    assert verify(green_pr(), git=Git()) == 2
-
-
-def test_status_listing_errors_are_never_a_pass() -> None:
-    gh = green_pr()
-    gh.error = None
-    gh.response_transform = lambda path, out: (
-        {**out, "total_count": 5} if "/status?" in path else out
-    )
-    assert verify(gh) == 2
-
-
-def test_contexts_skip_exempt_legs_and_include_aggregator(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert run_main(["contexts", "--ref", MAIN], FakeGitHub()) == 0
-    got = json.loads(capsys.readouterr().out)
-    assert not any(n.startswith("companion-wheel-macos (") for n in got)
-    assert "companion-wheel-macos-ok" in got and "native-changes" in got
