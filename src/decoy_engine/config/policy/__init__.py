@@ -7,12 +7,14 @@ is the `PipelineConfig` validator (slice E3); until then these names are used by
 from __future__ import annotations
 
 from decoy_engine.config.policy._expand import (
+    POLICY_EXPANSION_SCHEMA,
     DecisionSource,
     ExpansionInputs,
     FieldDecision,
     PolicyExpansion,
     RuleMatch,
     expand_policy,
+    expansion_to_dict,
 )
 from decoy_engine.config.policy._policy import (
     ColumnDecision,
@@ -22,9 +24,11 @@ from decoy_engine.config.policy._policy import (
     Prohibition,
 )
 from decoy_engine.config.policy._precedence import PrecedenceLevel
+from decoy_engine.config.policy._prohibit import ProhibitionMatch
 from decoy_engine.config.policy._selectors import Selector
 
 __all__ = [
+    "POLICY_EXPANSION_SCHEMA",
     "ColumnDecision",
     "DecisionSource",
     "DisguisePin",
@@ -35,7 +39,9 @@ __all__ = [
     "PolicyRule",
     "PrecedenceLevel",
     "Prohibition",
+    "ProhibitionMatch",
     "RuleMatch",
     "Selector",
     "expand_policy",
+    "expansion_to_dict",
 ]
