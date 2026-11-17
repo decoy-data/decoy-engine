@@ -15,6 +15,7 @@ def _rule(**extra):
 def _refused(data):
     with pytest.raises(ValidationError) as caught:
         PolicyConfig.model_validate(data)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
     return caught.value
 
 
@@ -79,7 +80,7 @@ def test_ids_are_unique_across_rules_and_prohibitions():
             "prohibit": [{"id": "same", "select": {"table": "t"}, "forbid": ["passthrough"]}],
         }
     )
-    assert exc.errors()[0]["type"] == "policy_rule_conflict"
+    assert exc.errors()[0]["type"] == "policy_block_invalid"
     assert "same" in exc.errors()[0]["msg"]
 
 
@@ -94,3 +95,24 @@ def test_models_are_frozen():
     cfg = PolicyConfig.model_validate({"default": {"strategy": "hash"}})
     with pytest.raises(ValidationError):
         cfg.default = None  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "prohibition",
+    [
+        {"id": "p", "select": {"table": "t"}},
+        {"id": "p", "select": {"table": "t"}, "forbid": ["a"], "require": ["b"]},
+    ],
+)
+def test_prohibition_needs_exactly_one_of_forbid_and_require(prohibition):
+    exc = _refused({"prohibit": [prohibition]})
+    assert [e["type"] for e in exc.errors()] == ["policy_block_invalid"]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_provider_config_must_be_json_carryable(bad):
+    exc = _refused({"rules": [_rule(provider_config={"k": bad})]})
+    assert [e["type"] for e in exc.errors()] == ["policy_block_invalid"]
+    assert all("nan" not in e["msg"].lower() for e in exc.errors())
+    exc = _refused({"default": {"strategy": "hash", "provider_config": {"k": [bad]}}})
+    assert [e["type"] for e in exc.errors()] == ["policy_block_invalid"]

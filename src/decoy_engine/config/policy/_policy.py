@@ -16,11 +16,13 @@ from pydantic import (
     Field,
     StrictStr,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
+from decoy_engine._canonical import CanonicalJsonError, canonical_json_bytes
 from decoy_engine.config.policy._selectors import Selector
 
 __all__ = [
@@ -57,6 +59,23 @@ class ColumnDecision(BaseModel):
     namespace: StrictStr | None = None
     deterministic: bool = False
     allow_collisions: bool = False
+
+    @field_validator("provider_config")
+    @classmethod
+    def _json_carryable(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """A NaN or other non-JSON value cannot be compared or digested; refuse it by code."""
+        try:
+            canonical_json_bytes(value)
+        except CanonicalJsonError:
+            carryable = False
+        else:
+            carryable = True
+        if not carryable:
+            raise PydanticCustomError(
+                str(reasons.config.POLICY_BLOCK_INVALID),
+                "provider_config holds a value JSON cannot carry.",
+            )
+        return value
 
 
 class DisguisePin(BaseModel):
@@ -101,7 +120,7 @@ class Prohibition(BaseModel):
     def _exactly_one_mode(self) -> Prohibition:
         if (self.forbid is None) == (self.require is None):
             raise PydanticCustomError(
-                str(reasons.config.POLICY_RULE_CONFLICT),
+                str(reasons.config.POLICY_BLOCK_INVALID),
                 "A prohibition sets exactly one of forbid and require.",
             )
         return self
@@ -124,7 +143,7 @@ class PolicyConfig(BaseModel):
         for item_id in ids:
             if item_id in seen:
                 raise PydanticCustomError(
-                    str(reasons.config.POLICY_RULE_CONFLICT),
+                    str(reasons.config.POLICY_BLOCK_INVALID),
                     "Rule and prohibition ids must be unique; {id} is used twice.",
                     {"id": item_id},
                 )
