@@ -239,9 +239,9 @@ jobs:
   # ner-gate: regression-gate installs .[dev] only, so every NER test skips there
   # and a broken `ner` install (spaCy imports click, which typer no longer pulls
   # in) went unseen. The model is not on PyPI and `spacy download` is an unpinned
-  # network install, so the wheel pinned in NER_MODEL_WHEELS is fetched,
-  # hash-checked and installed from a local path. DECOY_REQUIRE_NER makes an
-  # empty install fail the `ner` tests instead of skipping them.
+  # network install, so every wheel pinned in NER_MODEL_WHEELS is fetched,
+  # hash-checked and installed from a local path (the md calibration tests need md).
+  # DECOY_REQUIRE_NER makes an empty install fail the `ner` tests instead of skipping them.
   ner-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -252,16 +252,16 @@ jobs:
       - uses: ./.github/actions/lock-env
         with:
           extras: "dev ner"
-      - name: Install the pinned spaCy model wheel
+      - name: Install every pinned spaCy model wheel
         run: |
-          pin() { python -c "from decoy_engine.detection.ner import DEFAULT_NER_MODEL as m, DEFAULT_NER_MODEL_VERSION as v, NER_MODEL_WHEELS as w; print(w[(m, v)].$1)"; }
-          url=$(pin url)
-          sha=$(pin sha256)
+          python -c "from decoy_engine.detection.ner import NER_MODEL_WHEELS as w; [print(m, v, p.url, p.sha256) for (m, v), p in sorted(w.items())]" > "$RUNNER_TEMP/wheels.txt"
           mkdir -p "$RUNNER_TEMP/ner-model"
-          wheel="$RUNNER_TEMP/ner-model/$(basename "$url" .whl).whl"
-          curl --fail --silent --show-error --location --output "$wheel" "$url"
-          echo "$sha  $wheel" | sha256sum --check -
-          uv pip install --python "$RUNNER_TEMP/venv/bin/python" --no-deps "$wheel"
+          while read -r model version url sha; do
+            wheel="$RUNNER_TEMP/ner-model/$(basename "$url" .whl).whl"
+            curl --fail --silent --show-error --location --output "$wheel" "$url"
+            echo "$sha  $wheel" | sha256sum --check -
+            uv pip install --python "$RUNNER_TEMP/venv/bin/python" --no-deps "$wheel"
+          done < "$RUNNER_TEMP/wheels.txt"
       - name: NER gate (import spaCy, load the model, find person and location)
         run: pytest -m ner --tb=short
 
@@ -378,3 +378,39 @@ jobs:
           -m determinism_harness --tb=short --junitxml=determinism.xml
       - name: Guard -- the harness actually executed (passed>0, none skipped/errored/failed)
         run: python scripts/dev/junit_ran.py determinism.xml
+
+  # pg-gate: the pg_integration suites against a Postgres service container. The default marker
+  # expression still selects them, but they skip without a server, so this job is their lane.
+  # DECOY_REQUIRE_PG=1 turns a missing server or extension into a failure, and junit_ran.py fails
+  # the job on any skip.
+  pg-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DECOY_REQUIRE_PG: "1"
+      DECOY_TEST_PG_DSN: host=127.0.0.1 port=5432 user=postgres password=pw dbname=postgres
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          bootstrap: "true"
+      - name: Postgres integration suites
+        # Scoped to the files that carry the marker: a module-level skip elsewhere would trip the
+        # zero-skip guard below. A sentry (test_ci_lanes.py) fails if a marked file falls outside.
+        run: >
+          pytest tests/connectors/test_postgres_snapshot.py
+          -m pg_integration --tb=short --junitxml=pg.xml
+      - name: Guard -- the suites actually executed (passed>0, none skipped/errored/failed)
+        run: python scripts/dev/junit_ran.py pg.xml

@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.detection.ner import NER_ENTITY_MAP
+from decoy_engine.detection.ner import NER_ENTITY_MAP, resolve_column_ner
 from decoy_engine.execution._adapter import StrategyOption, option
 from decoy_engine.execution._errors import StrategyError
 
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 # The NER options text_redact and text_mask both accept; one copy so the two cannot drift.
 NER_WIZARD_OPTIONS: tuple[StrategyOption, ...] = (
-    option("ner_model", "str", "en_core_web_sm", location="provider_config.ner"),
+    option("ner_model", "str", "en_core_web_md", location="provider_config.ner"),
     option(
         "ner_entities",
         "str_list",
@@ -57,20 +57,7 @@ def resolve_ner_config(cfg: Mapping[str, Any]) -> tuple[str | None, list[str] | 
     `entities` resolves to `None` (all mapped entities), matching the handlers'
     long-standing fail-safe (never "find nothing").
     """
-    ner_cfg = cfg.get("ner")
-    if not ner_cfg:
-        return None, None
-    from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-    ner_entities: list[str] | None = None
-    if isinstance(ner_cfg, dict):
-        ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-        raw_entities = ner_cfg.get("entities")
-        if isinstance(raw_entities, (list, tuple)) and raw_entities:
-            ner_entities = [str(e) for e in raw_entities]
-    else:
-        ner_model = DEFAULT_NER_MODEL
-    return ner_model, ner_entities
+    return resolve_column_ner(cfg.get("ner"))
 
 
 def enforce_ner_model_version(

@@ -52,6 +52,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
+
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 REPO_ROOT = ENGINE_ROOT.parents[1]
 
@@ -228,10 +230,6 @@ def _git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout
-
-
-# The retired package name, spelled in two parts so the residual sentry has no literal to flag.
-_RETIRED = "sto" + "rm"
 
 
 def _only_these_line_changes(base: str, path: str, allowed: dict[str, str]) -> bool:

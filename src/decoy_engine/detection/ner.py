@@ -62,12 +62,20 @@ class NerModelWheel(NamedTuple):
 # meta.json `spacy_version`: a spaCy outside it refuses to load the model.
 NER_MODEL_WHEELS: Mapping[tuple[str, str], NerModelWheel] = MappingProxyType(
     {
-        (DEFAULT_NER_MODEL, DEFAULT_NER_MODEL_VERSION): NerModelWheel(
+        ("en_core_web_sm", DEFAULT_NER_MODEL_VERSION): NerModelWheel(
             url=(
                 "https://github.com/explosion/spacy-models/releases/download/"
                 "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
             ),
             sha256="1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+            spacy_range=">=3.8.0,<3.9.0",
+        ),
+        ("en_core_web_md", "3.8.0"): NerModelWheel(
+            url=(
+                "https://github.com/explosion/spacy-models/releases/download/"
+                "en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl"
+            ),
+            sha256="5e6329fe3fecedb1d1a02c3ea2172ee0fede6cea6e4aefb6a02d832dba78a310",
             spacy_range=">=3.8.0,<3.9.0",
         ),
     }
@@ -91,6 +99,39 @@ NER_ENTITY_MAP: dict[str, str] = {
     "LOC": "location",
     "FAC": "location",
 }
+
+
+def resolve_ner_model(value: str | None) -> str:
+    """The model a config value names: the default when unset or empty, else a validated name."""
+    if value is None or value == "":
+        return DEFAULT_NER_MODEL
+    return validate_ner_model_name(value)
+
+
+def is_default_ner_model(name: str) -> bool:
+    """True when `name` is the default model, so a dump may omit it."""
+    return name == DEFAULT_NER_MODEL
+
+
+def resolve_column_ner(ner_value: object) -> tuple[str | None, list[str] | None]:
+    """Resolve a column's `provider_config.ner` into `(model, entities)`.
+
+    Falsy means NER is off, `(None, None)`. `true` selects the default model with every mapped
+    entity; a mapping names a model and an optional detector-id filter. An empty or non-list
+    `entities` resolves to `None` (all mapped entities), never "find nothing".
+    """
+    if not ner_value:
+        return None, None
+    if not isinstance(ner_value, dict):
+        return resolve_ner_model(None), None
+    model = resolve_ner_model(None if ner_value.get("model") is None else str(ner_value["model"]))
+    raw_entities = ner_value.get("entities")
+    entities = (
+        [str(e) for e in raw_entities]
+        if isinstance(raw_entities, (list, tuple)) and raw_entities
+        else None
+    )
+    return model, entities
 
 
 class NerUnavailableError(DecoyError):

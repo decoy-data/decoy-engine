@@ -146,7 +146,7 @@ def test_the_threshold_is_the_accepted_value() -> None:
 def test_hit_is_at_or_over_the_threshold_and_needs_scanned_cells(
     hits: int, cells: int, expected: bool
 ) -> None:
-    assert nr.NerRate("person_name", hits, cells).hit is expected
+    assert nr.NerRate("person_name", hits, cells, nr.NER_MIN_RATE).hit is expected
 
 
 def test_a_column_that_was_not_scored_has_no_hit(monkeypatch: pytest.MonkeyPatch) -> None:
