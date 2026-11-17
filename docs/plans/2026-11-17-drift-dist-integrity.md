@@ -14,6 +14,9 @@ Revision 2 (2026-11-17): applies Dennis round 1 on `020a37e10` (GO-WITH-FIXES, 5
 6 LOW) with the coordinator's rulings. Section 19 maps each finding to its change. The DI and D-2
 slices are re-cut for size (section 13).
 
+Revision 3 (2026-11-17): applies Codex on `abc3c79f6` (NO-GO, two V1 findings). Section 20 lists the
+changes.
+
 Bases (2026-11-17): engine `origin/main` `09f6d7c70` (last tag `v0.27.0`, `REGISTRY_VERSION`
 1.29.0); CLI `origin/main` `5b49510` (pins the engine 0.27.0 line). Inputs read: CLI
 `docs/ROADMAP.md` rows 24e, 29, 30, 31, 32, 36, 37, 60, 62, 76, 80; engine `plan/scan-checks`
@@ -193,7 +196,8 @@ given here. No row ever holds NaN or Infinity; the report passes a strict JSON r
 | `mean`: `src_std` 0 and `src` mean 0, output mean not 0 | breach |
 | `mean`: `src_std` 0 and both means 0 | `info`, `delta_pct: 0.0` |
 | `std`: `src_std` 0 and output std above 0 | breach |
-| A moment is not finite (an infinite cell) | `info` |
+| A moment is not finite in the source (source origin; the output may be either) | `info` |
+| A moment is finite in the source and not finite (inf or NaN) in the output | breach (`warning`, or `fail` under `fail`) |
 | Non-numeric column where moments would apply | `info` |
 | The fact could not be read (column read failed) | `error` (blocks only under `fail`, section 3.3) |
 
@@ -373,6 +377,7 @@ own YAML. `--sample` runs check. `--rows` previews do not.
 | `--chunked` from the CLI | refused before any source is opened |
 | Float error over 100M rows | Chan merge in float64; no raw sum of squares |
 | Undefined or non-finite fact | `delta_pct: null` with the severity in the 3.2 table; strict JSON |
+| Masking turns a finite source moment into inf or NaN | breach, so `fail` blocks; never `info` |
 | Weighted categorical on a small table | only `row_count` and `null_rate` are checked |
 | A strategy's claimed null preservation is wrong | the generated null-position property test fails |
 | Second source read on a lazy 100M input | cost stated in the docs; bounded to columns with a checked fact |
@@ -580,7 +585,7 @@ keep passing. Each has a mutation that must turn it red.
 | DI-T2 | DI-1a | `preserved_facts` covers every label and every `SCALAR_HANDLERS` strategy; an unknown name in `NULLS_NOT_PRESERVED` fails; generated property test: every strategy claimed to keep nulls keeps the exact null positions on a null-bearing column; `joint_mask` in the set, `redact` not; `group_key` label is `destroys_frequency` | names absent | MDI-2: restore the `group_key` label; MDI-2b: mark `redact` null-destroying |
 | DI-T3 | DI-1a | moments over batches cut at 1, 7 and 50,000 rows equal the whole-column mean and `ddof=1` std (pandas `Series.std()`) to 1e-9 | no moments | MDI-3: average per-batch means; MDI-3b: `ddof=0` |
 | DI-T5 | DI-1a | `preserved_facts`: hash gives `distinct_ratio`, no `mean`; weighted and `from_profile` categorical give only `row_count` and `null_rate`; faker and redact give `row_count`, `null_rate`; joint_mask, group_key, windowed_date, grouped_series, derived, formula give `row_count` only; `when:` columns give `row_count` plus eligible `null_rate` | names absent | MDI-5: give every column all facts; MDI-5b: drop the categorical override |
-| DI-T4 | DI-1a, DI-1b | facts level (DI-1a): equal frames give no breach at 1%; output mean 1.2x the source gives a `mean` breach at 5% with `delta_pct` set; one cell per row of the 3.2 undefined-case table gives the stated `delta_pct` and severity; every findings list survives `json.dumps(allow_nan=False)` and back. Pipeline (DI-1b): a test-only scaling handler in place of `SCALAR_HANDLERS["passthrough"]` gives a breach row; a weighted categorical column on 20 rows gives no `mean` or `distinct_ratio` row; canary sweep finds no cell value in the report | no section | MDI-4: compare the output with itself; MDI-4b: emit NaN for an undefined delta |
+| DI-T4 | DI-1a, DI-1b | facts level (DI-1a): equal frames give no breach at 1%; output mean 1.2x the source gives a `mean` breach at 5% with `delta_pct` set; one cell per row of the 3.2 undefined-case table gives the stated `delta_pct` and severity; a finite source column whose output mean or std is inf, and one whose output is NaN, each give a breach row with `delta_pct: null` (and DI-2 promotes it to `fail` under `fail`, DI-T9), while an inf already in the source gives `info`; every findings list survives `json.dumps(allow_nan=False)` and back. Pipeline (DI-1b): a test-only scaling handler in place of `SCALAR_HANDLERS["passthrough"]` gives a breach row; a weighted categorical column on 20 rows gives no `mean` or `distinct_ratio` row; canary sweep finds no cell value in the report | no section | MDI-4: compare the output with itself; MDI-4b: emit NaN for an undefined delta; MDI-4c: map an output-origin non-finite moment back to `info` |
 | DI-T1 | DI-1b | `distribution` without `integrity: true` refused with `post_scan_inactive`; `tolerance_pct` 0, 101, `True`, `"5"` refused; `on_breach: block` refused; `on_breach: fail` refused (until DI-2); an omitted block keeps the old dump and plan hash; a set block moves it | unknown key | MDI-1: lax float; MDI-1b: always dump the block; MDI-1c: accept `fail` early |
 | DI-T13 | DI-1b | frozen config schema snapshot holds `distribution` with its bounds and enum; reason fixture holds `post_scan_distribution_deferred` since UNRELEASED | snapshot lacks it | MDI-13: drop the field from the schema export |
 | DI-T6 | DI-1b | (a) resident D8 quarantine drops 3 of 100 at 5%: no `row_count` breach, source `null_rate` counts 100; (b) streamed route records the same count; (c) declared-cast quarantine rows dropped on both sides | no section | MDI-6: skip the subtraction |
@@ -601,10 +606,10 @@ D-T1 and D-T2 (config and `pre_checks`) shipped green with D-1 (#613) and stay a
 | Id | Slice | Asserts | Red before | Mutation |
 |---|---|---|---|---|
 | D-T14 | D-2a | after the move, `decoy scan diff` and `decoy ci check` give byte-equal output to today on the existing fixtures; `scan.py` line count is at or below the new baseline `max` | guard | MD-14: change a bucket rank in the move |
-| D-T5 | D-2b | parity: for five fixture pairs the `rescan_and_diff` verdict per table equals `diff_scan_sets` over a direct `scan_sources` call with the same descriptors, detectors and sampling | no helper | MD-5b: rescan with default detectors |
+| D-T5 | D-2b | parity: for six fixture pairs the `rescan_and_diff` verdict per table equals `diff_scan_sets` over a direct `scan_sources` call with the same descriptors, detectors and sampling. Detector sets: (1) regex only, `head`; (2) regex only, `full`; (3) regex only, `random`; (4) regex + classifier; (5) regex + NER; (6) regex + classifier + NER. Pairs 4 to 6 use the test model stubs the scan-ml suite already loads | no helper | MD-5b: rescan with default detectors; MD-5c: drop only the classifier from the rebuilt `pre_scan` (pairs 4 and 6 go red) |
 | D-T9 | D-2b | the bytes parsed are the bytes read (spy counts one open of the baseline); a relative `path` resolves against the YAML folder, not the working directory | no read | MD-9: read twice; MD-9b: resolve from cwd |
 | D-T12 | D-2b | table matching: config table absent from the baseline gives `table_added`; baseline table absent from the config is reported, not drift; no common table gives exactly one `no_common_table` entry and one message | no helper | MD-12: one `table_added` per table |
-| D-T13 | D-2b | detectors: a baseline recording an NER model that is not installed, and one recording another version, each refuse with the fixed message before any source row is read (read spy); an empty `detectors` list rescans regex only | no helper | MD-13: fall back to the default detectors |
+| D-T13 | D-2b | detectors: a baseline recording an NER model that is not installed, one recording another NER version, one recording a classifier that is not installed, and one recording another classifier version each refuse with the fixed message before any source is opened (spy on the source open and on `scan_sources`); the regex + classifier + NER baseline rebuilds `pre_scan` with both models at their recorded versions (spy on the `scan_sources` argument); an empty `detectors` list rescans regex only | no helper | MD-13: fall back to the default detectors; MD-13b: skip the version check for the classifier only |
 | D-T8 | D-2b, D-2c | baseline input (D-2b): a missing file, another `scan_schema` and a legacy document without `scan_schema` each refuse with exit 1 naming `scan_baseline.path`. Ordering (D-2c): invalid config plus a missing baseline exits with the gate refusal and never opens the baseline (spy); on `--duckdb-source` the baseline is read after `check_static_before_acquire` and before the database opens (spy), and the rescan reads the staged Parquet; a cloud source with `on_drift` gets the cloud refusal and no rescan (spy); `on_drift` comes from the validated config, not `ctx.raw` | no check | MD-8: read `on_drift` from `ctx.raw`; MD-8b: accept a legacy scan |
 | D-T6 | D-2b, D-2c | stderr, `warnings.warn` text and `DriftVerdict` carry table and field names, never a value (canary sweep); a rescan whose source read fails gives the `_failure_message` text with the canary absent, and the raised error has no `__cause__` or `__context__` | no check | MD-6: echo a sample row; MD-6b: use `str(exc)` |
 | D-T3 | D-2c | e2e: baseline from `decoy scan`, then a source gains a high-PII column: `on_drift: fail` exits 4 before any masking read (read spy) and writes no output; `warn` prints the drift line and runs | no check | MD-3: check after masking |
@@ -636,6 +641,12 @@ engine 0.28.0 for D-1's codes and can run in parallel with the DI slices. D-2a i
 because it is a pure R1 move and keeping it apart holds D-2b under the size cap. DI-3 and open CLI PR
 #301 (scan-ml C2a) both edit `run/_render.py`; whichever merges second rebases. D-2c and DI-3 share
 no file.
+
+Coordination with row 80: `plan/f15-bound-baseline` will later move `diff_scan_sets` from CLI
+`scanning/_diff.py` into an engine `scan-diff/v1` module. D-2a's move stays as planned. F15 C1 moves
+the rules on from `scanning/_diff.py` and leaves the `decoy.cli.scanning` facade names pointing at
+the engine module, so `rescan_and_diff`, `scan.py` and `ci/adapters.py` keep their imports. If F15 C1
+merges before D-2a, D-2a is dropped and D-2b imports from the facade F15 C1 leaves.
 
 ### 13.2 Engine releases
 
@@ -741,3 +752,11 @@ New in this plan:
 Slice re-cut: DI-1b would have grown past 800 lines, so the pure facts and findings moved into DI-1a
 and the config surface moved into DI-1b. D-2 would have grown to about 1,500 lines, so it split
 into D-2a (R1 move), D-2b (facade) and D-2c (wiring).
+
+## 20. Revision 3: Codex resolutions (on `abc3c79f6`)
+
+| Finding | Change | Sections |
+|---|---|---|
+| A finite source moment that became inf or NaN in the output was `info`, so strict mode passed it | non-finite split by origin: source origin stays `info`; finite source with non-finite output is a breach (`fail` blocks under `fail`); DI-T4 cells for inf and NaN output; mutation MDI-4c (DI-1a) | 3.2, 5.1, 12 |
+| Detector parity covered NER and regex only | D-T5 names six fixture pairs including regex + classifier and regex + classifier + NER; D-T13 adds classifier missing and classifier version refusals before any source is opened, and a spy on the rebuilt `pre_scan`; mutations MD-5c and MD-13b | 12 |
+| Coordination with row 80 | `plan/f15-bound-baseline` C1 moves `diff_scan_sets` on from `scanning/_diff.py` into an engine `scan-diff/v1` module; D-2a stays | 13.1 |
