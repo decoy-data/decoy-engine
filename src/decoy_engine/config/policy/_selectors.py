@@ -30,8 +30,10 @@ __all__ = [
     "SLUG_RE",
     "FieldFacts",
     "Selector",
+    "facts_for",
     "has_glob",
     "matches",
+    "roles_by_field",
 ]
 
 MAX_VALUE_LENGTH = 128
@@ -144,3 +146,39 @@ def matches(selector: Selector, field: FieldFacts) -> bool:
         if field.logical_type is None or not _one_of(selector.logical_type, {field.logical_type}):
             return False
     return selector.role is None or _one_of(selector.role, field.roles)
+
+
+def roles_by_field(relationships: Any) -> dict[tuple[str, str], frozenset[str]]:
+    """Each `(table, column)` mapped to `parent_key` and or `child_key`, from every relationship."""
+    parent_role, child_role = ROLES
+    found: dict[tuple[str, str], set[str]] = {}
+    for rel in relationships if isinstance(relationships, list) else ():
+        if not isinstance(rel, Mapping):
+            continue
+        ends = [(rel.get("parent"), parent_role)]
+        children = rel.get("children")
+        ends += [(child, child_role) for child in children] if isinstance(children, list) else []
+        for end, role in ends:
+            if not isinstance(end, Mapping) or not isinstance(end.get("table"), str):
+                continue
+            columns = end.get("columns")
+            for name in columns if isinstance(columns, list) else ():
+                if isinstance(name, str):
+                    found.setdefault((end["table"], name), set()).add(role)
+    return {key: frozenset(roles) for key, roles in found.items()}
+
+
+def facts_for(
+    table: str, column: Mapping[str, Any], classification: str | None, roles: frozenset[str]
+) -> FieldFacts:
+    """The facts a selector may read from one raw column dict; a wrongly typed label is absent."""
+    tags = column.get("tags")
+    logical = column.get("logical_type")
+    return FieldFacts(
+        table=table,
+        column=column["name"],
+        classification=classification,
+        tags=tuple(t for t in tags if isinstance(t, str)) if isinstance(tags, list) else (),
+        logical_type=logical if isinstance(logical, str) else None,
+        roles=roles,
+    )

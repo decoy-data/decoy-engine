@@ -19,13 +19,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError as _PydanticValidationError
-from pydantic_core import InitErrorDetails, PydanticCustomError, ValidationError
+from pydantic_core import ValidationError
 
 from decoy_engine import reasons
 from decoy_engine._canonical import canonical_json_bytes
+from decoy_engine.config._generate_options import ContextProblem, problem_details
 from decoy_engine.config.policy._policy import ColumnDecision, DisguisePin, PolicyConfig, PolicyRule
 from decoy_engine.config.policy._precedence import PrecedenceLevel, selector_level
-from decoy_engine.config.policy._selectors import ROLES, FieldFacts, matches
+from decoy_engine.config.policy._selectors import facts_for, matches, roles_by_field
 from decoy_engine.detection.domains import registered_detector_ids
 
 __all__ = [
@@ -37,25 +38,22 @@ __all__ = [
     "expand_policy",
 ]
 
-# Keys that only a strategy can use: a column without `strategy` may not carry them.
-_SHAPING_KEYS = (
-    "provider",
-    "provider_config",
-    "namespace",
-    "deterministic",
-    "allow_collisions",
-    "cardinality_mode",
-    "scale",
-    "coherent_with",
-    "backend_type",
-    "backend_version",
-    "pool_size",
-    "vault",
-    "when",
+# The keys a column may carry without a strategy: identity, labels and the F06 declared-casting
+# contract. Anything else shapes the strategy, so a policy-decided column may not set it.
+_ALLOWED_WITHOUT_STRATEGY = frozenset(
+    {
+        "name",
+        "classification",
+        "tags",
+        "logical_type",
+        "parse_format",
+        "sentinel_to_null",
+        "error_policy",
+        "output_format",
+    }
 )
 _DECISION_KEYS = tuple(ColumnDecision.model_fields)
 
-Problem = tuple[tuple[str | int, ...], str, dict[str, str]]
 
 _TEMPLATES = {
     str(reasons.config.POLICY_UNKNOWN_CLASSIFICATION): (
@@ -71,6 +69,9 @@ _TEMPLATES = {
     ),
     str(reasons.config.POLICY_FIELD_UNDECIDED): (
         "No policy level decides {field}; give the column a strategy or add a rule or default."
+    ),
+    str(reasons.config.POLICY_BLOCK_INVALID): (
+        "Column {field} has a provider_config value JSON cannot carry."
     ),
     str(reasons.config.POLICY_COLUMN_PARTIAL): (
         "Column {field} has no strategy but sets {key}; write its strategy to tune it."
@@ -139,51 +140,18 @@ def _decision_key(decision: ColumnDecision) -> bytes:
     return canonical_json_bytes(decision.model_dump())
 
 
-def _own_decision(column: Mapping[str, Any]) -> ColumnDecision | None:
-    """The column's own strategy as a decision, or None when its keys fail the decision types."""
+def _own_decision(column: Mapping[str, Any]) -> tuple[ColumnDecision | None, bool]:
+    """The column's own strategy as a decision, with the coercion `ColumnConfig` applies.
+
+    Returns `(None, False)` only when `ColumnConfig` would refuse the keys too, so its own error
+    reports them. The flag is set for a `provider_config` JSON cannot carry.
+    """
     own = {k: column[k] for k in _DECISION_KEYS if k in column}
     try:
-        return ColumnDecision.model_validate(own)
-    except _PydanticValidationError:
-        pass
-    return None
-
-
-def _roles(relationships: Any) -> dict[tuple[str, str], frozenset[str]]:
-    """Each `(table, column)` mapped to `parent_key` and or `child_key`, from every relationship."""
-    parent_role, child_role = ROLES
-    found: dict[tuple[str, str], set[str]] = {}
-    if not isinstance(relationships, list):
-        return {}
-    for rel in relationships:
-        if not isinstance(rel, Mapping):
-            continue
-        ends = [(rel.get("parent"), parent_role)]
-        children = rel.get("children")
-        ends += [(child, child_role) for child in children] if isinstance(children, list) else []
-        for end, role in ends:
-            if not isinstance(end, Mapping) or not isinstance(end.get("table"), str):
-                continue
-            columns = end.get("columns")
-            for name in columns if isinstance(columns, list) else ():
-                if isinstance(name, str):
-                    found.setdefault((end["table"], name), set()).add(role)
-    return {key: frozenset(roles) for key, roles in found.items()}
-
-
-def _facts(
-    table: str, column: Mapping[str, Any], classification: str | None, roles: frozenset[str]
-) -> FieldFacts:
-    tags = column.get("tags")
-    logical = column.get("logical_type")
-    return FieldFacts(
-        table=table,
-        column=column["name"],
-        classification=classification,
-        tags=tuple(t for t in tags if isinstance(t, str)) if isinstance(tags, list) else (),
-        logical_type=logical if isinstance(logical, str) else None,
-        roles=roles,
-    )
+        return ColumnDecision.model_validate(own, strict=False), False
+    except _PydanticValidationError as exc:
+        unjson = any(e["type"] == str(reasons.config.POLICY_BLOCK_INVALID) for e in exc.errors())
+    return None, unjson
 
 
 def _decided_column(column: Mapping[str, Any], decision: ColumnDecision) -> dict[str, Any]:
@@ -197,9 +165,9 @@ class _Expansion:
     def __init__(self, raw: Mapping[str, Any], inputs: ExpansionInputs) -> None:
         self._raw = raw
         self._inputs = inputs
-        self._problems: list[Problem] = []
+        self._problems: list[ContextProblem] = []
         self._known_classes = registered_detector_ids()
-        self._roles = _roles(raw.get("relationships"))
+        self._roles = roles_by_field(raw.get("relationships"))
         pin = inputs.policy.disguise
         self._pin = pin
         self._disguise = DecisionSource(
@@ -257,14 +225,7 @@ class _Expansion:
                     rule=rule.id,
                 )
         if self._problems:
-            details: list[InitErrorDetails] = [
-                {
-                    "type": PydanticCustomError(code, _TEMPLATES[code], ctx),
-                    "loc": loc,
-                    "input": None,
-                }
-                for loc, code, ctx in self._problems
-            ]
+            details = problem_details(self._problems, _TEMPLATES)
             raise ValidationError.from_exception_data("PipelineConfig", details)
         out = dict(self._raw)
         if isinstance(tables, list):
@@ -295,7 +256,7 @@ class _Expansion:
         column = columns[index]
         name = f"{table}.{column['name']}"
         classification = self._classification(column, loc, name)
-        facts = _facts(
+        facts = facts_for(
             table, column, classification, self._roles.get((table, column["name"]), frozenset())
         )
         candidates: list[_Candidate] = []
@@ -305,14 +266,16 @@ class _Expansion:
                 candidates.append(
                     _Candidate(level, DecisionSource("rule", rule.id), rule.decision())
                 )
-        if "strategy" in column:
-            own = _own_decision(column)
+        if column.get("strategy") is not None:
+            own, unjson = _own_decision(column)
             if own is None:
+                if unjson:
+                    self._problem(loc, reasons.config.POLICY_BLOCK_INVALID, field=name)
                 return
             source = DecisionSource("column", name)
             candidates.append(_Candidate(PrecedenceLevel.EXACT_FIELD, source, own))
         else:
-            shaping = sorted(k for k in _SHAPING_KEYS if k in column)
+            shaping = sorted(set(column) - _ALLOWED_WITHOUT_STRATEGY - {"strategy"})
             if shaping:
                 self._problem(loc, reasons.config.POLICY_COLUMN_PARTIAL, field=name, key=shaping[0])
                 return

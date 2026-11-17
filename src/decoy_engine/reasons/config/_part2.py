@@ -24,6 +24,7 @@ __all__ = [
     "LOADER_TABLE_UNDECLARED",
     "NAMESPACE_PLACEHOLDER_UNSET",
     "PIPELINE_NAME_INVALID",
+    "POLICY_BLOCK_INVALID",
     "POLICY_COLUMN_PARTIAL",
     "POLICY_FIELD_UNDECIDED",
     "POLICY_RULE_CONFLICT",
@@ -194,5 +195,11 @@ POLICY_FIELD_UNDECIDED = _d(
 POLICY_COLUMN_PARTIAL = _d(
     "policy_column_partial",
     "A column without a strategy sets keys that only a strategy can use.",
+    since=UNRELEASED,
+)
+POLICY_BLOCK_INVALID = _d(
+    "policy_block_invalid",
+    "The policy block has a duplicate id, a prohibition without exactly one of forbid and "
+    "require, or a value JSON cannot carry.",
     since=UNRELEASED,
 )

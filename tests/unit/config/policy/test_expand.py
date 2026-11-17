@@ -339,3 +339,99 @@ def test_column_decision_defaults_equal_column_config_defaults():
         want = ColumnConfig.model_fields[name].get_default(call_default_factory=True)
         got = ColumnDecision.model_fields[name].get_default(call_default_factory=True)
         assert got == want, name
+
+
+# -- own strategy is never dropped when ColumnConfig accepts it -------------------
+
+
+def test_own_strategy_with_lax_values_is_decided_at_level_1():
+    raw = raw_config(
+        [table("t", col("c", strategy="passthrough", deterministic="yes", classification="ssn"))]
+    )
+    out, expansion = expand(raw, {})
+    (field,) = expansion.fields
+    assert field.level is PrecedenceLevel.EXACT_FIELD and field.decision.deterministic is True
+    assert out["tables"][0]["columns"][0]["deterministic"] is True
+    # the same column as ColumnConfig reads it
+    lax = {"name": "c", "strategy": "passthrough", "deterministic": "yes"}
+    assert ColumnConfig.model_validate(lax).deterministic is True
+
+
+def test_own_strategy_that_column_config_refuses_is_left_to_its_error():
+    raw = raw_config([table("t", col("c", strategy=5), col("d", strategy="hash", provider=3))])
+    out, expansion = expand(raw, {})
+    assert expansion.fields == () and out["tables"][0]["columns"][0] == {"name": "c", "strategy": 5}
+
+
+def test_strategy_none_counts_as_absent():
+    raw = raw_config([table("t", col("c", strategy=None))])
+    exc = refusal(raw, {})
+    assert codes(exc) == ["policy_field_undecided"] and "t.c" in exc.errors()[0]["msg"]
+    out, expansion = expand(raw, {"default": {"strategy": "redact"}})
+    assert out["tables"][0]["columns"][0]["strategy"] == "redact"
+    assert expansion.fields[0].level is PrecedenceLevel.GLOBAL_DEFAULT
+    partial = raw_config([table("t", col("c", strategy=None, deterministic=True))])
+    assert codes(refusal(partial, {"default": {"strategy": "redact"}})) == ["policy_column_partial"]
+
+
+def test_non_json_provider_config_is_refused_by_code_not_crashed():
+    raw = raw_config([table("t", col("c", strategy="hash", provider_config={"k": float("nan")}))])
+    exc = refusal(raw, {})
+    assert codes(exc) == ["policy_block_invalid"]
+    assert exc.errors()[0]["loc"] == ("tables", 0, "columns", 0)
+    assert exc.__cause__ is None and exc.__context__ is None
+
+
+# -- the allowlist of keys a strategy-less column may carry ------------------------
+
+_IDENTITY_AND_LABELS = {"name", "classification", "tags"}
+_DECLARED_CASTING = {
+    "logical_type",
+    "parse_format",
+    "sentinel_to_null",
+    "error_policy",
+    "output_format",
+}
+_SHAPING = {
+    *ColumnDecision.model_fields,
+    "cardinality_mode",
+    "scale",
+    "coherent_with",
+    "backend_type",
+    "backend_version",
+    "pool_size",
+    "vault",
+    "when",
+    "dtype",
+}
+
+
+def test_column_config_fields_partition_with_no_leftovers():
+    from decoy_engine.config.policy._expand import _ALLOWED_WITHOUT_STRATEGY
+
+    fields = set(ColumnConfig.model_fields)
+    groups = [_IDENTITY_AND_LABELS, _DECLARED_CASTING, _SHAPING]
+    assert sum(len(g) for g in groups) == len(set().union(*groups)), "groups overlap"
+    # classification and tags join ColumnConfig in a later slice
+    assert fields - {"classification", "tags"} == set().union(*groups) - {"classification", "tags"}
+    assert _ALLOWED_WITHOUT_STRATEGY == _IDENTITY_AND_LABELS | _DECLARED_CASTING
+
+
+def test_every_shaping_key_makes_a_strategyless_column_partial():
+    for key in sorted(_SHAPING - {"strategy"}):
+        raw = raw_config([table("t", {"name": "c", key: 1})])
+        exc = refusal(raw, {"default": {"strategy": "redact"}})
+        assert codes(exc) == ["policy_column_partial"], key
+
+
+def test_a_generate_table_is_ignored():
+    gen = {"name": "g", "row_count": 3, "generate_columns": [{"name": "x", "type": "sequence"}]}
+    raw = raw_config([gen, table("t", col("c"))])
+    before = copy.deepcopy(raw)
+    out, expansion = expand(raw, {"default": {"strategy": "redact"}})
+    assert out["tables"][0] == gen and [f.table for f in expansion.fields] == ["t"]
+    assert raw == before
+    unmatched = {"rules": [{"id": "g", "select": {"table": "g"}, "strategy": "hash"}]}
+    assert codes(refusal(raw, {**unmatched, "default": {"strategy": "redact"}})) == [
+        "policy_selector_unmatched"
+    ]
