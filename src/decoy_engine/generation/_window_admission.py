@@ -28,7 +28,6 @@ from decoy_engine import reasons as reason_codes
 from decoy_engine.contracts.distribution_snapshot import (
     MAX_SAMPLED_YEAR,
     MIN_YEAR,
-    names_unsupported_year,
 )
 from decoy_engine.errors import DecoyError
 
@@ -110,30 +109,12 @@ def _check_histogram(
     table: str,
     col: dict[str, Any],
     edges_key: str,
-    counts_key: str,
     stats: Mapping[str, Any],
     *,
     strictly_ordered: bool,
 ) -> list[float]:
     """The degenerate-stats and bounded-span checks shared by numeric and freetext. Returns edges."""
-    try:
-        edges = _floats(stats.get(edges_key))
-        counts = _floats(stats.get(counts_key))
-    except (TypeError, ValueError):
-        _refuse(table, col, CODE_DEGENERATE, edges_key, f"{edges_key}/{counts_key} not numeric")
-    if len(edges) < 2 or len(counts) != len(edges) - 1:
-        _refuse(
-            table,
-            col,
-            CODE_DEGENERATE,
-            edges_key,
-            f"histogram is degenerate (edges={len(edges)}, counts={len(counts)})",
-        )
-    total = sum(counts)
-    if any(c < 0 or not math.isfinite(c) for c in counts) or not math.isfinite(total) or total <= 0:
-        _refuse(
-            table, col, CODE_DEGENERATE, counts_key, "counts are negative, non-finite or sum <= 0"
-        )
+    edges = _floats(stats.get(edges_key))  # `_refuse_degenerate` already proved them numeric
     if not all(math.isfinite(e) for e in edges):
         _refuse(table, col, CODE_UNBOUNDED, edges_key, "edges are not all finite")
     if strictly_ordered and any(b <= a for a, b in pairwise(edges)):
@@ -146,25 +127,15 @@ def _check_histogram(
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
     buckets = spec.datetime_buckets
-    if buckets is None:
-        if names_unsupported_year(spec.stats):
-            _refuse(
-                table,
-                col,
-                CODE_UNBOUNDED,
-                "year_bins",
-                f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
-            )
-        _refuse(table, col, CODE_DEGENERATE, "year_bins", "year_bins entries are malformed")
+    if buckets is None:  # `_refuse_degenerate` passed, so the stats name a year outside the range
+        _refuse(
+            table,
+            col,
+            CODE_UNBOUNDED,
+            "year_bins",
+            f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}",
+        )
     weights = [float(b.count) for b in buckets]
-    total = sum(weights)
-    if (
-        not buckets
-        or any(w < 0 or not math.isfinite(w) for w in weights)
-        or not math.isfinite(total)  # two finite weights can sum to inf and pass `total > 0`
-        or not total > 0
-    ):
-        _refuse(table, col, CODE_DEGENERATE, "year_bins", "year_bins empty or counts unusable")
     bad = sorted(
         {
             y
@@ -192,16 +163,6 @@ def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> N
             )
         if parsed_bounds[bound].tzinfo is not None:
             _refuse(table, col, CODE_UNBOUNDED, bound, "timezone-aware datetime bound")
-    # An inverted range passes the per-bound checks but makes the sampler clamp every row to
-    # `max` silently (a wrong value, not a crash), so reject it at admission.
-    if parsed_bounds["min"] > parsed_bounds["max"]:
-        _refuse(
-            table,
-            col,
-            CODE_DEGENERATE,
-            "min",
-            "datetime min is after max",
-        )
     # A folded range has no per-year weights to check its edge against, so its outer year must be
     # the bound's year; otherwise the draw would pile up at the clamp.
     live = [b for b, w in zip(buckets, weights, strict=True) if w > 0]
@@ -220,34 +181,13 @@ def _check_categorical(
         _categorical_tables,
         _conditional_tables,
     )
-    from decoy_engine.generation.statistical._spec import StatisticalSpecError
 
-    try:
-        values, weights = _categorical_tables(spec)
-    except StatisticalSpecError as exc:
-        _refuse(table, col, CODE_FLAG_TOKEN, "top_values", exc.message)
-    except (TypeError, ValueError, KeyError):
-        _refuse(table, col, CODE_DEGENERATE, "top_values", "top_values entries are malformed")
-    cat_total = sum(weights)
-    if (
-        not values
-        or any(w < 0 or not math.isfinite(w) for w in weights)
-        or not math.isfinite(cat_total)  # finite weights can sum to inf and pass `> 0`
-        or not cat_total > 0
-    ):
-        _refuse(table, col, CODE_DEGENERATE, "top_values", "top_values empty or counts unusable")
+    values, _ = _categorical_tables(spec)  # proved by `_refuse_degenerate`
     # BR-2: a category token is materialized per cell before any byte meter sees it.
     tokens = [str(v) for v in values]
     conditional = _conditional_tables(spec) if spec.condition_on else {}
-    for kids, wts in conditional.values():
+    for kids, _ in conditional.values():
         tokens.extend(kids)
-        cond_total = sum(wts)
-        if (
-            any(w < 0 or not math.isfinite(w) for w in wts)
-            or not math.isfinite(cond_total)  # finite weights can sum to inf
-            or not cond_total > 0
-        ):
-            _refuse(table, col, CODE_DEGENERATE, "joint", "a conditional row has no usable weight")
     if any(len(t) > max_cell_chars for t in tokens):
         _refuse(
             table,
@@ -258,13 +198,24 @@ def _check_categorical(
         )
 
 
+def _refuse_degenerate(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
+    """Refuse a snapshot the shared degenerate rule rejects, with that rule's property name."""
+    from decoy_engine.generation.statistical import StatisticalSpecError, degenerate_finding
+
+    try:
+        finding = degenerate_finding(spec)
+    except StatisticalSpecError as exc:  # a non-canonical flag token, not a degenerate snapshot
+        _refuse(table, col, CODE_FLAG_TOKEN, "top_values", exc.message)
+    if finding is not None:
+        _refuse(table, col, CODE_DEGENERATE, finding[0], finding[1])
+
+
 def _check_statistical(
     table: str, col: dict[str, Any], spec: StatisticalSpec, max_cell_chars: int
 ) -> None:
+    _refuse_degenerate(table, col, spec)
     if spec.kind == "numeric":
-        edges = _check_histogram(
-            table, col, "bin_edges", "bin_counts", spec.stats, strictly_ordered=True
-        )
+        edges = _check_histogram(table, col, "bin_edges", spec.stats, strictly_ordered=True)
         from decoy_engine.generation.statistical._sample import _is_integer_dtype
 
         # Integer outputs are clamped to [edges[0], edges[-1]] then materialized as Arrow int64;
@@ -278,20 +229,7 @@ def _check_statistical(
                 f"integer numeric edges [{edges[0]}, {edges[-1]}] exceed the int64 range",
             )
     elif spec.kind == "freetext":
-        edges = _check_histogram(
-            table, col, "length_bin_edges", "length_bin_counts", spec.stats, strictly_ordered=False
-        )
-        # Length edges must be non-negative and non-decreasing (ties allowed). A negative or any
-        # descending adjacent pair (endpoint OR interior, e.g. [0, 100, 10]) makes the sampler clamp
-        # every cell to one length, silently collapsing the distribution. Reject at admission.
-        if edges[0] < 0 or any(b < a for a, b in pairwise(edges)):
-            _refuse(
-                table,
-                col,
-                CODE_DEGENERATE,
-                "length_bin_edges",
-                f"length edges {edges} are negative or not non-decreasing",
-            )
+        edges = _check_histogram(table, col, "length_bin_edges", spec.stats, strictly_ordered=False)
         if int(edges[-1]) > max_cell_chars:
             _refuse(
                 table,
