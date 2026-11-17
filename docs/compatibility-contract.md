@@ -179,6 +179,18 @@ the same path a record from a newer engine takes. `REGISTRY_VERSION` stays `1.29
 release with this change report one registry version with two different catalogs. An engine branch forked before
 this change sees the two identities as stale in its registry checks until it rebases.
 
+**Pre-GA correction (connector usage outcomes, 2026-11-17).** Eight released connector codes change their `rules`
+from outcome `execution`, retry `unknown` to outcome `configuration`, retry `configuration_repair`:
+`connector/ambiguous_name`, `connector/column_not_found`, `connector/duplicate_relation`,
+`connector/extension_unavailable`, `connector/extension_untrusted_location`, `connector/relation_not_found`,
+`connector/unsupported_column_type` and `connector/value_not_representable`. Each names a problem the user fixes in
+the config or the database, so the CLI now exits 1 for them instead of 3. This is a one-time exception to the
+append-only rule, approved by the owner before GA. It is a closed list in
+`scripts/release/reason_pre_ga_corrections.py`: the release pin check and the v1 append-only check accept only these
+eight identities, only the `rules` field and only this exact old and new value. Any other change to a released reason
+still fails. `REGISTRY_VERSION` stays `1.29.0`, so a consumer that keys on the outcome or retry of these codes sees
+the new values under the same registry version until the next release recaptures the pin.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
