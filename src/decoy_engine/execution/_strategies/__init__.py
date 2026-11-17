@@ -33,7 +33,6 @@ from decoy_engine.execution._strategies._group_key import GroupKeyStrategyHandle
 from decoy_engine.execution._strategies._grouped_series import GroupedSeriesStrategyHandler
 from decoy_engine.execution._strategies._hash import HashStrategyHandler
 from decoy_engine.execution._strategies._joint_mask import JointMaskHandler
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
 from decoy_engine.execution._strategies._passthrough import PassthroughHandler
 from decoy_engine.execution._strategies._redact import RedactHandler
 from decoy_engine.execution._strategies._shuffle import ShuffleStrategyHandler
@@ -43,6 +42,7 @@ from decoy_engine.execution._strategies._tokenize import TokenizeStrategyHandler
 from decoy_engine.execution._strategies._top_code import TopCodeStrategyHandler
 from decoy_engine.execution._strategies._truncate import TruncateHandler
 from decoy_engine.execution._strategies._windowed_date import WindowedDateStrategyHandler
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, StrategyRequirement, requirements_for
 
 SCALAR_HANDLERS: dict[str, StrategyHandler] = {

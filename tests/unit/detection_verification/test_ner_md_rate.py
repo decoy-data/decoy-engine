@@ -46,7 +46,7 @@ def test_sm_keeps_its_accepted_rate_and_md_has_its_own() -> None:
     assert nr.NER_MIN_RATES[SM] == 0.211
     assert MD in nr.NER_MIN_RATES
     assert 0 < nr.NER_MIN_RATES[MD] < nr.NER_MIN_RATES[SM]
-    assert nr.NER_MIN_RATES[SM] == nr.NER_MIN_RATE
+    assert nr.NER_MIN_RATES[SM] == 0.211
 
 
 @needs_model(MD)

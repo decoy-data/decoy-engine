@@ -1716,7 +1716,7 @@ column.
 | `plan.reference_fanout_conflict` | `weights`, `min_per_parent` or `max_per_parent` is set; the fan-out already fixes the per-parent counts. |
 | `plan.reference_parent_pool_empty` | The child table has rows but the generated parent column has no non-null keys. |
 | `plan.dp_generate_fitted_fanout_unsupported` | The config declares `global_settings.dp`. The exact source fan-out would reach DP output unprotected; use `distribution: random`. |
-| `plan.statistical_snapshot_unreadable`, `plan.statistical_snapshot_schema_mismatch` | The snapshot file could not be read or is not `distribution-snapshot/v1`. |
+| `plan.statistical_snapshot_unreadable`, `plan.statistical_snapshot_schema_mismatch` | The snapshot file could not be read or is not `distribution-snapshot/v1` or `/v2`. |
 | `plan.statistical_snapshot_not_pinned` | A saved Plan loaded with `plan_from_yaml` no longer carries the fitted column's snapshot. |
 | `plan.pinned_snapshot_file_not_statistical` | The pinned API (`compile_pinned`) takes `snapshot_file` only on statistical columns. |
 | `quality.fanout_column_unknown` | At fit: a fan-out column is not in the source, or `fanout_columns` is a bare string. |
@@ -1724,6 +1724,30 @@ column.
 
 Messages name tables, columns and fields only, never a key value or a stored
 count.
+
+### What a plain `decoy fit` snapshot keeps
+
+A plain snapshot (no `--include-values`) applies one floor, `MIN_RELEASE_COUNT` (10 rows), to
+every column, not only the columns the profiler flags.
+
+- A categorical label or a joint cell held by fewer than 10 rows moves into `other_count`. A bool
+  column keeps its labels.
+- A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
+  cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
+  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+- A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
+  10 rows each. A flagged column gets the same ranges.
+- A short string column whose labels read as sentences (median of 3 or more words) is written as
+  free text, with length statistics only.
+- A column too small to floor (a numeric with under 20 finite cells, a categorical with every
+  label under 10 rows, a datetime with no year held by 10 rows) is withheld and listed in
+  `redacted_columns`. A categorical column, or a `condition_on` parent, then refuses with
+  `plan.statistical_snapshot_values_redacted`. A numeric column samples one coarse interval. A
+  datetime column samples its year ranges, and releases none when it has under 10 rows in all.
+  `--include-values` keeps the old content.
+
+The snapshot is `distribution-snapshot/v2` and `value_policy` is `flagged-redacted/v2`. Readers
+accept `flagged-redacted/v1` and `distribution-snapshot/v1` as before.
 
 ### formula
 

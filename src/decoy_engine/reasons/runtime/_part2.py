@@ -82,6 +82,7 @@ __all__ = [
     "POOL_EXCEEDS_CACHE_BUDGET",
     "POOL_QUALITY_THRESHOLD_EXCEEDED",
     "POOL_TOO_SMALL_FOR_SOURCE",
+    "PROBE_FAILED",
     "PROVIDER_NOT_POOLABLE",
     "RAW_HEX_BATCH_LENGTH_MISMATCH",
     "RAW_HEX_BATCH_TYPE_MISMATCH",
@@ -470,6 +471,17 @@ _d = _catalog.runtime("PoolQualityError")
 
 POOL_QUALITY_THRESHOLD_EXCEEDED = _d(
     "pool_quality.threshold_exceeded", "Pool quality threshold exceeded."
+)
+
+_d = _catalog.runtime("ProbeError")
+
+PROBE_FAILED = _d(
+    "probe_failed",
+    "The synthetic probe could not run.",
+    phases=(Phase.RESOLVE,),
+    outcome=Outcome.EXECUTION,
+    retry=RetryClass.UNKNOWN,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("RowExceedsMaxRowBytes")

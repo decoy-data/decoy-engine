@@ -75,6 +75,8 @@ jobs:
           python: ${{ matrix.python }}
       - name: Import
         run: python -c "import decoy_engine"
+      - name: Probe
+        run: python -c 'from decoy_engine.support import probe_status, run_probe; assert probe_status(run_probe()) == "ok"'
 
   mypy:
     if: github.event_name != 'pull_request'
