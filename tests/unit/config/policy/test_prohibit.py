@@ -160,6 +160,73 @@ def test_prohibited_code_is_registered_unreleased():
     assert not re.search(r"[{}%]", spec.summary)
 
 
+# -- forbid is never bypassed, at every level -------------------------------
+
+_LEVEL_CASES = {
+    "column": ({"strategy": "hash"}, {}, {}, "hash"),
+    "rule_level_1": (
+        {},
+        {"rules": [{"id": "r", "select": {"table": "p", "column": "c"}, "strategy": "fpe"}]},
+        {},
+        "fpe",
+    ),
+    "rule_level_2": (
+        {},
+        {"rules": [{"id": "r", "select": {"table": "p"}, "strategy": "tokenize"}]},
+        {},
+        "tokenize",
+    ),
+    "rule_level_3": (
+        {},
+        {"rules": [{"id": "r", "select": {"table": "p*"}, "strategy": "truncate"}]},
+        {},
+        "truncate",
+    ),
+    "disguise": (
+        {"classification": "ssn"},
+        {},
+        {"ssn": ColumnDecision(strategy="faker")},
+        "faker",
+    ),
+    "default": ({}, {"default": {"strategy": "date_shift"}}, {}, "date_shift"),
+}
+
+
+@pytest.mark.parametrize("case", list(_LEVEL_CASES))
+def test_forbid_is_never_bypassed_at_any_level(case):
+    column_keys, policy, level4, strategy = _LEVEL_CASES[case]
+    policy = {
+        "default": {"strategy": "redact"},
+        **policy,
+        "prohibit": [{"id": "ban", "select": {"column": "c"}, "forbid": [strategy]}],
+    }
+    exc = refusal(raw_config([table("p", col("c", **column_keys))]), policy, level4)
+    assert codes(exc) == ["policy_prohibited"]
+    msg = exc.errors()[0]["msg"]
+    assert "p.c" in msg and strategy in msg and "ban" in msg
+
+
+def test_prohibited_and_another_code_come_back_in_one_error():
+    raw = raw_config([table("p", col("c", strategy="hash"), col("d"))])
+    policy = {
+        "rules": [{"id": "r", "select": {"table": "p", "column": "d"}, "strategy": "nope"}],
+        "prohibit": [{"id": "ban", "select": {"column": "c"}, "forbid": ["hash"]}],
+    }
+    assert sorted(codes(refusal(raw, policy))) == [
+        "policy_field_undecided",
+        "policy_prohibited",
+        "policy_unknown_strategy",
+    ]
+
+
+def test_every_agreeing_source_reaches_the_explanation_in_order():
+    same = {"strategy": "hash"}
+    raw = raw_config([table("p", col("c", **same))])
+    policy = {"rules": [{"id": "r", "select": {"table": "p", "column": "c"}, **same}]}
+    (field,) = _doc(raw, policy)["fields"]
+    assert field["sources"] == [{"kind": "column", "id": "p.c"}, {"kind": "rule", "id": "r"}]
+
+
 # -- F16-T12 -----------------------------------------------------------------
 
 CANARY = "CANARY_PC_8c1f"
@@ -203,27 +270,45 @@ def test_canary_literals_never_reach_the_explanation():
 
 
 def test_refusal_messages_for_every_policy_code_carry_no_canary():
-    raw = raw_config([table("t", col("c", provider_config={"k": CANARY}, strategy="hash"))])
+    nan = float("nan")
+    raw = raw_config(
+        [
+            table(
+                "t",
+                col("c"),
+                col("d", strategy="hash", provider_config={"k": CANARY}),
+                col("e", classification="bogus", strategy="hash"),
+                col("f", provider="p"),
+                col("g", strategy="hash", provider_config={"k": nan}),
+            ),
+            table("w", col("x")),
+        ]
+    )
+    rule = {"select": {"table": "t", "column": "c"}, "provider_config": {"k": CANARY}}
     policy = {
         "rules": [
-            {
-                "id": "a",
-                "select": {"table": "t"},
-                "strategy": "hash",
-                "provider_config": {"k": CANARY},
-            },
-            {
-                "id": "b",
-                "select": {"table": "t"},
-                "strategy": "redact",
-                "provider_config": {"k": CANARY},
-            },
-            {"id": "z", "select": {"table": "zz"}, "strategy": "nope", "why": CANARY},
+            {"id": "a", "strategy": "hash", **rule},
+            {"id": "b", "strategy": "redact", **rule},
+            {"id": "z", "select": {"table": "t"}, "strategy": "nope", "why": CANARY},
+            {"id": "u", "select": {"table": "zz"}, "strategy": "hash"},
         ],
-        "prohibit": [{"id": "q", "select": {"table": "t"}, "forbid": ["hash", "nope2"]}],
+        "prohibit": [
+            {"id": "q", "select": {"table": "t"}, "forbid": ["nope2"]},
+            {"id": "h", "select": {"column": "d"}, "forbid": ["hash"], "why": CANARY},
+        ],
     }
     exc = refusal(raw, policy)
-    assert CANARY not in str(exc.errors())
+    assert set(codes(exc)) == {
+        "policy_unknown_classification",
+        "policy_unknown_strategy",
+        "policy_selector_unmatched",
+        "policy_rule_conflict",
+        "policy_field_undecided",
+        "policy_block_invalid",
+        "policy_prohibited",
+        "policy_column_partial",
+    }
+    assert CANARY not in str(exc.errors()) and CANARY not in str(exc)
 
 
 def _doc(raw=None, policy=None, level4=None):
@@ -243,9 +328,10 @@ def test_explanation_shape_and_tag():
     ssn = by[("p", "ssn")]
     assert ssn["level"] == 4 and ssn["level_name"] == "classification_default"
     assert ssn["strategy"] == "hash" and ssn["deterministic"] is True
-    assert ssn["source"]["kind"] == "disguise" and ssn["classification"] == "ssn"
-    assert by[("p", "note")]["level"] == 1 and by[("p", "note")]["source"]["kind"] == "column"
-    assert by[("p", "name")]["source"] == {"kind": "default", "id": "default"}
+    assert [s["kind"] for s in ssn["sources"]] == ["disguise"] and ssn["classification"] == "ssn"
+    assert by[("p", "note")]["level"] == 1
+    assert by[("p", "note")]["sources"] == [{"kind": "column", "id": "p.note"}]
+    assert by[("p", "name")]["sources"] == [{"kind": "default", "id": "default"}]
     assert "provider_config" not in ssn
     assert re.fullmatch(r"[0-9a-f]{64}", ssn["decision_digest"])
 

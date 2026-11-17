@@ -8,7 +8,7 @@ at its config location, as one `ValidationError`; messages carry rule ids and `t
 names only. Prohibitions run on the decided fields, level 1 included (`_prohibit`).
 
 `expansion_to_dict` writes the `policy-expansion/v1` explanation: one decision per field with its
-level and source, the rules and prohibitions with their match counts, and a fingerprint of the
+level and every agreeing source, the rules and prohibitions with their match counts, and a fingerprint of the
 decisions. It holds a digest of each decision, never `provider_config` itself.
 
 A malformed structure (tables not a list, a column without a string `name`, a column whose own
@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as _PydanticValidationError
 from pydantic_core import ValidationError
 
@@ -65,6 +65,7 @@ __all__ = [
 
 POLICY_EXPANSION_SCHEMA: Final = "policy-expansion/v1"
 SourceKind = Literal["column", "rule", "disguise", "default"]
+_SOURCE_ORDER: Final[dict[str, int]] = {"column": 0, "rule": 1, "disguise": 2, "default": 3}
 
 # The keys a column may carry without a strategy: identity, labels and the F06 declared-casting
 # contract. Anything else shapes the strategy, so a policy-decided column may not set it.
@@ -164,8 +165,10 @@ def _decision_key(decision: ColumnDecision) -> bytes:
 def _own_decision(column: Mapping[str, Any]) -> tuple[ColumnDecision | None, bool]:
     """The column's own strategy as a decision, with the coercion `ColumnConfig` applies.
 
-    Returns `(None, False)` only when `ColumnConfig` would refuse the keys too, so its own error
-    reports them. The flag is set for a `provider_config` JSON cannot carry.
+    Returns `(None, False)` when `ColumnConfig` would refuse the keys too, so its own error
+    reports them, or when the strategy string is empty or over 64 characters, which `ColumnConfig`
+    accepts and the caller reports as an unknown strategy. The flag is set for a `provider_config`
+    JSON cannot carry.
     """
     own = {k: column[k] for k in _DECISION_KEYS if k in column}
     if isinstance(own.get("provider_config"), Mapping) and not json_carryable(
@@ -327,6 +330,12 @@ class _Expansion:
             if own is None:
                 if unjson:
                     self._problem(loc, reasons.config.POLICY_BLOCK_INVALID, field=name)
+                elif isinstance(column["strategy"], str):
+                    self._problem(
+                        (*loc, "strategy"),
+                        reasons.config.POLICY_UNKNOWN_STRATEGY,
+                        where=f"column {name}",
+                    )
                 return
             source = DecisionSource("column", name)
             candidates.append(_Candidate(PrecedenceLevel.EXACT_FIELD, source, own))
@@ -347,7 +356,11 @@ class _Expansion:
             self._problem(loc, reasons.config.POLICY_FIELD_UNDECIDED, field=name)
             return
         best = min(c.level for c in candidates)
-        chosen = [c for c in candidates if c.level == best]
+        # Column first, then rules in policy order, then disguise, then default. The sort is
+        # stable, so rules keep policy order; the conflict message and the explanation share it.
+        chosen = sorted(
+            (c for c in candidates if c.level == best), key=lambda c: _SOURCE_ORDER[c.source.kind]
+        )
         clash = next(
             (
                 c
@@ -410,7 +423,7 @@ class _FieldDoc(BaseModel):
     deterministic: bool
     level: int
     level_name: str
-    source: _SourceDoc
+    sources: list[_SourceDoc] = Field(min_length=1)
     overridden: list[str]
     classification: str | None
     decision_digest: str
@@ -439,7 +452,7 @@ class _ExpansionDoc(BaseModel):
     """The one strict writer of `policy-expansion/v1`. Nothing reads the document back in V1."""
 
     model_config = _WRITER
-    schema_: Literal["policy-expansion/v1"]
+    schema_: Literal["policy-expansion/v1"] = Field(serialization_alias="schema")
     disguise: _PinDoc | None
     fingerprint: str
     fields: list[_FieldDoc]
@@ -477,7 +490,7 @@ def expansion_to_dict(expansion: PolicyExpansion) -> dict[str, Any]:
                 deterministic=f.decision.deterministic,
                 level=int(f.level),
                 level_name=f.level.label,
-                source=_SourceDoc(kind=f.sources[0].kind, id=f.sources[0].id),
+                sources=[_SourceDoc(kind=s.kind, id=s.id) for s in f.sources],
                 overridden=list(f.overridden),
                 classification=f.classification,
                 decision_digest=_digest(f.decision),
@@ -487,6 +500,4 @@ def expansion_to_dict(expansion: PolicyExpansion) -> dict[str, Any]:
         rules=[_RuleDoc(id=r.id, level=int(r.level), matched=r.matched) for r in expansion.rules],
         prohibitions=[_ProhibitionDoc(id=p.id, matched=p.matched) for p in expansion.prohibitions],
     )
-    out = doc.model_dump()
-    out["schema"] = out.pop("schema_")
-    return {"schema": out.pop("schema"), **out}
+    return doc.model_dump(by_alias=True)
