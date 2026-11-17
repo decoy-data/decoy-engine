@@ -20,6 +20,7 @@ from scripts.release.reason_manifest_policy import since_floor_violations
 from scripts.release.reason_release_pin import PIN_PATH, build_pin, load_pin, pin_violations
 
 from decoy_engine import reasons
+from tests.sentry.test_no_residual_removed_surface import RETIRED_PATTERN
 
 V1_PIN = Path(__file__).resolve().parents[1] / "fixtures" / "f29" / "reason-manifest-v1.json"
 
@@ -44,6 +45,10 @@ def test_pin_is_well_formed() -> None:
     pin, problems = load_pin(PIN_PATH.read_text(encoding="utf-8"))
     assert problems == [] and pin is not None
     assert sum(pin["since_counts"].values()) == len(pin["identities"])
+
+
+def test_pin_holds_no_identity_with_the_retired_name() -> None:
+    assert [i["code"] for i in _pin()["identities"] if RETIRED_PATTERN.search(i["code"])] == []
 
 
 def _first_shipped(m: dict) -> dict:
@@ -327,3 +332,9 @@ def test_at2_a_flipped_digest_nibble_under_the_live_value_fails_the_pin_cli(tree
     name = f"{record['namespace']}.{record['code']}"
     assert res.returncode == 1 and f"{name}: summary" in res.stderr, res.stderr[-800:]
     assert re.search(r"[0-9a-f]{64}", res.stderr) is None, "messages name fields, never digests"
+
+
+def test_pin_cli_check_accepts_the_checked_in_tree(tree) -> None:
+    # --release-ready holds only after release prep stamps pending reasons; release_checks.sh runs it.
+    res = pin_cli(tree, "--check")
+    assert res.returncode == 0, res.stderr[-800:]
