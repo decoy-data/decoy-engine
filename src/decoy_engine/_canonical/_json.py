@@ -29,7 +29,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from decoy_engine import reasons
@@ -56,6 +56,10 @@ __all__ = [
 MASK_CELL_BYTES: Final = 16 * 1024 * 1024
 MASK_MAX_DEPTH: Final = 64
 
+# A number the lexeme reader may have to keep: an exponent, a trailing zero, a long run of digits,
+# a leading `.0000` (Python prints those as an exponent) or `-0`. It over-matches on purpose: text
+# inside a string also sends a cell to the hook path, which is slower and always correct.
+_LOSSY_HINT = re.compile(r"[eE]|\.\d*0(?!\d)|\.0000|\d{16}|-0(?![.\d])")
 _SURROGATE = re.compile("[\ud800-\udfff]")
 # A lone surrogate written by the ASCII encoder is always `\ud8xx` to `\udfxx`. A literal
 # backslash-u in data is written `\\u`, which also matches here, so a hit only asks for the walk.
@@ -196,12 +200,13 @@ class StrictJsonError(CanonicalJsonError):
 class JsonNumber:
     """A JSON number with its source text. ``value`` is ``None`` for an integer too long for ``int``.
 
-    Reading in lexeme mode keeps every number as one of these so an unselected number is written
-    back exactly as read (``1.10``, ``1e400``, a long decimal), not as ``json.dumps`` would print it.
+    Lexeme mode returns one only for a number that ``json.dumps`` would print differently (``1.10``,
+    ``1e400``, ``-0``, a long decimal), so an unselected number is written back exactly as read.
+    A number that prints as read stays a plain ``int`` or ``float``.
     """
 
     value: int | float | None
-    lexeme: str
+    lexeme: str = field(repr=False)
 
 
 def _oversized(text: str, max_bytes: int) -> bool:
@@ -252,9 +257,10 @@ def strict_json_read(
     found: list[str] = []
 
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        if len({key for key, _ in items}) != len(items):
+        members = dict(items)
+        if len(members) != len(items):
             found.append("duplicate_key")
-        return dict(items)
+        return members
 
     def constant(name: str) -> float | None:
         if non_finite == "keep":
@@ -269,17 +275,20 @@ def strict_json_read(
         if not keep_lexemes:
             return int(text)
         try:
-            return JsonNumber(int(text), text)
+            number = int(text)
         except ValueError:  # past CPython's integer string limit: keep the lexeme only
             return JsonNumber(None, text)
+        return number if str(number) == text else JsonNumber(number, text)
 
-    def real(text: str) -> JsonNumber:
-        return JsonNumber(float(text), text)
+    def real(text: str) -> Any:
+        number = float(text)
+        return number if json.dumps(number) == text else JsonNumber(number, text)
 
     parsed: Any = None
     malformed = False
     too_big = False
     too_deep = False
+    walk_depth = True
     try:
         if max_bytes is not None and isinstance(data, bytes) and len(data) > max_bytes:
             too_big = True
@@ -290,12 +299,20 @@ def strict_json_read(
             else:
                 if not text.isascii():
                     text.encode("utf-8")  # a raw lone surrogate is not RFC 8259 text
+                # Containers open with one bracket each, so a text with few of them cannot be deep.
+                walk_depth = max_depth is not None and (
+                    text.count("[") + text.count("{") > max_depth
+                )
+                # No number can be lossy in most cells, so the C parser reads them with no hook.
+                lexemes = keep_lexemes and (
+                    max_int_digits is not None or bool(_LOSSY_HINT.search(text))
+                )
                 parsed = json.loads(
                     text,
                     object_pairs_hook=pairs,
                     parse_constant=constant,
-                    parse_int=integer,
-                    parse_float=real if keep_lexemes else None,
+                    parse_int=integer if lexemes or not keep_lexemes else None,
+                    parse_float=real if lexemes else None,
                 )
     except (UnicodeError, ValueError):
         malformed = True
@@ -306,7 +323,7 @@ def strict_json_read(
         raise StrictJsonError("oversized")
     if malformed:
         raise StrictJsonError("not_json")
-    if too_deep or (max_depth is not None and _deeper_than(parsed, max_depth)):
+    if too_deep or (walk_depth and max_depth is not None and _deeper_than(parsed, max_depth)):
         raise StrictJsonError("too_deep")
     if found:
         raise StrictJsonError(found[0])
@@ -314,10 +331,14 @@ def strict_json_read(
 
 
 def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
-    """Parse JSON, refusing a duplicate key, a non-finite number and an integer longer than
-    ``max_int_digits`` digits (``None`` sets no digit limit). Raises ``StrictJsonError``.
+    """Parse JSON, refusing a duplicate key, a non-finite number, a raw lone surrogate in the text
+    and an integer longer than ``max_int_digits`` digits (``None`` sets no digit limit).
+    Raises ``StrictJsonError``.
     """
     return strict_json_read(data, max_int_digits=max_int_digits)
+
+
+_SCALARS = frozenset({str, int, float, bool, type(None)})
 
 
 def strict_json_plain(value: Any) -> Any:
@@ -325,6 +346,8 @@ def strict_json_plain(value: Any) -> Any:
 
     Raises ``StrictJsonError("out_of_range")`` for a number that has no plain value.
     """
+    if type(value) in _SCALARS:
+        return value
     refused = False
 
     def walk(item: Any) -> Any:
@@ -345,42 +368,45 @@ def strict_json_plain(value: Any) -> Any:
     return plain
 
 
+def _key_text(key: Any) -> str:
+    """The quoted member name exactly as ``json.dumps`` writes it, including its key coercions."""
+    return json.dumps({key: 0})[1:-4]
+
+
 def _write_lexemes(value: Any) -> str:
     """The ``json.dumps`` form, with each ``JsonNumber`` written as its source text."""
     if isinstance(value, JsonNumber):
         return value.lexeme
     if isinstance(value, dict):
-        members = (
-            f"{json.dumps(key if isinstance(key, str) else str(key))}: {_write_lexemes(child)}"
-            for key, child in value.items()
-        )
+        members = (f"{_key_text(key)}: {_write_lexemes(child)}" for key, child in value.items())
         return "{" + ", ".join(members) + "}"
     if isinstance(value, list):
         return "[" + ", ".join(_write_lexemes(child) for child in value) + "]"
     return json.dumps(value)
 
 
-def _lossless(value: Any) -> bool:
-    """Whether every ``JsonNumber`` in ``value`` prints as its own source text."""
+def _has_number(value: Any) -> bool:
+    """Whether ``value`` holds a ``JsonNumber``. Only a lossy number is one, so most cells hold none."""
+    if type(value) is JsonNumber:
+        return True
+    if type(value) is not dict and type(value) is not list:
+        return False
     stack = [value]
     while stack:
         item = stack.pop()
-        if isinstance(item, JsonNumber):
-            if item.value is None or json.dumps(item.value) != item.lexeme:
-                return False
-        elif isinstance(item, dict):
-            stack.extend(item.values())
-        elif isinstance(item, list):
-            stack.extend(item)
-    return True
+        for child in item.values() if type(item) is dict else item:
+            kind = type(child)
+            if kind is JsonNumber:
+                return True
+            if kind is dict or kind is list:
+                stack.append(child)
+    return False
 
 
 def strict_json_write(value: Any) -> str:
     """Write a tree read with ``keep_lexemes`` back as JSON text, never changing a number.
 
-    When every number prints as it was read, this is exactly ``json.dumps`` of the plain value, so
-    the bytes equal what the strategy wrote before lexemes were kept.
+    A tree with no ``JsonNumber`` is exactly ``json.dumps`` of it, so the bytes equal what the
+    strategy wrote before lexemes were kept.
     """
-    if _lossless(value):
-        return json.dumps(strict_json_plain(value))
-    return _write_lexemes(value)
+    return _write_lexemes(value) if _has_number(value) else json.dumps(value)

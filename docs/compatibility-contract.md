@@ -1058,7 +1058,7 @@ collection. The requirements are `StrategyRequirement` descriptors in `decoy_eng
 **Nested cell reading and output (F07 E1).** Recorded pre-GA semantic change (2026-11-17): the `nested`
 strategy reads each cell with `strict_json_read` under bounds (16 MiB, depth 64) and writes a number it did
 not select as it was read, so `1.10`, `1e400` and a long decimal are no longer rewritten. A cell that repeats
-a key, is over a bound or holds a lone surrogate fails its row with a closed warning code (`nested_cell_duplicate_key`,
+a key, is over a bound or holds a raw lone surrogate (an escaped `\ud800` is valid) fails its row with a closed warning code (`nested_cell_duplicate_key`,
 `nested_cell_oversized`, `nested_cell_too_deep`, `nested_cell_json_parse_error`). A selected integer too long
 for `int` fails the row (`nested_cell_number_out_of_range`). A leaf list of integers with a null now reaches
 the child as integers and a null, not as `float64` with `NaN`, so `hash` and `tokenize` accept it. A child

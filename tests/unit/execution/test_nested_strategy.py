@@ -1223,3 +1223,97 @@ def test_the_new_cell_codes_are_declared_for_the_mixed_route_and_the_capability_
     }
     assert new.issubset(CHUNK_VARIANT_WARNING_CODES)
     assert new.issubset(capabilities_for("nested").warning_codes)
+
+
+class TestArraySelectorOnAScalarNumber:
+    """A number is a plain int or float again, so an array selector on it fails typed, as on main."""
+
+    @pytest.mark.parametrize(
+        ("cell", "target"), [("5", "$[*]"), ('{"a":5}', "$.a[*]"), ('{"a":1.5}', "$.a[*]")]
+    )
+    def test_the_selector_gives_the_typed_unwritable_container_error(self, cell, target):
+        handler = NestedStrategyHandler()
+        with pytest.raises(StrategyError) as caught:
+            handler.run(
+                pd.DataFrame({"data": [cell]}),
+                "data",
+                _seed({"target": target, "strategy": "redact"}),
+                _FakeCtx(),
+            )
+        assert caught.value.code == "nested_target_unwritable_container"
+
+
+def test_every_fault_the_handler_records_maps_to_its_own_warning_code():
+    from decoy_engine.execution._strategies.nested import _leaves
+
+    codes = {}
+    for fault in _leaves._FAULTS:
+        warning = _leaves._warning(fault, "c", 0)
+        codes[fault] = warning.code
+    assert len(set(codes.values())) == len(_leaves._FAULTS)
+    assert codes["not_json"] == "nested_cell_json_parse_error"
+    assert codes["child_non_finite"] == "nested_child_non_finite"
+    assert {"duplicate_key", "oversized", "too_deep"} < set(_leaves._FAULTS)
+    # Every token the reader can raise has a row-error entry.
+    from decoy_engine._canonical._json import STRICT_JSON_TOKENS
+
+    assert {t for t in STRICT_JSON_TOKENS if t != "non_finite"} <= set(_leaves._FAULTS)
+
+
+def _flat_vs_nested(name: str) -> tuple[Any, Any]:
+    """The child run on the flat int64 leaf frame (the pre-E1 frame), and the same child under nested."""
+    handler, child_seed = NestedStrategyHandler()._resolve_child(
+        _seed({"target": "$.v", "strategy": name}, "ns")
+    )
+    outcomes = []
+    for run in ("flat", "nested"):
+        try:
+            if run == "flat":
+                frame, _ = handler.run(pd.DataFrame({"c": [1, 2, 3]}), "c", child_seed, _FakeCtx())
+                outcomes.append(frame["c"].tolist())
+            else:
+                cells = ['{"v":1}', '{"v":2}', '{"v":3}']
+                frame, _ = NestedStrategyHandler().run(
+                    pd.DataFrame({"data": cells}),
+                    "data",
+                    _seed({"target": "$.v", "strategy": name}, "ns"),
+                    _FakeCtx(),
+                )
+                outcomes.append([json.loads(c)["v"] for c in frame["data"].tolist()])
+        except Exception as exc:
+            outcomes.append((type(exc).__name__, getattr(exc, "code", None)))
+    return outcomes[0], outcomes[1]
+
+
+class TestNullFreeIntegerLeavesAreUnchanged:
+    """AT-E1-13: a null-free integer leaf list gives each child the frame and the bytes it gave
+    before E1. The oracle is the child run on the flat int64 frame, which is what the old
+    nested code built."""
+
+    @staticmethod
+    def _children() -> list[str]:
+        import decoy_engine.execution._strategies as strat
+
+        return sorted(n for n in strat.SCALAR_HANDLERS if n != "nested")
+
+    def test_every_scalar_child_matches_its_flat_run(self):
+        mismatches = {}
+        for name in self._children():
+            flat, nested = _flat_vs_nested(name)
+            if flat != nested:
+                mismatches[name] = (flat, nested)
+        assert mismatches == {}
+
+    def test_tokenize_still_refuses_integer_leaves(self):
+        flat, nested = _flat_vs_nested("tokenize")
+        assert nested == flat == ("StrategyError", "tokenize_requires_string_dtype")
+
+    def test_the_leaf_column_is_int64_without_a_null(self, monkeypatch):
+        child = _RecordingChild(lambda v: v)
+        _run_nested(
+            ['{"v":1}', '{"v":2}', '{"v":3}'],
+            {"target": "$.v", "strategy": "rec"},
+            monkeypatch,
+            child,
+        )
+        assert str(child.frames[0]["_nested_leaves"].dtype) == "int64"
