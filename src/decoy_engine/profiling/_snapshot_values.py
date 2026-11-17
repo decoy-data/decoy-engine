@@ -218,13 +218,12 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     raw = stats.get("year_bins")
     if not raw:
         return
-    folded = fold_ranges_under_k([(b["year"], b["year"], b["count"]) for b in raw])
-    # A multi-year range cannot end past the last sampled year, so a 9999 sentinel joins 9998.
+    # A multi-year range cannot end past the last sampled year, so a year beyond it (a 9999
+    # sentinel) keeps its own bucket instead of being counted under an earlier year.
+    inside = [(b["year"], b["year"], b["count"]) for b in raw if b["year"] <= MAX_SAMPLED_YEAR]
+    beyond = [(b["year"], b["year"], b["count"]) for b in raw if b["year"] > MAX_SAMPLED_YEAR]
     stats["year_bins"] = encode_datetime_buckets(
-        [
-            DatetimeBucket(lo, hi if lo == hi else min(hi, MAX_SAMPLED_YEAR), count)
-            for lo, hi, count in folded
-        ]
+        [DatetimeBucket(*r) for r in [*fold_ranges_under_k(inside), *beyond]]
     )
 
 
@@ -245,7 +244,7 @@ def _redact_column(non_null: pd.Series, col: dict[str, Any]) -> None:
         fold_year_bins(stats)
     if "cell_format" in col:
         # Lazy, as in `quality/snapshot.py`: `generation` imports `quality` and `profiling`.
-        from decoy_engine.generation.statistical._cell_format import scrub_cell_format
+        from decoy_engine.generation.statistical import scrub_cell_format
 
         col["cell_format"] = scrub_cell_format(kind, col["cell_format"])
     data_keys = {k: r for k, r in snapshot_rules(kind).items() if r in DATA_RULES}
@@ -393,7 +392,7 @@ def _floor_column(non_null: pd.Series, col: dict[str, Any], *, numeric_bins: int
 def _to_freetext(df: pd.DataFrame, name: Any, col: dict[str, Any], *, numeric_bins: int) -> None:
     """Rewrite a sentence-like categorical column as free text: length statistics only."""
     # Lazy, as in `_redact_column`: `generation` imports `quality` and `profiling`.
-    from decoy_engine.generation.statistical._cell_format import add_cell_format
+    from decoy_engine.generation.statistical import add_cell_format
 
     only = df[[name]]
     col["kind"] = "freetext"
