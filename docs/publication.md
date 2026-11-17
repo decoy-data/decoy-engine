@@ -75,6 +75,24 @@ ambient policy, a directory the engine cannot open ends the walk only when anoth
 read is refused, because it may be the remains of an earlier attempt (named limit L1u). The
 operator restores its owner bits.
 
+### Stage liveness lock and stage marker (F26 E1)
+
+Before a `publication` stage is handed to its caller, both POSIX policies:
+
+- take `flock(LOCK_SH)` on the stage's own directory descriptor and hold it until the stage is
+  bound, its `abort()` has removed the name, or the transaction is collected. The call blocks
+  (a cleaner holding the exclusive lock is waited for) and retries `EINTR`; any other `OSError`
+  leaves the stage unlocked and the run carries on, publishing the same unit;
+- write `.decoy-publication-stage`, a `0600` regular file holding `decoy-publication-stage-v1:`,
+  the stage name's 12-hex token and a newline, and read it back through the one proof reader.
+  A marker that does not prove fails the `begin` and the stage is removed.
+
+The marker is reserved metadata: it stays inside the bound unit, is fsynced with it, and is not
+listed in the descriptor (a file left in the stage but not named is bound without being described,
+above). Its leading dot keeps Arrow and pandas directory reads from treating it as a table. A
+later `decoy cleanup` (F26) needs both: a stage whose lock it cannot take exclusively is live, and
+only a stage with a valid marker can be removed. The win32 arm takes no lock and writes no marker.
+
 Other labels (`table_sink`, `hold`, `quarantine` and the rest) publish as before.
 
 ## Destination lock and reading a bound unit
