@@ -121,6 +121,11 @@ def test_warning_codes_match_handler_return_surface() -> None:
     assert set(capabilities_for("nested").warning_codes) == {
         "nested_cell_json_parse_error",
         "nested_jsonpath_path_overlap",
+        "nested_cell_oversized",
+        "nested_cell_too_deep",
+        "nested_cell_duplicate_key",
+        "nested_cell_number_out_of_range",
+        "nested_child_non_finite",
     }
     # text_mask's handler returns one aggregate sub-floor warning (C6b-i declares it so the
     # routed-diagnostic gate admits text_mask on the unified route).
