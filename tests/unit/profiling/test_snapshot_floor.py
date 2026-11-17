@@ -378,6 +378,27 @@ def test_a_folded_range_is_drawn_at_its_weight_with_no_pile_up_at_the_bound() ->
     assert len(covered) > 0.8 * (first["end_year"] - first["start_year"] + 1)
 
 
+def _window_verdict(doc: dict[str, Any], names: list[str]) -> Any:
+    from decoy_engine.generation._window_admission import classify_window_table
+
+    cols = [{"name": n, "type": "statistical", "source_column": n} for n in names]
+    specs = {("t", n): load_spec(c, snapshot=doc) for n, c in zip(names, cols, strict=True)}
+    cfg = {"tables": [{"name": "t", "row_count": 10, "generate_columns": cols}]}
+    return classify_window_table(cfg, "t", statistical_specs=specs)
+
+
+def test_windowed_generation_admits_plain_fit_datetimes_with_short_outer_years() -> None:
+    df = _qa_frame()
+    df["sparse"] = _date_frame()["sparse"].reindex(range(len(df)))
+    doc = _doc(df)  # the real profiler flags both datetime columns
+    assert {"visit_date", "sparse"} <= set(doc["redacted_columns"])
+    first = _ranges(doc, "visit_date")[0]
+    assert first["start_year"] == 1921 and first["end_year"] > first["start_year"]
+    assert _window_verdict(doc, ["visit_date", "sparse"]).is_class_a
+    unflagged = _doc(df, flagged=[])
+    assert _window_verdict(unflagged, ["visit_date"]).is_class_a
+
+
 # AT-6
 
 
