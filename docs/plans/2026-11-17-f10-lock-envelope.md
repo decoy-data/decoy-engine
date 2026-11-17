@@ -2,8 +2,9 @@ Status: plan
 
 # F10: lock envelope remainder, synthetic probe, CLI environment report and fleet comparison (roadmap row 78)
 
-Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 2 (Dennis r1 GO-WITH-FIXES, H1 to
-L12 applied in place; record in section 20; owner answers OQ-1 to OQ-4 taken as recommended).
+Owner: Cam. Author: Opus plan agent. Date: 2026-11-17. Revision 3 (Dennis r1 GO-WITH-FIXES H1 to
+L12 in revision 2; Codex r1 NO-GO items 1 to 4 in revision 3; record in section 20; owner answers
+OQ-1 to OQ-4 taken as recommended).
 Scope: engine slice 78-E2, the engine release and CLI repin that carry it (a row 76 RD-n stop),
 then CLI slice 78-C1.
 
@@ -20,8 +21,9 @@ the V1 bar (only a function break, data loss, a non-admin value leak or cascadin
 V1); the V1 threat model (accidental leaks only); owner rules: CLI V1 first, platform parked, no
 new features beyond the row.
 
-Bases: engine `origin/main` `b3206c042` (#619), CLI `origin/main` `081ce13` (pins engine 0.27.0).
-Line numbers below are from those heads.
+Bases: engine `origin/main` `b3206c042` (#619), CLI `origin/main` `34f6ba4e4` (#293, pins engine
+0.27.0; refreshed in revision 3, every CLI line cited below re-checked there). Line numbers below
+are from those heads.
 
 ## 1. Source and what is already done
 
@@ -145,7 +147,11 @@ report model. Each is small and specific to Decoy.
 - Custom providers: `_V2_CUSTOM_PROVIDERS` is process-global (`providers_v2/_faker_adapter.py:84`).
   A probe run in a process where a custom provider overrides `person_first_name` would digest the
   custom function, not the shipped one. `run_probe` refuses that case with `ProbeError` before any
-  draw (the registry offers no default-only view today, so refusal is the smaller change).
+  draw. It asks through a deliberately public accessor: `custom_provider_names() -> frozenset[str]`,
+  added to `providers_v2/_faker_adapter.py` beside the test-only `_v2_custom_provider_names`
+  (`providers_v2/_faker_adapter.py:277`) and exported from `providers_v2/__init__.py` `__all__`.
+  The probe imports it from `decoy_engine.providers_v2`, never from `_faker_adapter`. The registry
+  offers no default-only view today, so refusal is the smaller change.
 - `PROBE_KEY` is `sha256(b"decoy-probe/v1")`, a public constant. `PROBE_JOB_SEED` is its first 8
   bytes. The probe never reads a key provider, an environment variable or a file.
 - Module contract: no NumPy or pandas distribution draw, no file, socket or subprocess.
@@ -164,13 +170,19 @@ report model. Each is small and specific to Decoy.
 
 ### 4.2 The `probe` field in `lock/v1` (78-E2)
 
-- `RuntimeLock` gains `probe: str | None = None`, spec `NullableSpec(_DIGEST)`, placed last in
-  `_FIELDS` (`_runtime_lock.py:127`). `build_runtime_lock()` always sets it from `run_probe()`.
-- Read and write are symmetric (OQ-1). Read: a lock with no `probe` key reads as `probe=None`
-  (`from_dict`, `_runtime_lock.py:202`, fills it before `ObjectSpec.load`). Write: `to_dict` omits
-  `probe` when it is `None`. So a lock written by an engine with E1 but not E2 reads, and rewrites
-  to the same bytes, whatever the release order. A `probe` key whose value is JSON `null` is
-  refused, so there is one spelling of "no probe". Every other field stays required.
+- `RuntimeLock` gains `probe: str | None = None`, spec `_DIGEST`, placed last in `_FIELDS`
+  (`_runtime_lock.py:127`) with `required=False`. `build_runtime_lock()` always sets it from
+  `run_probe()`.
+- Optional-and-omitted is a property of the field, stated once. `_FIELDS` entries become a small
+  frozen `_Field(name, spec, required=True)` descriptor; `probe` is the one entry with
+  `required=False`. `to_dict`, `from_dict` and `compare_runtime_locks` all read the flag; none of
+  them names `probe`. Read: a missing optional field reads as `None` (`from_dict`,
+  `_runtime_lock.py:202`, fills it before `ObjectSpec.load`); a missing required field is still
+  refused. Write: `to_dict` omits an optional field whose value is `None`. Compare: it compares the
+  attribute values, so `None` against a digest is a difference. So a lock written by an engine
+  with E1 but not E2 reads, and rewrites to the same bytes, whatever the release order (OQ-1).
+- An optional field present as JSON `null` is refused, so there is one spelling of "no probe". The
+  field spec is the plain `_DIGEST`, not `NullableSpec`, which gives this refusal for free.
 - `compare_runtime_locks` names `probe` like any other field; `None` against a digest is a
   difference.
 - The existing corpus sample `lock-v1.json` is not edited and still rewrites byte-identically. A
@@ -196,13 +208,20 @@ report model. Each is small and specific to Decoy.
 - `--key-version` is checked with the engine's `is_key_version_label` before any work; a bad label
   exits 1 with fixed text.
 - Human mode prints one line per field. `--json` prints the complete report. `--out FILE` writes
-  the JSON through `decoy._atomic.write_atomic` (`src/decoy/_atomic.py:179`).
+  the JSON through `decoy._atomic.write_local_target(path, data, WriteMode.REPLACE)`
+  (`src/decoy/_atomic.py:199`), the writer for a path the user chose. `write_atomic` is for
+  program-controlled portable names and would refuse names that are valid here (a leading dot, a
+  space, non-ASCII).
 - Exit 0 when `probe_status` is `ok`. A mismatch prints `probe: MISMATCH` in human mode, writes the
   complete report in either mode, and exits 3 (`EXIT_RUNTIME`, `src/decoy/cli/exit_codes.py:66`;
   OQ-3). A `ProbeError` prints `probe: failed (runtime/probe_failed)`, writes no report and exits
-  3. `ProbeError` and an `OSError` from the `--out` write go through the one exception-to-exit map,
-  `exit_code_for` (`src/decoy/cli/exit_codes.py:163`), which returns 3 for both; the env package
-  holds no exit map of its own.
+  3. `ProbeError` and an `AtomicWriteError` from the `--out` write go through the one
+  exception-to-exit map, `exit_code_for` (`src/decoy/cli/exit_codes.py:163`). Both reach its final
+  "everything else is 3" arm today: `ProbeError` is a `DecoyError` whose code is not a capacity
+  code, and `AtomicWriteError` is matched by no earlier arm. No new arm is needed; AT-C1-9 pins
+  both results so a later arm cannot move them. The refusal line prints `describe(exc)`
+  (`src/decoy/_atomic.py:214`), which holds the code and OS reason, never the path. The env
+  package holds no exit map of its own.
 
 ### 4.4 Fleet comparison (78-C1)
 
@@ -235,6 +254,7 @@ report model. Each is small and specific to Decoy.
 | FM-5 | A lock written before E2 cannot be read, or rewrites differently, after E2 | `probe` made required, or `None` written as `null` | absent reads as `None`, `None` omitted on write | AT-E2-7, AT-E2-10 |
 | FM-13 | Probe digests a user's custom provider | process-global `_V2_CUSTOM_PROVIDERS` overrides `person_first_name` | refuse with `ProbeError` | AT-E2-13 |
 | FM-14 | Probe says `ok` while the native route is broken | probe covers the Python reference path only | report carries `native_selfcheck` (companion KATs); compare shows both | AT-C1-5, AT-C1-2 |
+| FM-15 | `--out` refuses a valid user file name or a failed write exits with the wrong code | `write_atomic` used for a user path; `AtomicWriteError` mapped by hand | `write_local_target`; exit through `exit_code_for` | AT-C1-9 |
 | FM-6 | Probe exception text reaches the user | raw `str(exc)` | `ProbeError` with fixed text, no context | AT-E2-8, AT-C1-6 |
 | FM-7 | Protocol bump with no golden row reports `ok` | default to ok | missing row is `mismatch` | AT-E2-4 |
 | FM-8 | Report carries a path or host name | companion `cause` or `detail`, host name as default label | three companion fields only; default label `host` | AT-C1-4, AT-C1-5 |
@@ -260,7 +280,18 @@ report model. Each is small and specific to Decoy.
 - Public names only (defect class 6): `decoy_engine.determinism.derive`,
   `decoy_engine.kernel.canonicalize_derive_source`, `decoy_engine.transforms.fpe`
   (`FF1_KEY_LABEL`, `build_ff1_tweak`, `fpe_encrypt_value`, `FF1_TWEAK_SCOPE_COLUMN`),
-  `decoy_engine.generation.pool.PoolBuilder` and `decoy_engine.providers_v2`.
+  `decoy_engine.generation.pool.PoolBuilder` and `decoy_engine.providers_v2`
+  (`get_default_registry`, the new `custom_provider_names`).
+- Boundary sentry: new `tests/sentry/test_runtime_lock_public_imports.py` walks the AST of
+  `support/_probe.py` and `support/_runtime_lock.py` and fails on any import whose dotted path has
+  a segment starting with `_` below another engine package (for example
+  `decoy_engine.providers_v2._faker_adapter`). Imports inside `decoy_engine.support` and the
+  engine-root shared module `decoy_engine._canonical` are allowed. Scope is the two F10 modules:
+  `support/__init__.py` already imports `execution.native._route_decline_codes` (F32), which is a
+  V2-LOG item (section 19), not something this row widens or hides.
+- Choke point for optional fields: the `_Field.required` flag. A second hand-written `probe`
+  branch in `to_dict`, `from_dict` or compare is the bypass; AT-E2-15 flips the flag and expects
+  the corpus cells to go red, which a hand branch would not do.
 - The support no-network sentry (`tests/sentry/test_support_no_network.py`) already covers the new
   module.
 - Platform coverage: the cross-Python probe check runs on Linux CI (`ci.yml` `import-smoke`,
@@ -270,8 +301,9 @@ report model. Each is small and specific to Decoy.
 - CLI: new sub-package `src/decoy/cli/env/` (the flat `src/decoy/cli/` is pinned at 29 direct
   modules by `tests/sentry/layout/test_package_fanout.py`).
   Registered in `src/decoy/__main__.py` beside `doctor` (`__main__.py:288`), panel "Start".
-- Size: engine 4 production files, about 320 lines, 4 public names; CLI 5 production files, about
-  520 lines, 2 commands.
+- Size: engine 6 production files, about 360 lines, 4 public names (`run_probe`, `probe_status`,
+  `ProbeError`, `providers_v2.custom_provider_names`); CLI 5 production files, about 520 lines, 2
+  commands.
 
 ## 7. Value-free rules
 
@@ -303,7 +335,9 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | AT-E2-10 | Edit list for the merged E1 cells in `tests/unit/support/test_runtime_lock.py`, each red before E2 lands its half and green after: `:71` (`test_lock_has_exactly_the_declared_fields_and_round_trips`) gains `probe` in the expected key set; `:398` (`test_an_added_field_under_lock_v1_is_ignored`) uses another added-field name (`added_later_2`) in place of `probe`; `:406` (`test_the_hand_written_corpus_sample_reads_and_rewrites`) stays unedited and must still pass (the symmetric write rule); a new cell pins that a `probe` key is read, not ignored. No other E1 cell is edited, including `test_each_source_changes_exactly_its_named_field` | E1 cells fail once `probe` is written; the new cell fails before | treat `probe` as an ignored added field |
 | AT-E2-11 | `.github/workflows/ci.yml` job `import-smoke` (3.11.9 and 3.12.7) runs one step after the import, `python -c` that asserts `probe_status(run_probe()) == "ok"`; a sentry reads `ci.yml` and finds the step in that job | step does not exist | remove the step |
 | AT-E2-12 | Import-layer sentry passes with no new ignore line; `runtime/probe_failed` is in the reason catalog with since=UNRELEASED | guard and catalog | add an ignore line |
-| AT-E2-13 | With a custom provider registered for `person_first_name` in `_V2_CUSTOM_PROVIDERS` (fixture removes it after), `run_probe()` raises `ProbeError` before any draw; the custom function is never called (spy) | module does not exist | skip the custom-provider check |
+| AT-E2-13 | With a custom provider registered for `person_first_name` through the public `register_faker_provider_v2` (fixture removes it after), `run_probe()` raises `ProbeError` before any draw; the custom function is never called (spy); `providers_v2.custom_provider_names()` returns the name while registered and not after | module and accessor do not exist | skip the custom-provider check |
+| AT-E2-14 | `tests/sentry/test_runtime_lock_public_imports.py`: no import in `support/_probe.py` or `support/_runtime_lock.py` has a `_`-prefixed segment below another engine package; a planted fixture module with `from decoy_engine.providers_v2._faker_adapter import _v2_custom_provider_names` is flagged | sentry does not exist | import the test-only `_v2_custom_provider_names` from `_faker_adapter` |
+| AT-E2-15 | Descriptor mutation: flipping `required` on the `probe` entry to `True` turns the `lock-v1.json` corpus read red; flipping `required=False` on `engine` makes the missing-field cell red; no function in `_runtime_lock.py` other than the `_FIELDS` table contains the string `"probe"` (AST cell) | descriptor does not exist | add `if name == "probe"` in `to_dict` |
 
 ### 78-C1, CLI (`tests/unit/cli/env/`, `tests/e2e/env/test_env_commands.py`)
 
@@ -317,7 +351,7 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | AT-C1-6 | Probe golden patched wrong: human mode prints `probe: MISMATCH`, `--json` prints the complete report with `probe_status: "mismatch"`, both exit 3; probe patched to raise: exit 3, fixed line, no report written | command does not exist | exit 0 on mismatch |
 | AT-C1-7 | `--label` values `"a\n"`, `""`, 33 characters, `"a b"` and `--key-version` values `"v1\n"`, `""`, 65 characters, `"a/b"` exit 1 without echoing the value | command does not exist | `re.match` instead of `fullmatch` |
 | AT-C1-8 | Strict `decoy-env-report/v1` reader matrix on write and read: `cli_version`, `target`, `label`, `probe_status` refuse wrong types; `native_selfcheck.present` and `.ok` refuse `0`, `1`, `"true"`, `null` and a list; `probe_status` refuses every token but `ok` and `mismatch`; an unknown top-level key and a wrong `schema` tag are refused; a report whose `lock.key_version` is `"a/b"` makes `env compare` exit 1 with fixed text (the engine's `MaskSecretError` is caught at the parse boundary) | command does not exist | accept `1` as `True` in `native_selfcheck.ok`; let `MaskSecretError` escape |
-| AT-C1-9 | `--out FILE` writes through `write_atomic`; an existing file is replaced whole; a write failure exits 3 and leaves no partial file; `exit_code_for(ProbeError(...)) == 3` | command does not exist | write with `open(..., "w")`; map `ProbeError` to 1 |
+| AT-C1-9 | `--out FILE` writes through `write_local_target(..., WriteMode.REPLACE)` (spy); an existing file is replaced whole; names `.env-a.json`, `env report.json` and `rapport-hôte.json` write fine; a patched writer raising `AtomicWriteError` exits 3, prints the `describe` text without the path, and leaves no partial file; `exit_code_for(AtomicWriteError("x")) == 3` and `exit_code_for(ProbeError(...)) == 3` | command does not exist | write with `write_atomic` (the three names are refused); map `AtomicWriteError` to 1 |
 | AT-C1-10 | `tests/unit/test_cli_surface.py` lists `env report` and `env compare`; the `--json` snapshot rows exist; the CLI fan-out sentry passes with the new CODEMAP row | guard | omit the CODEMAP row |
 | AT-C1-11 | QA INST-18 on two hosts (a Linux VM and the Mac): reports from both compare and name each differing field | run at QA | none (QA) |
 
@@ -339,7 +373,9 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | Item | Goes in | Map line and neighbor |
 |---|---|---|
 | Probe and golden | engine `src/decoy_engine/support/_probe.py` (new) | "Support bundles", `src/decoy_engine/support/_<concern>.py`; tier 1 beside `_runtime_lock.py`; not `execution/` (frozen for new top-level files) |
-| `probe` lock field | engine `src/decoy_engine/support/_runtime_lock.py` | existing module |
+| `probe` lock field and `_Field` descriptor | engine `src/decoy_engine/support/_runtime_lock.py` | existing module |
+| `custom_provider_names` | engine `src/decoy_engine/providers_v2/_faker_adapter.py`, exported from `providers_v2/__init__.py` | beside `_v2_custom_provider_names` and `_V2_CUSTOM_PROVIDERS`, the owner of that state |
+| Boundary sentry | engine `tests/sentry/test_runtime_lock_public_imports.py` | beside `tests/sentry/test_support_no_network.py`, the other support sentry |
 | `ProbeError` reason | engine `src/decoy_engine/reasons/runtime/_part2.py` | beside `KEY_VERSION_INVALID` |
 | Exports | engine `src/decoy_engine/support/__init__.py` | existing facade; not the root (held at 600 lines) |
 | Support row text | engine `CODEMAP.md:125` | update to name `_runtime_lock.py` and `_probe.py` |
@@ -359,12 +395,13 @@ mutation that must turn it red. A builder may add tests; none of these may be we
 | Keyed hash core | `derive`, `canonicalize_derive_source` | `determinism/_derive.py:260`, `kernel/__init__.py:8` |
 | FF1 | `fpe_encrypt_value`, `build_ff1_tweak`, `FF1_KEY_LABEL` | `transforms/fpe.py:152`, `:155`, `:468` |
 | Seeded Faker pool | `PoolBuilder.build` | `generation/pool/_builder.py:163` |
-| Strict field specs | `NullableSpec`, `ShapedSpec`, `attempt` | `_canonical/_strict_spec.py:188` |
+| Strict field specs | `ObjectSpec`, `ShapedSpec`, `attempt` | `_canonical/_strict_spec.py:188` |
 | Label rule | `is_key_version_label` | `keyprovider.py` (E1) |
 | Lock comparison | `compare_runtime_locks` | `support/_runtime_lock.py:310` |
 | Companion facts | `_companion_report` | CLI `src/decoy/cli/info.py:72` |
 | Target | `detect_target` | CLI `src/decoy/distribution/targets.py:43` |
-| Atomic write | `write_atomic` | CLI `src/decoy/_atomic.py:179` |
+| User-path write | `write_local_target`, `WriteMode.REPLACE`, `describe` | CLI `src/decoy/_atomic.py:199`, `:214` |
+| Custom-provider names | `_V2_CUSTOM_PROVIDERS` behind a new public accessor | `providers_v2/_faker_adapter.py:84`, `:277` |
 | Exit codes | `EXIT_USAGE`, `EXIT_RUNTIME`, `EXIT_FINDINGS` | CLI `src/decoy/cli/exit_codes.py:49`, `:66`, `:74` |
 
 ## 12. Frozen contracts touched
@@ -375,7 +412,8 @@ All additive.
   3.1 "refuses a missing field" gains "except `probe`"; the frozen-surface row matches; the new
   corpus sample pins the read rule.
 - Engine public names: `run_probe`, `probe_status`, `ProbeError` in
-  `decoy_engine.support.__all__`, each in one Public names row of `docs/frozen-surfaces.md`.
+  `decoy_engine.support.__all__`, and `custom_provider_names` in `decoy_engine.providers_v2.__all__`,
+  each in one Public names row of `docs/frozen-surfaces.md`.
 - Engine reason `runtime/probe_failed`, since=UNRELEASED.
 - CLI command set: `decoy env report`, `decoy env compare`; `docs/cli-reference.md` and
   `tests/unit/test_cli_surface.py`.
@@ -388,7 +426,7 @@ All additive.
 | # | Class | Closing structure | Sentry or property test | Mutation |
 |---|---|---|---|---|
 | 1 | Value-bearing output | Fixed refusal text; three companion fields only; label default `host`; `ProbeError` raised outside the handler | AT-E2-8, AT-C1-4, AT-C1-5, AT-C1-7 | copy `abi_actual` or `str(exc)` into output |
-| 2 | Cleanup missing on an exit path | `--out` only through `write_atomic`; a probe failure writes no report | AT-C1-9, AT-C1-6 | write with `open(..., "w")` |
+| 2 | Cleanup missing on an exit path | `--out` only through `write_local_target`, which stages and replaces in one step; a probe failure writes no report | AT-C1-9, AT-C1-6 | write with `open(..., "w")` |
 | 3 | State and concurrency | Probe is a pure function of constants; no cache, no global state | AT-E2-2 | memoize the digest in a module global |
 | 4 | Route parity and silent fallback | The probe checks the Python reference path only; the native route is checked by the companion's `HASH_KAT` and `FPE_KAT` and reported as `native_selfcheck`; compare shows both, so a broken native route is never hidden behind a probe `ok` | AT-E2-3, AT-C1-5, AT-C1-2 | drop `native_selfcheck` from the compared fields |
 | 5 | Referential integrity | N/A: no table data or relationships are read or written | N/A | N/A |
@@ -396,7 +434,7 @@ All additive.
 | 7 | Check then use on a path (TOCTOU) | Compare reads each file once into memory and parses those bytes; no re-open | AT-C1-3 | re-open the file after the size check |
 | 8 | Weak tests and overclaimed evidence | Red-first cells with named mutations; golden checked in merge-gating CI; coverage stated per platform (Linux CI, macOS QA, Windows not checked); golden change only with a protocol bump or Faker repin | AT-E2-1, AT-E2-11 | return a constant digest |
 | 9 | Behavior-preserving refactor drift | N/A: no refactor in this row; the three E1 cell edits are listed one by one and change no assertion's strength | AT-E2-10 | edit an E1 cell beyond the list |
-| 10 | Frozen contract drift | One frozen-surface map; one engine field list read by the CLI | AT-E2-7, AT-C1-10, `tests/sentry/release/test_frozen_surface_map.py` | omit the map row |
+| 10 | Frozen contract drift | One frozen-surface map; one engine field list, with the optional flag in its descriptor, read by the CLI | AT-E2-7, AT-C1-10, `tests/sentry/release/test_frozen_surface_map.py` | omit the map row |
 
 Class 11 (no raised caps): nothing in this plan raises a cap, ceiling, pin, baseline or allowlist.
 
@@ -413,8 +451,8 @@ Class 11 (no raised caps): nothing in this plan raises a cap, ceiling, pin, base
   failure (`src/decoy/cli/exit_codes.py:66`).
 - `env compare`: 0 all match, 1 bad input (including a caught `ValueError` or `MaskSecretError`),
   4 a difference (`src/decoy/cli/exit_codes.py:74`).
-- `ProbeError` and an `--out` `OSError` exit 3 through `exit_code_for`
-  (`src/decoy/cli/exit_codes.py:163`).
+- `ProbeError` and an `--out` `AtomicWriteError` exit 3 through `exit_code_for`
+  (`src/decoy/cli/exit_codes.py:163`), its final arm.
 
 ### Routes
 
@@ -451,7 +489,7 @@ N/A: no slice reads, writes or plans table data or relationships.
 
 | Slice | Repo | Production files | Count | Lines | Depends on | Risk |
 |---|---|---|---|---|---|---|
-| 78-E2 | engine | `support/_probe.py` (new), `support/_runtime_lock.py`, `support/__init__.py`, `reasons/runtime/_part2.py`; plus the workflow step, `CODEMAP.md:125`, the contract 3.1 sentence, frozen-surface rows, the corpus sample and a `changelog.d/` fragment | 4 | about 320 | 78-E1 (merged) | R2 (new public names, a field in a versioned format, a golden) |
+| 78-E2 | engine | `support/_probe.py` (new), `support/_runtime_lock.py`, `support/__init__.py`, `reasons/runtime/_part2.py`, `providers_v2/_faker_adapter.py`, `providers_v2/__init__.py`; plus the workflow step, the boundary sentry, `CODEMAP.md:125`, the contract 3.1 sentence, frozen-surface rows, the corpus sample and a `changelog.d/` fragment | 6 | about 360 | 78-E1 (merged) | R2 (new public names, a field in a versioned format, a golden) |
 | RD-n | engine, CLI | the release and repin under row 76 | n/a | n/a | 78-E2 merged | R1 (row 76) |
 | 78-C1 | CLI | `cli/env/__init__.py`, `cli/env/_report.py`, `cli/env/_compare.py`, `cli/env/_model.py` (all new), `__main__.py` (one line); plus the schema file, frozen-surface row, CODEMAP row, `docs/cli-reference.md` and QA INST-18 text | 5 | about 520 | an engine release with E1 and E2, pinned | R2 (new commands, a new versioned format) |
 
@@ -520,6 +558,9 @@ Assume it is 2026-12-04 and row 78 is not closed. Likely reasons, with the guard
   reader ignores added fields), so compare across CLI versions can miss a new field. Compare
   reports from one CLI version for now.
 - Windows chain (rows 6 and 89): add the AT-E2-11 probe step to the Windows CI job.
+- V2-LOG: `support/__init__.py` imports `execution.native._route_decline_codes` (F32 E1); move
+  `RouteDeclineCode` behind a public `execution.native` name and widen the AT-E2-14 sentry to the
+  whole `support/` package.
 - Platform V1: worker inventory and admission that compare `lock/v1` documents (parked).
 - CLI roadmap row 78: record E1 merged and point at this plan. The release-chain plan section 7
   gains a one-line pointer to this plan for 78-E2 and 78-C1.
@@ -544,3 +585,14 @@ Assume it is 2026-12-04 and row 78 is not closed. Likely reasons, with the guard
   AT-C1-9.
 - L7 FF1 inputs 6 to 10 digits. L8 CLI flat pin is 29. L9 wall-clock assertion dropped. L10
   `support/` drift V2-LOG and the Faker digest note. L11 older-CLI V2-LOG. L12 lazy imports.
+
+### Codex r1 (NO-GO), resolved in revision 3
+
+- 1 (V1): `--out` uses `write_local_target(path, data, WriteMode.REPLACE)`; `AtomicWriteError`
+  exits 3 through the existing final arm of `exit_code_for`; AT-C1-9 covers it and the three
+  valid names (leading dot, space, non-ASCII).
+- 2 (DESIGN): public `providers_v2.custom_provider_names()`; boundary sentry
+  `tests/sentry/test_runtime_lock_public_imports.py` (AT-E2-14); 78-E2 counts 6 production files.
+- 3 (DESIGN): `_Field(name, spec, required)` descriptor read by `to_dict`, `from_dict` and compare;
+  no `probe` branch; AT-E2-15 flips the flag; corpus and null-refusal cells kept.
+- 4 (V2-LOG): CLI base refreshed to `34f6ba4e4`; every cited CLI line re-checked, none moved.
