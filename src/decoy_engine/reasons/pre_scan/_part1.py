@@ -7,6 +7,7 @@ from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, RetryClass, S
 
 __all__ = [
     "BASELINE_DIGEST_MISMATCH",
+    "BASELINE_UNBOUND",
     "BASELINE_UNREADABLE",
     "DRIFT_BLOCKED",
     "DRIFT_DETECTED",
@@ -47,5 +48,16 @@ BASELINE_UNREADABLE = _d(
     "baseline_unreadable",
     "The scan baseline file is not a readable scan-set/v1 scan.",
     retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
+# An `on_drift: warn` baseline with no `scan_baseline.sha256`: nothing proves the file is the one
+# the operator meant, so a run that passes the drift check still says so.
+BASELINE_UNBOUND = _d(
+    "baseline_unbound",
+    "The scan baseline has no scan_baseline.sha256, so nothing proves it is the intended file.",
+    kind=Kind.WARNING,
+    severity=Severity.WARNING,
+    outcome=Outcome.FINDINGS,
+    retry=RetryClass.NEVER,
     since=UNRELEASED,
 )

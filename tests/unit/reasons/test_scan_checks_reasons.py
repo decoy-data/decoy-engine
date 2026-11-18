@@ -13,6 +13,7 @@ NEW = (
     ("pre_scan", "drift_detected", "warning", "warning"),
     ("pre_scan", "drift_blocked", "finding", "error"),
     ("warning", "scan_baseline_missing", "warning", "warning"),
+    ("pre_scan", "baseline_unbound", "warning", "warning"),
 )
 
 

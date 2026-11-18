@@ -140,7 +140,9 @@ class DriftFinding:
 class DriftVerdict:
     """The outcome of comparing a bound baseline with a fresh scan.
 
-    `passed`: no drift. `warned`: drift under `warn` (code `pre_scan.drift_detected`).
+    `passed`: no drift and a bound baseline. `warned`: drift under `warn` (code
+    `pre_scan.drift_detected`), or any unbound baseline (code `pre_scan.baseline_unbound` when no
+    drift), because nothing proves an unpinned file is the intended one.
     `failed`: drift under `fail` (code `pre_scan.drift_blocked`). `findings` is sorted by
     (table, column, kind); `drifted_tables` groups the findings that name a table.
     """
@@ -158,7 +160,9 @@ class DriftVerdict:
         if self.status == "failed":
             return str(reasons.pre_scan.DRIFT_BLOCKED)
         if self.status == "warned":
-            return str(reasons.pre_scan.DRIFT_DETECTED)
+            if self.diff.drift:
+                return str(reasons.pre_scan.DRIFT_DETECTED)
+            return str(reasons.pre_scan.BASELINE_UNBOUND)
         return None
 
 
@@ -188,7 +192,8 @@ def _findings(diff: ScanSetDiff) -> tuple[DriftFinding, ...]:
 def evaluate_drift(bound: BoundBaseline, current: Mapping[str, Any]) -> DriftVerdict:
     """Compare the bound baseline with `current` (a `scan-set/v1` core) and decide.
 
-    A baseline with no `on_drift` set is reported (`warned`), never refused.
+    A baseline with no `on_drift` set is reported (`warned`), never refused. An unbound baseline
+    never passes silently: with no drift it is `warned` with `pre_scan.baseline_unbound`.
     """
     diff = diff_scan_documents(bound.scan, current)
     findings = _findings(diff)
@@ -197,9 +202,9 @@ def evaluate_drift(bound: BoundBaseline, current: Mapping[str, Any]) -> DriftVer
         if finding.table is not None:
             grouped.setdefault(finding.table, []).append(finding)
     status: _Status
-    if not diff.drift:
+    if not diff.drift and bound.bound:
         status = "passed"
-    elif bound.on_drift == "fail":
+    elif bound.on_drift == "fail" and diff.drift:
         status = "failed"
     else:
         status = "warned"

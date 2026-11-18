@@ -304,6 +304,28 @@ def test_a_removed_table_is_not_drift() -> None:
     assert verdict.diff.tables_removed == ("orders",)
 
 
+@pytest.mark.parametrize("on_drift", ["warn", None])
+def test_an_unbound_baseline_replaced_by_the_current_scan_still_warns(on_drift: str | None) -> None:
+    """Without a digest nothing proves the file is the intended one, so no drift is not a pass."""
+    current = copy.deepcopy(BASE)
+    unbound = bind_baseline(_raw(current), _block(None, on_drift))
+    verdict = evaluate_drift(unbound, current)
+    assert verdict.diff.drift is False
+    assert (verdict.status, verdict.bound) == ("warned", False)
+    assert verdict.code == str(reasons.pre_scan.BASELINE_UNBOUND)
+    assert verdict.findings == ()
+
+
+def test_an_unbound_baseline_with_drift_keeps_the_drift_code() -> None:
+    verdict = evaluate_drift(bind_baseline(_raw(BASE), _block(None, "warn")), DRIFTED)
+    assert verdict.code == str(reasons.pre_scan.DRIFT_DETECTED)
+
+
+def test_a_bound_baseline_with_no_drift_has_no_warning() -> None:
+    verdict = evaluate_drift(_bound(BASE, "warn"), copy.deepcopy(BASE))
+    assert (verdict.status, verdict.code) == ("passed", None)
+
+
 def test_an_unbound_warn_baseline_reports_bound_false() -> None:
     raw = _raw(BASE)
     verdict = evaluate_drift(bind_baseline(raw, _block(None, "warn")), DRIFTED)
