@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import errors, reasons
-from decoy_engine.errors import SubsetConfigError
+from decoy_engine.subset._errors import SubsetConfigError
 from decoy_engine.subset import subset_inputs_from_config
 
 _REMOTE = {
