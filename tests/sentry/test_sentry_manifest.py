@@ -37,6 +37,7 @@ SENTRIES = (
     "tests/sentry/test_expression_safety.py",
     "tests/sentry/test_f06_declared_casting.py",
     "tests/sentry/test_f06_route_matrix.py",
+    "tests/sentry/test_digest_single_helper.py",
     "tests/sentry/test_fixed_width_single_parser.py",
     "tests/sentry/test_gate_pins.py",
     "tests/sentry/test_file_access_boundary.py",

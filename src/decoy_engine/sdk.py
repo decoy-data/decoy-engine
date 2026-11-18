@@ -140,7 +140,7 @@ class WriteResult:
         if self.sha256 is not None and not (
             isinstance(self.sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.sha256)
         ):
-            raise ValueError("sha256 must be 64 lowercase hexadecimal characters")
+            raise TypeError("sha256 must be 64 lowercase hexadecimal characters or None")
 
 
 # ----- Exceptions ---------------------------------------------------------

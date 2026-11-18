@@ -165,7 +165,7 @@ def test_gcs_sink_reports_digest_and_length() -> None:
     ids=["upper", "short", "long", "newline", "bool", "bytes", "int", "empty"],
 )
 def test_write_result_refuses_a_bad_digest(bad: Any) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         WriteResult("p", 1, sha256=bad)
 
 
