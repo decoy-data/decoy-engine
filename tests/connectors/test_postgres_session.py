@@ -145,9 +145,7 @@ def test_attach_guard_ignores_the_extension_name_query():
 
 def _src_sources():
     root = Path(session.__file__).resolve().parents[1]
-    return {
-        str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in root.rglob("*.py")
-    }
+    return {str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in root.rglob("*.py")}
 
 
 _ATTACH_SHAPES = {

@@ -591,9 +591,7 @@ def test_silent_host_fails_as_source_unreachable_before_the_deadline(
 
 
 @pytest.mark.parametrize("form", ["kv", "uri"])
-def test_attach_carries_the_connect_timeout_once_after_the_users_text(
-    fake_pg, tmp_path, form
-):
+def test_attach_carries_the_connect_timeout_once_after_the_users_text(fake_pg, tmp_path, form):
     base, suffix = _FORMS[form]
     dsn = base.format(port=5432)
     conn = fake_pg()
@@ -622,9 +620,7 @@ def test_a_rejected_dsn_stays_rejected_and_value_free(
 
 
 @pytest.mark.parametrize("slashes", [1, 3])
-def test_an_odd_trailing_backslash_run_is_refused_before_attach(
-    fake_pg, tmp_path, caplog, slashes
-):
+def test_an_odd_trailing_backslash_run_is_refused_before_attach(fake_pg, tmp_path, caplog, slashes):
     caplog.set_level("DEBUG")
     conn = fake_pg()
     dsn = "host=h user=u dbname=d password=PW_SECRET" + "\\" * slashes

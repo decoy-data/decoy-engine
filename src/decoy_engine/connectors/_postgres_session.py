@@ -17,7 +17,7 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from pydantic import SecretStr
 
@@ -28,11 +28,13 @@ from decoy_engine.sdk import PermanentError
 __all__ = [
     "ATTACH_ALIAS",
     "INTERRUPT_CAUSE",
+    "PG_CONNECT_TIMEOUT_S",
     "Deadline",
     "PostgresSnapshotError",
     "SessionSettings",
     "attach_read_only",
     "close_connection",
+    "connect_timeout_s",
     "connected_session",
     "load_postgres_extension",
     "open_connection",
@@ -42,6 +44,7 @@ __all__ = [
     "raise_for_setup_interrupt",
     "sql_literal",
     "validate_identifier",
+    "with_connect_timeout",
 ]
 
 # Strict on purpose: unquoted-safe Postgres identifiers. Names needing quoted
@@ -51,6 +54,10 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}\Z")
 
 # Alias for the attached database. Fixed, never caller-derived.
 ATTACH_ALIAS = "decoy_pg_src"
+
+# libpq connect_timeout, in seconds. The same order as the 5 s S3 and GCS connect timeouts, a
+# little longer because libpq also covers TLS and authentication.
+PG_CONNECT_TIMEOUT_S: Final = 10
 
 # Class name DuckDB gives an interrupted statement (``conn.interrupt()`` or Ctrl-C).
 INTERRUPT_CAUSE = "InterruptException"
@@ -232,15 +239,47 @@ def load_postgres_extension(
         raise PostgresSnapshotError(reasons.connector.EXTENSION_UNTRUSTED_LOCATION)
 
 
+def connect_timeout_s(deadline_s: int) -> int:
+    """The libpq connect timeout for a session deadline: under it by 2 s, never below 2 s.
+
+    The 2 s floor matches older libpq releases. The gap keeps a connect failure clear of the
+    deadline timer.
+    """
+    return max(2, min(PG_CONNECT_TIMEOUT_S, deadline_s - 2))
+
+
+def with_connect_timeout(dsn_text: str, seconds: int) -> str:
+    """``dsn_text`` with a trailing ``connect_timeout`` that libpq reads last, so it wins.
+
+    Existing bytes are never changed. A key/value DSN that ends in an odd run of backslashes is
+    refused, because the appended separator would become part of the last value. The refusal is
+    value-free and carries no cause or context.
+    """
+    keyword = f"connect_timeout={int(seconds)}"
+    if dsn_text.startswith(("postgresql://", "postgres://")):
+        if dsn_text.endswith(("?", "&")):
+            return dsn_text + keyword
+        return dsn_text + ("&" if "?" in dsn_text else "?") + keyword
+    if (len(dsn_text) - len(dsn_text.rstrip("\\"))) % 2:
+        raise PostgresSnapshotError(reasons.connector.SOURCE_UNREACHABLE)
+    return f"{dsn_text} {keyword}"
+
+
 def attach_read_only(
-    conn: Any, dsn: SecretStr, statement_timeout_s: int, deadline: Deadline | None = None
+    conn: Any,
+    dsn: SecretStr,
+    statement_timeout_s: int,
+    connect_timeout_s: int,
+    deadline: Deadline | None = None,
 ) -> None:
+    # Built before the try: a refused DSN is raised here, outside any handler and before ATTACH.
+    attach_dsn = with_connect_timeout(dsn.get_secret_value(), connect_timeout_s)
     cause_type = ""
     try:
         conn.execute("SET TimeZone = 'UTC'")
         conn.execute(f"SET pg_statement_timeout_millis = {int(statement_timeout_s) * 1000}")
         conn.execute(
-            f"ATTACH {sql_literal(dsn.get_secret_value())} AS {quote_ident(ATTACH_ALIAS)} "
+            f"ATTACH {sql_literal(attach_dsn)} AS {quote_ident(ATTACH_ALIAS)} "
             "(TYPE postgres, READ_ONLY)"
         )
     except Exception as exc:
@@ -267,7 +306,13 @@ def open_read_session(
         load_postgres_extension(conn, config.extension_directory, deadline)
         if on_connect is not None:
             on_connect(conn)
-        attach_read_only(conn, config.dsn, config.statement_timeout_s, deadline)
+        attach_read_only(
+            conn,
+            config.dsn,
+            config.statement_timeout_s,
+            connect_timeout_s(config.deadline_s),
+            deadline,
+        )
     except BaseException:
         close_connection(conn)
         raise
