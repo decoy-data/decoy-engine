@@ -114,7 +114,9 @@ def test_the_adapter_ingests_with_the_union_of_every_role(tmp_path: Path, cls: s
     from tests.native._chunked_entry_support import key_provider
     from tests.unit.execution._o1_when_support import build_case
 
-    cfg, tables = build_case(cls, tmp_path, "v == 5")
+    # Only the `plain` column is in the set because a `when:` reads it; every other role must put
+    # `v` there by itself, so the predicate reads `id` instead.
+    cfg, tables = build_case(cls, tmp_path, "v == 5" if cls == "plain" else "id == 5")
     seen: list[dict[str, set[str]]] = []
     real = _fk_keys.lossless_int_columns
 
