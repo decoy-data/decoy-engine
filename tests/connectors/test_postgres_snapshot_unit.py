@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import shutil
+import socket
+import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -207,16 +210,44 @@ def test_failed_extension_load_leaves_no_staged_files(tmp_path):
 # ----- Leak rule ------------------------------------------------------------
 
 
-def test_connect_failure_leaks_no_dsn(ext_dir, tmp_path, caplog):
+@pytest.fixture
+def closing_port():
+    """A loopback port whose server closes every connection on accept.
+
+    The failure is deterministic on every host. A closed port is not: a host that drops SYNs
+    to it (WSL2 mirrored networking, a firewall) leaves libpq waiting until the session
+    deadline, which is ``deadline_exceeded``, not the connect failure this test is about.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+
+    def close_all() -> None:
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            conn.close()
+
+    threading.Thread(target=close_all, daemon=True).start()
+    try:
+        yield srv.getsockname()[1]
+    finally:
+        srv.close()
+
+
+def test_connect_failure_leaks_no_dsn(ext_dir, tmp_path, caplog, closing_port):
     caplog.set_level("DEBUG")
-    cfg = _cfg(ext_dir, tmp_path)
+    dsn = f"host=127.0.0.1 port={closing_port} user=u password=PW_SECRET dbname=d"
+    cfg = _cfg(ext_dir, tmp_path, dsn=dsn)
     with pytest.raises(PostgresSnapshotError) as ei:
         snapshot_tables_to_parquet(cfg, [_sel()], tmp_path / "dest")
     err = ei.value
     assert err.code == "source_unreachable"
     rendered = "".join(traceback.format_exception(err)) + str(err) + repr(err)
     rendered += "\n".join(r.getMessage() for r in caplog.records)
-    for needle in ("PW_SECRET", "127.0.0.1", "port=1", "user=u", "dbname"):
+    for needle in ("PW_SECRET", "127.0.0.1", f"port={closing_port}", "user=u", "dbname"):
         assert needle not in rendered
     assert err.__cause__ is None
 
@@ -475,3 +506,155 @@ def test_extension_loaded_from_outside_the_bundled_directory_is_refused(tmp_path
     with pytest.raises(PostgresSnapshotError) as ei:
         session.load_postgres_extension(_ElsewhereConn(), tmp_path / "ext")
     assert ei.value.code == "extension_untrusted_location"
+
+
+# ----- S2: connect timeout ---------------------------------------------------------------------
+
+_KV = "host=127.0.0.1 port={port} user=u dbname=d password=PW_SECRET"
+_URI = "postgresql://u:PW_SECRET@127.0.0.1:{port}/d"
+_FORMS = {"kv": (_KV, " connect_timeout={n}"), "uri": (_URI, "?connect_timeout={n}")}
+
+
+@pytest.fixture
+def silent_port():
+    """A loopback listener that accepts and never answers, on every host.
+
+    Teardown closes the listener and each accepted socket even when the test failed, so a
+    blocked libpq read returns on FIN.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    held: list[socket.socket] = []
+
+    def hold() -> None:
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            held.append(conn)
+
+    threading.Thread(target=hold, daemon=True).start()
+    try:
+        yield srv.getsockname()[1]
+    finally:
+        srv.close()
+        for conn in held:
+            conn.close()
+
+
+def _bounded_snapshot(ext, tmp_path, dsn, monkeypatch, deadline_s=6, join_s=15):
+    """Run the snapshot in a daemon thread: libpq blocks in C, where no timeout can preempt it.
+
+    Elapsed time starts when the session deadline is armed, which is right before ATTACH, so
+    slow DuckDB setup does not count.
+    """
+    marks: dict = {}
+    real_arm = session.Deadline.arm
+
+    def arm(self, conn):
+        marks["armed"] = time.monotonic()
+        real_arm(self, conn)
+
+    monkeypatch.setattr(session.Deadline, "arm", arm)
+    cfg = _cfg(ext, tmp_path, dsn=dsn).model_copy(update={"deadline_s": deadline_s})
+    box: dict = {}
+
+    def target() -> None:
+        try:
+            snapshot_tables_to_parquet(cfg, [_sel()], tmp_path / "dest")
+        except BaseException as exc:
+            box["err"] = exc
+        box["ended"] = time.monotonic()
+
+    t0 = time.monotonic()
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(join_s)
+    assert not worker.is_alive(), "connect did not return"
+    return box.get("err"), box["ended"] - marks.get("armed", t0)
+
+
+_LEAK_NEEDLES = ("PW_SECRET", "127.0.0.1", "user=u", "u:", "dbname", "connect_timeout")
+
+
+def _assert_no_dsn_text(err, caplog, port):
+    rendered = _rendered(err, caplog)
+    for needle in (*_LEAK_NEEDLES, str(port)):
+        assert needle not in rendered
+    assert err.__cause__ is None and err.__context__ is None
+
+
+@pytest.mark.serial
+@pytest.mark.parametrize("form", ["kv", "uri"])
+@pytest.mark.parametrize("user_value", [False, True])
+def test_silent_host_fails_as_source_unreachable_before_the_deadline(
+    ext_dir, tmp_path, caplog, silent_port, form, user_value, monkeypatch
+):
+    caplog.set_level("DEBUG")
+    base, suffix = _FORMS[form]
+    dsn = base.format(port=silent_port)
+    if user_value:
+        dsn += suffix.format(n=600)
+    err, elapsed = _bounded_snapshot(ext_dir, tmp_path, dsn, monkeypatch)
+    assert isinstance(err, PostgresSnapshotError)
+    assert err.code == "source_unreachable"
+    assert elapsed < 6
+    _assert_no_dsn_text(err, caplog, silent_port)
+
+
+@pytest.mark.parametrize("form", ["kv", "uri"])
+def test_attach_carries_the_connect_timeout_once_after_the_users_text(fake_pg, tmp_path, form):
+    base, suffix = _FORMS[form]
+    dsn = base.format(port=5432)
+    conn = fake_pg()
+    config = _cfg(tmp_path / "ext", tmp_path, dsn=dsn).model_copy(update={"deadline_s": 12})
+    snapshot_tables_to_parquet(config, [_sel()], tmp_path / "dest")
+    attach = next(s for s in conn.statements if s.startswith("ATTACH"))
+    tail = suffix.format(n=session.connect_timeout_s(12))
+    assert attach.count("connect_timeout=") == 1
+    assert dsn + tail in attach
+
+
+@pytest.mark.parametrize("form", ["kv", "uri"])
+def test_a_rejected_dsn_stays_rejected_and_value_free(
+    ext_dir, tmp_path, caplog, closing_port, form, monkeypatch
+):
+    caplog.set_level("DEBUG")
+    dsn = (
+        f"host=127.0.0.1 port={closing_port} user=u dbname=d password='PW_SECRET"
+        if form == "kv"
+        else f"postgresql://u:PW_SECRET@127.0.0.1:{closing_port}/d?sslmode=bogus"
+    )
+    err, _ = _bounded_snapshot(ext_dir, tmp_path, dsn, monkeypatch)
+    assert isinstance(err, PostgresSnapshotError)
+    assert err.code == "source_unreachable"
+    _assert_no_dsn_text(err, caplog, closing_port)
+
+
+@pytest.mark.parametrize("slashes", [1, 3])
+def test_an_odd_trailing_backslash_run_is_refused_before_attach(fake_pg, tmp_path, caplog, slashes):
+    caplog.set_level("DEBUG")
+    conn = fake_pg()
+    dsn = "host=h user=u dbname=d password=PW_SECRET" + "\\" * slashes
+    config = _cfg(tmp_path / "ext", tmp_path, dsn=dsn)
+    box: dict = {}
+
+    def target() -> None:
+        try:
+            snapshot_tables_to_parquet(config, [_sel()], tmp_path / "dest")
+        except BaseException as exc:
+            box["err"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(15)
+    assert not worker.is_alive()
+    err = box["err"]
+    assert isinstance(err, PostgresSnapshotError) and err.code == "source_unreachable"
+    assert not any(s.startswith("ATTACH") for s in conn.statements)
+    rendered = _rendered(err, caplog)
+    for needle in ("PW_SECRET", "host=h", "user=u", "dbname"):
+        assert needle not in rendered
+    assert err.__cause__ is None and err.__context__ is None

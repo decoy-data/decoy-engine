@@ -37,6 +37,12 @@ from decoy_engine.verification.postmask._blocked import severity_counts
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, column_facts
 from decoy_engine.verification.postmask._keys import KeyResult
 from decoy_engine.verification.postmask._stream_input import TableBatches, from_table
+from decoy_engine.verification.postmask.distribution import (
+    DistributionInput,
+    check_distribution,
+    distribution_value_columns,
+    warn_only,
+)
 from decoy_engine.verification.postmask.fk_preservation import fk_findings
 
 # The runner keeps its check names: callers and tests patch them here to fail one check.
@@ -65,6 +71,7 @@ def run_post_mask(
     config: dict[str, Any],
     detectors: DetectorSet | None = None,
     keys: Sequence[KeyResult] | None = None,
+    distribution: DistributionInput | None = None,
 ) -> dict[str, Any]:
     """Run all three post-mask check categories + assemble the report.
 
@@ -86,6 +93,8 @@ def run_post_mask(
             written.
         keys: the declared keys' facts (`check_keys`) when the caller has counted them; the
             FK findings derive from these. None counts them here from the two frame dicts.
+        distribution: what the `post_scan.distribution` check reads; `None` runs no check and the
+            report has no `distribution` section.
 
     Returns:
         A post-scan-integrity/v3 report dict. JSON-serializable (every
@@ -116,6 +125,7 @@ def run_post_mask(
             memory_limit=MEMORY_LIMIT,
             tables_checked=tuple(str(name) for name in output_frames),
             models=(output_frames, detectors) if detectors is not None else None,
+            distribution=distribution,
         )
 
 
@@ -127,6 +137,7 @@ def run_post_mask_tables(
     keys: Sequence[KeyResult],
     scratch: Path,
     memory_limit: str,
+    distribution: DistributionInput | None = None,
 ) -> dict[str, Any]:
     """`run_post_mask` over tables the run holds as batches. The caller counted the declared keys
     (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches. Regex
@@ -140,6 +151,7 @@ def run_post_mask_tables(
         scratch=scratch,
         memory_limit=memory_limit,
         tables_checked=tuple(str(name) for name in output_tables),
+        distribution=distribution,
     )
 
 
@@ -239,6 +251,7 @@ def _assemble(
     memory_limit: str,
     tables_checked: tuple[str, ...],
     models: tuple[Mapping[str, pd.DataFrame], DetectorSet] | None = None,
+    distribution: DistributionInput | None = None,
 ) -> dict[str, Any]:
     residual_pii: list[ResidualPIIFinding] = []
     fk_preservation: list[FKPreservationFinding] = []
@@ -261,7 +274,11 @@ def _assemble(
     # error is recorded by class name and the other tables and columns are still checked.
     source_tables, output_tables, failed = get_tables()
     facts, suite_failed = _suite_facts(
-        source_tables, output_tables, scratch=scratch, memory_limit=memory_limit
+        source_tables,
+        output_tables,
+        scratch=scratch,
+        memory_limit=memory_limit,
+        distribution=distribution,
     )
     failed = {**failed, **suite_failed}
 
@@ -326,10 +343,31 @@ def _assemble(
             )
         ]
 
+    # Rows are `warning` at most while the check is warn-only; a table it cannot read is a row too.
+    distribution_rows = (
+        warn_only(
+            check_distribution(
+                distribution,
+                output_tables,
+                facts,
+                failed,
+                scratch=scratch,
+                memory_limit=memory_limit,
+            )
+        )
+        if distribution is not None
+        else None
+    )
+
     # Tally severity counters for the FE summary line.
     pass_count, warning_count, fail_count, error_count = severity_counts(
         getattr(finding, "severity", "info")
-        for finding in (*residual_pii, *fk_preservation, *policy_validation)
+        for finding in (
+            *residual_pii,
+            *fk_preservation,
+            *policy_validation,
+            *(distribution_rows or ()),
+        )
     )
 
     # Dennis M23 fix (2026-06-01): stamp generated_at at report
@@ -351,6 +389,7 @@ def _assemble(
         generated_at=datetime.now(timezone.utc).isoformat(),
         detectors=models[1].runs() if models is not None else (DetectorRun("regex", None),),
         tables_checked=tables_checked,
+        distribution=distribution_rows,
     )
     return _report_to_dict(report)
 
@@ -361,9 +400,11 @@ def _suite_facts(
     *,
     scratch: Path,
     memory_limit: str,
+    distribution: DistributionInput | None = None,
 ) -> tuple[dict[str, dict[str, ColumnFacts]], dict[str, str]]:
     """Facts for every output column, per output table, against its source when it has one, and
-    the class name of the error for each table whose facts could not be computed."""
+    the class name of the error for each table whose facts could not be computed. Output null
+    counts and moments are tallied only for the columns a distribution check reads."""
     facts: dict[str, dict[str, ColumnFacts]] = {}
     failed: dict[str, str] = {}
     for name, table in output_tables.items():
@@ -374,6 +415,7 @@ def _suite_facts(
                 table.schema.names,
                 scratch=scratch,
                 memory_limit=memory_limit,
+                value_columns=distribution_value_columns(distribution, name),
             )
         except Exception as exc:
             if passes_through(exc):
@@ -389,7 +431,7 @@ def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
     level by hand so the field ordering matches the schema and so
     the platform persistence layer can rely on stable key names.
     """
-    return {
+    out: dict[str, Any] = {
         "schema_version": report.schema_version,
         "generated_at": report.generated_at,
         "residual_pii": [asdict(f) for f in report.residual_pii],
@@ -404,3 +446,6 @@ def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
         "tables_checked": list(report.tables_checked),
         "config_sha256": report.config_sha256,
     }
+    if report.distribution is not None:
+        out["distribution"] = [f.as_dict() for f in report.distribution]
+    return out

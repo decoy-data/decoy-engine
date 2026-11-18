@@ -77,6 +77,7 @@ from decoy_engine.config._post_scan import (
     NO_SINK_KIND,
     Dismissal,
     PostScanConfig,
+    post_scan_distribution_tolerance,
     post_scan_gate_applies,
     post_scan_integrity_requested,
     post_scan_model_setting,
@@ -93,7 +94,7 @@ from decoy_engine.config._relationships import (
     RelationshipEnd,
     relationship_shape_error,
 )
-from decoy_engine.config._scan_baseline import ScanBaselineConfig
+from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
 from decoy_engine.config._sources import (
     FILE_SOURCE_PATH_FIELDS,
     SOURCE_LOCATOR_FIELDS,
@@ -157,6 +158,7 @@ __all__ = [
     "GlobalSettings",
     "LimitOp",
     "NamespaceConfig",
+    "OnDrift",
     "OrphanPolicyLiteral",
     "PipelineConfig",
     "PipelineConfigError",
@@ -191,6 +193,7 @@ __all__ = [
     "parse_relationship_config",
     "per_parent_bounds",
     "per_parent_problems",
+    "post_scan_distribution_tolerance",
     "post_scan_gate_applies",
     "post_scan_integrity_requested",
     "post_scan_model_setting",
