@@ -18,10 +18,11 @@ Isolation contract:
      sources as Parquet), matching the probe's own `--source-dir` convention
      of pointing a worker at on-disk input rather than materializing it in
      command-line text.
-  2. `_CAPPED_ENV` (MALLOC_ARENA_MAX / ARROW_DEFAULT_MEMORY_POOL) is set via
-     `subprocess.Popen(..., env=...)`, i.e. driver-side, before the child
-     interpreter starts -- both env vars are read at process/import time, so
-     setting them after the child is running would be a no-op.
+  2. `_CAPPED_ENV` (MALLOC_ARENA_MAX / ARROW_DEFAULT_MEMORY_POOL and the BLAS
+     thread counts) is set via `subprocess.Popen(..., env=...)`, i.e.
+     driver-side, before the child interpreter starts -- these env vars are
+     read at process/import time, so setting them after the child is running
+     would be a no-op.
   3. The child's PID is handed to `on_spawn` (if given) the moment
      `Popen` returns, so a caller (a test simulating the governor, or the
      real governor in a later sprint) can act on it while the run is still

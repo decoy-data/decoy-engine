@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shutil
+import socket
+import threading
 import traceback
 from pathlib import Path
 
@@ -207,16 +209,44 @@ def test_failed_extension_load_leaves_no_staged_files(tmp_path):
 # ----- Leak rule ------------------------------------------------------------
 
 
-def test_connect_failure_leaks_no_dsn(ext_dir, tmp_path, caplog):
+@pytest.fixture
+def closing_port():
+    """A loopback port whose server closes every connection on accept.
+
+    The failure is deterministic on every host. A closed port is not: a host that drops SYNs
+    to it (WSL2 mirrored networking, a firewall) leaves libpq waiting until the session
+    deadline, which is ``deadline_exceeded``, not the connect failure this test is about.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+
+    def close_all() -> None:
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            conn.close()
+
+    threading.Thread(target=close_all, daemon=True).start()
+    try:
+        yield srv.getsockname()[1]
+    finally:
+        srv.close()
+
+
+def test_connect_failure_leaks_no_dsn(ext_dir, tmp_path, caplog, closing_port):
     caplog.set_level("DEBUG")
-    cfg = _cfg(ext_dir, tmp_path)
+    dsn = f"host=127.0.0.1 port={closing_port} user=u password=PW_SECRET dbname=d"
+    cfg = _cfg(ext_dir, tmp_path, dsn=dsn)
     with pytest.raises(PostgresSnapshotError) as ei:
         snapshot_tables_to_parquet(cfg, [_sel()], tmp_path / "dest")
     err = ei.value
     assert err.code == "source_unreachable"
     rendered = "".join(traceback.format_exception(err)) + str(err) + repr(err)
     rendered += "\n".join(r.getMessage() for r in caplog.records)
-    for needle in ("PW_SECRET", "127.0.0.1", "port=1", "user=u", "dbname"):
+    for needle in ("PW_SECRET", "127.0.0.1", f"port={closing_port}", "user=u", "dbname"):
         assert needle not in rendered
     assert err.__cause__ is None
 
