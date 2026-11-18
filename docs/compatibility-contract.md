@@ -279,10 +279,11 @@ Additive within `/v1` (F07 82-E2b): each field of a new record carries `nested`,
 (or when the scan ran with `nested_paths=False`) and otherwise a `NestedCore`: cell outcome counts, the bounds that
 fired and `paths`, each with `path`, `present_count`, `null_count`, closed `kinds` and `detector_hits`. A path is a
 count of cells and holds no leaf value. A key is written as a name only when it passes the key rule: identifier shape,
-no run of four digits, no detector hit, and at least 2 cells and a tenth of its parent's cells; every other key is `*`.
-The stated limit: an identifier-shaped key with no long digit run that no detector hits and that repeats in at least a
-tenth of the cells, such as a username, can appear as a path segment. `NestedCore` and `PathObservationCore` refuse unknown fields on write; the read model ignores added fields and reads a kind token it
-does not know as a string. A record written before this change has no `nested` member and still validates.
+no run of four digits, no detector hit, and at least 2 cells and a tenth of the cells the parent object appears in;
+every other key is `*`. The stated limit: an identifier-shaped key with no long digit run that no detector hits and that
+repeats in at least a tenth of those cells, such as a username, can appear as a path segment. `NestedCore` and
+`PathObservationCore` refuse unknown fields on write; the read model ignores added fields and reads a kind token it does
+not know as a string. A record written before this change has no `nested` member and still validates.
 
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
