@@ -13,6 +13,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `execution/` | `run_pipeline` spine, routes (full-frame oracle, unified slice, chunked dispatcher, sequential and out-of-core FK), strategy handlers, native companion bridge, transactional sink, capacity |
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
 | `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form); `_strict_spec.py` holds the strict persisted-reader specs the publication descriptor and the resume records share |
+| `_nested_json/` | Nested JSON cell foundation: `nested_children` (`_rules.py`), the one reader of a nested column's child strategy and config, used by the plan checks, the secret requirements, column access, the multi-table runner and the nested handler |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
 | `publication/` | F22 output publication: the `decoy-publication/v1` descriptor codec and `result_id` (`_descriptor.py`), request and receipt types (`_types.py`), judge and bind (`_publish.py`), the sink state table (`_sink_state.py`); vault ordering arrives in a later slice |
 | `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome`, `_project.py` (`project_tables`, the per-table projection) |
