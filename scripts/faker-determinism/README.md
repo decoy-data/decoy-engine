@@ -78,3 +78,27 @@ Determinism-approved is not the same claim as reuse-safe: this harness
 proves ONLY that a pool builds and selects identically across processes
 and time. Whether reusing a value across rows is semantically acceptable
 for a given type is a separate judgment the addition slice still owes.
+
+## The Faker output lock
+
+`output_lock.json` records what Faker gives the engine, for every Faker locale, on both
+surfaces the engine uses: the reflected surface (`faker_type` columns: keyword-argument names, a
+per-seed digest, a sequential-draw digest) and the adapter surface (the masking `faker` strategy:
+a batch digest through `FakerAdapter.generate_batch`). It holds digests and exception class names
+only, never a generated value or exception text. A cell is a 64-hex digest, `unstable` (processes
+disagree at one clock), or `raises:<Class>[/<Cause>]`. `calendar: true` marks a pair whose digest
+differs between the two frozen clocks (2026-10-16 and 2027-11-20): it is stable only because the
+clock is frozen.
+
+- Write it: `python scripts/faker-determinism/output_lock.py --write`. This runs only under
+  CPython 3.10.20 with the pinned Faker. Read the printed diff, which has seven kinds: changed,
+  removed, added, newly reproducible, newly unstable, newly calendar-dependent, no longer
+  calendar-dependent. Commit the file in the same PR as the pin change.
+- Check it: `tests/sentry/dependencies/test_faker_output_lock.py`. The cells marked
+  `faker_output_lock` spawn the workers (about 50 seconds each, run concurrently) and are the
+  required `faker-output-lock` CI job on CPython 3.10.20, 3.11.9 and 3.12.7. The reviewed lists in
+  that file (`EXPECTED_UNSTABLE`, `EXPECTED_RAISES`, `EXPECTED_CALENDAR`, `ANCHORS`) must equal the
+  lock; changing a list needs a reason in the same diff.
+- After 1.0: a Faker bump may ship in a 1.x release only when the diff holds added providers or
+  locales, newly reproducible pairs, or pairs that stop depending on the calendar. Anything else
+  is a 2.0 change. See the compatibility contract, section 3.3.
