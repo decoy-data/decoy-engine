@@ -201,15 +201,16 @@ def _eval_predicate(
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
             ast = parse_when_cached(expression)
-            frame = when_eval_frame(pdf, when_column_refs(ast), when_literals_by_ref(ast))
+            source = pdf
+            pdf = when_eval_frame(source, when_column_refs(ast), when_literals_by_ref(ast))
             # numexpr has no object arithmetic: exact integers use pandas' own Python engine,
             # under the same empty scopes and the same closed grammar.
             exact = any(
-                frame[c].dtype == object and pd.api.types.is_integer_dtype(pdf[c].dtype)
-                for c in frame.columns
-                if c in pdf.columns and isinstance(frame[c], pd.Series)
+                pdf[c].dtype == object and pd.api.types.is_integer_dtype(source[c].dtype)
+                for c in pdf.columns
+                if c in source.columns and isinstance(pdf[c], pd.Series)
             )
-            mask = frame.eval(
+            mask = pdf.eval(
                 expression,
                 engine="python" if exact else "numexpr",
                 local_dict={},
