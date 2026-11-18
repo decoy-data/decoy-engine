@@ -37,9 +37,10 @@ map documents the overlap rather than partitioning the files artificially.
 
 The self-hosted gate (`gate-selfhosted.yml`, `scripts/dev/gates.sh`) is the merge gate: it runs
 ruff, mypy, the layer contract and the full default suite on pushes to main and on dispatch. Hosted
-`ci.yml` repeats `ruff`, `mypy`, `regression-gate` and `layers-gate` only on `schedule` and
+`ci.yml` repeats `ruff`, `regression-gate` and `layers-gate` only on `schedule` and
 `workflow_dispatch` (they carry `if: github.event_name != 'pull_request'`), so a PR does not run
-them twice.
+them twice. `mypy` is the exception: it also runs on every PR, because the self-hosted gate only
+fires on owner pushes to main and a PR would otherwise get no type check.
 
 Every other lane runs on each pull request and nightly on main: the profile gates in `ci.yml`
 (`packaging-gate`, `ml-gate`, `ner-gate`, `dp-certified-gate`, `determinism`),

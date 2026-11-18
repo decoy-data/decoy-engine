@@ -79,7 +79,8 @@ jobs:
         run: python -c 'from decoy_engine.support import probe_status, run_probe; assert probe_status(run_probe()) == "ok"'
 
   mypy:
-    if: github.event_name != 'pull_request'
+    # Runs on PRs too (ci/required-jobs.toml merge tier). The self-hosted gate that also runs mypy
+    # fires only on owner pushes to main, so without this a PR had no type check before merge.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
