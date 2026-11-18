@@ -565,8 +565,8 @@ class TestGenerationUnchanged:
             effective_locale="en_US",
             pool_size=64,
         )
-        build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
-        selection_seed = gen_ctx.family_bytes(_faker_pool._SELECTION_FAMILY)[:8]
+        build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
+        selection_seed = gen_ctx.family_bytes(_faker_pool.POOL_SELECTION_FAMILY)[:8]
         pool_values, _exact, _custom = _faker_pool.build_pool_values(
             "city", "en_US", build_seed, 64, {}
         )

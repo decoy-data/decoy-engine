@@ -98,12 +98,12 @@ def test_pool_bridge_draws_from_both_frozen_hmac_labels() -> None:
             and isinstance(node.args[0], ast.Name)
         ):
             family_bytes_args.append(node.args[0].id)
-    assert set(family_bytes_args) == {"_BUILD_FAMILY", "_SELECTION_FAMILY"}, (
+    assert set(family_bytes_args) == {"POOL_BUILD_FAMILY", "POOL_SELECTION_FAMILY"}, (
         f"build_and_sample must derive exactly the build + selection seeds via "
         f"family_bytes; found calls keyed on {family_bytes_args}"
     )
-    assert _faker_pool._BUILD_FAMILY == "faker_pool_build"
-    assert _faker_pool._SELECTION_FAMILY == "faker_pool_selection"
+    assert _faker_pool.POOL_BUILD_FAMILY == "faker_pool_build"
+    assert _faker_pool.POOL_SELECTION_FAMILY == "faker_pool_selection"
 
 
 def test_new_pool_bridge_module_is_the_only_uncatalogued_file() -> None:
