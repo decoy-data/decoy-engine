@@ -138,7 +138,7 @@ def test_the_allowed_spellings_pass(source: str) -> None:
 
 def test_the_package_has_the_planned_number_of_direct_modules() -> None:
     names = sorted(p.name for p in PKG.glob("*.py"))
-    assert len(names) == 20, names
+    assert len(names) == 21, names
     assert {"_bundle.py", "_expectations.py"} <= set(names)
 
 
