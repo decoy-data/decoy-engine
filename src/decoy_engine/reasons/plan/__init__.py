@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons.plan._f06 import *  # noqa: F403
+from decoy_engine.reasons.plan._nested_rules import *  # noqa: F403
 from decoy_engine.reasons.plan._part1 import *  # noqa: F403
 from decoy_engine.reasons.plan._part2 import *  # noqa: F403
 from decoy_engine.reasons.plan._part3 import *  # noqa: F403

@@ -31,7 +31,9 @@ class StrategyRequirement:
 
     ``when_path`` and ``when_equals`` make the requirement conditional: it applies only when the
     value at ``when_path`` has exactly the type and value of ``when_equals``, so ``1`` never
-    activates a boolean condition.
+    activates a boolean condition. ``unless_present`` names a path whose presence satisfies the
+    requirement another way (a `nested` column's `rules` list stands in for its single target and
+    strategy).
     """
 
     path: tuple[str, ...]
@@ -39,6 +41,7 @@ class StrategyRequirement:
     message: str
     when_path: tuple[str, ...] | None = None
     when_equals: bool | str | None = None
+    unless_present: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.path or not self.message:
@@ -78,11 +81,13 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
                 (*_PROVIDER, "strategy"),
                 reasons.plan.NESTED_STRATEGY_UNSET,
                 "nested needs a child strategy; set `provider_config.strategy`.",
+                unless_present=(*_PROVIDER, "rules"),
             ),
             StrategyRequirement(
                 (*_PROVIDER, "target"),
                 reasons.plan.NESTED_TARGET_UNSET,
                 "nested needs a target path; set `provider_config.target`.",
+                unless_present=(*_PROVIDER, "rules"),
             ),
         ),
     }
@@ -104,7 +109,11 @@ def lookup_path(entry: Mapping[str, Any], path: tuple[str, ...]) -> Any:
 
 
 def requirement_applies(req: StrategyRequirement, entry: Mapping[str, Any]) -> bool:
-    """Whether ``req`` binds the column ``entry``: always, or when its condition holds exactly."""
+    """Whether ``req`` binds the column ``entry``: always, or when its condition holds exactly.
+
+    It never binds when the value at ``unless_present`` is there."""
+    if req.unless_present is not None and lookup_path(entry, req.unless_present) is not None:
+        return False
     if req.when_path is None:
         return True
     actual = lookup_path(entry, req.when_path)

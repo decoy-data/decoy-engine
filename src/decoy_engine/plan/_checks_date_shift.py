@@ -124,24 +124,25 @@ def check_date_shift_group_by_refs(config: dict[str, Any]) -> None:
                 else []
             )
             if nested_date_shift:
-                nested_cfg = nested_date_shift[0].strategy_config or {}
-                if isinstance(nested_cfg, dict) and nested_cfg.get("group_by"):
-                    raise PlanCompileError(
-                        code=reasons.plan.DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED,
-                        path=(
-                            f"tables.{table_name}.columns.{col_name}"
-                            f".{nested_date_shift[0].config_path}.strategy_config.group_by"
-                        ),
-                        message=(
-                            f"date_shift column {col_name!r} in table "
-                            f"{table_name!r} sets group_by inside a `nested` "
-                            "strategy. group_by is not supported there: the "
-                            "nested child masks a synthetic single-column leaf "
-                            "batch with no sibling columns, so the entity anchor "
-                            "can never be present. Move date_shift+group_by to a "
-                            "top-level column."
-                        ),
-                    )
+                for child in nested_date_shift:
+                    nested_cfg = child.strategy_config or {}
+                    if isinstance(nested_cfg, dict) and nested_cfg.get("group_by"):
+                        raise PlanCompileError(
+                            code=reasons.plan.DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED,
+                            path=(
+                                f"tables.{table_name}.columns.{col_name}"
+                                f".{child.config_path}.strategy_config.group_by"
+                            ),
+                            message=(
+                                f"date_shift column {col_name!r} in table "
+                                f"{table_name!r} sets group_by inside a `nested` "
+                                "strategy. group_by is not supported there: the "
+                                "nested child masks a synthetic single-column leaf "
+                                "batch with no sibling columns, so the entity anchor "
+                                "can never be present. Move date_shift+group_by to a "
+                                "top-level column."
+                            ),
+                        )
                 continue
 
             if col_entry.get("strategy") != "date_shift":
@@ -246,12 +247,13 @@ def _preserve_columns(table_entry: dict[str, Any]) -> list[tuple[str, str, dict[
         pc = col_entry.get("provider_config")
         prefix = f"tables.{table_name}.columns.{name}.provider_config"
         if strategy == "nested" and isinstance(pc, dict):
-            (child,) = nested_children(pc)
-            strategy, pc, prefix = (
-                child.strategy,
-                child.strategy_config,
-                f"tables.{table_name}.columns.{name}.{child.config_path}.strategy_config",
-            )
+            for child in nested_children(pc):
+                cfg = child.strategy_config
+                if child.strategy in _PRESERVE_STRATEGIES and isinstance(cfg, dict):
+                    if has_preserve_values(cfg):
+                        path = f"tables.{table_name}.columns.{name}.{child.config_path}"
+                        found.append((name, str(child.strategy), cfg, f"{path}.strategy_config"))
+            continue
         if strategy in _PRESERVE_STRATEGIES and isinstance(pc, dict) and has_preserve_values(pc):
             found.append((name, str(strategy), pc, prefix))
     return found

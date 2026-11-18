@@ -104,6 +104,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
 )
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
+from decoy_engine.plan.checks._nested_rules import check_nested_rules
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
@@ -247,6 +248,7 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
+    check_nested_rules(config)
     check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
@@ -552,6 +554,7 @@ def run_config_only_checks(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
+    check_nested_rules(config)
     check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)

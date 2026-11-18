@@ -75,9 +75,7 @@ class TestTwoRulesOnePass:
         assert parsed["customer_id"] != _flat_hash(["c-1"], "events")[0]
 
     def test_a_rule_without_namespace_uses_the_column_namespace(self) -> None:
-        out, _, _ = _run(
-            [json.dumps({"id": "c-1"})], [{"target": "$.id", "strategy": "hash"}]
-        )
+        out, _, _ = _run([json.dumps({"id": "c-1"})], [{"target": "$.id", "strategy": "hash"}])
         assert json.loads(out["payload"].iloc[0])["id"] == _flat_hash(["c-1"], "events")[0]
 
 
@@ -159,9 +157,7 @@ class TestDrawIdentityPerRule:
     @staticmethod
     def _flat_shuffle(values: list[int], column: str) -> list[Any]:
         seed = dataclasses.replace(_seed({}, "events"), strategy="shuffle", provider_config=())
-        out, _ = ShuffleStrategyHandler().run(
-            pd.DataFrame({column: values}), column, seed, _ctx()
-        )
+        out, _ = ShuffleStrategyHandler().run(pd.DataFrame({column: values}), column, seed, _ctx())
         return out[column].tolist()
 
     def test_two_unkeyed_shuffle_rules_draw_independent_permutations(self) -> None:
