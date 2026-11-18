@@ -243,7 +243,9 @@ def _read_finding(raw: object, *, current: bool) -> dict[str, Any]:
     ok = (
         all(isinstance(row[n], str) for n in ("table", "column", "detector_id"))
         and isinstance(row["message"], str)
+        and isinstance(row["severity"], str)
         and row["severity"] in _SEVERITIES
+        and isinstance(row["source"], str)
         and row["source"] in DETECTOR_ORDER
         and (row["match_rate"] is None or _is_number(row["match_rate"]))
         and (row["configured_strategy"] is None or isinstance(row["configured_strategy"], str))
