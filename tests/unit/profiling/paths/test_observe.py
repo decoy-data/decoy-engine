@@ -570,3 +570,27 @@ def test_random_trees_never_name_a_key_the_rule_would_drop(tmp_path: Path, seed:
     ]
     obs = observation(scan_cells(tmp_path, dumps(cells)))
     assert_every_named_segment_is_earned(obs)
+
+
+def _icd_keys(letter: str) -> dict[str, int]:
+    """40 keys the detectors read as ICD-10 codes, so rule 2 rejects every one of them."""
+    return {f"{letter}{n:02d}": 1 for n in range(40)}
+
+
+def test_rejected_keys_of_folded_levels_count_toward_the_key_limit(tmp_path: Path) -> None:
+    # Each rare parent holds 40 rejected keys and `safe`: under the limit alone. Rule 3 folds both
+    # into `$.*`, where they are 80 distinct rejected keys, so the level must collapse.
+    cells: list[dict[str, Any]] = [{"common": 1} for _ in range(18)]
+    cells.append({"Usr_a": {**_icd_keys("a"), "safe": 1}})
+    cells.append({"Usr_b": {**_icd_keys("c"), "safe": 1}})
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert obs.map_collapsed >= 1
+    assert not any("safe" in path for path in by_path(obs))
+
+
+def test_a_level_of_rejected_keys_already_judged_elsewhere_still_collapses(tmp_path: Path) -> None:
+    # `x` collapses first. Every key under `y` then has a cached verdict, and the level must still
+    # be charged for each: 70 distinct rejected keys are over the limit however they were judged.
+    keys = {**_icd_keys("a"), **{k: 1 for k in list(_icd_keys("c"))[:30]}}
+    obs = observation(scan_cells(tmp_path, dumps([{"x": keys, "y": keys}] * 20)))
+    assert obs.map_collapsed == 2
