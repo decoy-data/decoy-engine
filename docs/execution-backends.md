@@ -8,7 +8,7 @@ This page is a human-readable reading of the authoritative, test-enforced source
 the per-operator compute classification in
 `docs/records/2026-10-16-d-audit-compute-matrix.md`
 (masking) and the generation compute audit (the
-[F-audit plan](https://github.com/louiskeep/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
+[F-audit plan](https://github.com/decoy-data/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
 The enumerated strategy/provider list is [`capability-matrix.md`](capability-matrix.md);
 install and wheel/ABI facts are [`native/supported-matrix.md`](native/supported-matrix.md).
 If this page and those sources ever disagree, the sources win: they are derived from

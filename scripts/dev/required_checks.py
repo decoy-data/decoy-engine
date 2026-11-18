@@ -54,7 +54,7 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-REPO = "louiskeep/decoy-engine"
+REPO = "decoy-data/decoy-engine"
 MAX_NIGHTLY_AGE = timedelta(hours=26)
 WORKFLOW_DIR = ".github/workflows/"
 REGISTRY = "ci/required-jobs.toml"
