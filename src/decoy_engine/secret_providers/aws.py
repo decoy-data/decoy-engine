@@ -16,8 +16,11 @@ Contract notes:
   * The provider is IMMUTABLE. Construction copies the frozen credentials, the configured endpoint
     (if any) and the CA bundle into one ``AwsContext`` and keeps no session or profile name. The
     read builds a fresh client from that context with the SDK's own endpoint configuration
-    switched off, so later changes to environment variables, config files or the credential
-    source cannot change the read or the cache key.
+    switched off. Endpoint, credentials and CA bundle are frozen; other SDK settings (retries,
+    timeouts, proxies) are read per call. Frozen credentials can expire, so build the provider per
+    run.
+  * botocore logs a response body at DEBUG, which would show the secret: a filter on its parser
+    logger drops those records.
   * Every SDK failure is mapped to a fixed registered reason by exception TYPE (and, for a
     ``ClientError``, a fixed error-code string); vendor text, ARNs, names and request ids never
     leave this module. Every mapped error is raised after its ``except`` block has closed.
@@ -28,6 +31,7 @@ from __future__ import annotations
 import contextlib
 import sys
 from dataclasses import dataclass
+from logging import Filter, LogRecord, getLogger
 from typing import Any, Literal
 
 from decoy_engine._canonical import strict_json_loads
@@ -70,6 +74,22 @@ _DENIED_CODES = frozenset(
         "ExpiredTokenException",
     }
 )
+
+
+class _DropResponseBody(Filter):
+    """botocore.parsers logs `Response body:` with the whole GetSecretValue answer at DEBUG."""
+
+    def filter(self, record: LogRecord) -> bool:
+        return not str(record.msg).startswith("Response body")
+
+
+def _silence_response_bodies() -> None:
+    parser_log = getLogger("botocore.parsers")
+    if not any(isinstance(f, _DropResponseBody) for f in parser_log.filters):
+        parser_log.addFilter(_DropResponseBody())
+
+
+_silence_response_bodies()
 
 
 def _boto3() -> Any:
@@ -120,15 +140,18 @@ def _configured_endpoint(session: Any, config_type: Any) -> str | None:
     return configured if configured != public else None
 
 
-def _verify_of(session: Any) -> bool | str:
-    """The CA bundle the standard chain selects (``AWS_CA_BUNDLE`` or the profile), else ``True``."""
-    botocore_session = getattr(session, "_session", None)
+def _verify_of(botocore_session: Any) -> bool | str:
+    """The CA bundle the standard chain selects (``AWS_CA_BUNDLE`` or the profile), else ``True``.
+    A session that cannot answer is refused: falling back to ``True`` could hide a configured
+    private CA."""
     getter = getattr(botocore_session, "get_config_variable", None)
-    bundle = getter("ca_bundle") if callable(getter) else None
+    if not callable(getter):
+        raise SecretProviderConfigError(_NOT_CONFIGURED)
+    bundle = getter("ca_bundle")
     return bundle if isinstance(bundle, str) and bundle else True
 
 
-def _context_of(session: Any, endpoint_url: str | None) -> AwsContext:
+def _context_of(session: Any, botocore_session: Any, endpoint_url: str | None) -> AwsContext:
     from botocore.config import Config
 
     credentials = session.get_credentials()
@@ -143,7 +166,7 @@ def _context_of(session: Any, endpoint_url: str | None) -> AwsContext:
         secret_access_key=str(frozen.secret_key or ""),
         session_token=str(frozen.token or ""),
         endpoint_url=endpoint_url,
-        verify=_verify_of(session),
+        verify=_verify_of(botocore_session),
     )
 
 
@@ -175,10 +198,13 @@ class AwsSecretsManagerProvider:
     __slots__ = ("_context",)
     _context: AwsContext
 
-    def __init__(self, session: Any, *, endpoint_url: str | None = None) -> None:
-        """``session`` is a ``boto3.session.Session``. ``endpoint_url`` (explicit, so above any
-        configured endpoint) is for private endpoints and local test servers."""
-        object.__setattr__(self, "_context", _context_of(session, endpoint_url))
+    def __init__(
+        self, session: Any, botocore_session: Any, *, endpoint_url: str | None = None
+    ) -> None:
+        """``session`` is a ``boto3.session.Session`` built over ``botocore_session``.
+        ``endpoint_url`` (explicit, so above any configured endpoint) is for private endpoints and
+        local test servers."""
+        object.__setattr__(self, "_context", _context_of(session, botocore_session, endpoint_url))
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("AwsSecretsManagerProvider is immutable; build a new provider")
@@ -294,9 +320,10 @@ def _non_interactive() -> bool:
 
 
 def _refuse_unattended_mfa(botocore_session: Any) -> None:
-    # An assume-role profile with `mfa_serial` makes botocore prompt on stdin: an unattended job
-    # is refused instead of hanging.
-    if botocore_session.get_scoped_config().get("mfa_serial") and _non_interactive():
+    # An assume-role profile (`role_arn` with `mfa_serial`) makes botocore prompt on stdin: an
+    # unattended job is refused instead of hanging. `mfa_serial` alone does not prompt.
+    scoped = botocore_session.get_scoped_config()
+    if scoped.get("role_arn") and scoped.get("mfa_serial") and _non_interactive():
         raise SecretProviderConfigError(_NOT_CONFIGURED)
 
 
@@ -316,7 +343,7 @@ def aws_provider_from_env(*, endpoint_url: str | None = None) -> AwsSecretsManag
         botocore_session = botocore.session.Session()
         session = boto3.session.Session(botocore_session=botocore_session)
         _refuse_unattended_mfa(botocore_session)
-        provider = AwsSecretsManagerProvider(session, endpoint_url=endpoint_url)
+        provider = AwsSecretsManagerProvider(session, botocore_session, endpoint_url=endpoint_url)
     except Exception:
         provider = None
     if provider is None:

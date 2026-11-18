@@ -189,7 +189,7 @@ register_secret_provider(aws_provider_from_env())
 
 - The provider is built from boto3's standard credential chain: environment variables, the shared
   config and credentials files (`~/.aws/config`, `~/.aws/credentials`, or the files named by
-  `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`), a named profile, web identity
+  `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`), a named profile (`AWS_PROFILE`), web identity
   (`AWS_WEB_IDENTITY_TOKEN_FILE`), container credentials and instance metadata. `AWS_CA_BUNDLE`
   or a profile `ca_bundle` selects the CA bundle. boto3 opens these paths; they come only from the
   operator's environment, never from a job config. `tests/sentry/file_access_modules.toml` lists
@@ -198,9 +198,11 @@ register_secret_provider(aws_provider_from_env())
   global `AWS_ENDPOINT_URL`, a service-specific one, or a profile `endpoint_url`) and the CA bundle.
   It builds two throwaway clients in a placeholder region to find out whether an endpoint is
   configured. Each read then builds a fresh client from the frozen values with the SDK's own
-  endpoint lookup switched off. A later change to the environment or the config files changes
-  nothing. With no configured endpoint, the read uses the public endpoint of the reference's region.
-- An assume-role profile with `mfa_serial` makes botocore prompt on stdin. When stdin is not
+  endpoint lookup switched off. Endpoint, credentials and CA bundle are frozen; other SDK settings
+  are read per call. Frozen credentials can expire, so build the provider per run. botocore logs
+  response bodies at DEBUG, so the adapter installs a filter on `botocore.parsers` that drops them;
+  the secret never reaches a log handler. With no configured endpoint, the read uses the public endpoint of the reference's region.
+- An assume-role profile (`role_arn` with `mfa_serial`) makes botocore prompt on stdin. When stdin is not
   interactive the factory refuses such a profile with `secret_provider_unconfigured` instead of
   waiting. Unattended jobs use pre-issued session credentials or a workload identity.
 - Any failure while building the provider (missing profile, unreadable file, no credential, an STS

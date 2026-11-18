@@ -488,7 +488,9 @@ def _config_failure(monkeypatch, hermetic_aws, kind):
         monkeypatch.setattr(configparser.RawConfigParser, "read", deny)
         hermetic_aws.config.write_text("[default]\nregion = us-east-1\n")
     elif kind == "mfa_unattended":
-        hermetic_aws.config.write_text(f"[default]\nmfa_serial = arn:aws:iam::1:mfa/{SENTINEL}\n")
+        hermetic_aws.config.write_text(
+            f"[default]\nrole_arn = arn:aws:iam::1:role/r\nmfa_serial = arn:aws:iam::1:mfa/{SENTINEL}\n"
+        )
         monkeypatch.setattr("sys.stdin", types.SimpleNamespace(isatty=lambda: False))
     else:
         raise AssertionError(kind)
@@ -514,3 +516,31 @@ def test_admission_through_preflight_maps_a_failed_read(monkeypatch):
         provider().preflight(ref_of(), REQ, SecretCachePolicy())
     assert info.value.code == "secret_access_denied"
     assert SENTINEL not in str(info.value) + render(info.value)
+
+
+def test_mfa_serial_without_a_role_does_not_prompt_so_it_builds(monkeypatch, hermetic_aws):
+    hermetic_aws.config.write_text("[default]\nmfa_serial = arn:aws:iam::1:mfa/x\n")
+    monkeypatch.setattr("sys.stdin", types.SimpleNamespace(isatty=lambda: False))
+    assert aws.aws_provider_from_env().resolve_context().access_key_id
+
+
+def test_a_botocore_session_that_cannot_answer_is_refused_not_defaulted():
+    with pytest.raises(SecretProviderConfigError):
+        aws._verify_of(object())
+
+
+def test_the_response_body_never_reaches_a_log(tmp_path, registry, caplog):
+    with moto.mock_aws():
+        client = boto3.client("secretsmanager", region_name=REGION)
+        version = client.create_secret(Name="team/app", SecretString=json.dumps({"key": KEY_B64}))[
+            "VersionId"
+        ]
+        prov = provider()
+        ref = parse_ref(f"aws-sm://{REGION}/team/app?version={version}&field=key&encoding=base64")
+        with caplog.at_level(logging.DEBUG):
+            logging.getLogger().setLevel(logging.DEBUG)
+            logging.getLogger("botocore").setLevel(logging.DEBUG)
+            with prov.preflight(ref, REQ, SecretCachePolicy()):
+                pass
+    assert "Response body" not in caplog.text
+    assert KEY_B64 not in caplog.text
