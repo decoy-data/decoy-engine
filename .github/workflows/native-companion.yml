@@ -334,6 +334,7 @@ jobs:
       # selection (pytest exits 5 then).
       - name: Output metadata canary, auto-chunk route (companion-present case, must not skip)
         run: |
+          set -o pipefail
           pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
           if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
 
