@@ -8,10 +8,12 @@ decoded `ARROW:schema` schema (schema and every field, recursive), and the parse
 from __future__ import annotations
 
 import base64
+import hashlib
+import io
 import json
-import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pyarrow as pa
@@ -43,7 +45,12 @@ ALL_CANARIES = (
     PDVER,
 )
 
+# Not a value canary: `DataFrame.to_parquet` writes the frame's `attrs` into this footer key, so
+# the key's presence in an output is the leak. It is reported under this name.
+PANDAS_ATTRS = "PANDAS_ATTRS"
+
 _ARROW_SCHEMA_KEY = b"ARROW:schema"
+_PANDAS_ATTRS_KEY = b"PANDAS_ATTRS"
 
 
 def _walk_type(typ: pa.DataType) -> Iterator[pa.Field]:
@@ -57,7 +64,7 @@ def _walk_type(typ: pa.DataType) -> Iterator[pa.Field]:
         yield from _walk_type(value_type)
 
 
-def _schema_texts(schema: pa.Schema) -> list[bytes]:
+def schema_texts(schema: pa.Schema) -> list[bytes]:
     """Every metadata key and value of the schema and of every field, plus the field names."""
     texts: list[bytes] = []
 
@@ -83,27 +90,34 @@ def _footer_texts(path: Path) -> list[bytes]:
         if k == _ARROW_SCHEMA_KEY:
             decoded = base64.b64decode(v)
             texts.append(decoded)
-            texts.extend(_schema_texts(pa.ipc.read_schema(pa.py_buffer(decoded))))
+            texts.extend(schema_texts(pa.ipc.read_schema(pa.py_buffer(decoded))))
         if k == b"pandas":
             texts.append(json.dumps(json.loads(v)).encode())
     return texts
 
 
 def canaries_in(path: Path | str) -> set[str]:
-    """The canaries present in the file, in any of the four places."""
+    """The canaries present in the file, in any of the four places, plus `PANDAS_ATTRS` when the
+    footer carries that key."""
     p = Path(path)
     blobs = [p.read_bytes(), *_footer_texts(p)]
-    return {c for c in ALL_CANARIES if any(c.encode() in b for b in blobs)}
+    found = {c for c in ALL_CANARIES if any(c.encode() in b for b in blobs)}
+    if _PANDAS_ATTRS_KEY in (pq.ParquetFile(p).metadata.metadata or {}):
+        found.add(PANDAS_ATTRS)
+    return found
 
 
-def assert_engine_wrote(
-    path: Path | str, run_start: float, *, not_written_by_test: set[Path]
-) -> None:
-    """The file is a committed output the engine wrote during the run, not one the test made."""
-    p = Path(path)
-    assert p.is_file(), "the route published no file at the reported path"
-    assert p.resolve() not in {x.resolve() for x in not_written_by_test}, "path is a test source"
-    assert os.stat(p).st_mtime >= run_start, "file predates the run"
+def assert_bound_by_receipt(paths: list[Path], receipt: Any) -> None:
+    """Each file is one the engine's own `CommitReceipt` binds: the receipt says `published`, and
+    every file's size, row count and sha256 match an artifact it reports."""
+    assert receipt is not None and receipt.outcome == "published", "no published receipt"
+    bound = {(a.size, a.rows, a.sha256) for a in receipt.artifacts}
+    for path in paths:
+        data = path.read_bytes()
+        rows = pq.ParquetFile(io.BytesIO(data)).metadata.num_rows
+        assert (len(data), rows, hashlib.sha256(data).hexdigest()) in bound, (
+            f"{path.name} is not an artifact of the commit receipt"
+        )
 
 
 def _pandas_blob(df: pd.DataFrame, *, preserve_index: bool | None) -> bytes:
@@ -132,6 +146,15 @@ def canary_table(
     base = pa.Table.from_pandas(frame, preserve_index=None)
     meta = dict(base.schema.metadata or {})
     meta[b"pandas"] = _pandas_blob(frame, preserve_index=None)
+    attrs_file = io.BytesIO()
+    frame.to_parquet(attrs_file)  # pandas writes the PANDAS_ATTRS footer key itself
+    meta.update(
+        {
+            k: v
+            for k, v in (pq.ParquetFile(attrs_file).metadata.metadata or {}).items()
+            if k == _PANDAS_ATTRS_KEY
+        }
+    )
     meta[b"table_comment"] = SCHEMA.encode()
     meta[SKEY.encode()] = b"x"
     fields = []
