@@ -192,7 +192,9 @@ def test_size_of_an_s3_object_and_a_missing_key() -> None:  # AT-E1-11
         assert info.value.kind == "not_found"
 
 
-def test_size_of_a_gcs_object_and_a_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:  # AT-E1-11
+def test_size_of_a_gcs_object_and_a_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # AT-E1-11
     from decoy_engine.connectors.gcs import GCSConfig
 
     class Blob:

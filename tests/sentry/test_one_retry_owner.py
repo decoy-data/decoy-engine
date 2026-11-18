@@ -52,13 +52,19 @@ def _names_in_handler(handler_type: ast.expr | None, bindings: dict[str, str]) -
 
 
 def _callees(statements: list[ast.stmt]) -> set[str]:
+    """Call identities: the callee plus its first argument when that is a dotted name.
+
+    The first argument keeps ``s3_call(client.get_object, ...)`` and ``s3_call(body.read, ...)``
+    apart, since a wrapper callee runs whatever it is given.
+    """
     out: set[str] = set()
     for statement in statements:
         for node in ast.walk(statement):
             if isinstance(node, ast.Call):
                 name = dotted(node.func)
                 if name:
-                    out.add(name)
+                    first = dotted(node.args[0]) if node.args else None
+                    out.add(f"{name}({first or ''})")
     return out
 
 
@@ -137,6 +143,16 @@ def test_seeded_spellings_are_flagged() -> None:
         assert findings_in(source, "connectors/x.py"), name
         assert findings_in(source, "publication/x.py"), name
         assert findings_in(source, "delivery/x.py"), name
+
+
+def test_the_same_wrapper_over_a_different_call_is_not_a_resend() -> None:
+    source = (
+        "def g(c, b):\n    try:\n        r = call(c.get)\n    except ConnectorError:\n"
+        "        return None\n    return call(b.read)\n"
+    )
+    assert findings_in(source, "connectors/x.py") == []
+    again = source.replace("b.read", "c.get")
+    assert findings_in(again, "connectors/x.py")
 
 
 def test_a_catch_without_a_second_call_is_not_a_finding() -> None:

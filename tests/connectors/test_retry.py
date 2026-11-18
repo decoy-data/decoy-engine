@@ -97,7 +97,10 @@ def test_deadline_stops_before_a_sleep_that_would_pass_it() -> None:  # AT-E1-4
     op2, calls2 = _flaky(99)
     with pytest.raises(TransientError) as info2:
         run_retrying(
-            op2, policy=RetryPolicy(deadline_s=2.5), sleep=sleep, clock=lambda: now[0],
+            op2,
+            policy=RetryPolicy(deadline_s=2.5),
+            sleep=sleep,
+            clock=lambda: now[0],
             rand=lambda: 0.5,
         )
     assert sleeps == [1.0] and len(calls2) == 2
@@ -158,4 +161,4 @@ def test_each_operation_has_its_own_attempt_floor() -> None:  # AT-E1-12
 
 
 def test_the_module_exposes_one_default_policy() -> None:
-    assert _retry.DEFAULT_POLICY == RetryPolicy()
+    assert RetryPolicy() == _retry.DEFAULT_POLICY

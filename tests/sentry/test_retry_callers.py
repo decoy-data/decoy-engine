@@ -9,8 +9,15 @@ from __future__ import annotations
 
 import ast
 
-from tests.sentry._retry_scan import PKG, RETRY_MODULE, canonical, dotted, import_bindings, rel
-from tests.sentry._retry_scan import walk_with_scope
+from tests.sentry._retry_scan import (
+    PKG,
+    RETRY_MODULE,
+    canonical,
+    dotted,
+    import_bindings,
+    rel,
+    walk_with_scope,
+)
 
 TARGET = f"{RETRY_MODULE}.run_retrying"
 # Expected set after F02-E5 is in the plan (4.1); each slice pins what exists at its head.
