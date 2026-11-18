@@ -7,8 +7,8 @@ from `decoy_engine._nested_json`, which is the only reader.
 
 A module is in scope when it has a `"nested"` literal in a comparison
 (`==`, `!=`, `in`, `not in`) or as a dict key (`"nested"` or a prefixed key such as
-`"scalar:nested"`). In scope, a child read is `.get("strategy")` or `["strategy"]` off a provider
-config, or `.get("strategy_config")` or `["strategy_config"]`. Enforcement is per read: every direct read is flagged, also in a module that calls
+`"scalar:nested"`). In scope, a child read is `.get("strategy")` or `["strategy"]` off a provider-config
+derived value (see `direct_child_reads`), or `.get("strategy_config")` or `["strategy_config"]`. Enforcement is per read: every direct read is flagged, also in a module that calls
 `nested_children` elsewhere. A module that reads the child must go through `nested_children`
 for all of it. Registries that name `"nested"` in a set or table without reading the child
 (for example `validators/_leak_check.py`) have no comparison or key, so the shape does not match
@@ -26,7 +26,6 @@ from tests.sentry._call_resolution import resolved_calls
 from tests.sentry.defects import _defect_scan as scan
 
 OWNER = "_nested_json/_rules.py"
-PROVIDER_CONFIG_NAMES = frozenset({"pc", "cfg", "config", "provider_cfg", "pcfg", "pconf"})
 # The seven modules that read a nested child at the slice base; each must call the choke point.
 READERS = (
     "execution/_column_access.py",
@@ -67,43 +66,155 @@ def _names_nested(tree: ast.AST) -> bool:
     return False
 
 
-def _receiver(node: ast.AST) -> str:
-    """The last name of the object a key is read from: `pc` for `pc.get(..)`, else ''."""
+def _const_key(node: ast.AST) -> object:
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def _own_nodes(scope: ast.AST) -> list[ast.AST]:
+    """Every node of one scope: a function body without the bodies of functions nested in it."""
+    found: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        found.append(node)
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _derived(node: ast.AST, names: set[str]) -> bool:
+    """Whether an expression is a provider config, or a part of one, by where it comes from."""
     if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
+        return node.id in names
+    if isinstance(node, ast.Subscript):
+        return _const_key(node.slice) == "provider_config" or _derived(node.value, names)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if node.func.attr == "get" and node.args and _const_key(node.args[0]) == "provider_config":
+            return True
+        if node.func.attr in ("get", "values", "items", "keys", "copy", "pop"):
+            return _derived(node.func.value, names)
+    if isinstance(node, ast.BoolOp):
+        return any(_derived(v, names) for v in node.values)
+    if isinstance(node, ast.IfExp):
+        return _derived(node.body, names) or _derived(node.orelse, names)
+    return False
 
 
-def _is_provider_config(receiver: str) -> bool:
-    return receiver in PROVIDER_CONFIG_NAMES or "provider_config" in receiver
+def _target_names(target: ast.AST) -> set[str]:
+    return {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
+
+
+def _scope_names(scope: ast.AST, seeded: set[str]) -> set[str]:
+    """Names in one scope bound to a derived value: assigned from one, or iterated over one."""
+    names = set(seeded)
+    nodes = _own_nodes(scope)
+    grew = True
+    while grew:
+        grew = False
+        for node in nodes:
+            bound: set[str] = set()
+            if isinstance(node, ast.Assign) and _derived(node.value, names):
+                for target in node.targets:
+                    bound |= _target_names(target)
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)) and _derived(
+                node.iter, names
+            ):
+                bound = _target_names(node.target)
+            if not bound <= names:
+                names |= bound
+                grew = True
+    return names
+
+
+def _params(func: ast.FunctionDef | ast.AsyncFunctionDef, is_method: bool) -> list[str]:
+    args = [*func.args.posonlyargs, *func.args.args]
+    if is_method and args:
+        args = args[1:]
+    return [a.arg for a in args]
 
 
 def direct_child_reads(tree: ast.AST) -> list[int]:
     """Lines that read a nested child key straight off a provider config.
 
-    `strategy_config` is a child key whatever it is read from. `strategy` is also the column's
-    own key (`col_entry.get("strategy")`), so it counts only when read from a provider-config
-    looking name (`pc`, `cfg`, `provider_config`, ...). Per read, not per module: a module that
-    also calls `nested_children` is still flagged for each direct read it keeps.
+    A read is `.get("strategy")`, `["strategy"]` or the same for `strategy_config`. It counts
+    when its receiver is provider-config derived: a `["provider_config"]` subscript or
+    `.get("provider_config")` call (inline counts), a name assigned from or iterated over such
+    a value (aliases, `.values()`, `.items()`, comprehension targets), or a parameter of a
+    function in the same module that a call site passes a derived value to. Column-level reads
+    (`col_entry.get("strategy")`) come from a column entry, not from a provider config, so they
+    are not flagged, with no list of names. A `strategy_config` read is flagged from any
+    receiver. Per read, not per module: a module that also calls `nested_children` is still
+    flagged for each direct read it keeps.
+
+    Known remainder, not tracked: a derived value that crosses a module boundary, or a call
+    chain deeper than a same-module call that passes the value on by name or attribute. V2.
     """
+    scopes: list[ast.AST] = [tree] + [
+        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    methods = {
+        id(f)
+        for c in ast.walk(tree)
+        if isinstance(c, ast.ClassDef)
+        for f in c.body
+        if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    funcs: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for sc in scopes[1:]:
+        assert isinstance(sc, (ast.FunctionDef, ast.AsyncFunctionDef))
+        funcs.setdefault(sc.name, []).append(sc)
+    names: dict[int, set[str]] = {id(sc): set() for sc in scopes}
+    grew = True
+    while grew:
+        grew = False
+        for sc in scopes:
+            names[id(sc)] = _scope_names(sc, names[id(sc)])
+        for sc in scopes:
+            for node in _own_nodes(sc):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                callee = (
+                    fn.id
+                    if isinstance(fn, ast.Name)
+                    else fn.attr
+                    if isinstance(fn, ast.Attribute)
+                    else ""
+                )
+                for target in funcs.get(callee, []):
+                    params = _params(target, id(target) in methods)
+                    passed = {
+                        params[i]
+                        for i, a in enumerate(node.args)
+                        if i < len(params) and _derived(a, names[id(sc)])
+                    } | {
+                        k.arg
+                        for k in node.keywords
+                        if k.arg in params and _derived(k.value, names[id(sc)])
+                    }
+                    if not passed <= names[id(target)]:
+                        names[id(target)] |= passed
+                        grew = True
     lines: list[int] = []
-    for node in ast.walk(tree):
-        key: object = None
-        receiver = ""
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "get"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-        ):
-            key, receiver = node.args[0].value, _receiver(node.func.value)
-        elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            key, receiver = node.slice.value, _receiver(node.value)
-        if key == "strategy_config" or (key == "strategy" and _is_provider_config(receiver)):
-            lines.append(node.lineno)
+    for sc in scopes:
+        for node in _own_nodes(sc):
+            key: object = None
+            receiver: ast.AST | None = None
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and node.args
+            ):
+                key, receiver = _const_key(node.args[0]), node.func.value
+            elif isinstance(node, ast.Subscript):
+                key, receiver = _const_key(node.slice), node.value
+            if receiver is None:
+                continue
+            if key == "strategy_config" or (
+                key == "strategy" and _derived(receiver, names[id(sc)])
+            ):
+                lines.append(node.lineno)
     return lines
 
 
