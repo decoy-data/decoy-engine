@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-18; Dennis round 1 NO-GO addressed; owner answered Q1 to Q10)
+Status: plan (revision 3, 2026-11-18; Dennis rounds 1 and 2 addressed; owner answered Q1 to Q12)
 
 # 1.0 freeze batch: the experimental tier, the frozen surface, and the output shapes that change before the freeze
 
@@ -8,9 +8,9 @@ This plan covers the three 1.0 rows that had no plan: EXPERIMENTAL-TIER, FREEZE-
 
 Anchors: a path with no prefix is in decoy-engine; a path with the prefix `C:` is in the CLI repository (decoy). Engine `origin/main` `ad36687a6`; CLI `origin/main` `920ea13c`. The plan lives in the engine repo on branch `plan/freeze-batch` because most of the slices and both contracts it edits are engine-owned.
 
-Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1 for docs, registries and the dead-base removal; R2 for output bytes, a frozen `--json` reason code and the outbound URL check), `development-loop.md` (PLAN: scope, behaviour and failure modes, acceptance tests first with their mutation, placement, slice table, owner questions), `api-and-compatibility.md` (consumer inventory, explicit breaking changes, contract tests), `cross-cutting-concerns.md` (one choke point plus a sentry and its mutation), `security.md` (outbound URL schemes and redirects), `data-and-migrations.md` (output format bytes), `testing.md` (T0 to T2, mutations), `proportionality.md`, `reuse-first.md`, `documentation.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md`.
+Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1 for bounded docs and cleanup; R2 for stability registries, artifact tags, output bytes, a frozen `--json` reason code, and outbound URL checks), `development-loop.md` (PLAN: scope, behaviour and failure modes, acceptance tests first with their mutation, placement, slice table, owner questions), `api-and-compatibility.md` (consumer inventory, explicit breaking changes, contract tests), `cross-cutting-concerns.md` (one choke point plus a sentry and its mutation), `security.md` (outbound URL schemes and redirects), `data-and-migrations.md` (output format bytes), `testing.md` (T0 to T2, mutations), `proportionality.md`, `reuse-first.md`, `documentation.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md`.
 
-Risk: R2 overall, because O1 to O3 change output bytes and S4 and S6 change what a user sees in `--json`. X0, X1, S1, S2, S5 and S7 are R1 (docs, registries, sentries, dead code). Approver: Cam (owner) for the plan and the owner questions; Dennis then Codex for the plan gate.
+Risk: R2 overall, because O1 to O3 change output bytes, S4 and S6 change what a user sees in `--json`, X0 defines the public stability registry, and S7a classifies artifact tags. X1, S1, S2, S5 and S7b are R1. Approver: Cam (owner) for the plan and the owner questions; Dennis then Codex for the plan gate.
 
 Why 1.0: all three rows pass the "freeze" test of the triage. After 1.0, any of these changes is a 2.0 break under the triage's definition (a public name, a default, an output byte, an exit code, a reason string, a schema field, a report tag, or a new refusal for a config or run that is valid today). The tier must exist before 1.0, or every public name is frozen by default.
 
@@ -18,30 +18,51 @@ Why 1.0: all three rows pass the "freeze" test of the triage. After 1.0, any of 
 
 | Finding | Change | Where |
 |---|---|---|
-| B1 | O1 keeps today's null-row selection for every operator (owner Q10, decided). Only integers at or above 2**53 change. AT-O1b is a null-row matrix over every operator pinned to today; AT-O1c compares to a Python-int reference evaluator. | 4.3, 8, 15 |
+| B1 | Superseded by the owner Q10 re-decision recorded in revision 3. | Revision 3 B1 |
 | H1 | One `lossless_int_columns(plan, registry, graph)` in `_fk_keys.py`, called from every ingestion site and `native/_when_mask.py`; it includes the integer columns `when:` reads. Drift sentry. Second output change (int64 instead of double on whole-frame routes) listed. | 4.3, 5.5, 10.6 |
 | H2 | O3: no new module. `narrow_text` in the passthrough branch of `native/_chunked_schema_rule.py`; `kernel/_scalar.py::passthrough_array` narrows per batch. Text over 2 GiB is split, never refused. | 4.3, 10.3 |
 | H3 | S6 folds telemetry's `validate_endpoint` in as purpose `otel`. The sentry is import-based over every network module spelling, with a (path, name) allowlist. | 4.2, 10.7 |
 | H4 | Redirect rule per purpose; installer and bundle purposes follow https-to-https redirects; new test. Notify keeps its behaviour. | 10.7, AT-S6e |
 | H5 | Tiers are assigned by object identity. sdk names that are `errors.*` objects stay frozen. Root re-exports handled. Constants are covered by their module docstring marker. | 4.1, 10.1 |
 | H6 | One default: the census reads contract 3.4 plus every public subpackage `__all__`; each name has an explicit tier. | 4.1, AT-X0e |
-| H7 | Tag regex allows dots and underscores; 32 unlisted tags; `flagged-redacted/v1` and `/v2` frozen; the classification rule is written down; f-string tags are a known limit. | 4.2, 5.6 |
+| H7 | Tag regex allows dots and underscores; revision 3 corrects the outside-3.1 count to 30. The classification rule is written down; f-string tags are a known limit. | 4.2, 5.6 |
 | H8 | O2 covers `.tar.gz` (same gzip wrapper, `TarInfo.mtime=0`) and zip (fixed `date_time`); pinned compression level; the claim is scoped to the same zlib build. | 4.3, 10.4 |
 | H9 | Order against FAKER-MIGRATE, PROP-batch C-F1b and E-S1a/E-S1b written down (Q11). | 10.5 |
 | M1 to M9 | Notify URLs come from `--notify`, value-free `NotifySpecError`; F12 and old AT-O3c dropped; S7 sized honestly; Removed and Breaking fragments and a contract section 1 entry; AT-S5a labelled a guard with the case policy; G1 narrowed to what the tests check; gzip header bytes asserted; route lists recorded as a known limit; upgrade-document artifact purpose added. | throughout |
 | L1 to L3 | `pyproject.toml:549` and `:1019` entries removed in S1; S4 updates the deferred row in `C:docs/roadmap/post-1.0-plan.md` and keeps `report.*` descriptors in the one descriptor module; compression level pinned. | S1, S4, O2 |
 
+### Revision 3 changes (Dennis round 2: 1 BLOCKER, 6 HIGH, 7 MEDIUM, 4 LOW)
+
+| Finding | Change | Where |
+|---|---|---|
+| B1 | Q10 now requires one NaN-style null-selection rule for every column class and route. The Breaking entry names FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings. AT-O1b pins each class on every route and mutates each class independently. | 1, 4.3, 5.3 to 5.6, 6 to 8, 10.6, 14, 15 |
+| H1, H2 | Object evaluation is selected when either a referenced value or any integer literal is outside `[-2**53, 2**53]`, including int64-to-float-literal comparisons. AT-O1b and AT-O1c include a literal-only trigger, chunk size 1, and a mutation that removes the literal check. | 4.3, 8, 10.6 |
+| H3 | The ingestion census has six direct sites, including `_unified_slice_admission.py:364`; `_faker_null_mask.py` widens its protected set with `lossless_int_columns`. The exact caller allowlist names indirect diagnostic callers and flag-on/flag-off parity. | 4.3, 5.1, 5.3, 8, 10.6 |
+| H4 | One split-and-narrow helper in `_arrow_types.py` serves chunked schema normalization and out-of-core passthrough. Analytic passthrough typing is narrowed too, including FK resolution. `mask_batch` splits record batches by row slice. AT-O3e patches the shared helper on every route. | 4.3, 5.3, 8, 9, 10.3 |
+| H5 | X0 uses the measured 59-package, 1,186-name walk, a per-package rule registry with exceptions, an optional-extra import policy, and a sub-700-line budget. Public subpackage names outside contract 3.4 default to documented internal unless explicitly listed. | 1, 4.1, 8, 11, 12, 15 |
+| H6 | X0 and S7a are R2 with Dennis then Codex. S7a writes representative artifacts and rejects any `INTERNAL_TAGS` literal in files or `--json`. Zip stages CSV bytes and sets `ZipInfo.file_size`, with a patched `ZIP64_LIMIT` test and no new 2 GiB refusal. | 7, 8, 10.4, 12 |
+| M1 | The `when:`-read nullable-integer output change and AT-O1f cover every strategy and every route, including the chunked oracle. | 5.3, 5.5, 8 |
+| M2 | O2 states that chunked gzip is a deterministic concatenation of one member per chunk, pins `TextIOWrapper` settings, and guards `.tar`, `.tar.bz2`, `.tar.xz`, `.bz2`, `.xz`, and `.zst`. | 4.3, 8, 10.4 |
+| M3 | `RefuseRedirects` moves into `_outbound`; `_update_check` is a purpose caller, not an allowlisted network owner. Notify parsing uses the central scheme rule and notify redirects re-check every hop. G6 excludes engine connectors and third-party libraries. | 1, 4.2, 8, 9, 10.7 |
+| M4 | Reciprocal ordering with `plan/output-metadata-leak` rev 3 is explicit. E1 conditionally rides the freeze release, C1 follows O2, and the compatibility-contract route-metadata paragraph has one owner. | 5.6, 10.5, 12 |
+| M5 | The golden inventory names testflight fingerprints, parity captures and proof outputs affected by O1/O3, with the same rerun-on-final-head rule as `plan/faker-migrate`. | 5.6, 7, 10.5, 12.1 |
+| M6 | AT-O1e checks an exact AST `(path, function)` caller allowlist for both ingestion helpers. Plain `to_pandas()` remains a documented limit, and `_pipeline_full_frame.py:57` stays on its diagnostic path because it has no plan or registry. | 8, 10.6 |
+| L1 | The engine has 30 tag literals outside 3.1; `flagged-redacted/v2` and `distribution-snapshot/v2` are already classified there. | 4.2, 5.6, 8 |
+| L2 | Zip `external_attr` is fixed explicitly; tar coverage in AT-O2b is labelled a guard. | 8, 10.4 |
+| L3 | The import sentry handles `import urllib`, aliased `from urllib import request`, and AST-resolved constants. | 8, 10.7 |
+| L4 | The pre-mortem records the memory and conversion cost of forcing NaN-style evaluation for nullable integer `when:` columns. | 14 |
+
 ## 1. Guarantee and non-goals
 
 Guarantees after this batch:
 
-- G1. Every name in `decoy_engine.__all__`, in the `__all__` of every public engine subpackage (contract 3.4 plus the census walk, 39 packages today), and in the CLI `_LAZY_API` has exactly one tier: frozen, experimental or internal. The tier is keyed by object identity, so one object exported from two places has one tier. AT-X0a, AT-X0e and AT-X1a check this. Visible CLI commands and options stay frozen through the existing `C:tests/unit/test_cli_surface.py`; hidden ones get a tier through S2.
+- G1. Every name in `decoy_engine.__all__`, and every name found by the 59-package, 1,186-name public-subpackage walk, has one rule-derived tier with explicit exceptions: frozen, experimental or documented internal. The tier is keyed by object identity, so one object exported from two places has one tier. A public subpackage name outside contract 3.4 defaults to documented internal unless the registry lists it as frozen or experimental. Optional-extra packages are recorded and skipped only for their named missing extra. Every CLI `_LAZY_API` name has exactly one tier. AT-X0a, AT-X0e and AT-X1a check this. Visible CLI commands and options stay frozen through the existing `C:tests/unit/test_cli_surface.py`; hidden ones get a tier through S2.
 - G2. An experimental class or function starts its docstring with the fixed marker; an experimental constant is covered by its module docstring marker. A sentry checks the markers against the registry.
 - G3. Hidden CLI options and commands are listed with a tier. A new hidden name fails the build until it is listed.
 - G4. Every `"<name>/vN"` tag literal (dots and underscores allowed) in engine and CLI source is classified: frozen format (contract 3.1), frozen determinism label (contract 3.3), or internal with a reason. A new literal fails the build until it is classified. Tags built with f-strings are a known limit.
 - G5. The `when:` grammar's keyword literals are all reserved names, and the reserved set is pinned by an exact snapshot.
-- G6. Every outbound network call the CLI makes goes through one function with a per-purpose scheme and redirect rule, except a short (path, name) allowlist.
-- G7. Three output shapes are fixed before the freeze: `when:` on integer columns compares exactly at or above 2**53 with today's null semantics; a compressed CSV target (`.gz`, `.tar.gz`, `.zip`) holds no staging name and no wall-clock time; a pass-through text column is `string` on every route.
+- G6. Every outbound network call in first-party CLI source goes through one function with a per-purpose scheme and redirect rule, except a short `(path, function)` allowlist. Engine connectors and calls performed inside third-party libraries are outside this CLI guarantee.
+- G7. Three output shapes are fixed before the freeze: `when:` on integer columns compares exactly outside the float-exact range and uses one NaN-style null-selection rule on every route and dtype; a compressed CSV target (`.gz`, `.tar.gz`, `.zip`) holds no staging name and no wall-clock time; a pass-through text column is `string` on every route.
 
 Non-goals:
 
@@ -50,7 +71,7 @@ Non-goals:
 - No new public name. FREEZE-SURFACE removes or relabels.
 - No rename of experimental names (the `decoy_engine.FileSource` and `decoy_engine.config.FileSource` collision is a 1.x candidate).
 - No snapshot of every CLI reason code. Only the gate and warning vocabulary is pinned (S4); the rest is a known limit in the CLI map.
-- No change to `when:` null semantics (Q10, owner: keep today's).
+- No change to the chosen NaN-style `when:` truth table between routes or column classes after O1. Q10 explicitly permits the pre-GA change from today's `pd.NA` behaviour on FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings.
 - Platform: parked. No platform slice.
 
 ## 2. Established solutions
@@ -63,7 +84,7 @@ Non-goals:
 | Public surface check | `griffe check`, Typer `utils docs` | Reuse the map sentries and `C:tests/command_tree.py`; `griffe check` stays REL-GATE Q6. |
 | Reproducible archives | RFC 1952 (FNAME optional, MTIME 0 means no time); reproducible-builds.org archive guidance (`SOURCE_DATE_EPOCH`, fixed tar mtime, uid, gid, fixed zip `date_time`) | `gzip.GzipFile(filename="", mtime=0)`, `TarInfo.mtime=0` with uid, gid 0 and empty owner names, `ZipInfo.date_time=(1980, 1, 1, 0, 0, 0)`, pinned compression level. |
 | Exact integers with nulls | pandas nullable integer dtypes; the DE-10 contract `execution/_fk_keys.py::to_pandas_fk_safe` | One function names the lossless columns for every ingestion site. |
-| Three-valued comparison | SQL and pandas `NA` propagate unknown; float `NaN` compares unequal | Keep Decoy's current `NaN` semantics for `when:` (Q10): a reference evaluator over Python ints with `NaN` for null is the oracle. |
+| Three-valued comparison | SQL and pandas `NA` propagate unknown; float `NaN` compares unequal | Use one owner-chosen NaN-style rule for `when:` on every ingestion dtype and route (Q10): a reference evaluator over Python ints with `NaN` for null is the oracle. |
 | URL allow list and redirects | OWASP SSRF guidance (allow list, re-check every redirect hop); `urllib.request` `HTTPRedirectHandler.redirect_request` | One function with per-purpose schemes and a per-purpose redirect handler that re-checks the scheme of every hop. |
 
 ## 3. Reuse inventory
@@ -88,7 +109,7 @@ Non-goals:
 | Shape changelog check | `check_shape_changelog.py` (REL-GATE G3) | `C:scripts/release/check_shape_changelog.py` |
 | Changelog fragments | Breaking and Removed fragments | `changelog.d/README.md` |
 
-No new module is added under `src/decoy_engine/execution/` (frozen at 103 modules; caps are never raised).
+No new module is added under `src/decoy_engine/execution/` (104 direct Python modules today; the CODEMAP fan-out freeze is not raised).
 
 ## 4. Behaviour
 
@@ -96,12 +117,12 @@ No new module is added under `src/decoy_engine/execution/` (frozen at 103 module
 
 Contract text (new section 3.6 "Experimental surfaces" in `docs/compatibility-contract.md`, mirrored in `C:docs/release/versioning.md`):
 
-1. A surface is frozen, experimental or internal. Frozen follows sections 3.1 to 3.5 and section 4. Internal names are listed with tier `internal` in the registry (engine) or start with `_` (CLI); they may change in any release. Nothing is internal by omission: an unlisted public name fails the census.
+1. A surface is frozen, experimental or internal. Frozen follows sections 3.1 to 3.5 and section 4. The engine registry is rule-based per package, with a short exception table. Names in packages named by contract 3.4 follow that contract; names in other public subpackages default to documented internal unless an exception lists them as frozen or experimental. Internal names may change in any release, but no name is unclassified: a name must match exactly one package rule or exception. CLI internal names start with `_` or have an explicit row.
 2. An experimental surface may change or be removed in any minor release. The change gets a `Changed` or `Removed` fragment that starts with "Experimental:". No deprecation window is promised.
 3. Determinism is never experimental. Output bytes produced through an experimental surface (a custom provider's values, a connector's rows once masked) follow section 3.3. Stored records are never experimental: everything under `.decoy/` is frozen whatever the tier of the command that wrote it.
 4. An experimental class or function starts its docstring with `Experimental:`. An experimental constant has no docstring of its own; its module docstring starts with the marker and names it. The doc page has the marker in its first paragraph.
 5. An experimental surface becomes frozen by moving its registry row and removing the marker, in a minor release. It never goes from frozen back to experimental inside a major.
-6. A tier belongs to an object, not to a name. The census resolves each exported name to its object; the same object exported from two modules has one tier.
+6. A tier belongs to an object, not to a name. The census resolves each exported name to its object; the same object exported from two modules has one tier. The walk imports all 59 public packages and classifies all 1,186 exported names. An optional-extra package may raise `ImportError` only for its registered missing dependency, for example `providers_v2.mimesis` without the `mimesis` extra; the census still classifies its statically declared names and fails on any other import error.
 
 The 1.0 tier lists (owner Q1 answered yes):
 
@@ -121,15 +142,15 @@ Contract section 1 gets a "Pre-GA corrections taken with the freeze batch" entry
 3. J2: moved to v1+ (Q4). No slice.
 4. S4 (CLI): rename `layout.report_source_ambiguous` (`C:src/decoy/cli/io/_layout_errors.py:159`) to `report.source_ambiguous` (Q5). The descriptor stays in `_layout_errors.py`, the one descriptor module, in a new `REPORT_DESCRIPTORS` tuple that joins `GATE_DESCRIPTORS`. Exact snapshot of `GATE_CODES`, `WARNING_CODES` and `_CLI_GATE_CODES`. S4 updates the deferred reason-code row in `C:docs/roadmap/post-1.0-plan.md` to say the gate and warning set is pinned and the rest stays a known limit.
 5. S5 (engine): add `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`, `endswith` to `RESERVED_NAMES` (Q6). Case policy: reserved names match exactly, case-sensitive, as `_name()` does today (`src/decoy_engine/expressions/_when_parser.py:116`); only the lowercase forms are reserved, so a column named `NULL` or `Between` stays a column. A sentry checks that every keyword literal in `when_grammar.lark` is a reserved name (a guard: green today), and an exact snapshot pins the set.
-6. S6 (CLI): one outbound function `C:src/decoy/_outbound.py::open_url(url, purpose)`. Purposes and rules are in 10.7 (Q7). The `urlopen` sites (`C:src/decoy/cli/upgrade.py:55`, `C:src/decoy/distribution/installer.py:250`, `C:src/decoy/notify.py:254`, `C:src/decoy/notify.py:319`) call it, and telemetry's `validate_endpoint` (`C:src/decoy/telemetry.py:93`) becomes the `otel` purpose's rule. Notify URLs come from `--notify kind:target`, so the scheme check runs in `parse_notify_spec`, and every `NotifySpecError` message becomes value-free (today `C:src/decoy/notify.py:128` echoes the whole spec, which can hold a webhook token).
-7. S7 (engine, then CLI): a "Public renames before 1.0" table in contract section 1 (the detection taxonomy renames), and a tag census in each repo with the regex `"[a-z][a-z0-9._-]*/v[0-9]+"`. The engine has 32 tag literals not in the 3.1 block. Each is classified by the rule in 5.6.
+6. S6 (CLI): one outbound function `C:src/decoy/_outbound.py::open_url(url, purpose)`. Purposes and rules are in 10.7 (Q7). `RefuseRedirects` moves from `C:src/decoy/_update_check.py:60` into `_outbound`, so `_update_check` is only the caller for purpose `update_check`, not an allowlisted network owner. The `urlopen` sites (`C:src/decoy/cli/upgrade.py:55`, `C:src/decoy/distribution/installer.py:250`, `C:src/decoy/notify.py:254`, `C:src/decoy/notify.py:319`) call the choke point, and telemetry's `validate_endpoint` (`C:src/decoy/telemetry.py:93`) becomes the `otel` purpose's rule. Notify URLs come from `--notify kind:target`, so `parse_notify_spec` calls the same `_outbound` scheme-policy function used immediately before opening. `notify_webhook` and `notify_slack` re-check every redirect hop against that purpose. Every `NotifySpecError` message becomes value-free (today `C:src/decoy/notify.py:128` echoes the whole spec, which can hold a webhook token).
+7. S7 (engine, then CLI): a "Public renames before 1.0" table in contract section 1 (the detection taxonomy renames), and a tag census in each repo with the regex `"[a-z][a-z0-9._-]*/v[0-9]+"`. The engine has 30 tag literals outside the 3.1 block; `flagged-redacted/v2` and `distribution-snapshot/v2` are already in 3.1 and are not counted again. Each remaining literal is classified by the rule in 5.6.
 
 ### 4.3 FREEZE-OUTPUT
 
-1. O1 (engine), decided by Q10: a `when:` predicate keeps today's null semantics for every operator. Null rows are selected by `!=`, by `not (...)` around a comparison that is false for null, and by `not in`; they are not selected by `==`, `<`, `<=`, `>`, `>=` or `in`. What changes: an integer column that holds a value outside `[-2**53, 2**53]` compares exactly. The `when:` eval frame is built by one function `when_eval_frame(frame, refs)` in `_when_gate.py`. For each referenced nullable integer column: no null, so it stays int64 (as today); every value inside `[-2**53, 2**53]`, so it becomes float64 with `NaN` for null (exactly today's bytes); otherwise it becomes an object column of Python ints with `NaN` for null, and that predicate runs on the pandas python engine. The result equals a Python-int reference evaluator on every chunking. Callers: `_eval_predicate` (`src/decoy_engine/execution/_when_gate.py:115`) calls it first, so `native/_when_mask.py:59` and `_unified_slice_when.py:88` get it too.
-2. O1 ingestion (H1): one function `lossless_int_columns(plan, registry, graph) -> dict[str, set[str]]` in `src/decoy_engine/execution/_fk_keys.py` returns the union every site builds by hand today (FK keys, group anchors, `top_code`, `group_key` siblings, declared ints, date-shift group columns) plus the integer columns any `when:` reads. Every ingestion site calls it: `src/decoy_engine/execution/_pandas_adapter.py:205`, `src/decoy_engine/execution/_sequential.py:422`, `src/decoy_engine/execution/_pipeline_full_frame.py:77`, `src/decoy_engine/execution/_chunked_carry.py:215` (`adapter_fk_safe_columns`, which has already drifted: it lacks declared ints and group anchors), and `src/decoy_engine/execution/native/_when_mask.py:58`. Second output change: a null-bearing integer column read by `when:` and passed through is written as `int64` instead of `double` on the whole-frame and sequential routes (the chunked native leg already writes the source type).
-3. O2 (CLI): compressed CSV targets are written through one function in `C:src/decoy/cli/io/_compression.py`, used by `C:src/decoy/cli/io/_targets.py:405` and `:543`. `.gz`: `gzip.GzipFile(fileobj=tmp, mode="wb", filename="", mtime=0, compresslevel=9)`. `.tar.gz`: the same gzip wrapper around `tarfile.open(fileobj=..., mode="w|")` with one `TarInfo(name=member, mtime=0, mode=0o644, uid=0, gid=0, uname="", gname="")`. `.zip`: `ZipInfo(member, date_time=(1980, 1, 1, 0, 0, 0))`, `ZIP_DEFLATED`, `compresslevel=6`. bz2 and xz keep pandas (their headers hold no name or time). Claim: two runs give byte-identical files for the same input, Decoy version and zlib build.
-4. O3 (engine): a pass-through `large_string` column is written as `string` on every route. Chunked: the passthrough branch of `build_schema_rule` (`src/decoy_engine/execution/native/_chunked_schema_rule.py:294`) records `pa.string()` for a `large_string` field and casts each batch with `narrow_text`. Out-of-core: `passthrough_array` (`src/decoy_engine/kernel/_scalar.py:36`) narrows each chunk with `narrow_text` and never the combined array. Over 2 GiB: when one batch's text does not fit 32-bit offsets, `narrow_text` raises `ArrowInvalid`; the caller splits that batch in halves until each half narrows, and writes the halves as chunks of one `string` column. A run that works today never gets a new refusal. Contract 3.4's "the source type for passthrough" becomes "`string` for a `string` or `large_string` source; the source type otherwise".
+1. O1 (engine), decided by Q10: a `when:` predicate uses one NaN-style rule regardless of ingestion dtype. A blank row is selected by `!=`, by `not (...)` around a comparison that is false for the blank, and by `not in`; it is not selected by `==`, `<`, `<=`, `>`, `>=`, or `in`. `and` and `or` follow that same operand table. This applies to plain columns and to columns currently ingested as pandas `Int64` with `pd.NA`: FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings. The difference for those five classes is a Breaking changelog entry. The `when:` eval frame is built by one function `when_eval_frame(frame, refs, literals)` in `_when_gate.py`, after ingestion and before evaluation on every route. A referenced integer column takes the Python-object path when any non-null value is outside `[-2**53, 2**53]`. It also takes that path when any compared integer literal is outside the range. The literal rule applies when the current chunk contains only in-range values and when the chunk size is 1. Every comparison between an int64 column and a float literal takes the object path. It never depends on float64 rounding. Object columns contain Python ints and `NaN` for blanks, never `pd.NA`, and use the pandas Python engine. Other referenced nullable integer columns are converted to float64 with `NaN` solely for evaluation. The result equals the uniform reference evaluator on every chunking.
+2. O1 ingestion: one function `lossless_int_columns(plan, registry, graph) -> dict[str, set[str]]` in `src/decoy_engine/execution/_fk_keys.py` returns the union every site builds by hand today (FK keys, date-shift anchors, `top_code`, `group_key` siblings, and declared integers) plus integer columns any `when:` reads. Six direct ingestion sites use it: `src/decoy_engine/execution/_pandas_adapter.py:214`, `_sequential.py:422`, `_chunked_carry.py:215`, `_unified_slice_admission.py:364`, `native/_when_mask.py:58`, and `native/_faker_null_mask.py:81`. The unified-slice frame then reaches `compute_when_masks` at `_unified_slice.py:244`. `_faker_null_mask.py` widens its existing protected set with `lossless_int_columns`, rather than replacing its positional-Faker rule. Indirect diagnostic callers `_chunked_oracle.py:465` and `_chunked_carry.py:143` use the same set. `_pipeline_full_frame.py:57` remains a diagnostic-only allowlist entry because it has no plan or registry and converts one column to attribute an existing failure. Second output change: any null-bearing integer column read by `when:` and passed through is written as `int64` instead of `double` for every strategy and route, including `run_mask_pipeline_chunked`'s oracle at `_chunked_oracle.py:195`. Flag-on and flag-off runs have identical values, types, nullability, and metadata.
+3. O2 (CLI): compressed CSV targets are written through one function in `C:src/decoy/cli/io/_compression.py`, used by `C:src/decoy/cli/io/_targets.py:405` and `write_chunked_output` at `:543`. Every text layer is `io.TextIOWrapper(binary, encoding="utf-8", newline="")`. `.gz`: `gzip.GzipFile(fileobj=tmp, mode="wb", filename="", mtime=0, compresslevel=9)`. The non-chunked path has one member; `write_chunked_output` preserves today's exact shape of one gzip member per CSV chunk, concatenated in chunk order, with the fixed header on each member. `.tar.gz`: the same gzip wrapper around `tarfile.open(fileobj=..., mode="w|")` with one `TarInfo(name=member, mtime=0, mode=0o644, uid=0, gid=0, uname="", gname="")`. `.zip`: stage the complete CSV first, set `ZipInfo.file_size` to the staged byte count before `ZipFile.open`, fix `date_time`, `external_attr`, compression type, and compression level, then copy the staged bytes. This lets `zipfile` choose the ZIP64 header before data and adds no refusal beyond 2 GiB. `.bz2`, `.xz`, and `.zst` remain on their existing writers; `.tar`, `.tar.bz2`, and `.tar.xz` remain unchanged. Claim: two runs give byte-identical files for the same input, Decoy version and compression-library build.
+4. O3 (engine): a pass-through `large_string` column is written as `string` on every route. One helper in `src/decoy_engine/_arrow_types.py` takes an Arrow array or record-batch row slice and returns an ordered sequence of losslessly narrowed `string` slices, recursively splitting by rows when 32-bit offsets would overflow. The passthrough branch of `_safe_cast` (`execution/native/_chunked_schema_rule.py:313`) and `kernel/_scalar.py::passthrough_array` both call it. `masked_output_type` (`execution/out_of_core/_mask.py:248`) returns `pa.string()` for a passthrough `large_string`, so analytic type equals emitted data type. The same rule feeds FK type resolution through `_pipeline_routing_fk_dtype.py:94` and `out_of_core/_batch_join.py::_resolve_output_types`. `mask_batch` (`out_of_core/_mask.py:482`) splits record batches by row slices before writing, preserving row order, nulls, and every non-text column. Every route in 5.3 uses the helper or already emits `string`. No run that works today gains a refusal, including a total text payload over 2 GiB when each recursively split row slice fits `string`. Contract 3.4's "the source type for passthrough" becomes "`string` for a `string` or `large_string` source; the source type otherwise".
 
 ## 5. Enumerations
 
@@ -139,8 +160,8 @@ Contract section 1 gets a "Pre-GA corrections taken with the freeze batch" entry
 - `FormulaStrategy`: `src/decoy_engine/execution/_strategies/_formula.py:18`, the draw-site label at `src/decoy_engine/execution/native/_draw_sites_mask.py:375`.
 - `REPORT_SOURCE_AMBIGUOUS`: raised at `C:src/decoy/cli/_sources.py:335`, exported at `C:src/decoy/cli/io/__init__.py:78`, tested at `C:tests/e2e/config_explicit/test_config_explicit_reports.py:230`.
 - Outbound: the four `urlopen` sites; `C:packaging_tools/smoke_install.py:290` (the upgrade document and its `file://` artifact URLs); `C:src/decoy/telemetry.py:93`.
-- `when:` frame: `src/decoy_engine/execution/_when_gate.py:248`, `src/decoy_engine/execution/native/_when_mask.py:59`, `src/decoy_engine/execution/_unified_slice_when.py:88`.
-- Lossless ingestion: the five sites in 4.3 item 2.
+- `when:` frame: `src/decoy_engine/execution/_when_gate.py:248`, `src/decoy_engine/execution/native/_when_mask.py:59`, `src/decoy_engine/execution/_unified_slice_when.py:88`, and unified-slice `compute_when_masks` at `src/decoy_engine/execution/_unified_slice.py:244` after admission converted the source at `_unified_slice_admission.py:364`.
+- Lossless ingestion: the six direct sites and two indirect diagnostic callers in 4.3 item 2. `_pipeline_full_frame.py:57` is the diagnostic-only exception.
 
 ### 5.2 Exit paths
 
@@ -161,12 +182,12 @@ No exit integer changes meaning.
 
 | Route | O1 (`when:` frame and ingestion) | O3 (pass-through type) |
 |---|---|---|
-| whole-frame (`run_pipeline`) | `_pandas_adapter.py` ingestion; `_when_gate.py` frame | already `string` |
-| sequential | `_sequential.py` ingestion; `_when_gate.py` frame | already `string` |
-| `run_mask_pipeline_chunked` (`src/decoy_engine/execution/_chunked.py:382`) | `_when_gate.py` frame | already `string` |
-| `run_mask_chunked` (`src/decoy_engine/execution/native/_chunked_entry.py:589`) | `_when_mask.py` | `_chunked_schema_rule.py` passthrough branch |
-| unified slice | `_unified_slice_when.py:88` | already `string` |
-| out-of-core FK | no `when:` (rejected at plan time) | `kernel/_scalar.py::passthrough_array` |
+| whole-frame (`run_pipeline`) | `_pandas_adapter.py` ingestion; `_when_gate.py` uniform frame | already `string`; O3 helper guard |
+| sequential | `_sequential.py` ingestion; `_when_gate.py` uniform frame | already `string`; O3 helper guard |
+| `run_mask_pipeline_chunked` (`src/decoy_engine/execution/_chunked.py:382`) | `_chunked_oracle.py` through adapter; `_when_gate.py` uniform frame | already `string`; O3 helper guard |
+| `run_mask_chunked` (`src/decoy_engine/execution/native/_chunked_entry.py:589`) | `_when_mask.py`; Faker null masks use the widened set | `_chunked_schema_rule.py::_safe_cast` calls shared split helper |
+| unified slice | `_unified_slice_admission.py:364` ingestion, then `_unified_slice.py:244` and `_unified_slice_when.py:88`; flag-on/off parity required | already `string`; O3 helper guard |
+| out-of-core FK | no `when:` (rejected at plan time) | `passthrough_array`, `masked_output_type`, FK resolver, and `mask_batch` call the shared rule |
 | full-frame mixed route diagnosis | `_pipeline_full_frame.py:77` | n/a |
 
 Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route list as a constant in the test module, with a map row that says so. A new route must add itself; the same limit applies to the other route-parametrized suites.
@@ -184,7 +205,8 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 | reason `layout.report_source_ambiguous` | renamed `report.source_ambiguous` | `--json` error `code`, CI report |
 | reasons `url_scheme_refused`, `url_redirect_refused`, `notify_url_scheme_refused` | added | `--json` error `code` |
 | Arrow type of pass-through text | `large_string` to `string` on `run_mask_chunked` and out-of-core | Parquet schema |
-| Arrow type of a null-bearing integer column read by `when:` and passed through | `double` to `int64` on whole-frame and sequential | Parquet schema, CSV text (`5` instead of `5.0`) |
+| Arrow type of any null-bearing integer column read by `when:` and passed through | `double` to `int64` where a route or strategy widened it; source `int64` retained everywhere | Parquet schema, CSV text (`5` instead of `5.0`) |
+| `when:` blank-row selection for FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings | pandas `pd.NA` route-dependent selection to the uniform NaN-style table | selected rows on every route; Breaking entry names all five classes |
 | gzip header FNAME and MTIME; tar member mtime, uid, gid, names; zip entry `date_time` | removed or fixed | compressed output bytes |
 | registry tier per public object | added | docs, both maps |
 
@@ -192,10 +214,11 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 
 - Parquet schema and CSV text of the routes in 5.3 (O1, O3).
 - Compressed CSV bytes (O2).
-- Rows selected by `when:` on integer columns with a value outside `[-2**53, 2**53]` (O1).
+- Rows selected by `when:` on integer columns when a value or integer literal is outside `[-2**53, 2**53]`, for int64-to-float-literal comparisons that cannot be proved exact, and for blanks in the five formerly `pd.NA` classes (O1).
 - `--json` error `code` (S4, S6).
 - Docs: contract sections 1, 3.1, 3.3, 3.4 and new 3.6; both frozen maps; `C:docs/release/versioning.md`; the SDK, provider and Python API pages.
-- Tag classification. The rule (Q9 answered yes, and the answer covers the builder's reclassifications under this rule): a tag that reaches disk, `--json`, a signed or hashed record, or a derivation input is frozen; a tag that never leaves the process is internal and needs a one-line reason. Frozen tags that name a file or record format go in the 3.1 block with a map row and a pinning test that reads the tag from the written artifact; frozen tags that are derivation labels go in a new 3.3 list, pinned by the existing determinism goldens. Proposed, for the S7 builder to check at each write site: frozen formats `decoy-publication/v1`, `publication/v1`, `pinned-plan/v1`, `pinned-plan-fingerprint/v1`, `decoy-safe-output/v1`, `decoy-quarantine/v1`, `decoy-support-bundle/v1`, `decoy-reasons/v1`, `checkpoint-index/v1`, `decoy-resume-key-check/v1`, `decoy-model-pack/v1`, `dps-marginal/v3`, `post-scan-integrity/v2`, `canary-span-report/v1`, `flagged-redacted/v1`, `flagged-redacted/v2`, `decoy.evidence.statement/v1`, `decoy.trust-policy/v1`, `decoy.required-catalog/v1`, `immutable_directory/v1`; frozen derivation labels `fpe-key/v1`, `tokenize-key/v1`, `secret-provider/v1`, `decoy.shuffle.unkeyed/v1`, `name_email/v1`, `canary-span-normalization/v1`, `policy-expansion/v1`; internal candidates `phase-result/v1`, `phase-event/v1`, `decoy-probe/v1`, `decoy-telemetry/v1`, `distribution-snapshot/v2` if it is already covered by 3.1 under another spelling. The builder's census output is the final list; the count today is 32.
+- Tag classification. The rule (Q9 answered yes, and the answer covers the builder's reclassifications under this rule): a tag that reaches disk, `--json`, a signed or hashed record, or a derivation input is frozen; a tag that never leaves the process is internal and needs a one-line reason. Frozen tags that name a file or record format go in the 3.1 block with a map row and a pinning test that reads the tag from the written artifact; frozen tags that are derivation labels go in a new 3.3 list, pinned by the existing determinism goldens. The S7a artifact sentry runs the writer fixtures for every `INTERNAL_TAGS` owner and scans every resulting file plus captured `--json`; no internal-tag literal may appear. Proposed, for the S7 builder to check at each write site: frozen formats `decoy-publication/v1`, `publication/v1`, `pinned-plan/v1`, `pinned-plan-fingerprint/v1`, `decoy-safe-output/v1`, `decoy-quarantine/v1`, `decoy-support-bundle/v1`, `decoy-reasons/v1`, `checkpoint-index/v1`, `decoy-resume-key-check/v1`, `decoy-model-pack/v1`, `dps-marginal/v3`, `post-scan-integrity/v2`, `canary-span-report/v1`, `flagged-redacted/v1`, `decoy.evidence.statement/v1`, `decoy.trust-policy/v1`, `decoy.required-catalog/v1`, `immutable_directory/v1`; frozen derivation labels `fpe-key/v1`, `tokenize-key/v1`, `secret-provider/v1`, `decoy.shuffle.unkeyed/v1`, `name_email/v1`, `canary-span-normalization/v1`, `policy-expansion/v1`; internal candidates `phase-result/v1`, `phase-event/v1`, `decoy-probe/v1`, `decoy-telemetry/v1`. `flagged-redacted/v2` and `distribution-snapshot/v2` are already in 3.1. The builder's census output is the final list; the count outside 3.1 today is 30.
+- Golden inventory for O1 and O3: `testflight/golden_fingerprints.json` entries `a_healthcare_claims`, `b_retail_m2m`, `c_hr_selfref`, `d_longitudinal_visits`, `e_hostile_edge_cases`, and `f_tokenize_vault` are expected unchanged because their fixtures contain neither the changed `when:` integer-null shapes nor pass-through `large_string`. O1 parity captures in `tests/parity/_f0_expected.py` and FR0 refreeze data are expected unchanged but are rerun. O3 moves the exact type signatures in `tests/parity/test_phase_d_dcomp_composite_ooc.py::test_g7_large_string_parent_component_keeps_its_width_out_of_core_only`; its tool-owned replacement is reviewed with any resulting `tests/fileaccess/route_corpus_golden.json` and `tests/native/_c8_iii_a_main_goldens.json` hash moves. `docs/proof-manifest.json` moves because O1/O3 change tracked source and test files; `scripts/gen_proof_manifest.py` owns it. `docs/capability-matrix.md` is expected unchanged and is regenerated by `scripts/gen_capability_matrix.py` to prove that. The build record gives moved or unchanged for every listed item. After FREEZE-OUTPUT, `plan/faker-migrate` S2, or GEN-PROVIDERS E#661 changes the shared head, whichever lands later reruns every owning tool from faker-migrate section 5.6 plus these O1/O3 parity and proof owners, and `git status` must stay clean.
 
 ## 6. Frozen contracts
 
@@ -204,7 +227,7 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 - `C:docs/release/versioning.md`: "Public surface" gains an "Experimental" list.
 - Reason registries: one rename and three additions (CLI).
 - Output bytes: O1, O2, O3, each with a `Breaking:` fragment and a shape-changelog entry, so `check_shape_changelog.py` passes at REL-GATE G3. S1 has a `Removed:` fragment.
-- Must not change: the draw-site label and census rows of `FormulaStrategy.apply` (AT-S1b); `when:` selection for null rows and for values inside `[-2**53, 2**53]` (AT-O1b).
+- Must not change: the draw-site label and census rows of `FormulaStrategy.apply` (AT-S1b); after O1, the uniform `when:` selection table for blanks and exact integer comparisons on every route and column class (AT-O1b and AT-O1c).
 
 ## 7. Failure modes
 
@@ -219,12 +242,15 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 | F7 | `file://` refused on upgrade breaks the release smoke | `file` allowed for `upgrade_document` and `upgrade_artifact`; AT-S6a uses the smoke's call shape |
 | F8 | A new network call bypasses the choke point | import-based sentry (AT-S6d) |
 | F9 | GitHub release downloads stop working because the CDN redirect is refused | `upgrade_artifact` follows https-to-https redirects; AT-S6e |
-| F10 | O1 stops selecting null rows and leaves rows unmasked | Q10: today's null semantics kept; AT-O1b matrix over every operator |
+| F10 | O1 uses `pd.NA` on one route or column class and selection diverges | Q10 uniform NaN-style semantics; AT-O1b per-route, per-class matrix over every operator |
 | F11 | The ingestion column sets drift apart again | `lossless_int_columns` plus AT-O1e |
 | F12 | O2 drops the atomic staging | the writer runs inside the staging context; AT-O2c |
 | F13 | O3 refuses or corrupts text over 2 GiB | split-then-narrow; AT-O3e |
 | F14 | A tag classified internal reaches disk | the rule in 5.6; S7 builder checks each write site |
 | F15 | FAKER-MIGRATE and this batch both move goldens and one overwrites the other | order in 10.5; the second to land reruns the golden tools on its own head |
+| F16 | A large integer literal rounds even though the current chunk contains only small values | literal-aware object-path rule; AT-O1b and AT-O1c chunk-size-1 cell and mutation |
+| F17 | An internal tag reaches an artifact or `--json` | S7a writer-fixture artifact scan rejects every `INTERNAL_TAGS` literal |
+| F18 | Zip crosses the ZIP64 threshold after a streaming header was chosen | stage CSV, set `ZipInfo.file_size`, and test with patched `ZIP64_LIMIT` |
 
 ## 8. Acceptance tests (red first)
 
@@ -234,7 +260,7 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 | AT-X0b | every experimental class or function has a docstring starting with `EXPERIMENTAL_MARKER`; every experimental constant's module docstring starts with it and names the constant | no markers | drop the marker from `register_faker_provider` | X0 |
 | AT-X0c | the registry equals the map's tier rows, both ways | no registry | add a name to the map only | X0 |
 | AT-X0d | contract section 3.6 lists the same experimental names as the registry | no section | delete one name from 3.6 | X0 |
-| AT-X0e | census: every name in the `__all__` of every public subpackage (walk of `decoy_engine`, excluding `_`-prefixed and `internal`) has an explicit tier; the walk finds at least 39 packages and includes `decoy_engine.sdk` | no census | skip one package in the walk | X0 |
+| AT-X0e | census: the real walk finds at least 59 public packages and 1,186 names; each name matches exactly one per-package rule or explicit exception; `decoy_engine.sdk` is included; a fixture optional package that raises its registered missing-extra `ImportError` is classified statically, while a different `ImportError` fails | no census | skip one package in the walk; separately change the `providers_v2.mimesis` missing dependency name | X0 |
 | AT-X0f | `ConfigError` and `ConnectorError` reached through `sdk` are frozen | no identity rule | tier by name instead of object | X0 |
 | AT-X1a | every `_LAZY_API` name is in exactly one tier row | no tier | drop `scan` from the experimental row | X1 |
 | AT-X1b | `mask`, `scan` and the three error docstrings start with the CLI marker | no marker | remove the marker from `ConfigValidationError` | X1 |
@@ -251,34 +277,37 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 | AT-S6a | `open_url("file:///tmp/v.json", purpose="upgrade_document")` opens; the same URL with `purpose="notify_webhook"` refuses | no choke point | allow `file` for every purpose | S6 |
 | AT-S6b | `decoy upgrade --url ftp://x --json` exits 1 with `url_scheme_refused`, opens no socket, and the message holds no URL | no check | skip the check for upgrade | S6 |
 | AT-S6c | `--notify webhook:file:///x` exits 1 with `notify_url_scheme_refused`; `--notify slack:http://x` is refused; no `NotifySpecError` message contains the spec text | no check, spec echoed | echo the spec in the message | S6 |
-| AT-S6d | import sentry over `C:src/`: no module outside the (path, name) allowlist imports a network module in any covered spelling (10.7) | four direct sites | `import urllib.request as r` in `notify.py` | S6 |
-| AT-S6e | `upgrade_artifact`: a local test server redirects https to https, followed; https to http, refused with `url_redirect_refused`; `update_check` refuses every redirect; `notify_webhook` behaves as today | no per-purpose rule | follow https-to-http | S6 |
+| AT-S6d | AST import sentry over `C:src/`: no function outside the exact `(path, function)` allowlist owns a first-party network call. It resolves aliases and module string constants and covers `import urllib`, `import urllib.request as r`, `from urllib import request as r`, `from urllib.request import urlopen as u`, and the other 10.7 spellings | four direct sites | `import urllib` then `urllib.request.urlopen(...)` in `notify.py`; separately bind a module constant for `import_module` | S6 |
+| AT-S6e | `upgrade_artifact`: a local test server redirects https to https, followed; https to http, refused with `url_redirect_refused`; `update_check` refuses every redirect through `_outbound.RefuseRedirects`; `notify_webhook` and `notify_slack` preserve their allowed hops but re-check each one | no per-purpose rule | follow a notify redirect to a disallowed scheme | S6 |
 | AT-S6f | the `otel` purpose refuses exactly what `validate_endpoint` refuses today (table-driven from its current tests) | guard | drop the header rule | S6 |
-| AT-S7a | engine tag census: every literal matching `"[a-z][a-z0-9._-]*/v[0-9]+"` under `src/` is in 3.1, the 3.3 label list, or `INTERNAL_TAGS` with a reason | 32 unlisted | add a new tag literal | S7 |
+| AT-S7a | engine tag census: every literal matching `"[a-z][a-z0-9._-]*/v[0-9]+"` under `src/` is in 3.1, the 3.3 label list, or `INTERNAL_TAGS` with a reason; the base has 30 outside 3.1 | 30 unlisted | add a new tag literal | S7 |
 | AT-S7b | CLI tag census: same rule over `C:src/` and the CLI map | no sentry | add `"x.tag/v1"` | S7 |
 | AT-S7c | each new 3.1 tag has a map row and a pinning test that reads it from a written artifact | no rows | drop one map row | S7 |
 | AT-S7d | contract section 1 renames table lists every pair of the taxonomy map, and each old name is in the retired-name residual list | no table | drop `run_storm` | S7 |
-| AT-O1a | for every route in 5.3: an integer column holding `2**53`, `2**53 + 1` and a null; `when: "id == 9007199254740993"` selects exactly one row | float64 rounding selects two | skip the object path in `when_eval_frame` | O1 |
-| AT-O1b | null-row matrix: for `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in`, `not (==)`, `not (<)`, `and`, `or`, on a null-bearing integer column with ordinary values and with a value beyond 2**53, over chunk sizes 1, 2, 3 and whole-frame, the selected rows equal a pinned table of today's selection (null rows selected by `!=`, `not in`, `not (...)`) | object path without `NaN` nulls selects differently | use `pd.NA` for null in the object path | O1 |
-| AT-O1c | on random frames (ints across `+-2**63`, nulls), the mask equals a Python-int reference evaluator that uses `NaN` semantics for null | float64 path | drop the range check | O1 |
+| AT-S7e | artifact-scan sentry runs the writer fixtures for every `INTERNAL_TAGS` owner and asserts no internal-tag literal occurs in any written file or captured `--json`; each fixture proves it wrote at least one artifact | no artifact proof | write one internal tag into a fixture's JSON output | S7 |
+| AT-O1a | for every route in 5.3: an integer column holding `2**53`, `2**53 + 1` and a blank; `when: "id == 9007199254740993"` selects exactly one row; flag-on and flag-off results have equal values, type, nullability, and metadata | float64 rounding selects two | skip the object path in `when_eval_frame` | O1 |
+| AT-O1b | uniform selection matrix runs once for each column class (plain, FK key, declared integer, date-shift anchor, `top_code`, `group_key` sibling) on every route in 5.3 and for chunk sizes 1, 2, 3 and whole-frame. It pins `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in`, `not (==)`, `not (<)`, `and`, and `or`: blanks are selected by `!=`, `not in`, and `not (...)`. It includes a chunk with only in-range values and the literal `9007199254740993`, and int64 against exact and inexact float literals | today's Int64 classes use `pd.NA`; literal-only trigger is absent | one mutation per class restores `pd.NA`; another removes the literal-range check | O1 |
+| AT-O1c | generated frames with ints across `+-2**63`, blanks, integer literals across the same range, and int64/float-literal pairs equal the Python-int-and-NaN reference evaluator on every route; a fixed chunk-size-1 example has only in-range values and an out-of-range literal | float64 path | drop the value-range check; separately drop the literal-range check | O1 |
 | AT-O1d | an FK integer key read by `when:` still matches the DE-10 contract | guard | drop FK columns from the set | O1 |
-| AT-O1e | drift sentry: `fk_columns_for_table` and `to_pandas_fk_safe` at the five ingestion sites take their column set only from `lossless_int_columns`; other callers are on a (path, reason) allowlist | sets built by hand | build the set by hand in `_chunked_carry.py` | O1 |
-| AT-O1f | a null-bearing integer column read by `when:` and passed through is `int64` on whole-frame and sequential | written as `double` | leave `when:` columns out of the set | O1 |
-| AT-O2a | two runs to `out.csv.gz`, `out.csv.tar.gz` and `out.csv.zip` give byte-identical files | time in headers | `mtime=None` | O2 |
-| AT-O2b | gzip header: byte 3 has the FNAME bit clear and bytes 4 to 8 are `00 00 00 00`; tar member has mtime 0, uid 0, gid 0, empty names; zip entry `date_time` is `(1980, 1, 1, 0, 0, 0)` | staging name and time stored | pass `filename=tmp.name` | O2 |
+| AT-O1e | AST drift sentry checks exact `(path, function)` callers of both `fk_columns_for_table` and `to_pandas_fk_safe`. `_fk_keys.py:lossless_int_columns` is the sole production caller that builds the complete set from `fk_columns_for_table`. Direct ingestion rows are `_pandas_adapter.py:PandasExecutionAdapter.run`, `_sequential.py:run_sequential`, `_chunked_carry.py:adapter_fk_safe_columns`, `_unified_slice_admission.py:cheap_admission`, `native/_when_mask.py:when_mask`, `native/_faker_null_mask.py:plan_faker_null_masks` and `faker_missing_mask`. Indirect diagnostic rows are `_chunked_oracle.py:_oracle_masked` and `_chunked_carry.py:CarryPlan.diagnose_adapter`. Narrow-purpose rows are `_mixed_fk_bridge.py:_write_back_fk_column`, `_transforms_table.py:to_transform_frame`, and `native/_group_key_kernel.py:_stringify_sibling`. `_pipeline_full_frame.py:_raise_if_source_value_unrepresentable` is the diagnostic-only exception. Each row has a reason; any other caller fails. Plain `.to_pandas()` ingestion is a known limit, not claimed by this sentry | sets built by hand | build the set by hand in `_chunked_carry.py`; separately call the helper from a new function with an allowlisted bare name | O1 |
+| AT-O1f | for every route and every admitted strategy, a null-bearing integer column read by `when:` and passed through is `int64`, including `run_mask_pipeline_chunked` oracle; flag-on and flag-off schema equality includes metadata | some routes write `double` | leave `when:` columns out of the set | O1 |
+| AT-O2a | two runs to `out.csv.gz`, `out.csv.tar.gz` and `out.csv.zip` give byte-identical files; chunked gzip parses as exactly one member per input chunk and concatenates to the uncompressed CSV bytes | time in headers | `mtime=None`; separately collapse chunked gzip to one member | O2 |
+| AT-O2b | gzip header: byte 3 has FNAME clear and bytes 4 to 8 are zero for every member; tar guard: member mtime 0, uid 0, gid 0, empty names; zip entry has fixed `date_time`, explicit fixed `external_attr`, expected compression and staged `file_size` | staging name and time stored | pass `filename=tmp.name`; separately omit `external_attr` | O2 |
 | AT-O2c | a failure after chunk one keeps the old output for each compressed suffix | guard | open the final path directly | O2 |
 | AT-O2d | the decompressed CSV equals the uncompressed run's bytes | guard | change the line terminator | O2 |
+| AT-O2e | with `zipfile.ZIP64_LIMIT` patched below the fixture size, zip writes and reads successfully with a ZIP64 local header and no new refusal; the staged size was set before `ZipFile.open` | streaming header lacks ZIP64 | omit `ZipInfo.file_size` | O2 |
+| AT-O2f | `.tar`, `.tar.bz2`, `.tar.xz`, `.bz2`, `.xz`, and `.zst` output bytes and decoded CSV match the base; wrappers use `encoding="utf-8", newline=""` | guard | route `.xz` through the new gzip writer | O2 |
 | AT-O3a | for every route in 5.3, a pass-through `large_string` column is `string` in the output | `run_mask_chunked` keeps `large_string` | remove the narrow in the passthrough branch | O3 |
 | AT-O3b | an FK pass-through `large_string` key joins the same rows | guard | narrow the parent only | O3 |
-| AT-O3c | AT-E3-2 (`tests/native/test_chunked_nondet_categorical_admission.py:709`) expects `string`, changed in the same commit as the cast; the gate checks the edit is the type assertion only | pins `large_string` | none: diff-checked at the gate | O3 |
+| AT-O3c | AT-E3-2 (`tests/native/test_chunked_nondet_categorical_admission.py:709`) and the G7 signatures in `tests/parity/test_phase_d_dcomp_composite_ooc.py` expect `string`, changed in the same commit as the cast; the gate checks that only the expected type/signature assertions and test name change | pin `large_string` | none: diff-checked at the gate | O3 |
 | AT-O3d | out-of-core: `passthrough_array` narrows each chunk; it never calls `combine_chunks` on a `large_string` input | combined first | narrow after `combine_chunks` | O3 |
-| AT-O3e | with `narrow_text` patched to refuse arrays above a small byte size, a long pass-through column is written as `string` in split chunks and the run exits 0 | `ArrowInvalid` raised | re-raise instead of split | O3 |
+| AT-O3e | patch the shared split-and-narrow helper with a small byte threshold and run every route in 5.3. Each writes an ordered `string` column by row-sliced arrays or record batches and exits 0; FK analytic resolution equals data type; a total payload above the threshold is not refused when its row slices fit | `ArrowInvalid` raised or analytic type stays `large_string` | bypass the shared helper in `_safe_cast`; separately return source type from `masked_output_type` | O3 |
 
 ## 9. Placement
 
 | File | New or changed | CODEMAP row | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/contracts/stability.py` | new: `TIERS`, `EXPERIMENTAL_MARKER`, `INTERNAL_TAGS`, `DERIVATION_LABELS` | Versioned contracts | `contracts/distribution_snapshot.py` |
+| `src/decoy_engine/contracts/stability.py` | new: `PACKAGE_TIERS`, `TIER_EXCEPTIONS`, optional-extra rules, `EXPERIMENTAL_MARKER`, `INTERNAL_TAGS`, `DERIVATION_LABELS` | Versioned contracts | `contracts/distribution_snapshot.py` |
 | `docs/compatibility-contract.md`, `docs/frozen-surfaces.md` | changed | Feature and contract docs | - |
 | `tests/sentry/release/test_frozen_surface_map.py` | changed | Sentry test (release) | - |
 | `tests/sentry/release/test_public_census.py` | new (AT-X0a, AT-X0e, AT-X0f) | Sentry test (release) | the map sentry |
@@ -291,28 +320,30 @@ Known limit: there is no route registry, so AT-O1a and AT-O3a carry the route li
 | `tests/sentry/defects/test_when_reserved_names.py` | new | Sentry test (recurring-defect) | - |
 | `src/decoy_engine/execution/_when_gate.py` | changed (`when_eval_frame`) | Pipeline spine and routes | - |
 | `src/decoy_engine/execution/_fk_keys.py` | changed (`lossless_int_columns`; 380 lines today) | Pipeline spine and routes | - |
-| `src/decoy_engine/execution/_pandas_adapter.py`, `_sequential.py`, `_pipeline_full_frame.py`, `_chunked_carry.py`, `native/_when_mask.py` | changed (call sites) | Pipeline spine; Native companion bridge | - |
+| `src/decoy_engine/execution/_pandas_adapter.py`, `_sequential.py`, `_chunked_carry.py`, `_unified_slice_admission.py`, `native/_when_mask.py`, `native/_faker_null_mask.py` | changed (six direct call sites) | Pipeline spine; Native companion bridge | - |
 | `tests/sentry/defects/test_lossless_int_columns.py` | new | Sentry test (recurring-defect) | - |
 | `src/decoy_engine/execution/native/_chunked_schema_rule.py` | changed (passthrough branch) | Native companion bridge | - |
 | `src/decoy_engine/kernel/_scalar.py` | changed (`passthrough_array`) | Arrow kernels | - |
+| `src/decoy_engine/_arrow_types.py`, `src/decoy_engine/execution/out_of_core/_mask.py`, `_pipeline_routing_fk_dtype.py`, `out_of_core/_batch_join.py` | changed (one split/narrow rule and analytic type consumers) | Shared bottom leaf; Out-of-core FK; Pipeline routing | - |
 | `C:src/decoy/__init__.py`, `C:src/decoy/api.py` | changed | Python API | `_LAZY_API` |
+| `C:CODEMAP.md` | changed: add the shared first-party outbound policy row | Where Things Go map | existing Notifications and Shipped install rows |
 | `C:docs/release/frozen-surfaces.md`, `C:docs/release/versioning.md`, `C:docs/roadmap/post-1.0-plan.md` | changed | Release runbooks, logs and maps; Roadmap | - |
 | `C:tests/sentry/release/test_frozen_surface_map.py` | changed | Release runbooks, logs and maps | - |
 | `C:tests/sentry/release/test_hidden_names.py`, `C:tests/sentry/release/test_tag_census.py` | new | Sentry test | `test_frozen_surface_map.py` |
 | `C:src/decoy/cli/demo.py` | changed | Command module | - |
 | `C:src/decoy/cli/io/_layout_errors.py` | changed (`REPORT_DESCRIPTORS`) | Project layout services | - |
-| `C:src/decoy/_outbound.py` | new | Private shared filesystem or process primitives | `_atomic.py` |
-| `C:src/decoy/notify.py`, `C:src/decoy/telemetry.py`, `C:src/decoy/cli/upgrade.py`, `C:src/decoy/distribution/installer.py` | changed | Notifications, telemetry; Command module; Shipped install and update | - |
+| `C:src/decoy/_outbound.py` | new | New CODEMAP row "Shared first-party outbound policy": `src/decoy/_outbound.py`; the existing map has no network-policy row, so S6 adds it before the module | beside `_update_check.py`, `notify.py`, and `telemetry.py` at their shared root |
+| `C:src/decoy/_update_check.py`, `C:src/decoy/notify.py`, `C:src/decoy/telemetry.py`, `C:src/decoy/cli/upgrade.py`, `C:src/decoy/distribution/installer.py` | changed | Shared outbound caller; Notifications, telemetry; Command module; Shipped install and update | - |
 | `C:tests/sentry/io_policy/test_outbound_choke_point.py` | new | Sentry test | `test_update_check_no_identifiers.py` |
 | `C:src/decoy/cli/io/_compression.py`, `C:src/decoy/cli/io/_targets.py` | changed (one compressed writer) | Source readers and target writers | - |
 
-No new module under `src/decoy_engine/execution/` (frozen at 103) or at the engine root (at its fan-out cap). The registry goes in `contracts/`.
+No new module is added under `src/decoy_engine/execution/` or at the engine root. The registry goes in `contracts/`. CLI `src/decoy/` has 17 direct Python modules today, below the about-25 limit; `_outbound.py` is placed there only after the CODEMAP gains its explicit shared-outbound row.
 
 ## 10. Design notes
 
 ### 10.1 One registry per repo, keyed by object
 
-`contracts/stability.py` holds `TIERS`, a tuple of `(module, name, tier)` rows, plus the marker and the two tag lists. The census sentry imports every public package, resolves each `__all__` name to its object, and groups by `id(obj)`; each group must map to exactly one tier. Constants (ints, strings) are not unique objects, so constants are matched by `(module, name)` and their defining module wins. The CLI keeps `EXPERIMENTAL_API` beside `_LAZY_API`. No decorator (mutmut 3.7, API reference signatures).
+`contracts/stability.py` holds package rules plus a short `(module, name, tier)` exception tuple, the marker, and the two tag lists. Contract 3.4 packages derive frozen rows from the contract; other public subpackages derive documented-internal rows unless an exception marks a name frozen or experimental. The census imports all 59 public packages, resolves 1,186 names, and groups non-constant exports by `id(obj)`; each group must map to exactly one tier. Constants are matched by `(module, name)` and their defining module wins. Optional-extra packages have one registry from package to expected missing dependency and statically declared exports; only that exact `ImportError` may skip runtime resolution. The CLI keeps `EXPERIMENTAL_API` beside `_LAZY_API`. No decorator (mutmut 3.7, API reference signatures). The census test module stays below the 700-line hand-written module cap, with a 650-line ceiling and expected size about 330 lines.
 
 ### 10.2 Hidden names
 
@@ -320,23 +351,24 @@ The sentry reads `walk()` from `C:tests/command_tree.py` and compares the hidden
 
 ### 10.3 Pass-through narrowing
 
-Chunked: `SchemaRule.passthrough_types` records `pa.string()` for a `large_string` field, so the per-batch cast in `_safe_cast` produces `string`. Out-of-core: `passthrough_array` returns a `pa.ChunkedArray` of narrowed chunks when given a chunked input; its two callers (`execution/native/_kernels_scalar.py:79`, `execution/out_of_core/_mask.py:214`) already pass the result to writers that accept chunked arrays; the builder confirms both. Split rule: on `ArrowInvalid` from `narrow_text`, slice the batch in two and retry each half, down to one row (a single value over 2 GiB is not representable as `string` and is not representable in Parquet either, so today's run already fails there).
+`_arrow_types.py` owns one `split_narrow_text` helper. It narrows arrays and row slices, bisects on offset overflow, and returns ordered slices. The chunked schema rule's passthrough `_safe_cast` branch and `passthrough_array` call it; no caller implements its own split. Out-of-core `masked_output_type` applies the same `large_string` to `string` analytic rule, which feeds routing and `_batch_join._resolve_output_types`. `mask_batch` splits record batches on row boundaries and repeats the untouched arrays as matching slices, so writers see aligned batches. A total column larger than 2 GiB succeeds when its row slices fit. A single text value too large for `string` already fails today, so O3 adds no refusal to a run that currently succeeds.
 
 ### 10.4 Compressed writer
 
-One function in `_compression.py` returns a context manager that yields a text stream for `to_csv` and closes the gzip, tar or zip layers in its `finally`. Tar needs the member size in advance, so the CSV is written to a second staging temp first and then added with `TarInfo.size` set; zip uses `ZipFile.open(zinfo, "w")` streaming. Compression levels are pinned to today's library defaults (gzip 9, zip deflate 6), so the deflate stream bytes do not change, only the headers.
+One function in `_compression.py` returns a context manager that yields `TextIOWrapper(..., encoding="utf-8", newline="")` for `to_csv` and closes every compression layer in its `finally`. `write_chunked_output` opens and closes one fixed-header gzip member per chunk, preserving today's concatenated-member shape. Tar needs the member size in advance, so the CSV is written to a second staging temp and then added with `TarInfo.size` set. Zip also stages the CSV, sets `ZipInfo.file_size` before `ZipFile.open`, fixes `date_time` and `external_attr`, and copies the bytes; this chooses ZIP64 in the local header when needed. Compression levels are pinned to today's defaults (gzip 9, zip deflate 6). Existing `.tar`, `.tar.bz2`, `.tar.xz`, `.bz2`, `.xz`, and `.zst` paths are guards and do not move to this function.
 
 ### 10.5 Order with other plans (Q11)
 
-- FAKER-MIGRATE (`E:plan/faker-migrate`) edits contract sections 1 and 3.3, adds Breaking fragments, rewrites the testflight goldens, and has its own engine release and CLI repin. Order: this batch's engine release goes first; FAKER-MIGRATE S2 comes after. Whichever lands second reruns the golden tools (section 5.6 of that plan) on its own head and rebases the contract section 1 and 3.3 text; it never edits a golden by hand.
+- FAKER-MIGRATE (`E:plan/faker-migrate`) edits contract sections 1 and 3.3, adds Breaking fragments, rewrites the testflight goldens, and has its own engine release and CLI repin. Owner Q11: this batch's engine release goes first; FAKER-MIGRATE S2 comes after. Whichever of FREEZE-OUTPUT, FAKER-MIGRATE S2, and GEN-PROVIDERS E#661 lands later reruns every owning tool in faker-migrate section 5.6 plus the O1/O3 parity and proof owners listed in 5.6, on its final head, and requires a clean `git status`. It never edits a golden by hand.
 - PROP-batch C-F1b changes `C:src/decoy/cli/io/_targets.py` `write_targets` and the demo writer; O2 changes the two write functions in the same module, and S2 changes `C:src/decoy/cli/demo.py`. O2 and S2 start after C-F1b merges and rebase on it.
 - PROP-batch E-S1a and E-S1b delete root bindings and `ExecutionContext` members. X0's census requires registry rows equal to `__all__` both ways, so whichever lands second removes or adds the rows in its own diff. Recommended: E-S1a first, then X0.
 - REL-GATE G3 runs both map sentries, so X0, X1, S2, S4, S5 and S7 merge before G0.
-- One engine release carries X0, S1, S5, S7, O1 and O3; one CLI repin follows.
+- OUTPUT-METADATA-LEAK rev 3 at `0567f993f` reciprocally orders its E1/C1 against this batch. E1 rebases after X0. If E1 is merged when this engine release is cut, the release carries E1 with X0, S1, S5, S7, O1, and O3, and the one CLI repin contains it. Otherwise E1 rides the next daily engine release and requires a second CLI repin. C1 always lands after O2 because both edit `_targets.py`. O3 owns the contract 3.4 passthrough-type sentence; metadata-leak E1 owns the adjacent route-metadata paragraph and must not retain its old claim that passthrough columns always keep the source field, because O3 narrows `large_string` fields.
+- The freeze engine release carries X0, S1, S5, S7, O1, O3, and conditionally metadata-leak E1; one CLI repin follows, unless the E1 fallback requires the recorded second repin.
 
 ### 10.6 `lossless_int_columns`
 
-It moves the five hand-built unions into one function in `_fk_keys.py` (the module that owns the DE-10 contract). `adapter_fk_safe_columns` in `_chunked_carry.py` becomes a call to it, which fixes its drift (missing declared ints and group anchors). Other `to_pandas_fk_safe` callers with a deliberately narrower set (`_mixed_fk_bridge.py`, `_transforms_table.py`, `_unified_slice_admission.py`, `native/_faker_null_mask.py`, `native/_group_key_kernel.py`) go on the AT-O1e allowlist with a reason each.
+It replaces direct-site unions with one function in `_fk_keys.py` (the module that owns the DE-10 contract). `_pandas_adapter.py:214` and `_chunked_carry.py:215` currently disagree because the latter omits declared integers and date-shift/group anchors; both call the new function. `_sequential.py:422`, `_unified_slice_admission.py:364`, and `native/_when_mask.py:58` call it too. `native/_faker_null_mask.py:81` unions it with the positional-Faker protected set. Indirect diagnostic paths `_chunked_oracle.py:465` and `_chunked_carry.py:143` receive the same result. AT-O1e parses the AST and checks exact `(path, function)` identities for both helpers; the complete identities are in the AT-O1e row, and a bare helper-name allowlist is forbidden. `_pipeline_full_frame.py:_raise_if_source_value_unrepresentable` stays as a diagnostic exception because it receives no plan or registry and deliberately retries one column. Plain `to_pandas()` ingestion remains a known limit outside the helper claim. `when_eval_frame` is the post-ingestion choke point that replaces `pd.NA` with `NaN` for evaluation, so lossless storage dtype and uniform selection semantics do not conflict.
 
 ### 10.7 Outbound purposes and the import sentry
 
@@ -344,18 +376,18 @@ It moves the five hand-built unions into one function in `_fk_keys.py` (the modu
 |---|---|---|---|
 | `upgrade_document` | https, file | https to https only | `upgrade --url`, default version document |
 | `upgrade_artifact` | https, file | https to https only (GitHub release downloads redirect to a CDN) | installer download, artifact URLs inside the document (`C:packaging_tools/smoke_install.py:290`) |
-| `update_check` | https | none (existing `RefuseRedirects`) | `_update_check.py` |
-| `notify_webhook` | https, http | as today | `--notify webhook:` |
-| `notify_slack` | https | as today | `--notify slack:` |
+| `update_check` | https | none (`_outbound.RefuseRedirects`) | `_update_check.py` calls `_outbound` |
+| `notify_webhook` | https, http | followed only while every hop remains allowed for this purpose | `--notify webhook:` |
+| `notify_slack` | https | https-to-https only | `--notify slack:` |
 | `otel` | the rules of today's `validate_endpoint`, moved unchanged | as today (requests) | telemetry |
 
-Each hop of a followed redirect is re-checked against the purpose's schemes. Import sentry spellings covered: `import urllib.request`, `import urllib.request as x`, `from urllib import request`, `from urllib.request import urlopen` (any name), `import http.client` and `from http import client`, `import requests`, `import urllib3`, `import httpx`, `import socket`, `import smtplib`, and `importlib.import_module` or `__import__` with any of those names as a string literal. Allowlist (path, name): `_outbound.py` `urllib.request`; `_update_check.py` `urllib.request`; `telemetry.py` `requests`; `notify.py` `smtplib`. Known limit: a dynamic import with a computed name is not seen.
+Each hop of every followed redirect is re-checked against the purpose's schemes, including notify. `parse_notify_spec` asks `_outbound` for the purpose's scheme decision; it does not copy the table. Import sentry spellings covered: `import urllib`, `import urllib.request`, either with aliases; `from urllib import request as r`; `from urllib.request import urlopen` with any alias; `import http.client` and `from http import client`; `import requests`, `urllib3`, `httpx`, `socket`, and `smtplib`; and `importlib.import_module` or `__import__` when the name is a literal or a module-level constant the AST can resolve. Allowlist entries are exact `(path, function)`: `_outbound.py` owns urllib request opening and redirect handlers; `telemetry.py` owns the third-party `requests` call after applying the `otel` rule; `notify.py` owns SMTP only. `_update_check.py` is not allowlisted. Known limit: a dynamic import with a computed non-constant name is not seen and is V2-LOG.
 
 ## 11. Size
 
 | Slice | Source lines | Test lines | Docs lines |
 |---|---|---|---|
-| X0 | 120 | 260 | 180 |
+| X0 | 100 | 330 | 180 |
 | X1 | 30 | 120 | 80 |
 | S1 | -170 net | 40 | 10 |
 | S2 | -120 net | 90 | 20 |
@@ -368,34 +400,34 @@ Each hop of a followed redirect is re-checked against the purpose's schemes. Imp
 | O2 | 110 | 220 | 20 |
 | O3 | 60 | 240 | 30 |
 
-S7 is split because the per-tag pinning tests put it past 700 lines. Every slice is under the 800-line budget.
+X0 is about 610 hand-written lines total, and `test_public_census.py` has a 650-line ceiling below the 700-line module cap. S7 is split because the per-tag pinning and artifact tests would otherwise put one module past 700 lines. Every other hand-written module remains below its applicable cap.
 
 ## 12. Slices
 
 | Slice | Repo | Content | Risk | Acceptance tests | Depends on | Test gate |
 |---|---|---|---|---|---|---|
-| X0 | engine | contract 3.6 and section 1 entry, `contracts/stability.py`, census and marker sentries, docstrings | R1 | AT-X0a to AT-X0f | E-S1a (10.5) | T1 plus the new sentries; Codex |
+| X0 | engine | contract 3.6 and section 1 entry, rule-based `contracts/stability.py`, 59-package census and marker sentries, optional-extra handling, docstrings | R2 | AT-X0a to AT-X0f | E-S1a (10.5) | T2 plus the new sentries and mutations; Dennis then Codex |
 | X1 | CLI | `EXPERIMENTAL_API`, CLI map and `versioning.md` tiers, API docstrings, `library` tier `gate` | R1 | AT-X1a to AT-X1c | X0 | T1; Codex |
 | S1 | engine | delete the two base modules and `pyproject.toml` entries; `FormulaStrategy` plain; Removed fragment | R1 | AT-S1a, AT-S1b | - | T1 plus formula and draw-site tests; mutations on `formula.py` |
 | S2 | CLI | remove demo `--ref`, `--rows`, `_generate_ref_datasets`; hidden-name sentry | R1 | AT-S2a, AT-S2b | X1; PROP C-F1b | T1; Codex |
 | S4 | CLI | `report.source_ambiguous`, `REPORT_DESCRIPTORS`, code snapshot, post-1.0 row | R2 | AT-S4a, AT-S4b | - | T2; Dennis and Codex |
 | S5 | engine | reserved names, guard sentry, snapshot | R2 | AT-S5a to AT-S5c | X0 | T2; Dennis and Codex |
 | S6 | CLI | `_outbound.open_url`, purposes, redirect handlers, value-free notify errors, import sentry | R2 | AT-S6a to AT-S6f | - | T2 plus the smoke-install test; Dennis and Codex |
-| S7a | engine | tag census, 3.1 and 3.3 rows, map rows and pinning tests, `INTERNAL_TAGS` | R1 | AT-S7a, AT-S7c | X0 | T1; Codex |
+| S7a | engine | tag census, 3.1 and 3.3 rows, map rows, pinning tests, `INTERNAL_TAGS`, writer-fixture artifact scan | R2 | AT-S7a, AT-S7c, AT-S7e | X0 | T2 including artifact mutations; Dennis then Codex |
 | S7b | CLI | CLI tag census; contract section 1 renames table and residual list | R1 | AT-S7b, AT-S7d | S7a | T1; Codex |
-| O1 | engine | `when_eval_frame`, `lossless_int_columns`, five call sites, drift sentry, Breaking fragment | R2 | AT-O1a to AT-O1f | - | T2 over every route; mutations on both functions; Dennis and Codex |
-| O2 | CLI | one compressed writer for gz, tar.gz, zip; Breaking fragment | R2 | AT-O2a to AT-O2d | PROP C-F1b | T2; Dennis and Codex |
+| O1 | engine | uniform `when_eval_frame`, literal-aware object path, `lossless_int_columns`, six direct sites, exact-caller sentry, Breaking fragment naming five changed classes | R2 | AT-O1a to AT-O1f | - | T2 over every route/class/strategy; value, literal, and per-class mutations; Dennis and Codex |
+| O2 | CLI | deterministic gz members, tar.gz, staged ZIP64-safe zip, guard suffixes; Breaking fragment | R2 | AT-O2a to AT-O2f | PROP C-F1b | T2 including patched ZIP64 limit; Dennis and Codex |
 | O3 | engine | narrow in the schema rule and `passthrough_array`, split rule, contract 3.4, AT-E3-2 | R2 | AT-O3a to AT-O3e | - | T2 over every route; Dennis and Codex |
 
-Order: S1, O1 and O3 start at once. X0 starts after E-S1a. X1, S5 and S7a follow X0; S7b follows S7a. S4 and S6 start at once on the CLI; S2 and O2 wait for PROP C-F1b. One engine release (X0, S1, S5, S7a, O1, O3), before FAKER-MIGRATE S2; one CLI repin. Target: all merged before REL-GATE G0 on 2026-12-04.
+Order: S1, O1 and O3 start at once. X0 starts after E-S1a. X1, S5 and S7a follow X0; S7b follows S7a. S4 and S6 start at once on the CLI; S2 and O2 wait for PROP C-F1b. The engine release (X0, S1, S5, S7a, O1, O3, plus metadata-leak E1 if it has merged by the cut) ships before FAKER-MIGRATE S2; one CLI repin follows. If metadata-leak E1 misses the cut, it ships in the next daily release and causes the recorded second CLI repin; its C1 still lands after O2. Target: all freeze slices merged before REL-GATE G0 on 2026-12-04.
 
 ## 12.1 Done when
 
-Every slice is merged with its acceptance tests green and its mutations red; both map sentries are green on the engine release head and the CLI repin head; the Breaking fragments for O1, O2, O3, S2, S4, S5 and S6 and the Removed fragment for S1 are in `changelog.d/` or the CLI `CHANGELOG`; contract section 1 lists the freeze batch corrections.
+Every slice is merged with its acceptance tests green and its mutations red; both map sentries are green on the engine release head and the CLI repin head; the Breaking fragments for O1, O2, O3, S2, S4, S5 and S6 and the Removed fragment for S1 are in `changelog.d/` or the CLI `CHANGELOG`; contract section 1 lists the freeze batch corrections. O1/O3 record each golden, parity hash, and proof output in 5.6 as moved or unchanged. On the final shared head, every owning tool from faker-migrate section 5.6 plus the O1/O3 owners is rerun and leaves the tree clean. The release manifest conditionally includes metadata-leak E1 exactly as 10.5 specifies.
 
 ## 13. Recurring-defect class check
 
-- A test weakened to pass: AT-O3c is the only edited existing assertion; the gate checks it changes the type only.
+- A test weakened to pass: AT-O3c lists every edited existing assertion; the gate checks that each changes only the expected type or signature and that all value, row, null, metadata, and parity assertions remain.
 - Two copies of a central mechanism: one tier registry per repo, one outbound function, one lossless-column function, one `when:` frame function, one compressed writer. The ingestion drift found in `_chunked_carry.py` is the class this closes.
 - A frozen surface changed without its records: each output slice carries its contract sentence, map row and fragment in the same commit.
 - Value-free errors: the new refusals name the purpose and scheme only; `NotifySpecError` stops echoing the spec.
@@ -411,16 +443,33 @@ Every slice is merged with its acceptance tests green and its mutations red; bot
 | 5 | Referential integrity (FK keys after the narrow or the frame change) | FK keys stay on the DE-10 path; the narrow keeps values | AT-O1d, AT-O3b | narrow the parent only | O1, O3 |
 | 6 | Untrusted input (a URL from a flag or a version document) | per-purpose scheme allow list; every redirect hop re-checked | AT-S6a, AT-S6e | follow https to http | S6 |
 | 7 | TOCTOU or check-then-use (scheme checked, a different URL opened) | `open_url` parses once, checks and opens that parsed value; redirect hops are checked inside the handler before the request | AT-S6a, AT-S6e | check, then open a re-read string | S6 |
-| 8 | Weak proof (a sentry that passes on an empty set; a guard labelled as a red test) | each sentry asserts a minimum set and a known member; guards are labelled | self-tests; AT-X0e floor of 39; AT-S5a labelled | make the walk return nothing | X0, S2, S5, S6, S7a |
+| 8 | Weak proof (a sentry that passes on an empty set; a guard labelled as a red test) | each sentry asserts a minimum set and a known member; guards are labelled | self-tests; AT-X0e floors of 59 packages and 1,186 names; AT-S5a labelled | make the walk return nothing | X0, S2, S5, S6, S7a |
 | 9 | Refactor drift (S1 changes formula output; the ingestion move changes a set) | S1 removes bases only; `lossless_int_columns` returns the old union plus `when:` columns, checked per site | AT-S1b, AT-O1e | rename `apply`; drop declared ints | S1, O1 |
 | 10 | Frozen contract drift (contract, map and code disagree) | the registry is the source; sentries compare contract 3.6, both maps and docstrings to it | AT-X0c, AT-X0d, AT-S5c, AT-S4b, AT-S7c | edit the map only | X0, X1, S4, S5, S7a |
+
+### 13.2 Recurring defect catalog
+
+| Catalog class | Plan check |
+|---|---|
+| 1. Anchored validation | Tag and version patterns use `re.fullmatch` or `\Z`, never `$`; newline cells are included in the sentries. |
+| 2. Strict wire and stored types | New tier, tag, and purpose records use closed enums and strict primitive types; wrong booleans and numeric strings are refused in registry fixture tests. |
+| 3. No exception context | New value-free outbound errors are raised after the caught exception scope; tests assert both `__cause__` and `__context__` are `None`. |
+| 4. Versioned read models | No new persisted read model. Existing tag artifacts remain under their owning versioned readers; S7 does not invent a second reader. |
+| 5. Normalized guard scanners | AT-S6d resolves aliases and constants; AT-O1e keys helpers by exact `(path, function)`; each has seeded realistic spellings. |
+| 6. No private-module imports | CLI calls public engine exports only. New engine imports stay within declared layer contracts and public package APIs. |
+| 7. No hidden CI failures | X0, S7a, O1, O2, and O3 sentries fail normally; no skip, report-only mode, `continue-on-error`, or narrowed export. |
+| 8. One trust class per entry point | `_outbound` purposes separate program-controlled update URLs, user-chosen notify URLs, and telemetry; no flag switches trust class. |
+| 9. Mutations on final head | Every named mutation is rerun after the last artifact change and records the exact head. Golden owners also rerun on the final shared head. |
+| 10. Allowlisted helpers checked | AT-O1e checks callers of allowlisted forwarding helpers by exact identity. AT-S6d checks the bodies and callers of its exact allowlist entries. |
+| 11. No raised pins | The X0 census floor rises only to the measured real walk and the test file has a 650-line ceiling below the 700 cap. No module or package cap is raised. |
 
 ## 14. Pre-mortem
 
 - "The tier is a label nobody reads." The marker is the first word of each docstring and doc page; `versioning.md` lists it next to the frozen list.
 - "`decoy library` stayed at `gate` and 1.0 shipped." AT-X1c fails in ga.
-- "O1 stopped masking null rows." Q10 keeps today's null semantics; AT-O1b pins every operator.
-- "O1 is slow on big tables." Only a column with a value beyond 2**53 takes the object path; every other column keeps today's dtype and numexpr.
+- "O1 selected blanks differently by route." Q10 chooses one NaN-style table; AT-O1b runs it for each column class on every route.
+- "O1 rounded a large literal in a chunk of small values." Literal magnitude independently selects the object path; AT-O1b and AT-O1c include chunk size 1 and a literal-check mutation.
+- "O1 used too much memory on nullable integer columns." Every `when:`-read nullable integer column now gets a temporary NaN-style evaluation representation, including Int64 inputs. This can allocate an object array for a large-value or large-literal predicate and a float64 array otherwise. The O1 build records peak memory and conversion time for plain, FK, declared-int, and anchor columns at the route's normal chunk size; a regression beyond the existing route budget stops the slice for an owner decision rather than changing semantics.
 - "S6 broke `decoy upgrade` from GitHub releases." `upgrade_artifact` follows https-to-https redirects; AT-S6e.
 - "S6 broke the release smoke." `file` stays allowed for both upgrade purposes; AT-S6a uses the smoke's call.
 - "O2 changed the compressed bytes beyond the header." Compression levels are pinned to today's defaults; AT-O2d checks the CSV content.
@@ -440,11 +489,11 @@ Every slice is merged with its acceptance tests green and its mutations red; bot
 | Q7 | Scheme allow list as in 10.7 | Yes (owner); revision 2 adds per-purpose redirect rules, `upgrade_artifact` and `otel` under the same answer | DUP-DEFECTS B11 |
 | Q8 | `decoy demo --ref` from exit 1 to exit 2? | Yes (owner) | new |
 | Q9 | Tag classification by the rule in 5.6, including the builder's reclassifications under that rule | Yes (owner) | new |
-| Q10 | `when:` null semantics with exact integers | Decided (owner, 2026-11-18): keep today's behaviour. `!=` and `not` still select null rows, `not in` stays consistent with that, and O1 changes selection only for integers at or above 2**53 | Dennis round 1 B1 |
-| Q11 | Order against FAKER-MIGRATE: this batch's engine release first, FAKER-MIGRATE S2 after, the second to land reruns the golden tools on its own head | Recommended: yes; owner to confirm | Dennis round 1 H9 |
+| Q10 | `when:` null semantics with exact integers | Re-decided (owner, 2026-11-18): use one NaN-style rule on every route and column class. Blank rows are selected by `!=`, `not in`, and `not (...)`; they are not selected by `==`, ordering comparisons, or `in`. `when_eval_frame` enforces it even for Int64 ingestion. FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings are named in the Breaking entry. | Dennis round 2 B1 |
+| Q11 | Order against FAKER-MIGRATE: this batch's engine release first, FAKER-MIGRATE S2 after, the later shared-head change reruns all owning tools | Decided as recommended (owner, 2026-11-18): yes | Dennis round 1 H9; owner decision |
+| Q12 | Default tier for names exported by public subpackages outside contract 3.4 | Decided as recommended (owner, 2026-11-18): documented internal unless a registry exception lists the name as frozen or experimental | Dennis round 2 H5; owner decision |
 
 ## 16. Unresolved
 
 - Q3 is applied at G0; X1 builds the `gate` value and the ga refusal either way.
-- Q11 is open. If the owner puts FAKER-MIGRATE first, only the order line in section 12 changes; the rerun rule stays.
 - The S7a builder may move a tag between classes under the 5.6 rule; that is covered by Q9 and recorded in the slice's build record.
