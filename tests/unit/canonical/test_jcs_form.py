@@ -8,7 +8,7 @@ import pickle
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine._canonical import STRICT_JSON_TOKENS, CanonicalJsonError, JcsError, jcs_bytes
+from decoy_engine._canonical import ALL_STRICT_JSON_TOKENS, CanonicalJsonError, JcsError, jcs_bytes
 from decoy_engine.errors import DecoyError
 from decoy_engine.signed_evidence import _strict_json as sj
 from decoy_engine.signed_evidence._errors import SignedEvidenceError
@@ -98,7 +98,7 @@ def test_the_profile_accepts_the_largest_safe_integers() -> None:
 
 
 def test_the_token_map_covers_every_token_the_owner_can_raise() -> None:
-    assert set(sj.OWNER_TOKEN_MAP) == set(STRICT_JSON_TOKENS)
+    assert set(sj.OWNER_TOKEN_MAP) == set(ALL_STRICT_JSON_TOKENS)
     assert {str(v) for v in sj.OWNER_TOKEN_MAP.values()} <= {
         "duplicate_member",
         "non_finite_number",

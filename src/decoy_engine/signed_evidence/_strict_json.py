@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from decoy_engine._canonical import STRICT_JSON_TOKENS, strict_json_read
+from decoy_engine._canonical import ALL_STRICT_JSON_TOKENS, strict_json_read
 from decoy_engine._canonical import StrictJsonError as _OwnerError
 from decoy_engine.reasons import ReasonCode
 from decoy_engine.reasons import evidence as ev
@@ -38,7 +38,7 @@ OWNER_TOKEN_MAP: dict[str, ReasonCode] = {
     "invalid_unicode": ev.INVALID_UNICODE,
 }
 
-if set(OWNER_TOKEN_MAP) != set(STRICT_JSON_TOKENS):
+if set(OWNER_TOKEN_MAP) != set(ALL_STRICT_JSON_TOKENS):
     raise ImportError("the strict-json token map is out of step with the owner")
 
 StrictJsonError = SignedEvidenceError

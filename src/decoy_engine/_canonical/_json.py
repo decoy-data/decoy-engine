@@ -36,8 +36,10 @@ from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
 
 __all__ = [
+    "ALL_STRICT_JSON_TOKENS",
     "MASK_CELL_BYTES",
     "MASK_MAX_DEPTH",
+    "PROFILE_JSON_TOKENS",
     "STRICT_JSON_TOKENS",
     "CanonicalJsonError",
     "CanonicalStringError",
@@ -178,14 +180,17 @@ STRICT_JSON_TOKENS = (
     "out_of_range",
     "oversized",
     "too_deep",
-    "negative_zero",
-    "float",
-    "invalid_unicode",
 )
+#: Tokens only a profile that turns on ``forbid_float``, ``forbid_negative_zero`` or
+#: ``forbid_lone_surrogate`` can raise. A default read, such as the nested strategy's, never
+#: raises them, so they stay out of ``STRICT_JSON_TOKENS`` and a row-error handler built from
+#: that set has no dead entries.
+PROFILE_JSON_TOKENS = ("negative_zero", "float", "invalid_unicode")
+ALL_STRICT_JSON_TOKENS = STRICT_JSON_TOKENS + PROFILE_JSON_TOKENS
 
 
 class StrictJsonError(CanonicalJsonError):
-    """Strict JSON was refused. ``token`` is one of ``STRICT_JSON_TOKENS``; no input text.
+    """Strict JSON was refused. ``token`` is one of ``ALL_STRICT_JSON_TOKENS``; no input text.
 
     It sits under ``CanonicalJsonError`` so it is a ``DecoyError`` and a ``ValueError`` in the
     registered config family, with no new exception family to classify.
