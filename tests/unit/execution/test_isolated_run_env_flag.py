@@ -18,6 +18,7 @@ from tests.unit.execution.test_isolated_run import (
 )
 
 _ENV = "DECOY_INSIDE_ISOLATED_WORKER"
+BLAS_KNOBS = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
 
 
 def _no_spawn(*args: object, **kwargs: object) -> None:
@@ -62,7 +63,8 @@ def test_the_spawned_child_starts_no_blas_thread_pool(tmp_path, monkeypatch: pyt
     # numpy's OpenBLAS starts one thread per host core at import, about 40 MiB of VmData each,
     # charged to the child's RLIMIT_DATA cap before the cap is set (SIGSEGV on a 26-core host).
     # The parent's own setting must not leak through: the capped child decides its pool size.
-    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "8")
+    for knob in BLAS_KNOBS:
+        monkeypatch.setenv(knob, "8")
     seen: dict[str, str] = {}
     real_popen = subprocess.Popen
 
@@ -75,6 +77,7 @@ def test_the_spawned_child_starts_no_blas_thread_pool(tmp_path, monkeypatch: pyt
     sources = _mask_sources(tmp_path, n_rows=10, n_cols=1)
     result = run_pipeline_isolated(cfg, sources, engine_version=_ENGINE_VERSION)
     assert result.outcome == "completed"
+    assert {k: seen[k] for k in BLAS_KNOBS} == dict.fromkeys(BLAS_KNOBS, "1")
     probe = "import numpy, pathlib; print(pathlib.Path('/proc/self/status').read_text())"
     status = subprocess.run(  # noqa: S603
         [sys.executable, "-c", probe], env=seen, capture_output=True, text=True, check=True

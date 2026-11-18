@@ -94,6 +94,12 @@ root. `RouteSummary` gains `native_executed: bool | None`, true only when an exe
 backend from the operator registry. The no-sink lazy auto-chunk lane returns one resident output with either
 keyword value.
 
+**Pre-GA additive function with F24 84-E2 (2026-11-18).** `decoy_engine.generation.generated_lifecycle_terms(config, spec_widths)`
+is a new name; it returns the resident bytes and the largest unique working set of a config's generate tables for
+`estimate_job`. `estimate_job` now fills the three lifecycle fields of `JobEstimate` for generate-only and mixed jobs
+too. `peak_bytes` of a generate-only job stays `None`, and a mixed job stays `priceable=False`; no existing value
+changes. New note text: `lifecycle not priced: generated column {column} has no width source`.
+
 **Pre-GA additive fields with SAMPLE SE2 (2026-11-12).** `ExecutionResult.sample_source_rows: dict[str, pa.Table] | None`
 (default `None`, hidden from `repr`, not compared) holds the first kept source rows per table, only for a sample
 request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`, `roots`, `head_tables`,
@@ -152,7 +158,7 @@ output for it). Loader tables with a `sources:` entry are unchanged.
 gains the optional `scan_baseline: {path: str, schema: "scan-set/v1"}` block, default absent and omitted from
 `model_dump()` while unset, so a config without it hashes as before. The block is a pointer no run reads, so it
 is left out of `pipeline_config_hash` (with `sources`, `targets`, `pre_scan` and `name`): two configs that differ
-only in `scan_baseline` hash the same. (SCAN-CHECKS D-1 adds the optional `scan_baseline.on_drift: warn | fail`, omitted from the dump while unset. When set it is hashed, because it decides whether a run is refused; `path` and `schema` stay out. `decoy-run-result/v1` gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`. Both are additive. A reader from before this change refuses the new config key, and a tolerant `RunResultRead` reads the new check id as a plain token.) `ColumnConfig.namespace` and
+only in `scan_baseline` hash the same. (SCAN-CHECKS D-1 adds the optional `scan_baseline.on_drift: warn | fail`, omitted from the dump while unset. When set it is hashed, because it decides whether a run is refused; `path` and `schema` stay out. `decoy-run-result/v1` gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`. Both are additive. A reader from before this change refuses the new config key, and a tolerant `RunResultRead` reads the new check id as a plain token. F15 E2 adds the optional `scan_baseline.sha256`, 64 lowercase hex characters in a strict string, omitted from the dump while unset; when `on_drift` is set it is hashed with `on_drift`. It also tightens the released `on_drift: fail`: the config is refused with `config/scan_baseline_unbound` unless `sha256` is set. This is a pre-GA tightening of a key released in 0.28.0, allowed while `is_pre_ga()` holds; a config with `on_drift: fail` and no digest must add one.) `ColumnConfig.namespace` and
 `RelationshipConfig.namespace` refuse any value starting `decoy-set-namespace-` with `config/namespace_placeholder_unset`
 (new, `since` unreleased), naming the field location and never the value. No shipped config used the prefix. No
 artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profiling.DETECTOR_DESCRIPTORS` with its
@@ -282,6 +288,8 @@ engine versions, never a cell value. `read_scan_set` is the one reader of a pars
 `scan-set/v1.<minor>` document, with the same tag rule. The new names are exported from `decoy_engine.profiling`, not
 from `decoy_engine`. Corpus samples and the parity pairs are in `tests/integration/compat_corpus/scan_diff/`.
 
+A bound baseline (F15 E2) is the scan file whose bytes `scan_baseline.sha256` pins. `decoy_engine.profiling.bind_baseline` hashes the bytes, checks the digest, and only then parses them with the engine's strict JSON parser, which now also refuses a number that overflows to infinity (`1e999`). `BaselineBindingError` carries `pre_scan.baseline_digest_mismatch` or `pre_scan.baseline_unreadable` (both since UNRELEASED) with fixed text. `evaluate_drift` returns a `DriftVerdict` (`passed`, `warned` with `pre_scan.drift_detected`, or with `pre_scan.baseline_unbound` when the baseline has no digest and nothing drifted, or `failed` with `pre_scan.drift_blocked`) holding table and column names and drift kinds only. The new names are exported from `decoy_engine.profiling`, not from `decoy_engine`.
+
 `post-scan-integrity/v3` is the report `run_post_mask` returns (v2 until SCAN-ML M4). Recorded pre-GA semantic change
 (POSTSCAN-STREAM PS-4, 2026-11-12): each `fk_preservation[]` finding now derives from the declared
 keys' facts (`verification/postmask/_keys.py`) and no longer from an orphan rate. `fail` means the run
@@ -303,6 +311,18 @@ them whole numbers in the Int64 range (pandas' reading of a nullable integer col
 self-reference with a null root), is compared as an integer key. A column with any fraction stays
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
 The tag stayed `v2` for that change; the field set only grew.
+
+Row 31 DI-1b (2026-11) adds the optional `post_scan.distribution: {tolerance_pct, on_breach}` config block and an
+optional `distribution` section of the v3 report. `tolerance_pct` is a strict number above 0 and at most 100;
+`on_breach` is `warn` only until the blocking slice, so `fail` is refused at config load. The block needs
+`post_scan.integrity: true` (`config.post_scan_inactive` otherwise), is left out of the dump while absent (a
+config without it keeps its dump and plan hash) and is hashed when set. The report section holds one row per
+checked fact (`table`, `column`, `fact`, `severity`, `delta_pct`), no source or output value, and is absent
+unless the block is set, so a v3 reader that ignores unknown keys is unaffected. A run that asks for the check
+and has a transform-bearing mask table, a source loader or a deferred gate is refused (a transform-bearing table
+with the existing `runtime/post_scan_integrity_transforms_unsupported`, the others with
+`runtime/post_scan_distribution_deferred`, new, `since` unreleased). Registry version and manifests are
+untouched until the release.
 
 `distribution-snapshot/v2` (row 24f, 2026-11) is what a plain `decoy fit` now writes
 (`distribution_snapshot_document` with `include_values=False`). Only the datetime bucket changed:

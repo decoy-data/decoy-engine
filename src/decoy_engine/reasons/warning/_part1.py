@@ -31,6 +31,7 @@ __all__ = [
     "SCAN_HEADER_SUSPECT",
     "SCAN_KEY_TYPE_MISMATCH",
     "SEED_IGNORED_WITH_MASTER_KEY",
+    "SFTP_LOCK_NOT_REMOVED",
     "SOURCE_VALUE_LEAK",
     "TEXT_MASK_SUB_FLOOR_SPAN_HANDLED",
     "TOP_CODE_GENERALIZED",
@@ -110,3 +111,10 @@ JOB_LOG_WRITE_FAILED = _d("job_log_write_failed", "Job log write failed.", since
 LIBRARY_DEGRADED = _d("library_degraded", "Library degraded.", since="1.20.0")
 LIBRARY_DELETE_SKIPPED = _d("library_delete_skipped", "Library delete skipped.", since="1.20.0")
 LIBRARY_WRITE_FAILED = _d("library_write_failed", "Library write failed.", since="1.20.0")
+_d = _catalog.warning("ConnectorEvent")
+
+SFTP_LOCK_NOT_REMOVED = _d(
+    "sftp_lock_not_removed",
+    "An SFTP lock file could not be removed after a run.",
+    since=UNRELEASED,
+)

@@ -36,7 +36,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _supervisor import classify_failure, run_worker
 
 SCHEMA = "f24-lifecycle-accuracy/v1"
-CELLS = ("AT-E1-17", "AT-E1-18", "AT-E1-19", "AT-E1-23", "AT-E1-24", "AT-E1-25", "AT-E1-27")
+CELLS = (
+    "AT-E1-17",
+    "AT-E1-18",
+    "AT-E1-19",
+    "AT-E1-23",
+    "AT-E1-24",
+    "AT-E1-25",
+    "AT-E1-27",
+    "AT-E2-6a",
+    "AT-E2-6b",
+)
 
 
 # ------------------------------------------------------------------------------- fixtures
@@ -168,6 +178,19 @@ def _chain_config(root: Path, tables: dict[str, Any], *, src_fmt: str, tgt_fmt: 
     return _base(sources, targets, table_cfgs, rels)
 
 
+def _generate_table(name: str, rows: int) -> dict[str, Any]:
+    """A generate table the unified core admits: a sequence and two text columns."""
+    return {
+        "name": name,
+        "row_count": rows,
+        "generate_columns": [
+            {"name": "id", "type": "sequence", "start": 1},
+            {"name": "status", "type": "categorical", "categories": ["active", "inactive", "new"]},
+            {"name": "tier", "type": "categorical", "categories": ["bronze", "silver", "gold"]},
+        ],
+    }
+
+
 def build_cell(cell: str, rows: int, root: Path) -> dict[str, Any]:
     """Write the fixture files under `root` and return the pipeline config for `cell`."""
     import numpy as np
@@ -221,6 +244,23 @@ def build_cell(cell: str, rows: int, root: Path) -> dict[str, Any]:
             {"t": _src("parquet", _write_parquet(root / "t.parquet", table))},
             {"t": _tgt("fixed_width", str(root / "t.out.txt"), layout={"columns": layout_cols})},
             [{"name": "t", "columns": cols}],
+        )
+    if cell == "AT-E2-6a":
+        return _base(
+            {},
+            {"g": _tgt("csv", str(root / "g.out.csv"))},
+            [_generate_table("g", rows)],
+        )
+    if cell == "AT-E2-6b":
+        table = pa.table({f"n{c}": pa.array(np.arange(rows) + c) for c in range(4)})
+        cols = [{"name": c, "strategy": "redact"} for c in table.column_names]
+        return _base(
+            {"m": _src("parquet", _write_parquet(root / "m.parquet", table))},
+            {
+                "m": _tgt("parquet", str(root / "m.out.parquet")),
+                "g": _tgt("parquet", str(root / "g.out.parquet")),
+            },
+            [{"name": "m", "columns": cols}, _generate_table("g", rows)],
         )
     raise ValueError(f"unknown cell {cell!r}")
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from decoy_engine._arrow_types import is_text, is_text_or_null
+from decoy_engine._arrow_types import is_text, is_text_or_null, narrow_text
 
 _TABLE = [
     (pa.string(), True, True),
@@ -22,6 +22,32 @@ _TABLE = [
 def test_text_predicates_truth_table(typ: pa.DataType, text: bool, text_or_null: bool) -> None:
     assert is_text(typ) is text
     assert is_text_or_null(typ) is text_or_null
+
+
+# --- LARGE-STRING-FAST: narrow_text ----------------------------------------------------------
+
+
+def test_narrow_text_returns_a_string_array_unchanged() -> None:
+    arr = pa.array(["a", None])
+    assert narrow_text(arr) is arr
+
+
+def test_narrow_text_casts_large_string_keeping_values_nulls_and_slices() -> None:
+    arr = pa.array(["abc", None, "", "é😀", "z"], type=pa.large_string())
+    for src in (arr, arr.slice(1, 3)):
+        out = narrow_text(src)
+        assert out.type == pa.string()
+        assert out.to_pylist() == src.to_pylist()
+
+
+@pytest.mark.parametrize(
+    "typ",
+    [pa.binary(), pa.int64(), pa.null(), pa.dictionary(pa.int32(), pa.string())],
+    ids=str,
+)
+def test_narrow_text_rejects_non_text(typ: pa.DataType) -> None:
+    with pytest.raises(TypeError):
+        narrow_text(pa.nulls(1, typ))
 
 
 # --- F24 84-E1: the shared Arrow column byte helper ----------------------------------------

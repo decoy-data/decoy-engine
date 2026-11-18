@@ -273,6 +273,12 @@ class TestCodexCrossModelRejections:
             check_top_code_config(self._nested({"cap": 89, "over_label": "OVER"}))
         assert exc.value.code == "top_code_unsupported_in_nested"
 
+    def test_nested_top_code_refusal_path_is_unchanged(self) -> None:
+        # F07 E3a: the path text comes from the child's config_path; it stays as it was.
+        with pytest.raises(PlanCompileError) as exc:
+            check_top_code_config(self._nested({"cap": 89, "over_label": "OVER"}))
+        assert exc.value.path == "tables.t.columns.payload.provider_config.strategy"
+
     def test_nested_top_code_with_malformed_floor_rejected(self) -> None:
         # The malformed-floor nested child (BLOCKER 3) is caught by the nested
         # guard before it can silently disable the floor.
