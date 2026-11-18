@@ -19,7 +19,7 @@ from decoy_engine._canonical import (
 from decoy_engine.profiling import paths, scan_set_to_dict
 from decoy_engine.profiling.paths import _walk
 
-from ._support import COLUMN, by_path, dumps, observation, ref, scan_cells, warning_codes
+from ._support import by_path, dumps, observation, ref, scan_cells, warning_codes
 
 
 def test_at_e2_1_paths_use_wildcards_with_exact_counts(tmp_path: Path) -> None:

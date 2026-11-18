@@ -40,6 +40,14 @@ from decoy_engine._error_base import DecoyError
 __all__ = [
     "MASK_CELL_BYTES",
     "MASK_MAX_DEPTH",
+    "SCAN_ARRAY_ITEMS",
+    "SCAN_CELL_BYTES",
+    "SCAN_KEY_APPEARANCE",
+    "SCAN_LEAF_SAMPLE",
+    "SCAN_MAP_KEYS",
+    "SCAN_MAX_CELLS",
+    "SCAN_MAX_DEPTH",
+    "SCAN_MAX_PATHS",
     "STRICT_JSON_TOKENS",
     "CanonicalJsonError",
     "CanonicalStringError",
@@ -57,6 +65,19 @@ __all__ = [
 # any rule runs, so a hostile or broken cell cannot exhaust memory or the parser stack.
 MASK_CELL_BYTES: Final = 16 * 1024 * 1024
 MASK_MAX_DEPTH: Final = 64
+
+# Bounds for path observation in a scan (`profiling/paths`). They keep the scan's memory and time
+# bounded for any cell: bytes per cell, container depth, array items walked, distinct path
+# patterns per column, distinct keys per level before it collapses to `*`, scalar leaves kept per
+# path for detection, cells walked per column, and the share of its parent's cells a key needs.
+SCAN_CELL_BYTES: Final = 1024 * 1024
+SCAN_MAX_DEPTH: Final = 16
+SCAN_ARRAY_ITEMS: Final = 16
+SCAN_MAX_PATHS: Final = 256
+SCAN_MAP_KEYS: Final = 64
+SCAN_LEAF_SAMPLE: Final = 1000
+SCAN_MAX_CELLS: Final = 20480
+SCAN_KEY_APPEARANCE: Final = 0.1
 
 # A number the lexeme reader may have to keep: an exponent, a trailing zero, a long run of digits,
 # a leading `.0000` (Python prints those as an exponent) or `-0`. It over-matches on purpose: text

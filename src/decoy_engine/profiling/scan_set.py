@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,7 +49,7 @@ from decoy_engine.fileaccess import (
     FileAccessUnavailable,
     entry_point,
 )
-from decoy_engine.profiling import _scan_integrity
+from decoy_engine.profiling import _scan_integrity, paths
 from decoy_engine.profiling._model_pass import (
     REGEX_ONLY,
     ModelHit,
@@ -62,6 +62,7 @@ from decoy_engine.profiling._scan_core import (
     FieldCore,
     ModelHitCore,
     ModelRefCore,
+    NestedCore,
     RelationshipFactsCore,
     ScanSetCore,
     Strategy,
@@ -123,6 +124,8 @@ class TableScan:
     null_counts: dict[str, int]
     leading_zero_counts: dict[str, int | None]
     model_hits: Mapping[str, tuple[ModelHit, ...]] = field(default_factory=dict)
+    # Column name -> its path observation, for the JSON columns only (empty with `nested_paths=False`).
+    nested: Mapping[str, NestedCore] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,7 @@ def scan_sources(
     spill_dir: Path | None = None,
     file_access: FileAccess | None = None,
     pre_scan: PreScanConfig | None = None,
+    nested_paths: bool = True,
 ) -> ScanSet:
     """Scan the selected tables of `sources` and return one `ScanSet`.
 
@@ -168,6 +172,9 @@ def scan_sources(
 
     `pre_scan` adds model detectors to the regex ones (`None`: regex only). They load strictly,
     once, before the first table; an unavailable model raises `ModelUnavailableError` first.
+
+    `nested_paths` (default true) observes the paths of every JSON column under bounds
+    (`profiling/paths`); false skips that walk and no column gets a `nested` member.
     """
     from decoy_engine.release import __version__
 
@@ -193,7 +200,13 @@ def scan_sources(
     for position, name in enumerate(selected, 1):
         started = time.monotonic()
         scan = _scan_one(
-            name, descriptors[name], sample_rows, strategy, file_access, (models, position)
+            name,
+            descriptors[name],
+            sample_rows,
+            strategy,
+            file_access,
+            (models, position),
+            nested_paths,
         )
         _LOG.info(
             "scanned table=%s rows=%d seconds=%.2f",
@@ -253,10 +266,13 @@ def _scan_one(
     strategy: Strategy,
     file_access: FileAccess | None,
     model_pass: tuple[ModelPass | None, int],
+    nested_paths: bool,
 ) -> TableScan:
     cause: str | None = None
     try:
-        return _read_and_profile(name, descriptor, sample_rows, strategy, file_access, model_pass)
+        return _read_and_profile(
+            name, descriptor, sample_rows, strategy, file_access, model_pass, nested_paths
+        )
     except Exception as exc:
         if passes_through(exc):
             raise
@@ -278,6 +294,7 @@ def _read_and_profile(
     strategy: Strategy,
     file_access: FileAccess | None,
     model_pass: tuple[ModelPass | None, int],
+    nested_paths: bool,
 ) -> TableScan:
     # Imported here because decoy_engine.profile imports this package.
     from decoy_engine import profile as src
@@ -324,8 +341,25 @@ def _read_and_profile(
     )
     models, position = model_pass
     hits = {} if models is None else models.run(frame, name, position)
+    nested = paths.observe_frame(frame) if nested_paths else {}
     del frame
-    return _table_scan(name, descriptor, profile, tuple(warned), total, exact, zero_counts, hits)
+    warned.extend(_nested_warnings(nested.values()))
+    return _table_scan(
+        name, descriptor, profile, tuple(warned), total, exact, zero_counts, hits, nested
+    )
+
+
+def _nested_warnings(observed: Iterable[NestedCore]) -> list[reasons.ReasonRef]:
+    """The table warnings for its JSON columns: one of each code, however many columns hit it."""
+    found = list(observed)
+    codes: list[reasons.ReasonRef] = []
+    if any(n.paths_truncated for n in found):
+        codes.append(reasons.warning.NESTED_PATHS_TRUNCATED.spec.ref)
+    if any(n.key_suspect_collapsed for n in found):
+        codes.append(reasons.warning.NESTED_PATH_KEY_SUSPECT.spec.ref)
+    if any(n.cells_malformed or n.cells_oversized or n.depth_truncated_cells for n in found):
+        codes.append(reasons.warning.NESTED_CELLS_UNREADABLE.spec.ref)
+    return codes
 
 
 def _text_frames(
@@ -362,6 +396,7 @@ def _table_scan(
     exact: bool,
     zero_counts: dict[str, int] | None,
     hits: Mapping[str, tuple[ModelHit, ...]],
+    nested: Mapping[str, NestedCore],
 ) -> TableScan:
     scanned = profile.row_count
     keys = tuple(
@@ -382,6 +417,7 @@ def _table_scan(
             f.name: None if zero_counts is None else zero_counts.get(f.name) for f in profile.fields
         },
         model_hits=hits,
+        nested=nested,
     )
 
 
@@ -398,7 +434,12 @@ def _finite(value: float | None) -> float | None:
 
 
 def _field_core(
-    f: FieldStats, name: str, scanned: int, zeros: int | None, hits: Sequence[ModelHit]
+    f: FieldStats,
+    name: str,
+    scanned: int,
+    zeros: int | None,
+    hits: Sequence[ModelHit],
+    nested: NestedCore | None,
 ) -> FieldCore:
     # Only these attributes of FieldStats are read: top_values, mode, min and max can hold
     # cell text and must not reach the core.
@@ -415,6 +456,7 @@ def _field_core(
         model_hits=[
             ModelHitCore(**{**asdict(h), "model": ModelRefCore(**asdict(h.model))}) for h in hits
         ],
+        nested=nested,
     )
 
 
@@ -439,6 +481,7 @@ def _table_core(t: TableScan) -> TableCore:
             p.row_count,
             t.leading_zero_counts.get(f.name),
             t.model_hits.get(f.name, ()),
+            t.nested.get(f.name),
         )
         for f in p.fields
     ]

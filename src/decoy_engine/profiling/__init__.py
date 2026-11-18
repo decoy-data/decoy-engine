@@ -20,7 +20,12 @@ Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 
 from decoy_engine.profiling._model_pass import ModelHit
 from decoy_engine.profiling._profile_document import profile_document, redact_profile_dict
-from decoy_engine.profiling._scan_core import ScanSetCore, ScanSetCoreRead
+from decoy_engine.profiling._scan_core import (
+    NestedCore,
+    PathObservationCore,
+    ScanSetCore,
+    ScanSetCoreRead,
+)
 from decoy_engine.profiling._scan_integrity import (
     KEY_BATCH_ROWS,
     MEMORY_LIMIT,
@@ -128,6 +133,8 @@ __all__ = [
     "KeyBatches",
     "KeyFacts",
     "ModelHit",
+    "NestedCore",
+    "PathObservationCore",
     "RelationshipFacts",
     "ScanDiffCore",
     "ScanDiffCoreRead",
