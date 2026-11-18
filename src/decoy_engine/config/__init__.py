@@ -86,7 +86,7 @@ from decoy_engine.config._relationships import (
     RelationshipEnd,
     relationship_shape_error,
 )
-from decoy_engine.config._scan_baseline import ScanBaselineConfig
+from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
 from decoy_engine.config._sources import (
     FILE_SOURCE_PATH_FIELDS,
     SOURCE_LOCATOR_FIELDS,
@@ -145,6 +145,7 @@ __all__ = [
     "GlobalSettings",
     "LimitOp",
     "NamespaceConfig",
+    "OnDrift",
     "OrphanPolicyLiteral",
     "PipelineConfig",
     "PipelineConfigError",

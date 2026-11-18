@@ -5,12 +5,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import pickle
 from typing import Any
 
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.config import ScanBaselineConfig
+from decoy_engine.config import PipelineConfigError, ScanBaselineConfig
 from decoy_engine.profiling import (
     BaselineBindingError,
     BoundBaseline,
@@ -18,6 +19,7 @@ from decoy_engine.profiling import (
     bind_baseline,
     evaluate_drift,
 )
+from decoy_engine.reason_adapter import reason_from_exception
 
 CANARY = "CANARY-31f0a9"
 PATH = "baselines/CANARY-path.scan.json"
@@ -119,18 +121,20 @@ def test_an_unpinned_warn_baseline_binds_but_reports_unbound() -> None:
     assert bound.sha256 == _digest(raw)
 
 
-def test_one_changed_byte_is_a_digest_mismatch() -> None:
+@pytest.mark.parametrize("on_drift", [None, "warn", "fail"])
+def test_one_changed_byte_is_a_digest_mismatch(on_drift: str | None) -> None:
     raw = _raw(BASE)
-    block = _block(_digest(raw), "fail")
+    block = _block(_digest(raw), on_drift)
     error = _refusal(raw.replace(b"customers", b"customerz"), block)
     assert error.code == str(reasons.pre_scan.BASELINE_DIGEST_MISMATCH)
     assert error.kind == "digest_mismatch"
     _clean(error, _digest(raw))
 
 
-def test_a_reformatted_file_with_the_same_content_is_a_mismatch() -> None:
+@pytest.mark.parametrize("on_drift", [None, "warn", "fail"])
+def test_a_reformatted_file_with_the_same_content_is_a_mismatch(on_drift: str | None) -> None:
     raw = _raw(BASE)
-    block = _block(_digest(raw), "fail")
+    block = _block(_digest(raw), on_drift)
     pretty = json.dumps(json.loads(raw), indent=2).encode()
     assert _refusal(pretty, block).code == str(reasons.pre_scan.BASELINE_DIGEST_MISMATCH)
 
@@ -180,6 +184,36 @@ def test_an_unreadable_baseline_with_a_matching_digest_is_still_refused() -> Non
     error = _refusal(raw, _block(_digest(raw), "fail"))
     assert error.code == str(reasons.pre_scan.BASELINE_UNREADABLE)
     _clean(error)
+
+
+def test_fail_without_a_digest_is_refused_before_hashing() -> None:
+    block = ScanBaselineConfig.model_construct(
+        path=PATH, schema_tag="scan-set/v1", on_drift="fail", sha256=None
+    )
+    with pytest.raises(PipelineConfigError) as caught:
+        bind_baseline(_raw(BASE), block)
+    assert [p.code for p in caught.value.problems] == [str(reasons.config.SCAN_BASELINE_UNBOUND)]
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    assert PATH not in str(caught.value)
+
+
+@pytest.mark.parametrize("kind", ["digest_mismatch", "unreadable"])
+def test_the_error_pickles_and_maps_to_its_pre_scan_code(kind: str) -> None:
+    error = BaselineBindingError(kind)  # type: ignore[arg-type]
+    again = pickle.loads(pickle.dumps(error))  # noqa: S301 - bytes this test just produced
+    assert (type(again), again.kind, again.code, str(again)) == (
+        BaselineBindingError,
+        kind,
+        error.code,
+        str(error),
+    )
+    record = reason_from_exception(error)
+    want = (
+        reasons.pre_scan.BASELINE_DIGEST_MISMATCH
+        if kind == "digest_mismatch"
+        else reasons.pre_scan.BASELINE_UNREADABLE
+    )
+    assert (record.namespace, str(record.code)) == ("pre_scan", str(want))
 
 
 def test_the_error_text_names_a_config_key_and_no_value() -> None:

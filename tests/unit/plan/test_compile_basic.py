@@ -7,6 +7,7 @@ import pytest
 from decoy_engine.plan import (
     Plan,
     PlanCompileError,
+    _compile,
     compile_plan,
     plan_from_yaml,
     plan_to_yaml,
@@ -138,7 +139,7 @@ class TestCompileDeterminism:
         assert hash_of({**pointer, "path": "elsewhere/y.json", "on_drift": "warn"}) == warn
 
     def test_the_baseline_digest_moves_the_hash_only_when_on_drift_is_set(
-        self, simple_config: dict, simple_profile: Profile
+        self, simple_config: dict, simple_profile: Profile, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def hash_of(block: dict) -> str:
             return compile_plan(
@@ -149,6 +150,15 @@ class TestCompileDeterminism:
 
         pointer = {"path": "x.json", "schema": "scan-set/v1"}
         one, two = "a" * 64, "b" * 64
+        real = _compile.canonical_config_bytes
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            _compile, "canonical_config_bytes", lambda c: (seen.append(c), real(c))[1]
+        )
+        hash_of({**pointer, "on_drift": "warn"})
+        monkeypatch.undo()
+        # warn without a digest hashes exactly {"on_drift": "warn"}, so its hash is unchanged.
+        assert seen[-1]["scan_baseline"] == {"on_drift": "warn"}
         warn = hash_of({**pointer, "on_drift": "warn"})
         assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != warn
         assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != hash_of(

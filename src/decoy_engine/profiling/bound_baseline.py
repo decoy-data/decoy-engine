@@ -25,10 +25,11 @@ from typing import Any, Final, Literal
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
-from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
+from decoy_engine.config import OnDrift, PipelineConfigError, ScanBaselineConfig
 from decoy_engine.errors import DecoyError
 from decoy_engine.profiling.scan_diff import ScanSetDiff, diff_scan_documents
 from decoy_engine.profiling.scan_set_read import ScanSetReadError, read_scan_set
+from decoy_engine.safe_output import ConfigProblem
 
 __all__ = [
     "BaselineBindingError",
@@ -65,6 +66,9 @@ class BaselineBindingError(DecoyError, ValueError):
             else reasons.pre_scan.BASELINE_UNREADABLE
         )
 
+    def __reduce__(self) -> tuple[type[BaselineBindingError], tuple[_Kind]]:
+        return (type(self), (self.kind,))
+
 
 @dataclass(frozen=True)
 class BoundBaseline:
@@ -88,8 +92,21 @@ class BoundBaseline:
 def bind_baseline(raw: bytes, block: ScanBaselineConfig) -> BoundBaseline:
     """Hash `raw`, check it against `block.sha256`, then parse it as a `scan-set/v1` core.
 
-    The digest is checked before any parse. Raises `BaselineBindingError`.
+    The digest is checked before any parse. A block that asks for `on_drift: fail` without a
+    digest (one built past the config validator) is refused first with the config's
+    `config/scan_baseline_unbound`. Raises `BaselineBindingError` or `PipelineConfigError`.
     """
+    if block.on_drift == "fail" and block.sha256 is None:
+        raise PipelineConfigError.from_problems(
+            [
+                ConfigProblem(
+                    str(reasons.config.SCAN_BASELINE_UNBOUND),
+                    "scan_baseline.sha256",
+                    "scan_baseline.on_drift: fail needs scan_baseline.sha256.",
+                )
+            ],
+            prefix="scan baseline is not bound",
+        )
     digest = hashlib.sha256(raw).hexdigest()
     if block.sha256 is not None and digest != block.sha256:
         raise BaselineBindingError("digest_mismatch")
