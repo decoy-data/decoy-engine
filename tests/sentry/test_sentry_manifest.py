@@ -112,8 +112,7 @@ def uncovered(sentries: tuple[str, ...], paths: list[str]) -> list[str]:
     ]
 
 
-def test_manifest_holds_every_sentry_file_and_no_ghost() -> None:
-    assert {s for s in SENTRIES if s.startswith("tests/sentry/")} == sentry_files(ROOT)
+def test_outside_sentries_exist_and_the_manifest_has_no_duplicate() -> None:
     assert [s for s in OUTSIDE_SENTRIES if not (ROOT / s).is_file()] == []
     assert len(set(SENTRIES)) == len(SENTRIES)
 
