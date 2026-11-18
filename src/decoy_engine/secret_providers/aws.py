@@ -26,11 +26,11 @@ Contract notes:
 from __future__ import annotations
 
 import contextlib
-import json
 import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from decoy_engine._canonical import strict_json_loads
 from decoy_engine.secret_providers._buffer import SecretBuffer
 from decoy_engine.secret_providers._errors import (
     SecretAccessDenied,
@@ -235,13 +235,6 @@ class AwsSecretsManagerProvider:
         )
 
 
-def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    keys = [key for key, _ in pairs]
-    if len(keys) != len(set(keys)):
-        raise ValueError("duplicate key")
-    return dict(pairs)
-
-
 def _to_resolved(
     ref: SecretRef, response: Any
 ) -> tuple[ResolvedSecret | None, BaseException | None]:
@@ -256,7 +249,7 @@ def _to_resolved(
         return None, SecretVersionUnavailable()
     value: Any = None
     with contextlib.suppress(Exception):
-        payload = json.loads(text, object_pairs_hook=_no_duplicate_keys)
+        payload = strict_json_loads(text)
         value = payload.get(ref.field or "") if isinstance(payload, dict) else None
         del payload
     del text
