@@ -214,14 +214,41 @@ def labels_read_as_sentences(labels: Collection[str]) -> bool:
     )
 
 
-def _kth_year(counts: Sequence[tuple[int, int | float]]) -> int:
-    """The year holding the `MIN_RELEASE_COUNT`-th row, walking `(year, count)` in the order given."""
+def _kth_index(ranges: Sequence[tuple[int, int, int | float]]) -> int:
+    """Index of the range that holds the `MIN_RELEASE_COUNT`-th row, counting in the order given."""
     running: int | float = 0
-    for year, count in counts:
+    for i, (_, _, count) in enumerate(ranges):
         running += count
         if running >= MIN_RELEASE_COUNT:
-            return year
+            return i
     raise ValueError("fewer than MIN_RELEASE_COUNT rows")
+
+
+def release_ranges_at_k(
+    ranges: Sequence[tuple[int, int, int | float]],
+) -> list[tuple[int, int, int | float]]:
+    """Bottom and top code ordered `(start, end, count)` ranges at the K-th row, then fold them.
+
+    Every range below the one that holds the `MIN_RELEASE_COUNT`-th lowest row counts under that
+    range, and likewise above the K-th highest, so the outer edges of what is released are those of
+    the K-th row from each end and never name one of the K-1 rows at either end. Then
+    `fold_ranges_under_k` merges until each range holds K rows. Fewer than K rows in all, or K-th
+    rows that cross (fewer than 2K-1 rows), release nothing, as numeric columns already do. Top
+    and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al., Statistical Disclosure
+    Control (Wiley, 2012), section 3.4. The one coder for the snapshot's years and a profile
+    document's decades.
+    """
+    counts = [count for _, _, count in ranges]
+    if sum(counts) < MIN_RELEASE_COUNT:
+        return []
+    low, high = _kth_index(ranges), len(ranges) - 1 - _kth_index(ranges[::-1])
+    if low > high:
+        return []
+    if low == high:
+        return [(ranges[low][0], ranges[low][1], sum(counts))]
+    first = (ranges[low][0], ranges[low][1], sum(counts[: low + 1]))
+    last = (ranges[high][0], ranges[high][1], sum(counts[high:]))
+    return fold_ranges_under_k([first, *ranges[low + 1 : high], last])
 
 
 def fold_year_bins(stats: dict[str, Any]) -> None:
@@ -230,15 +257,7 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     A column with fewer than K rows in all has nothing it may release, so it keeps no range. A
     year past the last sampled year (a 9999 sentinel) is counted under the last sampled year: a
     multi-year range cannot end later, and a bucket of its own would hold the few sentinel rows.
-
-    The years are then bottom and top coded, as numeric columns are: every row below the year of
-    the K-th lowest row counts under that year, and likewise above the K-th highest, so the
-    outer edges of the released ranges are the years of the K-th row from each end and never name
-    one of the K-1 rows at either end. When the two K-th rows cross (fewer than 2K-1 rows, so the
-    K-th highest year is below the K-th lowest year) no range can be released without an edge at
-    one of the K-1 rows, so none is: the 2K-1 floor numeric columns already have. Top and bottom
-    coding: R sdcMicro `topBotCoding`; Hundepool et al., Statistical Disclosure Control (Wiley,
-    2012), section 3.4.
+    The years are then coded and folded by `release_ranges_at_k`.
     """
     raw = stats.get("year_bins")
     if not raw:
@@ -246,19 +265,7 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     by_year: Counter[int] = Counter()
     for b in raw:
         by_year[min(b["year"], MAX_SAMPLED_YEAR)] += b["count"]
-    total = sum(by_year.values())
-    years = sorted(by_year.items())
-    if total < MIN_RELEASE_COUNT:
-        low, high = 1, 0
-    else:
-        low, high = _kth_year(years), _kth_year(years[::-1])
-    if low > high:
-        stats["year_bins"] = encode_datetime_buckets([])
-        return
-    coded: Counter[int] = Counter()
-    for year, count in years:
-        coded[min(max(year, low), high)] += count
-    kept = fold_ranges_under_k([(y, y, c) for y, c in sorted(coded.items())])
+    kept = release_ranges_at_k([(y, y, c) for y, c in sorted(by_year.items())])
     stats["year_bins"] = encode_datetime_buckets([DatetimeBucket(*r) for r in kept])
 
 

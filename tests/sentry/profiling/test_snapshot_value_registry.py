@@ -269,28 +269,59 @@ _FORBIDDEN_NAMES = {
 _FORBIDDEN_CALLS = {"crosstab", "_joint_snapshot", "joint_snapshot"}
 
 
-def _guard_findings(source: str) -> list[str]:
+def _is_placeholder(node: ast.AST) -> bool:
+    return (isinstance(node, ast.Name) and node.id == "REDACTED") or (
+        isinstance(node, ast.Attribute) and node.attr == "REDACTED"
+    )
+
+
+def _shared_findings(source: str) -> list[str]:
+    """Checks for every writer of a value document: no placeholder, null or empty written inline.
+
+    `_apply` owns every replacement. The placeholder may only be read, as an operand of a
+    comparison or membership test (`text not in (REDACTED, ...)`).
+    """
     tree = ast.parse(source)
+    parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+
+    def operand(node: ast.AST) -> bool:
+        parent = parents.get(node)
+        if isinstance(parent, (ast.Tuple, ast.Set, ast.List)):
+            parent = parents.get(parent)
+        return isinstance(parent, ast.Compare)
+
     found: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant):
-            if isinstance(node.value, str) and node.value in _FORBIDDEN_NAMES:
-                found.append(f"string {node.value}")
-            if isinstance(node.value, float) and 0.0 <= node.value <= 1.0:
+        text = isinstance(node, ast.Constant) and node.value == vr.REDACTED
+        if (_is_placeholder(node) or text) and not operand(node):
+            found.append("the placeholder used other than in a comparison")
+        if isinstance(node, ast.Constant) and isinstance(node.value, float):
+            if 0.0 <= node.value <= 1.0:
                 found.append(f"float {node.value}")
-        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_NAMES | _FORBIDDEN_CALLS:
-            found.append(f"attribute {node.attr}")
-        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_CALLS:
-            found.append(f"name {node.id}")
         if isinstance(node, (ast.Assign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             value = node.value
             plain = (
-                isinstance(value, ast.Constant)
-                and (value.value is None or value.value == vr.REDACTED)
-            ) or (isinstance(value, ast.Dict) and not value.keys)
+                (isinstance(value, ast.Constant) and value.value is None)
+                or (isinstance(value, ast.Dict) and not value.keys)
+                or (isinstance(value, ast.List) and not value.elts)
+            )
             if plain and any(isinstance(t, ast.Subscript) for t in targets):
-                found.append("a stats key assigned null, {} or the placeholder inline")
+                found.append("a stats key assigned null, {} or [] inline")
+    return found
+
+
+def _guard_findings(source: str) -> list[str]:
+    tree = ast.parse(source)
+    found = _shared_findings(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str) and node.value in _FORBIDDEN_NAMES:
+                found.append(f"string {node.value}")
+        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_NAMES | _FORBIDDEN_CALLS:
+            found.append(f"attribute {node.attr}")
+        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_CALLS:
+            found.append(f"name {node.id}")
         if isinstance(node, ast.Call):
             fn = node.func
             name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
@@ -415,3 +446,33 @@ def test_the_profile_redactor_uses_the_same_selection_stamp_and_applier() -> Non
     assert {"_sensitive_entries", "stamp_value_policy"} <= writer["redact_profile_dict"]
     assert "_apply" in writer["redact_profile_dict"] | registry["_redact_field"]
     assert "_sensitive_entries" in registry["value_sensitive_names"]
+    assert "_floor_field" in writer["redact_profile_dict"]
+    assert "_apply" in writer["_floor_field"]
+
+
+_PROFILE_PATH = _SRC / "profiling" / "_profile_document.py"
+
+
+def test_the_profile_writer_has_no_inline_placeholder_null_or_empty_write() -> None:
+    assert _shared_findings(_PROFILE_PATH.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        'def f(field):\n    field["mode_value"] = None',
+        "def f(labels, i):\n    labels[i] = REDACTED",
+        "def f(labels, n):\n    labels = [REDACTED] * n",
+        'def f(field):\n    field["labels"] = "[redacted]"',
+        'def f(field):\n    field["sample_invalid"] = []',
+        "def f(x):\n    return x >= 0.5",
+    ],
+)
+def test_the_shared_guard_bites_on_each_inline_write(snippet: str) -> None:
+    assert _shared_findings(snippet) != []
+
+
+def test_the_shared_guard_lets_a_placeholder_comparison_through() -> None:
+    assert (
+        _shared_findings("def f(t):\n    return t not in (REDACTED, 'x') and t != REDACTED") == []
+    )
