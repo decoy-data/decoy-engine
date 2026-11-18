@@ -148,11 +148,13 @@ def _numeric_sentinels(field: Mapping[str, Any]) -> dict[str, int]:
     for flag in flags if isinstance(flags, list) else ():
         if not isinstance(flag, Mapping):
             continue
-        kind, value, note, count = (flag.get(k) for k in ("kind", "value", "note", "count"))
+        kind, value, note, raw_count = (flag.get(k) for k in ("kind", "value", "note", "count"))
+        count = _count(raw_count)
         if (
             kind == "numeric_sentinel"
-            and is_table_sentinel(kind, value, note, count)
-            and _count(count) is not None
+            and isinstance(value, str)
+            and count is not None
+            and is_table_sentinel(kind, value, note, raw_count)
         ):
             out[value] = max(out.get(value, 0), count)
     return out
