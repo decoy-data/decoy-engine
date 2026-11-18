@@ -22,11 +22,14 @@ source and masked rows at the same row offsets and fails on a broken link).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
 pytestmark = pytest.mark.perf
 
@@ -68,6 +71,7 @@ def test_over_ceiling_parent_demotes_to_batch_and_stays_bounded(tmp_path: Path) 
         capture_output=True,
         text=True,
         timeout=660,
+        env={**os.environ, **CAPPED_ENV},
         check=False,
     )
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BENCH_JSON "))
