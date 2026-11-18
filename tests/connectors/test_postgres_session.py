@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import re
+from pathlib import Path
+
 import duckdb
 import pytest
 
@@ -67,3 +71,99 @@ def test_require_pg_turns_a_skip_into_a_failure(pg_policy):
         pg_policy(True, "no postgres")
     with pytest.raises(pytest.skip.Exception):
         pg_policy(False, "no postgres")
+
+
+# ----- S2: connect timeout on every ATTACH -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("deadline_s", "want"), [(1, 2), (3, 2), (4, 2), (6, 4), (12, 10), (3600, 10)]
+)
+def test_connect_timeout_s_stays_under_the_deadline(deadline_s, want):
+    assert session.connect_timeout_s(deadline_s) == want
+
+
+@pytest.mark.parametrize(
+    ("dsn", "want"),
+    [
+        ("host=h dbname=d", "host=h dbname=d connect_timeout=7"),
+        ("", " connect_timeout=7"),
+        ("postgresql://u@h/d", "postgresql://u@h/d?connect_timeout=7"),
+        (
+            "postgres://u@h/d?sslmode=require",
+            "postgres://u@h/d?sslmode=require&connect_timeout=7",
+        ),
+        ("postgresql://u@h/d?", "postgresql://u@h/d?connect_timeout=7"),
+        (
+            "postgresql://u@h/d?sslmode=require&",
+            "postgresql://u@h/d?sslmode=require&connect_timeout=7",
+        ),
+        ("host=h password='a\\\\'", "host=h password='a\\\\' connect_timeout=7"),
+        ("host=h password=a\\\\", "host=h password=a\\\\ connect_timeout=7"),
+        ("host=h password=a\\\\\\\\", "host=h password=a\\\\\\\\ connect_timeout=7"),
+        ("host=h password='x?y' dbname=d", "host=h password='x?y' dbname=d connect_timeout=7"),
+    ],
+)
+def test_with_connect_timeout_appends_and_keeps_every_byte(dsn, want):
+    out = session.with_connect_timeout(dsn, 7)
+    assert out == want
+    assert out.startswith(dsn)
+
+
+@pytest.mark.parametrize("dsn", ["host=h password=a\\", "host=h password=a\\\\\\"])
+def test_with_connect_timeout_refuses_an_odd_trailing_backslash_run(dsn):
+    with pytest.raises(session.PostgresSnapshotError) as ei:
+        session.with_connect_timeout(dsn, 7)
+    assert ei.value.code == "source_unreachable"
+    assert ei.value.__cause__ is None and ei.value.__context__ is None
+    assert "password" not in str(ei.value) and "host=h" not in repr(ei.value)
+
+
+def test_type_postgres_attach_has_one_site():
+    assert _attach_hits(_src_sources()) == [("connectors/_postgres_session.py", "type_postgres")]
+
+
+@pytest.mark.parametrize(
+    "seeded",
+    [
+        "ATTACH '...' AS x (type postgres)",
+        "attach 'postgres:dbname=d' AS x",
+        "CALL postgres_attach('dbname=d')",
+        "SELECT * FROM postgres_scan('dbname=d', 'public', 't')",
+        "SELECT * FROM postgres_scan_pushdown('dbname=d', 'public', 't')",
+    ],
+)
+def test_attach_guard_catches_every_seeded_shape(seeded):
+    hits = _attach_hits({"other/elsewhere.py": f"q = {seeded!r}\n"})
+    assert hits and hits[0][0] == "other/elsewhere.py"
+
+
+def test_attach_guard_ignores_the_extension_name_query():
+    src = "q = \"SELECT 1 FROM duckdb_extensions() WHERE extension_name = 'postgres_scanner'\"\n"
+    assert _attach_hits({"x.py": src}) == []
+
+
+def _src_sources():
+    root = Path(session.__file__).resolve().parents[1]
+    return {
+        str(p.relative_to(root)): p.read_text(encoding="utf-8") for p in root.rglob("*.py")
+    }
+
+
+_ATTACH_SHAPES = {
+    "type_postgres": re.compile(r"type\s+postgres\b", re.I),
+    "prefixed_attach": re.compile(r"attach\s+'postgres(ql)?:", re.I),
+    "postgres_attach": re.compile(r"postgres_attach\s*\(", re.I),
+    "postgres_scan": re.compile(r"postgres_scan(_pushdown)?\s*\(", re.I),
+}
+
+
+def _attach_hits(sources):
+    hits = []
+    for path, text in sources.items():
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                hits.extend(
+                    (path, name) for name, rx in _ATTACH_SHAPES.items() if rx.search(node.value)
+                )
+    return hits
