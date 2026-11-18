@@ -121,6 +121,8 @@ class Levels:
         return pairs
 
     def _admit(self, pattern: Pattern, level: _Level, key: Any) -> str:
+        if level.collapsed:  # it collapsed earlier in this object: no more detector runs
+            return WILD
         if key in level.counts:
             if level.last[key] != self.cell:
                 level.last[key] = self.cell
