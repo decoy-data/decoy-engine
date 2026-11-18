@@ -93,6 +93,7 @@ def test_optional_extra_is_a_declared_extra_of_the_package() -> None:
     assert st.OPTIONAL_EXTRAS, "no optional-extra package registered"
     for package, extra in st.OPTIONAL_EXTRAS.items():
         assert extra in declared, f"{package}: {extra} is not an optional dependency"
+        assert (ROOT / "src" / "decoy_engine" / package.replace(".", "/") / "__init__.py").is_file()
 
 
 def _fixture_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wanted: str) -> None:

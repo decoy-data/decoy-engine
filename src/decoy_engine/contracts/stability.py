@@ -71,9 +71,11 @@ EXPERIMENTAL_CONSTANTS: Final[tuple[str, tuple[str, ...]]] = (
     ),
 )
 
-# A public package that needs an optional extra: the one dependency whose absence the census
-# tolerates. Its declared names are then classified from source. Any other import error fails.
-OPTIONAL_EXTRAS: Final[dict[str, str]] = {"decoy_engine.providers_v2.mimesis": "mimesis"}
+# A public package that needs an optional extra, keyed by its path under `decoy_engine`: the one
+# dependency whose absence the census tolerates. Its declared names are then classified from
+# source. Any other import error fails. The key is relative so the string-target sentry, which
+# resolves every `decoy_engine.` path, does not need the extra installed.
+OPTIONAL_EXTRAS: Final[dict[str, str]] = {"providers_v2.mimesis": "mimesis"}
 
 
 def package_tier(module: str) -> str:

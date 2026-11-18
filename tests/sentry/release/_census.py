@@ -52,7 +52,7 @@ def static_all(module: str) -> list[str]:
 
 def missing_extra(module: str, exc: ImportError) -> str | None:
     """The registered optional dependency this error is about, or None for any other error."""
-    wanted = st.OPTIONAL_EXTRAS.get(module)
+    wanted = st.OPTIONAL_EXTRAS.get(module.removeprefix("decoy_engine."))
     cause = exc.__cause__ if isinstance(exc.__cause__, ImportError) else exc
     return wanted if wanted is not None and getattr(cause, "name", None) == wanted else None
 
