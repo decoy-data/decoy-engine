@@ -471,6 +471,9 @@ class _DroppingCast:
     def tables(self) -> set[str]:
         return {"t"}
 
+    def quarantine_tables(self) -> set[str]:
+        return {"t"}
+
     def declared_columns(self, name: str) -> tuple[str, ...]:
         return ()
 

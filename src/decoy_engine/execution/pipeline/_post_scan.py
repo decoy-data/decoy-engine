@@ -391,6 +391,7 @@ class PostScanGate:
             base,
             needs=cast.declared_columns(name),
             schema=typed,
+            drops_rows=name in cast.quarantine_tables(),
             cast=lambda table, offset: (
                 cast.cast_batch(name, table, offset=offset, record=False).table
             ),

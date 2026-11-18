@@ -109,10 +109,12 @@ def with_cast(
     needs: Sequence[str],
     schema: pa.Schema,
     cast: Callable[[pa.Table, int], pa.Table],
+    drops_rows: bool = False,
 ) -> TableBatches:
     """`table` as a declared cast reads it: each batch is cast (`cast` takes the batch and the
     absolute row of its first row, and may drop rows) before the named columns are taken. `needs`
-    are the columns the cast reads, `schema` the cast table's schema."""
+    are the columns the cast reads, `schema` the cast table's schema. `drops_rows` is true only
+    when a column quarantines: any other policy keeps every row, so the length check stays exact."""
 
     def read(columns: Sequence[str], batch_rows: int) -> Iterator[pa.RecordBatch]:
         _require_columns(columns)
@@ -127,7 +129,9 @@ def with_cast(
 
         return batches()
 
-    return TableBatches(table.name, schema, table.num_rows, read, table.bounded, drops_rows=True)
+    return TableBatches(
+        table.name, schema, table.num_rows, read, table.bounded, drops_rows=drops_rows
+    )
 
 
 def missing_columns(table: TableBatches, columns: Sequence[str]) -> tuple[str, ...]:

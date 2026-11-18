@@ -202,3 +202,16 @@ def test_a_table_that_drops_rows_may_not_give_more_than_it_declares() -> None:
     over = replace(base, read=longer.read, drops_rows=True)
     with pytest.raises(ValueError, match="declares"):
         value_facts(over, ["x"])
+
+
+def test_a_cast_table_without_a_quarantine_column_keeps_the_exact_length_check() -> None:
+    from decoy_engine.verification.postmask._stream_input import with_cast
+
+    table = _short(_source(20), 17, drops=False)
+    cast = {
+        True: with_cast(table, needs=(), schema=table.schema, cast=lambda t, o: t, drops_rows=True),
+        False: with_cast(table, needs=(), schema=table.schema, cast=lambda t, o: t),
+    }
+    assert value_facts(cast[True], ["x"])["x"].rows == 17
+    with pytest.raises(ValueError, match="declares"):
+        value_facts(cast[False], ["x"])

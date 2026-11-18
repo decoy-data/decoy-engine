@@ -17,14 +17,18 @@ Counts and names only: nothing here reads or keeps a cell value.
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
-from typing import TYPE_CHECKING, Any, Final, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from decoy_engine import reasons
 from decoy_engine.config import post_scan_distribution_tolerance
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
 from decoy_engine.reasons import ReasonCode
-from decoy_engine.verification.postmask.distribution import DistributionInput, preserved_facts
+from decoy_engine.verification.postmask.distribution import (
+    ROW_ONLY,
+    DistributionInput,
+    preserved_facts,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.execution._pipeline_context import PipelineRunContext
@@ -36,8 +40,6 @@ __all__ = [
     "refuse_transformed_integrity",
     "refuse_unchecked_distribution",
 ]
-
-_ROW_ONLY: Final = frozenset({"row_count"})
 
 
 def distribution_refusal(ctx: PipelineRunContext, *, deferred: bool) -> ReasonCode | None:
@@ -130,7 +132,7 @@ class DistributionState:
                 facts = preserved_facts(
                     column.get("strategy"), _provider_config(column), conditional=_when(column)
                 )
-                if facts != _ROW_ONLY:
+                if facts != ROW_ONLY:
                     checked[column["name"]] = facts
             columns[str(entry["name"])] = checked
         return DistributionInput(
@@ -138,6 +140,6 @@ class DistributionState:
             columns=columns,
             sources={name: source_of(name) for name in columns},
             quarantined=dict(self._quarantined),
-            cast_tables=frozenset(cast_run.tables() if cast_run is not None else ())
+            cast_tables=frozenset(cast_run.quarantine_tables() if cast_run is not None else ())
             & columns.keys(),
         )

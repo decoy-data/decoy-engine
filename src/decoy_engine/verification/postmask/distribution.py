@@ -52,7 +52,7 @@ from decoy_engine.verification.postmask._stream_input import TableBatches
 _Fact = Literal["row_count", "null_rate", "distinct_ratio", "mean", "std"]
 FACTS: tuple[_Fact, ...] = get_args(_Fact)
 
-_ROW: frozenset[_Fact] = frozenset({"row_count"})
+ROW_ONLY: frozenset[_Fact] = frozenset({"row_count"})
 _NULLS: frozenset[_Fact] = frozenset({"row_count", "null_rate"})
 _CARDINALITY: frozenset[_Fact] = frozenset({"row_count", "null_rate", "distinct_ratio"})
 _ALL: frozenset[_Fact] = frozenset(FACTS)
@@ -73,10 +73,10 @@ def preserved_facts(
     produce a false breach."""
     label = distribution_behavior_for(strategy, provider_config)
     if label is None or strategy is None:
-        return _ROW
+        return ROW_ONLY
     keeps_nulls = strategy not in NULLS_NOT_PRESERVED
     if not keeps_nulls:
-        return _ROW
+        return ROW_ONLY
     if conditional or strategy in _VALUES_REMAPPED:
         return _NULLS
     if label == "preserves_all":
