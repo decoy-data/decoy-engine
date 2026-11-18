@@ -35,6 +35,7 @@ OWNER_TOKEN_MAP: dict[str, ReasonCode] = {
     "not_json": ev.NOT_JSON,
     "oversized": ev.TOO_LARGE,
     "too_deep": ev.TOO_DEEP,
+    "invalid_unicode": ev.INVALID_UNICODE,
 }
 
 if set(OWNER_TOKEN_MAP) != set(STRICT_JSON_TOKENS):
@@ -87,6 +88,7 @@ def parse_strict(data: bytes | bytearray | memoryview, *, max_bytes: int = MAX_B
             max_int_digits=MAX_INT_DIGITS,
             forbid_float=True,
             forbid_negative_zero=True,
+            forbid_lone_surrogate=True,
         )
     except _OwnerError as exc:
         owner_token = exc.token

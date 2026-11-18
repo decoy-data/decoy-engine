@@ -180,6 +180,7 @@ STRICT_JSON_TOKENS = (
     "too_deep",
     "negative_zero",
     "float",
+    "invalid_unicode",
 )
 
 
@@ -247,20 +248,23 @@ def strict_json_read(
     max_int_digits: int | None = 20,
     forbid_float: bool = False,
     forbid_negative_zero: bool = False,
+    forbid_lone_surrogate: bool = False,
 ) -> Any:
     """Parse JSON under bounds, refusing a duplicate key and a lone surrogate in the text.
 
-    ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
-    bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
-    ``"refuse"`` names them ``non_finite``. ``keep_lexemes`` returns every number as a
-    ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
+        ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
+        bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
+        ``"refuse"`` names them ``non_finite``. ``keep_lexemes`` returns every number as a
+        ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
 
-    Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
-    ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
-    ``negative_zero`` for the integer text ``-0``. Both default off, so the defaults read as before.
+        Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
+        ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
+        ``negative_zero`` for the integer text ``-0``. ``forbid_lone_surrogate`` records
+    ``invalid_unicode`` for an escaped lone surrogate (``"\\ud800"``) in a string or key; a raw one is
+    always refused. All default off, so the defaults read as before.
 
-    The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
-    error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
+        The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
+        error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
     """
     found: list[str] = []
 
@@ -341,6 +345,8 @@ def strict_json_read(
         raise StrictJsonError("not_json")
     if too_deep or (walk_depth and max_depth is not None and _deeper_than(parsed, max_depth)):
         raise StrictJsonError("too_deep")
+    if forbid_lone_surrogate and _has_surrogate(parsed):
+        found.append("invalid_unicode")
     if found:
         raise StrictJsonError(found[0])
     return parsed
@@ -352,6 +358,7 @@ def strict_json_loads(
     max_int_digits: int | None = 20,
     forbid_float: bool = False,
     forbid_negative_zero: bool = False,
+    forbid_lone_surrogate: bool = False,
 ) -> Any:
     """Parse JSON, refusing a duplicate key, a non-finite number, a raw lone surrogate in the text
     and an integer longer than ``max_int_digits`` digits (``None`` sets no digit limit).
@@ -362,6 +369,7 @@ def strict_json_loads(
         max_int_digits=max_int_digits,
         forbid_float=forbid_float,
         forbid_negative_zero=forbid_negative_zero,
+        forbid_lone_surrogate=forbid_lone_surrogate,
     )
 
 

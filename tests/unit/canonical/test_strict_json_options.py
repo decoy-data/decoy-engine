@@ -45,3 +45,12 @@ def test_the_first_recorded_defect_wins() -> None:
     with pytest.raises(StrictJsonError) as caught:
         strict_json_loads(b'[{"a":1,"a":2},1.5]', forbid_float=True)
     assert caught.value.token == "duplicate_key"
+
+
+def test_forbid_lone_surrogate_refuses_an_escaped_one_and_defaults_off() -> None:
+    text = '{"a": "\\ud800"}'
+    assert strict_json_loads(text) == {"a": "\ud800"}
+    with pytest.raises(StrictJsonError) as caught:
+        strict_json_loads(text, forbid_lone_surrogate=True)
+    assert caught.value.token == "invalid_unicode"
+    assert strict_json_loads('{"a": "\\ud83d\\ude00"}', forbid_lone_surrogate=True) == {"a": "😀"}

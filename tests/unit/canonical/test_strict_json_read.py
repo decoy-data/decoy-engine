@@ -43,7 +43,7 @@ def _nest(depth: int) -> str:
 
 def test_tokens_keep_their_first_four_and_add_the_bounds() -> None:
     assert STRICT_JSON_TOKENS[:4] == ("not_json", "duplicate_key", "non_finite", "out_of_range")
-    assert STRICT_JSON_TOKENS[4:] == ("oversized", "too_deep")
+    assert STRICT_JSON_TOKENS[4:6] == ("oversized", "too_deep")
 
 
 def test_lexeme_mode_keeps_every_number_as_read() -> None:

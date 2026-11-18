@@ -105,6 +105,9 @@ def test_the_token_map_covers_every_token_the_owner_can_raise() -> None:
         "integer_out_of_domain",
         "float_not_allowed",
         "not_json",
+        "too_large",
+        "too_deep",
+        "invalid_unicode",
     }
 
 
