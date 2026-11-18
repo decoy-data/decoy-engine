@@ -27,7 +27,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from decoy_engine.anonymize._values import type_family
+from decoy_engine._value_family import type_family
 
 SUPPRESSED = "*"
 

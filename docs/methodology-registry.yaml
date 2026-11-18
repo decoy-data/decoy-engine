@@ -226,6 +226,14 @@ modules:
     pattern: t-closeness EMD (Li, Li and Venkatasubramanian 2007)
     source: Li, Li, Venkatasubramanian, t-Closeness, ICDE 2007 (equal and ordered ground distance); ARX
 
+  - path: src/decoy_engine/quality/anonymity/_models.py
+    pattern: ARX privacy criteria
+    source: ARX criteria package (KAnonymity, DistinctLDiversity, EntropyLDiversity, RecursiveCLDiversity, EqualDistanceTCloseness; Apache-2.0), monotonicity flags
+
+  - path: src/decoy_engine/quality/anonymity/_frequency_set.py
+    pattern: Incognito frequency set and rollup
+    source: LeFevre, DeWitt and Ramakrishnan, Incognito, SIGMOD 2005
+
   # Generalization hierarchies for quasi-identifiers (library only; opt-in by import).
   - path: src/decoy_engine/anonymize/hierarchies/__init__.py
     pattern: domain and value generalization hierarchies
