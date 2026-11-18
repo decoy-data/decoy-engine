@@ -27,6 +27,7 @@ Design notes (read before adding capabilities or breaking changes):
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -59,8 +60,11 @@ __all__ = [
 ]
 
 
-SDK_VERSION = "1.0"
-"""Public SDK contract version. Bumped on breaking changes to ABCs or types.
+SDK_VERSION = "1.1"
+"""Public SDK contract version.
+
+Bumped as major on a breaking change to ABCs or types, and as minor on an additive one
+(1.1: ``WriteResult.sha256``).
 
 Connectors declare a `min_sdk_version` class attribute; the engine refuses
 to load any connector whose `min_sdk_version` is newer than this constant.
@@ -129,6 +133,14 @@ class WriteResult:
 
     path: str
     bytes_written: int
+    sha256: str | None = None
+    """Lowercase SHA-256 hex of the bytes written; ``None`` when the sink reports no digest."""
+
+    def __post_init__(self) -> None:
+        if self.sha256 is not None and not (
+            isinstance(self.sha256, str) and re.fullmatch(r"[0-9a-f]{64}", self.sha256)
+        ):
+            raise ValueError("sha256 must be 64 lowercase hexadecimal characters")
 
 
 # ----- Exceptions ---------------------------------------------------------

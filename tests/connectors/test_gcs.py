@@ -90,6 +90,7 @@ class _FakeBlob:
         self.size = None
         self.content_type = None
         self.updated = None
+        self.generation = 1
         self.calls: list[tuple[str, object, object]] = []
 
     def reload(self, timeout=None, retry=None):
@@ -101,7 +102,7 @@ class _FakeBlob:
         self.content_type = entry["content_type"]
         self.updated = entry["updated"]
 
-    def open(self, mode: str, timeout=None, retry=None):
+    def open(self, mode: str, timeout=None, retry=None, **kw):
         self.calls.append(("open", timeout, retry))
         return _FakeBlobFile(self.store, self.name, mode)
 

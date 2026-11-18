@@ -22,6 +22,7 @@ from typing import ClassVar
 from pydantic import Field, SecretStr
 
 from decoy_engine.connectors import _clients
+from decoy_engine.connectors._digest import DigestingChunks
 from decoy_engine.sdk import (
     CAP_INTROSPECTION,
     CAP_MULTIPART,
@@ -163,19 +164,26 @@ class GCSFileSource(FileSource[GCSConfig]):
 
 
 def _stream_blob(get_bucket, path: str) -> Iterator[bytes]:
-    """The one GCS object read loop, shared by the source and the object store."""
+    """The one GCS object read loop, shared by the source and the object store.
+
+    Every chunk request carries the generation reloaded first, so an object replaced mid-read
+    fails as ``source_changed`` instead of mixing two versions.
+    """
     try:
         blob = get_bucket().blob(path)
+        _clients.gcs_reload(blob)
         # Blob.open returns a file-like wrapping an HTTPS stream;
         # iterate in chunks for bounded memory use.
-        with _clients.gcs_open(blob, "rb") as remote:
+        with _clients.gcs_open(blob, "rb", if_generation_match=blob.generation) as remote:
             while True:
                 chunk = remote.read(_DEFAULT_CHUNK_BYTES)
                 if not chunk:
                     return
                 yield chunk
-    except ConnectorError:
-        raise
+    except ConnectorError as exc:
+        if exc.kind != "precondition_failed":
+            raise
+        err = _clients.source_changed("GCS")
     except Exception as exc:
         err = _clients.gcs_error(exc)
     raise err
@@ -226,18 +234,17 @@ class GCSFileSink(FileSink[GCSConfig]):
 
     def write(self, path: str, chunks: Iterator[bytes]) -> WriteResult:
         key = _join_key(self.config.prefix, path)
-        bytes_written = 0
         # Only the setup is translated. The remote I/O below is covered by
         # _TranslatingFile, and an error from the caller's `chunks` iterator must reach
         # the caller as raised, not relabelled "Unexpected GCS error".
         blob = self._blob(key)
+        digest = DigestingChunks(chunks)
         # google-cloud-storage's Blob.open("wb") streams the upload
         # and handles resumable session negotiation internally for
         # large writes. We don't need to manage parts ourselves.
         with _clients.gcs_open(blob, "wb") as remote:
-            for chunk in chunks:
+            for chunk in digest:
                 if not chunk:
                     continue
                 remote.write(chunk)
-                bytes_written += len(chunk)
-        return WriteResult(path=key, bytes_written=bytes_written)
+        return WriteResult(path=key, bytes_written=digest.count, sha256=digest.hexdigest())

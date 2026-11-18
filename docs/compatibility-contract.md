@@ -608,6 +608,9 @@ No `SEED_PROTOCOL_VERSION` change.
   (A5a): a `format: fixed_width` `FileSource` can now be read through these
   names instead of importing the private `decoy_engine.profile._fixed_width_reader`
   module, which the additive-only rule in §4.1 does not cover.
+  `WriteResult.sha256` (SDK 1.1, F02-E2) is an additive, defaulted field: lowercase
+  SHA-256 hex of the bytes a sink wrote, or `None` when the sink reports no digest, so
+  sinks written against SDK 1.0 keep working.
   It also includes `generated_table_to_pandas(table)` (2026-11-08): converts a generated
   Arrow table to pandas with every integer column kept as a pandas nullable integer, so
   output written from the frame prints `1` where a plain `to_pandas()` prints `1.0`.

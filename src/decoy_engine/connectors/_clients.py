@@ -29,6 +29,7 @@ Google imports are local so ``import decoy_engine`` works without the cloud extr
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
@@ -113,6 +114,8 @@ def _gcs_kind(exc: BaseException) -> ConnectorErrorKind:
         return "precondition_failed"
     if isinstance(exc, gax.Conflict):
         return "conflict"
+    if _is_data_corruption(exc):
+        return "digest_mismatch"
     transient = (
         gax.ServiceUnavailable,
         gax.TooManyRequests,
@@ -126,6 +129,15 @@ def _gcs_kind(exc: BaseException) -> ConnectorErrorKind:
     if isinstance(exc, transient):
         return "transient"
     return "rejected" if isinstance(exc, gax.BadRequest) else "unexpected"
+
+
+def _is_data_corruption(exc: BaseException) -> bool:
+    """The library's checksum failure on a finalized upload (``DataCorruption``)."""
+    try:
+        from google.cloud.storage.exceptions import DataCorruption
+    except ImportError:
+        return False
+    return isinstance(exc, DataCorruption)
 
 
 def _call(
@@ -206,15 +218,50 @@ def gcs_download(blob: Any, *, start: int | None = None, end: int | None = None)
     )
 
 
+_GENERATION = re.compile(r"[1-9][0-9]{0,18}")
+
+
+def _corrupt_generation(exc: BaseException) -> int | None:
+    """The generation GCS reports for the object a failed checksum left live, if well formed.
+
+    The JSON API sends it as a decimal string; any other shape counts as unreadable.
+    """
+    try:
+        value = exc.response.json()["generation"]  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return int(value) if isinstance(value, str) and _GENERATION.fullmatch(value) else None
+
+
+def gcs_delete_generation(blob: Any, generation: int) -> None:
+    """Delete one object generation, once. A newer object written by someone else is kept."""
+    _guard(blob.delete, if_generation_match=generation, timeout=GCS_TIMEOUT, retry=None)
+
+
+def _removed(blob: Any, generation: int | None) -> bool:
+    """Whether the object a failed checksum left live is gone; never raises."""
+    if generation is None:
+        return False
+    try:
+        gcs_delete_generation(blob, generation)
+    except Exception:
+        return False
+    return True
+
+
 class _TranslatingFile:
     """The object ``Blob.open`` returns, with each I/O failure translated.
 
     Reads and writes on a ``BlobReader``/``BlobWriter`` are the network calls, so
-    translation at ``open`` alone would let their errors through.
+    translation at ``open`` alone would let their errors through. A writer also owns the
+    cleanup after a failed content check: the finalizing request (``close``, ``__exit__``)
+    leaves the object live when GCS rejects its checksum, and only this wrapper still sees
+    the original error (and so the generation) before ``gcs_error`` drops it.
     """
 
-    def __init__(self, raw: Any) -> None:
+    def __init__(self, raw: Any, writing: Any = None) -> None:
         self._raw = raw
+        self._writing = writing
 
     def read(self, size: int = -1) -> bytes:
         return _guard(self._raw.read, size)
@@ -222,19 +269,36 @@ class _TranslatingFile:
     def write(self, data: bytes) -> int:
         return _guard(self._raw.write, data)
 
+    def _finish(self, call: Callable[..., Any], *args: Any) -> Any:
+        """Run the finalizing call; a content-check failure deletes the object it left live."""
+        generation: int | None = None
+        try:
+            return call(*args)
+        except Exception as exc:
+            err = gcs_error(exc)
+            if err is exc:
+                raise
+            if self._writing is not None and err.kind == "digest_mismatch":
+                generation = _corrupt_generation(exc)
+        if self._writing is not None and err.kind == "digest_mismatch":
+            err.cleanup_ok = _removed(self._writing, generation)
+        raise err
+
     def close(self) -> None:
-        _guard(self._raw.close)
+        self._finish(self._raw.close)
 
     def __enter__(self) -> _TranslatingFile:
         _guard(self._raw.__enter__)
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
-        return _guard(self._raw.__exit__, exc_type, exc, tb)
+        return self._finish(self._raw.__exit__, exc_type, exc, tb)
 
 
-def gcs_open(blob: Any, mode: str) -> _TranslatingFile:
-    return _TranslatingFile(_guard(blob.open, mode, timeout=GCS_TIMEOUT, retry=gcs_retry()))
+def gcs_open(blob: Any, mode: str, **kwargs: Any) -> _TranslatingFile:
+    """Open a blob for streaming; ``kwargs`` are download or upload options (for a read pin)."""
+    raw = _guard(blob.open, mode, timeout=GCS_TIMEOUT, retry=gcs_retry(), **kwargs)
+    return _TranslatingFile(raw, blob if "w" in mode else None)
 
 
 # S3 error codes (or bare HTTP statuses, which head calls report as the code) to kinds.
@@ -243,6 +307,7 @@ _S3_KINDS: dict[str, ConnectorErrorKind] = {
     **dict.fromkeys(("403", "AccessDenied", "AllAccessDisabled"), "access_denied"),
     **dict.fromkeys(("InvalidAccessKeyId", "SignatureDoesNotMatch", "ExpiredToken"), "credentials"),
     **dict.fromkeys(("PreconditionFailed", "412"), "precondition_failed"),
+    **dict.fromkeys(("BadDigest", "InvalidDigest", "XAmzContentSHA256Mismatch"), "digest_mismatch"),
     **dict.fromkeys(("ConditionalRequestConflict", "409"), "conflict"),
     **dict.fromkeys(("PermanentRedirect", "301", "AuthorizationHeaderMalformed"), "wrong_region"),
     # The codes botocore's standard retry mode retries (retries/standard.py throttled and
@@ -332,6 +397,8 @@ def _s3_kind(exc: BaseException) -> ConnectorErrorKind:
         return "credentials"
     if isinstance(exc, (bce.ConnectionError, bce.HTTPClientError)):
         return "transient"
+    if isinstance(exc, bce.FlexibleChecksumError):
+        return "digest_mismatch"
     if not isinstance(exc, bce.ClientError):
         return "unexpected"
     response = exc.response if isinstance(exc.response, dict) else {}

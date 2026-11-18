@@ -64,7 +64,8 @@ to its expected set. Names exported again by `decoy_engine.sdk` are listed as `s
 page's sentry is what holds `sdk.__all__`, because a name added to or dropped from it fails the
 row check. Both pin that a name exists, not its signature or fields; rows that cite `RGF1-KL-4`
 have nothing more. `JobEstimate` gained three defaulted fields after `notes` (`lifecycle_peak_bytes`,
-`limiting_phase`, `phase_bytes`); the row pins the name, not the fields.
+`limiting_phase`, `phase_bytes`); the row pins the name, not the fields. `WriteResult` gained
+the defaulted `WriteResult.sha256` field in SDK 1.1, so `SDK_VERSION` is `"1.1"`.
 
 | Surface | Completeness source | Owning code | Pinning test or snapshot |
 |---|---|---|---|

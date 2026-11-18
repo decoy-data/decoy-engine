@@ -11,6 +11,12 @@ AT-C10: the GCS name set is derived from the installed library (public methods o
 ``retry=`` as explicit keywords is a finding, whatever the receiver. Today's non-GCS
 name collisions live in the shrink-only baseline ``baselines/gcs-call-kwargs.json``.
 
+Precision rule (OQ-10 option b, AT-E2-10): a ``.update`` call whose receiver is a local name bound
+exactly once in the same function from a ``hashlib`` or ``hmac`` constructor is counted in
+``seen`` and is not a finding; a hashlib object is never a GCS ``Blob``. A rebound name, any
+other call, an outer-function binding, an attribute receiver (``self.h.update``) and a real
+``blob.update()`` stay findings.
+
 Named limit: matching is by method name, so a bound method stored in a variable and
 called later, or a client built inside an unwrapped third-party library, is not seen.
 Calls wrapped in ``functools.partial`` and the ``google.cloud.storage.transfer_manager``
@@ -45,6 +51,7 @@ BASELINE = HERE / "baselines" / "gcs-call-kwargs.json"
 CORPUS = HERE / "fixtures" / "outbound_seeded.py.txt"
 CLIENT_TARGETS = frozenset({"google.cloud.storage.Client", "google.cloud.storage.client.Client"})
 REQUIRED = frozenset({"timeout", "retry"})
+HMAC_CONSTRUCTORS = frozenset({"hmac.new", "hmac.HMAC"})
 # Canonical spellings of an S3 client or resource build. Calls on a built object print as
 # `Name()`, so `boto3.Session(...).client(...)` reads `boto3.Session().client`.
 S3_BUILDERS = frozenset(
@@ -167,6 +174,77 @@ def _chain(node: ast.AST, scope: Scope) -> str | None:
     return None
 
 
+def _param_names(args: ast.arguments) -> frozenset[str]:
+    every = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+    return frozenset(a.arg for a in every if a is not None)
+
+
+def _scope_stores(body: list[ast.stmt]) -> list[ast.AST]:
+    """Nodes in ``body`` outside nested defs and classes, plus those defs and classes."""
+    out: list[ast.AST] = []
+    stack: list[ast.AST] = list(body)
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _bound_names(node: ast.AST) -> list[str]:
+    """Names ``node`` binds in its own scope (a parameter, import, def, store or handler)."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        return [node.id]
+    if isinstance(node, ast.arg):
+        return [node.arg]
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.ExceptHandler) and node.name:
+        return [node.name]
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return [(a.asname or a.name).split(".")[0] for a in node.names]
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return list(node.names)
+    return []
+
+
+def _local_hashers(body: list[ast.stmt], scope: Scope, params: frozenset[str]) -> frozenset[str]:
+    """Local names bound exactly once in this function, from a ``hashlib`` or ``hmac`` constructor.
+
+    OQ-10 option (b): ``h.update(...)`` on such a name is a hash update, never a GCS
+    ``Blob.update``, so the walk counts it in ``seen`` and does not report it. A name that is a
+    parameter, is rebound, comes from any other call, is declared ``global``/``nonlocal`` or is
+    bound in an outer function does not qualify.
+    """
+    nodes = _scope_stores(body)
+    counts: dict[str, int] = defaultdict(int)
+    for name in params:
+        counts[name] += 1
+    for node in nodes:
+        for name in _bound_names(node):
+            counts[name] += 1
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                counts[name] += 2
+    out: set[str] = set()
+    for node in nodes:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+            and counts[node.targets[0].id] == 1
+        ):
+            ctor = _chain(node.value.func, scope) or ""
+            if ctor.startswith("hashlib.") or ctor in HMAC_CONSTRUCTORS:
+                out.add(node.targets[0].id)
+    return frozenset(out)
+
+
+def _is_local_hasher(receiver: ast.AST, hashers: frozenset[str]) -> bool:
+    return isinstance(receiver, ast.Name) and receiver.id in hashers
+
+
 class _ModuleScan:
     def __init__(
         self, rel: str, name: str, tree: ast.Module, index: ProjectIndex, names: frozenset[str]
@@ -182,7 +260,14 @@ class _ModuleScan:
         self._body(self.tree.body, scope, "<module>", "")
         return self.findings
 
-    def _body(self, body: list[ast.stmt], scope: Scope, qual: str, owner: str) -> None:
+    def _body(
+        self,
+        body: list[ast.stmt],
+        scope: Scope,
+        qual: str,
+        owner: str,
+        params: frozenset[str] | None = None,
+    ) -> None:
         for stmt in body:
             if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
                 target = stmt.targets[0]
@@ -190,16 +275,19 @@ class _ModuleScan:
                     found = resolve(stmt.value, scope, self.index)
                     if found is not None and found != DYNAMIC:
                         scope.aliases[target.id] = found
-        self._classify(_calls_in(body), scope, qual)
+        hashers = _local_hashers(body, scope, params) if params is not None else frozenset()
+        self._classify(_calls_in(body), scope, qual, hashers)
         for node in _nested(body):
             if isinstance(node, ast.ClassDef):
                 self._body(node.body, scope, f"{owner}{node.name}", f"{owner}{node.name}.")
             else:
                 inner = scope.child(build_import_map(node.body, self.name, self.is_package))
                 name = f"{owner}{node.name}"
-                self._body(node.body, inner, name, f"{name}.")
+                self._body(node.body, inner, name, f"{name}.", _param_names(node.args))
 
-    def _classify(self, calls: list[ast.Call], scope: Scope, qual: str) -> None:
+    def _classify(
+        self, calls: list[ast.Call], scope: Scope, qual: str, hashers: frozenset[str]
+    ) -> None:
         counts: dict[str, int] = defaultdict(int)
         for call in calls:
             target = resolve(call.func, scope, self.index)
@@ -217,6 +305,8 @@ class _ModuleScan:
             if self.rel == FACTORY:
                 continue
             self.seen += 1
+            if method == "update" and _is_local_hasher(call.func.value, hashers):
+                continue
             # `timeout=None` or `retry=None` switches the bound off, so it does not count.
             explicit = {
                 k.arg

@@ -191,9 +191,7 @@ def _client_error(code: str) -> Any:
         lambda: _client_error("BadDigest"),
         lambda: _client_error("InvalidDigest"),
         lambda: _client_error("XAmzContentSHA256Mismatch"),
-        lambda: botocore_exc.FlexibleChecksumError(
-            expected_checksum="zz_marker_a", actual_checksum="zz_marker_b"
-        ),
+        lambda: botocore_exc.FlexibleChecksumError(error_msg="zz_marker"),
     ],
     ids=["BadDigest", "InvalidDigest", "XAmzContentSHA256Mismatch", "FlexibleChecksumError"],
 )
