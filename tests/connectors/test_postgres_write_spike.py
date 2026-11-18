@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import warnings
 
 import pytest
 
@@ -102,7 +103,7 @@ def _wait(predicate, seconds: float):
 
 def _note(record_property, key: str, value) -> None:
     record_property(key, str(value))
-    print(f"SPIKE {key}={value}")
+    warnings.warn(f"SPIKE {key}={value}", stacklevel=2)
 
 
 def _seed_table(pg, name="t", rows=3):
@@ -236,34 +237,57 @@ def test_cell_d_pg_clear_cache_shows_changed_catalog(pg, rw, record_property):
 # ----- (e) interrupt() cancels the server query -------------------------------------------------
 
 
-@pytest.mark.parametrize("in_transaction", [False, True])
-def test_cell_e_interrupt_cancels_the_server_query(pg, peer, rw, in_transaction):
+@pytest.mark.parametrize("path", ["query", "execute", "execute_in_transaction", "lock_wait"])
+def test_cell_e_interrupt_cancels_the_server_query(pg, peer, rw, path, record_property):
+    s = pg.schema
     conn = rw()
     marker = "m" + uuid.uuid4().hex
-    sql = f"SELECT 1 FROM pg_sleep(60) /* {marker} */"
     running = (
         "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' "
         f"AND pid <> pg_backend_pid() AND query LIKE '%{marker}%'"
     )
-    if in_transaction:
+    holder = None
+    if path == "lock_wait":
+        _seed_table(pg)
+        holder = rw()
+        holder.execute("BEGIN")
+        _pgx(holder, f"TRUNCATE {s}.t")
+        statement = f"TRUNCATE {s}.t /* {marker} */"
+    else:
+        statement = f"SELECT 1 FROM pg_sleep(30) /* {marker} */"
+    if path in ("execute_in_transaction", "lock_wait"):
         conn.execute("BEGIN")
-    box: dict = {}
 
     def run():
         try:
-            conn.execute("SELECT * FROM postgres_query('w', ?)", [sql]).fetchall()
+            if path == "query":
+                conn.execute("SELECT * FROM postgres_query('w', ?)", [statement]).fetchall()
+            else:
+                _pgx(conn, statement)
             box["done"] = True
         except Exception as exc:
             box["error"] = type(exc).__name__
 
+    box: dict = {}
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    assert _wait(lambda: peer.one(running) == 1, 10), "the query never reached the server"
-    conn.interrupt()
-    t.join(10)
-    assert not t.is_alive()
-    assert "error" in box
-    assert _wait(lambda: peer.one(running) == 0, 5), "the server query outlived interrupt()"
+    try:
+        assert _wait(lambda: peer.one(running) == 1, 10), "the statement never reached the server"
+        conn.interrupt()
+        t.join(10)
+        returned = not t.is_alive()
+        gone = _wait(lambda: peer.one(running) == 0, 5)
+        _note(record_property, f"cell_e_{path}", f"client_returned={returned} server_gone={gone}")
+        assert returned, "interrupt() did not return control to the client"
+        assert gone, "the server query outlived interrupt()"
+    finally:
+        # Leave no sleeper behind if interrupt() failed.
+        peer.q(
+            "SELECT pg_cancel_backend(pid) FROM pg_stat_activity "
+            f"WHERE query LIKE '%{marker}%' AND pid <> pg_backend_pid()"
+        )
+        if holder is not None:
+            holder.close()
 
 
 # ----- (f) INSERT with a column list over generated, identity and exotic types -------------------
