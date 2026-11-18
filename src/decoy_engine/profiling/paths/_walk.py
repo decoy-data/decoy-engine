@@ -80,15 +80,18 @@ def kind_of(value: Any) -> str | None:
     return None
 
 
+def _union(left: int, right: int) -> int:
+    """The union of two sets of cell numbers, each kept as a bit mask."""
+    return left | right
+
+
 class _Level:
-    __slots__ = ("cells", "collapsed", "counts", "kept", "last", "last_cell", "runs")
+    __slots__ = ("cells", "collapsed", "kept", "runs", "seen")
 
     def __init__(self) -> None:
-        self.cells = 0  # cells in which an object with this pattern appears
+        self.cells = 0  # the cells in which an object with this pattern appears, as a bit mask
+        self.seen: dict[str, int] = {}  # key -> the cells it appears in, as a bit mask
         self.runs = 0  # detector runs on this level's keys: stored and rejected keys both count
-        self.last_cell = -1
-        self.counts: dict[str, int] = {}  # key -> cells it appears in
-        self.last: dict[str, int] = {}  # key -> last cell counted, so a cell counts once
         self.collapsed = False
         self.kept: frozenset[str] = frozenset()
 
@@ -114,9 +117,7 @@ class Levels:
                 self.truncated = True
                 return [(WILD, child) for child in mapping.values()]
             level = self._levels[pattern] = _Level()
-        if level.last_cell != self.cell:
-            level.last_cell = self.cell
-            level.cells += 1
+        level.cells |= 1 << self.cell
         if level.collapsed:
             return [(WILD, child) for child in mapping.values()]
         pairs = [(self._admit(pattern, level, key), child) for key, child in mapping.items()]
@@ -127,10 +128,8 @@ class Levels:
     def _admit(self, pattern: Pattern, level: _Level, key: Any) -> str:
         if level.collapsed:  # it collapsed earlier in this object: no more detector runs
             return WILD
-        if key in level.counts:
-            if level.last[key] != self.cell:
-                level.last[key] = self.cell
-                level.counts[key] += 1
+        if key in level.seen:
+            level.seen[key] |= 1 << self.cell
             return str(key)
         if not isinstance(key, str) or not _KEY.fullmatch(key) or _DIGITS.search(key):
             return WILD
@@ -139,27 +138,26 @@ class Levels:
             self.add(level, key)
         # Keys rejected as data count toward the level's budget too, so an object of endless
         # distinct data-like keys collapses instead of running a detector on every one.
-        if len(level.counts) > SCAN_MAP_KEYS or level.runs > SCAN_MAP_KEYS:
+        if len(level.seen) > SCAN_MAP_KEYS or level.runs > SCAN_MAP_KEYS:
             self._collapse(pattern, level)
             return WILD
         return WILD if data else key
 
     def add(self, level: _Level, key: str) -> None:
         """Store a key that passed rules 1 and 2. The only place a key text enters the state."""
-        level.counts[key] = 1
-        level.last[key] = self.cell
+        level.seen[key] = 1 << self.cell
         self.key_total += 1
 
     def _collapse(self, pattern: Pattern, level: _Level) -> None:
         """Drop the level's keys and every level below one of them: the level is now `*`."""
-        self.key_total -= len(level.counts)
-        level.counts, level.last = {}, {}
+        self.key_total -= len(level.seen)
+        level.seen = {}
         level.collapsed = True
         depth = len(pattern)
         for below in [
             p for p in self._levels if len(p) > depth and p[:depth] == pattern and p[depth] != WILD
         ]:
-            self.key_total -= len(self._levels.pop(below).counts)
+            self.key_total -= len(self._levels.pop(below).seen)
 
     def _is_data(self, level: _Level, key: str) -> bool:
         """Key rule 2: a detector hit on the key text. A detector run (not a cached answer) is
@@ -184,37 +182,39 @@ class Levels:
                 level = self._levels.get(pattern)
                 if level is None or level.collapsed:
                     continue
+                cells = level.cells.bit_count()
                 level.kept = frozenset(
                     key
-                    for key, count in level.counts.items()
-                    if count >= 2 and count / level.cells >= SCAN_KEY_APPEARANCE
+                    for key, mask in level.seen.items()
+                    if mask.bit_count() >= 2 and mask.bit_count() / cells >= SCAN_KEY_APPEARANCE
                 )
-                for key in level.counts.keys() - level.kept:
+                for key in level.seen.keys() - level.kept:
                     self._fold((*pattern, key), (*pattern, WILD))
 
     def _fold(self, source: Pattern, target: Pattern) -> None:
-        """Move every level at or below `source` to the same place below `target`, merging counts
-        into a level that is already there. No key text is added: only keys already stored move."""
+        """Move every level at or below `source` to the same place below `target`, merging them
+        into a level that is already there. Cells are unioned, so one cell that holds several
+        dropped siblings counts once. No key text is added: only keys already stored move."""
         size = len(source)
         for pattern in [p for p in self._levels if p[:size] == source]:
             level = self._levels.pop(pattern)
-            self.key_total -= len(level.counts)
+            self.key_total -= len(level.seen)
             destination = (*target, *pattern[size:])
             held = self._levels.get(destination)
             if held is None:
                 self._levels[destination] = level
-                self.key_total += len(level.counts)
+                self.key_total += len(level.seen)
             elif held.collapsed:
                 continue
             elif level.collapsed:
                 self._collapse(destination, held)
             else:
-                for key, count in level.counts.items():
-                    if key not in held.counts:
+                for key, mask in level.seen.items():
+                    if key not in held.seen:
                         self.key_total += 1
-                    held.counts[key] = held.counts.get(key, 0) + count
-                held.cells += level.cells
-                if len(held.counts) > SCAN_MAP_KEYS:
+                    held.seen[key] = _union(held.seen.get(key, 0), mask)
+                held.cells = _union(held.cells, level.cells)
+                if len(held.seen) > SCAN_MAP_KEYS:
                     self._collapse(destination, held)
 
     @property
@@ -296,8 +296,12 @@ def walk(
     stack: list[tuple[Any, Pattern, int]] = [(root, (), 1)]
     while stack:
         value, pattern, depth = stack.pop()
+        length = -1
         if isinstance(value, np.ndarray) and value.ndim == 1:
-            value = value.tolist()  # a parquet list column reads as a 1-D array
+            # A parquet list column reads as a 1-D array. Cut it before converting, so a huge
+            # cell is never built as a list; `length` keeps the real size for the item cap.
+            length = len(value)
+            value = value[:SCAN_ARRAY_ITEMS].tolist()
         if pattern and not record(pattern, value):
             continue
         if isinstance(value, dict):
@@ -310,7 +314,7 @@ def walk(
             if depth > SCAN_MAX_DEPTH:
                 too_deep = True
                 continue
-            if len(value) > SCAN_ARRAY_ITEMS:
+            if max(length, len(value)) > SCAN_ARRAY_ITEMS:
                 long_arrays += 1
             below = (*pattern, ITEM)
             stack.extend((child, below, depth + 1) for child in reversed(value[:SCAN_ARRAY_ITEMS]))
