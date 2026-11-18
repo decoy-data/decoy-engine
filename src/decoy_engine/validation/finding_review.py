@@ -232,7 +232,7 @@ def _read_finding(raw: object, *, current: bool) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise _malformed()
     row: dict[str, Any] = dict(raw)
-    required = ("table", "column", "detector_id", "severity", "match_rate")
+    required: tuple[str, ...] = ("table", "column", "detector_id", "severity", "match_rate")
     if current:
         required += tuple(_OPTIONAL_V2) + _V3_ONLY
     if any(name not in row for name in required):
