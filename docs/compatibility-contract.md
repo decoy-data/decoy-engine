@@ -94,6 +94,12 @@ root. `RouteSummary` gains `native_executed: bool | None`, true only when an exe
 backend from the operator registry. The no-sink lazy auto-chunk lane returns one resident output with either
 keyword value.
 
+**Pre-GA additive function with F24 84-E2 (2026-11-18).** `decoy_engine.generation.generated_lifecycle_terms(config, spec_widths)`
+is a new name; it returns the resident bytes and the largest unique working set of a config's generate tables for
+`estimate_job`. `estimate_job` now fills the three lifecycle fields of `JobEstimate` for generate-only and mixed jobs
+too. `peak_bytes` of a generate-only job stays `None`, and a mixed job stays `priceable=False`; no existing value
+changes. New note text: `lifecycle not priced: generated column {column} has no width source`.
+
 **Pre-GA additive fields with SAMPLE SE2 (2026-11-12).** `ExecutionResult.sample_source_rows: dict[str, pa.Table] | None`
 (default `None`, hidden from `repr`, not compared) holds the first kept source rows per table, only for a sample
 request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`, `roots`, `head_tables`,

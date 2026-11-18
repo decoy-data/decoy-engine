@@ -55,6 +55,7 @@ NOTE_LAYOUT = "lifecycle not priced: layout of target {table} not readable"
 NOTE_OUTPUT_WIDTH = (
     "lifecycle not priced: column {column} has an output width its strategy does not declare"
 )
+NOTE_GENERATE_WIDTH = "lifecycle not priced: generated column {column} has no width source"
 NOTE_FAILED = "lifecycle not priced ({error})"
 
 NOTE_SHAPES = frozenset(
@@ -66,6 +67,7 @@ NOTE_SHAPES = frozenset(
         NOTE_TARGET_FORMAT,
         NOTE_LAYOUT,
         NOTE_OUTPUT_WIDTH,
+        NOTE_GENERATE_WIDTH,
         NOTE_FAILED,
     }
 )
@@ -124,11 +126,24 @@ class TableInputs:
 
 
 @dataclass(frozen=True)
+class GeneratedInputs:
+    """The generate tables of a job. `tables` are the outputs as written (target attached);
+    `resident_bytes` is what the run holds for them while it executes and `unique_peak_bytes`
+    the largest unique-draw working set (both from `decoy_engine.generation`)."""
+
+    tables: tuple[TableInputs, ...]
+    resident_bytes: int
+    unique_peak_bytes: int
+
+
+@dataclass(frozen=True)
 class PhaseInputs:
-    """`path` is the priced route (one of the three models), `tables` are in config order."""
+    """`path` is the priced route (one of the three models), `tables` are the mask tables in
+    config order. `generated` is set for a generate-only or mixed job."""
 
     path: ExecutionPath
     tables: tuple[TableInputs, ...]
+    generated: GeneratedInputs | None = None
 
 
 @dataclass(frozen=True)
@@ -334,7 +349,11 @@ def _ingest(inputs: PhaseInputs, intercept: int) -> int:
     return peak
 
 
-def _execute(inputs: PhaseInputs) -> int:
+def _execute(inputs: PhaseInputs, intercept: int) -> int:
+    generated = inputs.generated
+    held = 0 if generated is None else generated.resident_bytes
+    if not inputs.tables:
+        return intercept + held + (0 if generated is None else generated.unique_peak_bytes)
     base = estimate_peak_bytes(tuple(working_table_spec(t) for t in inputs.tables), inputs.path)
     if base.estimated_bytes is None:
         raise ValueError("lifecycle needs every column priced")
@@ -346,11 +365,13 @@ def _execute(inputs: PhaseInputs) -> int:
         extra = sum(arrows)
     # A declared transform builds a new table beside the resident one.
     extra += sum(a for a, t in zip(arrows, inputs.tables, strict=True) if t.has_transforms)
-    return base.estimated_bytes + extra
+    return base.estimated_bytes + extra + held
 
 
 def _write(inputs: PhaseInputs, intercept: int) -> int:
     outputs = [output_table(t) for t in inputs.tables]
+    if inputs.generated is not None:
+        outputs += inputs.generated.tables
     resident = sum(arrow_bytes(t) for t in inputs.tables) + sum(arrow_bytes(o) for o in outputs)
     transient = max(WRITE_TRANSIENT[o.target.format](o) for o in outputs)
     return intercept + resident + transient
@@ -367,12 +388,12 @@ def limiting_phase(phase_bytes: tuple[tuple[Phase, int], ...]) -> Phase:
 
 def lifecycle_peak(inputs: PhaseInputs) -> Lifecycle:
     """The three phase peaks, the largest of them and the phase that sets it."""
-    if not inputs.tables:
+    if not inputs.tables and inputs.generated is None:
         raise ValueError("lifecycle needs at least one table")
     intercept = route_intercept_bytes("full_frame")
     phases: tuple[tuple[Phase, int], ...] = (
         ("ingest", _ingest(inputs, intercept)),
-        ("execute", _execute(inputs)),
+        ("execute", _execute(inputs, intercept)),
         ("write", _write(inputs, intercept)),
     )
     return Lifecycle(
