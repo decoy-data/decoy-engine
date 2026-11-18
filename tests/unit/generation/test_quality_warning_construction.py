@@ -70,6 +70,27 @@ def test_empty_column_is_refused_but_none_is_allowed() -> None:
         QualityWarning(code="c", provider="p", column="")
 
 
+_BAD_NAMES = ["\x1f", "a\nb", "tab\there", "nul\x00", "del\x7f", "x" * 257, 5]
+
+
+@pytest.mark.parametrize("bad", _BAD_NAMES)
+def test_code_provider_and_column_must_be_plain_names(bad: Any) -> None:
+    """The evidence model's name rule (no control character, at most 256 characters)."""
+    with pytest.raises(ValueError):
+        QualityWarning(code=bad, provider="p")
+    with pytest.raises(ValueError):
+        QualityWarning(code="c", provider=bad)
+    with pytest.raises(ValueError):
+        QualityWarning(code="c", provider="p", column=bad)
+
+
+def test_the_longest_plain_name_is_accepted_and_the_refusal_names_no_value() -> None:
+    QualityWarning(code="c", provider="p" * 256, column="é" * 256)
+    with pytest.raises(ValueError) as caught:
+        QualityWarning(code="c", provider="SECRET\x1f-VALUE")
+    assert "SECRET" not in str(caught.value)
+
+
 @pytest.mark.parametrize(
     ("given", "stored"),
     [(["a", "b"], "a, b"), (("a",), "a"), ([], ""), (["x, y", "z"], "x, y, z")],

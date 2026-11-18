@@ -15,6 +15,7 @@ instead of being dropped.
 
 from __future__ import annotations
 
+import re
 import types
 from collections.abc import Callable, Collection
 from enum import Enum
@@ -24,12 +25,32 @@ from annotated_types import Ge
 from pydantic import BaseModel, Field, Strict, create_model
 
 __all__ = [
+    "PLAIN_NAME_MAX",
+    "PLAIN_NAME_PATTERN",
     "Count",
     "SharedRules",
     "ValueFree",
     "derive_read",
     "has_kind",
+    "is_plain_name",
 ]
+
+
+# A plain name: 1 to PLAIN_NAME_MAX characters, none of them a control character. The one rule for
+# the names a manifest holds (a warning's code, provider and column, a strategy, a table), so the
+# producer that builds one and the record that stores it cannot disagree.
+PLAIN_NAME_PATTERN = r"^[^\x00-\x1f\x7f]+$"
+PLAIN_NAME_MAX = 256
+_PLAIN_NAME = re.compile(PLAIN_NAME_PATTERN)
+
+
+def is_plain_name(value: object) -> bool:
+    """True when `value` is a str the record model accepts as a name."""
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= PLAIN_NAME_MAX
+        and _PLAIN_NAME.fullmatch(value) is not None
+    )
 
 
 class SharedRules(BaseModel):

@@ -12,6 +12,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
+from decoy_engine._value_free import is_plain_name
+
 DetailValue: TypeAlias = str | int | float | bool | None
 # What a producer may pass: a scalar, or a list of names the constructor joins with ", ".
 DetailInput: TypeAlias = DetailValue | list[str] | tuple[str, ...]
@@ -59,16 +61,18 @@ class QualityWarning:
     def __post_init__(self) -> None:
         """Make the warning evidence-ready, the one place every producer's warning passes.
 
-        `EvidencePayload` refuses an empty provider and any non-scalar `detail` value. So
-        `provider` names the source (a provider, a strategy or a route) and is never empty, and
-        `detail` ends up scalar-only: a list or tuple of names becomes one string joined with
+        `EvidencePayload` refuses a code, provider or column that is not a plain name (see
+        `is_plain_name`) and any non-scalar `detail` value. So `provider` names the source (a
+        provider, a strategy or a route) and is never empty, and `detail` ends up scalar-only: a list or tuple of names becomes one string joined with
         ", " here and nowhere else, and anything else non-scalar is refused (a per-row map must
         become counts at the producer). Messages name the key, never a value.
         """
-        if not isinstance(self.provider, str) or not self.provider:
-            raise ValueError(f"QualityWarning {self.code!r}: provider must be a non-empty string")
-        if self.column is not None and (not isinstance(self.column, str) or not self.column):
-            raise ValueError(f"QualityWarning {self.code!r}: column must be None or non-empty")
+        if not is_plain_name(self.code):
+            raise ValueError("QualityWarning: code must be a plain name")
+        if not is_plain_name(self.provider):
+            raise ValueError(f"QualityWarning {self.code!r}: provider must be a plain name")
+        if self.column is not None and not is_plain_name(self.column):
+            raise ValueError(f"QualityWarning {self.code!r}: column must be None or a plain name")
         scalar: dict[str, DetailValue] = {}
         for key, value in self.detail.items():
             if not isinstance(key, str):
