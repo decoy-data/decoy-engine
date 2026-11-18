@@ -321,3 +321,106 @@ def test_assert_mode_still_allows_narrowed_workload() -> None:
     # is legitimate: it only asserts against the golden, never rewrites it.
     args = parse_and_validate_args(["--types", "first_name", "--k", "1", "--hash-seeds", "0"])
     assert args.write_golden is False
+
+
+# ---------------------------------------------------------------------------
+# FAKER-MIGRATE (AT-L14, AT-L15): one worker environment, one engine-internal access module.
+# ---------------------------------------------------------------------------
+
+import ast  # noqa: E402
+
+_TOOLS = ("check_determinism.py", "pool_determinism_worker.py", "output_lock.py")
+
+
+def _imports(source: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Every import in `source` as (module, imported names), `import a.b` giving ("a.b", ())."""
+    out: list[tuple[str, tuple[str, ...]]] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            out += [(a.name, ()) for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            out.append((node.module or "", tuple(a.name for a in node.names)))
+    return out
+
+
+def _reaches_engine_internal(source: str) -> bool:
+    for module, names in _imports(source):
+        if module == "decoy_engine.internal" or module.startswith("decoy_engine.internal."):
+            return True
+        if module == "decoy_engine" and "internal" in names:
+            return True
+    return False
+
+
+def _internal_importers(directory: Path) -> list[str]:
+    return sorted(
+        p.name
+        for p in directory.glob("*.py")
+        if _reaches_engine_internal(p.read_text(encoding="utf-8"))
+    )
+
+
+def test_worker_env_matches_the_prior_contract() -> None:
+    env_mod = _load_sibling("worker_env")
+    assert env_mod.worker_env(Path("/r"), 3, "abc") == {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "PYTHONPATH": "/r/src",
+        "PYTHONHASHSEED": "3",
+        "TZ": "UTC",
+        "LC_ALL": "C",
+        "LANG": "C",
+        "DECOY_ENGINE_COMMIT": "abc",
+    }
+
+
+def test_worker_env_helper_has_no_engine_edge() -> None:
+    source = (HARNESS_DIR / "worker_env.py").read_text(encoding="utf-8")
+    assert not [m for m, _ in _imports(source) if m.split(".")[0] == "decoy_engine"]
+
+
+@pytest.mark.parametrize("tool", ["check_determinism.py", "output_lock.py"])
+def test_both_tools_use_the_shared_env_builder(tool: str) -> None:
+    source = (HARNESS_DIR / tool).read_text(encoding="utf-8")
+    assert ("worker_env", ("worker_env",)) in _imports(source)
+    assert '"LC_ALL"' not in source, "a second copy of the worker environment"
+
+
+def _load_sibling(name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(f"_sib_{name}", HARNESS_DIR / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_engine_access_is_only_internal_import() -> None:
+    assert _internal_importers(HARNESS_DIR) == ["_engine_access.py"]
+
+
+@pytest.mark.parametrize("tool", _TOOLS)
+def test_tools_take_engine_names_from_the_access_module(tool: str) -> None:
+    source = (HARNESS_DIR / tool).read_text(encoding="utf-8")
+    assert any(module == "_engine_access" for module, _ in _imports(source)), tool
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from decoy_engine.internal.faker_setup import make_faker",
+        "from decoy_engine.internal.faker_setup import make_faker as mk",
+        "import decoy_engine.internal.faker_setup as fs",
+        "import decoy_engine.internal",
+        "from decoy_engine import internal",
+    ],
+)
+def test_a_seeded_direct_internal_import_is_seen(line: str, tmp_path: Path) -> None:
+    (tmp_path / "scratch.py").write_text(f"{line}\n", encoding="utf-8")
+    assert _internal_importers(tmp_path) == ["scratch.py"]
+
+
+def test_public_engine_imports_are_not_flagged(tmp_path: Path) -> None:
+    (tmp_path / "ok.py").write_text(
+        "from decoy_engine.providers_v2 import get_default_registry\nimport decoy_engine\n",
+        encoding="utf-8",
+    )
+    assert _internal_importers(tmp_path) == []

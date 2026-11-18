@@ -513,3 +513,58 @@ def test_pg_gate_seeded_failures() -> None:
     t = seeded()
     only_lane(t, ("ci.yml", "pg-gate"), "pytest tests/connectors/test_postgres_snapshot.py")
     assert has(pg_gate_findings(t, sites), "-m pg_integration")
+
+
+# --- FAKER-MIGRATE AT-L12: the required faker-output-lock matrix job -------------------------
+
+
+def faker_lock_findings(tree: lanes.Tree) -> list[str]:
+    """The Faker lock lane: required, matrixed on three minors, fail-fast off, import-smoke apart."""
+    out: list[str] = []
+    jobs = tree.workflows["ci.yml"]["jobs"]
+    fl = jobs.get("faker-output-lock")
+    if fl is None:
+        return ["no faker-output-lock job"]
+    if "faker-output-lock" not in tree.required["merge"][0]["jobs"]:
+        out.append("faker-output-lock is not a required merge job")
+    if fl.get("strategy", {}).get("fail-fast") is not False:
+        out.append("faker-output-lock must set strategy.fail-fast: false")
+    if fl.get("strategy", {}).get("matrix", {}).get("python") != ["3.10.20", "3.11.9", "3.12.7"]:
+        out.append("faker-output-lock must run CPython 3.10.20, 3.11.9 and 3.12.7")
+    if "if" in fl or any(s.get("continue-on-error") for s in fl["steps"]):
+        out.append("faker-output-lock must not be conditional or continue-on-error")
+    if not any("-m faker_output_lock" in s.get("run", "") for s in fl["steps"]):
+        out.append("faker-output-lock does not run the marked cells")
+    smoke = jobs["import-smoke"]
+    if any(s.get("with", {}).get("extras") for s in smoke["steps"]):
+        out.append("import-smoke must install no extras")
+    runs = [s["run"] for s in smoke["steps"] if "run" in s]
+    if len(runs) != 2 or any("pytest" in r for r in runs):
+        out.append("import-smoke must keep only its Import and Probe checks")
+    return out
+
+
+def test_faker_output_lock_lane_is_required_and_independent() -> None:
+    assert faker_lock_findings(TREE) == []
+
+
+def test_removing_the_required_faker_job_is_caught() -> None:
+    t = seeded()
+    del t.workflows["ci.yml"]["jobs"]["faker-output-lock"]
+    assert has(faker_lock_findings(t), "no faker-output-lock job")
+    assert has(lanes.marker_findings(t), "'faker_output_lock'")
+    t = seeded()
+    t.required["merge"][0]["jobs"].remove("faker-output-lock")
+    assert has(faker_lock_findings(t), "not a required merge job")
+
+
+def test_faker_lane_rules_are_each_seeded() -> None:
+    t = seeded()
+    job(t, "ci.yml", "faker-output-lock")["strategy"]["fail-fast"] = True
+    assert has(faker_lock_findings(t), "fail-fast")
+    t = seeded()
+    job(t, "ci.yml", "faker-output-lock")["strategy"]["matrix"]["python"].pop()
+    assert has(faker_lock_findings(t), "3.12.7")
+    t = seeded()
+    job(t, "ci.yml", "import-smoke")["steps"].append({"run": "pytest tests/sentry"})
+    assert has(faker_lock_findings(t), "import-smoke")

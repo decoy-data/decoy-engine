@@ -102,6 +102,8 @@ SENTRIES = (
     "tests/sentry/protected_dir/test_protected_dir.py",
     "tests/sentry/scratch/test_scratch_arena_prefix.py",
     "tests/sentry/dependencies/test_dependency_floors.py",
+    "tests/sentry/dependencies/test_faker_output_lock.py",
+    "tests/sentry/dependencies/test_faker_pin_agrees.py",
     "tests/sentry/defects/test_anchored_regex.py",
     "tests/sentry/defects/test_canonical_json_choke_point.py",
     "tests/sentry/defects/test_environment_reads.py",
