@@ -46,7 +46,7 @@ IN_CORE = {
 # Splits the block off and checks the rest.
 SPLITS = {"validate_plan"}
 # Reads the config only; neither a source nor a plan is touched.
-CONFIG_ONLY = {"run_config_only_checks"}
+CONFIG_ONLY = {"run_config_only_checks", "run_ner_models"}
 # Answers "not applicable" for a subset config before any read.
 NOT_APPLICABLE = {"estimate_job_capacity", "estimate_job"}
 

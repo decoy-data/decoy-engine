@@ -27,7 +27,8 @@ from typing import Annotated, Any, Final, Literal, get_args
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
 
-from decoy_engine.profiling.scan_set import PII_CANDIDATE_THRESHOLD, _relaxed
+from decoy_engine.profiling._scan_core import _relaxed
+from decoy_engine.profiling.scan_set import PII_CANDIDATE_THRESHOLD
 
 SCAN_DIFF_SCHEMA: Final = "scan-diff/v1"
 _PiiBucket = Literal["none", "low", "med", "high"]

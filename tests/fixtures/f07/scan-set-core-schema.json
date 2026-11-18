@@ -1,0 +1,1098 @@
+{
+  "ScanSetCore": {
+    "$defs": {
+      "ChildFactsCore": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "null_key_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Key Rows"
+          },
+          "orphan_distinct_keys": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Distinct Keys"
+          },
+          "orphan_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Rows"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "columns",
+          "rows",
+          "null_key_rows",
+          "orphan_rows",
+          "orphan_distinct_keys"
+        ],
+        "title": "ChildFactsCore",
+        "type": "object"
+      },
+      "FieldCore": {
+        "additionalProperties": false,
+        "properties": {
+          "detector_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detector Hits",
+            "type": "array"
+          },
+          "distinct_count": {
+            "title": "Distinct Count",
+            "type": "integer"
+          },
+          "dtype": {
+            "title": "Dtype",
+            "type": "string"
+          },
+          "leading_zero_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leading Zero Count"
+          },
+          "model_hits": {
+            "items": {
+              "$ref": "#/$defs/ModelHitCore"
+            },
+            "title": "Model Hits",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "null_count": {
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "null_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Rate"
+          },
+          "pii_candidate": {
+            "title": "Pii Candidate",
+            "type": "boolean"
+          },
+          "pii_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pii Score"
+          }
+        },
+        "required": [
+          "name",
+          "dtype",
+          "null_count",
+          "null_rate",
+          "distinct_count",
+          "pii_score",
+          "pii_candidate",
+          "detector_hits",
+          "leading_zero_count"
+        ],
+        "title": "FieldCore",
+        "type": "object"
+      },
+      "ModelHitCore": {
+        "additionalProperties": false,
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "review"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "detector_id": {
+            "title": "Detector Id",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/$defs/ModelRefCore"
+          },
+          "rate_bucket": {
+            "anyOf": [
+              {
+                "enum": [
+                  "<10%",
+                  "10-50%",
+                  ">=50%"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Bucket"
+          },
+          "source": {
+            "enum": [
+              "classifier",
+              "ner"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "detector_id",
+          "model",
+          "band",
+          "rate_bucket"
+        ],
+        "title": "ModelHitCore",
+        "type": "object"
+      },
+      "ModelRefCore": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "ModelRefCore",
+        "type": "object"
+      },
+      "ModelRunCore": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "$ref": "#/$defs/ModelRefCore"
+          },
+          "source": {
+            "enum": [
+              "classifier",
+              "ner"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "model"
+        ],
+        "title": "ModelRunCore",
+        "type": "object"
+      },
+      "RegexRunCore": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "null"
+          },
+          "source": {
+            "const": "regex",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "model"
+        ],
+        "title": "RegexRunCore",
+        "type": "object"
+      },
+      "RelationshipFactsCore": {
+        "additionalProperties": false,
+        "properties": {
+          "bounded": {
+            "title": "Bounded",
+            "type": "boolean"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/$defs/ChildFactsCore"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "exact": {
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "parent": {
+            "title": "Parent",
+            "type": "string"
+          },
+          "parent_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Columns",
+            "type": "array"
+          },
+          "parent_duplicate_excess": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Duplicate Excess"
+          },
+          "parent_null_key_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Null Key Rows"
+          },
+          "parent_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Rows"
+          },
+          "status": {
+            "enum": [
+              "checked",
+              "key_type_mismatch",
+              "skipped_cloud"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/WarningRefCore"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parent",
+          "parent_columns",
+          "children",
+          "status",
+          "parent_rows",
+          "parent_null_key_rows",
+          "parent_duplicate_excess",
+          "exact",
+          "bounded",
+          "warnings"
+        ],
+        "title": "RelationshipFactsCore",
+        "type": "object"
+      },
+      "TableCore": {
+        "additionalProperties": false,
+        "properties": {
+          "descriptor": {
+            "additionalProperties": true,
+            "title": "Descriptor",
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/$defs/FieldCore"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "key_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Candidates",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quasi_identifier_groups": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Quasi Identifier Groups",
+            "type": "array"
+          },
+          "reid_risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reid Risk Score"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "row_count_exact": {
+            "title": "Row Count Exact",
+            "type": "boolean"
+          },
+          "sample_row_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Row Cap"
+          },
+          "sample_strategy": {
+            "enum": [
+              "head",
+              "random",
+              "full"
+            ],
+            "title": "Sample Strategy",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/WarningRefCore"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "descriptor",
+          "row_count",
+          "row_count_exact",
+          "sample_strategy",
+          "sample_row_cap",
+          "fields",
+          "key_candidates",
+          "warnings",
+          "reid_risk_score",
+          "quasi_identifier_groups"
+        ],
+        "title": "TableCore",
+        "type": "object"
+      },
+      "WarningRefCore": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "code"
+        ],
+        "title": "WarningRefCore",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "detectors": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "classifier": "#/$defs/ModelRunCore",
+              "ner": "#/$defs/ModelRunCore",
+              "regex": "#/$defs/RegexRunCore"
+            },
+            "propertyName": "source"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RegexRunCore"
+            },
+            {
+              "$ref": "#/$defs/ModelRunCore"
+            }
+          ]
+        },
+        "title": "Detectors",
+        "type": "array"
+      },
+      "engine_version": {
+        "title": "Engine Version",
+        "type": "string"
+      },
+      "relationships": {
+        "items": {
+          "$ref": "#/$defs/RelationshipFactsCore"
+        },
+        "title": "Relationships",
+        "type": "array"
+      },
+      "scan_schema": {
+        "const": "scan-set/v1",
+        "title": "Scan Schema",
+        "type": "string"
+      },
+      "scanned_at": {
+        "title": "Scanned At",
+        "type": "string"
+      },
+      "tables": {
+        "items": {
+          "$ref": "#/$defs/TableCore"
+        },
+        "title": "Tables",
+        "type": "array"
+      }
+    },
+    "required": [
+      "scan_schema",
+      "engine_version",
+      "scanned_at",
+      "tables",
+      "relationships"
+    ],
+    "title": "ScanSetCore",
+    "type": "object"
+  },
+  "ScanSetCoreRead": {
+    "$defs": {
+      "ChildFactsCoreRead": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "null_key_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Key Rows"
+          },
+          "orphan_distinct_keys": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Distinct Keys"
+          },
+          "orphan_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphan Rows"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "columns",
+          "rows",
+          "null_key_rows",
+          "orphan_rows",
+          "orphan_distinct_keys"
+        ],
+        "title": "ChildFactsCoreRead",
+        "type": "object"
+      },
+      "FieldCoreRead": {
+        "properties": {
+          "detector_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detector Hits",
+            "type": "array"
+          },
+          "distinct_count": {
+            "title": "Distinct Count",
+            "type": "integer"
+          },
+          "dtype": {
+            "title": "Dtype",
+            "type": "string"
+          },
+          "leading_zero_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leading Zero Count"
+          },
+          "model_hits": {
+            "items": {
+              "$ref": "#/$defs/ModelHitCoreRead"
+            },
+            "title": "Model Hits",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "null_count": {
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "null_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Rate"
+          },
+          "pii_candidate": {
+            "title": "Pii Candidate",
+            "type": "boolean"
+          },
+          "pii_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pii Score"
+          }
+        },
+        "required": [
+          "name",
+          "dtype",
+          "null_count",
+          "null_rate",
+          "distinct_count",
+          "pii_score",
+          "pii_candidate",
+          "detector_hits",
+          "leading_zero_count"
+        ],
+        "title": "FieldCoreRead",
+        "type": "object"
+      },
+      "ModelHitCoreRead": {
+        "properties": {
+          "band": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "review"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band"
+          },
+          "detector_id": {
+            "title": "Detector Id",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/$defs/ModelRefCoreRead"
+          },
+          "rate_bucket": {
+            "anyOf": [
+              {
+                "enum": [
+                  "<10%",
+                  "10-50%",
+                  ">=50%"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Bucket"
+          },
+          "source": {
+            "enum": [
+              "classifier",
+              "ner"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "detector_id",
+          "model",
+          "band",
+          "rate_bucket"
+        ],
+        "title": "ModelHitCoreRead",
+        "type": "object"
+      },
+      "ModelRefCoreRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "ModelRefCoreRead",
+        "type": "object"
+      },
+      "ModelRunCoreRead": {
+        "properties": {
+          "model": {
+            "$ref": "#/$defs/ModelRefCoreRead"
+          },
+          "source": {
+            "enum": [
+              "classifier",
+              "ner"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "model"
+        ],
+        "title": "ModelRunCoreRead",
+        "type": "object"
+      },
+      "RegexRunCoreRead": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "null"
+          },
+          "source": {
+            "const": "regex",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "model"
+        ],
+        "title": "RegexRunCoreRead",
+        "type": "object"
+      },
+      "RelationshipFactsCoreRead": {
+        "properties": {
+          "bounded": {
+            "title": "Bounded",
+            "type": "boolean"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/$defs/ChildFactsCoreRead"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "exact": {
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "parent": {
+            "title": "Parent",
+            "type": "string"
+          },
+          "parent_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Columns",
+            "type": "array"
+          },
+          "parent_duplicate_excess": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Duplicate Excess"
+          },
+          "parent_null_key_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Null Key Rows"
+          },
+          "parent_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Rows"
+          },
+          "status": {
+            "enum": [
+              "checked",
+              "key_type_mismatch",
+              "skipped_cloud"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/WarningRefCoreRead"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parent",
+          "parent_columns",
+          "children",
+          "status",
+          "parent_rows",
+          "parent_null_key_rows",
+          "parent_duplicate_excess",
+          "exact",
+          "bounded",
+          "warnings"
+        ],
+        "title": "RelationshipFactsCoreRead",
+        "type": "object"
+      },
+      "TableCoreRead": {
+        "properties": {
+          "descriptor": {
+            "additionalProperties": true,
+            "title": "Descriptor",
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/$defs/FieldCoreRead"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "key_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Candidates",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quasi_identifier_groups": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Quasi Identifier Groups",
+            "type": "array"
+          },
+          "reid_risk_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reid Risk Score"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "row_count_exact": {
+            "title": "Row Count Exact",
+            "type": "boolean"
+          },
+          "sample_row_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Row Cap"
+          },
+          "sample_strategy": {
+            "enum": [
+              "head",
+              "random",
+              "full"
+            ],
+            "title": "Sample Strategy",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/$defs/WarningRefCoreRead"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "descriptor",
+          "row_count",
+          "row_count_exact",
+          "sample_strategy",
+          "sample_row_cap",
+          "fields",
+          "key_candidates",
+          "warnings",
+          "reid_risk_score",
+          "quasi_identifier_groups"
+        ],
+        "title": "TableCoreRead",
+        "type": "object"
+      },
+      "WarningRefCoreRead": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "code"
+        ],
+        "title": "WarningRefCoreRead",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "detectors": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "classifier": "#/$defs/ModelRunCoreRead",
+              "ner": "#/$defs/ModelRunCoreRead",
+              "regex": "#/$defs/RegexRunCoreRead"
+            },
+            "propertyName": "source"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RegexRunCoreRead"
+            },
+            {
+              "$ref": "#/$defs/ModelRunCoreRead"
+            }
+          ]
+        },
+        "title": "Detectors",
+        "type": "array"
+      },
+      "engine_version": {
+        "title": "Engine Version",
+        "type": "string"
+      },
+      "relationships": {
+        "items": {
+          "$ref": "#/$defs/RelationshipFactsCoreRead"
+        },
+        "title": "Relationships",
+        "type": "array"
+      },
+      "scan_schema": {
+        "const": "scan-set/v1",
+        "title": "Scan Schema",
+        "type": "string"
+      },
+      "scanned_at": {
+        "title": "Scanned At",
+        "type": "string"
+      },
+      "tables": {
+        "items": {
+          "$ref": "#/$defs/TableCoreRead"
+        },
+        "title": "Tables",
+        "type": "array"
+      }
+    },
+    "required": [
+      "scan_schema",
+      "engine_version",
+      "scanned_at",
+      "tables",
+      "relationships"
+    ],
+    "title": "ScanSetCoreRead",
+    "type": "object"
+  }
+}

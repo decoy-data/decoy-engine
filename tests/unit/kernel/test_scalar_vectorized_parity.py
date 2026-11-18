@@ -1,10 +1,10 @@
 """Task 5.1: `redact_array`/`truncate_array` vectorized fast path vs the frozen reference.
 
 `_scalar.py`'s public `redact_array` and `truncate_array` are guarded dispatchers: a
-closed, non-raising guard admits only a plain `pa.string()` array (or chunked array of
-one) with plain-`str` options, and takes a vectorized Arrow compute fast path in that
-case; every other shape -- another dtype, an encoded-null layout, invalid UTF-8, a raw
-Python list -- falls back to `_redact_array_reference`/`_truncate_array_reference`, the
+closed, non-raising guard admits a plain `pa.string()` array or a `pa.large_string()`
+array (cast to `string` by `narrow_text`), or a chunked array of either, with plain-`str`
+options, and takes a vectorized Arrow compute fast path in that case; every other shape
+-- another dtype, an encoded-null layout, invalid UTF-8, a raw Python list -- falls back to `_redact_array_reference`/`_truncate_array_reference`, the
 frozen, byte-identical copy of the pre-vectorization per-row implementation.
 
 This file is a DIFFERENTIAL suite: every case calls both the dispatcher and the
@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 
+from decoy_engine._arrow_types import narrow_text
 from decoy_engine.kernel import _scalar
 from decoy_engine.kernel._scalar import (
     _redact_array_reference,
@@ -143,6 +144,16 @@ def _invalid_utf8_array() -> pa.Array:
     return pc.cast(binary, pa.string(), safe=False)
 
 
+def _invalid_utf8_large_array() -> pa.Array:
+    """A `large_string` array holding malformed UTF-8, built from raw buffers (int64 offsets)."""
+    data = b"\xff\xfeok"
+    offsets = pa.array([0, 2, 4, 4], type=pa.int64()).buffers()[1]
+    validity = pa.array([True, True, False]).buffers()[1]
+    return pa.Array.from_buffers(
+        pa.large_string(), 3, [validity, offsets, pa.py_buffer(data)], null_count=1
+    )
+
+
 _TEXT_VALUES = ["abcdef", None, "xy", "", "café", "😀abc", "a😀b😀c"]
 
 LENGTHS: list[Any] = [
@@ -185,6 +196,7 @@ MASK_CHARS: list[Any] = [
 def test_truncate_matrix(length: Any, keep: Any, mask_char: Any) -> None:
     values = pa.array(_TEXT_VALUES)
     _check_truncate(values, length=length, keep=keep, mask_char=mask_char)
+    _check_truncate(values.cast(pa.large_string()), length=length, keep=keep, mask_char=mask_char)
 
 
 def test_truncate_unhashable_keep_does_not_raise_on_membership_check() -> None:
@@ -240,6 +252,8 @@ def test_truncate_dtype_sweep(label: str, values: Any) -> None:
 def test_truncate_invalid_utf8_falls_back_and_raises_like_the_reference() -> None:
     _check_truncate(_invalid_utf8_array(), length=2, keep="head", mask_char=None)
     _check_truncate(_invalid_utf8_array(), length=2, keep="tail", mask_char="*")
+    _check_truncate(_invalid_utf8_large_array(), length=2, keep="head", mask_char=None)
+    _check_truncate(_invalid_utf8_large_array(), length=2, keep="tail", mask_char="*")
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +265,9 @@ def test_truncate_sliced_array() -> None:
     base = pa.array(["abcdef", "ghij", None, "xy", "z"])
     _check_truncate(base.slice(1, 3), length=2, keep="head", mask_char=None)
     _check_truncate(base.slice(1, 3), length=2, keep="tail", mask_char="*")
+    large = base.cast(pa.large_string())
+    _check_truncate(large.slice(1, 3), length=2, keep="head", mask_char=None)
+    _check_truncate(large.slice(1, 3), length=2, keep="tail", mask_char="*")
 
 
 def test_truncate_multi_chunk_chunked_array() -> None:
@@ -259,15 +276,20 @@ def test_truncate_multi_chunk_chunked_array() -> None:
     )
     _check_truncate(ca, length=2, keep="head", mask_char=None)
     _check_truncate(ca, length=2, keep="tail", mask_char="*")
+    large = ca.cast(pa.large_string())
+    _check_truncate(large, length=2, keep="head", mask_char=None)
+    _check_truncate(large, length=2, keep="tail", mask_char="*")
 
 
 def test_truncate_empty_array() -> None:
     _check_truncate(pa.array([], type=pa.string()), length=2, keep="head", mask_char=None)
+    _check_truncate(pa.array([], type=pa.large_string()), length=2, keep="head", mask_char=None)
 
 
 def test_truncate_all_null_chunked_array() -> None:
     ca = pa.chunked_array([pa.array([None, None], type=pa.string())])
     _check_truncate(ca, length=2, keep="tail", mask_char="*")
+    _check_truncate(ca.cast(pa.large_string()), length=2, keep="tail", mask_char="*")
 
 
 def test_truncate_empty_chunks_chunked_array() -> None:
@@ -275,6 +297,7 @@ def test_truncate_empty_chunks_chunked_array() -> None:
         [pa.array([], type=pa.string()), pa.array([], type=pa.string()), pa.array(["a", None])]
     )
     _check_truncate(ca, length=1, keep="head", mask_char=None)
+    _check_truncate(ca.cast(pa.large_string()), length=1, keep="head", mask_char=None)
 
 
 # ---------------------------------------------------------------------------
@@ -289,10 +312,11 @@ def test_truncate_unicode_nfc_nfd_and_nul() -> None:
     nfd = unicodedata.normalize("NFD", "café")
     with_nul = "ab\x00cd"
     values = pa.array([nfc, nfd, with_nul, None])
-    for length in (1, 2, 3, 4, 5):
-        for keep in ("head", "tail"):
-            for mask_char in (None, "*", "😀"):
-                _check_truncate(values, length=length, keep=keep, mask_char=mask_char)
+    for arr in (values, values.cast(pa.large_string())):
+        for length in (1, 2, 3, 4, 5):
+            for keep in ("head", "tail"):
+                for mask_char in (None, "*", "😀"):
+                    _check_truncate(arr, length=length, keep=keep, mask_char=mask_char)
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +328,9 @@ def test_truncate_unicode_nfc_nfd_and_nul() -> None:
 def _redact_cases() -> list[tuple[str, Any]]:
     cases: list[tuple[str, Any]] = [
         ("plain_string", pa.array(["a", "b", None])),
+        ("large_string", pa.array(["a", "b", None], type=pa.large_string())),
+        ("empty_large_string", pa.array([], type=pa.large_string())),
+        ("all_null_large_string", pa.array([None, None], type=pa.large_string())),
         ("real_nan_float", pa.array([1.5, float("nan"), None])),
         ("dictionary", _dictionary_array()),
         ("run_end_encoded", _run_end_encoded_array()),
@@ -335,6 +362,7 @@ def test_redact_non_str_redact_with() -> None:
 
 def test_redact_invalid_utf8_falls_back_and_raises_like_the_reference() -> None:
     _check_redact(_invalid_utf8_array(), redact_with="REDACTED")
+    _check_redact(_invalid_utf8_large_array(), redact_with="REDACTED")
 
 
 def test_redact_unpaired_surrogate_list_input() -> None:
@@ -351,6 +379,8 @@ def test_redact_sliced_and_multi_chunk() -> None:
         [pa.array(["a", "b"]), pa.array([], type=pa.string()), pa.array([None, "c"])]
     )
     _check_redact(ca, redact_with="X")
+    _check_redact(base.cast(pa.large_string()).slice(1, 3), redact_with="X")
+    _check_redact(ca.cast(pa.large_string()), redact_with="X")
 
 
 def test_redact_all_null_and_empty_chunks() -> None:
@@ -358,6 +388,8 @@ def test_redact_all_null_and_empty_chunks() -> None:
     _check_redact(ca, redact_with="X")
     ca_empty = pa.chunked_array([pa.array([], type=pa.string()), pa.array([], type=pa.string())])
     _check_redact(ca_empty, redact_with="X")
+    _check_redact(ca.cast(pa.large_string()), redact_with="X")
+    _check_redact(ca_empty.cast(pa.large_string()), redact_with="X")
 
 
 # ---------------------------------------------------------------------------
@@ -374,9 +406,10 @@ def test_route_spy_redact_plain_string_takes_fast_path(monkeypatch: pytest.Monke
         return original(*args, **kwargs)
 
     monkeypatch.setattr(_scalar, "_redact_array_reference", spy)
-    result = _scalar.redact_array(pa.array(["a", "b", None]), redact_with="X")
-    assert result.to_pylist() == ["X", "X", None]
-    assert calls == [], "plain string + str redact_with must skip the reference entirely"
+    for typ in (pa.string(), pa.large_string()):
+        result = _scalar.redact_array(pa.array(["a", "b", None], type=typ), redact_with="X")
+        assert result.to_pylist() == ["X", "X", None]
+    assert calls == [], "string/large_string + str redact_with must skip the reference entirely"
 
 
 @pytest.mark.parametrize(
@@ -384,7 +417,6 @@ def test_route_spy_redact_plain_string_takes_fast_path(monkeypatch: pytest.Monke
     [
         (pa.array([1, 2, None]), {"redact_with": "X"}),  # non-string dtype
         (pa.array(["a", "b"]).dictionary_encode(), {"redact_with": "X"}),  # dictionary
-        (pa.array(["a", "b", None], type=pa.large_string()), {"redact_with": "X"}),  # large_string
         (["a", "b", None], {"redact_with": "X"}),  # raw list
         (pa.array(["a", "b", None]), {"redact_with": 7}),  # non-str redact_with
     ],
@@ -417,21 +449,18 @@ def test_route_spy_truncate_plain_string_takes_fast_path(monkeypatch: pytest.Mon
         return original(*args, **kwargs)
 
     monkeypatch.setattr(_scalar, "_truncate_array_reference", spy)
-    result = _scalar.truncate_array(
-        pa.array(["abcdef", None]), length=3, keep="head", mask_char="*"
-    )
-    assert result.to_pylist() == ["abc***", None]
-    assert calls == [], "plain string + valid options must skip the reference entirely"
+    for typ in (pa.string(), pa.large_string()):
+        result = _scalar.truncate_array(
+            pa.array(["abcdef", None], type=typ), length=3, keep="head", mask_char="*"
+        )
+        assert result.to_pylist() == ["abc***", None]
+    assert calls == [], "string/large_string + valid options must skip the reference entirely"
 
 
 @pytest.mark.parametrize(
     ("values", "kwargs"),
     [
         (pa.array([1, 2, None]), {"length": 2, "keep": "head", "mask_char": None}),  # non-string
-        (
-            pa.array(["a", "b"], type=pa.large_string()),
-            {"length": 1, "keep": "head", "mask_char": None},
-        ),
         (["a", "b", None], {"length": 1, "keep": "head", "mask_char": None}),  # raw list
         (pa.array(["a", "b"]), {"length": 0, "keep": "head", "mask_char": None}),  # length == 0
         (
@@ -464,3 +493,60 @@ def test_route_spy_truncate_excluded_inputs_take_reference(
     with contextlib.suppress(Exception):
         _scalar.truncate_array(values, **kwargs)
     assert len(calls) == 1, "excluded input must route through the reference exactly once"
+
+
+# ---------------------------------------------------------------------------
+# large_string admission: one shared helper, and the over-2-GiB cast fallback
+# ---------------------------------------------------------------------------
+
+
+def _count_narrow_text(monkeypatch: pytest.MonkeyPatch) -> list[pa.DataType]:
+    seen: list[pa.DataType] = []
+
+    def wrapped(array: pa.Array) -> pa.Array:
+        seen.append(array.type)
+        return narrow_text(array)
+
+    monkeypatch.setattr(_scalar, "narrow_text", wrapped)
+    return seen
+
+
+def test_both_dispatchers_narrow_through_the_one_shared_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _count_narrow_text(monkeypatch)
+    large = pa.array(["abcdef", None], type=pa.large_string())
+    _scalar.redact_array(large, redact_with="X")
+    assert seen == [pa.large_string()], "redact_array must call narrow_text exactly once"
+    seen.clear()
+    _scalar.truncate_array(large, length=2, keep="head", mask_char=None)
+    assert seen == [pa.large_string()], "truncate_array must call narrow_text exactly once"
+
+
+def test_narrow_text_failure_falls_back_to_the_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Stands in for the over-2-GiB cast failure without building a 2 GiB array.
+    def boom(array: pa.Array) -> pa.Array:
+        raise pa.ArrowInvalid("offset overflow")
+
+    large = pa.array(["abcdef", None, "xy"], type=pa.large_string())
+    expected_r = _redact_array_reference(large, redact_with="X")
+    expected_t = _truncate_array_reference(large, length=2, keep="tail", mask_char="*")
+    calls = {"redact": 0, "truncate": 0}
+    orig_r, orig_t = _scalar._redact_array_reference, _scalar._truncate_array_reference
+
+    def spy_r(*a: Any, **k: Any) -> pa.Array:
+        calls["redact"] += 1
+        return orig_r(*a, **k)
+
+    def spy_t(*a: Any, **k: Any) -> pa.Array:
+        calls["truncate"] += 1
+        return orig_t(*a, **k)
+
+    monkeypatch.setattr(_scalar, "narrow_text", boom)
+    monkeypatch.setattr(_scalar, "_redact_array_reference", spy_r)
+    monkeypatch.setattr(_scalar, "_truncate_array_reference", spy_t)
+    got_r = _scalar.redact_array(large, redact_with="X")
+    got_t = _scalar.truncate_array(large, length=2, keep="tail", mask_char="*")
+    assert calls == {"redact": 1, "truncate": 1}
+    assert got_r.equals(expected_r)
+    assert got_t.equals(expected_t)

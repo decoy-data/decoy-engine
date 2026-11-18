@@ -4,7 +4,7 @@ Paper byte-accounting cannot prove a sorter's resident memory stays capped;
 only a real process's OS-reported peak RSS can. This runs
 `BoundedExternalSorter` in a FRESH subprocess (allocator env pinned so the
 measurement reflects real allocation, not reserved-but-untouched address
-space -- see `_CAPPED_ENV` below, matching `scripts/fk_memory_probe.py`'s
+space -- see `CAPPED_ENV`, matching `scripts/fk_memory_probe.py`'s
 own established pattern) streaming a shuffled, variable-width dataset that
 is far larger than a small process memory ceiling, and asserts the
 subprocess's VmHWM (the OS high-water mark, not `ru_maxrss`, which survives
@@ -38,17 +38,9 @@ import textwrap
 
 import pytest
 
-pytestmark = pytest.mark.perf
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
-# Allocator pinning, BEFORE the worker process starts (glibc reads
-# MALLOC_ARENA_MAX at startup, pyarrow reads ARROW_DEFAULT_MEMORY_POOL at
-# import): without this, arena/allocator reservations inflate RSS far beyond
-# real usage, the same reasoning `scripts/fk_memory_probe.py` documents for
-# its own capped workers.
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
+pytestmark = pytest.mark.perf
 
 # A small process ceiling: run_bytes_cap (F_SORT * M) is deliberately tiny
 # relative to the dataset below, so the sorter MUST spill and merge
@@ -236,7 +228,7 @@ def _run_worker(tmp_path) -> dict:
     worker_path.write_text(_WORKER_SCRIPT)
     spill_dir = tmp_path / "spill"
     spill_dir.mkdir()
-    env = {**os.environ, **_CAPPED_ENV}
+    env = {**os.environ, **CAPPED_ENV}
     cmd = [
         sys.executable,
         str(worker_path),

@@ -22,8 +22,8 @@ from __future__ import annotations
 
 # ── Project metadata ─────────────────────────────────────────────────────
 project = "decoy-engine"
-author = "louiskeep"
-copyright = "2026, louiskeep"
+author = "Decoy"
+copyright = "2026, Decoy"
 
 # Pull the version from the package itself so a release bump in
 # pyproject.toml shows up in the docs without a parallel edit here.
@@ -141,7 +141,7 @@ html_static_path = ["_static"]
 html_show_sourcelink = False  # the GitHub-link button below replaces this
 
 html_theme_options = {
-    "source_repository": "https://github.com/louiskeep/decoy-engine/",
+    "source_repository": "https://github.com/decoy-data/decoy-engine/",
     "source_branch": "main",
     "source_directory": "docs/",
     # Keep accent colors aligned with the CLI's semantic-token palette
@@ -216,6 +216,11 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
+    # F15-E2: `OnDrift` and `ScanBaselineConfig` are defined in the private
+    # `config._scan_baseline` and re-exported by `decoy_engine.config`, which
+    # `bound_baseline` imports from. Same class as the entries above.
+    ("py:class", "decoy_engine.config.OnDrift"),
+    ("py:class", "decoy_engine.config.ScanBaselineConfig"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),

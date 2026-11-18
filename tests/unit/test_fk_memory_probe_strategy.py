@@ -12,11 +12,14 @@ cost curves are the paid-GCP-session's job (R4), not this gate's.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "fk_memory_probe.py"
@@ -52,6 +55,7 @@ def _run_probe(*extra_args: str) -> dict:
         text=True,
         cwd=_REPO_ROOT,
         timeout=120,
+        env={**os.environ, **CAPPED_ENV},
     )
     assert proc.returncode == 0, f"probe failed (rc={proc.returncode}): {proc.stderr}"
     line = proc.stdout.strip().splitlines()[-1]
@@ -95,6 +99,7 @@ def test_source_dir_and_capability_reject_explicit_strategy(tmp_path: Path) -> N
             text=True,
             cwd=_REPO_ROOT,
             timeout=30,
+            env={**os.environ, **CAPPED_ENV},
         )
         assert proc.returncode == 2, proc.stderr
         assert "not supported together with --source-dir or --capability" in proc.stderr
