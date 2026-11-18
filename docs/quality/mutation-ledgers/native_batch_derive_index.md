@@ -1,4 +1,4 @@
-# Equivalent-mutant ledger: `decoy-engine-native/src/batch.rs::derive_index_array`
+# Equivalent-mutant ledger: `decoy-engine-native/src/batch/index.rs::derive_index_array`
 
 Phase 2 Task 2.2, 2026-09-10. `cargo mutants` over the four new functions
 (`derive_index_array`, `fill_index_range`, `partition_index_tasks`,
@@ -9,7 +9,7 @@ coverage gaps now killed** by new tests and **6 are genuine equivalent mutants**
 (5 in `balanced_row_ranges` + 1 in the `fill_index_range` panic guard), detailed
 below.
 
-Covering tests: `src/batch.rs` unit tests (`derive_index_thread_count_never_changes_output`,
+Covering tests: `src/batch/tests.rs` unit tests (`derive_index_thread_count_never_changes_output`,
 `derive_index_matches_manual_reduction_and_is_in_range`,
 `derive_index_pool_size_guards_with_inclusive_2_56_boundary`,
 `derive_index_all_null_and_empty_validate_nothing`,
