@@ -292,9 +292,12 @@ def _check_ranges(doc: dict[str, Any], name: str, df: pd.DataFrame) -> None:
     assert all(r["count"] >= K for r in ranges)
     assert sum(r["count"] for r in ranges) == int(df[name].notna().sum())
     assert all(r["start_year"] in years and r["end_year"] in years for r in ranges)
-    assert ranges[0]["start_year"] == years[0] and ranges[-1]["end_year"] == years[-1]
+    # Bottom and top coded: the outer edges are the years of the K-th row from each end.
+    rows = sorted(df[name].dropna().dt.year)
+    assert ranges[0]["start_year"] == rows[K - 1] and ranges[-1]["end_year"] == rows[-K]
+    coded = [y for y in years if rows[K - 1] <= y <= rows[-K]]
     for before, after in pairwise(ranges):
-        assert after["start_year"] == years[years.index(before["end_year"]) + 1]
+        assert after["start_year"] == coded[coded.index(before["end_year"]) + 1]
 
 
 def test_datetime_years_fold_into_contiguous_ranges_of_at_least_k() -> None:
@@ -307,17 +310,18 @@ def test_datetime_years_fold_into_contiguous_ranges_of_at_least_k() -> None:
         _check_ranges(doc, name, df)
     assert doc["redacted_columns"] == ["forced", "sparse"]
     first, last = _ranges(doc, "visit")[0], _ranges(doc, "visit")[-1]
-    assert first["start_year"] == 1921 and first["end_year"] > 1951
+    assert first["start_year"] == 2012 and first["end_year"] >= 2012  # not the 1921 outlier
+    assert "1921" not in json.dumps(doc["columns"]["visit"]["stats"])
     visit = _col(doc, "visit")["stats"]
-    assert visit["min"] == "1921-01-01T00:00:00"
+    assert visit["min"] == "2012-01-01T00:00:00"
     assert visit["max"] == f"{last['end_year']:04d}-12-31T23:59:59.999999"
 
 
-def test_a_short_last_range_joins_the_one_before_it() -> None:
+def test_a_short_last_year_is_coded_into_the_one_before_it() -> None:
     years = [2000] * 12 + [2001] * 3
     df = pd.DataFrame({"d": pd.to_datetime([f"{y}-02-02" for y in years])})
     assert _ranges(_doc(df, flagged=[]), "d") == [
-        {"start_year": 2000, "end_year": 2001, "count": 15}
+        {"start_year": 2000, "end_year": 2000, "count": 15}
     ]
 
 
@@ -327,9 +331,12 @@ def _wide_years(years: list[int]) -> pd.DataFrame:
 
 
 def test_a_year_past_the_sampled_range_never_gets_a_bucket_of_its_own() -> None:
-    df = _wide_years([2000] * 12 + [9998] * 3 + [9999])
+    df = _wide_years([2000] * 12 + [9998] * 10 + [9999])
     ranges = _ranges(_doc(df, flagged=[]), "d")
-    assert ranges == [{"start_year": 2000, "end_year": 9998, "count": 16}]
+    assert ranges == [
+        {"start_year": 2000, "end_year": 2000, "count": 12},
+        {"start_year": 9998, "end_year": 9998, "count": 11},
+    ]
     assert _draw(_doc(df, flagged=[]), "d", 50, 1)
 
 
@@ -393,7 +400,8 @@ def test_windowed_generation_admits_plain_fit_datetimes_with_short_outer_years()
     doc = _doc(df)  # the real profiler flags both datetime columns
     assert {"visit_date", "sparse"} <= set(doc["redacted_columns"])
     first = _ranges(doc, "visit_date")[0]
-    assert first["start_year"] == 1921 and first["end_year"] > first["start_year"]
+    kth = sorted(df["visit_date"].dropna().dt.year)[K - 1]
+    assert first["start_year"] == kth > 1921 and first["end_year"] >= kth
     assert _window_verdict(doc, ["visit_date", "sparse"]).is_class_a
     unflagged = _doc(df, flagged=[])
     assert _window_verdict(unflagged, ["visit_date"]).is_class_a
@@ -525,11 +533,13 @@ def test_property_labels_and_joint_cells_are_held_by_k_rows(
 def test_property_every_year_range_holds_k_rows_and_the_count_is_kept(years: list[int]) -> None:
     df = pd.DataFrame({"d": pd.to_datetime([f"{y:04d}-07-07" for y in years])})
     ranges = _ranges(_doc(df, flagged=[]), "d")
-    if len(years) >= K:
+    if len(years) >= 2 * K - 1:
+        assert sum(r["count"] for r in ranges) == len(years)
+    if ranges:  # fewer than 2K-1 rows may release none, when the K-th rows cross
         assert sum(r["count"] for r in ranges) == len(years)
         assert all(r["count"] >= K for r in ranges)
     else:
-        assert ranges == []
+        assert len(years) < 2 * K - 1
     assert all(a["end_year"] < b["start_year"] for a, b in pairwise(ranges))
 
 
@@ -609,3 +619,91 @@ def test_the_shape_block_names_match_the_numeric_shape_module() -> None:
     from decoy_engine.generation.statistical import _numeric_shape as shape
 
     assert set(sv._SHAPE_BLOCKS) == {shape.GRID_KEY, shape.EXACT_KEY}
+
+
+# Row 24zp: datetime years are bottom and top coded at the K-th row from each end.
+
+
+def _spread(n: int, start: int = 1950) -> list[int]:
+    """One row in each of `n` consecutive years."""
+    return list(range(start, start + n))
+
+
+def _coded(years: list[int]) -> dict[str, Any]:
+    return _doc(_wide_years(years), flagged=[])
+
+
+def _span(doc: dict[str, Any]) -> tuple[list[dict[str, Any]], Any, Any]:
+    stats = _col(doc, "d")["stats"]
+    return _ranges(doc, "d"), stats["min"], stats["max"]
+
+
+def test_single_low_outlier_year_is_bottom_coded() -> None:
+    ranges = _ranges(_coded([1850, *range(1990, 2020)]), "d")
+    assert ranges[0]["start_year"] == 1998  # the 10th lowest row
+    assert 1850 not in {r["start_year"] for r in ranges}
+
+
+def test_single_high_outlier_year_is_top_coded() -> None:
+    ranges = _ranges(_coded([*range(1990, 2020), 2090]), "d")
+    assert ranges[-1]["end_year"] == 2011  # the 10th highest row
+    assert 2090 not in {r["end_year"] for r in ranges}
+
+
+@pytest.mark.parametrize("total", range(2 * K - 1, 2 * K + 12))
+def test_moving_any_tail_row_outward_leaves_ranges_unchanged(total: int) -> None:
+    years = _spread(total)
+    base = _span(_coded(years))
+    for i in range(K - 1):
+        low = years.copy()
+        low[i] = 1700 + i  # at or below the K-th lowest row's year
+        assert _span(_coded(low)) == base, f"low row {i}"
+        high = years.copy()
+        high[-1 - i] = 2500 + i  # at or above the K-th highest row's year
+        assert _span(_coded(high)) == base, f"high row {i}"
+
+
+@pytest.mark.parametrize("total", range(K, 2 * K - 1))
+def test_low_above_high_releases_no_range(total: int) -> None:
+    """10 to 18 rows spread over distinct years: any one range would name a K-1 row's year."""
+    doc = _coded(_spread(total, 1850))
+    ranges, low, high = _span(doc)
+    assert ranges == []
+    assert low is None and high is None
+    assert "1850" not in json.dumps(doc)
+
+
+def test_k_rows_in_the_lowest_year_keep_that_year() -> None:
+    """Kills an off-by-one K-th: the K-th lowest row sits in 1990, the (K+1)-th in 2000."""
+    ranges = _ranges(_coded([*[1990] * K, *range(2000, 2020)]), "d")
+    assert ranges[0]["start_year"] == 1990
+    ranges = _ranges(_coded([*range(1990, 2010), *[2019] * K]), "d")
+    assert ranges[-1]["end_year"] == 2019
+
+
+def test_the_9999_sentinel_is_clamped_then_top_coded() -> None:
+    ranges = _ranges(_coded([2000] * 12 + [9999] * 10), "d")
+    assert ranges == [
+        {"start_year": 2000, "end_year": 2000, "count": 12},
+        {"start_year": 9998, "end_year": 9998, "count": 10},
+    ]
+
+
+def test_year_edge_reads_coded_bounds() -> None:
+    df = _wide_years([1850, *range(1990, 2020)])
+    stats = _col(_doc(df, flagged=["d"]), "d")["stats"]
+    assert stats["min"] == "1997-01-01T00:00:00"  # one year below the coded first range
+    assert stats["max"] == "2011-12-31T23:59:59"
+
+
+def test_plain_min_max_read_coded_bounds() -> None:
+    # A year holding K rows keeps the column out of the too-small-to-release path (G5), which
+    # would bound it by the flagged edges instead of the plain ones.
+    low_doc = _coded([1850, *[1990] * K, *range(1991, 2020)])
+    assert "d" not in low_doc["redacted_columns"]  # the plain path, not the G5 flagged one
+    assert _span(low_doc)[1] == "1990-01-01T00:00:00"
+    assert "1850" not in json.dumps(low_doc)
+    high_doc = _coded([2090, *[2019] * K, *range(1990, 2019)])
+    assert "d" not in high_doc["redacted_columns"]
+    assert _span(high_doc)[2] == "2019-12-31T23:59:59.999999"
+    assert "2090" not in json.dumps(high_doc)
