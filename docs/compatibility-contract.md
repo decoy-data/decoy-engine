@@ -608,9 +608,6 @@ No `SEED_PROTOCOL_VERSION` change.
   (A5a): a `format: fixed_width` `FileSource` can now be read through these
   names instead of importing the private `decoy_engine.profile._fixed_width_reader`
   module, which the additive-only rule in §4.1 does not cover.
-  `WriteResult.sha256` (SDK 1.1, F02-E2) is an additive, defaulted field: lowercase
-  SHA-256 hex of the bytes a sink wrote, or `None` when the sink reports no digest, so
-  sinks written against SDK 1.0 keep working.
   It also includes `generated_table_to_pandas(table)` (2026-11-08): converts a generated
   Arrow table to pandas with every integer column kept as a pandas nullable integer, so
   output written from the frame prints `1` where a plain `to_pandas()` prints `1.0`.
@@ -959,6 +956,9 @@ No `SEED_PROTOCOL_VERSION` change.
   refused at load, before any row is read, where it used to run on sm's 0.211. A model that is
   absent or incompatible keeps its own earlier reason. `text_redact` and `text_mask` `ner` columns
   read no rate and are not refused for any model name.
+  It also includes `WriteResult.sha256` (SDK 1.1, F02-E2): an additive, defaulted field holding
+  the lowercase SHA-256 hex of the bytes a sink wrote, or `None` when the sink reports no
+  digest, so sinks written against SDK 1.0 keep working.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and

@@ -167,11 +167,15 @@ def _stream_blob(get_bucket, path: str) -> Iterator[bytes]:
     """The one GCS object read loop, shared by the source and the object store.
 
     Every chunk request carries the generation reloaded first, so an object replaced mid-read
-    fails as ``source_changed`` instead of mixing two versions.
+    fails as ``source_changed`` instead of mixing two versions. GCS answers a replaced
+    generation with 412 or, through the generation-bound media link, 404; after a good reload
+    both mean the object changed. A 404 from the reload itself stays ``not_found``.
     """
+    reloaded = False
     try:
         blob = get_bucket().blob(path)
         _clients.gcs_reload(blob)
+        reloaded = True
         # Blob.open returns a file-like wrapping an HTTPS stream;
         # iterate in chunks for bounded memory use.
         with _clients.gcs_open(blob, "rb", if_generation_match=blob.generation) as remote:
@@ -181,7 +185,7 @@ def _stream_blob(get_bucket, path: str) -> Iterator[bytes]:
                     return
                 yield chunk
     except ConnectorError as exc:
-        if exc.kind != "precondition_failed":
+        if exc.kind != "precondition_failed" and not (reloaded and exc.kind == "not_found"):
             raise
         err = _clients.source_changed("GCS")
     except Exception as exc:
