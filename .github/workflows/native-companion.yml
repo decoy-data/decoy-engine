@@ -328,6 +328,14 @@ jobs:
       # (skipif no companion), so this is the one job that runs them.
       - name: native FPE (FF1) on both routes (companion-present case)
         run: pytest tests/native/test_c6a_fpe_chunked.py tests/native/test_fpe_ext_loader.py tests/physical/test_shadow_fpe.py -v --tb=short
+      # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
+      # it, so this is the one job that can prove the chunked route leaks no source metadata.
+      # A skip here would hide that, so the step fails on any SKIPPED line and on an empty
+      # selection (pytest exits 5 then).
+      - name: Output metadata canary, auto-chunk route (companion-present case, must not skip)
+        run: |
+          pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
+          if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A
