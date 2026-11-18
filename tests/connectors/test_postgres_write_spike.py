@@ -290,6 +290,40 @@ def test_cell_e_interrupt_cancels_the_server_query(pg, peer, rw, path, record_pr
             holder.close()
 
 
+def test_cell_e2_cancelling_the_backend_from_a_second_session_stops_the_statement(
+    pg, peer, rw, record_property
+):
+    # Fallback for cell e: the publisher already records pg_backend_pid() at step 1, so a
+    # watchdog can cancel the running statement from another session when interrupt() cannot.
+    conn = rw()
+    marker = "m" + uuid.uuid4().hex
+    conn.execute("BEGIN")
+    pid = conn.execute("SELECT * FROM postgres_query('w', 'SELECT pg_backend_pid()')").fetchone()[0]
+    running = f"SELECT count(*) FROM pg_stat_activity WHERE pid = {pid} AND state = 'active'"
+    box: dict = {}
+
+    def run():
+        try:
+            _pgx(conn, f"SELECT pg_sleep(30) /* {marker} */")
+            box["done"] = True
+        except Exception as exc:
+            box["error"] = type(exc).__name__
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    assert _wait(lambda: peer.one(running) == 1, 10), "the statement never reached the server"
+    assert peer.one(f"SELECT pg_cancel_backend({pid})") is True
+    t.join(10)
+    returned = not t.is_alive()
+    _note(record_property, "cell_e2", f"client_returned={returned} outcome={box}")
+    assert returned and "error" in box
+    assert (
+        peer.one(f"SELECT count(*) FROM pg_stat_activity WHERE pid = {pid} AND state = 'active'")
+        == 0
+    )
+    conn.execute("ROLLBACK")
+
+
 # ----- (f) INSERT with a column list over generated, identity and exotic types -------------------
 
 
