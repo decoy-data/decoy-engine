@@ -56,6 +56,7 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 | `decoy-resume-run/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-run-v1.json` |
 | `decoy-resume-table/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-table-v1.json` |
 | `lock/v1` | contract 3.1 | `src/decoy_engine/support/_runtime_lock.py` | `tests/unit/support/test_runtime_lock.py`, `tests/unit/support/test_probe.py`, `tests/integration/compat_corpus/runtime-lock/lock-v1.json`, `tests/integration/compat_corpus/runtime-lock/lock-v1-probe.json` |
+| `risk-utility-report/v1` | contract 3.1 | `src/decoy_engine/anonymize/report/_model.py` | `tests/unit/anonymize/report/test_reader.py`, `tests/unit/anonymize/report/test_value_free.py`, `tests/integration/compat_corpus/test_compat_corpus.py` |
 
 ## Public names (contract 3.4)
 
