@@ -540,3 +540,36 @@ class TestQuarantineWriteTimingParity:
         # fail-loud run publishes nothing durable.
         assert not Path(qpath).exists()
         assert not (tmp_path / "t.out.parquet").exists()
+
+
+class TestNestedCellFaultsFailClosed:
+    """F07 E1 (AT-E1-3): a cell the bounded reader refuses (a repeated key, a lone surrogate) is a
+    `format_error` row error. The row is quarantined when opted in and the job fails when not."""
+
+    _ROWS = [
+        json.dumps({"contact": {"phone": "555-0100"}}),
+        '{"contact": {"phone": "555-0200-LEAK", "phone": "555-0201-LEAK"}}',
+        json.dumps({"contact": {"phone": "555-0300"}}),
+    ]
+
+    def _run(self, tmp_path: Path, quarantine: dict[str, Any] | None) -> Any:
+        src = pa.table({"payload": pa.array(self._ROWS, type=pa.string())})
+        src_path = _write_source(tmp_path, src)
+        config = _nested_config(src_path, str(tmp_path / "t.out.parquet"), quarantine=quarantine)
+        return run_pipeline(config, {"t": pq.read_table(src_path)}, engine_version="0.1.0")
+
+    def test_without_quarantine_the_job_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(RowErrorsFailedError) as exc_info:
+            self._run(tmp_path, None)
+        assert [r.trigger for r in exc_info.value.records] == ["format_error"]
+        assert "LEAK" not in str(exc_info.value)
+
+    def test_with_quarantine_the_row_is_removed_from_the_main_output(self, tmp_path: Path) -> None:
+        qpath = str(tmp_path / "quarantine.jsonl")
+        result = self._run(
+            tmp_path, {"enabled": True, "output_path": qpath, "triggers": ["format_error"]}
+        )
+        cells = result.outputs["t"].column("payload").to_pylist()
+        assert len(cells) == 2
+        assert all("LEAK" not in c for c in cells)
+        assert all(json.loads(c)["contact"]["phone"] == "REDACTED" for c in cells)

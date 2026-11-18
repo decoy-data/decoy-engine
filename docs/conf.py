@@ -22,8 +22,8 @@ from __future__ import annotations
 
 # ── Project metadata ─────────────────────────────────────────────────────
 project = "decoy-engine"
-author = "louiskeep"
-copyright = "2026, louiskeep"
+author = "Decoy"
+copyright = "2026, Decoy"
 
 # Pull the version from the package itself so a release bump in
 # pyproject.toml shows up in the docs without a parallel edit here.
@@ -141,7 +141,7 @@ html_static_path = ["_static"]
 html_show_sourcelink = False  # the GitHub-link button below replaces this
 
 html_theme_options = {
-    "source_repository": "https://github.com/louiskeep/decoy-engine/",
+    "source_repository": "https://github.com/decoy-data/decoy-engine/",
     "source_branch": "main",
     "source_directory": "docs/",
     # Keep accent colors aligned with the CLI's semantic-token palette
