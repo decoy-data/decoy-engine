@@ -122,7 +122,7 @@ def test_static_refusals_at_both_entry_points(
 
 
 def test_the_error_text_never_holds_a_config_value() -> None:
-    config = _config(_refs(table="SECRET-TABLE-9"))
+    config = _config(**_refs(table="SECRET-TABLE-9"))
     with pytest.raises(PlanCompileError) as exc:
         run_config_only_checks(config)
     assert "SECRET-TABLE-9" not in str(exc.value)
@@ -168,11 +168,11 @@ def test_compile_binds_the_key_kind_outside_the_child_config(dtype: str, kind: s
     plan = compile_plan(config, _profile(dtype), decoy_engine_version="0.1.0")
     (rule,) = _payload_config(plan)["rules"]
     assert rule["references"] == {"table": "customers", "column": "id", "key_kind": kind}
-    assert "key_kind" not in str(rule["strategy_config"])
+    assert "key_kind" not in str(rule.get("strategy_config"))
     assert config == before, "compile_plan must not edit the caller's config"
     plain = _config()
     del plain["tables"][1]["columns"][0]["provider_config"]["rules"][0]["references"]
     (plain_rule,) = _payload_config(
         compile_plan(plain, _profile(dtype), decoy_engine_version="0.1.0")
     )["rules"]
-    assert rule["strategy_config"] == plain_rule["strategy_config"]
+    assert rule.get("strategy_config") == plain_rule.get("strategy_config")

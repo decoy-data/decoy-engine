@@ -104,7 +104,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
 )
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
-from decoy_engine.plan.checks._nested_rules import check_nested_rules
+from decoy_engine.plan.checks._nested_rules import bind_reference_key_kinds, check_nested_rules
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
@@ -438,7 +438,8 @@ def compile_plan(
     relationships = _build_relationships(config, profile, orphan_policy_lookup=orphan_policy_lookup)
     namespaces = _build_namespaces(config)
     ordering = tuple(OrderingNode(table=t, columns=c) for (t, c) in relationship_graph.ordering)
-    seed_envelope, stamp_warnings = _build_seed_envelope(config, profile)
+    bound = bind_reference_key_kinds(config, None if no_profile else profile)
+    seed_envelope, stamp_warnings = _build_seed_envelope(bound, profile)
     generation_plan = build_generation_plan(
         config,
         _snapshots.pinned,

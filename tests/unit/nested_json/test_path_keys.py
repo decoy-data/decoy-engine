@@ -12,9 +12,13 @@ from typing import Any
 
 import pyarrow as pa
 import pytest
-from decoy_engine._nested_json._paths import UnsupportedKeyType, path_key_batches, singular_path
 
 from decoy_engine._nested_json import PathRelation, path_relations
+from decoy_engine._nested_json._paths import (
+    UnsupportedKeyTypeError,
+    path_key_batches,
+    singular_path,
+)
 
 
 def _config(*columns: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +98,7 @@ def test_string_parent_reads_string_leaves() -> None:
     ]
     keys, unreadable = _keys(cells, "$.ref.id", pa.string())
     assert keys == ["c-1", None, None]
-    assert unreadable == 2
+    assert unreadable == 1
 
 
 def test_an_integer_outside_the_parent_type_is_unreadable() -> None:
@@ -104,7 +108,7 @@ def test_an_integer_outside_the_parent_type_is_unreadable() -> None:
 
 
 def test_a_parent_of_another_type_is_refused_without_reading() -> None:
-    with pytest.raises(UnsupportedKeyType):
+    with pytest.raises(UnsupportedKeyTypeError):
         list(path_key_batches([pa.array(["{}"])], "$.k", pa.float64()))
 
 

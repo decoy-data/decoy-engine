@@ -6,6 +6,26 @@ column's child, so the one reader lives below them.
 
 from __future__ import annotations
 
-from decoy_engine._nested_json._rules import UNSET, NestedChild, effective_provider, nested_children
+from decoy_engine._nested_json._paths import PathKeyBatch, path_key_batches, singular_path
+from decoy_engine._nested_json._rules import (
+    UNSET,
+    NestedChild,
+    PathRelation,
+    effective_provider,
+    nested_children,
+    path_relations,
+    reference_ends,
+)
 
-__all__ = ["UNSET", "NestedChild", "effective_provider", "nested_children"]
+__all__ = [
+    "UNSET",
+    "NestedChild",
+    "PathKeyBatch",
+    "PathRelation",
+    "effective_provider",
+    "nested_children",
+    "path_key_batches",
+    "path_relations",
+    "reference_ends",
+    "singular_path",
+]

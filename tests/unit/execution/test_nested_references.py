@@ -182,6 +182,12 @@ def _pipeline_config(tmp_path: Any, *, reference: bool) -> dict[str, Any]:
             ],
         },
     ]
+    tables.append(
+        {
+            "name": "orders",
+            "columns": [{"name": "customer_id", "strategy": "hash", "namespace": "customer"}],
+        }
+    )
     sources = {
         t["name"]: {
             "type": "file",
@@ -201,6 +207,14 @@ def _pipeline_config(tmp_path: Any, *, reference: bool) -> dict[str, Any]:
         "sources": sources,
         "tables": tables,
         "targets": targets,
+        "relationships": [
+            {
+                "parent": {"table": "customers", "columns": ["id"]},
+                "children": [{"table": "orders", "columns": ["customer_id"]}],
+                "orphan_policy": "preserve",
+                "namespace": "customer",
+            }
+        ],
     }
     return PipelineConfig.model_validate(cfg).model_dump()
 
@@ -211,6 +225,7 @@ def _sources() -> dict[str, Any]:
     ids = [1, 2, 3, 4]
     return {
         "customers": pa.table({"id": pa.array(ids, pa.int64()), "name": ["a", "b", "c", "d"]}),
+        "orders": pa.table({"customer_id": pa.array([1, 1, 3], pa.int64())}),
         "events": pa.table(
             {
                 "event_id": pa.array([10, 11, 12, 13, 14], pa.int64()),
@@ -222,18 +237,38 @@ def _sources() -> dict[str, Any]:
 
 def test_a_reference_leaves_relationships_and_non_nested_output_unchanged(tmp_path: Any) -> None:
     from decoy_engine import run_pipeline
+    from decoy_engine.execution._chunked_profile import first_chunk_profile
+    from decoy_engine.plan import compile_plan
+    from decoy_engine.profile import Relationship
 
     results: dict[tuple[bool, str], Any] = {}
     for reference in (True, False):
         cfg = _pipeline_config(tmp_path, reference=reference)
+        for name, table in _sources().items():
+            table.to_pandas().to_csv(tmp_path / f"{name}.csv", index=False)
         for mode in ("full_frame", "sequential"):
             results[(reference, mode)] = run_pipeline(
                 cfg, sources=_sources(), engine_version="e4a-test", execution_mode=mode
             )
+    plans = {}
+    for reference in (True, False):
+        profiles = [
+            first_chunk_profile(t, table=n, engine_version="e4a-test")
+            for n, t in _sources().items()
+        ]
+        fk = Relationship("customers", ("id",), "orders", ("customer_id",), namespace="customer")
+        profile = dataclasses.replace(
+            profiles[0], tables=tuple(p.tables[0] for p in profiles), relationships=(fk,)
+        )
+        plans[reference] = compile_plan(
+            _pipeline_config(tmp_path, reference=reference), profile, decoy_engine_version="e4a"
+        )
+    assert plans[True].relationships == plans[False].relationships
+    assert plans[True].relationships != ()
     for (reference, mode), result in results.items():
         base = results[(False, mode)]
-        assert result.plan.relationships == base.plan.relationships
         assert result.outputs["customers"].equals(base.outputs["customers"])
+        assert result.outputs["orders"].equals(base.outputs["orders"])
         assert (
             result.outputs["events"].column("event_id").to_pylist()
             == base.outputs["events"].column("event_id").to_pylist()

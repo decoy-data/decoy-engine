@@ -11,6 +11,7 @@ __all__ = [
     "NESTED_CELL_OVERSIZED",
     "NESTED_CELL_TOO_DEEP",
     "NESTED_CHILD_NON_FINITE",
+    "NESTED_REFERENCE_LEAF_TYPE_MISMATCH",
 ]
 
 _d = _catalog.warning("QualityWarning")
@@ -38,5 +39,10 @@ NESTED_CELL_TOO_DEEP = _d(
 NESTED_CHILD_NON_FINITE = _d(
     "nested_child_non_finite",
     "A nested child strategy returned a value that is not a finite number.",
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_LEAF_TYPE_MISMATCH = _d(
+    "nested_reference_leaf_type_mismatch",
+    "A nested rule with references selects a leaf of another kind than its parent key.",
     since=UNRELEASED,
 )
