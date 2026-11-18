@@ -1,4 +1,4 @@
-"""``type_family`` is defined once, in ``_value_family.py``, and every reader uses that object."""
+"""``type_family`` is defined once, in ``_value_family/``, and every reader uses that object."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def test_one_definition_in_the_engine() -> None:
                 and node.name == "type_family"
             ):
                 found.append(path.relative_to(root).as_posix())
-    assert found == ["_value_family.py"]
+    assert found == ["_value_family/__init__.py"]
 
 
 def test_every_reader_uses_the_one_function() -> None:

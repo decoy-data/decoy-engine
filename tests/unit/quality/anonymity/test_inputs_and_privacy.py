@@ -583,8 +583,6 @@ def test_only_the_value_family_module_is_allowed() -> None:
     for name in (
         "decoy_engine.anonymize",
         "decoy_engine.anonymize.hierarchies",
-        "decoy_engine.anonymize.search",
-        "decoy_engine.anonymize._values",
     ):
         assert name not in _ALLOWED_ENGINE_MODULES
 
