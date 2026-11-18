@@ -307,8 +307,14 @@ def test_gcs_iter_object_streams_through_the_gcs_open_path(monkeypatch: pytest.M
     from decoy_engine.connectors.gcs import GCSConfig
 
     class Blob:
+        generation = 5
+
+        def reload(self, **kw: Any) -> None:
+            assert kw["retry"] is not None
+
         def open(self, mode: str, **kw: Any) -> io.BytesIO:
             assert mode == "rb" and kw["retry"] is not None
+            assert kw["if_generation_match"] == 5
             return io.BytesIO(b"gcs-bytes")
 
     class Bucket:

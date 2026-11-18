@@ -956,6 +956,9 @@ No `SEED_PROTOCOL_VERSION` change.
   refused at load, before any row is read, where it used to run on sm's 0.211. A model that is
   absent or incompatible keeps its own earlier reason. `text_redact` and `text_mask` `ner` columns
   read no rate and are not refused for any model name.
+  It also includes `WriteResult.sha256` (SDK 1.1, F02-E2): an additive, defaulted field holding
+  the lowercase SHA-256 hex of the bytes a sink wrote, or `None` when the sink reports no
+  digest, so sinks written against SDK 1.0 keep working.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and

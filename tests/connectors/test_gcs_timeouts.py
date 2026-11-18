@@ -105,6 +105,7 @@ class FakeBlob:
         self.size: int | None = None
         self.content_type = "application/octet-stream"
         self.updated = None
+        self.generation = 1
 
     def reload(self, timeout: Any = MISSING, retry: Any = MISSING) -> None:
         self.rec.hit("reload", timeout, retry)
@@ -121,7 +122,7 @@ class FakeBlob:
         body = self.rec.body
         return body if start is None else body[start : (end + 1 if end is not None else None)]
 
-    def open(self, mode: str, timeout: Any = MISSING, retry: Any = MISSING) -> FakeFile:
+    def open(self, mode: str, timeout: Any = MISSING, retry: Any = MISSING, **kw: Any) -> FakeFile:
         self.rec.hit("open", timeout, retry)
         return FakeFile(self.rec, mode)
 

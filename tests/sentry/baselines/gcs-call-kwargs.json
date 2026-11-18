@@ -186,33 +186,6 @@
     "decoy_engine/execution/out_of_core/_scratch.py::open_private::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
-    "decoy_engine/execution/physical/_activation.py::_compute_activation_hash::update::0": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_activation.py::_compute_activation_hash::update::1": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_inputs.py::compute_plan_hash::update::0": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_inputs.py::compute_plan_hash::update::1": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_shadow_snapshot.py::snapshot_identity::update::0": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_shadow_snapshot.py::snapshot_identity::update::1": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_shadow_snapshot.py::snapshot_identity::update::2": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_shadow_snapshot.py::snapshot_identity::update::3": {
-      "reason": "hashlib sha256 digest update"
-    },
-    "decoy_engine/execution/physical/_shadow_snapshot.py::snapshot_identity::update::4": {
-      "reason": "hashlib sha256 digest update"
-    },
     "decoy_engine/expressions/_safe_eval.py::safe_eval::update::0": {
       "reason": "dict.update on a plain dict"
     },

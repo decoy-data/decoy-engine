@@ -32,6 +32,7 @@ from typing import Any, ClassVar
 from pydantic import Field, SecretStr
 
 from decoy_engine.connectors import _clients
+from decoy_engine.connectors._digest import DigestingChunks
 from decoy_engine.connectors._retry import run_retrying
 from decoy_engine.sdk import (
     CAP_INTROSPECTION,
@@ -339,5 +340,6 @@ class S3FileSink(FileSink[S3Config]):
         """
         client = self._client_or_build()
         key = _join_key(self.config.prefix, path)
-        total = _clients.s3_put(client, self.config.bucket, key, chunks, {})
-        return WriteResult(path=key, bytes_written=total)
+        digest = DigestingChunks(chunks)
+        total = _clients.s3_put(client, self.config.bucket, key, iter(digest), {})
+        return WriteResult(path=key, bytes_written=total, sha256=digest.hexdigest())

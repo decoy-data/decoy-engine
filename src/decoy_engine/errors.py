@@ -78,14 +78,12 @@ class ValidationError(DecoyError):
     """Lower-level validation failure raised by individual modular
     validators (the per-op ``validate_config`` callbacks).
 
-    The public boundary catches this and re-wraps as
-    :class:`PipelineValidationError` for the raise-on-first-error
-    public API, or collects it into a
-    :class:`decoy_engine.validation_result.ValidationResult` for the
-    collect-all API. Callers should normally catch
-    PipelineValidationError or read the ValidationResult; this type
-    is exposed mainly because the per-op ``validate_config``
-    callbacks raise it.
+    The public boundary catches this and re-wraps it as
+    :class:`PipelineValidationError` (raise-on-first-error API), or collects it into a
+    :class:`decoy_engine.validation_result.ValidationResult` (collect-all API).
+    Callers normally catch PipelineValidationError or read the ValidationResult;
+    this type is exposed because the per-op ``validate_config`` callbacks
+    raise it.
 
     R2.1: carries an optional stable ``code`` so callers can map the
     failure to UI inspector fields without parsing the message
@@ -93,10 +91,6 @@ class ValidationError(DecoyError):
     ``decoy_engine.validation_result.CODES``. Older raises with no
     code are tolerated -- they surface as ``CODES.UNTAGGED`` when
     converted to a ValidationResult.
-
-    Moved from ``decoy_engine.internal.validator`` to this public
-    module in V2.0-C so platform/CLI callers stop importing from
-    ``decoy_engine.internal.*``.
     """
 
     def __init__(
@@ -123,9 +117,15 @@ class ValidationError(DecoyError):
 class ConnectorError(DecoyError):
     """Base class for connector errors; ``kind`` is the failure class a caller may branch on."""
 
-    def __init__(self, *args: object, kind: ConnectorErrorKind = "unexpected") -> None:
+    def __init__(
+        self,
+        *args: object,
+        kind: ConnectorErrorKind = "unexpected",
+        cleanup_ok: bool | None = None,
+    ) -> None:
         super().__init__(*args)
         self.kind = kind
+        self.cleanup_ok = cleanup_ok
 
 
 class ConnectorAuthError(ConnectorError):
