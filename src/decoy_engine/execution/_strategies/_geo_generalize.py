@@ -110,9 +110,7 @@ class GeoGeneralizeHandler:
                     column=column,
                     detail={
                         "rows_generalized": sum(cascaded.values()),
-                        "cascade_decisions": ", ".join(
-                            f"{decision}={count}" for decision, count in sorted(cascaded.items())
-                        ),
+                        **{f"rows_{decision}": count for decision, count in cascaded.items()},
                     },
                 )
             )

@@ -650,8 +650,8 @@ Cascade decisions are recorded in a frozen `CascadeEvidence` dataclass
 generalized past the top configured cascade level, the handler surfaces a
 `QualityWarning` with code `geo_generalize_cascade` in
 `ExecutionResult.warnings`. The warning's `rows_generalized` counts the rows that cascaded below
-the top level, and `cascade_decisions` lists the count per decision (for example
-`suppressed=2, zip3=5`). Neither holds a row position.
+the top level, and one `rows_<decision>` key per decision holds its count (for example
+`rows_suppressed: 2`, `rows_zip3: 5`). Neither holds a row position.
 
 Config validation runs at execution time, pre-mutation, fail-closed. Raises
 `PlanCompileError` on unsupported `type`, empty `cascade`, or missing
