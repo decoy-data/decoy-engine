@@ -103,6 +103,7 @@ SENTRIES = (
     "tests/sentry/defects/test_environment_reads.py",
     "tests/sentry/defects/test_exception_context.py",
     "tests/sentry/defects/test_generate_option_reads.py",
+    "tests/sentry/defects/test_hint_gated_registry.py",
     "tests/sentry/defects/test_lazy_builder_registry.py",
     "tests/sentry/defects/test_ner_mismatch_single_site.py",
     "tests/sentry/defects/test_nested_json_choke_point.py",

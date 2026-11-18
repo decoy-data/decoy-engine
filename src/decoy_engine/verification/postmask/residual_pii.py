@@ -48,6 +48,7 @@ from typing import Any
 
 import pandas as pd
 
+from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
@@ -79,6 +80,11 @@ _DESTROYS_PATTERN: frozenset[str] = frozenset(
         "bucketize",
     }
 )
+
+# The destroying strategies that replace a whole cell. text_redact is left out: it replaces
+# matched spans, and the name-hint-only detectors are not in its span set, so a cell can still
+# hold a name after it ran.
+_WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"})
 
 # Dennis M12 fix (2026-06-01): strategies that explicitly leave the
 # column untouched. A detector hit on these is expected -- the user
@@ -216,7 +222,10 @@ def configured_columns(
 def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
     """A regex finding raised from positional output==source evidence; a dismissal never lowers it."""
     rate = finding.source_identity_rate
-    return finding.source == "regex" and rate is not None and rate >= _LEAK_WARN_RATE
+    if finding.source != "regex" or rate is None:
+        return False
+    gated = _is_gated_whole_cell(finding.configured_strategy, finding.detector_id)
+    return _identity_evidence(rate, gated=gated)
 
 
 def _source_identity(
@@ -346,6 +355,54 @@ def _escalate(
     return None
 
 
+def _is_gated_whole_cell(strategy: str | None, detector_id: str) -> bool:
+    """A whole-cell destroying strategy on a hit from a name-hint-gated detector."""
+    return strategy in _WHOLE_CELL_DESTROYS and detector_id in NAME_HINT_GATED_DETECTORS
+
+
+def _identity_evidence(identity_rate: float, *, gated: bool) -> bool:
+    """Whether a source-identity rate is evidence the mask missed rows.
+
+    The one rule for grading and for the dismissal guard. On the gated path a whole-cell
+    strategy never legitimately leaves a cell equal to its source, so any identity counts; on
+    every other path the 5% floor keeps coincidence from escalating.
+    """
+    return identity_rate > 0 if gated else identity_rate >= _LEAK_WARN_RATE
+
+
+def _grade_gated(
+    *, identical_rows: int, comparable_rows: int, detector_id: str, strategy: str
+) -> tuple[Severity, str]:
+    """Grade a column whose detector hits all come from name-hint-gated detectors, under a
+    whole-cell destroying strategy, when the source comparison ran.
+
+    The hit itself proves nothing (the detector's regex is loose by design), so the source
+    comparison decides: a whole-cell strategy never legitimately leaves a non-null cell equal to
+    its source. There is no constant-source or minimum-row exception. Messages carry no rate,
+    count or value.
+    """
+    identity = identical_rows / comparable_rows
+    if not _identity_evidence(identity, gated=True):
+        return (
+            "info",
+            f"column matched {detector_id!r} only through its column name; "
+            f"strategy {strategy!r} replaced the values.",
+        )
+    if identical_rows == comparable_rows or (
+        identical_rows >= _LEAK_FAIL_MIN_ROWS and identity >= _LEAK_FAIL_RATE
+    ):
+        return (
+            "fail",
+            f"column matched {detector_id!r} only through its column name, and the output "
+            f"equals the source under strategy {strategy!r}; the mask did not fire.",
+        )
+    return (
+        "warning",
+        f"column matched {detector_id!r} only through its column name, and some output "
+        f"values still equal their source under strategy {strategy!r}; verify the output.",
+    )
+
+
 def _classify(detector_id: str, configured: str | None) -> tuple[Severity, str]:
     """Classify a detector hit + return (severity, human-readable message).
 
@@ -432,7 +489,20 @@ def residual_pii_findings(
             # Identity needs comparable rows; none means no source column or a row-count mismatch.
             compared = fact.comparable_rows > 0 and configured not in _NO_OP_BY_DESIGN
             rate = fact.identical_rows / fact.comparable_rows if compared else None
-            if rate is not None:
+            if (
+                rate is not None
+                and configured in _WHOLE_CELL_DESTROYS
+                and all(d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors)
+            ):
+                # Every hit is a loose regex held back by a column-name hint, so the source
+                # comparison, not the hit, says whether the mask fired.
+                severity, message = _grade_gated(
+                    identical_rows=fact.identical_rows,
+                    comparable_rows=fact.comparable_rows,
+                    detector_id=top.detector_id,
+                    strategy=str(configured),
+                )
+            elif rate is not None:
                 override = _escalate(
                     configured=configured,
                     identity_rate=rate,
