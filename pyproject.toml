@@ -547,6 +547,8 @@ ignore = [
 # dataclass by the Span/iter_spans block), each with its own explanatory
 # header. Deliberate narrative layout, not a top-of-file omission.
 "src/decoy_engine/detection/detectors.py" = ["E402"]
+# The name-hint section moved out of detectors.py with the same layout.
+"src/decoy_engine/detection/_hints.py" = ["E402"]
 
 # Legacy modules scheduled for V2.1 hard deletion (per the V2 sprint
 # plan + v2-roadmap Phase 1 Sprint 5). Each entry deletes with its

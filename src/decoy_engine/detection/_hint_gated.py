@@ -6,7 +6,7 @@ the constant ``REDACTED`` matches). A hit on one of them after a mask that repla
 says little about the output, so residual-PII grading reads the source comparison instead.
 
 The set is kept equal to the detector code by
-``tests/sentry/defects/test_hint_gated_registry.py``, which parses ``detectors.py``.
+``tests/sentry/defects/test_hint_gated_registry.py``, which parses ``builtin.py``.
 """
 
 from __future__ import annotations

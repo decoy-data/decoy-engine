@@ -2,7 +2,7 @@
 
 Residual-PII grading trusts the set: a detector missing from it is graded as if its regex alone
 proved a leak, and a stale entry hides a real pattern detector behind a name hint. The scan reads
-`detectors.py` with `ast`: every `detect_*` function whose first statement after the docstring is
+`builtin.py`, the one file that defines every registered detector, with `ast`: every `detect_*` function whose first statement after the docstring is
 `if not _hits_name_hint("<id>", ...): return None` is gated, and the id it passes must be the id
 it passes to `_evaluate`, because that id is the one that appears in the column facts.
 """
@@ -10,14 +10,15 @@ it passes to `_evaluate`, because that id is the one that appears in the column 
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 
 import pytest
 
-from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
+from decoy_engine.detection import NAME_HINT_GATED_DETECTORS, REGISTERED_DETECTORS
 
 DETECTORS = (
-    Path(__file__).resolve().parents[3] / "src" / "decoy_engine" / "detection" / "detectors.py"
+    Path(__file__).resolve().parents[3] / "src" / "decoy_engine" / "detection" / "builtin.py"
 )
 
 
@@ -106,6 +107,11 @@ def test_gate_id_equals_evaluate_id() -> None:
 
 def test_the_scan_sees_the_gated_detectors() -> None:
     assert len(gated_detectors(DETECTORS.read_text())) >= 10
+
+
+def test_the_scanned_file_defines_every_registered_detector() -> None:
+    files = {Path(inspect.getsourcefile(fn) or "").resolve() for fn in REGISTERED_DETECTORS}
+    assert files == {DETECTORS.resolve()}
 
 
 _GATED = '''

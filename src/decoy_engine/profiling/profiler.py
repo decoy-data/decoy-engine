@@ -16,10 +16,10 @@ from typing import Any
 import pandas as pd
 
 from decoy_engine.context import ExecutionContext, emit_lineage, emit_step
+from decoy_engine.detection._hints import hits_name_hint
 from decoy_engine.detection.detectors import (
     _series_str,
     hits_custom_name_hint,
-    hits_name_hint,
     prepared_scope,
     run_all_detectors,
 )
@@ -362,7 +362,7 @@ def profile_columns(
 
     # Install per-scan extras for the lifetime of this call. The
     # context manager is a no-op when extras is None or empty.
-    from decoy_engine.detection.detectors import name_hint_extras
+    from decoy_engine.detection._hints import name_hint_extras
 
     with name_hint_extras(extra_name_hints):
         return _profile_columns_inner(

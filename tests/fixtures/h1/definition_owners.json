@@ -23,7 +23,7 @@
   }
  },
  "E1.2": {
-  "landed": false,
+  "landed": true,
   "from": "src/decoy_engine/detection/detectors.py",
   "owners": {
    "_hint": "src/decoy_engine/detection/_hints.py",
@@ -35,7 +35,7 @@
   }
  },
  "E1.3": {
-  "landed": false,
+  "landed": true,
   "from": "src/decoy_engine/detection/detectors.py",
   "owners": {
    "_variant": "src/decoy_engine/detection/builtin.py",
