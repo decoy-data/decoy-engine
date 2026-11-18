@@ -138,6 +138,13 @@ def test_the_registry_that_only_names_nested_is_not_a_reader() -> None:
         'def f(c, pc):\n    return c["strategy"] != "nested" or pc.get("strategy_config")\n',
         'def f(c, pc):\n    if c["strategy"] in ("nested", "x"):\n        return pc["strategy_config"]\n',
         'def f(c, pc):\n    if c["strategy"] in {"x", "nested"}:\n        return pc.get("strategy")\n',
+        # A module that calls nested_children and still reads a child key directly.
+        "from decoy_engine._nested_json import nested_children\n"
+        "def f(c, pc):\n    kids = nested_children(pc)\n"
+        '    return c["strategy"] == "nested" and pc.get("strategy_config")\n',
+        "from decoy_engine._nested_json import nested_children\n"
+        "def f(c, pc):\n    kids = nested_children(pc)\n"
+        '    return c["strategy"] == "nested" and pc["strategy"]\n',
         'T = {"scalar:nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'T = {"nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'def f(c, pc):\n    return "nested" == c["strategy"] and pc.get("strategy")\n',
