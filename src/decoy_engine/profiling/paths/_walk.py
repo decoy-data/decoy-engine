@@ -176,7 +176,6 @@ class Levels:
         self.key_total -= len(level.seen)
         level.seen = {}
         level.last = {}
-        level.rejected = set()
         level.collapsed = True
         depth = len(pattern)
         named = {
@@ -244,12 +243,12 @@ class Levels:
                 continue
             held.cells = _union(held.cells, level.cells)
             held.last_cell = max(held.last_cell, level.last_cell)
-            held.rejected |= level.rejected
             if held.collapsed:
                 continue
             if level.collapsed:
                 self._collapse(destination, held)
                 continue
+            held.rejected |= level.rejected
             for key, mask in level.seen.items():
                 if key not in held.seen:
                     self.key_total += 1
