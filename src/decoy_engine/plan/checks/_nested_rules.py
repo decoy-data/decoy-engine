@@ -17,8 +17,10 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import (
+    KEY_KIND,
     UNSET,
     NestedChild,
+    bound_references,
     effective_provider,
     nested_children,
     reference_ends,
@@ -47,14 +49,17 @@ def check_nested_rules(config: dict[str, Any]) -> None:
     Raises:
         PlanCompileError: the code of the first failing rule, in config order.
     """
-    for where, col, pc in _rules_columns(config):
+    for _table, where, col, pc in _rules_columns(config):
         _check_column(where, pc, column_provider=col.get("provider"))
-    for where, col, pc in _rules_columns(config):
+    _check_single_form_references(config)
+    for _table, where, col, pc in _rules_columns(config):
         _check_references(config, where, col, pc)
 
 
-def _rules_columns(config: Mapping[str, Any]) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
-    """Each nested column that uses `rules`, with its config path, in config order."""
+def _rules_columns(
+    config: Mapping[str, Any],
+) -> list[tuple[str, str, dict[str, Any], dict[str, Any]]]:
+    """Each nested column that uses `rules`: table name, config path, column, provider config."""
     found = []
     tables = config.get("tables")
     for table in tables if isinstance(tables, list) else []:
@@ -66,7 +71,7 @@ def _rules_columns(config: Mapping[str, Any]) -> list[tuple[str, dict[str, Any],
             pc = col.get("provider_config")
             if isinstance(pc, dict) and "rules" in pc:
                 where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
-                found.append((where, col, pc))
+                found.append((str(table.get("name")), where, col, pc))
     return found
 
 
@@ -94,8 +99,8 @@ def _check_column(where: str, pc: dict[str, Any], *, column_provider: Any) -> No
                 raise PlanCompileError(
                     code=reasons.plan.NESTED_RULE_KEY_UNKNOWN,
                     path=f"{at}.{key}",
-                    message="A nested rule may set only `target`, `strategy`, `strategy_config` "
-                    "and `namespace`.",
+                    message="A nested rule may set only `target`, `strategy`, `strategy_config`, "
+                    "`namespace` and `references`.",
                 )
         if "namespace" in (rule if isinstance(rule, dict) else ()) and _blank(child.namespace):
             raise PlanCompileError(
@@ -186,6 +191,25 @@ def _parent_column(config: Mapping[str, Any], child: NestedChild) -> dict[str, A
     return None
 
 
+def _check_single_form_references(config: Mapping[str, Any]) -> None:
+    """`references` belongs to a rule: on the single form it would be ignored, so it is refused."""
+    tables = config.get("tables")
+    for table in tables if isinstance(tables, list) else []:
+        if not isinstance(table, dict):
+            continue
+        for col in table.get("columns") or []:
+            if not isinstance(col, dict) or col.get("strategy") != "nested":
+                continue
+            pc = col.get("provider_config")
+            if isinstance(pc, dict) and "rules" not in pc and "references" in pc:
+                where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_REFERENCE_REQUIRES_RULES,
+                    path=f"{where}.provider_config.references",
+                    message="`references` is set on a rule. Use the `rules` form.",
+                )
+
+
 def _check_references(
     config: Mapping[str, Any], where: str, col: dict[str, Any], pc: dict[str, Any]
 ) -> None:
@@ -195,7 +219,7 @@ def _check_references(
             continue
         at = f"{where}.{child.config_path}"
         refs = child.references[0]
-        if isinstance(refs, Mapping) and "key_kind" in refs:
+        if isinstance(refs, Mapping) and KEY_KIND in refs:
             raise PlanCompileError(
                 code=reasons.plan.NESTED_REFERENCE_KEY_KIND_RESERVED,
                 path=f"{at}.references.key_kind",
@@ -252,7 +276,19 @@ def _key_kind(dtype: str, strategy: Any) -> str | None:
     return "string" if is_string_dtype_label(dtype) else None
 
 
-def bind_reference_key_kinds(config: dict[str, Any], profile: Profile | None) -> dict[str, Any]:
+def _strings_unproven(col: Any, strategy: Any) -> bool:
+    """A `hash` parent labelled `object` whose values were not observed to be all strings.
+
+    `hash` encodes an integer by its value and a string by its text, so an object column of
+    integers would not match a string leaf. The profiler records length stats only for a column
+    whose values are all strings; `tokenize` turns both sides into text, so it needs no proof.
+    """
+    return strategy == "hash" and col.dtype.startswith("object") and col.max_length is None
+
+
+def bind_reference_key_kinds(
+    config: dict[str, Any], profile: Profile, *, trust_dtypes: bool = True
+) -> dict[str, Any]:
     """A copy of `config` with `key_kind` written into each rule's `references`.
 
     The parent's profiled dtype fixes the kind: an integer parent takes JSON integers and a string
@@ -260,37 +296,43 @@ def bind_reference_key_kinds(config: dict[str, Any], profile: Profile | None) ->
     sits in `references`, outside the child's `strategy_config`, so the child's draws do not
     change. A config with no reference is returned as it is.
 
+    Only a rule whose table is in `profile` is compiled here: the chunked oracle compiles the
+    whole config against a one-table profile, and the nested table runs on another lane with its
+    own compile. A rule outside the profile is left unbound; the handler fails it closed if it
+    ever runs without a kind (`nested_reference_key_kind_unbound`).
+
     Raises:
-        PlanCompileError: no profile (`no_profile=True`, so no dtype to trust), the parent is
-            not in the profile, or its dtype is not an integer or a string, or it is a
-            `tokenize` column over integers, which `tokenize` refuses at run time.
+        PlanCompileError: `trust_dtypes` is false (`no_profile=True`, so no dtype to trust), the
+            parent is not in the profile, or its dtype is not an integer or a string, or it is a
+            `tokenize` column over integers, which `tokenize` refuses at run time, or a `hash`
+            object column not observed to hold only strings.
     """
     if not any(
-        child.references for _, _, pc in _rules_columns(config) for child in nested_children(pc)
+        child.references for *_, pc in _rules_columns(config) for child in nested_children(pc)
     ):
         return config
     bound = copy.deepcopy(config)
-    dtypes = {
-        (t.name, c.name): c.dtype for t in (profile.tables if profile else ()) for c in t.columns
-    }
-    for where, _col, pc in _rules_columns(bound):
+    columns = {(t.name, c.name): c for t in profile.tables for c in t.columns}
+    in_scope = {t.name for t in profile.tables}
+    for table, where, _col, pc in _rules_columns(bound):
         for child in nested_children(pc):
             ends = reference_ends(child)
-            if not child.references or ends is None:
+            if not child.references or ends is None or table not in in_scope:
                 continue
             at = f"{where}.{child.config_path}"
-            if profile is None:
+            if not trust_dtypes:
                 raise PlanCompileError(
                     code=reasons.plan.NESTED_REFERENCE_REQUIRES_PROFILE,
                     path=f"{at}.references",
                     message="`references` needs the parent column's profiled type. Compile with a profile.",
                 )
             parent = _parent_column(bound, child)
-            dtype = dtypes.get(ends)
+            parent_col = columns.get(ends)
+            strategy = parent.get("strategy") if parent else None
             kind = (
                 None
-                if dtype is None or parent is None
-                else _key_kind(dtype, parent.get("strategy"))
+                if parent_col is None or parent is None
+                else _key_kind(parent_col.dtype, strategy)
             )
             if kind is None:
                 raise PlanCompileError(
@@ -299,6 +341,14 @@ def bind_reference_key_kinds(config: dict[str, Any], profile: Profile | None) ->
                     message="The referenced column must be an integer or a string key, "
                     "and `tokenize` takes string keys only.",
                 )
+            if parent_col is not None and _strings_unproven(parent_col, strategy):
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_REFERENCE_PARENT_TYPE_UNPROVEN,
+                    path=f"{at}.references",
+                    message="The referenced `hash` column has object type and was not "
+                    "observed to hold only strings, so a string leaf may not match it. "
+                    "Cast the column to a string type, or use `tokenize`.",
+                )
             rule = pc["rules"][child.index]
-            rule["references"] = {**rule["references"], "key_kind": kind}
+            rule["references"] = bound_references(rule["references"], kind)
     return bound

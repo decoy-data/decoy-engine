@@ -8,24 +8,30 @@ from __future__ import annotations
 
 from decoy_engine._nested_json._paths import PathKeyBatch, path_key_batches, singular_path
 from decoy_engine._nested_json._rules import (
+    KEY_KIND,
     UNSET,
     NestedChild,
     PathRelation,
+    bound_references,
     effective_provider,
     nested_children,
     path_relations,
     reference_ends,
+    reference_key_kind,
 )
 
 __all__ = [
+    "KEY_KIND",
     "UNSET",
     "NestedChild",
     "PathKeyBatch",
     "PathRelation",
+    "bound_references",
     "effective_provider",
     "nested_children",
     "path_key_batches",
     "path_relations",
     "reference_ends",
+    "reference_key_kind",
     "singular_path",
 ]

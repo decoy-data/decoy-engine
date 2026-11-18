@@ -9,10 +9,12 @@ __all__ = [
     "NESTED_REFERENCE_KEY_KIND_RESERVED",
     "NESTED_REFERENCE_NAMESPACE_MISMATCH",
     "NESTED_REFERENCE_PARENT_CONDITIONAL",
+    "NESTED_REFERENCE_PARENT_TYPE_UNPROVEN",
     "NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED",
     "NESTED_REFERENCE_PARENT_UNKNOWN",
     "NESTED_REFERENCE_PATH_NOT_SINGULAR",
     "NESTED_REFERENCE_REQUIRES_PROFILE",
+    "NESTED_REFERENCE_REQUIRES_RULES",
     "NESTED_REFERENCE_STRATEGY_MISMATCH",
     "NESTED_REFERENCE_STRATEGY_NOT_JOIN_SAFE",
     "NESTED_RULES_AND_TARGET_BOTH_SET",
@@ -131,5 +133,17 @@ NESTED_REFERENCE_REQUIRES_PROFILE = _d(
     "nested_reference_requires_profile",
     "A nested rule with references has no profiled key kind: compile it with a profile.",
     phases=(Phase.COMPILE,),
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_PARENT_TYPE_UNPROVEN = _d(
+    "nested_reference_parent_type_unproven",
+    "A nested rule references a hash column of object type that was not observed to hold only strings.",
+    phases=(Phase.COMPILE,),
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_REQUIRES_RULES = _d(
+    "nested_reference_requires_rules",
+    "A nested column sets references outside the rules form, where it would be ignored.",
+    phases=_BOTH,
     since=UNRELEASED,
 )

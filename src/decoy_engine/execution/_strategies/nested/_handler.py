@@ -74,10 +74,10 @@ from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._apply import (
     match_path,
     record_reference_mismatch,
-    reference_key_kind,
     reference_leaves_match,
     refuse_corrupting_write,
     refuse_rule_overlap,
+    rule_key_kind,
     run_rule_child,
 )
 from decoy_engine.execution._strategies.nested._leaves import (
@@ -297,7 +297,7 @@ class NestedStrategyHandler:
                 ) from exc
             # Two rules never share a draw; the single form keeps the outer column identity.
             draw = f"{column}.rules[{child.index}]" if child.index is not None else ""
-            rules.append(_Rule(child, target, handler, seed, expr, draw, reference_key_kind(child)))
+            rules.append(_Rule(child, target, handler, seed, expr, draw, rule_key_kind(child)))
         return rules
 
     def run(

@@ -10,14 +10,13 @@ a nested path.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import jsonpath_ng
 
 from decoy_engine import reasons
-from decoy_engine._nested_json import NestedChild
+from decoy_engine._nested_json import NestedChild, reference_key_kind
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -29,10 +28,10 @@ __all__ = [
     "RuleOutput",
     "match_path",
     "record_reference_mismatch",
-    "reference_key_kind",
     "reference_leaves_match",
     "refuse_corrupting_write",
     "refuse_rule_overlap",
+    "rule_key_kind",
     "run_rule_child",
 ]
 
@@ -221,7 +220,7 @@ def _remap_row_errors(
         )
 
 
-def reference_key_kind(child: NestedChild) -> str | None:
+def rule_key_kind(child: NestedChild) -> str | None:
     """The key kind a rule's leaf must have, `None` for a rule without `references`.
 
     `compile_plan` binds the kind from the parent's profiled dtype. A hand-written plan that has
@@ -229,10 +228,9 @@ def reference_key_kind(child: NestedChild) -> str | None:
     """
     if not child.references:
         return None
-    refs = child.references[0]
-    kind = refs.get("key_kind") if isinstance(refs, Mapping) else None
-    if kind in ("integer", "string"):
-        return str(kind)
+    kind = reference_key_kind(child)
+    if kind is not None:
+        return kind
     raise StrategyError(
         code=reasons.runtime.NESTED_REFERENCE_KEY_KIND_UNBOUND,
         strategy="nested",

@@ -438,7 +438,7 @@ def compile_plan(
     relationships = _build_relationships(config, profile, orphan_policy_lookup=orphan_policy_lookup)
     namespaces = _build_namespaces(config)
     ordering = tuple(OrderingNode(table=t, columns=c) for (t, c) in relationship_graph.ordering)
-    bound = bind_reference_key_kinds(config, None if no_profile else profile)
+    bound = bind_reference_key_kinds(config, profile, trust_dtypes=not no_profile)
     seed_envelope, stamp_warnings = _build_seed_envelope(bound, profile)
     generation_plan = build_generation_plan(
         config,

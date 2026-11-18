@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 SINGLE_FORM_PATH: Final = "provider_config"
+# The planner writes the leaf kind into a rule's `references` under this key; no config may set it.
+KEY_KIND: Final = "key_kind"
 UNSET: Final = object()
 
 
@@ -119,6 +121,18 @@ def reference_ends(child: NestedChild) -> tuple[str, str] | None:
     return None
 
 
+def reference_key_kind(child: NestedChild) -> str | None:
+    """The key kind the planner bound into a rule's `references`, `None` when there is none."""
+    refs = child.references[0] if child.references else None
+    kind = refs.get(KEY_KIND) if isinstance(refs, Mapping) else None
+    return kind if kind in ("integer", "string") else None
+
+
+def bound_references(references: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    """A copy of a rule's `references` with the planner's key kind written in."""
+    return {**references, KEY_KIND: kind}
+
+
 def path_relations(config: Mapping[str, Any]) -> tuple[PathRelation, ...]:
     """One relation per rule with a well-formed `references`, in config order.
 
@@ -137,9 +151,14 @@ def path_relations(config: Mapping[str, Any]) -> tuple[PathRelation, ...]:
                 continue
             if not isinstance(pc, Mapping):
                 continue
+            names = (table.get("name"), col.get("name"))
             for child in nested_children(pc):
                 ends = reference_ends(child)
-                if ends is not None and isinstance(child.target, str):
+                if (
+                    ends is not None
+                    and isinstance(child.target, str)
+                    and all(isinstance(n, str) and n for n in names)
+                ):
                     found.append(
                         PathRelation(
                             ends[0],
