@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "SECRET_ACCESS_DENIED",
@@ -12,6 +12,7 @@ __all__ = [
     "SECRET_LEASE_UNSUPPORTED",
     "SECRET_MATERIAL_INVALID",
     "SECRET_PROVIDER_UNAVAILABLE",
+    "SECRET_PROVIDER_UNCONFIGURED",
     "SECRET_PROVIDER_UNKNOWN",
     "SECRET_VERSION_UNAVAILABLE",
 ]
@@ -83,4 +84,14 @@ SECRET_FILE_PERMISSIONS_UNSAFE = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.2.0",
+)
+# F13 row 83: a provider client could not be built safely from the operator's settings (Vault
+# address or TLS toggle, an AWS credential chain). Raised by a factory before any read.
+SECRET_PROVIDER_UNCONFIGURED = _d(
+    "secret_provider_unconfigured",
+    "The secret provider's client settings are missing or unsafe.",
+    phases=(Phase.RESOLVE,),
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
 )

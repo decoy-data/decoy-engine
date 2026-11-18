@@ -119,6 +119,22 @@ class SecretFilePermissionsUnsafe(SecretProviderError):  # noqa: N818 -- reason-
         super().__init__(code=reasons.runtime.SECRET_FILE_PERMISSIONS_UNSAFE, message=self._MESSAGE)
 
 
+class SecretProviderConfigError(SecretProviderError):
+    """A provider client could not be built safely from the operator's settings.
+
+    The message is a fixed, value-free text chosen by the raising factory. ``str`` is exactly that
+    text, without the ``code:`` prefix of the base class, so existing messages keep their bytes.
+    """
+
+    _MESSAGE = "The secret provider's client settings are missing or unsafe."
+
+    def __init__(self, message: str) -> None:
+        super().__init__(code=reasons.runtime.SECRET_PROVIDER_UNCONFIGURED, message=message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 class SecretClosedError(DecoyError):
     """A closed secret buffer or prepared secret was used (an internal invariant breach)."""
 
@@ -139,6 +155,10 @@ _CLOSED: dict[str, Callable[[], MaskSecretError]] = {
         SecretFilePermissionsUnsafe,
     )
 }
+# Message-required, so not built by the no-argument comprehension above.
+_CLOSED[reasons.runtime.SECRET_PROVIDER_UNCONFIGURED] = lambda: SecretProviderConfigError(
+    SecretProviderConfigError._MESSAGE
+)
 _CLOSED[reasons.runtime.KEYED_STRATEGY_REQUIRES_SECRET] = lambda: KeyedStrategyRequiresSecret(
     KEY_REQUIRED_GUIDANCE
 )

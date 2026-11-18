@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from decoy_engine._opaque import OpaqueBox
-from decoy_engine.errors import DecoyError
 from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.secret_providers._buffer import SecretBuffer
 from decoy_engine.secret_providers._errors import (
@@ -38,6 +37,7 @@ from decoy_engine.secret_providers._errors import (
     SecretExpired,
     SecretLeaseUnsupported,
     SecretMaterialInvalid,
+    SecretProviderConfigError,
     SecretProviderUnavailable,
     SecretVersionUnavailable,
 )
@@ -55,7 +55,7 @@ from decoy_engine.secret_providers._types import (
 _SKIP_VERIFY_ENV = "VAULT_SKIP_VERIFY"
 
 
-class VaultClientConfigError(DecoyError):
+class VaultClientConfigError(SecretProviderConfigError):
     """The Vault client could not be built safely from the environment (fixed, value-free text)."""
 
 
