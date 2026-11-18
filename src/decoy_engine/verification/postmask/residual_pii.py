@@ -43,11 +43,14 @@ mask provably did not move anything); constant-source columns
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
 
+from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
+from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
 # Strategies whose output is EXPECTED to look like real PII. A detector
@@ -77,6 +80,11 @@ _DESTROYS_PATTERN: frozenset[str] = frozenset(
         "bucketize",
     }
 )
+
+# The destroying strategies that replace a whole cell. text_redact is left out: it replaces
+# matched spans, and the name-hint-only detectors are not in its span set, so a cell can still
+# hold a name after it ran.
+_WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"})
 
 # Dennis M12 fix (2026-06-01): strategies that explicitly leave the
 # column untouched. A detector hit on these is expected -- the user
@@ -151,67 +159,73 @@ def check_residual_pii(
         masking strategy (or absence of one), then escalated by the
         source comparison when evidence of a leak exists.
     """
-    findings: list[ResidualPIIFinding] = []
+    facts = {
+        table_name: {
+            str(col_name): _frame_column_facts(table_name, df, str(col_name), source_frames)
+            for col_name in df.columns
+        }
+        for table_name, df in output_frames.items()
+    }
+    return residual_pii_findings(facts, config)
 
-    # Build a lookup of configured masking strategy per (table, column).
-    # Per-table strategy = column-level "strategy" key in tables[].columns[].
-    strategy_by_col: dict[tuple[str, str], str] = {}
+
+def _frame_column_facts(
+    table_name: str,
+    df: pd.DataFrame,
+    col_name: str,
+    source_frames: dict[str, pd.DataFrame] | None,
+) -> ColumnFacts:
+    """The facts one column of a resident frame yields, so the frame check and the batch check
+    share `residual_pii_findings` as the only place a finding is built."""
+    series = df[col_name]
+    comparable = identical = distinct = 0
+    if source_frames is not None:
+        identity = _source_identity(source_frames, table_name, col_name, series)
+        if identity is not None:
+            identical, comparable, distinct = identity
+    return ColumnFacts(
+        table=table_name,
+        column=col_name,
+        source_rows=0,
+        output_rows=len(series),
+        comparable_rows=comparable,
+        identical_rows=identical,
+        bytes_identical=False,
+        source_distinct=distinct,
+        output_distinct=0,
+        detectors=tuple(
+            DetectorRate(m.detector_id, m.match_rate, m.confidence)
+            for m in run_all_detectors(series, col_name)
+        ),
+    )
+
+
+def configured_columns(
+    config: Mapping[str, Any],
+) -> dict[tuple[str, str], Mapping[str, Any]]:
+    """The column entry per (table, column) that names a strategy; the model passes read it too.
+
+    Per-table strategy = column-level "strategy" key in tables[].columns[].
+    """
+    entries: dict[tuple[str, str], Mapping[str, Any]] = {}
     for table_cfg in config.get("tables") or []:
         table_name = table_cfg.get("name")
         if not isinstance(table_name, str):
             continue
         for col_cfg in table_cfg.get("columns") or []:
             col_name = col_cfg.get("name")
-            strategy = col_cfg.get("strategy")
-            if isinstance(col_name, str) and isinstance(strategy, str):
-                strategy_by_col[(table_name, col_name)] = strategy
+            if isinstance(col_name, str) and isinstance(col_cfg.get("strategy"), str):
+                entries[(table_name, col_name)] = col_cfg
+    return entries
 
-    for table_name, df in output_frames.items():
-        for col_name in df.columns:
-            series = df[col_name]
-            matches = run_all_detectors(series, col_name)
-            if not matches:
-                continue
-            # The dominant detector match (highest match_rate; first in list
-            # per run_all_detectors's sorted-descending order).
-            top = matches[0]
-            configured = strategy_by_col.get((table_name, col_name))
-            severity, message = _classify(top.detector_id, configured)
 
-            identity = None
-            if source_frames is not None and configured not in _NO_OP_BY_DESIGN:
-                identity = _source_identity(source_frames, table_name, col_name, series)
-            if identity is not None:
-                rate, identical_count, src_distinct = identity
-                override = _escalate(
-                    configured=configured,
-                    identity_rate=rate,
-                    identical_count=identical_count,
-                    src_distinct=src_distinct,
-                    detector_confidence=top.confidence,
-                    detector_id=top.detector_id,
-                )
-                if override is not None and (
-                    _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
-                ):
-                    severity, message = override
-
-            findings.append(
-                ResidualPIIFinding(
-                    table=table_name,
-                    column=col_name,
-                    detector_id=top.detector_id,
-                    match_rate=top.match_rate,
-                    severity=severity,
-                    configured_strategy=configured,
-                    sample_match_count=int(top.match_rate * len(series)),
-                    message=message,
-                    source_identity_rate=identity[0] if identity is not None else None,
-                    source_compared=identity is not None,
-                )
-            )
-
-    return findings
+def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
+    """A regex finding raised from positional output==source evidence; a dismissal never lowers it."""
+    rate = finding.source_identity_rate
+    if finding.source != "regex" or rate is None:
+        return False
+    gated = _is_gated_whole_cell(finding.configured_strategy, finding.detector_id)
+    return _identity_evidence(rate, gated=gated)
 
 
 def _source_identity(
@@ -219,10 +233,10 @@ def _source_identity(
     table_name: str,
     col_name: str,
     out_col: pd.Series,
-) -> tuple[float, int, int] | None:
+) -> tuple[int, int, int] | None:
     """Positional out==src identity over comparable rows, or None.
 
-    Returns ``(identity_rate, identical_count, source_distinct)``. None
+    Returns ``(identical_count, comparable_count, source_distinct)``. None
     when the source lacks the table/column, row counts differ (a
     row-count mismatch is policy_validation's M13 concern, not a leak
     signal), or the comparison itself fails. Must never raise: the
@@ -246,7 +260,7 @@ def _source_identity(
             return None
         identical = int((src[both_present] == out[both_present]).sum())
         src_distinct = int(src.nunique(dropna=True))
-        return (identical / comparable, identical, src_distinct)
+        return (identical, comparable, src_distinct)
     except Exception:
         return None
 
@@ -341,6 +355,54 @@ def _escalate(
     return None
 
 
+def _is_gated_whole_cell(strategy: str | None, detector_id: str) -> bool:
+    """A whole-cell destroying strategy on a hit from a name-hint-gated detector."""
+    return strategy in _WHOLE_CELL_DESTROYS and detector_id in NAME_HINT_GATED_DETECTORS
+
+
+def _identity_evidence(identity_rate: float, *, gated: bool) -> bool:
+    """Whether a source-identity rate is evidence the mask missed rows.
+
+    The one rule for grading and for the dismissal guard. On the gated path a whole-cell
+    strategy never legitimately leaves a cell equal to its source, so any identity counts; on
+    every other path the 5% floor keeps coincidence from escalating.
+    """
+    return identity_rate > 0 if gated else identity_rate >= _LEAK_WARN_RATE
+
+
+def _grade_gated(
+    *, identical_rows: int, comparable_rows: int, detector_id: str, strategy: str
+) -> tuple[Severity, str]:
+    """Grade a column whose detector hits all come from name-hint-gated detectors, under a
+    whole-cell destroying strategy, when the source comparison ran.
+
+    The hit itself proves nothing (the detector's regex is loose by design), so the source
+    comparison decides: a whole-cell strategy never legitimately leaves a non-null cell equal to
+    its source. There is no constant-source or minimum-row exception. Messages carry no rate,
+    count or value.
+    """
+    identity = identical_rows / comparable_rows
+    if not _identity_evidence(identity, gated=True):
+        return (
+            "info",
+            f"column matched {detector_id!r} only through its column name; "
+            f"strategy {strategy!r} replaced the values.",
+        )
+    if identical_rows == comparable_rows or (
+        identical_rows >= _LEAK_FAIL_MIN_ROWS and identity >= _LEAK_FAIL_RATE
+    ):
+        return (
+            "fail",
+            f"column matched {detector_id!r} only through its column name, and the output "
+            f"equals the source under strategy {strategy!r}; the mask did not fire.",
+        )
+    return (
+        "warning",
+        f"column matched {detector_id!r} only through its column name, and some output "
+        f"values still equal their source under strategy {strategy!r}; verify the output.",
+    )
+
+
 def _classify(detector_id: str, configured: str | None) -> tuple[Severity, str]:
     """Classify a detector hit + return (severity, human-readable message).
 
@@ -396,3 +458,88 @@ def _classify(detector_id: str, configured: str | None) -> tuple[Severity, str]:
         "does not have a documented residual-PII expectation. Verify the "
         "output is acceptable.",
     )
+
+
+def residual_pii_findings(
+    output_facts: Mapping[str, Mapping[str, ColumnFacts]],
+    config: Mapping[str, Any],
+    failed_tables: Mapping[str, str] | None = None,
+) -> list[ResidualPIIFinding]:
+    """`check_residual_pii` from column facts: `{table: {column: ColumnFacts}}` over the output,
+    in column order. The decision tables are the ones the frame check uses."""
+    strategy_by_col = {key: entry["strategy"] for key, entry in configured_columns(config).items()}
+    findings: list[ResidualPIIFinding] = [
+        ResidualPIIFinding(
+            table=table,
+            column="",
+            detector_id="",
+            match_rate=0.0,
+            severity="error",
+            message=f"residual_pii check raised {error} (see job log for details)",
+        )
+        for table, error in (failed_tables or {}).items()
+    ]
+    for table_name, columns in output_facts.items():
+        for col_name, fact in columns.items():
+            if not fact.detectors:
+                continue
+            top = fact.detectors[0]
+            configured = strategy_by_col.get((table_name, col_name))
+            severity, message = _classify(top.detector_id, configured)
+            # Identity needs comparable rows; none means no source column or a row-count mismatch.
+            compared = fact.comparable_rows > 0 and configured not in _NO_OP_BY_DESIGN
+            rate = fact.identical_rows / fact.comparable_rows if compared else None
+            if (
+                rate is not None
+                and configured in _WHOLE_CELL_DESTROYS
+                and all(d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors)
+            ):
+                # Every hit is a loose regex held back by a column-name hint, so the source
+                # comparison, not the hit, says whether the mask fired.
+                severity, message = _grade_gated(
+                    identical_rows=fact.identical_rows,
+                    comparable_rows=fact.comparable_rows,
+                    detector_id=top.detector_id,
+                    strategy=str(configured),
+                )
+            elif rate is not None:
+                override = _escalate(
+                    configured=configured,
+                    identity_rate=rate,
+                    identical_count=fact.identical_rows,
+                    # An uncounted source distinct is unknown, not constant: keep it above the
+                    # constant-source cutoff so the valid identity rate still decides. A failed
+                    # output count says nothing about the source.
+                    src_distinct=max(fact.source_distinct, 2)
+                    if fact.source_distinct_failed
+                    else fact.source_distinct,
+                    detector_confidence=top.confidence,
+                    detector_id=top.detector_id,
+                )
+                if override is not None and (
+                    _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
+                ):
+                    severity, message = override
+            elif fact.identity_error and configured not in _NO_OP_BY_DESIGN:
+                # The source comparison could not run, so the escalation this column may need is
+                # unknown. Say so at error severity rather than report a clean "not compared".
+                severity = "error"
+                message = (
+                    f"column matched {top.detector_id!r} but the source comparison raised "
+                    f"{fact.identity_error} (see job log); a leak cannot be ruled out."
+                )
+            findings.append(
+                ResidualPIIFinding(
+                    table=table_name,
+                    column=col_name,
+                    detector_id=top.detector_id,
+                    match_rate=top.match_rate,
+                    severity=severity,
+                    configured_strategy=configured,
+                    sample_match_count=int(top.match_rate * fact.output_rows),
+                    message=message,
+                    source_identity_rate=rate,
+                    source_compared=rate is not None,
+                )
+            )
+    return findings

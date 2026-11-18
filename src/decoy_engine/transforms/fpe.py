@@ -3,7 +3,7 @@
 Replaces each string value with another string of the same length over the
 same character set. Same input + same key produces the same output across
 runs and instances (keyed determinism via the existing derive_key path,
-identical to HashStrategy and DateShiftStrategy).
+identical to the hash and date_shift handlers).
 
 Algorithm (Task 5.2, Option C): NIST SP 800-38G FF1 (Algorithms 5/6), the
 sole surviving NIST format-preserving-encryption method after the Rev.1

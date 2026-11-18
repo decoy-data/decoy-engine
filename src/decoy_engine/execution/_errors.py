@@ -18,18 +18,11 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.errors import ConfigError, DecoyError
+from decoy_engine._execution_error import ExecutionError as ExecutionError
+from decoy_engine._execution_error import lazy_source_changed as lazy_source_changed
+from decoy_engine.errors import ConfigError
 from decoy_engine.reason_adapter import tag_exception
 from decoy_engine.reasons import Phase, ReasonCode
-
-
-class ExecutionError(DecoyError):
-    """Execution-boundary / runner failure. Carries a machine-readable code."""
-
-    def __init__(self, *, code: str, message: str = "") -> None:
-        self.code = code
-        self.message = message
-        super().__init__(f"[{code}] {message}" if message else f"[{code}]")
 
 
 class StrategyError(ExecutionError):
@@ -38,6 +31,19 @@ class StrategyError(ExecutionError):
     def __init__(self, *, code: str, strategy: str, message: str = "") -> None:
         self.strategy = strategy
         super().__init__(code=code, message=f"strategy={strategy!r}: {message}")
+
+
+def vault_requires_resident_output() -> ExecutionError:
+    """B-6 D1 boundary rule B0: a file-vault writer where the engine does not hold every output row.
+
+    With a `sink` the engine commits output inside the run, and a chunked entry yields chunks the
+    caller publishes as they arrive; either way the caller could write the vault only after
+    output it reverses is already public. The text is the registered summary, nothing else.
+    """
+    return ExecutionError(
+        code=reasons.runtime.VAULT_REQUIRES_RESIDENT_OUTPUT,
+        message=reasons.get("runtime", reasons.runtime.VAULT_REQUIRES_RESIDENT_OUTPUT).summary,
+    )
 
 
 class DeclaredCastRouteError(ExecutionError):
@@ -77,6 +83,22 @@ def seq_ineligible(message: str) -> ConfigError:
 def ooc_ineligible(message: str) -> ConfigError:
     """An explicit ``execution_mode="out_of_core"`` for a job that is not eligible for it."""
     return _tagged(ConfigError(message), reasons.route.OUT_OF_CORE_INELIGIBLE)
+
+
+def loader_table_undeclared(table: str) -> ConfigError:
+    """A loader table the config masks but never declares under `sources:`; refused before a read."""
+    summary = reasons.get("config", reasons.config.LOADER_TABLE_UNDECLARED).summary
+    return _tagged(
+        ConfigError(f"table {table!r}: {summary}"), reasons.config.LOADER_TABLE_UNDECLARED
+    )
+
+
+def declared_table_dropped(table: str) -> ConfigError:
+    """A declared, supplied table the compiled plan holds no work for."""
+    summary = reasons.get("config", reasons.config.DECLARED_TABLE_DROPPED).summary
+    return _tagged(
+        ConfigError(f"table {table!r}: {summary}"), reasons.config.DECLARED_TABLE_DROPPED
+    )
 
 
 def _tagged(exc: ConfigError, reason: ReasonCode) -> ConfigError:

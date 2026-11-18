@@ -31,7 +31,9 @@ def _raw(when: Any = "s == 'a'", *, strategy: str = "redact") -> dict[str, Any]:
     return {
         "version": 2,
         "global_settings": {"seed": 7, "post_validation": False},
-        "sources": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
+        "sources": {
+            "t": {"type": "file", "format": "csv", "has_header": True, "path": "/dev/null"}
+        },
         "tables": [{"name": "t", "columns": [column, {"name": "n", "strategy": "passthrough"}]}],
         "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
     }
@@ -154,15 +156,20 @@ def test_a_validated_config_with_when_runs_end_to_end_on_the_chunked_native_rout
 # (as `null`) and shifted it. Source `layout` already existed at the first pin; later fields that
 # are omitted from the dump when unset (CSV params, `reference_date`) did not move this hash. The
 # pipeline determinism hash below is unchanged and byte-identical. Re-pinned again for schema version 2 (the dump now carries `version: 2` and the default `post_scan` block).
+# Re-pinned for CONFIG-EXPLICIT E1: a csv source dump now always carries `has_header`.
+# The canonical SHA was re-pinned once more when the plan-hash config moved to the canonical
+# compact form (DUP-FREEZE E1): same config, new separators. The pipeline hash did not move.
 _PRE_WHEN_PIPELINE_HASH = "116d87e4baee3ae1558ce9066121a5ec809870858736d90b554029d846154a25"
-_PRE_WHEN_CANONICAL_SHA = "77c4914f466168f6f95062bfcc1c2639a39b44331774c91061d704a3e85d9e95"
+_PRE_WHEN_CANONICAL_SHA = "2908cc5b9393ec7e25e33aa6ce3b341e5f105cd723eeefef84e50040755b8124"
 
 
 def _hash_fixture(**column_extra: object) -> dict:
     return {
         "version": 2,
         "global_settings": {"seed": 42},
-        "sources": {"t": {"type": "file", "format": "csv", "path": "/tmp/x.csv"}},
+        "sources": {
+            "t": {"type": "file", "format": "csv", "has_header": True, "path": "/tmp/x.csv"}
+        },
         "targets": {"t": {"type": "file", "format": "csv", "path": "/tmp/y.csv"}},
         "tables": [
             {

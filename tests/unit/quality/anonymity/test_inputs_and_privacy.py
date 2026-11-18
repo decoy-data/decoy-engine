@@ -540,9 +540,9 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
     return ".".join(base + ([node.module] if node.module else []))
 
 
-# The one value-identity rule lives at the anonymize package root; that exact
-# module is allowed, nothing below it.
-_ALLOWED_ENGINE_MODULES = frozenset({"decoy_engine.anonymize"})
+# The one value-identity rule lives in the bottom-tier module _value_family; that
+# exact module is allowed. Nothing in anonymize is: it sits in a higher layer.
+_ALLOWED_ENGINE_MODULES = frozenset({"decoy_engine._value_family"})
 
 
 def test_package_imports_only_data_libraries() -> None:
@@ -578,12 +578,12 @@ def test_package_imports_only_data_libraries() -> None:
                 )
 
 
-def test_only_the_anonymize_root_is_allowed() -> None:
-    assert "decoy_engine.anonymize" in _ALLOWED_ENGINE_MODULES
+def test_only_the_value_family_module_is_allowed() -> None:
+    assert {"decoy_engine._value_family"} == _ALLOWED_ENGINE_MODULES
     for name in (
+        "decoy_engine.anonymize",
         "decoy_engine.anonymize.hierarchies",
         "decoy_engine.anonymize.search",
-        "decoy_engine.anonymize._values",
     ):
         assert name not in _ALLOWED_ENGINE_MODULES
 

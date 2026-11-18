@@ -35,6 +35,7 @@ from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.keyprovider import SecretKeyProvider
 
 SAMPLE_ROWS = 5
+_CSV_IN = {"type": "file", "format": "csv", "has_header": True}
 
 _MATRIX_GEN_PATH = Path(__file__).resolve().parent / "gen_capability_matrix.py"
 
@@ -136,20 +137,19 @@ def _run_hero(
     config = {
         "version": 2,
         "global_settings": {"seed": 1234567, "post_validation": False},
-        # sources/targets: PipelineConfig requires both; profile_source reads
-        # the sources block to build the column profile. We write temp CSVs so
-        # the profiler gets real column types and FK structure; the engine then
-        # ignores these paths and uses the caller-supplied Arrow tables instead.
+        # PipelineConfig requires sources and targets; profile_source reads the temp CSVs for
+        # real column types and FK structure, then the engine ignores these paths and uses
+        # the caller-supplied Arrow tables instead.
         "sources": {
-            "members": {"type": "file", "format": "csv", "path": str(tmp / "members.csv")},
-            "claims": {"type": "file", "format": "csv", "path": str(tmp / "claims.csv")},
-            "providers": {"type": "file", "format": "csv", "path": str(tmp / "providers.csv")},
+            "members": {**_CSV_IN, "path": str(tmp / "members.csv")},
+            "claims": {**_CSV_IN, "path": str(tmp / "claims.csv")},
+            "providers": {**_CSV_IN, "path": str(tmp / "providers.csv")},
         },
         "targets": {
-            "members": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "claims": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "providers": {"type": "file", "format": "csv", "path": "/dev/null"},
-            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null"},
+            "members": {"type": "file", "format": "csv", "path": "/dev/null.members"},
+            "claims": {"type": "file", "format": "csv", "path": "/dev/null.claims"},
+            "providers": {"type": "file", "format": "csv", "path": "/dev/null.providers"},
+            "audit_log": {"type": "file", "format": "csv", "path": "/dev/null.audit_log"},
         },
         "namespaces": {"member_identity": {"declared_by": ["members.member_id"]}},
         "tables": [
@@ -643,7 +643,7 @@ def _run_capability(proof: CapabilityProof) -> dict:
         cfg = {
             **proof.config,
             "sources": {
-                "t": {"type": "file", "format": "csv", "path": str(csv_path)},
+                "t": {**_CSV_IN, "path": str(csv_path)},
             },
             "targets": {
                 "t": {"type": "file", "format": "csv", "path": "/dev/null"},
@@ -697,7 +697,7 @@ def _joint_mask_proof() -> dict:
             "key_by": "patient_id",
         }
     )
-    result = apply_joint_mask(df, cfg, mode="mask", job_seed=job_seed)
+    result = apply_joint_mask(df, cfg, mode="mask", job_seed=job_seed, table="proof")
 
     tbl = load_table("us_zip5_city_state")
     valid_tuples = {
@@ -768,7 +768,7 @@ def _derived_proof() -> dict:
         cfg = {
             "version": 2,
             "global_settings": {"seed": 1234567, "post_validation": False},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(csv_path)}},
+            "sources": {"t": {**_CSV_IN, "path": str(csv_path)}},
             "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
             "tables": [
                 {
@@ -845,7 +845,7 @@ def _derived_aggregate_proof() -> dict:
         cfg = {
             "version": 2,
             "global_settings": {"seed": 1234567, "post_validation": False},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(csv_path)}},
+            "sources": {"t": {**_CSV_IN, "path": str(csv_path)}},
             "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
             "tables": [
                 {
@@ -922,7 +922,7 @@ def _grouped_series_proof() -> dict:
         cfg = {
             "version": 2,
             "global_settings": {"seed": 42, "post_validation": False},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(csv_path)}},
+            "sources": {"t": {**_CSV_IN, "path": str(csv_path)}},
             "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
             "tables": [
                 {
@@ -1007,7 +1007,7 @@ def _windowed_date_proof() -> dict:
         cfg = {
             "version": 2,
             "global_settings": {"seed": 99, "post_validation": False},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(csv_path)}},
+            "sources": {"t": {**_CSV_IN, "path": str(csv_path)}},
             "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
             "tables": [
                 {
@@ -1091,7 +1091,7 @@ def _group_key_proof() -> dict:
         cfg = {
             "version": 2,
             "global_settings": {"seed": 77, "post_validation": False},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(csv_path)}},
+            "sources": {"t": {**_CSV_IN, "path": str(csv_path)}},
             "targets": {"t": {"type": "file", "format": "csv", "path": "/dev/null"}},
             "tables": [
                 {

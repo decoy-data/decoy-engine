@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine._reference_date import PinnedModeError
 
 PINNED_PLAN_SCHEMA = "pinned-plan/v1"
@@ -64,9 +65,14 @@ class PinnedPlan:
     runtime_identity: tuple[tuple[str, str], ...]
     tables: tuple[PinnedTable, ...]
     statistical: tuple[PinnedStatistical, ...]
+    # ``(table, column, "int64" | "float64")`` for each column the whole-table route would keep
+    # numeric, decided once at compile time from the full config (relationships included). Empty
+    # means "no numeric columns", and also what a plan written before this field loads as; an
+    # empty value is left out of ``to_dict`` and the fingerprint so those plans keep their bytes.
+    numeric_types: tuple[tuple[str, str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "schema_version": self.schema_version,
             "reference_date": self.reference_date,
             "runtime_identity": dict(self.runtime_identity),
@@ -89,6 +95,9 @@ class PinnedPlan:
                 for s in self.statistical
             ],
         }
+        if self.numeric_types:
+            out["numeric_types"] = [list(n) for n in self.numeric_types]
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PinnedPlan:
@@ -120,12 +129,35 @@ class PinnedPlan:
                     )
                     for s in data["statistical"]
                 ),
+                numeric_types=_numeric_types(data),
             )
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise PinnedModeError(
                 code=reasons.plan.PINNED_PLAN_MALFORMED,
                 message=f"serialized pinned plan is malformed ({type(exc).__name__})",
             ) from None
+
+
+NUMERIC_TYPE_NAMES = frozenset({"int64", "float64"})
+
+
+def _numeric_types(data: dict[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    """Decode the optional field strictly: absent means none; present must be a list of entries."""
+    if "numeric_types" not in data:
+        return ()
+    raw = data["numeric_types"]
+    if not isinstance(raw, list):
+        raise TypeError("numeric_types is not a list")
+    return tuple(_numeric_entry(n) for n in raw)
+
+
+def _numeric_entry(n: Any) -> tuple[str, str, str]:
+    if not isinstance(n, (list, tuple)) or len(n) != 3 or not all(isinstance(v, str) for v in n):
+        raise TypeError("numeric_types entry is not three strings")
+    table, column, dtype = n
+    if dtype not in NUMERIC_TYPE_NAMES:
+        raise ValueError("unknown numeric type")
+    return (table, column, dtype)
 
 
 def runtime_identity() -> tuple[tuple[str, str], ...]:
@@ -138,13 +170,13 @@ def runtime_identity() -> tuple[tuple[str, str], ...]:
     import pandas
     import pyarrow
 
-    import decoy_engine
     from decoy_engine.determinism import SEED_PROTOCOL_VERSION
+    from decoy_engine.release import __version__ as engine_version
 
     return tuple(
         sorted(
             {
-                "engine": str(decoy_engine.__version__),
+                "engine": str(engine_version),
                 "numpy": str(numpy.__version__),
                 "pandas": str(pandas.__version__),
                 "pyarrow": str(pyarrow.__version__),
@@ -166,7 +198,7 @@ def validate_seed(seed: Any) -> int:
 
 
 def _canonical(payload: Any) -> bytes:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return canonical_json_bytes(payload)
 
 
 def fingerprint(plan: PinnedPlan) -> str:
@@ -201,4 +233,6 @@ def fingerprint(plan: PinnedPlan) -> str:
             for s in plan.statistical
         ],
     }
+    if plan.numeric_types:
+        payload["numeric_types"] = [list(n) for n in plan.numeric_types]
     return hashlib.sha256(_canonical(payload)).hexdigest()

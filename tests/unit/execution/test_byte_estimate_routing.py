@@ -47,6 +47,7 @@ from decoy_engine.execution._pipeline_routing import decide_execution_route
 from decoy_engine.execution._pipeline_routing_signals import byte_estimate_full_frame_fits
 from decoy_engine.profile._types import ColumnProfile, TableProfile
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
+from tests._declared_schema import declare_rest
 
 _MB = 1024 * 1024
 _GB = 1024 * _MB
@@ -586,13 +587,9 @@ class TestFlagOnByteEstimateRouting:
 
 
 def _faker_col(name: str, namespace: str) -> dict[str, Any]:
-    return {
-        "name": name,
-        "strategy": "faker",
-        "provider": "person_email",
-        "deterministic": True,
-        "namespace": namespace,
-    }
+    # A key-preserving strategy: faker draws from a pool, so 200k keys collide and the post-scan
+    # gate rightly withholds the run.
+    return {"name": name, "strategy": "hash", "namespace": namespace}
 
 
 def _write_source(tmp_path: Path, table: pa.Table, name: str) -> str:
@@ -616,44 +613,46 @@ def _fk_pure_mask_config(tmp_path: Path, n: int = 20) -> dict[str, Any]:
     )
     parent_src = _write_source(tmp_path, parent, "parent")
     child_src = _write_source(tmp_path, child, "child")
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "b1b-byte-estimate-routing", "seed": 7},
-        "sources": {
-            "parent": {"type": "file", "path": parent_src, "format": "parquet"},
-            "child": {"type": "file", "path": child_src, "format": "parquet"},
-        },
-        "targets": {
-            "parent": {
-                "type": "file",
-                "path": str(tmp_path / "parent.out.parquet"),
-                "format": "parquet",
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "b1b-byte-estimate-routing", "seed": 7},
+            "sources": {
+                "parent": {"type": "file", "path": parent_src, "format": "parquet"},
+                "child": {"type": "file", "path": child_src, "format": "parquet"},
             },
-            "child": {
-                "type": "file",
-                "path": str(tmp_path / "child.out.parquet"),
-                "format": "parquet",
+            "targets": {
+                "parent": {
+                    "type": "file",
+                    "path": str(tmp_path / "parent.out.parquet"),
+                    "format": "parquet",
+                },
+                "child": {
+                    "type": "file",
+                    "path": str(tmp_path / "child.out.parquet"),
+                    "format": "parquet",
+                },
             },
-        },
-        "tables": [
-            {
-                "name": "parent",
-                "columns": [
-                    _faker_col("id", "ns"),
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
-                ],
-            },
-            {"name": "child", "columns": [_faker_col("parent_id", "ns")]},
-        ],
-        "relationships": [
-            {
-                "parent": {"table": "parent", "columns": ["id"]},
-                "children": [{"table": "child", "columns": ["parent_id"]}],
-                "orphan_policy": "preserve",
-                "namespace": "ns",
-            }
-        ],
-    }
+            "tables": [
+                {
+                    "name": "parent",
+                    "columns": [
+                        _faker_col("id", "ns"),
+                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    ],
+                },
+                {"name": "child", "columns": [_faker_col("parent_id", "ns")]},
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "child", "columns": ["parent_id"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "ns",
+                }
+            ],
+        }
+    )
 
 
 def _fk_sources(config: dict[str, Any]) -> dict[str, pa.Table]:
@@ -845,6 +844,7 @@ class TestEndToEndWiring:
                 ],
             }
             sources = {n: pq.read_table(s["path"]) for n, s in config["sources"].items()}
+            declare_rest(config, sources)
             try:
                 result = run_pipeline(
                     config,
@@ -852,6 +852,10 @@ class TestEndToEndWiring:
                     engine_version="0.1.0",
                     out_of_core_budget_bytes=budget,
                     fidelity_report=True,
+                    # The static byte estimate is what this test pins. With the probe on,
+                    # the wide leg spawns a capped child that cannot succeed here and has
+                    # been seen to stall until the probe's 600 s timeout.
+                    use_probe_routing=False,
                 )
             except ExecutionError as exc:
                 return exc.code

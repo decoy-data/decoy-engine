@@ -6,10 +6,10 @@ import logging
 import warnings
 
 import pandas as pd
+import pytest
 
 from decoy_engine.execution._transforms import FilterOp, apply_transforms
 from decoy_engine.execution._when_gate import _eval_predicate
-from decoy_engine.transforms.date_shift import DateShiftStrategy
 from tests.unit._dps_helpers import compile_and_generate
 
 _SECRET = "bob@example.com"
@@ -58,19 +58,7 @@ def test_transform_fallback_log_names_the_op_not_the_expression(caplog) -> None:
         assert "filter" in record.getMessage()
 
 
-def test_date_shift_unparseable_values_are_counted_not_logged(caplog) -> None:
-    column = pd.Series(["2024-01-01", _SECRET, "2024-02-02", _SECRET])
-    with caplog.at_level(logging.DEBUG):
-        out = DateShiftStrategy(seed=7).apply(
-            column, {"column": "dob", "date_format": "%Y-%m-%d", "min_days": 1, "max_days": 5}
-        )
-    assert out.iloc[1] == _SECRET and out.iloc[3] == _SECRET  # unparseable values unchanged
-    assert out.iloc[0] != "2024-01-01" and out.iloc[2] != "2024-02-02"
-    assert _SECRET not in caplog.text
-    assert "2 value(s) in column 'dob' could not be parsed" in caplog.text
-
-
-def test_formula_errors_are_one_line_per_column_without_cell_values(caplog) -> None:
+def test_formula_errors_fail_the_run_without_cell_values(caplog) -> None:
     cfg = {
         "version": 2,
         "global_settings": {"seed": 42},
@@ -92,15 +80,30 @@ def test_formula_errors_are_one_line_per_column_without_cell_values(caplog) -> N
             }
         ],
     }
-    with caplog.at_level(logging.DEBUG):
-        out = compile_and_generate(cfg)["t"]
-    names = out.column("first_name").to_pylist()
-    assert out.column("bad").to_pylist() == [None] * 5
-    failures = [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
-    assert len(failures) == 1
-    assert "ValueError" in failures[0].getMessage()
+    from decoy_engine.generation.pool import GenerationError
+
+    # The failing run yields no table, so draw the same names from the config without "bad".
+    names_cfg = {
+        **cfg,
+        "tables": [
+            {**cfg["tables"][0], "generate_columns": cfg["tables"][0]["generate_columns"][:1]}
+        ],
+    }
+    names = compile_and_generate(names_cfg)["t"].column("first_name").to_pylist()
+    assert names and all(names)
+    with caplog.at_level(logging.DEBUG), pytest.raises(GenerationError) as info:
+        compile_and_generate(cfg)
+    assert info.value.code == "generate_formula_evaluation_failed"
+    assert info.value.__cause__ is None and info.value.__context__ is None
     for name in names:
-        assert repr(name) not in caplog.text
+        assert name not in caplog.text
+        assert name not in str(info.value)
+    # Fixed text only: a faker name in the message would break this equality.
+    assert info.value.message == (
+        "formula column evaluation failed at table 't', column 'bad', row 0: "
+        "an operand value is invalid"
+    )
+    assert "failed to evaluate" not in caplog.text
 
 
 def _formula_cfg(formula: str) -> dict:
@@ -118,20 +121,16 @@ def _formula_cfg(formula: str) -> dict:
     }
 
 
-def test_formula_undefined_name_is_reported_once(caplog) -> None:
-    with caplog.at_level(logging.WARNING):
-        compile_and_generate(_formula_cfg("nope + 1"))
-    failures = [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
-    assert len(failures) == 1
-    assert "undefined name(s) ['nope']" in failures[0].getMessage()
+@pytest.mark.usefixtures("lenient_generate_checks")
+@pytest.mark.parametrize("formula", ["nope + 1", "nofn(1)"])
+def test_formula_undefined_name_fails_the_run_with_the_default_reason(formula, caplog) -> None:
+    from decoy_engine.generation.pool import GenerationError
 
-
-def test_formula_undefined_function_is_reported(caplog) -> None:
-    with caplog.at_level(logging.WARNING):
-        compile_and_generate(_formula_cfg("nofn(1)"))
-    failures = [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
-    assert len(failures) == 1
-    assert "undefined name(s) ['nofn']" in failures[0].getMessage()
+    with caplog.at_level(logging.WARNING), pytest.raises(GenerationError) as info:
+        compile_and_generate(_formula_cfg(formula))
+    assert info.value.code == "generate_formula_evaluation_failed"
+    assert info.value.message.endswith("row 0: the expression could not be evaluated")
+    assert not [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
 
 
 def test_run_with_when_gate_passes_the_target_column(monkeypatch) -> None:
@@ -153,7 +152,10 @@ def test_run_with_when_gate_passes_the_target_column(monkeypatch) -> None:
     assert seen["column"] == "email"
 
 
-def test_referenced_formula_undefined_name_is_reported(caplog) -> None:
+@pytest.mark.usefixtures("lenient_generate_checks")
+def test_referenced_formula_undefined_name_fails_the_run(caplog) -> None:
+    from decoy_engine.generation.pool import GenerationError
+
     cfg = _formula_cfg("first_name + nope")
     cfg["tables"][0]["generate_columns"] = [
         {"name": "first_name", "type": "faker", "faker_type": "first_name"},
@@ -164,11 +166,10 @@ def test_referenced_formula_undefined_name_is_reported(caplog) -> None:
             "formula": "first_name + nope",
         },
     ]
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING), pytest.raises(GenerationError) as info:
         compile_and_generate(cfg)
-    failures = [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
-    assert len(failures) == 1
-    assert "undefined name(s) ['nope']" in failures[0].getMessage()
+    assert info.value.code == "generate_formula_evaluation_failed"
+    assert not [r for r in caplog.records if "failed to evaluate" in r.getMessage()]
 
 
 def test_disguise_loader_logs_locations_not_input_values(tmp_path, caplog) -> None:
@@ -179,19 +180,6 @@ def test_disguise_loader_logs_locations_not_input_values(tmp_path, caplog) -> No
     with caplog.at_level(logging.ERROR, logger="decoy_engine.disguises.loader"):
         load_disguises(tmp_path)
     assert "schema validation failed" in caplog.text
-    assert _SECRET not in caplog.text
-
-
-def test_date_shift_key_failure_logs_type_not_message(caplog) -> None:
-    import pytest
-
-    def bad_key(_label: str) -> bytes:
-        raise RuntimeError(_SECRET)
-
-    strategy = DateShiftStrategy(seed=7, derive_key=bad_key)
-    with caplog.at_level(logging.DEBUG), pytest.raises(Exception):
-        strategy.apply(pd.Series(["2024-01-01"]), {"column": "dob", "date_format": "%Y-%m-%d"})
-    assert "RuntimeError" in caplog.text
     assert _SECRET not in caplog.text
 
 

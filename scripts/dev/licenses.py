@@ -44,7 +44,7 @@ FIRST_PARTY = {"decoy-engine", "decoy-engine-native"}
 FORBIDDEN = re.compile(r"AGPL|SSPL|BUSL|\bBSL\b|FSL|Commons-Clause|Elastic|(?<!L)GPL", re.I)
 SEPARATOR = "== Complete list =="
 RUNTIME = "runtime"
-LICENSOR = "[LICENSOR: registered entity name not yet decided; OWNER ITEM]"
+LICENSOR = "Decoy Labs LLC"
 
 
 class UnclassifiedLicenseError(Exception):
@@ -304,7 +304,10 @@ def render_notice(entries: list[Entry], policy: dict) -> str:
         "Decoy Engine",
         f"Copyright 2026 {LICENSOR}",
         "",
-        f"This product includes software developed by {LICENSOR}.",
+        f"This product includes software developed by {LICENSOR.rstrip('.')}.",
+        "",
+        "Licensed under the Functional Source License, Version 1.1, Apache 2.0 Future License",
+        "(FSL-1.1-ALv2). See LICENSE.",
         "",
         "THIRD-PARTY NOTICES",
         "",

@@ -8,12 +8,14 @@ version = "0.1.0"
 description = "Compiled Rust companion for decoy-engine's native masking hot path (optional accelerator; the core engine installs and runs without it)."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-license = "Apache-2.0"
-authors = [{ name = "louiskeep" }]
+license = "FSL-1.1-ALv2"
+# A copy of the repo-root LICENSE: PEP 639 paths cannot leave this directory.
+license-files = ["LICENSE"]
+authors = [{ name = "Decoy", email = "decoy@trydecoy.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: Other/Proprietary License",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
@@ -26,8 +28,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/louiskeep/decoy-engine"
-Repository = "https://github.com/louiskeep/decoy-engine"
+Homepage = "https://github.com/decoy-data/decoy-engine"
+Repository = "https://github.com/decoy-data/decoy-engine"
 
 [tool.maturin]
 # Dotted module-name places the compiled extension at

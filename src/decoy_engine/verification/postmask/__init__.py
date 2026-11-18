@@ -17,8 +17,8 @@ Three net-new check categories ship here:
   the source frames, and output==source identity escalates to
   'fail' -- a silently-failed mask cannot hide behind a PII-like-
   producer strategy.
-- ``fk_preservation``: walks the relationships graph against the
-  masked output; counts orphan FKs, classifies severity.
+- ``fk_preservation``: one finding per declared edge, derived from the
+  declared keys' facts (orphans the run introduced fail).
 - ``policy_validation``: reads the compiled plan; verifies every
   configured mask actually changed the output column vs. the source
   column (catches no-op masks).
@@ -34,13 +34,38 @@ relationships failures are captured as findings with severity
 ``error``; they do NOT fail the mask job. This matches the Quality
 hook precedent.
 
-Schema version: ``post-scan-integrity/v2``. Bump when the report dict
-shape changes in a non-backward-compatible way.
+Schema version: ``post-scan-integrity/v3`` (v3 allows ``match_rate: null`` on a
+classifier finding). Bump when the report dict shape changes in a
+non-backward-compatible way. The verdict reader still accepts v2.
 """
 
 from __future__ import annotations
 
-from decoy_engine.verification.postmask.runner import run_post_mask
+from decoy_engine.verification.postmask._blocked import (
+    PostScanBlockedError,
+    PostScanVerdict,
+    blocked_error,
+    post_scan_verdict,
+    raise_if_ner_blocked,
+    severity_counts,
+)
+from decoy_engine.verification.postmask._keys import (
+    KeyCounts,
+    KeyResult,
+    check_keys,
+    key_columns,
+    keys_report,
+)
+from decoy_engine.verification.postmask._stream_input import (
+    TableBatches,
+    from_lazy,
+    from_staged,
+    from_table,
+    key_batches,
+    missing_columns,
+    with_cast,
+)
+from decoy_engine.verification.postmask.runner import run_post_mask, run_post_mask_tables
 from decoy_engine.verification.postmask.types import (
     SCHEMA_VERSION,
     FKPreservationFinding,
@@ -53,9 +78,28 @@ from decoy_engine.verification.postmask.types import (
 __all__ = [
     "SCHEMA_VERSION",
     "FKPreservationFinding",
+    "KeyCounts",
+    "KeyResult",
     "PolicyValidationFinding",
     "PostMaskReport",
+    "PostScanBlockedError",
+    "PostScanVerdict",
     "ResidualPIIFinding",
     "Severity",
+    "TableBatches",
+    "blocked_error",
+    "check_keys",
+    "from_lazy",
+    "from_staged",
+    "from_table",
+    "key_batches",
+    "key_columns",
+    "keys_report",
+    "missing_columns",
+    "post_scan_verdict",
+    "raise_if_ner_blocked",
     "run_post_mask",
+    "run_post_mask_tables",
+    "severity_counts",
+    "with_cast",
 ]

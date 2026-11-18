@@ -24,7 +24,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
@@ -35,7 +35,9 @@ if TYPE_CHECKING:
     from decoy_engine.generation.pool._cache import PoolCache
     from decoy_engine.keyprovider import KeyProvider
     from decoy_engine.plan._types import ColumnSeed, Plan
+    from decoy_engine.plan.checks import StrategyRequirement
     from decoy_engine.providers_v2 import ProviderRegistry
+    from decoy_engine.publication import CommitReceipt
     from decoy_engine.relationships import NamespaceRegistry, RelationshipGraph
 
 
@@ -73,6 +75,10 @@ class ExecutionResult:
     # artifact. None when no row was quarantined. Hidden from repr and never serialized into
     # evidence, because possessing it is the read right.
     quarantine_access: Any = field(default=None, repr=False)
+    sample_source_rows: dict[str, pa.Table] | None = field(default=None, repr=False, compare=False)
+    # F22: the reference sink's commit receipt (outcome, digests, counts; no path or name).
+    # None when the run published through no `ParquetTransactionalSink`.
+    publication_receipt: CommitReceipt | None = None
 
     @property
     def output(self) -> pa.Table:
@@ -97,7 +103,17 @@ class TokenVaultWriter(Protocol):
     vault itself (library code does not know its callers). Distinct from
     ``decoy_engine.vault.VaultWriter``, which is the file-based one-way
     re-identification map for ``vault: true`` columns.
+
+    ``derivation_scope`` (B-6 D2) is an opaque, non-secret, vault-unique byte
+    string of 16 to 64 bytes that the vault's owner mints once at vault creation
+    and stores with the vault. The token key is derived under it, so two vaults
+    never mint the same token for one plaintext. A writer without one (a vault
+    from before vault-scoped derivation) is refused with
+    ``token_vault_derivation_unsupported``; a malformed one with
+    ``tokenize_vault_scope_required``. Required pre-GA, with no fallback.
     """
+
+    derivation_scope: bytes
 
     def lookup_existing(self, namespace: str, plaintext: str) -> str | None:
         """The token already stored for ``(namespace, plaintext)``, or None.
@@ -358,6 +374,8 @@ class StrategyInfo:
     join_safe: bool
     options: tuple[StrategyOption, ...]  # allowed V1 wizard options; empty is valid
     offer_in_wizard: bool  # listed at the wizard's `edit` prompt
+    # Settings the plan check refuses a column for omitting; the one mapping lives in plan/checks.
+    requirements: tuple[StrategyRequirement, ...]
 
     @property
     def required_options(self) -> tuple[str, ...]:
@@ -468,3 +486,38 @@ def pandas_column_to_kernel_input(column: pd.Series) -> pa.Array | list[Any]:
     except pa.ArrowException:
         na_mask = column.isna().to_numpy()
         return [None if is_na else value for is_na, value in zip(na_mask, column, strict=True)]
+
+
+def column_draw_identity(table: str, column: str) -> str:
+    """`<len>:<table>/<len>:<column>`, the (table, column) identity a table-keyed draw binds.
+
+    Names are unrestricted strings, so a plain `table/column` join would let table `a/b` +
+    column `c` collide with table `a` + column `b/c`; the length prefixes rule that out."""
+    return f"{len(table)}:{table}/{len(column)}:{column}"
+
+
+def draw_column(ctx: Any, column: str) -> str:
+    """The column a draw is keyed on: the outer column when running as a nested child.
+
+    `getattr` because a handler may be given a minimal context that predates the field."""
+    return str(getattr(ctx, "nested_outer_column", "") or column)
+
+
+def context_draw_identity(ctx: Any, column: str, *, strategy: str) -> str:
+    """`column_draw_identity` of the context's table and `draw_column`, failing closed.
+
+    An unstamped table would key every same-named column of every table on one draw, so an
+    empty `current_table` raises instead. The code predates the second caller and keeps its
+    Faker-era name; `strategy` on the error says which handler hit it."""
+    table = getattr(ctx, "current_table", "")
+    if not table:
+        raise StrategyError(
+            code=reasons.runtime.FAKER_POSITIONAL_TABLE_UNKNOWN,
+            strategy=strategy,
+            message=(
+                f"column {column!r}: {strategy} keys its draw on the table and column, but the "
+                "strategy context carries no current table. Every dispatch path stamps it; a "
+                "caller that does not must set it."
+            ),
+        )
+    return column_draw_identity(table, draw_column(ctx, column))

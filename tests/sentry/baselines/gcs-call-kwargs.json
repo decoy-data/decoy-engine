@@ -8,9 +8,6 @@
     "decoy_engine/_opaque.py::validate_after_init.init::open::1": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
-    "decoy_engine/config/_pipeline.py::PipelineConfig._subset_stage_constraints::update::0": {
-      "reason": "set.update on a local set of names"
-    },
     "decoy_engine/connectors/sftp.py::SFTPFileSink.write::open::0": {
       "reason": "paramiko SFTPClient.open, not a GCS Blob"
     },
@@ -128,8 +125,9 @@
     "decoy_engine/execution/_strategies/_fpe.py::FpeStrategyHandler.run.encrypt_one::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
-    "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0": {
-      "reason": "jsonpath_ng JSONPath.update on a parsed document"
+    "decoy_engine/execution/_strategies/nested/_handler.py::NestedStrategyHandler.run::update::0": {
+      "reason": "jsonpath_ng JSONPath.update on a parsed document",
+      "moved_from": "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0"
     },
     "decoy_engine/execution/_transactional_sink.py::ParquetTransactionalSink._cleanup_staging::exists::0": {
       "reason": "pathlib Path.exists on a local path"
@@ -185,9 +183,6 @@
     "decoy_engine/execution/out_of_core/_runner.py::run_fk_out_of_core::open::1": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
-    "decoy_engine/execution/out_of_core/_scratch.py::ScratchAccess.__init__::open::0": {
-      "reason": "os.open on a local path, not a GCS Blob"
-    },
     "decoy_engine/execution/out_of_core/_scratch.py::open_private::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
@@ -234,9 +229,6 @@
       "reason": "os.open on a local path, not a GCS Blob"
     },
     "decoy_engine/fileaccess/_local.py::LocalOutputTxn.create_file::open::1": {
-      "reason": "os.open on a local path, not a GCS Blob"
-    },
-    "decoy_engine/fileaccess/_local.py::LocalOutputTxn.create_file::open::2": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
     "decoy_engine/fileaccess/_local.py::_LocalStageDir.create_file::open::0": {
@@ -382,12 +374,6 @@
     },
     "decoy_engine/transforms/_ff1.py::_prf::update::0": {
       "reason": "cryptography AES CipherContext.update"
-    },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
-    },
-    "decoy_engine/transforms/date_shift.py::DateShiftStrategy.apply::open::1": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
     "decoy_engine/transforms/joint_mask.py::_pick_rows_mask::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
