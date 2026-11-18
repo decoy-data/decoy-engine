@@ -20,6 +20,9 @@ ConnectorErrorKind = Literal[
     "transient",
     "credentials",
     "rejected",
+    "source_changed",
+    "digest_mismatch",
+    "host_key_rejected",
     "unexpected",
 ]
 

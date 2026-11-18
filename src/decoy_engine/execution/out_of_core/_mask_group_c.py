@@ -93,7 +93,6 @@ from decoy_engine.execution._strategies._ner_config import (
 )
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
-from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
@@ -120,34 +119,6 @@ if TYPE_CHECKING:
 # `_compat.py`; code_set and bucket_perturb are admitted only for the config
 # shapes the kernel reproduces byte-for-byte (see module docstring + `_compat`).
 GROUP_C_STRATEGIES = frozenset({"text_mask", "code_set", "bucket_perturb"})
-
-
-def text_mask_sub_floor_warning(
-    column: str, policy: str | None, by_detector: dict[str, int]
-) -> QualityWarning:
-    """The aggregate `text_mask_sub_floor_span_handled` QualityWarning
-    (round-2 MEDIUM-1), shared so the out-of-core runners
-    (`_runner.run_fk_out_of_core`, `_stream_driver.stream_table`) emit the
-    IDENTICAL shape the full-frame handler
-    (`_strategies/_text_mask.TextMaskHandler.run`) does, from the SAME
-    accumulated `sub_floor_notices` dict `_text_mask_array` threads through
-    `mask_cell` for every batch of a table."""
-    return QualityWarning(
-        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-        provider="text_mask",
-        column=column,
-        detail={
-            "policy": policy,
-            "by_detector": dict(by_detector),
-            "total": sum(by_detector.values()),
-            "note": (
-                "these spans' domain was below the FF1 minimum admissible "
-                "domain, or failed checksum validation, and could not be "
-                "FF1-encrypted; they were handled under the configured "
-                "sub_floor_span policy instead (non-reversible)."
-            ),
-        },
-    )
 
 
 def group_c_array(

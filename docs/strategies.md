@@ -182,7 +182,7 @@ closed with `StrategyError(code=fpe_unencryptable_value)`, which wraps the
 internal `FpeUnencryptableError`, rather than emitting the value unmasked or
 partially masked. The engine no longer falls back to a non-invertible
 covering hash for such values (that fallback was removed in DE-01); see the
-[DE-01 FPE remediation design brief](https://github.com/louiskeep/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md)
+[DE-01 FPE remediation design brief](https://github.com/decoy-data/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md)
 (excluded from the built docs site; see `docs/conf.py`).
 
 Use it when a downstream system validates the format of an identifier (credit
@@ -649,8 +649,9 @@ Cascade decisions are recorded in a frozen `CascadeEvidence` dataclass
 (a `decisions` tuple, one label per input row). When at least one row was
 generalized past the top configured cascade level, the handler surfaces a
 `QualityWarning` with code `geo_generalize_cascade` in
-`ExecutionResult.warnings`. The warning's `cascade_decisions` map includes
-only the rows that cascaded below the top level.
+`ExecutionResult.warnings`. The warning's `rows_generalized` counts the rows that cascaded below
+the top level, and one `rows_<decision>` key per decision holds its count (for example
+`rows_suppressed: 2`, `rows_zip3: 5`). Neither holds a row position.
 
 Config validation runs at execution time, pre-mutation, fail-closed. Raises
 `PlanCompileError` on unsupported `type`, empty `cascade`, or missing

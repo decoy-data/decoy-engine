@@ -86,7 +86,7 @@ def test_each_generate_entry_hands_the_warning_to_the_sink_and_keeps_the_bytes(
     assert detail["snapshot_index"] == 0
     assert detail["threshold"] == 0.99
     assert detail["trigger"] in {"overall", "column"}
-    assert detail["worst_columns"] and detail["worst_columns"][0][0] == "amount"
+    assert detail["worst_columns"].split("=")[0] == "amount"
     assert set(detail) == {
         "table",
         "snapshot_index",
@@ -237,8 +237,8 @@ def test_one_broken_column_warns_even_when_the_overall_score_passes() -> None:
     detail = records[0].detail
     assert detail["overall_score"] >= 0.8
     assert detail["trigger"] == "column"
-    assert [name for name, _ in detail["below_columns"]] == ["null90"]
-    assert detail["worst_columns"][0][0] == "null90"
+    assert [pair.split("=")[0] for pair in detail["below_columns"].split(", ")] == ["null90"]
+    assert detail["worst_columns"].split("=")[0] == "null90"
 
 
 def test_a_low_overall_score_triggers_on_overall_and_a_faithful_table_is_quiet() -> None:

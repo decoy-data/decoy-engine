@@ -1,7 +1,8 @@
 """One strict JSON parser: only `_canonical` hands `json` a duplicate-key or constant hook.
 
 `strict_json_loads` is the choke point for refusing duplicate keys, NaN/Infinity and oversized
-integers. A module outside `_canonical/` that passes `object_pairs_hook=` or `parse_constant=`
+integers. A module outside `_canonical/` that passes `object_pairs_hook=`, `parse_constant=` or
+`parse_float=` (the hook that refuses an overflowed literal such as `1e999`)
 is a second copy of that rule, with its own gaps. There is no baseline and no allowlist.
 """
 
@@ -12,7 +13,7 @@ from pathlib import Path
 
 SRC = Path(__file__).parents[2] / "src" / "decoy_engine"
 OWNER_DIR = "_canonical/"
-_HOOKS = frozenset({"object_pairs_hook", "parse_constant"})
+_HOOKS = frozenset({"object_pairs_hook", "parse_constant", "parse_float"})
 
 
 def hook_calls(source: str) -> list[tuple[int, str]]:
@@ -48,6 +49,12 @@ def test_seeded_violation_is_caught() -> None:
         "    return json.loads(t, object_pairs_hook=dict)\n"
         "def g(t):\n"
         "    return json.JSONDecoder(parse_constant=str).decode(t)\n"
+        "def h(t):\n"
+        "    return json.loads(t, parse_float=float)\n"
     )
-    assert hook_calls(seeded) == [(3, "object_pairs_hook"), (5, "parse_constant")]
+    assert sorted(hook_calls(seeded)) == [
+        (3, "object_pairs_hook"),
+        (5, "parse_constant"),
+        (7, "parse_float"),
+    ]
     assert hook_calls("import json\njson.loads('{}')\n") == []

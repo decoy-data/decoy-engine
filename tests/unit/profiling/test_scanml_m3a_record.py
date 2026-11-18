@@ -23,7 +23,7 @@ from decoy_engine.profiling import (
     scan_set_to_dict,
     scan_sources,
 )
-from decoy_engine.profiling.scan_set import ModelHitCore, ModelRefCore, _DetectorRunCore
+from decoy_engine.profiling._scan_core import ModelHitCore, ModelRefCore, _DetectorRunCore
 from tests.unit.profiling import _scanml_m3a_support as s
 
 MODEL = {"id": "lgbm-v1", "version": "0.1.0"}

@@ -396,7 +396,7 @@ def test_warnings_are_one_undeclared_output_columns_per_chunk_naming_the_columns
         assert isinstance(warning, QualityWarning)
         assert warning.code == "undeclared_output_columns"
         assert warning.provider == "output_projection" and warning.column is None
-        assert warning.detail == {"table": TABLE, "undeclared_columns": ["p", "t", "u"]}
+        assert warning.detail == {"table": TABLE, "undeclared_columns": "p, t, u"}
 
 
 def test_native_route_computes_the_warning_with_no_sink_given() -> None:
@@ -733,4 +733,4 @@ def test_stored_pandas_index_field_is_dropped_on_the_native_route(
         assert out.column_names == ["r", "t", "u"]
     for result in native.sink:
         (warning,) = result.warnings
-        assert warning.detail == {"table": TABLE, "undeclared_columns": ["u"]}
+        assert warning.detail == {"table": TABLE, "undeclared_columns": "u"}

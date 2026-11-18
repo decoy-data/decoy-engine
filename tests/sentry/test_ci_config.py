@@ -127,7 +127,7 @@ def test_full_gate_runs_only_on_dispatch_and_main_in_two_shards() -> None:
     # The expensive self-hosted gate: manual dispatch or a push to main, never a feature push.
     assert "github.event_name == 'workflow_dispatch'" in guard
     assert "github.ref == 'refs/heads/main'" in guard
-    assert "github.repository_owner == 'louiskeep'" in guard
+    assert "github.repository_owner == 'decoy-data'" in guard
     assert "github.actor == 'louiskeep'" in guard
     assert "!github.event.repository.fork" in guard
     assert job["strategy"]["matrix"]["shard"] == [1, 2]
@@ -159,7 +159,7 @@ def test_fast_check_is_hosted_owner_guarded_and_push_only() -> None:
     assert "timeout-minutes" in fast
     guard = str(fast["if"])
     assert "github.event_name == 'push'" in guard
-    assert "github.repository_owner == 'louiskeep'" in guard
+    assert "github.repository_owner == 'decoy-data'" in guard
     assert "github.actor == 'louiskeep'" in guard
     assert "!github.event.repository.fork" in guard
     assert _checkout(fast)["with"]["persist-credentials"] is False
@@ -223,7 +223,7 @@ def test_tree_proof_job_is_hosted_main_push_only_and_read_only() -> None:
     for part in (
         "github.event_name == 'push'",
         "github.ref == 'refs/heads/main'",
-        "github.repository_owner == 'louiskeep'",
+        "github.repository_owner == 'decoy-data'",
         "github.actor == 'louiskeep'",
         "!github.event.repository.fork",
     ):
@@ -243,7 +243,7 @@ def test_gate_skips_only_on_an_explicit_proof() -> None:
     assert guard.startswith("!cancelled() && needs.tree-proof.outputs.skip != 'true' && ")
 
 
-REPO = "louiskeep/decoy-engine"
+REPO = "decoy-data/decoy-engine"
 TREE = "a" * 40
 
 
