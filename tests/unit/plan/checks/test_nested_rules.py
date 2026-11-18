@@ -197,10 +197,37 @@ class TestFakerRuleProvider:
             assert error.code == "nested_rule_faker_provider_missing"
             assert error.path == f"{COL}.provider_config.rules[1].strategy_config.provider"
 
-    def test_a_blank_rule_provider_is_refused(self, simple_profile: Profile) -> None:
-        rule = _rule("$.b", "faker", strategy_config={"provider": " "})
-        for error in _refused(_config({"rules": [rule]}), simple_profile):
-            assert error.code == "nested_rule_faker_provider_missing"
+    @pytest.mark.parametrize("value", [5, "", " ", None, ["person_email"]])
+    @pytest.mark.parametrize("strategy", ["faker", "hash"])
+    def test_a_provider_key_that_is_not_a_non_blank_string_is_refused_even_with_a_column_provider(
+        self, value: Any, strategy: str, simple_profile: Profile
+    ) -> None:
+        rule = _rule("$.b", strategy, strategy_config={"provider": value})
+        config = _config({"rules": [_rule("$.a"), rule]}, provider="person_email")
+        for error in _refused(config, simple_profile):
+            assert error.code == "nested_rule_provider_invalid"
+            assert error.path == f"{COL}.provider_config.rules[1].strategy_config.provider"
+
+    def test_an_unknown_rule_provider_is_refused_at_the_rule(self, simple_profile: Profile) -> None:
+        rule = _rule("$.b", "faker", strategy_config={"provider": "no_such_provider"})
+        for error in _refused(_config({"rules": [_rule("$.a"), rule]}), simple_profile):
+            assert error.code == "unknown_provider"
+            assert error.path == f"{COL}.provider_config.rules[1].strategy_config.provider"
+
+    def test_a_non_poolable_rule_provider_is_refused_at_the_rule(
+        self, simple_profile: Profile
+    ) -> None:
+        rule = _rule("$.b", "faker", strategy_config={"provider": "address_full"})
+        for error in _refused(_config({"rules": [_rule("$.a"), rule]}), simple_profile):
+            assert error.code == "non_poolable_provider_with_pool_backend"
+            assert error.path == f"{COL}.provider_config.rules[1].strategy_config.provider"
+
+    def test_a_non_poolable_column_provider_reaches_a_faker_rule(
+        self, simple_profile: Profile
+    ) -> None:
+        config = _config({"rules": [_rule("$.b", "faker")]}, provider="address_full")
+        for error in _refused(config, simple_profile):
+            assert error.code == "non_poolable_provider_with_pool_backend"
 
     def test_the_rule_provider_or_the_column_provider_satisfies_it(self) -> None:
         own = _rule("$.b", "faker", strategy_config={"provider": "person_email"})
