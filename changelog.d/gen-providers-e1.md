@@ -9,3 +9,5 @@ A `faker` column whose `faker_type` is a registry name now gets `generate_faker_
 Each synthetic identifier now reads one locale constant for both its capability row and its generator. SSN, EIN, NPI and NDC stay `en_US` only. CUSIP declares `en_CA` and `en_US` and now refuses any other locale in `generate_random`. IBAN, PAN, ICD-10 and MRN declare every engine locale, because their output does not depend on it.
 
 New reason codes (all unreleased): `plan/generate_provider_unknown`, `plan/generate_provider_unsupported`, `plan/generate_provider_field_required`, `plan/generate_provider_field_unexpected`, `plan/generate_provider_locale_unsupported`, `plan/generate_faker_type_is_domain_provider`, `plan/pinned_provider_unsupported` and `runtime/generation_provider_failed`. The registry version and manifests change at the release.
+
+The support bundle `StrategyKind` enum gains `provider`, so a bundle can name a provider generate column.

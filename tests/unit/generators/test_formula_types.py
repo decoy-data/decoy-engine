@@ -110,6 +110,7 @@ _EXEMPT = {
     "windowed_date": "dates are text on every route",
     "statistical": "snapshot-driven, keeps the binding as before",
     "lookup": "catalog values, keeps the binding as before",
+    "provider": "registry provider values are text, keeps the binding as before",
     "reference": "covered by its own cell below",
 }
 
