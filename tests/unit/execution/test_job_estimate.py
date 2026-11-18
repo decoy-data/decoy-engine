@@ -52,16 +52,15 @@ def test_numeric_mask_job_is_priceable(tmp_path: Path) -> None:
     assert 0 < est.runtime.low_seconds <= est.runtime.high_seconds
 
 
-def test_string_without_sample_is_unpriceable_not_a_raise(tmp_path: Path) -> None:
-    # A variable-width column with no resident sample cannot be priced pre-run
-    # (the profile carries no string-length stat) -- honest UNPRICEABLE.
+def test_a_string_mask_job_is_priced_from_a_bounded_sample(tmp_path: Path) -> None:
+    # A variable-width column is priced from a bounded sample of the file (F24 OQ-5).
     table = pa.table({"s": pa.array([f"v{i}" for i in range(200)], type=pa.string())})
     cfg = _single_table_config(tmp_path, table, {"name": "s", "strategy": "redact"})
     est = estimate_job(cfg, tmp_path)
-    assert est.route in _PATHS  # route is still reported honestly
-    assert est.priceable is False
-    assert est.peak_bytes is None and est.runtime is None
-    assert est.notes  # a reason is given
+    assert est.route in _PATHS
+    assert est.priceable is True
+    assert est.peak_bytes is not None
+    assert est.runtime is not None
 
 
 def _generate_config(tmp_path: Path, rows: int) -> dict:

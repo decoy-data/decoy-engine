@@ -1,0 +1,3 @@
+### Changed (redact and truncate are faster on `large_string` text columns, LARGE-STRING-FAST, 2026-11-18)
+
+`redact` and `truncate` now take the vectorized Arrow path when a text column is stored as `large_string`, which is what Polars Parquet files and pandas `string[pyarrow]` columns produce. Before, those columns fell back to a per-row Python loop that was 8 to 55 times slower in the kernel and about 10 times slower for a whole job. The column is cast to `string` first, so output values, nulls and types do not change. Text that does not fit 32-bit offsets, or is not valid UTF-8, still takes the per-row path as before.

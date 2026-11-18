@@ -14,7 +14,8 @@ recommendations, and the 10 compliance disguises (`hipaa`, `pci`, `gdpr` and the
 - Pre-scan only suggests. It never changes data and never blocks a run on its own.
 - A saved or displayed profile carries no raw cell values for value-sensitive columns
   unless the caller explicitly opts in (`profile_document`, `redact_profile_dict`;
-  roadmap row 24c).
+  roadmap row 24c). Every other column keeps a label, top value or bound only when 10 or more
+  rows hold it (roadmap row 24zm).
 - `regex` detectors are always on. `classifier` and `ner` are opt-in, and a missing
   model is reported at preflight as a status, not a crash.
 - The `pre_scan` block is left out of the plan hash, because it does not change output.
@@ -39,6 +40,8 @@ recommendations, and the 10 compliance disguises (`hipaa`, `pci`, `gdpr` and the
 | SCAN-10 | Load all disguises with `load_disguises()`. | Ten load: `ccpa`, `cpni`, `default`, `ferpa`, `gdpr`, `glba`, `hipaa`, `pc`, `pci`, `sox`, with the rule counts in `docs/capability-matrix.md`. |
 | SCAN-11 | Apply the `hipaa` disguise recommendation to a profiled healthcare table and compile the result. | Every recommended rule compiles. Each strategy named by a disguise exists. |
 | SCAN-12 | Profile a column with sentinel values (`9999-12-31`, `-1`, `N/A`). | The sentinels are flagged as sentinels, not counted as ordinary data. |
+| SCAN-13 | Save the profile of a table whose unflagged text column holds one value in a single row, a numeric column with one extreme row, and a date column with one row in an old decade. Search the saved file for the rare text, the extreme and the old year. | None of them appears. A label or top value held by fewer than 10 rows is `[redacted]`, numeric bin labels are `[redacted]` and the exact extremes are `null`, and the old row is counted into the first decade that holds the 10th earliest row. Counts, null rates and types are unchanged. Roadmap row 24zm. |
+| SCAN-14 | Save the profile of a table with a column of short sentences (three or more words), and a column of two-word names held by more than 10 rows each. | The sentence column keeps no label, top value or mode. The two-word column keeps its labels. |
 
 ## Open points
 

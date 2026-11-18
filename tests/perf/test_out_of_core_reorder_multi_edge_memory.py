@@ -69,12 +69,9 @@ import textwrap
 
 import pytest
 
-pytestmark = pytest.mark.perf
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
+pytestmark = pytest.mark.perf
 
 # 1024 MiB so the fixed Python / pyarrow / DuckDB baseline stays a small
 # fraction of the ceiling (a smaller ceiling lets that baseline alone crowd the
@@ -347,7 +344,7 @@ def _run_worker(tmp_path):
     worker_path.write_text(_WORKER_SCRIPT)
     work_dir = tmp_path / "work"
     work_dir.mkdir()
-    env = {**os.environ, **_CAPPED_ENV}
+    env = {**os.environ, **CAPPED_ENV}
     cmd = [
         sys.executable,
         str(worker_path),

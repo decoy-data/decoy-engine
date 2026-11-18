@@ -29,7 +29,18 @@ __all__ = [
     "ValueFree",
     "derive_read",
     "has_kind",
+    "is_plain_name",
 ]
+
+
+# A plain name: a non-empty str, with no limit on length or characters. The public configuration
+# admits any str as a column, table or strategy name, so the one rule for the names a manifest holds
+# (a warning's code, provider and column, a strategy, a table) refuses nothing a config accepts. A
+# narrower rule made a producer raise on a name the config let through. The producer that builds a
+# name and the record that stores it share this rule, so they cannot disagree.
+def is_plain_name(value: object) -> bool:
+    """True when `value` is a non-empty str, a structural name the record model accepts."""
+    return isinstance(value, str) and len(value) > 0
 
 
 class SharedRules(BaseModel):

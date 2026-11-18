@@ -12,7 +12,7 @@ The reorder route's only claimed advantage is removing the O(distinct-parent-
 key) resident floor the batch-join route's parent TEMP TABLE imposes, so the
 sweep variable is PARENT distinct-key count with a fixed (large) child. Each
 route runs its own fresh, allocator-pinned subprocess per sweep point (same
-`_CAPPED_ENV` + VmHWM discipline as `tests/perf/test_out_of_core_reorder_
+`CAPPED_ENV` + VmHWM discipline as `tests/perf/test_out_of_core_reorder_
 memory.py`, this script's template), with the SAME process ceiling, the SAME
 DuckDB `memory_limit` (computed once via `resolve_reorder_budgets` and passed
 identically to both), and the SAME parent-relation build -- only the route
@@ -32,12 +32,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-# Allocator pinning, BEFORE each worker subprocess starts -- same reasoning as
-# tests/perf/test_ooc_external_sort_memory.py's own `_CAPPED_ENV`.
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
 _CEILING_MIB = 512
 _CHILD_ROWS = 3_000_000
@@ -279,7 +274,7 @@ def _run_worker(route: str, parent_rows: int, work_root: Path) -> dict:
     worker_path.write_text(_WORKER_SCRIPT)
     work_dir = work_root / f"work_{route}_{parent_rows}"
     work_dir.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, **_CAPPED_ENV}
+    env = {**os.environ, **CAPPED_ENV}
     cmd = [
         sys.executable,
         str(worker_path),

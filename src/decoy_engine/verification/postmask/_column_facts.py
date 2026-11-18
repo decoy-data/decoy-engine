@@ -20,7 +20,7 @@ quarantine breaks. Aggregates only: no value reaches a field here.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -276,7 +276,8 @@ def _counted(table: TableBatches) -> tuple[TableBatches, Callable[[], None]]:
             yield batch
 
     def verify() -> None:
-        if seen[0] != table.num_rows:
+        # A table that drops rows on read (a declared cast) may give fewer rows, never more.
+        if seen[0] > table.num_rows or (seen[0] != table.num_rows and not table.drops_rows):
             raise ValueError(
                 f"column facts: a table read gave {seen[0]} rows but the table declares "
                 f"{table.num_rows}"
@@ -309,14 +310,23 @@ def column_facts(
     batch_rows: int = KEY_BATCH_ROWS,
     scratch: Path,
     memory_limit: str,
+    value_columns: Collection[str] | None = None,
 ) -> dict[str, ColumnFacts]:
-    """Facts for each of `columns` that the output has, keyed by column name."""
+    """Facts for each of `columns` that the output has, keyed by column name.
+
+    `value_columns` names the columns whose output null counts and moments are tallied
+    (`ColumnFacts.output_values`); `None` tallies every column. The run passes only the columns
+    a distribution check reads, so an unconfigured run pays nothing for them."""
     wanted = [c for c in columns if c in output.schema.names]
     if not wanted:
         return {}
     compared = [c for c in wanted if source is not None and c in source.schema.names]
     aligned = source is not None and source.num_rows == output.num_rows
-    tallies = {c: _Tally(values=_ValueTally(_is_numeric(output.schema, c))) for c in wanted}
+    tallied = set(wanted if value_columns is None else value_columns)
+    tallies = {
+        c: _Tally(values=_ValueTally(_is_numeric(output.schema, c)) if c in tallied else None)
+        for c in wanted
+    }
     out_read, out_verify = _counted(output)
     checks = [out_verify]
     if aligned and source is not None and compared:
@@ -373,6 +383,19 @@ def column_facts(
             output_values=t.values.done() if t.values is not None else None,
         )
     return facts
+
+
+def distinct_counts(
+    table: TableBatches, columns: Sequence[str], *, scratch: Path, memory_limit: str
+) -> dict[str, int | None]:
+    """The distinct count of each of `columns` that `table` has, or `None` for one whose count
+    failed with an uncoded error."""
+    counts: dict[str, int | None] = {}
+    for column in dict.fromkeys(columns):
+        if column in table.schema.names:
+            count, error = _distinct_or_error(table, column, scratch, memory_limit)
+            counts[column] = None if error is not None else count
+    return counts
 
 
 def value_facts(

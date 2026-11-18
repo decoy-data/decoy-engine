@@ -39,9 +39,9 @@ MULTI_PARENT_WARNING = (
     "ref",
     {
         "parent_table": "P1",
-        "parent_columns": ["k"],
+        "parent_columns": "k",
         "child_table": "X",
-        "child_columns": ["ref"],
+        "child_columns": "ref",
         "orphan_rows": 1,
     },
 )

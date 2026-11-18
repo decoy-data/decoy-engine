@@ -24,7 +24,7 @@ from decoy_engine.execution._fk_keys import (
     fk_join_key_tuple,
     fk_key_value,
 )
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
+from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
 from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge
@@ -41,22 +41,6 @@ if TYPE_CHECKING:
 # streaming runner reads this at call time, so it is the one batch-size knob
 # for the whole out-of-core route.
 _JOIN_BATCH_ROWS: Final = 65_536
-
-
-def orphan_fk_warning(edge: RelationshipEdge, orphan_count: int) -> QualityWarning:
-    """The WARN-policy warning, shared so every join surface reports one shape."""
-    return QualityWarning(
-        code=reasons.warning.ORPHAN_FK,
-        provider=edge.namespace,
-        column=",".join(edge.child_columns),
-        detail={
-            "parent_table": edge.parent_table,
-            "parent_columns": list(edge.parent_columns),
-            "child_table": edge.child_table,
-            "child_columns": list(edge.child_columns),
-            "orphan_rows": orphan_count,
-        },
-    )
 
 
 def mask_child_fk(
