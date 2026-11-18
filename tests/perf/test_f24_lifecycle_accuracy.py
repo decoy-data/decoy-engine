@@ -1,4 +1,4 @@
-"""F24 84-E1: the lifecycle estimate against measured peak RSS (opt-in, test VM only).
+"""F24 84-E1 and 84-E2: the lifecycle estimate against measured peak RSS (opt-in, test VM only).
 
 Plan: docs/plans/2026-11-17-f24-lifecycle-estimate.md section 8.2 and 8.3. Every cell asserts
 `measured <= predicted`. A cell marked bounded also asserts `predicted <= 1.5 * measured` when
@@ -39,6 +39,9 @@ BOUND = {
     "AT-E1-24": "lower",
     "AT-E1-25": "lower",
     "AT-E1-27": "bounded",
+    # 84-E2: no TB-4 anchor for generation, so the lower bound only (plan 8.4).
+    "AT-E2-6a": "lower",
+    "AT-E2-6b": "lower",
 }
 
 

@@ -163,6 +163,10 @@ def test_the_errors_survive_a_pickle_round_trip(error: CanonicalJsonError) -> No
     assert str(again) == str(error) and again.code == error.code
 
 
+def test_strict_json_loads_keeps_a_large_finite_float() -> None:
+    assert strict_json_loads("[1e308, -1.5e-320, 0.1]") == [1e308, -1.5e-320, 0.1]
+
+
 @pytest.mark.parametrize(
     ("text", "token"),
     [
@@ -170,6 +174,8 @@ def test_the_errors_survive_a_pickle_round_trip(error: CanonicalJsonError) -> No
         ('{"a": NaN}', "non_finite"),
         ("[Infinity]", "non_finite"),
         ("[-Infinity]", "non_finite"),
+        ("[1e999]", "non_finite"),
+        ('{"a": -1E999}', "non_finite"),
         ("[" + "9" * 21 + "]", "out_of_range"),
         ("[-" + "9" * 21 + "]", "out_of_range"),
         ("{not json", "not_json"),

@@ -180,7 +180,15 @@ def test_every_botocore_retryable_code_is_transient() -> None:
 def test_every_kind_the_tables_can_build_is_in_the_closed_set() -> None:
     kinds = {kind for _make, kind in KINDS.values()}
     assert kinds <= set(get_args(ConnectorErrorKind))
-    assert set(get_args(ConnectorErrorKind)) - kinds == {"pointer_invalid"}
+    # `pointer_invalid` is built by the object store; the three F02 kinds are built by the stream
+    # resume (`source_changed`), the digest check (F02-E2) and the SFTP host-key policy (F02-E3),
+    # not by an SDK error code, so no table row reaches them.
+    assert set(get_args(ConnectorErrorKind)) - kinds == {
+        "pointer_invalid",
+        "source_changed",
+        "digest_mismatch",
+        "host_key_rejected",
+    }
 
 
 @pytest.mark.parametrize("case", ["AccessDenied", "SlowDown", "ConnectTimeoutError"])
