@@ -10,18 +10,13 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._nested_json import nested_children
+from decoy_engine._nested_json import UNSET, effective_provider, nested_children
 from decoy_engine.plan._errors import PlanCompileError
 
 __all__ = ["check_nested_rules"]
 
 
 _RULE_KEYS = frozenset({"target", "strategy", "strategy_config", "namespace"})
-
-
-def _provider_named(strategy_config: Any, column_provider: Any) -> bool:
-    own = strategy_config.get("provider") if isinstance(strategy_config, dict) else None
-    return not _blank(own) or not _blank(column_provider)
 
 
 def _blank(value: Any) -> bool:
@@ -93,15 +88,14 @@ def _check_column(where: str, pc: dict[str, Any], *, column_provider: Any) -> No
                 path=f"{at}.strategy",
                 message="A nested rule needs a child strategy; set `strategy`.",
             )
-        if child.strategy == "faker" and not _provider_named(
-            child.strategy_config, column_provider
-        ):
+        if child.provider is not UNSET and _blank(child.provider):
             raise PlanCompileError(
-                code=reasons.plan.NESTED_RULE_FAKER_PROVIDER_MISSING,
+                code=reasons.plan.NESTED_RULE_PROVIDER_INVALID,
                 path=f"{at}.strategy_config.provider",
-                message="A nested faker rule needs a provider: set `strategy_config.provider` "
-                "or the column's `provider`.",
+                message="A nested rule's `provider` must be a non-blank string.",
             )
+        if child.strategy == "faker":
+            _check_faker_provider(at, child, column_provider, where)
         if child.target in seen_targets:
             raise PlanCompileError(
                 code=reasons.plan.NESTED_RULE_TARGET_DUPLICATE,
@@ -119,3 +113,37 @@ def _check_column(where: str, pc: dict[str, Any], *, column_provider: Any) -> No
                     "pinned once per column.",
                 )
             code_set_seen = True
+
+
+def _check_faker_provider(at: str, child: Any, column_provider: Any, where: str) -> None:
+    """A faker rule needs a provider the registry knows and a pool can build.
+
+    The column's own provider is already checked for being known by `check_unknown_provider`; a
+    nested column is not a faker column, so its pool check is done here for the rule that uses it.
+    """
+    from decoy_engine.providers_v2 import get_default_registry
+
+    provider = effective_provider(child, column_provider)
+    own = child.provider is not UNSET
+    path = f"{at}.strategy_config.provider" if own or provider is None else f"{where}.provider"
+    if provider is None:
+        raise PlanCompileError(
+            code=reasons.plan.NESTED_RULE_FAKER_PROVIDER_MISSING,
+            path=path,
+            message="A nested faker rule needs a provider: set `strategy_config.provider` "
+            "or the column's `provider`.",
+        )
+    registry = get_default_registry()
+    if provider not in registry.known_providers():
+        raise PlanCompileError(
+            code=reasons.plan.UNKNOWN_PROVIDER,
+            path=path,
+            message="A nested faker rule names a provider that is not in the default registry.",
+        )
+    if not registry.get_capabilities(provider).poolable:
+        raise PlanCompileError(
+            code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,
+            path=path,
+            message="A nested faker rule names a provider that declares poolable=False, so its "
+            "pool cannot be built. Use a poolable provider.",
+        )

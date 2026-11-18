@@ -1090,7 +1090,9 @@ column. The draw identity is the rule's position in the list, so reordering rule
 rule is a closed set of keys (`target`, `strategy`, `strategy_config`, `namespace`); any other key, such as
 `when`, is refused (`nested_rule_key_unknown`), and a `namespace` that is not a non-blank string is refused
 (`nested_rule_namespace_invalid`). A `faker` rule takes its provider from its own `strategy_config.provider`, else
-from the column's `provider`; with neither it is refused (`nested_rule_faker_provider_missing`). The single form
+from the column's `provider`; with neither it is refused (`nested_rule_faker_provider_missing`), and a rule that
+sets the `provider` key to anything but a non-blank string is refused (`nested_rule_provider_invalid`) with no
+fallback to the column's. A rule provider the registry does not know, or that is not poolable, is refused at the rule. The single form
 is unchanged and keeps taking the column's `provider`.
 
 ### 3.5 Disguises

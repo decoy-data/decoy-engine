@@ -12,6 +12,7 @@ __all__ = [
     "NESTED_RULE_FAKER_PROVIDER_MISSING",
     "NESTED_RULE_KEY_UNKNOWN",
     "NESTED_RULE_NAMESPACE_INVALID",
+    "NESTED_RULE_PROVIDER_INVALID",
     "NESTED_RULE_TARGET_DUPLICATE",
 ]
 
@@ -58,6 +59,12 @@ NESTED_RULE_NAMESPACE_INVALID = _d(
 NESTED_RULE_FAKER_PROVIDER_MISSING = _d(
     "nested_rule_faker_provider_missing",
     "A nested faker rule has no provider in its strategy_config or on the column.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_RULE_PROVIDER_INVALID = _d(
+    "nested_rule_provider_invalid",
+    "A nested rule sets a provider that is not a non-blank string.",
     phases=_BOTH,
     since=UNRELEASED,
 )

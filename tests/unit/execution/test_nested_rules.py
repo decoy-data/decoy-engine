@@ -110,6 +110,32 @@ class TestFakerRuleCarriesItsOwnProvider:
         assert parsed["customer_id"] == _flat_hash(["c-1"], "customer")[0]
 
 
+class TestHandlerUsesTheSharedProviderRule:
+    @pytest.mark.parametrize("value", [5, ""])
+    def test_a_bad_rule_provider_never_falls_back_to_the_column_provider(self, value: Any) -> None:
+        seed = dataclasses.replace(
+            _seed(
+                {
+                    "rules": [
+                        {
+                            "target": "$.e",
+                            "strategy": "faker",
+                            "strategy_config": {"provider": value},
+                        }
+                    ]
+                },
+                "events",
+            ),
+            provider="person_email",
+            backend_type="faker",
+            backend_version="v",
+        )
+        with pytest.raises(ValueError, match="has no provider"):
+            NestedStrategyHandler().run(
+                pd.DataFrame({"payload": [json.dumps({"e": "a@x.com"})]}), "payload", seed, _ctx()
+            )
+
+
 class TestAFaultInOneRuleDoesNotHideAnother:
     HUGE = "1" + "0" * 4999
 

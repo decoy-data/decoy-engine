@@ -68,7 +68,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
-from decoy_engine._nested_json import NestedChild, nested_children
+from decoy_engine._nested_json import NestedChild, effective_provider, nested_children
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._apply import (
@@ -85,13 +85,6 @@ from decoy_engine.execution._strategies.nested._leaves import (
 from decoy_engine.execution._technique_class import technique_class_for
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
-
-
-def _rule_provider(child: NestedChild, plan: ColumnSeed) -> str | None:
-    """A rule's own `strategy_config.provider` wins; else the column's, as the single form does."""
-    cfg = child.strategy_config
-    own = cfg.get("provider") if child.index is not None and isinstance(cfg, dict) else None
-    return own if isinstance(own, str) and own.strip() else plan.provider
 
 
 @dataclass(frozen=True)
@@ -207,7 +200,7 @@ class NestedStrategyHandler:
             if child.index is not None and child.namespace
             else plan.namespace,
             strategy=child_strategy_name,
-            provider=_rule_provider(child, plan),
+            provider=effective_provider(child, plan.provider),
             backend_type=plan.backend_type,
             backend_version=plan.backend_version,
             cardinality_mode=plan.cardinality_mode,
