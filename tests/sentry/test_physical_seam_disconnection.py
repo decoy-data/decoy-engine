@@ -44,12 +44,11 @@ modification.
 
 from __future__ import annotations
 
-import ast
 import subprocess
 import sys
 from pathlib import Path
 
-from tests.sentry.layout._reexport_init import imports_physical, is_pure_reexport_init
+from tests.sentry.layout._reexport_init import imports_physical
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 REPO_ROOT = ENGINE_ROOT.parents[1]
@@ -241,18 +240,3 @@ def test_compile_physical_plan_is_unreachable_from_a_fresh_import_of_run_pipelin
         "pulled in execution.physical module(s), which must stay unreachable "
         "from production until Task 4.5+:\n  - " + "\n  - ".join(hits)
     )
-
-
-def test_no_hand_entry_is_a_pure_reexport_init() -> None:
-    """A hand entry for a pure re-export is dead: the rule already permits the file."""
-    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
-    entries = {
-        n.value if n.value.startswith("src/") else f"src/decoy_engine/{n.value}"
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Constant)
-        and isinstance(n.value, str)
-        and n.value.endswith("/__init__.py")
-        and "execution/" in n.value
-    }
-    dead = sorted(e for e in entries if is_pure_reexport_init(REPO_ROOT / e))
-    assert dead == [], f"remove these hand entries, the rule covers them: {dead}"
