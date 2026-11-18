@@ -139,6 +139,9 @@ class _Evidence:
     free_text: bool
     exempt: bool  # a bool column keeps its two values
     decades: list[_Range] | None
+    # Non-null rows no released top value covers. A mean beside released exact values and 1 to K-1
+    # leftover rows would let a reader subtract the values and read the leftovers.
+    uncovered: int | None
 
 
 def _evidence(field: Mapping[str, Any]) -> _Evidence:
@@ -168,13 +171,17 @@ def _evidence(field: Mapping[str, Any]) -> _Evidence:
         }
     exempt = field.get("inferred_type") == "boolean"
     decades = _folded_decades(dist) if dist.get("kind") == "date" else None
+    non_null = None if rows is None or nulls is None or nulls > rows else rows - nulls
+    free_text = not exempt and labels_read_as_sentences(kept_texts)
+    released = 0 if free_text else sum(c for c in proven.values() if c >= MIN_RELEASE_COUNT)
     return _Evidence(
-        non_null=None if rows is None or nulls is None or nulls > rows else rows - nulls,
+        non_null=non_null,
         proven=proven,
         labels_kept=labels_kept,
-        free_text=not exempt and labels_read_as_sentences(kept_texts),
+        free_text=free_text,
         exempt=exempt,
         decades=decades,
+        uncovered=None if non_null is None or released > non_null else non_null - released,
     )
 
 
@@ -200,6 +207,7 @@ def _floor_slot(
         return None if proven and not ev.free_text else Rule.NULL
     if rule is Rule.AGGREGATE_2K:
         ok = ev.non_null is not None and ev.non_null >= 2 * MIN_RELEASE_COUNT
+        ok = ok and ev.uncovered is not None and not 0 < ev.uncovered < MIN_RELEASE_COUNT
         return None if ok and isinstance(current, (str, int, float)) else Rule.NULL
     if rule is Rule.UNDER_K_PLACEHOLDER and type_name == "TopValue":
         held = _held(container.get("count")) and isinstance(current, str)
