@@ -22,7 +22,7 @@ duckdb = pytest.importorskip("duckdb")
 pytestmark = pytest.mark.pg_integration
 
 # Cell (a) mutation seam: the plan's named mutation runs it with ``use_transaction := false``.
-CELL_A_USE_TRANSACTION = "false"
+CELL_A_USE_TRANSACTION = "true"
 
 
 def _lit(text: str) -> str:
