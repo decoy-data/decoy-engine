@@ -248,6 +248,8 @@ def test_at_e2_12_a_map_of_maps_keeps_bounded_state(
     assert set(by_path(obs)) == {"$.*", "$.*.*"}
     assert obs.map_collapsed == 2
     assert 0 < _Probe.peak <= SCAN_MAX_PATHS * (SCAN_MAP_KEYS + 1)
+    # Two levels exist, each held to its key limit as it was read: no end-of-pass collapse.
+    assert _Probe.peak <= 2 * (SCAN_MAP_KEYS + 1)
 
 
 def test_at_e2_12_a_key_that_fails_a_rule_is_never_stored(
