@@ -16,13 +16,16 @@ from scripts.release.frozen_map import rows
 
 import decoy_engine
 import decoy_engine.sdk
+from decoy_engine.contracts import stability
 from tests.sentry.layout import map_paths, section
+from tests.sentry.release import _census
 
 ROOT = Path(__file__).resolve().parents[3]
 MAP = ROOT / "docs" / "frozen-surfaces.md"
 CONTRACT = ROOT / "docs" / "compatibility-contract.md"
 TAGS_HEADING = "## Format tags (contract 3.1, 3.2)"
 NAMES_HEADING = "## Public names (contract 3.4)"
+EXPERIMENTAL_HEADING = "## Experimental surfaces (contract 3.6)"
 OTHER_HEADING = "## Other frozen surfaces"
 LIMITS_HEADING = "## Known limits"
 _TAG = re.compile(r"[a-z0-9-]+/v\d+")
@@ -55,6 +58,12 @@ def public_names() -> set[str]:
     return set(decoy_engine.__all__) | {f"sdk.{name}" for name in decoy_engine.sdk.__all__}
 
 
+def experimental_names() -> set[str]:
+    """The registry's experimental set, spelled like the map (root bare, `sdk.` prefixed)."""
+    exports, _ = _census.load([])
+    return _census.experimental_public_names(_census.classify(exports))
+
+
 def once_problems(expected: set[str], counts: collections.Counter[str]) -> list[str]:
     """Each expected item in exactly one row, and no row naming an item that is not expected."""
     problems = [f"{item}: {counts[item]} rows" for item in sorted(expected) if counts[item] != 1]
@@ -73,8 +82,30 @@ def test_every_contract_tag_has_a_row() -> None:
 
 
 def test_every_public_name_has_a_row() -> None:
-    problems = once_problems(public_names(), surface_counts(section(_map(), NAMES_HEADING)))
+    """A frozen name has one row here; an experimental name has its row in its own table."""
+    expected = public_names() - experimental_names()
+    problems = once_problems(expected, surface_counts(section(_map(), NAMES_HEADING)))
     assert not problems, f"docs/frozen-surfaces.md public-name rows: {problems}"
+
+
+def test_the_experimental_table_equals_the_registry() -> None:
+    """AT-X0c: both ways; a name in the table only, or in the registry only, fails."""
+    names = experimental_names()
+    assert len(names) >= 20, "the experimental registry lost its names"
+    counts = surface_counts(section(_map(), EXPERIMENTAL_HEADING))
+    problems = once_problems(names, counts)
+    assert not problems, f"docs/frozen-surfaces.md experimental rows: {problems}"
+
+
+def test_contract_3_6_lists_the_registry_experimental_names() -> None:
+    """AT-X0d: the code block of section 3.6 names the same objects, one per line."""
+    text = section(CONTRACT.read_text(encoding="utf-8"), "### 3.6 Experimental surfaces")
+    block = text.split("```")[1].split("\n", 1)[1]
+    listed = {line.strip() for line in block.splitlines() if line.strip()}
+    exports, _ = _census.load([])
+    tiers = _census.classify(exports)
+    registry = {name for (_, name), tier in tiers.items() if tier == stability.EXPERIMENTAL}
+    assert listed == registry, f"contract 3.6 vs registry: {sorted(listed ^ registry)}"
 
 
 def row_problems(table: str, limits: set[str]) -> list[str]:
@@ -99,7 +130,7 @@ def _limits(text: str) -> set[str]:
 def test_every_row_names_owning_code_and_an_existing_test() -> None:
     text = _map()
     cited: set[str] = set()
-    for heading in (TAGS_HEADING, NAMES_HEADING, OTHER_HEADING):
+    for heading in (TAGS_HEADING, NAMES_HEADING, EXPERIMENTAL_HEADING, OTHER_HEADING):
         table = section(text, heading)
         assert rows(table), f"{heading} has no rows"
         problems = row_problems(table, _limits(text))
