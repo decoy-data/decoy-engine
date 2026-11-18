@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from decoy_engine.execution._adapter import StrategyContext
@@ -28,7 +29,14 @@ JOB = (0x0123456789).to_bytes(8, "big")
 MISMATCH = "nested_reference_leaf_type_mismatch"
 
 
-def _ctx() -> StrategyContext:
+def _ctx(vault: Any = None) -> StrategyContext:
+    ctx = _ctx_bare()
+    if vault is not None:
+        object.__setattr__(ctx, "vault_writer", vault)
+    return ctx
+
+
+def _ctx_bare() -> StrategyContext:
     return StrategyContext(
         registry=None,  # type: ignore[arg-type]
         pool_cache=PoolCache(),
@@ -51,8 +59,10 @@ def _rule(kind: str | None = "integer", target: str = "$.customer_id") -> dict[s
     }
 
 
-def _run(cells: list[Any], rule: dict[str, Any]) -> tuple[pd.DataFrame, list, StrategyContext]:
-    ctx = _ctx()
+def _run(
+    cells: list[Any], rule: dict[str, Any], *, vault: Any = None
+) -> tuple[pd.DataFrame, list, StrategyContext]:
+    ctx = _ctx(vault)
     seed = _seed({"rules": [rule]}, "events_payload")
     out, warnings = NestedStrategyHandler().run(
         pd.DataFrame({"payload": cells}), "payload", seed, ctx
@@ -289,3 +299,59 @@ def test_a_reference_leaves_relationships_and_non_nested_output_unchanged(tmp_pa
     for reference in (True, False):
         full, seq = results[(reference, "full_frame")], results[(reference, "sequential")]
         assert full.outputs["events"].equals(seq.outputs["events"])
+
+
+def test_a_reference_runs_under_the_auto_route_when_another_table_chunks(tmp_path: Any) -> None:
+    """`customers` auto-chunks; the chunk oracle compiles the whole config without `events`."""
+    from decoy_engine import run_pipeline
+    from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
+
+    cfg = _pipeline_config(tmp_path, reference=True)
+    cfg["tables"] = [t for t in cfg["tables"] if t["name"] != "orders"]
+    cfg["relationships"] = []
+    cfg["sources"].pop("orders")
+    cfg["targets"].pop("orders")
+    big = {
+        "customers": pa.table({"id": pa.array(range(1, 51), pa.int64()), "name": ["n"] * 50}),
+        "events": _sources()["events"],
+    }
+    for name, table in big.items():
+        table.to_pandas().to_csv(tmp_path / f"{name}.csv", index=False)
+    kw = {"engine_version": "e4a-test", "key_provider": THROWAWAY_KEY_PROVIDER}
+    auto = run_pipeline(cfg, sources=big, auto_chunk_threshold_rows=10, chunk_size_rows=10, **kw)
+    full = run_pipeline(cfg, sources=big, execution_mode="full_frame", **kw)
+    for name in big:
+        assert auto.outputs[name].equals(full.outputs[name]), name
+
+
+class FakeVault:
+    """A token vault that records its puts: enough for `tokenize`."""
+
+    derivation_scope = b"fake-vault-scope-0123456789abcde"
+
+    def __init__(self) -> None:
+        self.map: dict[tuple[str, str], str] = {}
+
+    def lookup_existing(self, namespace: str, plaintext: str) -> str | None:
+        return self.map.get((namespace, plaintext))
+
+    def put(self, namespace: str, plaintext: str, token: str) -> str:
+        return self.map.setdefault((namespace, plaintext), token)
+
+
+def test_a_tokenize_leaf_gets_the_parent_token() -> None:
+    from decoy_engine.execution._strategies._tokenize import TokenizeStrategyHandler
+
+    keys = ["c-1", "c-2", "c-1"]
+    vault = FakeVault()
+    ctx = _ctx(vault)
+    parent_seed = dataclasses.replace(
+        _seed({}, "customer"), strategy="tokenize", provider_config=()
+    )
+    parent, _ = TokenizeStrategyHandler().run(pd.DataFrame({"id": keys}), "id", parent_seed, ctx)
+    rule = {**_rule("string"), "strategy": "tokenize"}
+    cells = [json.dumps({"customer_id": k}) for k in keys]
+    out, warnings, nested_ctx = _run(cells, rule, vault=vault)
+    assert warnings == [] and nested_ctx.row_errors == []
+    assert _leaves(out) == parent["id"].tolist()
+    assert all(t.startswith("tok_") for t in _leaves(out))

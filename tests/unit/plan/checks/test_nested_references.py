@@ -18,7 +18,9 @@ from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 PATH = "tables.events.columns.payload.provider_config.rules[0]"
 
 
-def _col(name: str, dtype: str) -> ColumnProfile:
+def _col(name: str, dtype: str, *, strings: bool = True) -> ColumnProfile:
+    # The profiler sets the length stats only for a column whose values are all strings.
+    observed = dtype.startswith(("object", "string")) and strings
     return ColumnProfile(
         name=name,
         dtype=dtype,
@@ -31,17 +33,19 @@ def _col(name: str, dtype: str) -> ColumnProfile:
         is_fk=False,
         fk_target=None,
         pii_class=None,
+        avg_length=3.0 if observed else None,
+        max_length=5 if observed else None,
     )
 
 
-def _profile(parent_dtype: str = "int64") -> Profile:
+def _profile(parent_dtype: str = "int64", *, strings: bool = True) -> Profile:
     return Profile(
         schema_version=1,
         tables=(
             TableProfile(
                 name="customers",
                 row_count=10,
-                columns=(_col("id", parent_dtype), _col("name", "object")),
+                columns=(_col("id", parent_dtype, strings=strings), _col("name", "object")),
             ),
             TableProfile(name="events", row_count=10, columns=(_col("payload", "object"),)),
         ),
@@ -176,3 +180,55 @@ def test_compile_binds_the_key_kind_outside_the_child_config(dtype: str, kind: s
         compile_plan(plain, _profile(dtype), decoy_engine_version="0.1.0")
     )["rules"]
     assert rule.get("strategy_config") == plain_rule.get("strategy_config")
+
+
+def test_a_hash_parent_of_object_dtype_needs_observed_strings() -> None:
+    """An object column of ints hashes as ints, so a string leaf would never match it."""
+    config = _config()
+    with pytest.raises(PlanCompileError) as exc:
+        compile_plan(config, _profile("object", strings=False), decoy_engine_version="0.1.0")
+    assert exc.value.code == "nested_reference_parent_type_unproven"
+    assert exc.value.path.startswith(PATH)
+    compile_plan(config, _profile("object", strings=True), decoy_engine_version="0.1.0")
+    compile_plan(config, _profile("string", strings=False), decoy_engine_version="0.1.0")
+
+
+def test_a_tokenize_parent_of_object_dtype_needs_no_proof() -> None:
+    config = _config({"strategy": "tokenize"}, strategy="tokenize")
+    compile_plan(config, _profile("object", strings=False), decoy_engine_version="0.1.0")
+
+
+def test_references_outside_the_rules_form_are_refused() -> None:
+    config = _config()
+    pc = config["tables"][1]["columns"][0]["provider_config"]
+    rule = pc.pop("rules")[0]
+    pc.update({"target": rule["target"], "strategy": "hash", "references": rule["references"]})
+    for call in (
+        lambda: run_config_only_checks(config),
+        lambda: compile_plan(config, _profile(), decoy_engine_version="0.1.0"),
+    ):
+        with pytest.raises(PlanCompileError) as exc:
+            call()
+        assert exc.value.code == "nested_reference_requires_rules"
+        assert exc.value.path == "tables.events.columns.payload.provider_config.references"
+
+
+def test_the_unknown_rule_key_message_lists_references() -> None:
+    config = _config(bogus=1)
+    with pytest.raises(PlanCompileError) as exc:
+        run_config_only_checks(config)
+    assert exc.value.code == "nested_rule_key_unknown"
+    assert "`references`" in str(exc.value)
+
+
+def test_a_rule_without_namespace_uses_the_column_namespace_for_the_identity() -> None:
+    config = _config()
+    column = config["tables"][1]["columns"][0]
+    rule = column["provider_config"]["rules"][0]
+    del rule["namespace"]
+    column["namespace"] = "customer"
+    run_config_only_checks(config)
+    column["namespace"] = "events_payload"
+    with pytest.raises(PlanCompileError) as exc:
+        run_config_only_checks(config)
+    assert exc.value.code == "nested_reference_namespace_mismatch"

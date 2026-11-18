@@ -120,3 +120,13 @@ def test_a_path_that_is_not_singular_names_is_refused(path: str) -> None:
 
 def test_singular_path_gives_the_name_segments() -> None:
     assert singular_path("$.a.b_c") == ("a", "b_c")
+
+
+def test_a_table_or_column_without_a_name_gives_no_relation() -> None:
+    config = {
+        "tables": [
+            {"columns": [_nested("payload", _ref("$.a"))]},
+            {"name": "events", "columns": [{**_nested("p", _ref("$.a")), "name": None}]},
+        ]
+    }
+    assert path_relations(config) == ()
