@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-18; Dennis round 1 GO-WITH-FIXES addressed; Codex review next)
+Status: plan (revision 3, 2026-11-18; Dennis round 1 and Codex plan gate GO-WITH-FIXES addressed)
 
 # OUTPUT-METADATA-LEAK: source Parquet metadata reaches masked output (1.0 leak row)
 
@@ -26,6 +26,17 @@ Revision 2 changes (Dennis round 1: 0 blocker, 2 high, 7 medium, 5 low):
 | M6 | Subset is a published `TARGET_OUTPUT` with its own baseline category, guarded by CE-9; 5.6 corrected | 5.3, 5.6 |
 | M7 | Canaries for the range-index name, key names, forged `creator` and `pandas_version` | 8.1 |
 | L1 to L5 | All 11 catalog classes named; physical-seam wording; cloud and DB delivery stated; light facade import; plain changelog text | 13, 3, 1.2, 10, 6 |
+
+Revision 3 changes (Codex plan gate on revision 2: GO-WITH-FIXES; writer inventory and choke points confirmed):
+
+| Finding | Change | Where |
+|---|---|---|
+| 1 (high) | The pandas blob copies no member because its shape looks valid. Every member is derived from the output Arrow type, the running library versions or a closed registry constant; `pandas_version` is the running pandas version; `num_categories` is dropped; AT-M4 gains forgeries that look valid | 4.2, AT-M4 |
+| 2 (high) | The sanitizer takes the final output schema: `sanitized_schema_metadata(meta, *, for_schema)`, called only inside `safe_output`; E2 sites use `attach_output_metadata(schema, meta)`; AT-S2 allowed forms updated | 4.1, 4.3, AT-S2 |
+| 3 (high) | One neutral Arrow-to-pandas descriptor registry `_pandas_descriptors.py`, used by native admission and by output sanitizing, each with its own policy; admission behaviour byte-identical (AT-R1) | 4.2, 8.2, 9 |
+| 4 (medium) | AT-M1 covers every nested type the stripper supports, each with its own omission mutation; an unhandled nested type fails closed | 4.1, AT-M1 |
+| 5 | One-repin order made explicit: no hard dependency; the fallback costs a second CLI repin, recorded | 12.1 |
+| 6 | Standing guards (CE-10, CC-4, CC-5) are named outside the mutation claim | 8 |
 
 Owner questions Q1 to Q6 were answered on 2026-11-18 with the recommended answers (section 15).
 
@@ -84,9 +95,10 @@ Remaining custom code: about 130 lines (the sanitizer and the pandas-blob filter
 
 `safe_output/_file_metadata.py` (new) owns the rule:
 
-- `output_schema(schema: pa.Schema) -> pa.Schema`: the same names, types and nullability; every field (recursively through struct, list, large_list, fixed_size_list, map and dictionary value types) has no metadata; schema metadata is `sanitized_schema_metadata(schema.metadata)`.
+- `output_schema(schema: pa.Schema) -> pa.Schema`: first builds a metadata-free schema with the same names, types and nullability. Every field is stripped recursively through struct, list, large_list, fixed_size_list, list_view, large_list_view, map (key and item fields), dense and sparse union, and the value type of a dictionary. A nested type outside this list raises `TypeError` (a code defect, fail closed; a test enumerates pyarrow's nested type predicates so a new pyarrow nested type turns that test red). Then it attaches `sanitized_schema_metadata(schema.metadata, for_schema=<the metadata-free schema>)`.
 - `output_table(table: pa.Table) -> pa.Table`: `table.cast(output_schema(table.schema))` when the two schemas differ under `check_metadata=True`, else `table` itself. Types are equal, so the cast copies no buffers.
-- `sanitized_schema_metadata(meta) -> dict[bytes, bytes] | None`: applies `_ALLOWED_SCHEMA_KEYS`, a mapping from key to its sanitizer. 1.0 holds one entry, `b"pandas": _sanitize_pandas_blob`. Any other key is dropped. `None` when nothing remains.
+- `sanitized_schema_metadata(meta, *, for_schema: pa.Schema) -> dict[bytes, bytes] | None`: applies `_ALLOWED_SCHEMA_KEYS`, a mapping from key to its sanitizer. 1.0 holds one entry, `b"pandas": _sanitize_pandas_blob`. Any other key is dropped. `None` when nothing remains. `for_schema` is the final output schema; the pandas sanitizer reads field names and Arrow types from it, never from `meta`. Called only inside `safe_output`.
+- `attach_output_metadata(schema: pa.Schema, meta) -> pa.Schema`: returns `schema` with its schema metadata replaced by `sanitized_schema_metadata(meta, for_schema=schema)` (or removed when that is `None`). Field metadata is left as it is (in memory, Q5). The in-memory entry for E2.
 - Public: `decoy_engine.output_schema` and `decoy_engine.output_table` (root facade exports, for the CLI). F38 can add `*, policy=` to both later.
 
 Callers:
@@ -96,22 +108,26 @@ Callers:
 
 ### 4.2 The sanitized pandas blob
 
-Parsed with `strict_json_loads`. Anything that is not a JSON object, or fails a rule below, is dropped as a whole, and the output has no `b"pandas"` key (fail toward stripping; no error). String checks use `re.fullmatch` (defect class 1: `$` matches before a trailing newline).
+Rule: no member is copied because its shape looks valid. Each written value is derived from (a) the output schema `for_schema`, (b) the running pyarrow and pandas versions, or (c) a constant of the descriptor registry. The source blob is used only to choose among registry constants that are all correct for the output Arrow type (for example `int64` or `Int64` for an Arrow int64), so it can tell the reader which pandas dtype to rebuild and cannot carry free text or a number.
+
+The source blob is parsed with `strict_json_loads`. If it is not a JSON object, the output has no `b"pandas"` key (fail toward stripping; no error). The one string check left (an `index_columns` entry naming an output field) is an exact equality against `for_schema` names.
+
+Descriptor registry: `src/decoy_engine/_pandas_descriptors.py` (new, a bottom leaf that imports only `pyarrow`). It holds, per Arrow type, the closed set of `(pandas_type, numpy_type)` pairs pyarrow writes for that type at the pinned version, the first pair being pyarrow's default; the column-index entry; and the per-type metadata builder (timezone from a timestamp type, `ordered` from a dictionary type, `precision` and `scale` from a decimal type). Native admission (`execution/native/_faker_deterministic_admission.py:117-145`) imports its `_PANDAS_TYPE_TABLE` pairs and `_COLUMN_INDEX_SHAPE` from it: admission's policy (exact match on the default pair, decline otherwise) and the output policy (choose a listed pair, or the default) stay in their own modules. There is one table.
 
 | Member | Rule |
 |---|---|
-| `columns` | kept. Each entry keeps only `name`, `field_name`, `pandas_type`, `numpy_type`, `metadata`. `field_name` must name a field of the output schema, else the entry is dropped. `name` is set equal to `field_name`. `pandas_type` must be a member of a closed enum: the logical type names that pyarrow's `pandas_compat` writes at the pinned pyarrow (`bool`, the int, uint and float widths, `datetime`, `datetimetz`, `date`, `time`, `bytes`, `unicode`, `decimal`, `categorical`, `object`, `empty`) or `list[<member>]`. The enum is derived in a test from pyarrow's own mapping, so a pin bump that adds a name fails that test instead of dropping entries without notice. `numpy_type` must be a string of at most 64 characters that fullmatches `[A-Za-z0-9_\[\], :/.()-]+`. Otherwise the entry is dropped. `metadata` keeps only `timezone` (string, must equal the Arrow field type's tz), `num_categories` (int, not bool), `ordered` (bool), `precision` and `scale` (int, not bool), `encoding` (`"UTF-8"`); otherwise `null` |
-| `index_columns` | keeps string entries that name a field of the output schema; drops every range-index object (its `name` is user text and its `stop` is a source row count) |
+| `columns` | rebuilt, one entry per field of `for_schema` whose Arrow type is in the registry, in schema order. `name` and `field_name` are the output field name. `(pandas_type, numpy_type)` is the registry pair the source entry for that field names, if the source pair is equal to one of the listed pairs for the output Arrow type; else the registry default. `metadata` is built from the output Arrow type only: `timezone` from a timestamp type's tz, `ordered` from a dictionary type, `precision` and `scale` from a decimal type, `encoding: "UTF-8"` where pyarrow writes it; otherwise `null`. `num_categories` is never written (it is a count of source categories, and a writer built from a schema has no data). A field whose type is not in the registry gets no entry |
+| `index_columns` | entries that are strings equal to a field name of `for_schema` are kept (the value written is the output field name); every range-index object is dropped (its `name` is user text and its `stop` is a source row count) |
 | `column_indexes` | replaced with pyarrow's default single entry (`name` null, `field_name` null, `pandas_type` `"unicode"`, `numpy_type` `"object"`, `metadata` `{"encoding": "UTF-8"}`) |
 | `creator` | always written as `{"library": "pyarrow", "version": pyarrow.__version__}` of the running process; the source's value is never copied |
-| `pandas_version` | kept only if it is at most 32 characters and fullmatches a PEP 440 public version with no local segment (`[0-9]+(\.[0-9]+)*((a\|b\|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?`), else dropped |
+| `pandas_version` | always the running pandas version (`importlib.metadata.version("pandas")`, read once at first use, so the facade import stays light); the source's value is never copied |
 | `attributes` and any other member | dropped |
 
-The JSON is re-encoded the way pyarrow writes it (`json.dumps` with default separators, members in pyarrow's order). A blob that pyarrow wrote for a frame with no `attrs`, no column-index name and `preserve_index=False` comes out byte-identical. AT-M3 pins that.
+The JSON is encoded the way pyarrow writes it (`json.dumps` with default separators, members in pyarrow's order). A blob that pyarrow wrote in the same process for a frame with no `attrs`, no column-index name, no categorical column and `preserve_index=False` comes out byte-identical. AT-M3 pins that; for categorical columns it pins the dtype round trip instead (`num_categories` is gone).
 
 ### 4.3 Carriers in memory (E2)
 
-Scope: the ten explicit copy sites of section 5.1, and no more (Q5). The six out-of-core builders copy `source_schema.metadata` or `batch.schema.metadata` into a new schema. `execution/_transforms_table.py:120` keeps every non-pandas source key. `execution/_faker_degenerate_pin.py:214` passes the rest of the source metadata through. E2 routes each through `sanitized_schema_metadata(...)`, so in-memory tables built by the engine carry no custom schema key and no `attributes`. Field metadata in memory stays as it is (passthrough columns are the source field by contract, `docs/compatibility-contract.md` line 852); the writers strip it.
+Scope: the ten explicit copy sites of section 5.1, and no more (Q5). The six out-of-core builders copy `source_schema.metadata` or `batch.schema.metadata` into a new schema. `execution/_transforms_table.py:120` keeps every non-pandas source key. `execution/_faker_degenerate_pin.py:214` passes the rest of the source metadata through. E2 changes each to build the schema without metadata and then call `attach_output_metadata(schema, source_meta)`, so the blob is derived from the schema the site actually builds, and in-memory tables built by the engine carry no custom schema key and no `attributes`. Field metadata in memory stays as it is (passthrough columns are the source field by contract, `docs/compatibility-contract.md` line 852); the writers strip it.
 
 ### 4.4 Errors and logs
 
@@ -218,7 +234,7 @@ Golden and determinism checks compare values, or hash outputs written from metad
 
 ## 8. Acceptance tests (red first)
 
-Each test is written first and fails on the slice base for the stated reason, then passes on the slice head. Each named mutation must turn its test red on the final slice head.
+Each test is written first and fails on the slice base for the stated reason, then passes on the slice head. Each named mutation must turn its test red on the final slice head. Standing guards are outside that claim: CE-10, CC-4 and CC-5 are expected green on the base and have no mutation; they stop a later regression (a CSV header comment, a CLI route that bypasses the writers) and are listed as guards in the slice gate record.
 
 ### 8.1 E0: the canary across all routes (settles the unknowns)
 
@@ -250,7 +266,7 @@ Each CE cell names its publishing entry and reads the file that entry committed:
 | CE-7 | unregistered-extension column on full_frame and out_of_core | unknown | as CE-1 | E0 |
 | CE-8 | zero-row source on out_of_core and chunked | unknown | as CE-1 | E0 |
 | CE-9 | subset output | expected green (Polars) | write the subset frame with the source schema attached | E0 |
-| CE-10 | CSV target on out_of_core: no canary in the file | expected green | none (a guard against a future CSV header comment) | E0 |
+| CE-10 | CSV target on out_of_core: no canary in the file | standing guard, expected green | none (standing guard) | E0 |
 
 E0 rule: every cell red on the base is marked `pytest.mark.xfail(strict=True, reason="OUTPUT-METADATA-LEAK: <canary set>")`, so it stays visible and fails the suite the moment it turns green without the marker being removed. E0 also writes `docs/records/2026-11-<dd>-output-metadata-canary.md`: the full matrix (route by carrier, red or green) from one Linux VM run (`VMRUN_LINUX=1 ~/bin/vm-run engine <wt> 'pytest tests/security/test_output_metadata_canary.py -rxX'`) plus the companion-lane run for CE-4. If a cell needs a route the test kit cannot reach, the record says so and lists it as a follow-up; it is not dropped silently.
 
@@ -258,10 +274,11 @@ E0 rule: every cell red on the base is marked `pytest.mark.xfail(strict=True, re
 
 | Id | Test | Red because | Mutation that must turn it red | Slice |
 |---|---|---|---|---|
-| AT-M1 | `tests/unit/safe_output/test_file_metadata.py::test_fields_stripped_recursively` (struct, list, map, dictionary value fields; `PARQUET:field_id`) | no function | strip top-level fields only | E1 |
+| AT-M1 | `tests/unit/safe_output/test_file_metadata.py::test_fields_stripped_recursively[type]`, one cell per supported nested type, each with metadata on the nested child and on `PARQUET:field_id`: struct, list, large_list, fixed_size_list, list_view, large_list_view, map key, map item, dense union, sparse union, dictionary value; plus `::test_nested_types_enumerated` (every pyarrow `pa.types.is_*` nested predicate at the pin maps to a handled case, and an unhandled nested type raises `TypeError`) | no function | strip top-level fields only; and one omission mutation per type (drop the large_list branch, drop the fixed_size_list branch, drop the map item branch, and so on), each turning only its own cell red | E1 |
 | AT-M2 | `::test_only_allowed_schema_keys` (custom key, `PANDAS_ATTRS`, non-UTF-8 key bytes) | no function | add `b"PANDAS_ATTRS"` to `_ALLOWED_SCHEMA_KEYS` | E1 |
 | AT-M3 | `::test_pandas_blob_sanitized` (`attributes` gone, column-index name gone) and `::test_clean_blob_identical[dtype]` over a dtype matrix: categorical, tz-aware datetime, decimal, nullable `Int64`, `string[pyarrow]`, non-ns datetime (`datetime64[ms]`), bool, and non-ASCII column names. For a frame with no `attrs`, `sanitized_schema_metadata(Table.from_pandas(df, preserve_index=False).schema.metadata)` equals the input bytes, and a round trip through `read_pandas` gives the same dtypes. File-level cell `::test_clean_file_identical`: `StagedParquetWriter.write` output bytes equal raw `pq.write_table` bytes for the same clean table | no function | keep `attributes`; re-encode with other separators (identity cells turn red); build the output table with `pa.Table.from_arrays(table.columns, schema=...)` instead of `cast` (keeps nested child field metadata; the nested cell of AT-M1 and the file-level cell turn red) | E1 |
-| AT-M4 | `::test_bad_blob_dropped` (not JSON, a JSON list, NaN, a 1 MiB string, wrong member types, a bool where an int is required, a type string ending in `"\n"`, a forged `creator` (`{"library": "x", "version": "<canary>"}`), a forged `pandas_type` outside the enum, a `pandas_version` with a local segment or over 32 characters) | no function | raise instead of dropping; match with `re.match` (the newline cell turns red); copy the source `creator` (the forged-creator cell turns red); replace the enum with the free pattern (the forged-type cell turns red) | E1 |
+| AT-M4 | `::test_forged_blob_not_copied`. Shape forgeries: not JSON, a JSON list, NaN, a 1 MiB string, wrong member types, a string ending in `"\n"`. Forgeries that look valid: `numpy_type: "DCY-CANARY"`, and a plausible but wrong `numpy_type` (`"int32"` on an Arrow int64); a numeric secret (`314159265`) in `precision`, `scale` and `num_categories`; `pandas_version: "9.9.9"` and `creator: {"library": "pyarrow", "version": "99.0.0"}`; `pandas_type: "decimal"` on an Arrow string; an `index_columns` string that names no output field. Each cell asserts the output blob equals the blob derived from the output schema alone (the canary or number is absent) | no function | keep any `numpy_type` that fullmatches the old pattern (the `DCY-CANARY` cell turns red); copy `precision` from the source (the numeric cell turns red); copy `pandas_version` (the version cell turns red); copy `creator` | E1 |
+| AT-R1 | `tests/unit/execution/native/test_admission_descriptor_parity.py`: a fixed corpus of schemas (every row of the old `_PANDAS_TYPE_TABLE`, the column-index shape, unlisted types, forged pairs, extension and field-metadata cases) gives the same admission decision and reason code before and after the move; written and green on the E1 base first, then kept green. The registry's admission view equals the old 13 pairs | new test | change one admission pair in the registry (an int64 row) | E1 |
 | AT-M5 | `::test_blob_entries_follow_output_schema` (unknown `field_name`, range index, `name` differing from `field_name`) | no function | keep range-index objects | E1 |
 | AT-M6 | `tests/fileaccess/test_output_writers.py`: `output_parquet_writer` with a dirty schema and dirty batches writes a clean footer; `write_output_table` likewise; a clean table passes through without a copy (same buffer addresses) | no output writers | sanitize the batches but build the writer from the raw schema | E1 |
 | AT-S1 | `tests/sentry/defects/test_output_metadata_choke_point.py`: walks `src/decoy_engine` with the file-access resolver. Watch set: the full CLI G-ONE-TARGET-WRITE Parquet set (`pyarrow.parquet.write_table`, `ParquetWriter`, `write_to_dataset`; `pyarrow.dataset.write_dataset`), plus `pyarrow.parquet.write_metadata`, `DataFrame.to_parquet`, Polars `DataFrame.write_parquet` and `LazyFrame.sink_parquet`, the Arrow and Polars adapter writers, DuckDB relation `.write_parquet`, and `execute()` / `sql()` calls whose SQL contains `COPY ... TO`. The SQL check joins string literals and f-string constant parts and resolves a `Name` or imported name bound to a module-level string constant (so `_PRIVATE_COPY` from `out_of_core/_duckdb.py:27` is seen). Every hit is inside an output writer of `fileaccess/adapters/arrow.py`, or matches a row of `tests/sentry/baselines/parquet-intermediate-writers.json` keyed by (module, function) with a category (`intermediate` or `published-polars`) and a reason, and a count per key. The baseline is shrink-only through `scripts/dev/ratchet_check.py`. At `ad36687a6` the COPY hits are the 7 statements in 3 functions of 5.3. Covered spellings, each with one seeded cell that fails: direct attribute call, `from pyarrow.parquet import write_table as w`, module alias, adapter call through `arrow_adapter`, `write_dataset`, `write_metadata`, `sink_parquet`, DuckDB `relation.write_parquet`, COPY in a plain literal, COPY with the format in an imported constant, COPY split across f-string parts. The output writers themselves must call `output_schema` or `output_table` (seeded cell removes the call) | no sentry | switch `StagedParquetWriter.write` back to `arrow_adapter.write_table` | E1 |
@@ -272,7 +289,7 @@ E0 rule: every cell red on the base is marked `pytest.mark.xfail(strict=True, re
 
 | Id | Test | Red because | Mutation that must turn it red | Slice |
 |---|---|---|---|---|
-| AT-S2 | `tests/sentry/defects/test_metadata_carrier.py`: AST walk of `src/decoy_engine`. Every schema-metadata argument (the `metadata=` keyword or second positional of `pa.schema`, `pa.record_batch`, `pa.RecordBatch.from_arrays`, `pa.Table.from_arrays`, `pa.Table.from_batches` schema built inline, and the argument of `replace_schema_metadata` and `Schema.with_metadata`) must be `None`, a literal, or a direct `sanitized_schema_metadata(...)` call. A local name (`meta` at `_transforms_table.py:120-122`, the merged dict at `_faker_degenerate_pin.py:214`) fails. Field-level `metadata=` on `pa.field` is out of scope (Q5). Seeded cells: a direct `.metadata` read, a local variable, a dict merge | the ten sites in 5.1 | restore `metadata=source_schema.metadata` at `_rewrite_pass.py:377`; restore `meta` at `_transforms_table.py:122` | E2 |
+| AT-S2 | `tests/sentry/defects/test_metadata_carrier.py`: AST walk of `src/decoy_engine`. Every schema-metadata argument (the `metadata=` keyword or second positional of `pa.schema`, `pa.record_batch`, `pa.RecordBatch.from_arrays`, `pa.Table.from_arrays`, `pa.Table.from_batches` schema built inline, and the argument of `replace_schema_metadata` and `Schema.with_metadata`) must be `None` or a literal. Source metadata reaches a schema only through `attach_output_metadata(schema, meta)`. `sanitized_schema_metadata` may be called only inside `safe_output/` (a call elsewhere fails). A local name (`meta` at `_transforms_table.py:120-122`, the merged dict at `_faker_degenerate_pin.py:214`) fails. Field-level `metadata=` on `pa.field` is out of scope (Q5). Seeded cells: a direct `.metadata` read, a local variable, a dict merge | the ten sites in 5.1 | restore `metadata=source_schema.metadata` at `_rewrite_pass.py:377`; restore `meta` at `_transforms_table.py:122` | E2 |
 | AT-E2 | `tests/security/test_output_metadata_canary.py::test_in_memory[out_of_core_fk, resident_transforms, stream_no_sink]`: the returned tables' schema metadata holds no schema-key, attrs-member or creator canary (stream without a sink publishes no file, so it is checked here) | carriers | restore the `_transforms_table.py:120` line | E2 |
 
 ### 8.4 CLI (C1)
@@ -292,7 +309,10 @@ Engine (rows of `CODEMAP.md` "Where Things Go"):
 
 | File | New or changed | CODEMAP row | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/safe_output/_file_metadata.py` | new (E1, about 130 lines) | Safe output boundary: `src/decoy_engine/safe_output/_<output concern>.py` | `safe_output/_event.py` |
+| `src/decoy_engine/_pandas_descriptors.py` | new (E1, about 90 lines): the one Arrow-to-pandas descriptor registry; a bottom leaf importing only `pyarrow`, added to the leaf list in `.importlinter` | Shared bottom leaf modules (the top-level `Path | Purpose` table of `CODEMAP.md`, where `src/decoy_engine/_arrow_types.py` has its row; a new row is added beside it) | `src/decoy_engine/_arrow_types.py` |
+| `src/decoy_engine/execution/native/_faker_deterministic_admission.py` | changed (E1, about -30 +3): imports the pairs and the column-index shape from the registry; policy unchanged; file stays in place, already in the physical-seam permitted set | Native companion bridge: `src/decoy_engine/execution/native/` | |
+| `tests/unit/execution/native/test_admission_descriptor_parity.py` | new (E1) | Unit tests | existing admission tests |
+| `src/decoy_engine/safe_output/_file_metadata.py` | new (E1, about 150 lines) | Safe output boundary: `src/decoy_engine/safe_output/_<output concern>.py` | `safe_output/_event.py` |
 | `src/decoy_engine/safe_output/__init__.py` | changed (E1): re-exports | same | |
 | `src/decoy_engine/fileaccess/adapters/arrow.py` | changed (E1, about +25): `write_output_table`, `output_parquet_writer` | Secret providers, file access | `write_table`, `parquet_writer` |
 | `src/decoy_engine/execution/_transactional_sink.py`, `src/decoy_engine/publication/_publish.py` | changed (E1, two or three lines each) | Pipeline spine and routes; Publication | |
@@ -324,7 +344,8 @@ CLI (rows of `C:CODEMAP.md` "Where Things Go"):
   - CLI: the `WRITERS` of `_targets.py` (already the only table writers under G-ONE-TARGET-WRITE). Guard: CC-6. Mutation: a writer that skips `output_table`.
 - Why at the output writer and not at every Parquet write (the investigator's first suggestion): intermediate files feed logic that reads metadata on purpose (stored pandas index fields in `execution/native/_chunk_schema.py:60`, native admission shape checks at `_faker_deterministic_admission.py:259`, the isolated child reading its sources). Stripping there changes routing and admission, which is not this row. Intermediates are never published. Owner Q4.
 - Why also clean the in-memory carriers (E2) when the writer already guarantees files: in-memory tables cross into the CLI and the SDK, and a carrier left in place is how the next writer leaks. It is one line per site and gets its own sentry.
-- Why keep a sanitized pandas blob (owner Q1): without it a pandas reader loses nullable integer and categorical dtypes on round trip, and every resident output's bytes change. With the closed filter, clean-source bytes stay identical (AT-M3).
+- Why keep a derived pandas blob (owner Q1): without it a pandas reader loses nullable integer and categorical dtypes on round trip, and every resident output's bytes change. A blob derived from the output schema plus a choice among registry pairs keeps those dtypes and keeps clean-source bytes identical (AT-M3), with nothing copied from the source.
+- Why one descriptor registry: native admission already maps Arrow types to the exact pandas pair. A second table in `safe_output` would drift from it. The registry holds the facts; admission and output each keep their own policy.
 - Why separate output writer functions and not a flag: house style (no flag arguments that switch behavior). `write_output_table` and `write_table` are two named entry points on one core (defect class 8).
 - F38 seam: `_ALLOWED_SCHEMA_KEYS` is the one registry, and `output_schema` and `output_table` are the one entry. F38 adds `*, policy: MetadataPolicy = STRIP` and a preserve policy built from the run config, threaded to the output writers. Nothing is pre-built now.
 - Logs: none added.
@@ -335,7 +356,7 @@ CLI (rows of `C:CODEMAP.md` "Where Things Go"):
 | Slice | Src lines | Test lines | Docs lines | Files touched |
 |---|---|---|---|---|
 | E0 | 0 | about +330 | about +60 (record) | 4 |
-| E1 | about +170 | about +420 | about +90 | src 6, tests 5, docs 4, baseline 1 |
+| E1 | about +250, -30 | about +520 | about +90 | src 8, tests 6, docs 4, baseline 1 |
 | E2 | about +20, -10 | about +170 | about +5 | src 8, tests 2 |
 | C1 | about +20 | about +260 | about +15 | src 1, tests 3, docs 2 |
 
@@ -346,8 +367,8 @@ New public names: `output_schema`, `output_table` (engine). No product file grow
 | Slice | Repo | Content | Risk | Acceptance tests | Depends on | Test gate |
 |---|---|---|---|---|---|---|
 | E0 | engine | canary helper, route matrix with strict xfail on red cells, record of the matrix | R1 (tests only) | AT-C0, CE-1 to CE-10 | none | T0 on the new files; one Linux VM run plus the companion lane for CE-4; Codex review |
-| E1 | engine | `safe_output/_file_metadata.py`, output writers, three call sites, public exports, choke-point sentry and baseline, flip of the engine CE cells, docs, fragment | R2 | AT-M1 to AT-M6, AT-S1, AT-E1, AT-P1 | E0 | T1 impact set (safe_output, fileaccess, publication, transactional sink, out_of_core, chunked, security, sentry) on the head, plus T2: each named mutation. Frozen-contract trigger: one saved-baseline full suite via `decoy-vm-t3` on the merge head. Dennis then Codex |
-| E2 | engine | ten carrier sites through `sanitized_schema_metadata`, carrier sentry, in-memory cells | R1 | AT-S2, AT-E2 | E1 | T1 (out_of_core, transforms, faker pin, parity suites unchanged) plus the physical-seam sentry; Codex |
+| E1 | engine | `safe_output/_file_metadata.py`, output writers, three call sites, public exports, choke-point sentry and baseline, flip of the engine CE cells, docs, fragment | R2 | AT-M1 to AT-M6, AT-R1, AT-S1, AT-E1, AT-P1 | E0 | T1 impact set (safe_output, fileaccess, publication, transactional sink, out_of_core, chunked, security, sentry) on the head, plus T2: each named mutation. Frozen-contract trigger: one saved-baseline full suite via `decoy-vm-t3` on the merge head. Dennis then Codex |
+| E2 | engine | ten carrier sites through `attach_output_metadata`, carrier sentry, in-memory cells | R1 | AT-S2, AT-E2 | E1 | T1 (out_of_core, transforms, faker pin, parity suites unchanged) plus the physical-seam sentry; Codex |
 | C1 | CLI | `_targets.py` through `output_table` and `output_schema`, CLI canary e2e, sentry rule, changelog | R2 | CC-1 to CC-6 | the engine release that carries E1, and the CLI repin to it | T1 (`tests/e2e/cli_fmt/`, io_policy sentries, unmask e2e) plus T2 on the head; Dennis then Codex |
 
 Order: E0 now. E1 starts when E0's record exists (the record may add sites to 5.3; it cannot move the choke point). E2 after E1. C1 after the engine release that carries E1; target before the D-4 engine freeze ahead of 2026-12-04. The row closes only when C1 merges.
@@ -359,23 +380,23 @@ Against `plan/freeze-batch` revision 2 (`24b1da552`, `docs/plans/2026-11-18-free
 - E1 rebases after freeze X0 merges (X0 changes the frozen-surface map and contract section 1; E1 adds a row to the same map).
 - E1 rides the same engine release as freeze O1 and O3, so the output-byte changes reach users in one release with one set of Breaking fragments.
 - C1 lands after freeze O2, which changes the same two `_targets.py` write functions (`_write_table`, `write_chunked_output`), and rebases on it. C1 uses the single CLI repin to that engine release; it adds no second repin.
-- If the freeze release goes first without E1, E1 takes the next daily release and C1 waits for its repin; nothing in this plan blocks the freeze batch.
+- No hard dependency. E1 is R2 and waits on E0's record, so it may not merge by the time the freeze release is cut, and the freeze batch must not wait for it. Decision: if E1 is merged when the freeze release is cut, it rides that release and C1 uses the single CLI repin. If not, the freeze release ships without E1, E1 takes the next daily release, and C1 needs a second CLI repin to that release. That second repin is the recorded cost of the fallback; it follows the standard repin checklist.
 
 ## 13. Recurring-defect class check
 
 - Two copies of a central mechanism: one sanitizer, one registry, one engine writer pair, one CLI writer set; each has a sentry.
 - A test weakened to pass: E0's strict xfail markers are removed only by the slice that fixes the cell; the gate diff-checks that no canary assertion changed.
 - A grep counted as an enumeration: AT-S1 and AT-S2 walk the syntax tree with alias resolution and prove a seeded bypass per covered spelling.
-- Anchored validation: every string check in 4.2 uses `re.fullmatch`; AT-M4 has a trailing-newline cell.
+- Anchored validation: 4.2 has no pattern check left; values are derived or are exact equality against output names and registry pairs; AT-M4 keeps a trailing-newline cell.
 - Allowlisted helpers are still checked: the output writers are the allowed sites in AT-S1, and their own bodies must call `output_schema` or `output_table` (a seeded cell removes the call).
 - Value exposure (F31 class): metadata text never enters an error or log line.
 
 Catalog `catalogs/recurring-defects.md`, all 11 classes:
 
-1. Anchored validation: `re.fullmatch` in 4.2; AT-M4 newline cell.
+1. Anchored validation: no pattern checks in 4.2 (derived values and exact equality only); AT-M4 newline cell.
 2. Strict wire and stored types: the pandas blob is parsed with `strict_json_loads` into a closed member set with typed values.
 3. No exception context: the sanitizer raises nothing; no new exception.
-4. Versioned read models: the pandas blob is read with its own closed rules; a blob from an unknown pyarrow writes a fresh `creator`; the enum is derived from the pinned pyarrow.
+4. Versioned read models: the pandas blob is read with its own closed rules; `creator` and `pandas_version` come from the running libraries; the descriptor registry is checked against the pinned pyarrow.
 5. Normalized guard scanners: AT-S1 and AT-S2 resolve aliases, re-exports, module constants and f-string parts; one seeded cell per spelling.
 6. No reaching into private modules: the CLI imports `decoy_engine.output_table` and `output_schema`, never `safe_output._file_metadata`.
 7. No hidden CI failures: strict xfail on E0 red cells; the sentries fail, never skip.
@@ -393,7 +414,7 @@ Catalog `catalogs/recurring-defects.md`, all 11 classes:
 | 3 | State completeness: every metadata kind handled | the closed list in 5.5, one test cell per kind | AT-M1 to AT-M5 | drop the recursion into map value fields | E1 |
 | 4 | Route coverage: a route that writes output without the rule | one output writer pair used by every engine route; CLI writers pinned | CE matrix over every route in 5.3, AT-S1, CC-6 | route the F22 publish through the raw adapter | E0, E1, C1 |
 | 5 | Referential integrity | N/A: no key or FK value changes; FK shapes only reach the same writer (5.4) | none | none | none |
-| 6 | Untrusted input: the source's metadata bytes and pandas JSON | strict JSON parser, closed member set, length and fullmatch pattern limits, drop on any failure | AT-M4, AT-M5 | accept a non-object JSON top level | E1 |
+| 6 | Untrusted input: the source's metadata bytes and pandas JSON | strict JSON parser; every written value derived from the output schema, the running versions or a registry constant; the source only chooses among registry pairs | AT-M4, AT-M5 | accept a non-object JSON top level | E1 |
 | 7 | TOCTOU / check-then-use: one schema checked, another written | the writer is constructed from the sanitized schema itself; nothing checks a schema and then writes a different one | AT-M6 (dirty batches into a clean writer) | build the writer from the batch schema | E1 |
 | 8 | Weak proof: a canary check that cannot see field metadata | the helper decodes `ARROW:schema` and parses the pandas blob; its own test proves it sees a base64-only canary | AT-C0 | remove the decode step | E0 |
 | 9 | Refactor drift | N/A: no refactor or move; every touched line is behaviour, and execution files stay in place (physical-seam gate) | none | none | none |
