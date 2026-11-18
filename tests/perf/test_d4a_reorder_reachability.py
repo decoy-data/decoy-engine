@@ -68,6 +68,10 @@ def _run_worker(data_dir: Path, work_root: Path, *extra: str) -> dict:
         ],
         capture_output=True,
         text=True,
+        # The worker measures its own peak RSS against _RSS_GUARD_MB, so it must start with the
+        # allocator and thread-pool pins: unpinned, glibc arenas on a 26-core host add about
+        # 80 MB and the run lands on either side of the guard.
+        env={**os.environ, **CAPPED_ENV},
         timeout=600,
         check=False,
         env={**os.environ, **CAPPED_ENV},
