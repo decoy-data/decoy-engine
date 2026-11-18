@@ -251,7 +251,6 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # google-cloud-storage does not survive the profile without it.) See
 # ``assert_lock_matches_installed`` for the guard that proves
 # the installed set is exactly the lock's marker-selected pins.
-#
 # CI ADDS THE OTHER ROWS. The dependency-matrix workflow
 # (``.github/workflows/dps-dependency-matrix.yml``) runs on exact-pinned CPython
 # patches (3.10.x / 3.11.x / 3.12.x), computes the fingerprint per row, and
@@ -280,9 +279,10 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # with certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces
             # 31ecf945.... 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine
             # moved); 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79...
-            # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
-            # regenerated NOTICE. Rows from SCAN-ML M2 (classifier stack in base deps) on are one
-            # per engine release, newest first.
+            # adds pytest-timeout (80); 50facd49... adds time-machine (81). A lock change needs its
+            # own row (test_dp_lock_row.py) and a regenerated NOTICE. Rows from SCAN-ML M2
+            # (classifier stack in base deps) on are one per engine release, newest first.
+            "50facd49c5772392770a72c517d6129dce717136a1afbad1acb9b068802d880f",
             "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
