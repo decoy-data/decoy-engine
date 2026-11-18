@@ -17,6 +17,7 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any, Final
 
+import numpy as np
 import pandas as pd
 
 from decoy_engine._canonical import (
@@ -39,6 +40,9 @@ ARRAY: Final = "array"
 
 # Key rule 1. `fullmatch` anchors at the true end of the text, so a trailing newline fails.
 _KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# Key rule 1b: a run of four digits reads as an id, a date or a phone or zip fragment, so the key
+# is a wildcard. Short runs (`line1`, `v2`, `sha256`) stay names.
+_DIGITS = re.compile(r"\d{4}")
 _VERDICTS: Final = 1024
 # A scalar leaf is kept for detection up to this many characters, so a few huge leaves cannot hold
 # `SCAN_LEAF_SAMPLE` megabytes per path. A detector matches short values, so the cut loses nothing.
@@ -128,7 +132,7 @@ class Levels:
                 level.last[key] = self.cell
                 level.counts[key] += 1
             return str(key)
-        if not isinstance(key, str) or not _KEY.fullmatch(key):
+        if not isinstance(key, str) or not _KEY.fullmatch(key) or _DIGITS.search(key):
             return WILD
         data = self._is_data(level, key)
         if not data:
@@ -170,13 +174,48 @@ class Levels:
         return verdict
 
     def finalize(self) -> None:
-        """Key rule 3: a key needs at least 2 cells and `SCAN_KEY_APPEARANCE` of its parent's."""
-        for level in self._levels.values():
-            level.kept = frozenset(
-                key
-                for key, count in level.counts.items()
-                if count >= 2 and count / level.cells >= SCAN_KEY_APPEARANCE
-            )
+        """Key rule 3: a key needs at least 2 cells and `SCAN_KEY_APPEARANCE` of its parent's.
+
+        A dropped key is `*` in pass 2, so the levels pass 1 tracked below it fold into the levels
+        below `*` first. Levels run from the root down, so a level has every fold into it before its
+        own keys are judged."""
+        for depth in range(max((len(p) for p in self._levels), default=0) + 1):
+            for pattern in [p for p in self._levels if len(p) == depth]:
+                level = self._levels.get(pattern)
+                if level is None or level.collapsed:
+                    continue
+                level.kept = frozenset(
+                    key
+                    for key, count in level.counts.items()
+                    if count >= 2 and count / level.cells >= SCAN_KEY_APPEARANCE
+                )
+                for key in level.counts.keys() - level.kept:
+                    self._fold((*pattern, key), (*pattern, WILD))
+
+    def _fold(self, source: Pattern, target: Pattern) -> None:
+        """Move every level at or below `source` to the same place below `target`, merging counts
+        into a level that is already there. No key text is added: only keys already stored move."""
+        size = len(source)
+        for pattern in [p for p in self._levels if p[:size] == source]:
+            level = self._levels.pop(pattern)
+            self.key_total -= len(level.counts)
+            destination = (*target, *pattern[size:])
+            held = self._levels.get(destination)
+            if held is None:
+                self._levels[destination] = level
+                self.key_total += len(level.counts)
+            elif held.collapsed:
+                continue
+            elif level.collapsed:
+                self._collapse(destination, held)
+            else:
+                for key, count in level.counts.items():
+                    if key not in held.counts:
+                        self.key_total += 1
+                    held.counts[key] = held.counts.get(key, 0) + count
+                held.cells += level.cells
+                if len(held.counts) > SCAN_MAP_KEYS:
+                    self._collapse(destination, held)
 
     @property
     def map_collapsed(self) -> int:
@@ -257,6 +296,8 @@ def walk(
     stack: list[tuple[Any, Pattern, int]] = [(root, (), 1)]
     while stack:
         value, pattern, depth = stack.pop()
+        if isinstance(value, np.ndarray) and value.ndim == 1:
+            value = value.tolist()  # a parquet list column reads as a 1-D array
         if pattern and not record(pattern, value):
             continue
         if isinstance(value, dict):

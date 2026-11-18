@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 
 from decoy_engine._canonical import (
@@ -35,7 +36,7 @@ _SCALAR = "scalar"
 
 def _read(cell: Any) -> tuple[Any, str | None]:
     """The tree of one cell and no fault, or no tree and the fault: malformed, oversized, scalar."""
-    if isinstance(cell, (dict, list, tuple)):
+    if isinstance(cell, (dict, list, tuple)) or (isinstance(cell, np.ndarray) and cell.ndim == 1):
         return cell, None
     if not isinstance(cell, str) or not _OPENS.match(cell):
         return None, _SCALAR
