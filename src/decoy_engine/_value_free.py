@@ -15,7 +15,6 @@ instead of being dropped.
 
 from __future__ import annotations
 
-import re
 import types
 from collections.abc import Callable, Collection
 from enum import Enum
@@ -41,15 +40,16 @@ __all__ = [
 # producer that builds one and the record that stores it cannot disagree.
 PLAIN_NAME_PATTERN = r"^[^\x00-\x1f\x7f]+$"
 PLAIN_NAME_MAX = 256
-_PLAIN_NAME = re.compile(PLAIN_NAME_PATTERN)
 
 
 def is_plain_name(value: object) -> bool:
     """True when `value` is a str the record model accepts as a name."""
+    # The same rule as PLAIN_NAME_PATTERN, without a Python `re` (its `$` accepts a trailing
+    # newline, which the pydantic pattern refuses).
     return (
         isinstance(value, str)
         and 0 < len(value) <= PLAIN_NAME_MAX
-        and _PLAIN_NAME.fullmatch(value) is not None
+        and not any(ord(c) < 0x20 or c == "\x7f" for c in value)
     )
 
 
