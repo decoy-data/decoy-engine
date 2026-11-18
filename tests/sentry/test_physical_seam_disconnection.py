@@ -583,6 +583,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
             "src/decoy_engine/execution/_strategies/nested/_handler.py",
+            # Nested leaf dtype and child-output rules, split from the handler for its size cap;
+            # pure value shaping on already-read cells, no physical read or write.
+            "src/decoy_engine/execution/_strategies/nested/_leaves.py",
             "src/decoy_engine/execution/_strategies/_windowed_date.py",
             # Cross-column dependency PR1: joint_mask reads its key_by driver from the pre-mask
             # source snapshot (ctx.group_anchor_snapshots), and derived gains a docstring note for
