@@ -59,6 +59,9 @@ def _config(**extra: Any) -> dict[str, Any]:
     }
 
 
+_STRATEGY = {"id": "hash", "email": "passthrough", "notes": "redact", "cust": "hash"}
+
+
 def _row(column: str, detector: str, severity: str = "warning", **kw: Any) -> dict[str, Any]:
     row: dict[str, Any] = {
         "table": "customers",
@@ -66,7 +69,8 @@ def _row(column: str, detector: str, severity: str = "warning", **kw: Any) -> di
         "detector_id": detector,
         "match_rate": 0.9,
         "severity": severity,
-        "configured_strategy": None,
+        # What the plan said at scan time; the config above holds the same strategies.
+        "configured_strategy": _STRATEGY.get(column),
         "source": "regex",
         "model": None,
         "dismissed": False,
@@ -283,6 +287,59 @@ def test_a_malformed_or_foreign_report_is_refused() -> None:
         _report({**EMAIL, "source": "magic"}),
         _report({**EMAIL, "table": 7}),
     ):
+        assert isinstance(
+            _refusal(lambda r=report: finding_edits(_config(), r, [])), ReviewEntryError
+        )
+
+
+def test_a_stale_report_cannot_dismiss_under_a_strategy_nobody_reviewed() -> None:
+    """The finding came from `passthrough`; the column is `redact` now and the review leaves it."""
+    config = _config(post_scan={"integrity": True})
+    config["tables"][0]["columns"][1]["strategy"] = "redact"
+    err = _refusal(lambda: finding_edits(config, _report(EMAIL), [_decision(EMAIL, V.REJECT)]))
+    assert err.identity == "pre_scan.review_stale"
+    assert (err.table, err.column) == ("customers", "email")
+    # The same review changing the strategy is not stale: the dismissal binds the new one.
+    other = _row("email", "us_phone")
+    edits = finding_edits(
+        config, _report(EMAIL, other), [_decision(EMAIL, V.REJECT), _decision(other, V.CONFIRM)]
+    )
+    assert edits[-1].value["strategy"] == detector_entry("us_phone", "email")["strategy"]
+
+
+def test_a_v2_report_row_without_source_or_model_reads_as_regex() -> None:
+    row = {k: v for k, v in EMAIL.items() if k not in ("source", "model", "dismissed", "promoted")}
+    report = {"schema_version": "post-scan-integrity/v2", "residual_pii": [row]}
+    decision = FindingDecision("customers", "email", "email", "regex", None, V.REJECT)
+    config = _config(post_scan={"integrity": True})
+    (edit,) = finding_edits(config, report, [decision])
+    assert edit.value["source"] == "regex" and edit.value["model_id"] is None
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [None],
+        ["email"],
+        [[1, 2]],
+        [{**EMAIL, "model": {"id": ["x"], "version": "1"}}],
+        [{**EMAIL, "model": {"id": "x", "version": {}}}],
+        [{**EMAIL, "model": {"version": "1"}}],
+        [{**EMAIL, "model": "en_core"}],
+        [{**EMAIL, "detector_id": ["email"]}],
+        [{**EMAIL, "configured_strategy": 3}],
+        [{**EMAIL, "source_identity_rate": "high"}],
+    ],
+)
+def test_a_malformed_row_raises_the_value_free_error(rows: list[Any]) -> None:
+    report = {"schema_version": "post-scan-integrity/v3", "residual_pii": rows}
+    err = _refusal(lambda: finding_edits(_config(), report, []))
+    assert isinstance(err, ReviewEntryError)
+
+
+def test_a_malformed_container_raises_the_value_free_error() -> None:
+    for bad in (5, "rows", {"a": 1}):
+        report = {"schema_version": "post-scan-integrity/v3", "residual_pii": bad}
         assert isinstance(
             _refusal(lambda r=report: finding_edits(_config(), r, [])), ReviewEntryError
         )

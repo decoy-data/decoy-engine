@@ -25,6 +25,7 @@ from decoy_engine.validation.starter_review import (
     ReviewDuplicateError,
     ReviewEntryError,
     ReviewInputError,
+    ReviewStaleError,
     ReviewUnknownColumnError,
     ReviewVerdict,
     _edited_entry,
@@ -32,8 +33,11 @@ from decoy_engine.validation.starter_review import (
     column_entry,
     pin_key_entry,
 )
-from decoy_engine.verification.postmask.residual_pii import is_source_identity_finding
-from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS, ResidualPIIFinding
+from decoy_engine.verification.postmask import (
+    READABLE_SCHEMA_VERSIONS,
+    ResidualPIIFinding,
+    is_source_identity_finding,
+)
 
 __all__ = [
     "ConfigEdit",
@@ -136,10 +140,19 @@ def finding_edits(
             replacements.append(
                 (table_index, -1 if index is None else index, ConfigEdit(path, op, final))
             )
-        strategy = final["strategy"] if final is not None else (current or {}).get("strategy")
+        now = (current or {}).get("strategy")
+        strategy = final["strategy"] if final is not None else now
         for decision, row in group:
             if decision.verdict is not ReviewVerdict.REJECT:
                 continue
+            if strategy == now and row.get("configured_strategy") != now:
+                # The finding was raised under another strategy than the column has now, and this
+                # review does not change it: a dismissal would bind a strategy nobody reviewed.
+                raise ReviewStaleError(
+                    "the finding was raised under a strategy the column no longer has",
+                    table=decision.table,
+                    column=decision.column,
+                )
             dismissal = _dismissal(decision, row, strategy)
             if dismissal is not None and dismissal not in existing and dismissal not in dismissals:
                 dismissals.append(dismissal)
@@ -164,27 +177,48 @@ def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]
     if report.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
         raise ReviewEntryError("the report has an unreadable schema version")
     rows: dict[_Identity, Mapping[str, Any]] = {}
-    for row in report.get("residual_pii") or ():
-        model = row.get("model") if isinstance(row, Mapping) else None
+    listed = report.get("residual_pii")
+    if listed is None:
+        listed = ()
+    if not isinstance(listed, Sequence) or isinstance(listed, str | bytes):
+        raise _malformed()
+    for row in listed:
+        if not isinstance(row, Mapping):
+            raise _malformed()
+        # A v2 row predates the model detectors: no `source`, no `model`.
+        source = row.get("source", "regex")
+        model = row.get("model")
         names = (row.get("table"), row.get("column"), row.get("detector_id"))
         if (
-            not isinstance(row, Mapping)
-            or not all(isinstance(n, str) for n in names)
-            or row.get("source") not in DETECTOR_ORDER
+            not all(isinstance(n, str) for n in names)
+            or not isinstance(source, str)
+            or source not in DETECTOR_ORDER
             or not isinstance(row.get("severity"), str)
+            or not (
+                row.get("configured_strategy") is None
+                or isinstance(row["configured_strategy"], str)
+            )
             or not (model is None or isinstance(model, Mapping))
+            or not _is_rate(row.get("source_identity_rate"))
         ):
-            raise ReviewEntryError("the report holds a malformed finding")
-        ident = (
-            row["table"],
-            row["column"],
-            row["source"],
-            row["detector_id"],
-            None if model is None else model.get("id"),
-            None if model is None else model.get("version"),
+            raise _malformed()
+        model_id = model_version = None
+        if model is not None:
+            model_id, model_version = model.get("id"), model.get("version")
+            if not isinstance(model_id, str) or not isinstance(model_version, str):
+                raise _malformed()
+        rows[(row["table"], row["column"], source, row["detector_id"], model_id, model_version)] = (
+            row
         )
-        rows[ident] = row
     return rows
+
+
+def _is_rate(value: object) -> bool:
+    return value is None or (isinstance(value, int | float) and not isinstance(value, bool))
+
+
+def _malformed() -> ReviewEntryError:
+    return ReviewEntryError("the report holds a malformed finding")
 
 
 def _final_entry(

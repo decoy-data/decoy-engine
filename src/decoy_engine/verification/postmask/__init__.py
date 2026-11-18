@@ -65,8 +65,10 @@ from decoy_engine.verification.postmask._stream_input import (
     missing_columns,
     with_cast,
 )
+from decoy_engine.verification.postmask.residual_pii import is_source_identity_finding
 from decoy_engine.verification.postmask.runner import run_post_mask, run_post_mask_tables
 from decoy_engine.verification.postmask.types import (
+    READABLE_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
     FKPreservationFinding,
     PolicyValidationFinding,
@@ -76,6 +78,7 @@ from decoy_engine.verification.postmask.types import (
 )
 
 __all__ = [
+    "READABLE_SCHEMA_VERSIONS",
     "SCHEMA_VERSION",
     "FKPreservationFinding",
     "KeyCounts",
@@ -92,6 +95,7 @@ __all__ = [
     "from_lazy",
     "from_staged",
     "from_table",
+    "is_source_identity_finding",
     "key_batches",
     "key_columns",
     "keys_report",
