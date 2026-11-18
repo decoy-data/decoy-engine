@@ -19,6 +19,7 @@ gax_exc = pytest.importorskip("google.api_core.exceptions")
 gcs_exc = pytest.importorskip("google.cloud.storage.exceptions")
 
 from decoy_engine.connectors import _clients  # noqa: E402
+from decoy_engine.connectors._digest import DigestingChunks  # noqa: E402
 from decoy_engine.connectors.gcs import GCSConfig, GCSFileSink, GCSFileSource  # noqa: E402
 from decoy_engine.connectors.s3 import S3Config, S3FileSink  # noqa: E402
 from decoy_engine.errors import ConnectorError  # noqa: E402
@@ -57,6 +58,8 @@ class _GcsStore:
         self.deletes: list[dict[str, Any]] = []
         self.delete_fails = False
         self.open_calls: list[tuple[str, dict[str, Any]]] = []
+        self.stale_error: Any = gax_exc.PreconditionFailed  # answer for a replaced generation
+        self.read_fault: Any = None  # raised when a reader closes
 
 
 class _Writer:
@@ -97,7 +100,7 @@ class _Reader:
     def read(self, size: int = -1) -> bytes:
         body, generation = self.blob.store.objects[self.blob.name]
         if "if_generation_match" in self.kw and self.kw["if_generation_match"] != generation:
-            raise gax_exc.PreconditionFailed(MARKER)
+            raise self.blob.store.stale_error(MARKER)
         self.reads += 1
         return body[(self.reads - 1) * 4 : self.reads * 4]
 
@@ -105,7 +108,8 @@ class _Reader:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        return None
+        if self.blob.store.read_fault is not None:
+            raise self.blob.store.read_fault()
 
 
 class _Blob:
@@ -262,23 +266,39 @@ def test_gcs_corruption_without_a_response_means_no_delete() -> None:
     assert info.value.cleanup_ok is False and store.deletes == []
 
 
-def test_gcs_close_and_exit_behave_the_same() -> None:
+@pytest.mark.parametrize("how", ["close", "exit"])
+def test_gcs_close_and_exit_behave_the_same(how: str) -> None:
     store = _GcsStore()
     blob = _Blob(store, "k", _corruption({"generation": "7"}))
     wrapper = _clients.gcs_open(blob, "wb")
     wrapper.write(b"abc")
     with pytest.raises(PermanentError) as info:
-        wrapper.close()
+        wrapper.close() if how == "close" else wrapper.__exit__(None, None, None)
     assert info.value.cleanup_ok is True and len(store.deletes) == 1
 
 
 def test_a_read_wrapper_has_no_cleanup() -> None:
     store = _GcsStore()
     store.objects["k"] = (b"abcdefgh", 3)
+    store.read_fault = _corruption({"generation": "3"})
     blob = _Blob(store, "k")
-    with _clients.gcs_open(blob, "rb") as remote:
-        assert remote.read(4) == b"abcd"
-    assert store.deletes == []
+    with pytest.raises(PermanentError) as info:
+        with _clients.gcs_open(blob, "rb") as remote:
+            assert remote.read(4) == b"abcd"
+    assert info.value.kind == "digest_mismatch" and info.value.cleanup_ok is None
+    assert store.deletes == [] and "k" in store.objects
+
+
+def test_digest_read_before_exhaustion_raises() -> None:
+    digest = DigestingChunks(iter([b"a", b"b"]))
+    with pytest.raises(ValueError):
+        digest.hexdigest()
+    it = iter(digest)
+    next(it)
+    with pytest.raises(ValueError):
+        digest.hexdigest()
+    list(it)
+    assert digest.hexdigest() == hashlib.sha256(b"ab").hexdigest() and digest.count == 2
 
 
 # ----- AT-E2-7: the error attribute and the size ceiling ------------------------------
@@ -327,3 +347,23 @@ def test_gcs_object_replaced_mid_read_is_source_changed() -> None:
         next(reader)
     assert info.value.kind == "source_changed"
     assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+def test_gcs_replaced_object_answering_not_found_mid_read_is_source_changed() -> None:
+    """A real replaced generation can answer 404 (the media link carries the generation)."""
+    store = _GcsStore()
+    store.objects["k"] = (b"abcdefgh", 3)
+    store.stale_error = gax_exc.NotFound
+    reader = _source(store).open("k")
+    assert next(reader) == b"abcd"
+    store.objects["k"] = (b"WXYZ" * 2, 4)
+    with pytest.raises(PermanentError) as info:
+        next(reader)
+    assert info.value.kind == "source_changed"
+    assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+def test_gcs_missing_object_at_reload_stays_not_found() -> None:
+    with pytest.raises(PermanentError) as info:
+        next(_source(_GcsStore()).open("missing"))
+    assert info.value.kind == "not_found"
