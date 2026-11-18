@@ -81,7 +81,7 @@ class TestChildRefusalsReachRulesAfterTheFirst:
         config = _config(
             {
                 "rules": [
-                    _rule("$.a"),
+                    _rule("$.a", "date_shift"),
                     _rule("$.b", "date_shift", strategy_config={"group_by": "id"}),
                 ]
             }
@@ -163,3 +163,46 @@ class TestRequiredSettingsForRules:
 
 def test_a_valid_rules_column_passes_config_only_checks() -> None:
     run_config_only_checks(_config({"rules": [_rule("$.a"), _rule("$.b", "hash")]}))
+
+
+class TestRuleKeysAreAClosedSet:
+    @pytest.mark.parametrize("key", ["when", "namspace", "group_by"])
+    def test_an_unknown_rule_key_is_refused_at_its_own_path(
+        self, key: str, simple_profile: Profile
+    ) -> None:
+        config = _config({"rules": [_rule("$.a"), _rule("$.b", **{key: "x"})]})
+        for error in _refused(config, simple_profile):
+            assert error.code == "nested_rule_key_unknown"
+            assert error.path == f"{COL}.provider_config.rules[1].{key}"
+
+    @pytest.mark.parametrize("value", [5, "", "  ", ["ns"], {}])
+    def test_a_namespace_that_is_not_a_non_blank_string_is_refused(
+        self, value: Any, simple_profile: Profile
+    ) -> None:
+        config = _config({"rules": [_rule("$.a"), _rule("$.b", "hash", namespace=value)]})
+        for error in _refused(config, simple_profile):
+            assert error.code == "nested_rule_namespace_invalid"
+            assert error.path == f"{COL}.provider_config.rules[1].namespace"
+
+    def test_a_string_namespace_passes(self) -> None:
+        run_config_only_checks(_config({"rules": [_rule("$.b", "hash", namespace="customer")]}))
+
+
+class TestFakerRuleProvider:
+    def test_a_faker_rule_without_a_provider_anywhere_is_refused(
+        self, simple_profile: Profile
+    ) -> None:
+        config = _config({"rules": [_rule("$.a"), _rule("$.b", "faker")]})
+        for error in _refused(config, simple_profile):
+            assert error.code == "nested_rule_faker_provider_missing"
+            assert error.path == f"{COL}.provider_config.rules[1].strategy_config.provider"
+
+    def test_a_blank_rule_provider_is_refused(self, simple_profile: Profile) -> None:
+        rule = _rule("$.b", "faker", strategy_config={"provider": " "})
+        for error in _refused(_config({"rules": [rule]}), simple_profile):
+            assert error.code == "nested_rule_faker_provider_missing"
+
+    def test_the_rule_provider_or_the_column_provider_satisfies_it(self) -> None:
+        own = _rule("$.b", "faker", strategy_config={"provider": "person_email"})
+        run_config_only_checks(_config({"rules": [own]}))
+        run_config_only_checks(_config({"rules": [_rule("$.b", "faker")]}, provider="person_email"))

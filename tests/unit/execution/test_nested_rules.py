@@ -79,6 +79,65 @@ class TestTwoRulesOnePass:
         assert json.loads(out["payload"].iloc[0])["id"] == _flat_hash(["c-1"], "events")[0]
 
 
+class TestFakerRuleCarriesItsOwnProvider:
+    def test_an_email_rule_and_a_hash_rule_in_one_pass(self) -> None:
+        from decoy_engine.providers_v2 import get_default_registry
+
+        cells = [json.dumps({"user": {"email": "a@x.com"}, "customer_id": "c-1"})]
+        ctx = dataclasses.replace(_ctx(), registry=get_default_registry())
+        seed = dataclasses.replace(
+            _seed(
+                {
+                    "rules": [
+                        {
+                            "target": "$.user.email",
+                            "strategy": "faker",
+                            "strategy_config": {"provider": "person_email"},
+                        },
+                        {"target": "$.customer_id", "strategy": "hash", "namespace": "customer"},
+                    ]
+                },
+                "events",
+            ),
+            deterministic=True,
+            backend_type="faker",
+            backend_version="v",
+        )
+        out, _ = NestedStrategyHandler().run(
+            pd.DataFrame({"payload": cells}), "payload", seed, ctx
+        )
+        parsed = json.loads(out["payload"].iloc[0])
+        email = parsed["user"]["email"]
+        assert "@" in email and email != "a@x.com"
+        assert parsed["customer_id"] == _flat_hash(["c-1"], "customer")[0]
+
+
+class TestAFaultInOneRuleDoesNotHideAnother:
+    HUGE = "1" + "0" * 4999
+
+    @pytest.mark.parametrize("order", [("$.a", "$.b"), ("$.b", "$.a")])
+    def test_an_out_of_range_number_fails_the_row_not_the_job(self, order: tuple[str, str]) -> None:
+        cell = '{"a": ' + self.HUGE + ', "b": "x"}'
+        out, _, ctx = _run(
+            [cell, json.dumps({"a": 1, "b": "y"})],
+            [{"target": t, "strategy": "redact"} for t in order],
+        )
+        assert [e.row_index for e in ctx.row_errors] == [0]
+        assert json.loads(out["payload"].iloc[1]) == {"a": "REDACTED", "b": "REDACTED"}
+
+    def test_a_rule_with_no_match_in_any_clean_cell_still_fails_closed(self) -> None:
+        cell = '{"a": ' + self.HUGE + ', "b": "x"}'
+        with pytest.raises(StrategyError) as exc:
+            _run(
+                [cell, json.dumps({"a": 1, "b": "y"})],
+                [
+                    {"target": "$.a", "strategy": "redact"},
+                    {"target": "$.zzz", "strategy": "redact"},
+                ],
+            )
+        assert exc.value.code == "nested_target_matched_nothing"
+
+
 class TestOverlapFailsClosed:
     @pytest.mark.parametrize(
         ("targets", "cell"),
