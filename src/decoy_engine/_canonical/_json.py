@@ -15,8 +15,9 @@ bytes depend on the machine; every other non-JSON type is refused. An unpaired s
 string or an object key is refused before encoding: the ASCII form would otherwise escape it and
 the UTF-8 form would crash on it with codec text.
 
-``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity and
-an over-long integer, and names the defect as a closed token, never as input text.
+``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity
+(including a literal that overflows to infinity, such as ``1e999``) and an over-long integer, and
+names the defect as a closed token, never as input text.
 ``strict_json_read`` is the same reader with bounds (bytes, depth) and a number-lexeme mode for the
 nested strategy; ``strict_json_write`` writes such a tree back without changing a number.
 
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
@@ -257,19 +259,21 @@ def strict_json_read(
 ) -> Any:
     """Parse JSON under bounds, refusing a duplicate key and a lone surrogate in the text.
 
-        ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
-        bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
-        ``"refuse"`` names them ``non_finite``. ``keep_lexemes`` returns every number as a
-        ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
+    ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
+    bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
+    ``"refuse"`` names them ``non_finite``, and also a literal that overflows to infinity, such as
+    ``1e999``, unless ``keep_lexemes`` is set. ``keep_lexemes`` returns every number as a
+    ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
 
-        Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
-        ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
-        ``negative_zero`` for the integer text ``-0``. ``forbid_lone_surrogate`` records
+    Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
+    ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
+    ``negative_zero`` for the integer text ``-0``. ``forbid_lone_surrogate`` records
     ``invalid_unicode`` for an escaped lone surrogate (``"\\ud800"``) in a string or key; a raw one is
-    always refused. All default off, so the defaults read as before.
+    always refused. All default off, so the defaults read as before. A number can record more than
+    one defect; the first one recorded is raised, so ``1e999`` under ``forbid_float`` is ``float``.
 
-        The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
-        error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
+    The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
+    error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
     """
     found: list[str] = []
 
@@ -300,10 +304,16 @@ def strict_json_read(
             return JsonNumber(None, text)
         return number if str(number) == text else JsonNumber(number, text)
 
+    # A literal such as `1e999` reads as infinity without passing through `parse_constant`, so the
+    # float hook refuses it too. A lexeme read keeps the literal text, so it does not refuse.
+    refuse_overflow = non_finite == "refuse" and not keep_lexemes
+
     def real(text: str) -> Any:
         if forbid_float:
             found.append("float")
         number = float(text)
+        if refuse_overflow and not math.isfinite(number):
+            found.append("non_finite")
         if not keep_lexemes:
             return number
         return number if json.dumps(number) == text else JsonNumber(number, text)
@@ -337,7 +347,7 @@ def strict_json_read(
                     object_pairs_hook=pairs,
                     parse_constant=constant,
                     parse_int=integer if hooked or not keep_lexemes else None,
-                    parse_float=real if hooked else None,
+                    parse_float=real if hooked or refuse_overflow else None,
                 )
     except (UnicodeError, ValueError):
         malformed = True

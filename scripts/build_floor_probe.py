@@ -49,8 +49,9 @@ if _REPO_ROOT not in sys.path:
 
 import pyarrow as pa  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
-from scripts.fk_memory_probe import _apply_mem_cap, _is_memory_failure, _peak_rss_mb  # noqa: E402
+from scripts.fk_memory_probe import _is_memory_failure, _peak_rss_mb  # noqa: E402
 
+from decoy_engine.execution._isolated_common import apply_mem_cap  # noqa: E402
 from decoy_engine.execution.out_of_core._relation import build_parent_key_relation  # noqa: E402
 from decoy_engine.execution.out_of_core._source import LazySource  # noqa: E402
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed  # noqa: E402
@@ -180,7 +181,7 @@ def main() -> None:
     # Applied before any allocation-heavy work (parquet build, DuckDB
     # connection) so the whole process, not just the relation build, runs
     # under the fixed ceiling -- matching what a real job would experience.
-    _apply_mem_cap(args.rlimit_mib, "data")
+    apply_mem_cap(args.rlimit_mib * _MIB, "data")
     record = run_probe(args.rows, args.memory_limit_mib)
     record["rlimit_mib"] = args.rlimit_mib
     if args.json:
