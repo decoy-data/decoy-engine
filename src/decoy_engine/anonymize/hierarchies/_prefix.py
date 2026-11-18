@@ -22,7 +22,7 @@ from typing import Any, ClassVar
 
 import pyarrow as pa
 
-from decoy_engine.anonymize._values import type_family
+from decoy_engine._value_family import type_family
 from decoy_engine.anonymize.hierarchies._base import SUPPRESSED, Hierarchy
 from decoy_engine.kernel import truncate_array
 

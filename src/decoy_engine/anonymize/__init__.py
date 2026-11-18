@@ -10,6 +10,6 @@ are the same value only when they are equal and of the same type family.
 
 from __future__ import annotations
 
-from decoy_engine.anonymize._values import type_family
+from decoy_engine._value_family import type_family
 
 __all__ = ["type_family"]
