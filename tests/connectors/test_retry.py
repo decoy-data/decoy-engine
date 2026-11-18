@@ -155,9 +155,15 @@ def test_each_report_carries_its_own_operation_id(monkeypatch: pytest.MonkeyPatc
         run_retrying(a, sleep=lambda s: None)
         b, _ = _flaky(1)
         run_retrying(b, sleep=lambda s: None)
-    assert [attempt for attempt, _ in ids] == [2, 3, 2]
-    first, second, third = (op for _, op in ids)
-    assert first is not None and first == second and third not in (None, first)
+        c, _ = _flaky(99)
+        with pytest.raises(TransientError):
+            run_retrying(c, sleep=lambda s: None)
+    # A: 2, 3. B: 2. C: scheduled 2, scheduled 3, then the exhausted report.
+    assert [attempt for attempt, _ in ids] == [2, 3, 2, 2, 3, 3]
+    ops = [op for _, op in ids]
+    assert None not in ops
+    assert ops[0] == ops[1] and ops[3] == ops[4] == ops[5]
+    assert len({ops[0], ops[2], ops[3]}) == 3
 
 
 def test_each_operation_has_its_own_attempt_floor() -> None:  # AT-E1-12
