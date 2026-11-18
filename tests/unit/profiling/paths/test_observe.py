@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -436,3 +437,134 @@ def test_an_array_cell_is_cut_to_the_item_cap_before_it_is_converted() -> None:
     assert obs is not None and obs.arrays_truncated == 3
     assert converted and max(converted) <= SCAN_ARRAY_ITEMS
     assert {p.path for p in obs.paths} == {"$[*]"}
+
+
+# -- review round 2: a collapse folds its named children, and every named segment is earned ------
+
+_SEGMENT = re.compile(r"\.[^.\[]+|\[\*\]")
+
+
+def assert_every_named_segment_is_earned(obs: Any) -> None:
+    """Each key written by name is in at least 2 cells and a tenth of its parent's cells."""
+    from decoy_engine._canonical import SCAN_KEY_APPEARANCE
+
+    present = {p.path: p.present_count for p in obs.paths}
+    for path in present:
+        parts = _SEGMENT.findall(path[1:])
+        for i, part in enumerate(parts):
+            if part == "[*]" or part == ".*":
+                continue
+            here = "$" + "".join(parts[: i + 1])
+            above = "$" + "".join(parts[:i])
+            parent = obs.cells_parsed if above == "$" else present[above]
+            assert present[here] >= 2, (path, present[here])
+            assert present[here] / parent >= SCAN_KEY_APPEARANCE, (path, present[here], parent)
+
+
+def _repro_a() -> list[dict[str, Any]]:
+    names = [f"feat_{n:03d}" for n in range(65)]
+    cells: list[dict[str, Any]] = [{"m": {names[i % 64]: {"id": 1}}} for i in range(1000)]
+    cells.append({"m": {names[64]: {"id": 1}}})
+    cells += [{"m": {"q": {"zorblax" if i < 3 else "id": 1}}} for i in range(19)]
+    return cells
+
+
+def _repro_b() -> list[dict[str, Any]]:
+    cells: list[dict[str, Any]] = [{f"Usr_{i:03d}": {f"fld_{i:03d}": {"id": 1}}} for i in range(70)]
+    cells += [{"bad-key": {"bad-2": {"zorblax" if i < 2 else "id": 1}}} for i in range(10)]
+    return cells
+
+
+def test_a_late_collapse_judges_the_wildcard_level_on_all_its_cells(tmp_path: Path) -> None:
+    obs = observation(scan_cells(tmp_path, dumps(_repro_a())))
+    found = by_path(obs)
+    assert "$.m.*.zorblax" not in found and "$.m.*.id" in found
+    assert found["$.m.*.id"].present_count == 1020
+    assert_every_named_segment_is_earned(obs)
+
+
+def test_a_collapse_by_fold_judges_the_wildcard_level_on_all_its_cells(tmp_path: Path) -> None:
+    obs = observation(scan_cells(tmp_path, dumps(_repro_b())))
+    assert "$.*.*.zorblax" not in by_path(obs)
+    assert_every_named_segment_is_earned(obs)
+
+
+def test_fold_into_a_level_that_already_collapsed_keeps_the_cells(tmp_path: Path) -> None:
+    # `$.*` collapses in cell 0 (65 keys under a key that is not a name). `zorblax` sits in 2 cells
+    # under it and in none of the 40 later cells that fold in; those cells must count.
+    cells: list[dict[str, Any]] = [
+        {"bad-key": {f"fld_{n:03d}": {"id": 1, "zorblax": 1} for n in range(65)}},
+        {"bad-key": {"fld_000": {"zorblax": 1}}},
+    ]
+    cells += [{f"Usr_{i:03d}": {f"fld_x{i:03d}": {"id": 1}}} for i in range(40)]
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert "$.*.*.zorblax" not in by_path(obs)
+    assert_every_named_segment_is_earned(obs)
+
+
+def test_fold_of_a_collapsed_level_collapses_the_level_it_lands_on(tmp_path: Path) -> None:
+    cells: list[dict[str, Any]] = [{"bad-key": {"a_key": 1}} for _ in range(10)]
+    cells.append({"Usr_one": {f"fld_{n:03d}": 1 for n in range(65)}})
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert "$.*.a_key" not in found and "$.*.*" in found
+
+
+def test_fold_that_pushes_a_level_over_the_key_limit_collapses_it(tmp_path: Path) -> None:
+    cells = [
+        {"Usr_zero": {f"k_{n:03d}": 1 for n in range(40)}},
+        {"Usr_one": {f"k_{n:03d}": 1 for n in range(30, 70)}},
+    ]
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert set(by_path(obs)) == {"$.*", "$.*.*"} and obs.map_collapsed >= 1
+
+
+def test_a_name_is_dropped_for_a_cell_pass_1_never_counted(tmp_path: Path) -> None:
+    # Cells 0 and 1 give two dropped keys whose `x` folds into `$.*`. Cell 2 fills the level cap,
+    # so cell 3's object under `bad-key` is never counted at `$.*` in pass 1. It must not be named.
+    fill = {f"grp_{g}": {f"leaf_{n:02d}": {} for n in range(62)} for g in range(5)}
+    cells: list[dict[str, Any]] = [
+        {"Maria": {"x": 1}},
+        {"Bob": {"x": 1}},
+        {"fill": fill},
+        {"bad-key": {"x": 1}},
+    ]
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    found = by_path(obs)
+    assert found["$.*.x"].present_count == 2
+    assert found["$.*.*"].present_count >= 1
+    assert_every_named_segment_is_earned(obs)
+
+
+def test_rule_3_keeps_a_key_at_exactly_a_tenth_of_the_cells(tmp_path: Path) -> None:
+    cells: list[dict[str, Any]] = [{"common": 1} for _ in range(30)]
+    for i in range(3):
+        cells[i]["tenth"] = 1
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert "$.tenth" in found
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_random_trees_never_name_a_key_the_rule_would_drop(tmp_path: Path, seed: int) -> None:
+    import random
+
+    rng = random.Random(seed)
+    words = ["alpha", "beta", "gamma", "delta"]
+
+    def tree(depth: int) -> Any:
+        roll = rng.random()
+        if depth == 0 or roll < 0.25:
+            return rng.choice([1, "x", None, True])
+        if roll < 0.55:  # a record
+            return {w: tree(depth - 1) for w in words if rng.random() < 0.6}
+        if roll < 0.8:  # a map of data-looking or random keys
+            return {
+                f"fld_{rng.randrange(400):03d}": tree(depth - 1)
+                for _ in range(rng.choice([1, 3, 70]))
+            }
+        return [tree(depth - 1) for _ in range(rng.randrange(4))]
+
+    cells = [
+        {"root": tree(3), rng.choice(["Usr_a", "Usr_b", "bad-key"]): tree(3)} for _ in range(120)
+    ]
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert_every_named_segment_is_earned(obs)
