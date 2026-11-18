@@ -252,11 +252,18 @@ def test_every_floor_rule_removes_an_unflagged_canary(entry: tuple[str, str]) ->
     assert canary not in json.dumps(redact_profile_dict(doc))
 
 
-@pytest.mark.parametrize("slot", ["labels", "min", "max", "mean"])
-def test_the_freetext_slots_an_unflagged_column_keeps_are_the_listed_ones(slot: str) -> None:
-    entry = _unflagged_with("Distribution.freetext", slot, "kept-text")
+@pytest.mark.parametrize(
+    ("slot", "canonical"),
+    [("labels", ["<20", ">100"]), ("min", "3"), ("max", "99"), ("mean", 4.5)],
+    ids=lambda v: str(v),
+)
+def test_the_freetext_slots_an_unflagged_column_keeps_are_the_listed_ones(
+    slot: str, canonical: Any
+) -> None:
+    entry = _unflagged_with("Distribution.freetext", slot, "x")
+    entry["distribution"][slot] = canonical
     out = redact_profile_dict({"fields": [entry]})["fields"][0]["distribution"]
-    assert "kept-text" in json.dumps(out)
+    assert out[slot] == canonical
 
 
 def test_a_detector_match_makes_the_column_flagged_so_its_samples_take_the_flagged_path() -> None:

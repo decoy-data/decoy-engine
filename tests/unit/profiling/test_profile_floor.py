@@ -426,7 +426,7 @@ def _sentinels(*flags: dict[str, Any]) -> list[dict[str, Any]]:
     return redact_profile_dict({"fields": [entry]})["fields"][0]["sentinels"]
 
 
-def _flag(kind: str, value: str, count: Any, note: str) -> dict[str, Any]:
+def _flag(kind: str, value: Any, count: Any, note: Any) -> dict[str, Any]:
     return {"kind": kind, "value": value, "count": count, "note": note}
 
 
@@ -443,7 +443,7 @@ def test_at14_profiled_sentinels_match_their_table_and_raw_cells_are_absent() ->
     assert is_table_sentinel(nflag["kind"], nflag["value"], nflag["note"], nflag["count"])
 
 
-def test_at14_a_loaded_sentinel_off_its_table_follows_the_count_floor() -> None:
+def test_at14_a_loaded_sentinel_off_its_table_is_withheld_whatever_its_count() -> None:
     table_note = "placeholder string 'x' - probably means missing data"
     out = _sentinels(
         _flag("string_sentinel", "Jane Q Example", 1, "free form"),
@@ -452,7 +452,7 @@ def test_at14_a_loaded_sentinel_off_its_table_follows_the_count_floor() -> None:
         _flag("string_sentinel", "x", 1, "changed note"),
     )
     assert (out[0]["value"], out[0]["note"]) == (REDACTED, REDACTED)
-    assert (out[1]["value"], out[1]["note"]) == ("Jane Q Example", "free form")
+    assert (out[1]["value"], out[1]["note"]) == (REDACTED, REDACTED)
     assert (out[2]["value"], out[2]["note"]) == ("x", table_note)
     assert (out[3]["value"], out[3]["note"]) == (REDACTED, REDACTED)
 
@@ -588,3 +588,73 @@ def test_an_ill_typed_null_count_withholds_the_mean(null_count: Any) -> None:
     entry = _numeric_entry([20, 20, 20, 20, 20], 100, None, null_count)
     out = redact_profile_dict({"fields": [entry]})["fields"][0]
     assert out["mean_value"] is None and out["distribution"]["mean"] is None
+
+
+# Release decisions keep a slot only when its content is canonical for that slot.
+
+
+def _loaded(**fields: Any) -> dict[str, Any]:
+    entry = {"name": "c", **_SAFE, "inferred_type": "integer", "row_count": 1000, "null_count": 0}
+    return redact_profile_dict({"fields": [{**entry, **fields}]})["fields"][0]
+
+
+def test_a_non_numeric_mean_is_withheld() -> None:
+    dist = {"kind": "numeric", "data": [1.0], "labels": ["a"], "mean": "SECRET-MEAN"}
+    out = _loaded(mean_value="SECRET-MEAN", distribution=dist)
+    assert out["mean_value"] is None and out["distribution"]["mean"] is None
+    assert "SECRET-MEAN" not in json.dumps(out)
+    for mean in (True, float("nan"), float("inf"), 7, ["5.0"]):
+        assert _loaded(distribution={**dist, "mean": mean})["distribution"]["mean"] is None
+    for text in ("1e999", "5.0 x", "-", ""):
+        assert _loaded(mean_value=text)["mean_value"] is None
+
+
+def test_a_numeric_mean_is_kept_in_the_profilers_own_form() -> None:
+    dist = {"kind": "numeric", "data": [1.0], "labels": ["a"], "mean": 5.25}
+    out = _loaded(mean_value="5.25", distribution=dist)
+    assert out["mean_value"] == "5.25" and out["distribution"]["mean"] == 5.25
+
+
+@pytest.mark.parametrize("count", [1, 12])
+def test_a_sentinel_value_or_note_that_is_not_the_table_text_is_withheld(count: int) -> None:
+    out = _sentinels(
+        _flag("string_sentinel", {"secret": "RAW"}, count, "free"),
+        _flag("string_sentinel", "x", count, ["RAW-NOTE"]),
+        _flag("string_sentinel", "x", count, "raw note RAW-TEXT"),
+    )
+    assert out[0]["value"] == REDACTED and out[0]["note"] == REDACTED
+    assert out[1]["note"] == REDACTED and out[2]["note"] == REDACTED
+    assert "RAW" not in json.dumps(out)
+
+
+def test_a_fake_boolean_column_keeps_only_the_boolean_literals() -> None:
+    out = _loaded(
+        inferred_type="boolean",
+        mode_value="Jane Doe",
+        min_value="Jane Doe",
+        top_values=[_top("Jane Doe", 1), _top("True", 1), _top("False", 1)],
+    )
+    assert out["mode_value"] is None and out["min_value"] is None
+    assert [t["value"] for t in out["top_values"]] == [REDACTED, "True", "False"]
+    assert "Jane Doe" not in json.dumps(out)
+
+
+def test_free_text_slots_keep_only_bucket_labels_and_numeric_lengths() -> None:
+    dist = {
+        "kind": "freetext",
+        "data": [1.0, 1.0, 1.0],
+        "labels": ["RAW LABEL", "<20", {"x": "RAW-DICT"}],
+        "min": "RAW-MIN",
+        "max": {"x": "RAW-MAX"},
+        "mean": "RAW-MEAN",
+    }
+    out = _loaded(inferred_type="string", distribution=dist)["distribution"]
+    assert out["labels"] == [REDACTED, "<20", REDACTED]
+    assert out["min"] is None and out["max"] is None and out["mean"] is None
+    assert "RAW" not in json.dumps(out)
+    assert (
+        _loaded(inferred_type="string", distribution={**dist, "labels": "RAW"})["distribution"][
+            "labels"
+        ]
+        == REDACTED
+    )

@@ -10,6 +10,7 @@ does for the fit snapshot.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Any, Final
 
 from decoy_engine.profiling._distributions import (
     CATEGORICAL_TOP_LABELS,
+    FREETEXT_BUCKET_LABELS,
     OTHER_LABEL,
     SHARE_ROUNDING_MARGIN,
 )
@@ -41,6 +43,11 @@ from decoy_engine.profiling._value_redaction import (
 from decoy_engine.profiling.sentinels import is_table_sentinel
 from decoy_engine.profiling.types import NULL_CELL_TEXT, ColumnProfile
 
+# What the profiler writes for each slot a floor keeps, so only that shape is kept: a bool cell
+# as `str(True)`, a numeric mean as `str(round(float, 4))`, a length as `str(int)`.
+_BOOL_TEXTS: Final = frozenset({"True", "False"})
+_MEAN_TEXT: Final = re.compile(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?")
+_LENGTH_TEXT: Final = re.compile(r"\d+")
 _DECADE_LABEL: Final = re.compile(r"(\d{4})s(?:-(\d{4})s)?")
 _Range = tuple[int, int, int | float]
 
@@ -190,7 +197,7 @@ def _evidence(field: Mapping[str, Any]) -> _Evidence:
     exempt = field.get("inferred_type") == "boolean"
     decades = _folded_decades(dist) if dist.get("kind") == "date" else None
     non_null = None if rows is None or nulls is None or nulls > rows else rows - nulls
-    free_text = not exempt and labels_read_as_sentences(kept_texts)
+    free_text = labels_read_as_sentences(kept_texts)
     held = {} if free_text else {t: c for t, c in proven.items() if c >= MIN_RELEASE_COUNT}
     # A kept numeric sentinel flag also names a value and its row count, so it covers rows too.
     for text, count in _numeric_sentinels(field).items():
@@ -205,6 +212,34 @@ def _evidence(field: Mapping[str, Any]) -> _Evidence:
         decades=decades,
         uncovered=None if non_null is None or released > non_null else non_null - released,
     )
+
+
+def _is_bool_text(value: Any) -> bool:
+    return isinstance(value, str) and value in _BOOL_TEXTS
+
+
+def _is_mean(type_name: str, value: Any) -> bool:
+    """A mean as its slot is written: a numeric string for `FieldStats`, a finite float for a distribution."""
+    if type_name == "FieldStats":
+        return (
+            isinstance(value, str)
+            and _MEAN_TEXT.fullmatch(value) is not None
+            and math.isfinite(float(value))
+        )
+    return _conforms(value, float)
+
+
+def _freetext_slot(slot: str, value: Any) -> Rule | PlaceholderAt | None:
+    """Check a free-text slot an unflagged column keeps: fixed bucket labels, numeric statistics."""
+    if slot == "labels":
+        if type(value) is not list:
+            return Rule.PLACEHOLDER_EACH
+        bad = frozenset(i for i, v in enumerate(value) if v not in FREETEXT_BUCKET_LABELS)
+        return PlaceholderAt(bad) if bad else None
+    if slot == "mean":
+        return None if _conforms(value, float) else Rule.NULL
+    ok = isinstance(value, str) and _LENGTH_TEXT.fullmatch(value) is not None
+    return None if ok else Rule.NULL
 
 
 def _decade_edge(ev: _Evidence, rule: Rule, whole_instant: bool) -> str | None:
@@ -223,20 +258,20 @@ def _floor_slot(
     if current is None:
         return Rule.NULL  # `_apply` leaves an absent or null slot as it is
     if rule is Rule.HELD_BY_K:
-        if ev.exempt:
+        if ev.exempt and _is_bool_text(current):
             return None
         proven = isinstance(current, str) and ev.proven.get(current, 0) >= MIN_RELEASE_COUNT
         return None if proven and not ev.free_text else Rule.NULL
     if rule is Rule.AGGREGATE_2K:
         ok = ev.non_null is not None and ev.non_null >= 2 * MIN_RELEASE_COUNT
         ok = ok and ev.uncovered is not None and not 0 < ev.uncovered < MIN_RELEASE_COUNT
-        return None if ok and isinstance(current, (str, int, float)) else Rule.NULL
+        return None if ok and _is_mean(type_name, current) else Rule.NULL
     if rule is Rule.UNDER_K_PLACEHOLDER and type_name == "TopValue":
         held = _held(container.get("count")) and isinstance(current, str)
-        return None if ev.exempt or (held and not ev.free_text) else Rule.PLACEHOLDER
-    if rule is Rule.UNDER_K_PLACEHOLDER:
-        if ev.exempt:
+        if ev.exempt and _is_bool_text(current):
             return None
+        return None if held and not ev.free_text else Rule.PLACEHOLDER
+    if rule is Rule.UNDER_K_PLACEHOLDER:
         if ev.free_text or ev.labels_kept is None:
             return Rule.PLACEHOLDER_EACH
         return PlaceholderAt(frozenset(i for i, kept in enumerate(ev.labels_kept) if not kept))
@@ -259,7 +294,7 @@ def _floor_slot(
             container.get("note"),
             container.get("count"),
         )
-        return None if table or _held(container.get("count")) else Rule.PLACEHOLDER
+        return None if table else Rule.PLACEHOLDER
     return rule
 
 
@@ -292,6 +327,9 @@ def _floor_field(fields: list[Any], index: int) -> None:
                 for slot, base in rules.items()
                 if (rule := _floor_slot(cls.__name__, slot, base, container, ev)) is not None
             }
+            for slot in kept & container.keys():
+                if (check := _freetext_slot(slot, container[slot])) is not None:
+                    plan[slot] = check
             _apply(container, plan, _floor_keep(shapes, kept | rules.keys() - plan.keys()))
 
 

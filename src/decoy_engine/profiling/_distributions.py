@@ -30,6 +30,8 @@ SHARE_ROUNDING_MARGIN: Final = Decimal("0.05")
 # The categorical chart keeps this many labels and sums the rest under `OTHER_LABEL`.
 CATEGORICAL_TOP_LABELS: Final = 10
 OTHER_LABEL: Final = "other"
+# The four length buckets a free-text distribution is labelled with, in order.
+FREETEXT_BUCKET_LABELS: Final = ("<20", "20-50", "50-100", ">100")
 
 
 def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
@@ -124,16 +126,16 @@ def _distribution_freetext(non_null: pd.Series) -> Distribution | None:
     if len(non_null) == 0:
         return None
     lens = non_null.astype(str).str.len()
-    buckets = [
-        ("<20", int((lens < 20).sum())),
-        ("20-50", int(((lens >= 20) & (lens < 50)).sum())),
-        ("50-100", int(((lens >= 50) & (lens < 100)).sum())),
-        (">100", int((lens >= 100).sum())),
+    counts = [
+        int((lens < 20).sum()),
+        int(((lens >= 20) & (lens < 50)).sum()),
+        int(((lens >= 50) & (lens < 100)).sum()),
+        int((lens >= 100).sum()),
     ]
     return Distribution(
         kind="freetext",
-        data=[float(c) for c in [b[1] for b in buckets]],
-        labels=[b[0] for b in buckets],
+        data=[float(c) for c in counts],
+        labels=list(FREETEXT_BUCKET_LABELS),
         min=str(int(lens.min())),
         max=str(int(lens.max())),
         mean=round(float(lens.mean()), 1),
