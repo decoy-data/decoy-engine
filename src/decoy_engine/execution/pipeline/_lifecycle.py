@@ -128,12 +128,12 @@ class TableInputs:
 @dataclass(frozen=True)
 class GeneratedInputs:
     """The generate tables of a job. `tables` are the outputs as written (target attached);
-    `resident_bytes` is what the run holds for them while it executes and `unique_peak_bytes`
-    the largest unique-draw working set (both from `decoy_engine.generation`)."""
+    `resident_bytes` is what the run holds for them at its largest moment and `peak_bytes` the
+    same with the unique-draw working set of that moment (both from `decoy_engine.generation`)."""
 
     tables: tuple[TableInputs, ...]
     resident_bytes: int
-    unique_peak_bytes: int
+    peak_bytes: int
 
 
 @dataclass(frozen=True)
@@ -353,7 +353,7 @@ def _execute(inputs: PhaseInputs, intercept: int) -> int:
     generated = inputs.generated
     held = 0 if generated is None else generated.resident_bytes
     if not inputs.tables:
-        return intercept + held + (0 if generated is None else generated.unique_peak_bytes)
+        return intercept + (0 if generated is None else generated.peak_bytes)
     base = estimate_peak_bytes(tuple(working_table_spec(t) for t in inputs.tables), inputs.path)
     if base.estimated_bytes is None:
         raise ValueError("lifecycle needs every column priced")

@@ -89,7 +89,7 @@ def generated_inputs(config: Mapping[str, Any]) -> Generated:
     return Generated(
         lc.GeneratedInputs(
             tables=attached.tables,
-            resident_bytes=sum(terms.resident_bytes.values()),
-            unique_peak_bytes=terms.unique_peak_bytes,
+            resident_bytes=terms.held_bytes,
+            peak_bytes=terms.peak_bytes,
         )
     )

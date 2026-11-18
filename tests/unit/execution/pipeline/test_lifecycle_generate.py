@@ -89,7 +89,7 @@ def test_two_unique_columns_of_one_table_cost_the_largest_set_not_the_sum(tmp_pa
     assert _phases(est)["execute"] == INTERCEPT + resident + unique
 
 
-def test_a_second_table_adds_its_bytes_but_not_a_second_unique_set(tmp_path: Path) -> None:
+def test_a_second_table_is_built_while_the_first_is_already_arrow(tmp_path: Path) -> None:
     raw = {
         "version": 2,
         "global_settings": {"seed": 7},
@@ -104,9 +104,9 @@ def test_a_second_table_adds_its_bytes_but_not_a_second_unique_set(tmp_path: Pat
         ],
     }
     est = estimate_job(PipelineConfig.model_validate(raw).model_dump(), tmp_path)
-    resident = 2 * ROWS * (57 + 24)
-    unique = ROWS * (24 + 57 + 72) + ROWS * (32 + 72)  # the largest one, not the sum
-    assert _phases(est)["execute"] == INTERCEPT + resident + unique
+    # Table b is built while table a is already Arrow: a's Arrow output, b's objects, b's set.
+    during_b = ROWS * (4 + 24) + ROWS * (57 + 24) + ROWS * (24 + 57 + 72) + ROWS * (32 + 72)
+    assert _phases(est)["execute"] == INTERCEPT + during_b
 
 
 # --- AT-E2-2 ----------------------------------------------------------------------------

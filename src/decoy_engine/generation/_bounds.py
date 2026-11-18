@@ -415,6 +415,12 @@ class GeneratedTerms:
 
     resident_bytes: dict[str, int]
     unique_peak_bytes: int
+    # What the run holds at its largest moment, without and with a unique draw's working set. On
+    # the eligible path every table's Arrow output is resident together. On the legacy path each
+    # table is converted to Arrow before the next starts, so a moment is the earlier tables'
+    # Arrow output plus the current table's Python objects (and its unique set).
+    held_bytes: int
+    peak_bytes: int
     legacy: bool
     columns: tuple[GeneratedColumn, ...]
     unpriced: tuple[str, ...]
@@ -497,9 +503,28 @@ def generated_lifecycle_terms(
 
         return payload
 
-    unique = max((table_unique_peak(t, payload_in(t["name"])) for t in tables), default=0)
+    unique_of = {t["name"]: table_unique_peak(t, payload_in(t["name"])) for t in tables}
+    unique = max(unique_of.values(), default=0)
+
+    def arrow_cell(col: ColumnAdmission, rows: int) -> int:
+        form = forms.get((col.table, col.column))
+        return 0 if form is None else arrow_column_bytes(form[0], rows, form[1])
+
+    arrow_of = _resident_by_table(config, admission, arrow_cell)
+    if not legacy:
+        held = sum(resident.values())
+        peak = held + unique
+    else:
+        from decoy_engine.generation.synthesize import generation_order
+
+        held = peak = sum(arrow_of.values())
+        earlier = 0
+        for name in (n for n, _parents in generation_order(config) if n in resident):
+            held = max(held, earlier + resident[name])
+            peak = max(peak, earlier + resident[name] + unique_of.get(name, 0))
+            earlier += arrow_of[name]
     columns = tuple(GeneratedColumn(t, c, *f) for (t, c), f in forms.items())
-    return GeneratedTerms(resident, unique, legacy, columns, tuple(unpriced))
+    return GeneratedTerms(resident, unique, held, peak, legacy, columns, tuple(unpriced))
 
 
 def detected_memory_bytes() -> int | None:
