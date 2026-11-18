@@ -23,11 +23,14 @@ not evidence; writing runs and merging them is.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
 pytestmark = pytest.mark.perf
 
@@ -67,6 +70,7 @@ def _run_worker(data_dir: Path, work_root: Path, *extra: str) -> dict:
         text=True,
         timeout=600,
         check=False,
+        env={**os.environ, **CAPPED_ENV},
     )
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BENCH_JSON "))
     return json.loads(line.removeprefix("BENCH_JSON "))

@@ -149,7 +149,7 @@ def _supervise(code: str, tmp_path: Path, **kw: object) -> sup.WorkerOutcome:
     body = code.replace("RESULT", repr(str(result)))
     return sup.run_worker(
         [sys.executable, "-c", body],
-        env={"PATH": "/usr/bin"},
+        env={"PATH": "/usr/bin", **CAPPED_ENV},
         result_path=result,
         timeout_s=kw.get("timeout_s"),
         rss_kill_mb=kw.get("rss_kill_mb"),
@@ -339,7 +339,8 @@ def _spawn_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mem_cap_mb: int 
     monkeypatch.setattr(bench_worker_fk, "run_worker", fake_run_worker)
     args = argparse.Namespace(
         data_dir=str(tmp_path), work_root=str(tmp_path), strategy="hash", reorder="on",
-        native_threads=1, force_ooc=False, budget_mb=0, mem_cap_mb=mem_cap_mb, keep=False,
+        native_threads=1, force_ooc=False, budget_mb=0, mem_cap_mb=mem_cap_mb, rss_ceiling_mb=None,
+        keep=False,
         timeout_s=1, rss_kill_mb=None,
     )  # fmt: skip
     with pytest.raises(_SpawnedError):

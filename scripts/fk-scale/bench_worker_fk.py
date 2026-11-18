@@ -313,11 +313,11 @@ def _one_run(args: argparse.Namespace, run_no: int) -> dict[str, Any]:
     work = Path(tempfile.mkdtemp(prefix=f"fk-scale-run{run_no}-", dir=args.work_root))
     scratch = work / "scratch"
     scratch.mkdir()
-    # A capped run gets the engine's one capped env; an uncapped run keeps today's env so
-    # bench numbers stay comparable.
+    # A run with a memory cap or a declared RSS ceiling gets the engine's one capped env; any
+    # other run keeps its own env so bench numbers stay comparable.
     env = {
         **os.environ,
-        **(CAPPED_ENV if args.mem_cap_mb else {}),
+        **(CAPPED_ENV if args.mem_cap_mb or args.rss_ceiling_mb else {}),
         "TMPDIR": str(scratch),
         "ARROW_DEFAULT_MEMORY_POOL": "system",
     }
