@@ -422,6 +422,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # PS-7: the post-scan gate core, not yet wired; imports nothing from
             # `execution.physical`.
             "src/decoy_engine/execution/pipeline/_post_scan.py",
+            # The post-scan distribution check compares column facts and imports nothing from
+            # `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_post_scan_distribution.py",
             # RUN-STREAM E3: `route_summary` reads recorded quality_metrics blocks and imports
             # nothing from `execution.physical`.
             "src/decoy_engine/execution/pipeline/_route_summary.py",
