@@ -68,5 +68,5 @@ def test_the_sdk_lane_sets_the_variable_and_installs_semgrep_and_every_sdk_extra
     ]
     assert str(lane["env"]["DECOY_REQUIRE_PROVIDER_SDKS"]) == "1"
     text = " ".join(f"{step.get('run', '')} {step.get('with', '')}" for step in lane["steps"])
-    for needle in ("semgrep", "hashicorp-vault", "cloud", "tests/secret_providers"):
+    for needle in ("semgrep==", "hashicorp-vault", "cloud", "tests/secret_providers"):
         assert needle in text, needle

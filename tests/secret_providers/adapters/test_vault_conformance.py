@@ -79,6 +79,15 @@ def test_an_empty_token_sends_no_header_and_reads_no_variable_or_file(
     assert not [path for path in opened if path.endswith(".vault-token")]
 
 
+def test_an_empty_token_ignores_a_token_file_when_no_variable_is_set(tmp_path, monkeypatch) -> None:
+    hermetic(monkeypatch, tmp_path / "home")
+    (tmp_path / "home" / ".vault-token").write_text("s.from-file")
+    with FakeVault() as server:
+        provider = VaultKV2Provider(hvac.Client(url=server.url, token=""))
+        _read_through(provider)
+    assert server.state.requests[-1]["token"] is None
+
+
 def test_a_client_with_no_address_is_refused_at_build() -> None:
     client = SimpleNamespace(url="", token="t", adapter=None)
     with pytest.raises(SecretProviderConfigError) as info:
