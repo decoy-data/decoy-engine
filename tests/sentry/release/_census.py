@@ -2,13 +2,15 @@
 
 The walk imports every public package (no `_` in its dotted path) that declares `__all__`, plus
 the root, `sdk` and `providers` modules. Each export gets a tier from `contracts/stability.py`:
-an explicit exception first, then identity (an experimental object, or an object a frozen
-package already exports), then the package rule. Constants are matched by `(module, name)`.
+an explicit exception first, then identity (what `sdk` defines, a listed experimental object, or
+an object a frozen path already exports), then the package rule. A tier belongs to the object and
+applies to every path that exports it. A constant is matched by `(name, object identity)`.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
 import importlib
 import importlib.util
 import pkgutil
@@ -37,24 +39,60 @@ def public_packages() -> list[str]:
     return sorted(found)
 
 
-def static_all(module: str) -> list[str]:
-    """`__all__` read from source, for a package that cannot be imported."""
+def _source_tree(module: str) -> ast.Module:
     spec = importlib.util.find_spec(module)
     assert spec is not None and spec.origin, module
-    tree = ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+    return ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
+
+
+def _literal_names(node: ast.expr, module: str) -> list[str]:
+    assert isinstance(node, (ast.List, ast.Tuple)), f"{module}: `__all__` is not a literal list"
+    return [ast.literal_eval(e) for e in node.elts]
+
+
+def static_all(module: str) -> list[str]:
+    """`__all__` read from source: plain, annotated and `+=` forms; anything else fails."""
+    names: list[str] = []
+    found = False
+    for node in _source_tree(module).body:
+        if (isinstance(node, ast.Assign) and any(_is_all(t) for t in node.targets)) or (
+            isinstance(node, ast.AnnAssign) and _is_all(node.target) and node.value
         ):
-            return [ast.literal_eval(e) for e in node.value.elts]  # type: ignore[attr-defined]
-    return []
+            names, found = _literal_names(node.value, module), True  # type: ignore[arg-type]
+        elif isinstance(node, ast.AugAssign) and _is_all(node.target):
+            names += _literal_names(node.value, module)
+            found = True
+    assert found, f"{module}: no static `__all__` to classify"
+    return names
+
+
+def _is_all(target: ast.expr) -> bool:
+    return isinstance(target, ast.Name) and target.id == "__all__"
+
+
+@functools.cache
+def assigned_constants(module: str) -> set[str]:
+    """Names assigned at module level in the source of `module`."""
+    out: set[str] = set()
+    for node in _source_tree(module).body:
+        if isinstance(node, ast.Assign):
+            out |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out.add(node.target.id)
+    return out
 
 
 def missing_extra(module: str, exc: ImportError) -> str | None:
-    """The registered optional dependency this error is about, or None for any other error."""
+    """The registered optional dependency this error is about, or None for any other error.
+
+    Tolerated only when the dependency is really absent and the error is the
+    `ModuleNotFoundError` that names it.
+    """
     wanted = st.OPTIONAL_EXTRAS.get(module.removeprefix("decoy_engine."))
     cause = exc.__cause__ if isinstance(exc.__cause__, ImportError) else exc
-    return wanted if wanted is not None and getattr(cause, "name", None) == wanted else None
+    if wanted is None or not isinstance(cause, ModuleNotFoundError) or cause.name != wanted:
+        return None
+    return wanted if importlib.util.find_spec(wanted) is None else None
 
 
 def load(
@@ -68,8 +106,7 @@ def load(
             mod = importlib.import_module(module)
         except ImportError as exc:
             assert missing_extra(module, exc), f"{module}: unregistered import failure: {exc!r}"
-            names = static_all(module)
-            exports += [Export(module, n, None, True) for n in names]
+            exports += [Export(module, n, None, True) for n in static_all(module)]
             continue
         names = getattr(mod, "__all__", None)
         if names is None:
@@ -80,59 +117,119 @@ def load(
     return exports, declared
 
 
+def packages_without_all() -> list[str]:
+    """Importable public packages that declare no `__all__`, as paths under `decoy_engine`."""
+    out = []
+    for module in public_packages():
+        try:
+            mod = importlib.import_module(module)
+        except ImportError:
+            continue
+        if getattr(mod, "__all__", None) is None:
+            out.append(module.removeprefix("decoy_engine."))
+    return sorted(out)
+
+
 def is_constant(obj: Any) -> bool:
     return not (isinstance(obj, type) or callable(obj))
+
+
+def group_key(export: Export) -> Any:
+    """One object has one key; a constant is keyed by its name too, as ints and strings repeat."""
+    return (export.name, id(export.obj)) if is_constant(export.obj) else id(export.obj)
 
 
 def experimental_by_identity(export: Export) -> bool:
     obj = export.obj
     if obj is None:
         return False
+    sdk = importlib.import_module(st.EXPERIMENTAL_MODULE)
     if is_constant(obj):
-        module, names = st.EXPERIMENTAL_CONSTANTS
-        return export.name in names and getattr(importlib.import_module(module), export.name) is obj
-    return (obj.__module__, obj.__qualname__) in st.EXPERIMENTAL_OBJECTS
+        return (
+            export.name in assigned_constants(st.EXPERIMENTAL_MODULE)
+            and getattr(sdk, export.name, None) is obj
+        )
+    key = (obj.__module__, obj.__qualname__)
+    return obj.__module__ == st.EXPERIMENTAL_MODULE or key in st.EXPERIMENTAL_OBJECTS
 
 
 def classify(exports: list[Export]) -> dict[tuple[str, str], str]:
     """`(module, name) -> tier`; raises AssertionError when one object gets two tiers."""
     exceptions = {(m, n): tier for m, n, tier in st.TIER_EXCEPTIONS}
-    frozen_ids = {
-        id(e.obj)
+    frozen_groups = {
+        group_key(e)
         for e in exports
         if e.obj is not None
-        and not is_constant(e.obj)
-        and (e.module, e.name) not in exceptions
         and not experimental_by_identity(e)
-        and st.package_tier(e.module) == st.FROZEN
+        and (
+            exceptions.get((e.module, e.name)) == st.FROZEN
+            or ((e.module, e.name) not in exceptions and st.package_tier(e.module) == st.FROZEN)
+        )
     }
     tiers: dict[tuple[str, str], str] = {}
-    groups: dict[int, dict[tuple[str, str], str]] = defaultdict(dict)
+    groups: dict[Any, dict[tuple[str, str], str]] = defaultdict(dict)
     for e in exports:
         key = (e.module, e.name)
         if key in exceptions:
             tier = exceptions[key]
         elif experimental_by_identity(e):
             tier = st.EXPERIMENTAL
-        elif e.obj is not None and not is_constant(e.obj) and id(e.obj) in frozen_ids:
+        elif e.obj is not None and group_key(e) in frozen_groups:
             tier = st.FROZEN
         else:
             tier = st.package_tier(e.module)
         assert key not in tiers, f"{key} exported twice"
         tiers[key] = tier
-        if e.obj is not None and not is_constant(e.obj):
-            groups[id(e.obj)][key] = tier
+        if e.obj is not None:
+            groups[group_key(e)][key] = tier
     clashes = [g for g in groups.values() if len(set(g.values())) > 1]
     assert not clashes, f"one object, two tiers: {clashes[:5]}"
     return tiers
 
 
+def experimental_names(tiers: dict[tuple[str, str], str]) -> set[str]:
+    """Bare names of every experimental export."""
+    return {n for (_, n), tier in tiers.items() if tier == st.EXPERIMENTAL}
+
+
 def experimental_public_names(tiers: dict[tuple[str, str], str]) -> set[str]:
     """Public-name spelling of the experimental set: root names bare, `sdk.` names prefixed."""
+    return _spelled(tiers, st.EXPERIMENTAL)
+
+
+def frozen_public_names(tiers: dict[tuple[str, str], str]) -> set[str]:
+    """The frozen names the map holds: root bare, `sdk.` prefixed, and each frozen exception row
+    as `<package path under decoy_engine>.<name>`."""
+    out = _spelled(tiers, st.FROZEN)
+    out |= {
+        f"{m.removeprefix('decoy_engine.')}.{n}"
+        for m, n, tier in st.TIER_EXCEPTIONS
+        if tier == st.FROZEN
+    }
+    return out
+
+
+def _spelled(tiers: dict[tuple[str, str], str], wanted: str) -> set[str]:
     out = set()
     for (module, name), tier in tiers.items():
-        if tier == st.EXPERIMENTAL and module == "decoy_engine":
+        if tier != wanted:
+            continue
+        if module == "decoy_engine":
             out.add(name)
-        elif tier == st.EXPERIMENTAL and module == "decoy_engine.sdk":
+        elif module == "decoy_engine.sdk":
             out.add(f"sdk.{name}")
     return out
+
+
+def marker_problems(rows: list[tuple[Export, str]]) -> list[str]:
+    """Callables whose docstring marker disagrees with their tier, both ways."""
+    problems = []
+    for e, tier in rows:
+        if e.obj is None or is_constant(e.obj):
+            continue
+        marked = (getattr(e.obj, "__doc__", None) or "").lstrip().startswith(st.EXPERIMENTAL_MARKER)
+        if tier == st.EXPERIMENTAL and not marked:
+            problems.append(f"{e.module}.{e.name}: experimental without the marker")
+        elif tier != st.EXPERIMENTAL and marked:
+            problems.append(f"{e.module}.{e.name}: marker on a {tier} name")
+    return problems

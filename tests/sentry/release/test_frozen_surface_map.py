@@ -16,7 +16,6 @@ from scripts.release.frozen_map import rows
 
 import decoy_engine
 import decoy_engine.sdk
-from decoy_engine.contracts import stability
 from tests.sentry.layout import map_paths, section
 from tests.sentry.release import _census
 
@@ -58,10 +57,14 @@ def public_names() -> set[str]:
     return set(decoy_engine.__all__) | {f"sdk.{name}" for name in decoy_engine.sdk.__all__}
 
 
+def registry_tiers() -> dict[tuple[str, str], str]:
+    exports, _ = _census.load([])
+    return _census.classify(exports)
+
+
 def experimental_names() -> set[str]:
     """The registry's experimental set, spelled like the map (root bare, `sdk.` prefixed)."""
-    exports, _ = _census.load([])
-    return _census.experimental_public_names(_census.classify(exports))
+    return _census.experimental_public_names(registry_tiers())
 
 
 def once_problems(expected: set[str], counts: collections.Counter[str]) -> list[str]:
@@ -82,8 +85,14 @@ def test_every_contract_tag_has_a_row() -> None:
 
 
 def test_every_public_name_has_a_row() -> None:
-    """A frozen name has one row here; an experimental name has its row in its own table."""
-    expected = public_names() - experimental_names()
+    """AT-X0c, frozen side: the registry's frozen set equals the frozen table, both ways.
+
+    The frozen set is the root and `sdk` names that are not experimental, plus one name per
+    frozen exception row. Experimental names have their own table.
+    """
+    tiers = registry_tiers()
+    expected = _census.frozen_public_names(tiers)
+    assert public_names() - experimental_names() <= expected, "a public name has no tier"
     problems = once_problems(expected, surface_counts(section(_map(), NAMES_HEADING)))
     assert not problems, f"docs/frozen-surfaces.md public-name rows: {problems}"
 
@@ -102,9 +111,7 @@ def test_contract_3_6_lists_the_registry_experimental_names() -> None:
     text = section(CONTRACT.read_text(encoding="utf-8"), "### 3.6 Experimental surfaces")
     block = text.split("```")[1].split("\n", 1)[1]
     listed = {line.strip() for line in block.splitlines() if line.strip()}
-    exports, _ = _census.load([])
-    tiers = _census.classify(exports)
-    registry = {name for (_, name), tier in tiers.items() if tier == stability.EXPERIMENTAL}
+    registry = _census.experimental_names(registry_tiers())
     assert listed == registry, f"contract 3.6 vs registry: {sorted(listed ^ registry)}"
 
 
