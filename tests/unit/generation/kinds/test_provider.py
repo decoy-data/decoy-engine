@@ -123,12 +123,12 @@ def test_the_provider_option_validates_its_keys() -> None:
 # ---- every live provider ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", SCALARS)
 def test_every_identifier_has_a_checksum_validator() -> None:
     native = {p for p in SCALARS if REGISTRY.get_capabilities(p).backend_type == "decoy_native"}
     assert set(VALIDATORS) == native
 
 
+@pytest.mark.parametrize("name", SCALARS)
 def test_every_scalar_provider_generates_valid_values(name: str, big: pa.Table) -> None:
     values = big.column(name).to_pylist()
     assert len(values) == ROWS and all(v is not None for v in values)
