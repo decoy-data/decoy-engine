@@ -19,16 +19,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry.test_no_residual_removed_surface import FORBIDDEN_TOKENS
-
 ROOT = Path(__file__).resolve().parents[2]
 SCAN_DIRS = ("src", "tests")
 ENGINE = "decoy_engine"
 _IDENT = r"[A-Za-z_][A-Za-z_0-9]*"
 _DOTTED = re.compile(rf"^{ENGINE}(\.{_IDENT})+$")
 _COLON = re.compile(rf"^({ENGINE}(?:\.{_IDENT})*):({_IDENT}(?:\.{_IDENT})*)$")
-# The removed module the residual-surface sentry lists (that sentry bars its name elsewhere).
-_REMOVED = next(token for token in FORBIDDEN_TOKENS if _DOTTED.match(token))
 MUTANT = ROOT / "tests" / "fixtures" / "h1" / "engine_string_target_mutant.py.txt"
 
 # Strings that look like engine paths and are not, measured on main. Categories open to
@@ -37,10 +33,8 @@ MUTANT = ROOT / "tests" / "fixtures" / "h1" / "engine_string_target_mutant.py.tx
 EXEMPT = {
     ("tests/unit/test_structured_events.py", f"{ENGINE}.test"): "logger",
     ("tests/unit/test_public_api.py", f"{ENGINE}.test"): "logger",
-    ("tests/fileaccess/test_char_cli_logging.py", f"{ENGINE}.log"): "filename",
     ("tests/sentry/test_ga_stub_exports.py", f"{ENGINE}.schema"): "deleted",
     ("tests/sentry/test_ga_stub_exports.py", f"{ENGINE}.license"): "deleted",
-    ("tests/sentry/test_no_residual_removed_surface.py", _REMOVED): "deleted",
     ("tests/unit/test_v2_fixed_width_source.py", f"{ENGINE}.profile._fixed_width_reader.open"): (
         "raising-false"
     ),

@@ -17,6 +17,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_matrix as matrix
 from tests.unit.execution import _auto_chunk_strategies as strategies
 from tests.unit.execution import _auto_chunk_support as support
@@ -108,7 +109,10 @@ def _check_case(
         assert never_read_whole, "a streamed lazy run read a whole file"
         published = ltarget / f"{b6b.TABLE}.parquet"
         assert published.read_bytes() == (twin_target / f"{b6b.TABLE}.parquet").read_bytes()
-        assert sorted(p.name for p in ltarget.iterdir()) == [f"{b6b.TABLE}.parquet"]
+        assert sorted(p.name for p in ltarget.iterdir()) == [
+            DESCRIPTOR_NAME,
+            f"{b6b.TABLE}.parquet",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -228,10 +232,10 @@ def test_lazy_equals_the_twin_with_a_plain_recording_sink(tmp_path: Path) -> Non
 
 
 def _record_chunk_sizes(monkeypatch: pytest.MonkeyPatch) -> list[list[int]]:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
     calls: list[list[int]] = []
-    real = _chunked_entry.run_mask_chunked
+    real = _native_core.mask_chunked
 
     def spy(config: Any, chunks: Any, **kwargs: Any) -> Any:
         sizes: list[int] = []
@@ -244,7 +248,7 @@ def _record_chunk_sizes(monkeypatch: pytest.MonkeyPatch) -> list[list[int]]:
 
         return real(config, counted(), **kwargs)
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", spy)
+    monkeypatch.setattr(_native_core, "mask_chunked", spy)
     return calls
 
 

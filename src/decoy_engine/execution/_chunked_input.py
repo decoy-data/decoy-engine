@@ -39,7 +39,7 @@ import pyarrow as pa
 import pyarrow.types as pat
 
 from decoy_engine import reasons
-from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._errors import ExecutionError, lazy_source_changed
 from decoy_engine.profile._readers import FooterFacts, LazySource, OpenedLazyBatches
 
 if TYPE_CHECKING:
@@ -74,6 +74,8 @@ INPUT_BUFFER_BYTES = 8 * 1024 * 1024
 REASON_LAZY = reasons.route.ELIGIBLE
 REASON_RESIDENT_SOURCE = reasons.route.RESIDENT_SOURCE
 MODE_NOT_DISPATCHED = "not_dispatched"
+# E5a: the with-sink output reasons under which a no-sink lane may collect a lazy table itself.
+_COLLECTABLE = frozenset({REASON_LAZY, reasons.route.POST_SCAN_INTEGRITY})
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -245,18 +247,11 @@ def _slices(source: pa.Table, chunk_size_rows: int) -> Iterator[pa.Table]:
         yield source.slice(start, chunk_size_rows)
 
 
-def _changed(table: str, detail: str) -> ExecutionError:
-    return ExecutionError(
-        code=reasons.runtime.LAZY_SOURCE_CHANGED,
-        message=f"the source of table {table!r} changed between routing and the read: {detail}.",
-    )
-
-
 def check_opened(opened: OpenedLazyBatches, expected: SourceFacts, *, table: str) -> None:
     """Raise `lazy_source_changed` unless the opened handle's footer facts equal the routing
     snapshot. Reads no second handle: the facts come from the handle being read."""
     if not facts_match(facts_from_footer(opened.facts), expected):
-        raise _changed(table, "footer facts differ from the routing snapshot")
+        raise lazy_source_changed(table, "footer facts differ from the routing snapshot")
 
 
 def _guarded(
@@ -480,20 +475,29 @@ def input_modes(
     out_reason: str,
     routed: str | None,
     split: MultiTableSplit | None,
+    reason_with_sink: str | None = None,
 ) -> dict[str, tuple[str, str]]:
     """`(mode, reason)` for each kept-lazy table.
 
     `lazy` when the output streams and the table is the routed table or a dispatched split
     table; `resident` with the output's reason when it is routed or dispatched but the
-    output stays resident; `resident` / `not_dispatched` for a table that no lane takes."""
+    output stays resident; `resident` / `not_dispatched` for a table that no lane takes.
+
+    RUN-STREAM E5a: the routed table also stays `lazy` when the only thing keeping its output
+    resident is the missing sink. `reason_with_sink` is `decide_output_mode`'s answer for the
+    same run with a streaming sink: eligible, or the post-scan gate (which reads the collected
+    output), lets the lane collect the output itself; validators, quarantine, fidelity,
+    post-validation and declared casting read the sources whole or refuse the lane, so their
+    input stays resident. Dispatched split tables never take this path."""
     dispatched = set(split.dispatched) if split is not None else set()
     if routed is not None:
         dispatched.add(routed)
+    collect = out_reason == reasons.route.NO_SINK and reason_with_sink in _COLLECTABLE
     out: dict[str, tuple[str, str]] = {}
     for name in kept:
         if name not in dispatched:
             out[name] = ("resident", MODE_NOT_DISPATCHED)
-        elif out_mode == "streamed":
+        elif out_mode == "streamed" or (collect and name == routed):
             out[name] = ("lazy", REASON_LAZY)
         else:
             out[name] = ("resident", out_reason)

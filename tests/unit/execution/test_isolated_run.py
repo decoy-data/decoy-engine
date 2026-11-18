@@ -153,6 +153,7 @@ def _mask_config(tmp_path, n_cols: int) -> dict:
                 "customers": {
                     "type": "file",
                     "format": "csv",
+                    "has_header": True,
                     "path": str(tmp_path / "customers.csv"),
                 },
             },
@@ -191,6 +192,7 @@ def _row_error_config(tmp_path) -> dict:
                 "customers": {
                     "type": "file",
                     "format": "csv",
+                    "has_header": True,
                     "path": str(tmp_path / "customers.csv"),
                 },
             },
@@ -281,6 +283,8 @@ class TestNormalJobCompletes:
 
 
 class TestMemCapOom:
+    # The child runs within megabytes of its RLIMIT_DATA cap, so it needs the host to itself.
+    @pytest.mark.serial
     def test_low_mem_cap_classifies_oom_cleanly_not_an_opaque_crash(self, tmp_path):
         # The cap sits ABOVE the child's import floor on purpose. A worker that
         # imports duckdb + polars reserves close to half a GB of RLIMIT_DATA in
@@ -466,7 +470,43 @@ class TestInProcessFallbackHonorsOutputDir:
         assert output_dir.exists()
         assert (output_dir / "customers.parquet").exists()
         # No leftover staging directory next to the committed target.
-        assert not list(output_dir.parent.glob("_decoy_isolated_stage_*"))
+        assert not list(output_dir.parent.glob("._decoy_publication_pending_*"))
+
+    def test_isolate_false_with_an_invalid_table_name_fails_and_commits_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """The isolated route refuses a name that is not one path component with a failed
+        receipt; the fallback returns that same result instead of raising after the run."""
+        from types import SimpleNamespace
+
+        from decoy_engine.execution import _isolated_run
+
+        table = pa.table({"x": [1]})
+        fake = SimpleNamespace(outputs={"a/b": table}, quality_metrics={}, table_kinds={})
+        monkeypatch.setattr(_isolated_run, "run_pipeline", lambda *a, **k: fake)
+        output_dir = tmp_path / "final_target"
+
+        result = run_pipeline_isolated(
+            {}, None, engine_version=_ENGINE_VERSION, isolate=False, output_dir=output_dir
+        )
+
+        assert result.outcome == "crashed"
+        assert result.isolated is False
+        assert result.publication_receipt is not None
+        assert result.publication_receipt.outcome == "failed"
+        assert not output_dir.exists()
+        assert not list(tmp_path.glob("._decoy_publication_pending_*"))
+
+    def test_publish_resident_refuses_an_invalid_table_name_with_a_failed_receipt(self, tmp_path):
+        from decoy_engine.execution._isolated_commit import publish_resident
+
+        receipt, stage = publish_resident(
+            tmp_path / "final_target", {"a/b": pa.table({"x": [1]})}, None
+        )
+
+        assert receipt.outcome == "failed"
+        assert stage is None
+        assert not (tmp_path / "final_target").exists()
 
 
 # --------------------------------------------------------------------------
@@ -521,7 +561,7 @@ class TestCommitFailureIsClassified:
         # survive completely untouched.
         assert (output_dir / "preexisting.txt").read_text() == "do not clobber me"
         # No orphaned staging directory left outside work_root.
-        assert not list(output_dir.parent.glob("_decoy_isolated_stage_*"))
+        assert not list(output_dir.parent.glob("._decoy_publication_pending_*"))
 
 
 # --------------------------------------------------------------------------
@@ -631,7 +671,7 @@ class TestGovernorKillAfterStagingLeavesNoPartialOutput:
 
         def _kill_after_staged(pid: int) -> None:
             deadline = time.monotonic() + 20.0
-            staging_glob = str(output_dir.parent / "_decoy_isolated_stage_*")
+            staging_glob = str(output_dir.parent / "._decoy_publication_pending_*")
             while time.monotonic() < deadline and not staged_seen.is_set():
                 for match in glob.glob(staging_glob):
                     if list(Path(match).glob("*.parquet")):
@@ -656,7 +696,7 @@ class TestGovernorKillAfterStagingLeavesNoPartialOutput:
         assert result.outcome != "completed"
         assert result.committed_output_dir is None
         assert not output_dir.exists()
-        assert not list(output_dir.parent.glob("_decoy_isolated_stage_*"))
+        assert not list(output_dir.parent.glob("._decoy_publication_pending_*"))
 
 
 # --------------------------------------------------------------------------

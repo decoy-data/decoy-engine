@@ -2,13 +2,14 @@
 
 Value-free by construction: every string is the schema tag, a column name that passes
 ``approve_name``, or a fixed token; every number is strict and range-checked. The reader comes
-from ``decoy_engine.run_result.derive_read_model`` (the run-result document's compatibility rule:
-tokens tolerant of later minors, added fields ignored, the tag required), so it is never a
-hand-kept copy. Under ``/v1`` only optional fields may be added (compatibility contract 3.1).
+from ``decoy_engine._value_free.derive_read`` (the versioned-document compatibility rule the run
+result also uses: tokens tolerant of later minors, added fields ignored, the tag required), so it
+is never a hand-kept copy. Under ``/v1`` only optional fields may be added (compatibility contract 3.1).
 
 One cross-field rule: journalist and marketer figures exist only when a population was
-supplied. The writer enforces it strictly; the reader enforces it for the two v1 population
-tokens and lets a token added in a later minor carry figures.
+supplied. It lives on a ``SharedRules`` class, so the writer and the derived reader both run it.
+It constrains the two v1 population tokens only: on the writer those are the only values, and
+on the reader a token added in a later minor may still carry figures.
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ from pydantic import (
     model_validator,
 )
 
+from decoy_engine._value_free import Count, SharedRules, ValueFree, derive_read
 from decoy_engine.reasons import approve_name
-from decoy_engine.run_result import ValueFree, derive_read_model
+from decoy_engine.run_result import Token
 
 RISK_UTILITY_REPORT_SCHEMA: Final = "risk-utility-report/v1"
 
@@ -47,7 +49,6 @@ def _name(value: str) -> str:
 SchemaTag = Annotated[str, ValueFree("schema_tag"), AfterValidator(_tag)]
 ColumnName = Annotated[str, ValueFree("column_name"), AfterValidator(_name)]
 
-Count = Annotated[int, Strict(), Ge(0)]
 Positive = Annotated[int, Strict(), Ge(1)]
 Unit = Annotated[float, Strict(), Ge(0), Le(1), AllowInfNan(False)]
 Threshold = Annotated[float, Strict(), Gt(0), Le(1), AllowInfNan(False)]
@@ -86,6 +87,10 @@ class _Base(BaseModel):
     def to_payload(self) -> dict[str, Any]:
         """The JSON-compatible dict, keyed by wire names."""
         return self.model_dump(mode="json", by_alias=True)
+
+
+class _ReadBase(_Base):
+    model_config = ConfigDict(extra="ignore")
 
 
 class ModelEntry(_Base):
@@ -135,19 +140,9 @@ class MarketerFigures(_Base):
 
 
 def _population_sections_agree(section: Any) -> Any:
-    """Writer: journalist and marketer figures and a population row count only with a
-    supplied population."""
-    supplied = section.population == "supplied"
-    if not supplied and (section.journalist is not None or section.marketer is not None):
-        raise ValueError("journalist and marketer figures need a supplied population")
-    if supplied != (section.population_rows is not None):
-        raise ValueError("population_rows is given exactly when a population was supplied")
-    return section
-
-
-def _population_sections_agree_on_read(section: Any) -> Any:
-    """Reader: the same rule for the two v1 tokens only. A later minor may add a population
-    token (for example an estimated population) that carries figures, and must still read."""
+    """Journalist and marketer figures and a population row count only with a supplied
+    population. Only the two v1 tokens are constrained, so a token a later minor adds (for
+    example an estimated population) may carry figures and must still read."""
     if section.population == "not_supplied":
         if section.journalist is not None or section.marketer is not None:
             raise ValueError("journalist and marketer figures need a supplied population")
@@ -158,17 +153,21 @@ def _population_sections_agree_on_read(section: Any) -> Any:
     return section
 
 
-class RiskSection(_Base):
+class _PopulationRules(SharedRules):
+    """The population rule, run by the writer's risk section and by its derived reader."""
+
+    @model_validator(mode="after")
+    def check_population_sections(self) -> Any:
+        return _population_sections_agree(self)
+
+
+class RiskSection(_Base, _PopulationRules):
     risk_threshold: Threshold
     population: PopulationToken
     population_rows: Count | None
     prosecutor: RiskFigures | None
     journalist: RiskFigures | None
     marketer: MarketerFigures | None
-
-    @model_validator(mode="after")
-    def check_population_sections(self) -> Any:
-        return _population_sections_agree(self)
 
 
 class RiskUtilityReport(_Base):
@@ -188,19 +187,10 @@ class RiskUtilityReport(_Base):
     not_established: tuple[NotEstablished, ...]
 
 
-def _derive_reader() -> Any:
-    # The derivation does not carry model validators, so the risk section's reader is derived
-    # first, given the same rule, and handed to the derivation of the whole document.
-    cache: dict[type, type] = {}
-    risk_read = derive_read_model(RiskSection, cache)
-
-    class RiskSectionRead(risk_read):  # type: ignore[valid-type, misc]
-        @model_validator(mode="after")
-        def check_population_sections(self) -> Any:
-            return _population_sections_agree_on_read(self)
-
-    cache[RiskSection] = RiskSectionRead
-    return derive_read_model(RiskUtilityReport, cache)
-
-
-RiskUtilityReportRead: Any = _derive_reader()
+RiskUtilityReportRead: Any = derive_read(
+    RiskUtilityReport,
+    base=_ReadBase,
+    token=Token,
+    required_kinds=("schema_tag",),
+    module=__name__,
+)

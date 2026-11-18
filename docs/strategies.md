@@ -13,8 +13,10 @@ what keeps masked values stable and joinable.
 
 ## Mask strategies
 
-There are seventeen mask strategies. `passthrough` (a no-op pass) and the
-internal composite/nested handlers are listed separately below.
+[capability-matrix](capability-matrix.md) lists every mask strategy and is
+generated from the strategy registry. This page has a section for each of
+them. `passthrough` and the internal composite and nested handlers share the
+last section.
 
 ### faker
 
@@ -36,15 +38,28 @@ modes draw a seeded whole-column stream from the job seed.
   default registry.
 - `namespace`: scopes determinism and joinability.
 
+Deterministic `faker` is a keyed many-to-one pick. Each source value selects one
+slot of a fixed pool, so two distinct source values can share one output. With
+the default pool of 10,000 slots, 1,000 distinct sources already share about 50
+slots, and a name provider's pool holds fewer distinct values than its size. A
+larger `pool_size` lowers the rate and a smaller one raises it. `allow_collisions`
+only states this explicitly. For a one-to-one mapping inside a format domain use
+`fpe`. Untruncated `hash` and `tokenize` are collision-resistant, and a
+`truncate` makes collisions likely again. A `--post-validate` run reports, for
+each deterministic `faker` column that is not `unique` and has no `when:`, how
+many distinct source values were lost to shared outputs (the warning
+`cardinality_collisions`, with counts and no values). A `when:` column is not
+reported, because its unmasked rows keep their source values.
+
 Use it for names, emails, phone numbers, addresses, and other fields where you
 want realistic-looking replacements rather than a redaction.
 
 ### hash
 
 Produces a deterministic, joinability-preserving token:
-`derive(seed, namespace, value).hex()`, optionally truncated. The same source
+`derive(mask_key, namespace, value).hex()`, optionally truncated. The same source
 value yields the same token within a namespace, byte-stable across runs and
-processes. Nulls are preserved. Needs a namespace.
+processes. Nulls are preserved. Needs a namespace and a mask secret.
 
 - `truncate`: positive int; keep only the first N hex characters.
 
@@ -55,7 +70,9 @@ rejected with `gated_hash_on_integer_unsupported` before that table is masked. H
 the whole column, or stringify it upstream and hash the text.
 
 Use it for opaque identifiers (SSN, MRN, account number) that must remain
-join-stable but not human-readable.
+join-stable but not human-readable. An untruncated token is collision-resistant,
+so two distinct values sharing a token is negligible but not impossible. A
+`truncate` makes collisions likely again as it gets shorter.
 
 Text normalization and the compute path. Before hashing, text is normalized
 with Unicode NFC so that two encodings of the same characters hash alike. The
@@ -69,6 +86,35 @@ entirely on one path is internally consistent; if you first mask on a
 Python-only install and later mask new rows on a companion-present install (or
 the reverse), those rare values can fail to join across the two runs. To keep
 such values join-stable, mask the related data on the same path.
+
+### tokenize
+
+Reversible tokenization. Each distinct plaintext becomes an opaque token,
+`tok_` followed by 32 hex characters, and the plaintext and token pair is
+recorded in a token vault so the value can be recovered later. The engine holds
+no vault. The platform that runs the job supplies one, so a job with no vault is
+refused. Needs a namespace and a mask secret. See
+[security/token-vault](security/token-vault.md).
+
+- No options.
+- The token derives from the mask key, the column namespace, the text after
+  Unicode NFC normalization, and the vault's own derivation scope. The same
+  value therefore tokenizes differently in another namespace or another vault,
+  and never equals a `hash` output.
+- The vault is the identity authority. If it already holds a token for the
+  namespace and plaintext, that token is reused, so a value keeps its token
+  across jobs.
+- Nulls stay null.
+- The source column must be a string or object column. A number, date or
+  boolean column is refused, not converted.
+
+Refusals, all before any row is written: `tokenize_requires_vault`,
+`tokenize_requires_namespace`, `tokenize_requires_string_dtype`,
+`tokenize_vault_scope_required` and `token_vault_derivation_unsupported` (the
+vault has no usable derivation scope). A vault call that fails stops the run
+with `tokenize_vault_error`, which names neither the value nor the token.
+Untruncated tokens are collision-resistant: two distinct values sharing a token
+is negligible but not impossible.
 
 ### fpe
 
@@ -136,7 +182,7 @@ closed with `StrategyError(code=fpe_unencryptable_value)`, which wraps the
 internal `FpeUnencryptableError`, rather than emitting the value unmasked or
 partially masked. The engine no longer falls back to a non-invertible
 covering hash for such values (that fallback was removed in DE-01); see the
-[DE-01 FPE remediation design brief](https://github.com/louiskeep/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md)
+[DE-01 FPE remediation design brief](https://github.com/decoy-data/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md)
 (excluded from the built docs site; see `docs/conf.py`).
 
 Use it when a downstream system validates the format of an identifier (credit
@@ -144,9 +190,13 @@ card, account number) and you cannot change its shape.
 
 ### date_shift
 
-Shifts each date by a deterministic per-value offset within a bounded range.
-Same source date maps to the same shifted date within a namespace; byte-stable
-across runs. Null and unparseable values are left as-is. Needs a namespace.
+Shifts each date by a keyed per-value offset within a bounded range. The offset
+derives from the mask key (the admitted mask secret, at least 32 bytes), so a
+run with no mask secret is refused before any source is read. Same source date
+maps to the same shifted date within a namespace; byte-stable across runs for
+the same secret. Null values are left as-is. A non-null value that does not
+parse as a date records a `format_error` row error and is never written to the
+output as it came in. Needs a namespace.
 
 - `min_days` / `max_days`: the offset range (defaults -365 and 365). If
   reversed, they are swapped.
@@ -164,8 +214,9 @@ the absolute date must move.
 Coarse time-bucket generalization: snaps each date to a deterministic position
 within its ISO week, calendar month, or calendar quarter. The bucket boundary
 is determined by the input date; the position within the bucket is derived
-deterministically from `derive(job_seed, namespace, value)`, so the same input
-value always maps to the same output position. Needs a namespace.
+deterministically from `derive(mask_key, namespace, value)`, so the same input
+value always maps to the same output position. Needs a namespace and a mask
+secret.
 
 - `bucket` (str, required): one of `week`, `month`, or `quarter`. An invalid
   or misspelled value raises `StrategyError(bucket_perturb_invalid_config)` at
@@ -190,15 +241,16 @@ Bucket semantics:
   Oct-Dec). Output day in `[1, days_in_quarter]`. Dates in the same quarter
   stay in that quarter.
 
-Determinism keying: uses `derive(job_seed, namespace, value)` (HKDF-SHA256,
+Determinism keying: uses `derive(mask_key, namespace, value)` (HKDF-SHA256,
 S3 contract) to derive a per-value offset within `[0, bucket_size - 1]` days
 from the bucket start. Namespace-bound: two columns with different namespaces
-sharing the same job seed produce independent offsets. Same `(job_seed,
+sharing the same mask key produce independent offsets. Same `(mask_key,
 namespace, value)` always produces the same output, byte-stable across runs
 and processes.
 
-Null and unparseable values are passed through unchanged (same contract as
-`date_shift`). When no date format is detected, the column is passed through
+Null values stay null. A non-null value that does not parse as a date is kept
+as it came in, with no row error. This differs from `date_shift`, which records
+a `format_error`. When no date format is detected, the column is passed through
 unchanged with a WARNING log (carry-forward: surfacing as a `QualityWarning`
 is deferred).
 
@@ -273,7 +325,11 @@ provider_config:
 ### bucketize
 
 Rounds numeric values into fixed-width bins. Deterministic by construction
-(same value maps to same bucket). Non-numeric and null values pass through.
+(same value maps to same bucket). Null values stay null. A non-null value that
+is not numeric records a `format_error` row error and is never written to the
+output as it came in: the job fails, or the row is quarantined, by the
+row-error policy (see
+"Per-row strategy errors" below).
 
 - `width`: positive bin width, or
 - `preset`: a named width (`by_year`, `by_2_years`, `by_5_years`, `by_decade`,
@@ -281,6 +337,36 @@ Rounds numeric values into fixed-width bins. Deterministic by construction
 - `format`: `lower` (bin floor, default), `range` (`lo-hi`), or `midpoint`.
 
 Use it to generalize ages, incomes, or counts into ranges.
+
+### top_code
+
+Top-coding and bottom-coding: folds the rare tail of a numeric column into one
+label. The standard case is HIPAA Safe Harbor, where every age over 89 becomes
+"90+". It is not keyed and needs no namespace.
+
+- `preset`: `hipaa_age` sets `cap` 89 and `over_label` "90+". A preset wins over
+  `cap` and `over_label`.
+- `cap`: values above it become `over_label`. It must be a finite number with a
+  magnitude below 2**53.
+- `over_label`: the text for values above `cap` (required with `cap`).
+- `floor` and `under_label`: values below `floor` become `under_label`. Set
+  both or neither. `floor` must be below `cap`.
+
+Every other number is written as text, so the column holds one type. A whole
+number has no trailing `.0`, whichever route runs it. Null values stay null. A
+non-null value that is not numeric records a `format_error` row error and is
+never written to the output as it came in: the job fails, or the row is
+quarantined, by the row-error policy. In a text or object column, a value with a
+fractional part fails the whole column with `top_code_non_integral_object_column`,
+because the exact tail comparison needs whole numbers. Generalized rows are
+reported in the `top_code_generalized` quality warning, which carries counts and
+row positions and never a value.
+
+Refusals at compile time or before any row is read: `top_code_bounds_unresolvable`,
+`top_code_missing_over_label`, `top_code_invalid_floor`,
+`top_code_missing_under_label`, `top_code_under_label_without_floor`,
+`top_code_floor_ge_cap`, `top_code_with_when_unsupported` (top-coding is
+whole-column, so a `when:` is refused) and `top_code_unsupported_in_nested`.
 
 ### categorical
 
@@ -322,9 +408,9 @@ The job's `sequential_categorical` disposition says which columns ran where.
 ### shuffle
 
 Permutes the non-null values within a column, preserving the multiset and the
-null positions. Deterministic mode seeds the permutation from the namespace, so
-it is byte-stable across runs; non-deterministic mode differs. Needs a
-namespace in deterministic mode.
+null positions. Deterministic mode seeds the permutation from the namespace and
+needs one. Non-deterministic mode (the default) seeds it from the job seed and
+the table and column names. Both draw from the mask key, so both are byte-stable across runs.
 
 Use it to break the row-to-value linkage while keeping the column's exact value
 distribution.
@@ -434,7 +520,8 @@ TIER-1 detector set may not cover all PII present.
 #### Cross-cell determinism
 
 The `faker` and `date_shift` span strategies key each matched span by
-`HMAC-SHA256(job_seed, matched_text)` (RFC 2104). The key depends only on the
+`HMAC-SHA256(mask_key, matched_text)` (RFC 2104), where `mask_key` is the
+admitted mask secret. The key depends only on the
 matched value, not on surrounding cell text, column name, or row index, so
 the same name or date in two different cells always produces the same
 synthetic replacement.
@@ -616,12 +703,17 @@ can produce a city/state pair that does not exist in the source data.
 Two modes:
 
 - **Mask mode**: calls `ReferenceTable.keyed_row(str(key_by_value))`, which
-  selects a row at position `HMAC-SHA256(job_seed, key_value) % row_count` in
-  the `id`-sorted table (RFC 2104). Same key value and seed always produce the
-  same row. Null `key_by` values fall back to a seeded random row.
-- **Gen mode**: draws row indices from `numpy.default_rng` seeded from the job
-  seed, independent of source column values. Deterministic for the same seed and
-  DataFrame length.
+  selects a row at position `HMAC-SHA256(key, key_value) % row_count` in the
+  `id`-sorted table (RFC 2104), where `key` is derived from the mask key. Same
+  key value and mask key always produce the same row. Null `key_by` values fall
+  back to a keyed random row.
+- **Gen mode**: draws row indices from `numpy.default_rng`, independent of
+  source column values. Deterministic for the same mask key and DataFrame length.
+
+The null-key fallback and gen mode seed from `derive(mask_key, namespace, source)`,
+where the source names the table, the reference and the target columns. Each
+`joint_mask` group therefore draws its own stream: two groups of one run never
+pick the same reference row index. `joint_mask` runs on the whole-frame route only.
 
 Config validation runs at execution time, before any data is mutated
 (fail-closed). Raises `PlanCompileError` on missing `columns`, missing
@@ -688,12 +780,12 @@ Two modes:
   % candidate_count` over the full corpus sorted ascending by code. The
   candidate set excludes the input code, so output is never equal to input
   (domain-exclusion idiom, RFC 2104 keying, same primitive as `fpe` and
-  `joint_mask`). Same input, same job_seed, same corpus version always produce
+  `joint_mask`). Same input, same mask key, same corpus version always produce
   the same output.
 - **GEN mode**: picks a code for each source row via `derive_index` keyed on
   the column namespace and the row index (HKDF+HMAC, covered by
   `SEED_PROTOCOL_VERSION`). Two columns with different namespaces sharing the
-  same job_seed produce decorrelated output sequences. Same namespace, seed,
+  same mask key produce decorrelated output sequences. Same namespace, mask key,
   and row index always produce the same code. Needs a namespace on the column.
 
 `chapter_preserve` fail-closed cases (both raise `PlanCompileError`,
@@ -949,8 +1041,8 @@ Common parameters:
   (`concat(a, b, ...)`, two or more arguments), substring
   (`slice(s, start[, end])`, Python-native 0-indexed slicing -- e.g.
   `slice(firstname, -4)` for the last 4 characters), date
-  (`days_between(start, end)`), ternary (`value if condition else other`),
-  and literals (integers, floats, double-quoted strings, `True`, `False`,
+  (`days_between(start, end)`), ternary (`value if condition else other`,
+  or `if(condition, value, other)`), and literals (integers, floats, double-quoted strings, `True`, `False`,
   `None`). Anything outside that set raises `ValidationError` at config-parse
   time, before any row data is touched. A column value that looks like an
   expression string is treated as data and is never re-evaluated.
@@ -959,13 +1051,15 @@ Common parameters:
   through unchanged. Bounds apply only when the expression produces a real
   number (int or float, but not bool). `min > max` is rejected at config-parse
   with `PlanCompileError(derived_bounds_inverted)`.
-- `null_propagation` (str, default `explicit_null`): controls how `None` or
-  `NaN` values in referenced columns are handled.
+- `null_propagation` (str, default `explicit_null`): controls how null values
+  in referenced columns are handled. A null is `None`, a float NaN of any
+  type, `Decimal('NaN')`, `pd.NaT`, `numpy.datetime64('NaT')` or `pd.NA`; the
+  strings `"NaT"` and `""` are values, not nulls.
   - `explicit_null` (default): output is `None` when any referenced column
-    is `None` or `NaN`.
-  - `sentinel`: `None`/`NaN` values in referenced columns are replaced with
+    is null.
+  - `sentinel`: null values in referenced columns are replaced with
     `""` before evaluation; the expression always runs.
-  - `default`: `None`/`NaN` values in referenced columns are coerced to `0`
+  - `default`: null values in referenced columns are coerced to `0`
     before evaluation; the expression always runs.
 
 Validation timing:
@@ -989,10 +1083,10 @@ path. The engine calls no `eval()`, `exec()`, or `__import__`. A column value
 that looks like an expression string is treated as data and is never re-parsed.
 
 In generate mode, each derived column reads from already-generated sibling
-columns in declared order. A forward reference (a derived column that
-references a sibling declared later in `generate_columns`) is caught at
-evaluation time with a fail-closed error, not yet at plan-compile time.
-Declare dependencies before the columns that read them.
+columns in declared order. Plan compile refuses a forward reference (a derived
+column that references a sibling declared later in `generate_columns`) with
+`generate_column_forward_reference`. Declare dependencies before the columns
+that read them.
 
 **Shipped in SP-10b:** `case_when` (closed-grammar CASE WHEN conditional
 expression) and `derived_aggregate` (intra-table scalar aggregate). Neither
@@ -1000,12 +1094,14 @@ implements `conditioned_on`: `case_when` is a conditional expression construct
 in the closed grammar; `conditioned_on` is a separate planned parameter on the
 `categorical` strategy (per-row nested weight tables) and is not yet built.
 
-**Carry-forwards (SP-10c and later, not yet built):** `grouped_series`,
-`windowed_date`; FK extensions (`cardinality`, `composite_depth`, `null_m2m`);
-layer-2/3 features (`conditioned_on`, `group_key`, `reconciliation_pass`). The
-FK-driven cross-table aggregate (parent.total = sum(child.amount), Gen Gap 4)
-is also not yet built; it is deferred to SP-10c. Forward-reference detection
-at plan-compile time is also deferred.
+`grouped_series`, `windowed_date` and `group_key` are built; their keys are in
+the table under [Options are checked per type](#options-are-checked-per-type).
+
+**Carry-forwards (SP-10c and later, not yet built):** FK extensions
+(`cardinality`, `composite_depth`, `null_m2m`); layer-2/3 features
+(`conditioned_on`, `reconciliation_pass`). The FK-driven cross-table aggregate
+(parent.total = sum(child.amount), Gen Gap 4) is also not yet built; it is
+deferred to SP-10c.
 
 ```yaml
 # Mask mode: replace an existing column value using source siblings.
@@ -1091,6 +1187,82 @@ Use it to attach a table-level summary scalar to every row (for example: a
 grand total, a mean rate, or a non-null row count computed from a sibling
 column).
 
+### group_key
+
+Gives every row that shares a group value the same opaque key, so a group such
+as a household stays linked without exposing the real group identifier. The key
+is the group value passed through the keyed derivation under the mask key, in the
+namespace `group_key/<column>`. Two `group_key` columns therefore derive
+independent keys. The column needs no `namespace` of its own, and it is refused
+when the run has no mask secret.
+
+- `group_by` (required): the column that defines the group.
+- `length`: hex characters in the key. Even, from 8 to 64. Default 16.
+- `prefix`: constant text put before the key. Default none.
+
+Rows with the same `group_by` value get the same key on every run that uses the
+same mask secret. A null group value is not kept null: it is keyed from its text
+form, so all null rows share one key.
+
+Refusals at compile time: `group_key_group_by_missing`, `group_key_length_odd`,
+`group_key_length_out_of_range` and `group_key_missing_group_by_ref` (the
+`group_by` column is not in the table).
+
+### grouped_series
+
+Writes a per-group counter or walk into the column. The source value of the
+column is not used.
+
+- `group_by` and `order_by` (both required, and different columns): the first
+  splits rows into groups, the second orders rows inside each group.
+- `generator`: `cumcount` (default) or `monotone_walk`.
+- `start`: the first value in each group. Default 0 for `cumcount`, 1 for
+  `monotone_walk`.
+- `step`: for `cumcount`, the gap between values. For `monotone_walk`, the
+  smallest step. Default 1. It must be from 0 to `max_step`.
+- `max_step`: the largest step of a `monotone_walk`. Default 10.
+
+`cumcount` counts rows inside each group in `order_by` order and draws nothing.
+`monotone_walk` never decreases inside a group. Its steps are drawn from a
+stream derived from the mask key, the namespace `grouped_series/<column>` and the
+group value, so a run with the same secret writes the same walk. Both
+generators are treated as keyed, so a run with no mask secret is refused even
+for `cumcount`.
+
+Refusals at compile time: `grouped_series_group_by_missing`,
+`grouped_series_order_by_missing`, `grouped_series_group_by_equals_order_by`,
+`grouped_series_generator_invalid`, `grouped_series_step_out_of_range`,
+`grouped_series_missing_group_by_ref` and `grouped_series_missing_order_by_ref`.
+
+### windowed_date
+
+Writes a date inside a window around an anchor date in another column of the
+same row, for example a discharge date a few days after an admission date.
+
+- `anchor` (required): the column that holds the anchor date.
+- `max_days` (required): the largest offset in days.
+- `min_days`: the smallest offset in days. Default 0. It may be negative and must
+  not exceed `max_days`.
+- `distribution`: `uniform` (default), `early` (offsets near `min_days` are more
+  likely) or `late` (offsets near `max_days` are more likely).
+
+The output is text in `YYYY-MM-DD` form, from anchor plus `min_days` to anchor
+plus `max_days`, inclusive. The offset is drawn from a stream derived from the
+mask key, the namespace `windowed_date/<column>` and the row's position in the
+table, so it depends on the position and not on the anchor value. A `when:` gate
+keeps each row's position in the whole table. A null anchor gives a null output.
+
+A non-null anchor must be an ISO date or datetime with no timezone, from
+1700-01-01 to 2200-12-31. Any other anchor, or a result outside that range,
+stops the run. The error names the row position and never the value. No row is
+clamped. The column is refused when the run has no mask secret.
+
+Refusals at compile time: `windowed_date_anchor_missing`,
+`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`,
+`windowed_date_distribution_invalid` and `windowed_date_missing_anchor_ref`.
+At run time `windowed_date_position_out_of_domain` refuses a row position it
+cannot encode.
+
 ### passthrough and structural handlers
 
 - `passthrough`: leaves the column untouched. Use it to make an unmasked column
@@ -1103,11 +1275,13 @@ column).
 
 ### Intentional collisions (allow_collisions)
 
-By default deterministic identifier and pool strategies preserve cardinality:
-distinct source values map to distinct masked values within a namespace. Set
-`allow_collisions: true` on a column when you deliberately want distinct inputs
-to collapse onto the same output (the classic "Tom and Peter both become Matt"
-case), for example to model a smaller masked population.
+A deterministic `faker` column already maps many sources onto a fixed pool, so
+two distinct source values can share an output by default. How often depends on
+`pool_size`. Set `allow_collisions: true` on a column to state that on purpose
+(the classic "Tom and Peter both become Matt" case), for example to model a
+smaller masked population. Only `fpe` is one-to-one, and only inside its format
+domain. Untruncated `hash` and `tokenize` are collision-resistant.
+`--post-validate` reports how many distinct source values a `faker` column lost.
 
 ```yaml
 columns:
@@ -1122,8 +1296,8 @@ It is a compile-time alias for `cardinality_mode: reuse` plus `deterministic:
 true`, so it requires a namespace and conflicts with an explicitly different
 `cardinality_mode` (the compiler raises `allow_collisions_mode_conflict`). When
 such a column is vaulted, the ambiguous source-to-masked pairs cannot be
-reversed and are counted in the vault's `ambiguous_dropped`. The default stays
-collision-free; this knob is purely additive.
+reversed and are counted in the vault's `ambiguous_dropped`. The default
+selection is the same, so this knob changes no output.
 
 ### Conditional masking (when:)
 
@@ -1240,14 +1414,121 @@ are not affected.
 
 ## Generation strategies (generate mode)
 
-In `mode: generate`, each column declares a `type` instead of a `strategy`.
+In a generate table (one with `generate_columns`), each column declares a `type` instead of a `strategy`.
+
+`sequence`, `categorical`, `faker` and `reference` columns accept `unique: true`, and a table
+accepts `unique_together` for pairs of `reference` columns. See
+[Unique generated columns](guides/generate-uniqueness.md).
+
+### Options are checked per type
+
+Each type takes a fixed set of keys, listed below. Every type also takes `name`, `type`,
+`null_probability` (a number from 0 to 1) and `determinism` (`stable` or `fresh`). `unique` is
+taken by the four types named above, and `pooled` by `faker` only (any other type refuses it
+with `generate_option_unknown`). `generate_option_catalog()` returns this table: the columns
+are `required`, `optional` and `required_when`, the common keys are `common`, and the required
+keys marked "at plan compile" are also in `required_at_plan`. `decoy schema` closes each type
+to its keys and lists the same required keys, and it allows `pooled` only on `faker` (other
+types may carry `pooled: null`), so an editor flags a misspelt or misplaced key. A test checks
+this table against `generate_option_catalog()`.
+
+A `lookup` column takes exactly one of `file` and `codeset`: neither is `missing` on `file`, and
+both is `generate_option_value_unknown` on `codeset`. The catalog lists the pair as `one_of`.
+
+`output_type` (`int`, `decimal(n)`, `date` or `bool`) sets the type of the column written.
+`distribution`, `sequence`, `grouped_series` and `derived_aggregate` take `int` or `decimal(n)`
+only, `windowed_date` takes `date` only, and `reference`, `statistical` and `group_key` do not
+take it.
+
+| Type | Required | Optional | Required when |
+|---|---|---|---|
+| `sequence` | `start` | `step`, `prefix`, `suffix`, `pad_length`, `output_type` | |
+| `faker` | `faker_type` | `locale`, `faker_kwargs`, `output_type` | |
+| `categorical` | `categories` | `weights`, `output_type` | |
+| `reference` | `reference_table`, `reference_column` | `distribution`, `weights`, `min_per_parent`, `max_per_parent`, `snapshot_file`, `source_column` | `weights` if `distribution: weighted` |
+| `formula` | `formula` | `references`, `output_type` | |
+| `statistical` | `snapshot_file` | `source_column`, `high_cardinality`, `allow_real_categories`, `other_mode`, `condition_on` | |
+| `derived` | `expression` | `bounds`, `null_propagation`, `output_type` | |
+| `derived_aggregate` | `op`, `column` (at plan compile) | `output_type` | |
+| `grouped_series` | `group_by`, `order_by` | `generator`, `step`, `max_step`, `start`, `output_type` | |
+| `windowed_date` | `anchor`, `max_days` | `min_days`, `distribution`, `output_type` | |
+| `group_key` | `group_by` | `length`, `prefix` | |
+| `constant` | `value` | `output_type` | |
+| `distribution` | `family` | `low`, `high`, `min`, `max`, `output_type` | `low`, `high` if `family: uniform` |
+| `lookup` | | `file`, `codeset`, `value_column`, `weight_column`, `output_type` | |
+
+`derived_aggregate` is the one type whose required keys are checked at plan compile, not at
+config parse: its transform refuses a missing `op` or `column` with `derived_aggregate_op_missing`
+or `derived_aggregate_column_missing`.
+
+Two layers refuse a bad column, and `decoy validate` and `decoy run` run both, so they refuse the
+same configs:
+
+- **Config parse** checks each key on its own: a key the type does not take
+  (`generate_option_unknown`), a wrong type (`generate_option_type`), a value out of range
+  (`generate_option_range`, for example `step: 0` or `null_probability: 2`), a value outside a
+  fixed list (`generate_option_value_unknown`), weights that are negative, not finite, sum to 0
+  or do not match the categories in length (`generate_weights_invalid`), a formula Python cannot
+  parse or the evaluator cannot run (`generate_formula_invalid`), and two columns with one name
+  (`generate_column_duplicate`). The location is the index path, such as
+  `tables[0].generate_columns[2].weigths`.
+- **Plan compile** checks what needs Faker, Arrow or the other columns: an unknown locale, faker
+  type or faker keyword (`generate_locale_unknown`, `generate_faker_type_unknown`,
+  `generate_faker_kwargs_unknown`), categories Arrow cannot put in one column
+  (`generate_categories_mixed`), a key that names a column the table does not have
+  (`derived_missing_column_ref`, `derived_aggregate_missing_column_ref`,
+  `grouped_series_missing_group_by_ref`, `grouped_series_missing_order_by_ref`,
+  `windowed_date_missing_anchor_ref`, `group_key_missing_group_by_ref`), a column the table has
+  but generates later (`generate_column_forward_reference`), `group_by` equal to `order_by`
+  (`grouped_series_group_by_equals_order_by`), the formula rules below, `weighted` reference
+  weights whose length differs from a `sequence` parent's `row_count`
+  (`reference_weights_length_mismatch`), and every other parse rule a type's transform has. Those
+  keep the transform's own code, such as `derived_aggregate_op_missing`,
+  `derived_bounds_inverted`, `grouped_series_generator_invalid`,
+  `windowed_date_min_exceeds_max` or `group_key_length_odd`; `generate_option_invalid` is used
+  only for a failure that carries no registered code. The path uses names:
+  `tables.<table>.generate_columns.<column>.<key>`.
+
+A refusal message holds the reason's fixed text and the table, column and option names. It
+never holds a category, weight, formula or other option value.
+
+### Memory floor
+
+Before a resident generate run starts, the engine prices the bytes the generated tables must
+hold, plus the seen-sets of `unique` columns. How it prices them follows the route the run will
+take:
+
+- **Arrow route** (every column eligible): each column at its Arrow size (fixed-width columns at
+  their bit width, variable-width columns at one offset per row). All tables are held together,
+  so their floors add up.
+- **Legacy route** (any column declined): every column at one eight-byte list slot per row. The
+  legacy path frees each table's slots before the next table starts, so only the largest table
+  counts.
+
+If that floor is larger than the machine's memory ceiling (the cgroup limit, else host RAM), the
+run is refused with `generation_budget_exceeded`, and the message gives the bytes needed, the
+bytes available and the largest table. `estimate_job_capacity` makes the same check and reports
+`INSUFFICIENT` with that code, so the CLI refuses the config before a run: `decoy validate
+pipeline.yaml` runs it as part of the whole pre-run gate, and `decoy validate preflight
+pipeline.yaml` runs that layer alone. `decoy validate config` checks the config only and does
+not run the capacity check. The floor is a lower bound, so a run that passes it can still run
+out of memory. It is skipped when the run has an explicit memory budget
+(the run then holds itself to that budget), when it streams eligible columns to a bounded sink,
+and when the ceiling cannot be read.
+`CAPACITY_REASON_CODES` in `decoy_engine.errors` lists every code that means the same verdict:
+the generation budget, the out-of-core memory, fan-in, Faker pool and reorder budgets, the pool
+cache budget and the isolated worker running out of memory. `CAPACITY_EXCLUSIONS` in the same
+module names each other memory or budget code with the reason it is not a capacity verdict. The
+full-frame OOM-risk refusals are in it: they are decided before any row is read.
 
 ### sequence
 
 Monotonic counter.
 
-- `start`: first value.
-- `step`: increment.
+- `start`: first value (required).
+- `step`: increment, any integer but 0 (default 1).
+- `prefix` / `suffix` / `pad_length`: turn the value into text, zero-padded to `pad_length`
+  digits.
 
 Use it for surrogate primary keys.
 
@@ -1255,15 +1536,21 @@ Use it for surrogate primary keys.
 
 A synthetic value per row from a named faker type.
 
-- `faker_type`: the faker generator (for example `first_name`, `email`, `job`).
-- locale and faker kwargs are supported per the generator.
+- `faker_type`: the faker generator (for example `first_name`, `email`, `job`). It must be a
+  provider in the column's locale or a registered custom provider.
+- `locale`: one locale or a non-empty list, each one Faker knows (`en_US` or `en-US`). A column
+  without one is checked again in the run's default locale before any provider runs.
+- `faker_kwargs`: keyword arguments for the provider method. For a built-in Faker method an
+  unknown keyword is refused (`generate_faker_kwargs_unknown`). A registered custom provider is
+  called as `fn(faker)` and never reads them, so any keyword is accepted there and ignored.
 
 ### categorical
 
 Draws each row from a fixed category pool.
 
-- `categories`: the pool.
-- `weights`: optional per-category distribution.
+- `categories`: the pool. The values must fit one Arrow column type (`[1, 2.5]` and
+  `["a", null]` do; `["a", 1]` does not).
+- `weights`: optional, one non-negative number per category with a positive sum.
 
 ### reference
 
@@ -1273,10 +1560,146 @@ child can point at a generated parent's keys.
 - `reference_table` / `reference_column`: the generated parent table and column
   to draw from (both required).
 - `distribution`: how draws are spread across the parent values: `random`
-  (default), `sequential`, or `weighted`.
-- `weights`: per-value weights, used when `distribution` is `weighted`.
+  (default), `sequential`, `weighted`, or `fitted` (below). Any other value is refused.
+- `weights`: per-value weights, required when `distribution` is `weighted`. Against a
+  `sequence` parent with no nulls, the list must have one weight per parent row.
 - `min_per_parent` / `max_per_parent`: optional per-parent cardinality bounds
   (0 = unbounded). These bounds do not compose with `sequential`.
+- `snapshot_file` / `source_column`: only with `distribution: fitted` (below).
+  Any other distribution refuses them with `config.generate_option_unknown`.
+
+`random` and `weighted` pick a parent for each child row on its own, so on 30
+parents and 60 children almost every parent gets 1 to 4 children. A source
+where a few parents hold most of the children, or many parents hold none, loses
+that shape. `distribution: fitted` keeps it.
+
+#### Fitted fan-out (`distribution: fitted`)
+
+The fan-out of a key column is how many child rows each parent key has. A
+fitted reference column gives each generated parent a child count drawn from
+the fan-out of the source child table.
+
+```yaml
+- name: patient_id
+  type: reference
+  reference_table: patients
+  reference_column: patient_id
+  distribution: fitted
+  snapshot_file: visits.snap.json
+  source_column: patient_id   # optional; defaults to the column name
+```
+
+**What the snapshot records.** `decoy fit visits.csv --fanout patient_id`
+writes a `fanout` block on the `patient_id` entry of the snapshot. The CLI
+option ships with the CLI release that pins this engine; from Python, pass
+`fanout_columns=["patient_id"]` to `compute_distribution_snapshot` or
+`distribution_snapshot_document`.
+
+```json
+"patient_id": {
+  "kind": "categorical",
+  "fanout": {"rows": 20, "keys": 8, "degrees": [[1, 5], [2, 1], [5, 1], [8, 1]]}
+}
+```
+
+- `rows`: the non-null rows of the column.
+- `keys`: the distinct non-null keys.
+- `degrees`: `[children, parents]` pairs in ascending order. `[1, 5]` means 5
+  keys appear on exactly 1 row. Keys compare as strings, the way the rest of
+  the snapshot treats them.
+
+The block holds counts only, never a key value, so a snapshot written with
+sensitive columns withheld still keeps it. Without `--fanout` the snapshot is
+unchanged. A DP snapshot never carries a fan-out.
+
+**How children are allocated to parents.** Generation reads the pinned
+snapshot bytes from the compiled Plan, never the file. With `P` unique non-null
+generated parent keys and a child `row_count` of `N`:
+
+1. Active parents: `K = round(N * keys / rows)`, clamped to at least 1 and at
+   most `min(P, N)`. This keeps the source's mean children per active parent.
+   If the child and parent row counts keep the source's ratio, the share of
+   parents with no children comes out as in the source too, without reading
+   the parent file.
+2. Base degrees: the `K` values of the source degree histogram at evenly
+   spaced quantiles (systematic resampling with a fixed offset). This step
+   draws nothing at random. When `K` equals the source `keys`, it returns the
+   source degrees exactly.
+3. Scale to `N`: largest-remainder apportionment makes the degrees sum to
+   exactly `N` with every active parent holding at least one child. All
+   arithmetic is on integers, so every platform gets the same result.
+4. Cap: no parent gets more children than the largest source parent, as long
+   as `N <= K * max_degree`. When `K` was clamped to `P` and `N` is larger
+   than that, the cap cannot hold and some parents exceed the source maximum.
+
+**Assignment.** Two shuffles are the only random draws. The first assigns the
+`K` degrees, plus a zero for each of the other `P - K` parents, to the parent
+keys. The second shuffles the child rows. Every child key comes from the
+generated parent pool (no orphans) and the column has exactly `N` rows. The
+seed derives from the master key (or `seed`), the column config and the
+snapshot digest, through the same derivation as every reference column, so
+the same inputs give byte-identical output.
+
+For the source above (`rows` 20, `keys` 8):
+
+| Generated parents `P` | Child rows `N` | Result |
+|---|---|---|
+| 10 | 20 | degrees `8, 5, 2, 1, 1, 1, 1, 1, 0, 0`: the source exactly |
+| 30 | 60 | 24 of 30 parents have children; 15 have 1, 3 have 2, 3 have 5, 3 have 8 |
+
+Notes:
+
+- `null_probability` applies after assignment, as on any reference column, so
+  each parent loses children at random.
+- Two fitted reference columns in one child table are allocated separately,
+  so which patient sees which provider is not kept. A chain (`patients`,
+  `visits`, `claims`) is fitted one level at a time from each child file.
+- A plan with a fitted column runs on the legacy generation route; the
+  streamed core declines it (admission reason `reference_fitted_fanout`).
+- `random`, `sequential` and `weighted` output does not change.
+
+**Refusals.** `fitted` never falls back to uniform draws or to an all-null
+column.
+
+| Code | When |
+|---|---|
+| `plan.reference_fanout_missing` | No `snapshot_file`; the source column is not in the snapshot; or its entry has no `fanout` (a snapshot fitted without `--fanout`, or any DP snapshot). Also raised at generation if no pinned fan-out reached it (a caller that skipped compile). |
+| `plan.reference_fanout_invalid` | The `fanout` block breaks a rule: not an object; a count that is not a plain integer (bools, floats and numeric strings are refused, not coerced); a pair that is not two positive integers; degrees not strictly ascending; parent counts that do not sum to `keys`; children that do not sum to `rows`; or `keys` of 0. |
+| `plan.reference_fanout_conflict` | `weights`, `min_per_parent` or `max_per_parent` is set; the fan-out already fixes the per-parent counts. |
+| `plan.reference_parent_pool_empty` | The child table has rows but the generated parent column has no non-null keys. |
+| `plan.dp_generate_fitted_fanout_unsupported` | The config declares `global_settings.dp`. The exact source fan-out would reach DP output unprotected; use `distribution: random`. |
+| `plan.statistical_snapshot_unreadable`, `plan.statistical_snapshot_schema_mismatch` | The snapshot file could not be read or is not `distribution-snapshot/v1` or `/v2`. |
+| `plan.statistical_snapshot_not_pinned` | A saved Plan loaded with `plan_from_yaml` no longer carries the fitted column's snapshot. |
+| `plan.pinned_snapshot_file_not_statistical` | The pinned API (`compile_pinned`) takes `snapshot_file` only on statistical columns. |
+| `quality.fanout_column_unknown` | At fit: a fan-out column is not in the source, or `fanout_columns` is a bare string. |
+| `config.generate_unique_conflict` | `unique: true` with `distribution: fitted`. |
+
+Messages name tables, columns and fields only, never a key value or a stored
+count.
+
+### What a plain `decoy fit` snapshot keeps
+
+A plain snapshot (no `--include-values`) applies one floor, `MIN_RELEASE_COUNT` (10 rows), to
+every column, not only the columns the profiler flags.
+
+- A categorical label or a joint cell held by fewer than 10 rows moves into `other_count`. A bool
+  column keeps its labels.
+- A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
+  cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
+  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+- A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
+  10 rows each. A flagged column gets the same ranges.
+- A short string column whose labels read as sentences (median of 3 or more words) is written as
+  free text, with length statistics only.
+- A column too small to floor (a numeric with under 20 finite cells, a categorical with every
+  label under 10 rows, a datetime with no year held by 10 rows) is withheld and listed in
+  `redacted_columns`. A categorical column, or a `condition_on` parent, then refuses with
+  `plan.statistical_snapshot_values_redacted`. A numeric column samples one coarse interval. A
+  datetime column samples its year ranges, and releases none when it has under 10 rows in all.
+  `--include-values` keeps the old content.
+
+The snapshot is `distribution-snapshot/v2` and `value_policy` is `flagged-redacted/v2`. Readers
+accept `flagged-redacted/v1` and `distribution-snapshot/v1` as before.
 
 ### formula
 
@@ -1284,10 +1707,44 @@ Computes a column from an expression over the other generated columns.
 
 - `formula`: the Python expression evaluated per row (required).
 - `references`: the sibling column names the expression reads; filled in a
-  single declared-order post-pass after the other columns exist. A formula
-  column that reads a later-declared referenced formula sibling sees that
-  sibling's null placeholder, not its computed value. Declare dependencies
-  before the columns that read them.
+  single declared-order post-pass after the other columns exist.
+
+Plan compile refuses a formula that reads a sibling not listed in `references`
+(`generate_formula_reference_missing`), lists a column the table does not have
+(`generate_formula_reference_unknown`), reads a name that is neither a sibling nor one
+the formula scope provides, such as `abs` or `sqrt` (`round` and `random` are in the scope)
+(`generate_formula_name_unknown`), wraps a sibling in braces as `{a} * 2` (`generate_formula_template_syntax`), or reads itself or a later formula
+that has `references` (`generate_column_forward_reference`). Declare dependencies
+before the columns that read them.
+
+A formula reads each referenced column as the type the column has. A plain `sequence` (no
+prefix, suffix or padding), an int or float `faker` column and a numeric `categorical`,
+`constant`, `distribution` or `reference` column arrive as numbers, so `round(a / 3)` and
+`a * 2` do arithmetic. The same holds when another column reads the same column as text: the
+output column stays text there, and the formula still sees the number.
+
+Text spellings of a number reference are refused at compile with
+`generate_formula_number_used_as_text`. Rewrite them with `str()` or compare with a number:
+
+| Before | After |
+|---|---|
+| `'ORD-' + id` | `'ORD-' + str(id)` or `f'ORD-{id}'` |
+| `id.zfill(5)` | `str(id).zfill(5)` or `f'{id:05d}'` |
+| `id[-4:]`, `len(id)` | `str(id)[-4:]`, `len(str(id))` |
+| `id == '1'` | `id == 1` |
+| `x if id else y` with a sequence from 0 | `x if id is not None else y` |
+
+Row rules:
+
+- A missing cell (a null from `null_probability`) in a referenced number column makes the
+  result null, and the formula does not run for that row. A formula cannot replace that null.
+- A missing cell in any other referenced column is bound as `""`.
+- A formula that raises on any other row fails the run with
+  `generate_formula_evaluation_failed`. The message names the table, the column, the row
+  index and a fixed reason word, never a cell value. This includes a formula with no
+  `references`.
+- Reversed membership such as `'1' in id` is not refused at compile. It fails at run with
+  `generate_formula_evaluation_failed`.
 
 ### derived
 
@@ -1299,18 +1756,55 @@ validation timing, and security note.
 In generate mode the same parameters (`expression`, `bounds`,
 `null_propagation`) are top-level keys on the generate column config, not
 nested under `provider_config:`. Sibling columns must be declared before the
-`derived` column that reads them; a forward reference fails at evaluation time.
+`derived` column that reads them; plan compile refuses a forward reference with
+`generate_column_forward_reference`.
+
+### constant
+
+Every row gets the same `value`: a string, a bool, a 64-bit integer or a finite float.
 
 ### distribution
 
-Samples rows whose distribution matches a provided snapshot (numeric,
-categorical, or datetime). Use it to generate a column shaped like a real
-source column's distribution.
+Draws numbers from a named family, with no source file. To shape a column like a real one, use
+`statistical` with a `decoy fit` snapshot instead.
 
-- `snapshot`: a dict with `kind` (`numeric`, `categorical`, or `datetime`) and a
-  `stats` block. `numeric` needs `bin_edges` + `bin_counts`; `categorical` needs
-  `top_values` + `other_count`; `datetime` needs `year_bins` + `min` + `max`.
-  This matches `compute_distribution_snapshot`'s output.
+- `family`: `uniform` is the only family. Others are refused with
+  `generate_option_value_unknown` until a sampler gives the same bytes on arm64 and x86.
+- `low` / `high`: the uniform range (both required, `high` above `low`). The family takes
+  only its own keys.
+- `min` / `max`: optional clip applied to each draw (`min` at most `max`).
+
+### lookup
+
+Draws each row from a list in a file or in a shipped code set, optionally weighted.
+
+```yaml
+- name: sku
+  type: lookup
+  file: data/skus.csv        # or: codeset: icd10 (exactly one of file, codeset)
+  value_column: sku          # default: the first column of a file, `code` of a code set
+  weight_column: units_sold  # optional
+```
+
+- `file`: a `.csv` (comma delimiter, a header row, UTF-8) or `.parquet` file. A relative path is
+  read from the config file's folder. Values are the CSV cells as exact text (`NA` stays `NA`, a
+  blank cell is an empty-string entry) or the Parquet column's string, integer, float or bool
+  values; `output_type` casts them. A repeated value is a separate entry, so its weights add.
+- `codeset`: `icd10`, `hcpcs`, `ndc` or `mcc`. The list comes from the corpus the installed
+  engine ships, so the same config can give different output on another engine version. A code set
+  has no numeric column, so a `weight_column` on one is refused.
+- `weight_column`: finite numbers of at least zero with a positive total. A blank, text or
+  negative cell is refused (`lookup_weight_invalid`). The list holds at most 1,000,000 entries.
+
+The file is read once at compile and its bytes are kept in the plan; a run and a reloaded plan use
+those bytes and never open the path again, so editing the file after compile changes nothing. The
+seed follows the file's content, not its path: moving the file keeps the output, editing it
+changes the output. A lookup column runs on the resident route only (a plan with one is not
+streamed) and is refused in pinned mode (`pinned_lookup_unsupported`). `unique` is not taken. A
+refusal names the table and column and a reason (`lookup_file_unreadable`, `lookup_file_too_large`,
+`lookup_file_format_unsupported`, `lookup_column_missing`, `lookup_file_empty`,
+`lookup_weight_invalid`, `lookup_too_many_entries`, and on plan load `lookup_pinned_digest_mismatch`
+and `lookup_not_pinned`), never a cell value or a path.
 
 ## Job-level config: validators and quarantine (SP-05, extended Sprint 2 honesty pack)
 
@@ -1442,9 +1936,9 @@ failing rows to a JSONL file instead of failing the job.
 
 ### Per-row strategy errors (Sprint 2 honesty pack, D7/D8)
 
-Independent of the `validators:` block, `bucketize`, `date_shift`, and
-`code_set` can each produce PER-ROW errors during masking itself (not a
-post-mask check): a non-null `bucketize`/`date_shift` cell that fails
+Independent of the `validators:` block, `bucketize`, `date_shift`, `top_code`
+and `code_set` can each produce PER-ROW errors during masking itself (not a
+post-mask check): a non-null `bucketize`/`date_shift`/`top_code` cell that fails
 numeric/date coercion (`format_error`), or a `code_set` `chapter_preserve`
 value that cannot be masked -- input chapter absent from the corpus, or a
 sole-member chapter bucket (`mask_error`).
@@ -1559,13 +2053,13 @@ Two safety bounds are checked before parsing:
 | String | `concat(a, b, ...)` (two or more arguments) |
 | Substring | `slice(s, start[, end])` (Python-native 0-indexed, half-open, negative-from-end slicing; out-of-range indices clamp rather than error, e.g. `slice(firstname, -4)` for the last 4 characters) |
 | Date | `days_between(start, end)` (integer days; accepts `datetime.date` or ISO-8601 strings) |
-| Conditional | `case_when(cond1, val1, ..., condN, valN, default)` -- **non-short-circuit**: all sub-expressions are evaluated before branch selection; every branch value must be safe to evaluate for all rows |
-| Ternary | `value if condition else other` |
+| Conditional | `case_when(cond1, val1, ..., condN, valN, default)` -- lazy: only the conditions up to the first true one and the chosen value are evaluated, so an unchosen `100 // a` cannot raise |
+| Ternary | `value if condition else other`, or the call form `if(condition, value, other)` (same node; lazy like `case_when`, and `or` / `and` short-circuit; the condition is evaluated first, so a failing condition is reported before a failing branch) |
 | Literals | integers, floats, double-quoted strings, `True`, `False`, `None` |
 | Column refs | bare identifiers (no dots, no dunders) |
 
 Anything not in the table above is rejected. This includes: function calls
-other than `concat`, `slice`, `days_between`, and `case_when`, attribute
+other than `concat`, `slice`, `days_between`, `case_when` and `if`, attribute
 access (`.`), subscript syntax (`[]`), `import`, and dunder identifiers
 (`__class__`, etc.).
 

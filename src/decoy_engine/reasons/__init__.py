@@ -36,9 +36,13 @@ from decoy_engine.reasons._identity import (
     ReasonRef,
     UnknownReasonError,
     get_reason,
+    reason_ref_payload,
     require_known,
 )
 from decoy_engine.reasons._record import (
+    COUNT_KEYS,
+    MAX_COUNTS,
+    MAX_NAME_LEN,
     REGISTRY_VERSION_RE,
     CleanupState,
     Operation,
@@ -48,6 +52,7 @@ from decoy_engine.reasons._record import (
     approve_name,
     approve_ref,
 )
+from decoy_engine.reasons._record import _is_count as is_count
 from decoy_engine.reasons._registry import (
     EVENT_SCHEMA_VERSION,
     REASON_SCHEMA_VERSION,
@@ -59,9 +64,11 @@ from decoy_engine.reasons._registry import (
     lookup,
     manifest,
     namespaces,
+    pending_summary_edits,
     specs,
 )
 from decoy_engine.reasons._types import (
+    UNRELEASED,
     Kind,
     Outcome,
     Phase,
@@ -73,12 +80,16 @@ from decoy_engine.reasons._types import (
 )
 
 __all__ = [
+    "COUNT_KEYS",
     "EVENT_SCHEMA_VERSION",
+    "MAX_COUNTS",
+    "MAX_NAME_LEN",
     "REASONS",
     "REASON_SCHEMA_VERSION",
     "REGISTRY_SCHEMA",
     "REGISTRY_VERSION",
     "REGISTRY_VERSION_RE",
+    "UNRELEASED",
     "CleanupState",
     "Kind",
     "Operation",
@@ -103,10 +114,12 @@ __all__ = [
     "find",
     "get",
     "get_reason",
+    "is_count",
     "is_registered",
     "lookup",
     "manifest",
     "namespaces",
+    "pending_summary_edits",
     "physical",
     "plan",
     "platform",
@@ -114,6 +127,7 @@ __all__ = [
     "pre_scan",
     "provider",
     "quality",
+    "reason_ref_payload",
     "require_known",
     "route",
     "runtime",

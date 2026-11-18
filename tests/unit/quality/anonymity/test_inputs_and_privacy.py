@@ -546,9 +546,9 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
     return ".".join(base + ([node.module] if node.module else []))
 
 
-# The one value-identity rule lives at the anonymize package root; that exact
-# module is allowed, nothing below it.
-_ALLOWED_ENGINE_MODULES = frozenset({"decoy_engine.anonymize"})
+# The one value-identity rule lives in the bottom-tier module _value_family; that
+# exact module is allowed. Nothing in anonymize is: it sits in a higher layer.
+_ALLOWED_ENGINE_MODULES = frozenset({"decoy_engine._value_family"})
 
 
 _PACKAGE = "decoy_engine.quality.anonymity"
@@ -594,16 +594,26 @@ def test_package_imports_only_data_libraries() -> None:
 @pytest.mark.parametrize(
     "source",
     [
+        "from decoy_engine.anonymize import type_family",
         "from decoy_engine.anonymize.hierarchies import Lattice",
         "from decoy_engine.anonymize.search import search_lattice",
-        "import decoy_engine.anonymize._values",
     ],
 )
-def test_only_the_anonymize_root_is_allowed(source: str) -> None:
-    """Seeded: the walk refuses anything below the anonymize root."""
+def test_nothing_in_anonymize_is_allowed(source: str) -> None:
+    """Seeded: the walk refuses every anonymize module; value identity comes from _value_family."""
     assert _refused_imports(ast.parse(source)) != [], source
-    assert _refused_imports(ast.parse("from decoy_engine.anonymize import type_family")) == []
+    assert _refused_imports(ast.parse("from decoy_engine._value_family import type_family")) == []
     assert _refused_imports(ast.parse("import importlib")) == ["importlib"]
+
+
+def test_only_the_value_family_module_is_allowed() -> None:
+    assert {"decoy_engine._value_family"} == _ALLOWED_ENGINE_MODULES
+    for name in (
+        "decoy_engine.anonymize",
+        "decoy_engine.anonymize.hierarchies",
+        "decoy_engine.anonymize.search",
+    ):
+        assert name not in _ALLOWED_ENGINE_MODULES
 
 
 def test_import_walk_sees_relative_and_dynamic_imports() -> None:

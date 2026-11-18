@@ -10,14 +10,68 @@ concatenation order there is part of the determinism contract.
 
 from __future__ import annotations
 
+from decoy_engine.config import UNIQUE_FAKER_ATTEMPTS
 from decoy_engine.execution.native._draw_site_types import _V6, DrawSite
+
+# Appended to the end of DRAW_SITES by `_determinism_protocol` (the catalogue order is pinned).
+GEN_KIND_DRAW_SITES: tuple[DrawSite, ...] = (
+    DrawSite(
+        draw_site_id="gen.distribution",
+        family="numpy_pcg64",
+        call_site="generation/kinds/_parametric.py::ParametricStream.__init__",
+        entropy_root="job_seed",
+        seed_derivation=(
+            'np.random.default_rng(GenDeriveContext.for_column(derive_key, col, seed).base_int("dist"))'
+        ),
+        api_operation="numpy.random.default_rng(col_seed).random",
+        call_shape=(
+            "draws = rng.random(size) * (high - low) + low  # one persistent Generator, size draws "
+            "per batch, multiply and add as separate ufuncs (no FMA); optional np.clip(draws, min, max)"
+        ),
+        consumes_variable_draws=False,
+        identity="column",
+        null_draw_behavior=(
+            "null_probability is gen.null_probability on the separate np family; "
+            "every row draws, nulls replace values afterwards"
+        ),
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)",
+        provider_version=f"{_V6} (GenDeriveContext); numpy NEP-19 PCG64",
+        notes=(
+            "Own RNG family so the value stream never shares uniforms with the null mask. "
+            "Prefix-stable: draws of sizes k and n-k concatenate to one draw of n, so batching "
+            "does not change values, but a partition cannot resume mid-stream."
+        ),
+    ),
+    DrawSite(
+        draw_site_id="gen.lookup",
+        family="python_mt19937",
+        call_site="generation/kinds/_lookup.py::lookup_values",
+        entropy_root="job_seed",
+        seed_derivation=(
+            'random.Random(GenDeriveContext.for_column(derive_key, col, seed, content_digests).base_int("py"))'
+        ),
+        api_operation="random.Random(col_seed).choices",
+        call_shape="rng.choices(values, weights=weights, k=n)  # single whole-column call",
+        consumes_variable_draws=False,
+        identity="column",
+        null_draw_behavior="null_probability applied as a separate post-pass",
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)+file content digest",
+        provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
+        notes=(
+            "The categorical call over a pinned lookup list; the seed fingerprint holds the "
+            "file's content digest, never its path."
+        ),
+    ),
+)
 
 GEN_DRAW_SITES: tuple[DrawSite, ...] = (
     # -- Generation: Faker per-row reseed ------------------------------------
     DrawSite(
         draw_site_id="gen.faker_per_row",
         family="faker_seed_instance",
-        call_site="generation/synthesize.py:490",
+        call_site="generation/synthesize.py::_faker#1",
         entropy_root="job_seed",
         seed_derivation='faker_inst.seed_instance(gen_ctx.row_int("faker", i))',
         api_operation="Faker.seed_instance(row_int) then provider_func(**kwargs)",
@@ -33,13 +87,13 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "generators/columns.py:329 is byte-identical. Provider draw count varies by "
             "provider but each row reseeds from its own HMAC(i)."
         ),
-        mirror_call_sites=("generators/columns.py:329",),
+        mirror_call_sites=("generators/columns.py::ColumnGenerator._generate_faker_column",),
     ),
     # -- Generation: whole-column python Random choices ----------------------
     DrawSite(
         draw_site_id="gen.categorical",
         family="python_mt19937",
-        call_site="generation/synthesize.py:433",
+        call_site="generation/synthesize.py::_generate_column",
         entropy_root="job_seed",
         seed_derivation=(
             'random.Random(GenDeriveContext.for_column(derive_key, col, seed).base_int("py"))'
@@ -53,35 +107,48 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
         config_fingerprint_source="strategy_config_fingerprint(column_config)",
         provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
         notes="One choices(k=n) stream over the whole column. V1 mirror generators/columns.py:412.",
-        mirror_call_sites=("generators/columns.py:412",),
+        mirror_call_sites=("generators/columns.py::ColumnGenerator._generate_categorical_column",),
     ),
     # -- Generation: reference / FK sampling (sequential python Random) ------
     DrawSite(
         draw_site_id="gen.reference",
         family="python_mt19937",
-        call_site="generation/synthesize.py:624",
+        call_site="generation/_synthesize_derived.py::_reference",
         entropy_root="job_seed",
         seed_derivation='random.Random(GenDeriveContext.for_column(...).base_int("py"))',
         api_operation="random.Random(col_seed).choice / .choices per row",
-        call_shape="per row: rng.choice(ref_vals) | rng.choices(..., k=1)  # sequential stream",
+        call_shape=(
+            "per row: rng.choice(ref_vals) | rng.choices(..., k=1)  # sequential stream; "
+            "fitted: rng.shuffle(slots) then rng.shuffle(stubs) on the same stream"
+        ),
         consumes_variable_draws=True,
         identity="column",
         null_draw_behavior="sequential distribution draws nothing (index i % len); random/weighted draw per row",
         partitionable=False,
-        config_fingerprint_source="strategy_config_fingerprint(column_config)+sorted parent pool",
+        config_fingerprint_source=(
+            "strategy_config_fingerprint(column_config)+insertion-order parent pool; "
+            "fitted: the pinned snapshot digest (no snapshot_file read)"
+        ),
         provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
         notes=(
             "One Random advanced across all rows: a partition cannot resume mid-stream. "
             "Cardinality repair (generators/columns.py:596-656) adds rng.shuffle/choices "
-            "on the same stream. V1 mirror generators/columns.py:507."
+            "on the same stream. V1 mirror generators/columns.py:507. The fitted fan-out "
+            "allocator (generation/statistical/_fanout.py:305) takes the same Random, seeded "
+            "with the pinned snapshot digest (FanoutSpec.seed_digest), and shuffles degrees "
+            "to parents, then the child row order."
         ),
-        mirror_call_sites=("generators/columns.py:507", "generators/columns.py:596"),
+        mirror_call_sites=(
+            "generators/columns.py::ColumnGenerator._generate_reference_column",
+            "generators/columns.py::ColumnGenerator._apply_cardinality_bounds",
+            "generation/statistical/_fanout.py::fitted_reference_values",
+        ),
     ),
     # -- Generation: per-row reseeded formula / faker scope ------------------
     DrawSite(
         draw_site_id="gen.formula_per_row",
         family="per_row_reseed",
-        call_site="generators/columns.py:202",
+        call_site="generators/columns.py::ColumnGenerator.generate_column#1",
         entropy_root="job_seed",
         seed_derivation=(
             'local_seed = gen_ctx.row_int("py", i); row_rng.seed(local_seed); '
@@ -100,22 +167,31 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "not matter. Referenced-formula post-pass mirror at generators/_formula.py:144."
         ),
         mirror_call_sites=(
-            "generators/_formula.py:144",
-            "generation/synthesize.py:559",
+            "generators/_formula.py::_FormulaMixin._generate_formula_column",
+            "generation/_synthesize_derived.py::_formula",
         ),
     ),
     # -- Generation: statistical sampler per-row reseed ----------------------
     DrawSite(
         draw_site_id="gen.statistical_per_row",
         family="per_row_reseed",
-        call_site="generation/statistical/_sample.py:260",
+        call_site="generation/statistical/_sample.py::sample_column",
         entropy_root="job_seed",
         seed_derivation="rng.seed(col_seed + i)  # one random.Random reseeded per row",
         api_operation="random.Random reseeded per row; .random / .choices / .randrange",
-        call_shape="per row: rng.seed(col_seed + i); inverse-CDF / weighted draw",
+        call_shape=(
+            "per row: rng.seed(col_seed + i); [freetext blank draw when blank_count > 0]; "
+            "histogram, quantile-grid (one draw) or exact-value draw; inverse-CDF / weighted draw; "
+            "round or floor to the fitted cell format; "
+            "[null draw when the snapshot carries cell_format and null_probability is unset]"
+        ),
         consumes_variable_draws=True,
         identity="row_index",
-        null_draw_behavior="every row draws; sampler emits a value for each row",
+        null_draw_behavior=(
+            "with a fitted cell_format: one rng.random() after the value draw, below "
+            "null_count/row_count gives None; kind empty draws nothing and emits None. "
+            "Without cell_format every row draws and emits a value."
+        ),
         partitionable=True,
         config_fingerprint_source="StatisticalSpec (snapshot_digest-pinned) + col_seed",
         provider_version="CPython Mersenne Twister (no numpy; bit-stable inverse-CDF)",
@@ -129,7 +205,7 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.null_probability",
         family="numpy_pcg64",
-        call_site="generation/synthesize.py:521",
+        call_site="generation/synthesize.py::_faker#2",
         entropy_root="job_seed",
         seed_derivation=('np.random.default_rng(GenDeriveContext.for_column(...).base_int("np"))'),
         api_operation="numpy.random.default_rng(col_seed).random(n)",
@@ -145,13 +221,13 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "position, so a partition cannot reproduce it without the full prefix. V1 "
             "mirror generators/columns.py:221."
         ),
-        mirror_call_sites=("generators/columns.py:221",),
+        mirror_call_sites=("generators/columns.py::ColumnGenerator.generate_column#2",),
     ),
     # -- Generation: distribution-snapshot sampler (whole-column numpy) ------
     DrawSite(
         draw_site_id="gen.distribution_snapshot",
         family="numpy_pcg64",
-        call_site="generators/_distribution.py:141",
+        call_site="generators/_distribution.py::_DistributionMixin._generate_distribution_numeric",
         entropy_root="job_seed",
         seed_derivation='np.random.default_rng(self._column_ctx(name, cfg).base_int("np"))',
         api_operation="numpy.random.default_rng(col_seed).choice / .uniform / .random",
@@ -167,15 +243,15 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "(generators/_distribution.py:141, :266, :386)."
         ),
         mirror_call_sites=(
-            "generators/_distribution.py:266",
-            "generators/_distribution.py:386",
+            "generators/_distribution.py::_DistributionMixin._generate_distribution_categorical",
+            "generators/_distribution.py::_DistributionMixin._generate_distribution_datetime",
         ),
     ),
     # -- Generation: value-pool sampler --------------------------------------
     DrawSite(
         draw_site_id="gen.pool_deterministic",
         family="source_keyed_hmac",
-        call_site="generation/pool/_sampler.py:225",
+        call_site="generation/pool/_sampler.py::PoolSampler.sample#1",
         entropy_root="job_seed",
         seed_derivation="derive_index(seed=seed, namespace=namespace, source=canonical, pool_size=pool.size)",
         api_operation="determinism.derive_index per non-null source row",
@@ -191,14 +267,14 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "(_pool_adapter.py:156) use the same per-row derive_index."
         ),
         mirror_call_sites=(
-            "generation/pool/_sampler.py:355",
-            "generation/pool/_pool_adapter.py:156",
+            "generation/pool/_sampler.py::PoolSampler._match_source_cardinality",
+            "generation/pool/_pool_adapter.py::PoolAdapter.generate",
         ),
     ),
     DrawSite(
         draw_site_id="gen.pool_nondeterministic",
         family="numpy_pcg64",
-        call_site="generation/pool/_sampler.py:122",
+        call_site="generation/pool/_sampler.py::_derive_pool_indices#1",
         entropy_root="job_seed",
         seed_derivation='np.random.default_rng(int.from_bytes(seed, "big"))',
         api_operation="numpy.random.default_rng(seed_int).integers / .permutation",
@@ -219,9 +295,12 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.composite_build_pool",
         family="numpy_pcg64",
-        call_site="generation/composite/_provider.py:116",
+        call_site="generation/composite/_provider.py::CompositeProvider.build_pool",
         entropy_root="job_seed",
-        seed_derivation='np.random.default_rng(int.from_bytes(seed, "big"))  # seed = spec.seed or b"\\x00"*8',
+        seed_derivation=(
+            'np.random.default_rng(int.from_bytes(seed, "big"))  '
+            "# seed = resolve_seed(spec.seed), one per spec"
+        ),
         api_operation="numpy.random.default_rng(seed_int).integers / .bytes",
         call_shape="rng.integers(0, len(names), size=n); rng.bytes(8)  # whole-pool build",
         consumes_variable_draws=False,
@@ -236,11 +315,80 @@ GEN_DRAW_SITES: tuple[DrawSite, ...] = (
             "drawn by the pool sampler entries above."
         ),
         mirror_call_sites=(
-            "generation/composite/_name_email.py:134",
-            "generation/composite/_custom.py:206",
-            "generation/composite/_address.py:96",
-            "generation/composite/_person.py:142",
+            "generation/composite/_name_email.py::CompositeNameEmail.build_pool",
+            "generation/composite/_custom.py::CompositeCustom.build_pool",
+            "generation/composite/_address.py::CompositeAddress.build_pool",
+            "generation/composite/_person.py::CompositePerson.build_pool",
         ),
+    ),
+    DrawSite(
+        draw_site_id="gen.faker_unique_retry",
+        family="faker_seed_instance",
+        call_site="generation/_unique.py::unique_faker",
+        entropy_root="job_seed",
+        seed_derivation=(
+            f'faker_inst.seed_instance(gen_ctx.row_int("faker_unique", i * {UNIQUE_FAKER_ATTEMPTS} + attempt - 1))'
+        ),
+        api_operation="Faker.seed_instance(row_int) then provider_func(**kwargs), only after a repeated value",
+        call_shape=(
+            f"per repeated row: up to {UNIQUE_FAKER_ATTEMPTS - 1} retries, each "
+            f"seed_instance(row_int('faker_unique', i*{UNIQUE_FAKER_ATTEMPTS}+k-1)); provider_func(...)"
+        ),
+        consumes_variable_draws=True,
+        identity="row_index",
+        null_draw_behavior="a None result is emitted without retry and never enters the seen set",
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)",
+        provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
+        notes="Attempt 0 of a unique faker row is gen.faker_per_row. A retry reseeds from its own HMAC family so it never reuses a row seed. The seen set makes a row depend on earlier rows, so it is not partitionable.",
+    ),
+    DrawSite(
+        draw_site_id="gen.categorical_unique",
+        family="python_mt19937",
+        call_site="generation/_unique.py::unique_categorical",
+        entropy_root="job_seed",
+        seed_derivation='random.Random(GenDeriveContext.for_column(derive_key, col, seed).base_int("py"))',
+        api_operation="random.Random(col_seed).sample(distinct_categories, k)",
+        call_shape="rng.sample(distinct, min(n, len(distinct)))  # single whole-column call, None fills the overflow",
+        consumes_variable_draws=False,
+        identity="column",
+        null_draw_behavior="None categories are not sampled; they fill rows past the distinct count",
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)",
+        provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
+        notes="Sampling without replacement replaces choices(k=n) when unique is true.",
+    ),
+    DrawSite(
+        draw_site_id="gen.reference_unique",
+        family="python_mt19937",
+        call_site="generation/_unique.py::unique_reference",
+        entropy_root="job_seed",
+        seed_derivation='random.Random(GenDeriveContext.for_column(...).base_int("py"))',
+        api_operation="random.Random(col_seed).sample(ref_vals, n)",
+        call_shape="rng.sample(ref_vals, n)  # sequential distribution slices ref_vals[:n] and draws nothing",
+        consumes_variable_draws=False,
+        identity="column",
+        null_draw_behavior="parent nulls are dropped from ref_vals before the draw",
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)",
+        provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
+        notes="Replaces the per-row choice stream of gen.reference when unique is true.",
+    ),
+    DrawSite(
+        draw_site_id="gen.unique_pair",
+        family="python_mt19937",
+        call_site="generation/_unique.py::unique_pair",
+        entropy_root="job_seed",
+        seed_derivation='random.Random(GenDeriveContext.for_column(first_member, table, seed).base_int("unique_pair"))',
+        api_operation="random.Random(pair_seed).sample(range(P_a * P_b), n)",
+        call_shape="picks = rng.sample(range(size), n); a = keys_a[i // P_b]; b = keys_b[i % P_b]",
+        consumes_variable_draws=False,
+        identity="column",
+        null_draw_behavior="pair members carry no null_probability",
+        partitionable=False,
+        config_fingerprint_source="strategy_config_fingerprint(column_config)",
+        provider_version=f"{_V6} (GenDeriveContext); CPython Mersenne Twister",
+        notes="One draw for both members of a unique_together entry, seeded from the first-declared member.",
     ),
 )
 
@@ -249,11 +397,11 @@ GEN_SUBSTRATE_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.derive_context",
         family="gen_derive_context",
-        call_site="generators/derivation.py:158",
+        call_site="generators/derivation.py::_gen_hmac",
         entropy_root="job_seed",
         seed_derivation=(
-            'root = derive_key("gen:" + strategy_config_fingerprint(cfg)) | '
-            "sha256(job_seed.to_bytes(8) + fingerprint) | os.urandom(32) if fresh; "
+            'root = derive_key("gen:" + strategy_config_fingerprint(cfg) + ":" + identity) | '
+            "sha256(job_seed.to_bytes(8) + fingerprint + identity) | os.urandom(32) if fresh; "
             'family_key = HMAC(root, b"fam:"+family); '
             "row_int = HMAC(family_key, family, extra=i.to_bytes(8))"
         ),

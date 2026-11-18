@@ -47,7 +47,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
-from decoy_engine.anonymize import type_family
+from decoy_engine._value_family import type_family
 from decoy_engine.quality.anonymity._classes import (
     IntArray,
     _real,

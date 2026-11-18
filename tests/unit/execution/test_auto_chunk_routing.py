@@ -36,8 +36,9 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
-from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.errors import PipelineValidationError, RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
+from tests._declared_schema import declare_rest
 from tests.native._chunked_entry_support import force_oracle, forced_reason
 
 _ENGINE_VERSION = "p3-auto-chunk-test"
@@ -51,7 +52,7 @@ _CHUNK = 16
 
 
 def _validated_dump(cfg: dict) -> dict:
-    return PipelineConfig.model_validate(cfg).model_dump()
+    return PipelineConfig.model_validate(declare_rest(cfg)).model_dump()
 
 
 def _config(tmp_path, columns: list[dict], table: str = "accounts") -> dict:
@@ -59,7 +60,14 @@ def _config(tmp_path, columns: list[dict], table: str = "accounts") -> dict:
         {
             "version": 2,
             "global_settings": {"seed": 42},
-            "sources": {table: {"type": "file", "format": "csv", "path": str(tmp_path / "in.csv")}},
+            "sources": {
+                table: {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(tmp_path / "in.csv"),
+                }
+            },
             "tables": [{"name": table, "columns": columns}],
             "targets": {
                 table: {"type": "file", "format": "csv", "path": str(tmp_path / "out.csv")}
@@ -312,18 +320,18 @@ class TestByteIdentityMatrix:
 
 class TestRoutingMechanics:
     def test_eligible_job_routes_through_chunked_entrypoint(self, tmp_path, monkeypatch):
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         cfg, sources = _single_column_job(tmp_path, "hash")
         calls: list[dict[str, Any]] = []
-        real = _chunked.run_mask_pipeline_chunked
+        real = _chunked_oracle._mask_pipeline_chunked
 
         def spy(config, chunks, **kwargs):
             chunk_list = list(chunks)
             calls.append({"n_chunks": len(chunk_list), **kwargs})
             return real(config, chunk_list, **kwargs)
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", spy)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", spy)
         # Today's lane: the dispatcher lane (B2) runs `run_mask_chunked` instead, which
         # acceptance test 2 covers.
         auto, _forced = _run_pair(cfg, sources, monkeypatch, chunked_dispatcher_enabled=False)
@@ -381,12 +389,12 @@ class TestFailClosed:
         also nondeterministic across runs, so identity is asserted on the
         PATH (chunked entrypoint must never run) rather than on output
         bytes; the output is still checked to be a permutation."""
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         def bomb(*args, **kwargs):
             raise AssertionError("chunked entrypoint ran for a non-chunk-safe strategy")
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", bomb)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", bomb)
         df = pd.DataFrame({"val": [f"v{i}" for i in range(_ROWS)]})
         df.to_csv(tmp_path / "in.csv", index=False)
         cfg = _config(tmp_path, [{"name": "val", "strategy": "shuffle"}])
@@ -404,7 +412,12 @@ class TestFailClosed:
                 "version": 2,
                 "global_settings": {"seed": 42},
                 "sources": {
-                    name: {"type": "file", "format": "csv", "path": str(tmp_path / f"{name}.csv")}
+                    name: {
+                        "type": "file",
+                        "format": "csv",
+                        "has_header": True,
+                        "path": str(tmp_path / f"{name}.csv"),
+                    }
                     for name in ("a", "b")
                 },
                 "tables": [
@@ -481,7 +494,12 @@ class TestFailClosed:
                 "version": 2,
                 "global_settings": {"seed": 42},
                 "sources": {
-                    "accounts": {"type": "file", "format": "csv", "path": str(tmp_path / "in.csv")}
+                    "accounts": {
+                        "type": "file",
+                        "format": "csv",
+                        "has_header": True,
+                        "path": str(tmp_path / "in.csv"),
+                    }
                 },
                 "tables": [
                     {
@@ -536,11 +554,13 @@ class TestFailClosed:
                     "customers": {
                         "type": "file",
                         "format": "csv",
+                        "has_header": True,
                         "path": str(tmp_path / "customers.csv"),
                     },
                     "orders": {
                         "type": "file",
                         "format": "csv",
+                        "has_header": True,
                         "path": str(tmp_path / "orders.csv"),
                     },
                 },
@@ -695,9 +715,11 @@ class TestFailClosed:
         sources["extra"] = pa.Table.from_pandas(
             pd.DataFrame({"x": [1, 2, 3]}), preserve_index=False
         )
-        auto, forced = _run_pair(cfg, sources, monkeypatch, explain_plan=True)
-        _assert_full_frame_and_identical(auto, forced, "accounts", "extra")
-        assert auto.outputs["extra"].equals(forced.outputs["extra"])
+        # The declaration gate (CONFIG-EXPLICIT E2c) refuses a loaded table the config does not
+        # declare, so no route ever sees an extra frame.
+        with pytest.raises(PipelineValidationError) as refused:
+            _run_pair(cfg, sources, monkeypatch, explain_plan=True)
+        assert refused.value.code == "source_file.undeclared_table"
 
     def test_composite_provider_rejected_by_planner(self, tmp_path, monkeypatch):
         """A composite (coherent_with) provider that satisfies the per-column
@@ -1151,14 +1173,14 @@ class TestRoutedResultSurface:
 
 class TestKillSwitch:
     def test_auto_chunk_false_forces_full_frame_with_reason(self, tmp_path, monkeypatch):
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         cfg, sources = _single_column_job(tmp_path, "hash")
 
         def bomb(*args, **kwargs):
             raise AssertionError("chunked entrypoint ran despite auto_chunk=False")
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", bomb)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", bomb)
         monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
         result = run_pipeline(
             cfg,

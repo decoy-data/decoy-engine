@@ -11,6 +11,7 @@ import pytest
 from pydantic import BaseModel, Strict
 
 import decoy_engine.anonymize.report._model as model_module
+from decoy_engine._value_free import ValueFree
 from decoy_engine.anonymize.hierarchies import Lattice, interval_hierarchy, prefix_hierarchy
 from decoy_engine.anonymize.report import (
     RiskUtilityReport,
@@ -22,7 +23,6 @@ from decoy_engine.quality.anonymity import (
     KAnonymity,
     measure_reidentification_risk,
 )
-from decoy_engine.run_result import ValueFree
 
 from ._helpers import release
 
@@ -82,7 +82,8 @@ def test_the_walk_sees_a_free_string() -> None:
 
 
 def test_the_value_free_kinds_are_pinned() -> None:
-    assert _named_kinds() == {"schema_tag", "column_name"}
+    # token: run_result's Token leaf, imported for derive_read; the writer's own kinds are the other two.
+    assert _named_kinds() == {"schema_tag", "column_name", "token"}
 
 
 def _frame() -> pd.DataFrame:

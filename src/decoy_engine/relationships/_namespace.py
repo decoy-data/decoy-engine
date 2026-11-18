@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.config import classify_table_kinds
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile._types import Profile, Relationship
 
@@ -55,7 +56,9 @@ class NamespaceConfigError(PlanCompileError):
       resolved. Two clauses: (a) a deterministic-mode column in the config
       that does not declare a namespace; (b) a FK `Relationship` with
       `namespace=None` where neither parent nor child column declares
-      one explicitly and no auto-binding supplies one.
+      one explicitly and no auto-binding supplies one. An edge between two
+      generate tables is exempt: it takes a derived label (see
+      `_generate_only_namespace`) because nothing on it is masked.
     """
 
 
@@ -90,6 +93,9 @@ class NamespaceRegistry:
     """
 
     bindings: tuple[NamespaceBinding, ...]
+    # Tables the config marks as generate tables (from `classify_table_kinds`). An edge whose
+    # parent and child are both in this set masks nothing, so it needs no namespace.
+    generate_tables: frozenset[str] = frozenset()
     # Lazy-default to empty so older callers constructing
     # NamespaceRegistry(bindings=...) without _index still work; the
     # post-init below populates from bindings if _index is empty.
@@ -139,6 +145,11 @@ class NamespaceRegistry:
         child_ns = self.for_column(relationship.child_table, relationship.child_columns)
         if child_ns is not None:
             return child_ns
+        if (
+            relationship.parent_table in self.generate_tables
+            and relationship.child_table in self.generate_tables
+        ):
+            return _generate_only_namespace(relationship)
         raise NamespaceConfigError(
             code=reasons.config.NAMESPACE_MISSING,
             path=(
@@ -262,34 +273,8 @@ def build_namespace_registry(
     # columns are tracked so step 3 does not demand a per-column namespace for
     # them (their namespace is the group binding).
     tables_block = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    composite_columns: set[tuple[str, str]] = set()
-    composite_group_ns: dict[tuple[str, tuple[str, ...]], str | None] = {}
-    for table_entry in tables_block:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            coherent = [c for c in (col_entry.get("coherent_with") or []) if isinstance(c, str)]
-            if not coherent:
-                continue
-            col_name = col_entry.get("name", "?")
-            group = tuple(sorted({col_name, *coherent}))
-            group_key = (table_name, group)
-            composite_columns.add((table_name, col_name))
-            for ref in coherent:
-                composite_columns.add((table_name, ref))
-            explicit_ns = col_entry.get("namespace")
-            if explicit_ns:
-                prev = composite_group_ns.get(group_key)
-                if prev is not None and prev != explicit_ns:
-                    _raise_ambiguity(table_name, group, sorted({prev, explicit_ns}))
-                composite_group_ns[group_key] = explicit_ns
-            elif group_key not in composite_group_ns:
-                composite_group_ns[group_key] = None
-    for (tbl, grp), explicit in composite_group_ns.items():
-        ns = explicit if explicit is not None else f"composite/{tbl}/{'__'.join(grp)}"
+    composite_group_ns, composite_columns = composite_bindings(config)
+    for (tbl, grp), ns in composite_group_ns.items():
         existing = column_owner.get((tbl, grp))
         if existing is not None and existing != ns:
             _raise_ambiguity(tbl, grp, sorted({existing, ns}))
@@ -347,7 +332,65 @@ def build_namespace_registry(
         NamespaceBinding(namespace=ns, declared_by=tuple(namespace_to_columns[ns]))
         for ns in sorted(namespace_to_columns.keys())
     )
-    return NamespaceRegistry(bindings=bindings)
+    kinds = classify_table_kinds(config)
+    return NamespaceRegistry(
+        bindings=bindings,
+        generate_tables=frozenset(name for name, kind in kinds.items() if kind == "generate"),
+    )
+
+
+def _generate_only_namespace(relationship: Relationship) -> str:
+    """The private label of an edge between two generate tables, keyed by the parent key.
+
+    Nothing is masked on such an edge, so the label is never registered, bound to a column or
+    written to the plan. It follows the composite precedent: `generated/<table>/<columns>`, with
+    the columns joined by `__`. Fan-out children of one parent key share it.
+    """
+    return f"generated/{relationship.parent_table}/{'__'.join(relationship.parent_columns)}"
+
+
+def composite_bindings(
+    config: dict[str, Any],
+) -> tuple[dict[tuple[str, tuple[str, ...]], str], set[tuple[str, str]]]:
+    """The namespace of each ``coherent_with`` group, and the columns that belong to one.
+
+    A group takes the explicit ``namespace`` of any member, else the derived
+    ``composite/<table>/<members>``; two different explicit names raise ``namespace_ambiguity``.
+    This is the one owner of that rule: the registry binds from it and the required-setting check
+    asks it whether a column's namespace is derived.
+    """
+    tables_block = config.get("tables", []) if isinstance(config.get("tables"), list) else []
+    composite_columns: set[tuple[str, str]] = set()
+    composite_group_ns: dict[tuple[str, tuple[str, ...]], str | None] = {}
+    for table_entry in tables_block:
+        if not isinstance(table_entry, dict):
+            continue
+        table_name = table_entry.get("name", "?")
+        for col_entry in table_entry.get("columns", []) or []:
+            if not isinstance(col_entry, dict):
+                continue
+            coherent = [c for c in (col_entry.get("coherent_with") or []) if isinstance(c, str)]
+            if not coherent:
+                continue
+            col_name = col_entry.get("name", "?")
+            group = tuple(sorted({col_name, *coherent}))
+            group_key = (table_name, group)
+            composite_columns.add((table_name, col_name))
+            for ref in coherent:
+                composite_columns.add((table_name, ref))
+            explicit_ns = col_entry.get("namespace")
+            if explicit_ns:
+                prev = composite_group_ns.get(group_key)
+                if prev is not None and prev != explicit_ns:
+                    _raise_ambiguity(table_name, group, sorted({prev, explicit_ns}))
+                composite_group_ns[group_key] = explicit_ns
+            elif group_key not in composite_group_ns:
+                composite_group_ns[group_key] = None
+    bound = {
+        key: explicit if explicit is not None else f"composite/{key[0]}/{'__'.join(key[1])}"
+        for key, explicit in composite_group_ns.items()
+    }
+    return bound, composite_columns
 
 
 def _raise_ambiguity(table: str, columns: tuple[str, ...], conflicting: list[str]) -> None:

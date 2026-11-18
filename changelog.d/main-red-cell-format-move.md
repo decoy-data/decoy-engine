@@ -1,0 +1,3 @@
+### Changed (cell-format fit helpers move below generation, main-red fix, 2026-11-17)
+
+Internal move with no user-visible change. The cell-format fit helpers (`learn_cell_format`, `add_cell_format`, `scrub_cell_format` and the member descriptor) now live in `profiling/cell_format.py`, and `finite_numeric_cells` lives in `internal/pandas_compat.py`. `decoy_engine.generation.statistical` and `decoy_engine.quality.snapshot` still export every name they did before, and snapshot output is byte-identical. This removes the last import from `profiling` into `generation` for these helpers, so the layer ignore list only shrinks.

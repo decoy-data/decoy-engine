@@ -14,7 +14,39 @@ import decoy_engine.run_result as run_result
 from decoy_engine.execution._strategies import strategy_catalog
 from tests.unit.anonymize.search._captured import CATALOG_AT_BASE, ENGINE_ALL_AT_BASE
 
-RUN_RESULT_ALL_AT_BASE = ("RUN_RESULT_SCHEMA", "RunResult", "RunResultRead", "derive_outcome")
+# Captured at 2c869dce (engine main merged into the stack) from that commit's own source.
+RUN_RESULT_ALL_AT_BASE = (
+    "BaselineLink",
+    "Check",
+    "CheckCounts",
+    "CollectedFacts",
+    "ConfigRef",
+    "DeliveryFacts",
+    "EvidenceLink",
+    "FailureInput",
+    "InvocationId",
+    "Links",
+    "LogLink",
+    "NativeRoute",
+    "ProjectedTables",
+    "RUN_RESULT_SCHEMA",
+    "RelPath",
+    "RouteView",
+    "RunFacts",
+    "RunResult",
+    "RunResultCollector",
+    "RunResultRead",
+    "SafeName",
+    "SafeRef",
+    "Sha256",
+    "TableDelivery",
+    "Token",
+    "UtcTimestamp",
+    "Version",
+    "build_run_result",
+    "derive_outcome",
+    "project_tables",
+)
 
 
 def _run(code: str) -> str:
@@ -48,7 +80,6 @@ def test_engine_api_and_catalog_unchanged() -> None:
     assert "measure_reidentification_risk" not in quality._LAZY_EXPORTS
 
 
-def test_run_result_gains_exactly_the_two_names() -> None:
-    assert set(run_result.__all__) == {*RUN_RESULT_ALL_AT_BASE, "ValueFree", "derive_read_model"}
-    assert "derive_read_model" not in decoy_engine.__all__
-    assert "ValueFree" not in decoy_engine.__all__
+def test_run_result_is_unchanged() -> None:
+    assert tuple(sorted(run_result.__all__)) == RUN_RESULT_ALL_AT_BASE
+    assert not set(report.__all__) & set(run_result.__all__)

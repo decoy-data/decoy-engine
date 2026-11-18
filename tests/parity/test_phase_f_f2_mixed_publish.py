@@ -17,7 +17,8 @@ import pytest
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution import _chunked_output_sink as output_sink
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.native import _chunked_entry
+from decoy_engine.execution.native.chunked import _core as _native_core
+from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRefused
 from tests.parity._f2_mixed_support import (
     CHILD,
     PARENT,
@@ -109,18 +110,22 @@ def test_the_real_sink_publishes_both_tables_atomically(tmp_path: Path) -> None:
     config, child = _job(tmp_path)
     target = tmp_path / "published"
     run(config, {CHILD: child}, sink=ParquetTransactionalSink(target))
-    assert sorted(p.name for p in target.iterdir()) == [f"{CHILD}.parquet", f"{PARENT}.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [
+        DESCRIPTOR_NAME,
+        f"{CHILD}.parquet",
+        f"{PARENT}.parquet",
+    ]
     want = oracle(config, {CHILD: child}).outputs
     got = {name: pq.read_table(target / f"{name}.parquet") for name in want}
     assert_outputs_identical(got, want)
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith("_decoy_stage_")]
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("._decoy_publication_pending_")]
 
 
 def test_the_real_sink_publishes_nothing_when_the_mask_stream_fails_midway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config, child = _job(tmp_path)
-    real = _chunked_entry.run_mask_chunked
+    real = _native_core.mask_chunked
 
     def failing(*args, **kwargs):
         for index, chunk in enumerate(real(*args, **kwargs)):
@@ -128,12 +133,12 @@ def test_the_real_sink_publishes_nothing_when_the_mask_stream_fails_midway(
                 raise RuntimeError("mask stream failed on the second chunk")
             yield chunk
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", failing)
+    monkeypatch.setattr(_native_core, "mask_chunked", failing)
     target = tmp_path / "published"
     with pytest.raises(RuntimeError, match="second chunk"):
         run(config, {CHILD: child}, sink=ParquetTransactionalSink(target))
     assert not target.exists()
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith("_decoy_stage_")]
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("._decoy_publication_pending_")]
 
 
 def test_the_real_sink_commit_failure_leaves_the_target_untouched(tmp_path: Path) -> None:
@@ -141,7 +146,8 @@ def test_the_real_sink_commit_failure_leaves_the_target_untouched(tmp_path: Path
     target = tmp_path / "published"
     target.mkdir()
     (target / "keep.txt").write_text("existing")
-    with pytest.raises(OSError):
+    with pytest.raises(PublicationRefused) as info:
         run(config, {CHILD: child}, sink=ParquetTransactionalSink(target))
+    assert info.value.code == "publication_target_occupied"
     assert [p.name for p in target.iterdir()] == ["keep.txt"]
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith("_decoy_stage_")]
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("._decoy_publication_pending_")]

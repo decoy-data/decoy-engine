@@ -21,6 +21,7 @@ from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
+from tests.fileaccess.support import fd_path
 from tests.parity.test_out_of_core_fk_parity import _plan, _seed_for
 
 _REG = get_default_registry()
@@ -45,7 +46,7 @@ def test_the_pool_spool_name_is_opaque_and_the_site_ran(
 
     monkeypatch.setattr(module.pq, "write_table", spy)
     work = tmp_path / "scratch"
-    work.mkdir()
+    work.mkdir(mode=0o700)
     for column in WEIRD:
         _measure(column, ["a", "b"], ["x", "y"], _pool(size=10, distinct_count=10), work)
     assert len(seen) == len(WEIRD), "the spool site did not execute for every column"
@@ -135,7 +136,9 @@ class _Probe:
             return real_makedirs(name, *a, **k)
 
         def os_mkdir(path: Any, *a: Any, **k: Any) -> None:
-            record(path)
+            # A descriptor-relative mkdir names its directory by fd; judge where it really lands.
+            fd = k.get("dir_fd")
+            record(path if fd is None else os.path.join(fd_path(fd), os.fsdecode(path)))
             return real_os_mkdir(path, *a, **k)
 
         def write_table(table: Any, where: Any, *a: Any, **k: Any) -> None:
@@ -174,7 +177,12 @@ def test_scratch_stays_inside_its_root_and_the_output_is_unchanged(
 
     plan, sources, graph = _jobs(*PLAIN)
     plain_out = run_fk_out_of_core(
-        plan, sources, registry=_REG, relationship_graph=graph, temp_dir=tmp_path / "plain-work"
+        plan,
+        sources,
+        config={},
+        registry=_REG,
+        relationship_graph=graph,
+        temp_dir=tmp_path / "plain-work",
     ).outputs
 
     outer = tmp_path / "outer"
@@ -185,14 +193,16 @@ def test_scratch_stays_inside_its_root_and_the_output_is_unchanged(
     weird = _weird_names(base)
     plan2, sources2, graph2 = _jobs(*weird)
     result = run_fk_out_of_core(
-        plan2, sources2, registry=_REG, relationship_graph=graph2, temp_dir=work
+        plan2, sources2, config={}, registry=_REG, relationship_graph=graph2, temp_dir=work
     )
     assert driver["resident"] >= 3 and driver["reorder"] == 0
     # Nothing was created beside the scratch root, and every probed path is beneath it.
     assert {p for p in _listing(tmp_path) - before if not p.startswith("outer/work")} == set()
     for path in probe.paths:
-        resolved = Path(os.path.abspath(path))
-        assert str(resolved).startswith(str(work)), f"{path} is outside the scratch root"
+        resolved = Path(os.path.realpath(path))
+        assert str(resolved).startswith(os.path.realpath(work)), (
+            f"{path} is outside the scratch root"
+        )
     # No scratch name is derived from a logical name.
     for entry in _listing(work):
         for name in weird:
@@ -227,9 +237,9 @@ def test_the_reorder_driver_names_nothing_from_a_column_or_edge(
     outer = tmp_path / "outer"
     outer.mkdir()
     work = outer / "work"
-    # The sink stages beside its target (`_decoy_stage_*` plus a `target.parent.mkdir`), which is
-    # legitimate output staging, not scratch. Nest the target so that staging lands under `out/`,
-    # the prefix the confinement assertion already allows.
+    # The sink stages beside its target (`._decoy_publication_pending_*` and its lock file, plus
+    # a `target.parent.mkdir`), which is legitimate output staging, not scratch. Nest the target
+    # so that staging lands under `out/`, the prefix the confinement assertion already allows.
     out = tmp_path / "out"
     out.mkdir()
     before = _listing(tmp_path)
@@ -237,6 +247,7 @@ def test_the_reorder_driver_names_nothing_from_a_column_or_edge(
     run_fk_out_of_core(
         plan,
         lazy,
+        config={},
         registry=_REG,
         relationship_graph=graph,
         sink=ParquetTransactionalSink(out / "result"),
@@ -249,8 +260,10 @@ def test_the_reorder_driver_names_nothing_from_a_column_or_edge(
     created = {p for p in _listing(tmp_path) - before if not p.startswith(("outer/work", "out"))}
     assert created == set()
     for path in probe.paths:
-        resolved = Path(os.path.abspath(path))
-        assert str(resolved).startswith((str(work), str(tmp_path / "out"))), path
+        resolved = Path(os.path.realpath(path))
+        assert str(resolved).startswith(tuple(map(os.path.realpath, (work, tmp_path / "out")))), (
+            path
+        )
     for entry in _listing(work):
         for name in names[3:]:
             assert name not in entry, entry
@@ -260,7 +273,7 @@ def test_relations_sharing_one_parent_do_not_collide(tmp_path: Path) -> None:
     plan, sources, graph = _jobs(*PLAIN)
     work = tmp_path / "work"
     result = run_fk_out_of_core(
-        plan, sources, registry=_REG, relationship_graph=graph, temp_dir=work
+        plan, sources, config={}, registry=_REG, relationship_graph=graph, temp_dir=work
     )
     # Both children resolve against their own relation of the shared parent.
     assert result.outputs["child1"].num_rows == 6 and result.outputs["child2"].num_rows == 5
@@ -281,7 +294,9 @@ def test_the_isolated_source_scratch_names_are_opaque(tmp_path: Path) -> None:
         rlimit_kind="data",
         staging_output_dir=staging,
     )
-    files = sorted(p.name for p in (work / "sources").iterdir())
+    # The source copies sit directly in the private work root, owner-only from creation.
+    files = sorted(p.name for p in work.iterdir() if p.name != "payload.json")
+    assert len(files) == 2  # non-vacuity: both sources were written
     assert all(name.startswith("s") and name.endswith(".parquet") for name in files)
     assert not (tmp_path / "x.parquet").exists()
 

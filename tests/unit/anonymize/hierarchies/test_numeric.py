@@ -98,7 +98,7 @@ class TestInterval:
 
     @pytest.mark.parametrize(
         "widths",
-        [(), (5, 7), (5, 5), (10, 5), (True,), (5.0,), (0,), (-5,), (np.int64(5),),
+        [(), (5, 7), (5, 12), (5, 5), (10, 5), (True,), (5.0,), (0,), (-5,), (np.int64(5),),
          (np.float64(5.0),), "5", 5],
     )  # fmt: skip
     def test_refusals(self, widths: object) -> None:
@@ -183,7 +183,7 @@ class TestConstructorsValidate:
 
     @pytest.mark.parametrize(
         "widths",
-        [(), (5, 7), (5, 5), (10, 5), (True,), (5.0,), (0,), (np.int64(5),), "5", 5],
+        [(), (5, 7), (5, 12), (5, 5), (10, 5), (True,), (5.0,), (0,), (np.int64(5),), "5", 5],
     )
     def test_interval_refusals(self, widths: object) -> None:
         with pytest.raises((TypeError, ValueError)):

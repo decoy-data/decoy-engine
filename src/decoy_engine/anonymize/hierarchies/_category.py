@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from decoy_engine.anonymize._values import type_family
+from decoy_engine._value_family import type_family
 from decoy_engine.anonymize.hierarchies._base import SUPPRESSED, Hierarchy
 
 Key = str | int

@@ -49,6 +49,9 @@ _DECISION_REASON = "forwards the rejection ReasonCode of the central route decis
 ADAPTERS: dict[tuple[str, str], str] = {
     # -- F06 declared casting ----------------------------------------------------------------
     ("contracts/_declared_base.py", "DeclaredCastContractError.__init__"): _CTOR,
+    ("execution/pipeline/_route_summary.py", "route_summary"): (
+        "copies the route reason code the engine recorded in quality_metrics into the summary record"
+    ),
     ("execution/_errors.py", "DeclaredCastValueError.__init__"): _CTOR,
     ("execution/_errors.py", "QuarantineError.__init__"): _CTOR,
     ("contracts/_declared_formats.py", "validate_format_spec"): _FIRST_CODE,
@@ -58,19 +61,31 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("declared_casting/_eligibility.py", "declared_route_guard"): _DECISION_REASON,
     ("declared_casting/_eligibility.py", "preflight_declared_casting"): _DECISION_REASON,
     ("declared_casting/_refusals.py", "note"): _DECISION_REASON,
+    ("delivery/_plan.py", "plan_delivery"): (
+        "stores the failure ReasonCode the caller passed in `outcomes` on the failed table"
+    ),
+    ("run_result/_build.py", "_warnings"): (
+        "copies the warning codes the engine recorded on the run into the result record, "
+        "each through the registered-code rule"
+    ),
+    ("run_result/_build.py", "_route"): (
+        "forwards the route reason code of route_summary, through the registered-code rule"
+    ),
     ("declared_casting/_quarantine_local.py", "_qerror"): _HELPER,
     ("plan/_checks_declared_casting.py", "_fail"): _HELPER,
     ("plan/_serialize_declared.py", "declared_casting_from_dict"): _REWRAP,
     # -- constructors that store the caller's code -------------------------------------------
     ("_reference_date.py", "PinnedModeError.__init__"): _CTOR,
-    ("connectors/postgres_snapshot.py", "PostgresSnapshotError.__init__"): _CTOR,
+    ("connectors/_postgres_session.py", "PostgresSnapshotError.__init__"): _CTOR,
+    ("detection/_model_status.py", "ModelUnavailableError.__init__"): _CTOR,
     ("detection/ner.py", "NerUnavailableError.__init__"): _CTOR,
     ("determinism/_derive.py", "DeterminismError.__init__"): _CTOR,
     ("errors.py", "FpeChecksumError.__init__"): _CTOR,
+    ("records/_errors.py", "RecordError.__init__"): _CTOR,
     ("errors.py", "FpeUnencryptableError.__init__"): _CTOR,
     ("errors.py", "PipelineValidationError.__init__"): _CTOR,
     ("errors.py", "ValidationError.__init__"): _CTOR,
-    ("execution/_errors.py", "ExecutionError.__init__"): _CTOR,
+    ("_execution_error.py", "ExecutionError.__init__"): _CTOR,
     ("execution/_errors.py", "StrategyError.__init__"): _CTOR,
     ("execution/_mixed_admission.py", "MixedDeclineError.__init__"): _CTOR,
     ("execution/_transforms.py", "TransformError.__init__"): _CTOR,
@@ -95,6 +110,23 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("subset/_errors.py", "SubsetError.__init__"): _CTOR,
     ("subset/_errors.py", "SubsetPreflightError.__init__"): _CTOR,
     ("vault.py", "VaultError.__init__"): _CTOR,
+    ("publication/_types.py", "_CodedOutcome.__init__"): _CTOR,
+    ("delivery/resume/_plan.py", "ResumeRefusedError.__init__"): _CTOR,
+    ("publication/_types.py", "raise_for_outcome"): (
+        "re-raises a CommitReceipt's code; the receipt accepts only a registered `decoy` code"
+    ),
+    ("publication/_sink_state.py", "recover"): (
+        "builds the RECOVERING refusal receipt from the registry symbol "
+        "`PUBLICATION_COMMIT_NOT_VISIBLE` as an exact `str` (a CommitReceipt takes no subclass)"
+    ),
+    ("execution/_transactional_sink.py", "ParquetTransactionalSink._leave"): (
+        "forwards the code of the CommitReceipt the attempt ended with to the sink state table; "
+        "the receipt accepts only a registered `decoy` code"
+    ),
+    ("publication/_sink_state.py", "SinkStateMachine._refuse"): (
+        "raises the code of a literal sink-state cell (a registry symbol) or the one the attempt "
+        "ended with; its CommitReceipt accepts only a registered `decoy` code"
+    ),
     ("validation_result.py", "ValidationResult.add_error"): _CTOR,
     ("validation_result.py", "ValidationResult.add_warning"): _CTOR,
     ("progress.py", "ProgressChannel.route"): _CTOR,
@@ -110,7 +142,13 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("generation/_pinned_compile.py", "_reject_column"): _HELPER,
     ("generation/_window_admission.py", "_refuse"): _HELPER,
     ("plan/_checks_dp.py", "_raise"): _HELPER,
-    ("profile/_csv_reader.py", "_refusal"): _HELPER,
+    ("plan/checks/_lookup_tables.py", "_lookup_refusal"): _HELPER,
+    ("plan/checks/_required_settings.py", "check_required_strategy_settings"): (
+        "forwards the registered plan symbol a frozen requirement descriptor holds; the descriptor "
+        "table is the only place those symbols are written"
+    ),
+    ("profile/_csv_reader.py", "source_refusal"): _HELPER,
+    ("publication/_publish.py", "_receipt"): _HELPER,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _HELPER,
     # -- re-wraps of an already-registered exception code ------------------------------------
     ("execution/_chunked_when_guard.py", "PositionalWhenGuard.check_schema"): _REWRAP,
@@ -121,6 +159,12 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("execution/physical/_shadow_mixed.py", "_as_shadow_difference"): _REWRAP,
     ("plan/_checks.py", "_check_ner_available_for_strategy"): _REWRAP,
     ("plan/_checks.py", "check_statistical_columns"): _REWRAP,
+    ("plan/checks/_generate_columns.py", "_located"): (
+        "re-wraps the registered code of the ref check or parse rule it caught, with fixed text; "
+        "its other callers pass a registry symbol"
+    ),
+    ("plan/_generation.py", "check_fitted_references"): _REWRAP,
+    ("plan/_serialize.py", "_pinned_snapshot_from_dict"): _REWRAP,
     ("plan/validate/_consolidator.py", "validate_plan"): _REWRAP,
     ("subset/_api.py", "_compute"): _REWRAP,
     ("unmask.py", "unmask_pipeline"): _REWRAP,
@@ -137,9 +181,9 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("quality/report.py", "_collect_warnings"): (
         "diagnostic check names are registry symbols in `verification`"
     ),
-    ("phase.py", "_reason_wire"): (
-        "exports the identity of a `ReasonRef` that `require_known` has just resolved against "
-        "the registry (an unknown identity fails closed before this dict is built)"
+    ("verification/postmask/_blocked.py", "PostScanBlockedError.__init__"): (
+        "the code is the identity of a ref the verdict produced, set only when that code is "
+        "registered in `post_scan`; the adapter trusts it only on that registration"
     ),
     ("safe_output/_event.py", "SafeEvent.to_dict"): (
         "exports the identity of a `ReasonRef` that `require_known` resolved against the "
@@ -177,7 +221,9 @@ NOT_POSITIONAL_SINKS: dict[tuple[str, str], str] = {
     ),
 }
 # Functions whose return value is a registry symbol chosen from a table of registry symbols.
-REGISTRY_HELPERS = frozenset({"strategy_code_for_unencryptable", "strategy_code_for_checksum"})
+REGISTRY_HELPERS = frozenset(
+    {"strategy_code_for_unencryptable", "strategy_code_for_checksum", "registered_model_reason"}
+)
 
 Key = tuple[str, str, str, str, str]
 
@@ -321,6 +367,13 @@ _MUTANTS: dict[str, str] = {
     "module_constant": """
         MY_CODE = "adhoc_constant"
     """,
+    # The fallback of a registry-backed code table (the FPE handler's unregistered default).
+    "code_table_default": """
+        from decoy_engine import reasons
+        _ROUTES = {"a": reasons.runtime.CYCLIC_WORK_ORDERING}
+        def f(key):
+            return _ROUTES.get(key, "adhoc_default")
+    """,
     "unchecked_forward": """
         from decoy_engine.errors import ExecutionError
         def f(code):
@@ -381,6 +434,9 @@ _CLEAN = """
         raise ExecutionError(code=MY_CODE)
     def h():
         return {"code": reasons.runtime.CYCLIC_WORK_ORDERING}
+    _ROUTES = {"a": reasons.runtime.CYCLIC_WORK_ORDERING}
+    def k(key):
+        return _ROUTES.get(key, reasons.runtime.CYCLIC_WORK_ORDERING)
 """
 
 
@@ -489,7 +545,7 @@ UNCLASSIFIED: dict[str, str] = {
     "FixedWidthWriteError": "data-derived layout errors; no stable code",
     "CsvRecordTooLarge": "input-shape error raised inside the CSV framer; no stable code yet",
     "CsvUnterminatedQuote": "input-shape error raised inside the CSV framer; no stable code yet",
-    "DiscoverySqlError": "data-discovery SQL failures can echo statements; no stable code",
+    "DiscoverySqlError": "data-discovery SQL failures carry fixed per-class text; no stable code",
     "NameHintLoaderError": "a reference-data load error; no stable code",
     "ModelPackLoadError": "a model-pack load error; no stable code",
     "Ff1Error": "an FF1 primitive error; surfaces as FpeUnencryptable/Checksum where it matters",
@@ -724,7 +780,7 @@ def test_forwarding_helper_callers_are_checked(tmp_path: Path) -> None:
 
 
 def test_the_csv_reader_refusals_are_scanned_and_registry_backed() -> None:
-    sites = [s for s in _scan() if s.file == "profile/_csv_reader.py" and s.family == "_refusal"]
+    sites = [s for s in _scan() if s.file == "profile/_csv_reader.py" and s.family == "source_refusal"]  # fmt: skip
     assert len(sites) >= 6
     assert {s.value_class for s in sites} == {"registry"}
 
@@ -806,7 +862,7 @@ def test_the_unchecked_ratchet_fails_swap_regrowth_and_collision() -> None:
 
 def test_every_forwarding_helper_is_checked_or_a_listed_follow_up() -> None:
     assert UNCHECKED_HELPERS <= HELPER_IDENTITIES, UNCHECKED_HELPERS - HELPER_IDENTITIES
-    assert ("profile/_csv_reader.py", "_refusal") in HELPER_SINKS
+    assert ("profile/_csv_reader.py", "source_refusal") in HELPER_SINKS
     assert len(UNCHECKED_HELPERS) <= 5  # in-suite floor; the registered baseline is the ratchet
 
 
@@ -819,3 +875,24 @@ def test_every_helper_sink_is_discovered_or_has_a_recorded_rationale() -> None:
     assert set(NOT_POSITIONAL_SINKS) <= HELPER_IDENTITIES
     # a rationale is not a place to park a helper the scanner does see
     assert not set(NOT_POSITIONAL_SINKS) & set(discovered)
+
+
+def test_baseline_script_runs_standalone(tmp_path: Path) -> None:
+    """The documented ``python tests/sentry/_reason_baseline.py`` entry point imports cleanly.
+
+    Run from an unrelated directory so neither the repo root nor tests/sentry is on the path
+    except through the script's own setup.
+    """
+    import subprocess
+
+    script = Path(__file__).resolve().parent / "_reason_baseline.py"
+    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "identities" in proc.stdout

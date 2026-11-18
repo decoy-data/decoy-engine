@@ -160,17 +160,17 @@ def test_routed_job_calls_run_mask_chunked_once_with_the_run_context(
     spies = support.spy_lanes(monkeypatch)
     # Admission wraps the supplied provider in a run-scoped prepared one (closed when the run
     # ends), so the key the lane received is read at call time and compared by value.
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
     seen_keys: list[tuple[bytes, str]] = []
-    spied_entry = _chunked_entry.run_mask_chunked
+    spied_entry = _native_core.mask_chunked
 
     def record_key(*args: Any, **kwargs: Any) -> Any:
         received = kwargs["key_provider"]
         seen_keys.append((received.mask_key(), received.key_version))
         return spied_entry(*args, **kwargs)
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", record_key)
+    monkeypatch.setattr(_native_core, "mask_chunked", record_key)
     result = support.run_default(
         cfg, src, native_threads=3, vault_writer=writer, key_provider=provider
     )
@@ -345,8 +345,9 @@ def test_mixed_table_with_a_non_native_column_runs_wholly_on_the_oracle_route(
 def test_unconfigured_column_is_admitted_to_the_native_route(
     companion: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """B8: an unconfigured column no longer vetoes the table under the `warn` policy
-    (pre-GA default). The hash column still needs the companion to run natively."""
+    """B8: a column that is not masked no longer vetoes the table. Since the declaration gate
+    every source column is listed, so the extra column is a declared passthrough and runs on
+    the arrow lane. The hash column still needs the companion to run natively."""
     if companion == "absent":
         support.remove_companion(monkeypatch)
     data = {**support.string_source(), "extra": pa.array([f"e{i}" for i in range(support.ROWS)])}
@@ -354,7 +355,7 @@ def test_unconfigured_column_is_admitted_to_the_native_route(
     result = support.run_default(cfg, src)
     evidence = result.quality_metrics["chunked_route"]
     backends = _backends(evidence)
-    assert "extra" not in backends
+    assert backends["extra"][0] == "arrow_python"
     if companion == "present":
         assert evidence["native_admitted"] is True
         assert evidence["reroute_reason"] is None
@@ -556,13 +557,15 @@ def test_a_vault_writer_keyed_differently_from_the_mask_key_is_rejected_before_a
 
     cfg, src = _vault_job(tmp_path)
     spies = support.spy_lanes(monkeypatch)
-    with pytest.raises((VaultError, ExecutionError)):
+    # A floor-valid key that is not the run's mask root, so the route's key-match guard refuses it.
+    with pytest.raises(VaultError) as err:
         support.run_default(
             cfg,
             src,
-            vault_writer=VaultWriter((42).to_bytes(8, "big")),
+            vault_writer=VaultWriter(b"\x42" * 32),
             key_provider=SecretKeyProvider(secret=bytes(range(32)), key_version="v1"),
         )
+    assert err.value.code == "vault_key_mismatch"
     assert spies["entry.run_mask_chunked"] == []
     assert spies["oracle.run_mask_pipeline_chunked"] == []
 
@@ -868,6 +871,8 @@ def test_each_job_gate_keeps_a_multi_table_job_out_of_the_new_module(
 def test_a_large_lazy_source_routes_chunked_like_its_resident_twin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """AT-E5a: with no sink a routed lazy table stays lazy, so the lane is handed the
+    `LazySource` itself, and the route and output still equal the resident twin's."""
     import pyarrow.parquet as pq
 
     from decoy_engine.profile._readers import LazySource
@@ -884,7 +889,7 @@ def test_a_large_lazy_source_routes_chunked_like_its_resident_twin(
     assert result.quality_metrics["auto_chunk"]["mode"] == "chunked"
     assert len(spies["auto_chunk.run_auto_chunk"]) == 1
     handed = spies["auto_chunk.run_auto_chunk"][0][0][1]
-    assert isinstance(handed, pa.Table)
+    assert isinstance(handed, LazySource)
     assert len(spies["entry.run_mask_chunked"]) == 1
     assert result.outputs[support.TABLE].equals(twin.outputs[support.TABLE], check_metadata=True)
 

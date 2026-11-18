@@ -69,9 +69,6 @@ __all__ = [
     "WORKER_EXIT_UNLANDED",
     "WORKER_LOST",
     "WORKER_SHUTDOWN",
-    "WORKFLOW_RESTART_INTERRUPTED",
-    "WORKFLOW_STEP_FAILED",
-    "WORKFLOW_STEP_NOT_RUN",
     "YAML_EMPTY",
     "YAML_NOT_A_MAPPING",
     "YAML_UNPARSEABLE",
@@ -236,19 +233,6 @@ SCAN_UPLOAD_CANCELLED = _d(
     since="1.5.0",
 )
 SCAN_DISABLED = _d("scan_disabled", "Scanning is disabled in this release.", since="1.5.0")
-WORKFLOW_RESTART_INTERRUPTED = _d(
-    "workflow_restart_interrupted",
-    "The platform restarted while this workflow step ran. Progress was not kept; run it again when ready.",
-    since="1.5.0",
-)
-WORKFLOW_STEP_NOT_RUN = _d(
-    "workflow_step_not_run",
-    "Cancelled: the workflow run ended before this step ran.",
-    kind=Kind.CONTROL,
-    severity=Severity.INFO,
-    outcome=Outcome.CANCELLED,
-    since="1.5.0",
-)
 QUALITY_HOOK_FAILED = _d(
     "quality_hook_failed",
     "The quality check after the run failed. The server log has the details.",
@@ -320,11 +304,6 @@ _d = _catalog.platform("PlatformResponse")
 VALIDATION_PREFLIGHT_FAILED = _d(
     "validation_preflight_failed",
     "The pipeline could not be checked. The server log has the details.",
-    since="1.5.0",
-)
-WORKFLOW_STEP_FAILED = _d(
-    "workflow_step_failed",
-    "The workflow step failed. The server log has the details.",
     since="1.5.0",
 )
 ITERATION_PREVIEW_FAILED = _d(

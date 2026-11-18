@@ -40,6 +40,7 @@ from decoy_engine.fileaccess import (
     FileRequest,
     FileRole,
 )
+from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.profiling.model_pack.provenance import (
     SIGNING_KEY_ENV,
     load_signing_key_from_env,
@@ -53,34 +54,39 @@ from decoy_engine.profiling.model_pack.types import (
 
 _log = logging.getLogger(__name__)
 
-#: Tokens accepted as "on"/"off" for the fail-closed signature flag, case-insensitive.
-_REQUIRE_SIG_TRUTHY = frozenset({"1", "true", "yes", "on"})
-_REQUIRE_SIG_FALSY = frozenset({"0", "false", "no", "off", ""})
+_REQUIRE_SIGNATURE_ENV = "DECOY_PACK_REQUIRE_SIGNATURE"
+_ML_DISABLED_ENV = "DECOY_ML_DISABLED"
 
 
 class ModelPackLoadError(DecoyError, ValueError):
-    """Raised when a pack fails any validation check."""
+    """Raised when a pack fails any validation check.
+
+    `cause` says why the pack is unusable and is set where the error is raised, never parsed
+    from the message: `disabled` (DECOY_ML_DISABLED), `import` (a runtime library will not
+    import) or `pack` (the pack itself is missing, altered or unreadable; the default).
+    """
+
+    def __init__(self, message: str, *, cause: str = "pack") -> None:
+        super().__init__(message)
+        self.cause = cause
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_rebuild_load_error, (str(self.args[0]) if self.args else "", self.cause))
+
+
+def _rebuild_load_error(message: str, cause: str) -> ModelPackLoadError:
+    return ModelPackLoadError(message, cause=cause)
 
 
 def _require_signature_enabled() -> bool:
     """Parse ``DECOY_PACK_REQUIRE_SIGNATURE`` into a bool, failing CLOSED.
 
-    A security flag whose purpose is fail-closed posture must not silently
-    fail *open* on a plausible misconfiguration (M1). So ``true``/``yes``/``on``
-    (any case) all enable the requirement, the explicit falsy tokens disable
-    it, and ANY other value raises ``ModelPackLoadError`` -- an ambiguous
-    security flag is treated as "require + you typo'd it", never as "off".
+    A security flag whose purpose is fail-closed posture must not silently fail *open* on a
+    plausible misconfiguration (M1). The one flag parser accepts the engine's spellings and
+    raises ``EnvFlagError`` on any other value, so an ambiguous security flag is treated as
+    "require + you typo'd it", never as "off". The error text never holds the value.
     """
-    raw = os.environ.get("DECOY_PACK_REQUIRE_SIGNATURE", "0").strip().lower()
-    if raw in _REQUIRE_SIG_TRUTHY:
-        return True
-    if raw in _REQUIRE_SIG_FALSY:
-        return False
-    raise ModelPackLoadError(
-        f"DECOY_PACK_REQUIRE_SIGNATURE has an unrecognized value {raw!r}; "
-        f"expected one of {sorted(_REQUIRE_SIG_TRUTHY)} or {sorted(_REQUIRE_SIG_FALSY)}. "
-        "Refusing to guess a security-flag value (fail-closed)."
-    )
+    return env_flag(_REQUIRE_SIGNATURE_ENV, os.environ.get(_REQUIRE_SIGNATURE_ENV))
 
 
 class ModelPackLoader:
@@ -166,8 +172,12 @@ class ModelPackLoader:
 
     @property
     def is_ml_disabled(self) -> bool:
-        """True when the ``DECOY_ML_DISABLED`` env var is set to ``"1"``."""
-        return os.environ.get("DECOY_ML_DISABLED", "0") == "1"
+        """True when ``DECOY_ML_DISABLED`` is set to an accepted true spelling.
+
+        Raises:
+            EnvFlagError: the variable holds a spelling outside the accepted set.
+        """
+        return env_flag(_ML_DISABLED_ENV, os.environ.get(_ML_DISABLED_ENV))
 
     def load(self) -> dict[str, Any]:
         """Load and validate the pack.  Returns the pack dict or raises.
@@ -185,10 +195,14 @@ class ModelPackLoader:
         ModelPackLoadError
             If any check fails: missing files, corrupt weights, wrong feature
             schema version, or SHA-256 mismatch.
+        EnvFlagError
+            If ``DECOY_ML_DISABLED`` or ``DECOY_PACK_REQUIRE_SIGNATURE`` holds a spelling
+            outside the accepted flag set (the text never shows the value).
         """
         if self.is_ml_disabled:
             raise ModelPackLoadError(
-                "ML is disabled via DECOY_ML_DISABLED=1; engine uses deterministic fallback."
+                f"ML is disabled via {_ML_DISABLED_ENV}; engine uses deterministic fallback.",
+                cause="disabled",
             )
 
         manifest = self._load_manifest()
@@ -201,6 +215,10 @@ class ModelPackLoader:
         pack_obj = self._deserialise(model_bytes)
         pack_obj["manifest"] = manifest
         return pack_obj
+
+    def read_manifest(self) -> ModelPackManifest:
+        """The pack's manifest alone (identity and version), without hashing or loading weights."""
+        return self._load_manifest()
 
     def load_with_fallback(self) -> dict[str, Any] | None:
         """Try to load the pack; return ``None`` on any failure + log a warning.
@@ -404,9 +422,13 @@ class ModelPackLoader:
             import joblib
         except ImportError as exc:
             raise ModelPackLoadError(
-                "joblib is required to load a model pack. Install via: pip install -e '.[ml]'"
+                "joblib is a base dependency and failed to import. Reinstall decoy-engine.",
+                cause="import",
             ) from exc
         try:
             return dict(joblib.load(io.BytesIO(model_bytes)))
         except Exception as exc:
-            raise ModelPackLoadError(f"Failed to deserialise model.joblib: {exc}") from exc
+            raise ModelPackLoadError(
+                f"Failed to deserialise model.joblib: {exc}",
+                cause="import" if isinstance(exc, ImportError) else "pack",
+            ) from exc

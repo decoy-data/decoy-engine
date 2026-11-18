@@ -25,7 +25,7 @@ from ._errors import CodesetFetchError
 #: connection, finishes in low single-digit seconds).
 _DEFAULT_TIMEOUT_S = 120.0
 
-_USER_AGENT = "decoy-engine-codeset-etl/1 (+https://github.com/louiskeep/decoy-engine)"
+_USER_AGENT = "decoy-engine-codeset-etl/1 (+https://github.com/decoy-data/decoy-engine)"
 
 
 def fetch_url(url: str, *, timeout: float = _DEFAULT_TIMEOUT_S) -> bytes:
