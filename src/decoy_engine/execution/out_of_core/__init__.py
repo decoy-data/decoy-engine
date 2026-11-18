@@ -5,6 +5,7 @@ from decoy_engine.execution.out_of_core._budget import (
     OutOfCoreBudget,
     check_temp_disk_budget,
     resolve_budget,
+    resolve_conservative_ooc_budget_bytes,
     resolve_ooc_memory_limit,
     temp_disk_bytes,
 )
@@ -30,6 +31,7 @@ from decoy_engine.execution.out_of_core._spill_estimate import (
     OocDiskPrediction,
     predict_ooc_disk_bytes,
 )
+from decoy_engine.execution.out_of_core._stage import MaskedKeyStager
 
 __all__ = [
     "DISK_SAFETY_MARGIN",
@@ -38,6 +40,7 @@ __all__ = [
     "UNKNOWN_WIDTH_CEILING_BYTES",
     "ChildFkBatchJoiner",
     "LazySource",
+    "MaskedKeyStager",
     "OocDiskPrediction",
     "OutOfCoreBudget",
     "OutOfCoreCompatibility",
@@ -53,6 +56,7 @@ __all__ = [
     "mask_column",
     "predict_ooc_disk_bytes",
     "resolve_budget",
+    "resolve_conservative_ooc_budget_bytes",
     "resolve_ooc_memory_limit",
     "run_fk_out_of_core",
     "temp_disk_bytes",

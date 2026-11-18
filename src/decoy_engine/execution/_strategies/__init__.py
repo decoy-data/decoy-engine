@@ -10,11 +10,18 @@ SP-10b adds `derived_aggregate` (intra-table scalar aggregate fill).
 SP-10c adds `grouped_series` (per-group series), `windowed_date` (bounded date
 offset from an anchor column), and `group_key` (HKDF-keyed per-group identifier).
 HC-3b adds `top_code` (numeric tail generalization, e.g. HIPAA Safe Harbor age>89).
+
+`strategy_catalog()` is the public, enumerable description of those handlers. Each handler
+declares its own catalog facts as class attributes; the function only reads them.
 """
 
 from __future__ import annotations
 
-from decoy_engine.execution._adapter import StrategyHandler
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from decoy_engine.execution._adapter import StrategyHandler, StrategyInfo, StrategyOption
 from decoy_engine.execution._strategies._bucket_perturb import BucketPerturbStrategyHandler
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
 from decoy_engine.execution._strategies._categorical import CategoricalStrategyHandler
@@ -30,7 +37,6 @@ from decoy_engine.execution._strategies._group_key import GroupKeyStrategyHandle
 from decoy_engine.execution._strategies._grouped_series import GroupedSeriesStrategyHandler
 from decoy_engine.execution._strategies._hash import HashStrategyHandler
 from decoy_engine.execution._strategies._joint_mask import JointMaskHandler
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
 from decoy_engine.execution._strategies._passthrough import PassthroughHandler
 from decoy_engine.execution._strategies._redact import RedactHandler
 from decoy_engine.execution._strategies._shuffle import ShuffleStrategyHandler
@@ -40,6 +46,8 @@ from decoy_engine.execution._strategies._tokenize import TokenizeStrategyHandler
 from decoy_engine.execution._strategies._top_code import TopCodeStrategyHandler
 from decoy_engine.execution._strategies._truncate import TruncateHandler
 from decoy_engine.execution._strategies._windowed_date import WindowedDateStrategyHandler
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
+from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, StrategyRequirement, requirements_for
 
 SCALAR_HANDLERS: dict[str, StrategyHandler] = {
     handler.name: handler
@@ -72,6 +80,83 @@ SCALAR_HANDLERS: dict[str, StrategyHandler] = {
     )
 }
 
+# Read from each class's own `__dict__`, never by attribute lookup: an inherited default would
+# let a new handler satisfy the catalog without anyone deciding its facts.
+_CATALOG_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "namespace_required": bool,
+    "join_safe": bool,
+    "wizard_options": tuple,
+    "offer_in_wizard": bool,
+}
+
+
+def _catalog_row(handler: StrategyHandler) -> StrategyInfo:
+    declared = vars(type(handler))
+    for field, expected in _CATALOG_FIELDS.items():
+        if field not in declared:
+            raise TypeError(f"strategy handler {handler.name!r} does not declare {field!r}")
+        if not isinstance(declared[field], expected):
+            raise TypeError(f"strategy handler {handler.name!r}: {field!r} has the wrong type")
+    options = declared["wizard_options"]
+    if not all(isinstance(o, StrategyOption) for o in options):
+        raise TypeError(f"strategy handler {handler.name!r}: wizard_options must hold options")
+    names = [o.name for o in options]
+    if len(set(names)) != len(names):
+        raise TypeError(f"strategy handler {handler.name!r}: duplicate option names")
+    requirements = requirements_for(handler.name)
+    if not all(isinstance(r, StrategyRequirement) for r in requirements):
+        raise TypeError(f"strategy handler {handler.name!r}: requirements must be descriptors")
+    needs_namespace = any(r.path == ("namespace",) for r in requirements)
+    if needs_namespace and not declared["namespace_required"]:
+        raise TypeError(
+            f"strategy handler {handler.name!r}: requires a namespace it does not declare"
+        )
+    return StrategyInfo(
+        name=handler.name,
+        namespace_required=declared["namespace_required"],
+        join_safe=declared["join_safe"],
+        options=options,
+        offer_in_wizard=declared["offer_in_wizard"],
+        requirements=requirements,
+    )
+
+
+def strategy_catalog() -> tuple[StrategyInfo, ...]:
+    """One row per scalar strategy handler, sorted by name.
+
+    A registry of descriptors, the shape of argparse and click option metadata and of the
+    connector spec catalogs Airbyte and Singer publish: each handler declares what an operator
+    may set on it, so a front end can prompt, validate and test from this data instead of
+    keeping a parallel table.
+    """
+    unknown = sorted(set(REQUIREMENTS_BY_STRATEGY) - set(SCALAR_HANDLERS))
+    if unknown:
+        raise TypeError(f"required settings name unknown strategies: {unknown}")
+    return tuple(sorted((_catalog_row(h) for h in SCALAR_HANDLERS.values()), key=lambda r: r.name))
+
+
+@dataclass(frozen=True)
+class OutputDeclaration:
+    """What a scalar handler says about the cells it writes: they are the input cells
+    (`is_input`), or strings of `string_width` UTF-8 bytes. Neither set means it declares nothing."""
+
+    is_input: bool = False
+    string_width: int | None = None
+
+
+def output_declaration(
+    strategy: str | None, provider_config: Sequence[tuple[str, Any]]
+) -> OutputDeclaration:
+    """The one place the handlers' optional output members (`output_is_input`,
+    `output_string_width`) are read; the lifecycle and out-of-core spill estimates both call it."""
+    handler = SCALAR_HANDLERS.get(strategy) if strategy is not None else None
+    if getattr(handler, "output_is_input", False):
+        return OutputDeclaration(is_input=True)
+    width_of = getattr(handler, "output_string_width", None)
+    width = width_of(provider_config) if callable(width_of) else None
+    return OutputDeclaration(string_width=width)
+
+
 __all__ = [
     "SCALAR_HANDLERS",
     "BucketPerturbStrategyHandler",
@@ -90,13 +175,18 @@ __all__ = [
     "HashStrategyHandler",
     "JointMaskHandler",
     "NestedStrategyHandler",
+    "OutputDeclaration",
     "PassthroughHandler",
     "RedactHandler",
     "ShuffleStrategyHandler",
+    "StrategyInfo",
+    "StrategyOption",
     "TextMaskHandler",
     "TextRedactHandler",
     "TokenizeStrategyHandler",
     "TopCodeStrategyHandler",
     "TruncateHandler",
     "WindowedDateStrategyHandler",
+    "output_declaration",
+    "strategy_catalog",
 ]

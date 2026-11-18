@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pyarrow as pa
@@ -11,7 +12,7 @@ import pyarrow.ipc
 import pyarrow.parquet as pq
 
 from decoy_engine.fileaccess._errors import guarded, guarded_iter
-from decoy_engine.fileaccess._types import FileHandle, OutputTxn
+from decoy_engine.fileaccess._types import FileHandle, StageDir
 
 
 def _strict(handle: FileHandle) -> bool:
@@ -32,6 +33,22 @@ def iter_batches(
     """`ParquetFile.iter_batches`, each step guarded under a strict handle."""
     source = guarded(handle.display, _strict(handle), parquet_file.iter_batches, **kwargs)
     return guarded_iter(handle.display, _strict(handle), source)
+
+
+@contextmanager
+def staged_parquet(fd: int) -> Iterator[pq.ParquetFile]:
+    """A staged output file, opened from a descriptor the stage issued; closes it on exit."""
+    fh = os.fdopen(fd, "rb")
+    try:
+        yield guarded("output", True, pq.ParquetFile, fh)
+    finally:
+        fh.close()
+
+
+def iter_staged_batches(parquet_file: pq.ParquetFile, **kwargs: Any) -> Iterator[pa.RecordBatch]:
+    """`ParquetFile.iter_batches` over a staged file: one row group at a time, each step guarded."""
+    source = guarded("output", True, parquet_file.iter_batches, **kwargs)
+    return guarded_iter("output", True, source)
 
 
 def read_metadata(handle: FileHandle) -> pq.FileMetaData:
@@ -69,21 +86,21 @@ class _FileBacked:
         self.close()
 
 
-def _writable(txn: OutputTxn, component: str) -> Any:
+def _writable(txn: StageDir, component: str) -> Any:
     return os.fdopen(txn.create_file(component), "wb")
 
 
-def _readable(txn: OutputTxn, component: str) -> Any:
+def _readable(txn: StageDir, component: str) -> Any:
     return os.fdopen(txn.open_file(component), "rb")
 
 
-def write_table(table: pa.Table, txn: OutputTxn, component: str, **kwargs: Any) -> None:
+def write_table(table: pa.Table, txn: StageDir, component: str, **kwargs: Any) -> None:
     """`pq.write_table` into a new file of the stage; bytes match a path write."""
     with _writable(txn, component) as fh:
         guarded(txn.display, txn.strict, pq.write_table, table, fh, **kwargs)
 
 
-def parquet_writer(txn: OutputTxn, component: str, schema: pa.Schema, **kwargs: Any) -> _FileBacked:
+def parquet_writer(txn: StageDir, component: str, schema: pa.Schema, **kwargs: Any) -> _FileBacked:
     fh = _writable(txn, component)
     try:
         writer = guarded(txn.display, txn.strict, pq.ParquetWriter, fh, schema, **kwargs)
@@ -93,7 +110,7 @@ def parquet_writer(txn: OutputTxn, component: str, schema: pa.Schema, **kwargs: 
     return _FileBacked(writer, fh, txn.display, txn.strict)
 
 
-def ipc_new_file(txn: OutputTxn, component: str, schema: pa.Schema) -> _FileBacked:
+def ipc_new_file(txn: StageDir, component: str, schema: pa.Schema) -> _FileBacked:
     fh = _writable(txn, component)
     try:
         writer = guarded(txn.display, txn.strict, pa.ipc.new_file, fh, schema)
@@ -103,7 +120,7 @@ def ipc_new_file(txn: OutputTxn, component: str, schema: pa.Schema) -> _FileBack
     return _FileBacked(writer, fh, txn.display, txn.strict)
 
 
-def ipc_new_stream(txn: OutputTxn, component: str, schema: pa.Schema) -> _FileBacked:
+def ipc_new_stream(txn: StageDir, component: str, schema: pa.Schema) -> _FileBacked:
     fh = _writable(txn, component)
     try:
         writer = guarded(txn.display, txn.strict, pa.ipc.new_stream, fh, schema)
@@ -113,14 +130,14 @@ def ipc_new_stream(txn: OutputTxn, component: str, schema: pa.Schema) -> _FileBa
     return _FileBacked(writer, fh, txn.display, txn.strict)
 
 
-def ipc_read_file(txn: OutputTxn, component: str) -> pa.Table:
+def ipc_read_file(txn: StageDir, component: str) -> pa.Table:
     """Read a whole IPC file written into this stage back as a table."""
     with _readable(txn, component) as fh:
         reader = guarded(txn.display, txn.strict, pa.ipc.open_file, fh)
         return guarded(txn.display, txn.strict, reader.read_all)
 
 
-def ipc_read_stream_batches(txn: OutputTxn, component: str) -> list[pa.RecordBatch]:
+def ipc_read_stream_batches(txn: StageDir, component: str) -> list[pa.RecordBatch]:
     with _readable(txn, component) as fh:
         reader = guarded(txn.display, txn.strict, pa.ipc.open_stream, fh)
         return [b for b in reader]

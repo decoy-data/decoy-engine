@@ -532,11 +532,11 @@ def test_mac_exemption_is_exactly_one_job() -> None:
         if is_mac_gate(n, j, job)
     ]
     assert exempt == [("gate-selfhosted.yml", "gate")], exempt
-    mac = ["self-hosted", "macos", "decoy-gate"]
+    mac = ["self-hosted", "decoy-gate"]
     boot = "bash scripts/dev/bootstrap.sh"
     on_gate = _wf(boot, name_job="gate", runs_on=mac)
     assert not any("outside" in f for f in scan_workflow(on_gate, name="gate-selfhosted.yml"))
-    other_labels = _wf(boot, name_job="gate", runs_on=["self-hosted", "linux"])
+    other_labels = _wf(boot, name_job="gate", runs_on=["self-hosted", "macos", "decoy-gate"])
     assert any("outside" in f for f in scan_workflow(other_labels, name="gate-selfhosted.yml"))
     other_job = _wf(boot, name_job="gate2", runs_on=mac)
     assert any("outside" in f for f in scan_workflow(other_job, name="gate-selfhosted.yml"))
@@ -641,28 +641,28 @@ SHARED_LEDGER = [
     {
         "path": "tests/sentry/ci_scan/__init__.py",
         "sha256": "957ed128539114a8d15c4e03ac77f486f9abee53294fb6b1aadbba536f76ca21",
-        "other_repo": "louiskeep/decoy",
+        "other_repo": "decoy-data/decoy",
         "other_path": "tests/sentry/ci_scan/__init__.py",
         "other_commit": "d60d1fa1e183f3ed4787d96b24fbe944dd666707",
     },
     {
         "path": "tests/sentry/ci_scan/_shell_tokens.py",
         "sha256": "38e9fddea1c22fdc56017b492193f38649fa448aa04461557645a5921e701b78",
-        "other_repo": "louiskeep/decoy",
+        "other_repo": "decoy-data/decoy",
         "other_path": "tests/sentry/ci_scan/_shell_tokens.py",
         "other_commit": "d60d1fa1e183f3ed4787d96b24fbe944dd666707",
     },
     {
         "path": "tests/sentry/ci_scan/_identity.py",
         "sha256": "82e09cfd65539afb6289750017a79dbcb5663116010309e821bc699e2f48b096",
-        "other_repo": "louiskeep/decoy",
+        "other_repo": "decoy-data/decoy",
         "other_path": "tests/sentry/ci_scan/_identity.py",
         "other_commit": "d60d1fa1e183f3ed4787d96b24fbe944dd666707",
     },
     {
         "path": "tests/sentry/ci_scan/test_identity.py",
         "sha256": "ea864e19cd4ea0804f792520e23dec5fd181ebaae1bee8681e5cb80be97fea30",
-        "other_repo": "louiskeep/decoy",
+        "other_repo": "decoy-data/decoy",
         "other_path": "tests/sentry/ci_scan/test_identity.py",
         "other_commit": "d60d1fa1e183f3ed4787d96b24fbe944dd666707",
     },

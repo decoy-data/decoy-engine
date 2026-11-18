@@ -27,6 +27,7 @@ at the per-table-kind shape).
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from typing import Any, Literal
 
@@ -35,20 +36,52 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    field_validator,
     model_serializer,
     model_validator,
 )
+from pydantic_core import PydanticCustomError, ValidationError
 
+from decoy_engine import reasons
+from decoy_engine.config._delivery import DeliveryConfig
+from decoy_engine.config._generate_options import problem_details
+from decoy_engine.config._generate_unique import cross_table_unique_problems
 from decoy_engine.config._global_settings import GlobalSettings
 from decoy_engine.config._namespaces import NamespaceConfig
 from decoy_engine.config._post_scan import PostScanConfig
+from decoy_engine.config._pre_scan import PreScanConfig
 from decoy_engine.config._relationships import RelationshipConfig
+from decoy_engine.config._scan_baseline import ScanBaselineConfig
 from decoy_engine.config._sources import FileSource, SourceDescriptor
 from decoy_engine.config._subset import SubsetConfig
 from decoy_engine.config._tables import TableConfig
-from decoy_engine.config._targets import FileTarget, TargetDescriptor
+from decoy_engine.config._targets import FileTarget, TargetDescriptor, duplicate_target_groups
 from decoy_engine.config._validators import QuarantineConfig, ValidatorEntry
 from decoy_engine.contracts.declared_casting import ProtectedQuarantineConfig
+from decoy_engine.errors import ConfigRuleError
+
+_PIPELINE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+# Windows device names are reserved with any extension and in any case. The pattern is ASCII only,
+# so the superscript 1, 2 and 3 forms (COM\u00b9 ...) already fail it; COM0 and LPT0 are not reserved.
+_WINDOWS_DEVICES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+
+
+def is_valid_pipeline_name(value: object) -> bool:
+    """The one pipeline-name rule: a folder-safe slug on every platform.
+
+    The engine owns the `name:` field and the CLI checks folder names and file stems with this
+    same function, so a name that loads here also joins safely under `pipelines/`. A non-string
+    is never valid; nothing is coerced.
+    """
+    if not isinstance(value, str) or _PIPELINE_NAME.fullmatch(value) is None:
+        return False
+    if value.endswith("."):
+        return False
+    return value.split(".", 1)[0].upper() not in _WINDOWS_DEVICES
 
 
 class PipelineConfig(BaseModel):
@@ -66,6 +99,9 @@ class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     version: Literal[2]
+    # Optional pipeline name (PROJECT-LAYOUT). Strict: a non-string is refused, never coerced.
+    # Unset stays out of dumps and hashes, so a config without it is byte-identical to before.
+    name: str | None = None
     # FC-1 (2026-06-02): top-level `mode` discriminator dropped. Per-table
     # kind is inferred from `columns` (mask) vs `generate_columns` (generate)
     # presence on each TableConfig; a config that lists both kinds is a
@@ -80,6 +116,9 @@ class PipelineConfig(BaseModel):
     relationships: list[RelationshipConfig] = Field(default_factory=list)
     targets: dict[str, TargetDescriptor] = Field(min_length=1)
     namespaces: dict[str, NamespaceConfig] = Field(default_factory=dict)
+    # Pre-scan detector choice (regex always; classifier and ner opt in). Equal to the default
+    # it stays out of dumps and hashes, so a legacy config is unchanged.
+    pre_scan: PreScanConfig = Field(default_factory=PreScanConfig)
     # Post-scan controls. `post_scan.integrity` runs the post-mask integrity suite
     # (report-only) over the finished output; omitted -> disabled.
     post_scan: PostScanConfig = Field(default_factory=PostScanConfig)
@@ -106,6 +145,12 @@ class PipelineConfig(BaseModel):
     # column with `error_policy: quarantine`; there is deliberately no path or key here, because
     # the store is a runtime capability. Unset stays out of dumps (legacy hashes are unchanged).
     protected_quarantine: ProtectedQuarantineConfig | None = None
+    # How the run's outputs become visible. Equal to the default it stays out of dumps and
+    # hashes, so a legacy config is unchanged.
+    delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
+    # SCAN-MULTI: the scan record this pipeline was built from. Read only by `decoy scan
+    # --compare`; no run reads it. Unset stays out of dumps (legacy hashes are unchanged).
+    scan_baseline: ScanBaselineConfig | None = None
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema: Any, handler: Any) -> Any:
@@ -114,13 +159,30 @@ class PipelineConfig(BaseModel):
         return recover_serialization_schema(core_schema, handler)
 
     @model_serializer(mode="wrap")
-    def _omit_unset_protected_quarantine(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
+    def _omit_unset_optional_blocks(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         data: dict[str, Any] = handler(self)
+        if data.get("name") is None:
+            data.pop("name", None)
         if data.get("protected_quarantine") is None:
             data.pop("protected_quarantine", None)
+        if data.get("scan_baseline") is None:
+            data.pop("scan_baseline", None)
+        # By value, not by what was written: a pre_scan equal to the default is the legacy shape.
+        if self.pre_scan == PreScanConfig():
+            data.pop("pre_scan", None)
+        if self.delivery == DeliveryConfig():
+            data.pop("delivery", None)
         return data
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name_is_a_valid_slug(cls, value: object) -> object:
+        """Refuse anything but a rule-passing string. The error never carries the submitted text."""
+        if value is None or is_valid_pipeline_name(value):
+            return value
+        raise PydanticCustomError(
+            str(reasons.config.PIPELINE_NAME_INVALID), "name is not an acceptable pipeline name."
+        )
 
     @model_validator(mode="after")
     def _f06_protected_quarantine_required(self) -> PipelineConfig:
@@ -152,14 +214,14 @@ class PipelineConfig(BaseModel):
         mask_table_names = [t.name for t in self.tables if t.columns]
         generate_tables = [t for t in self.tables if t.generate_columns]
         if mask_table_names and not self.sources:
-            raise ValueError(
+            raise ConfigRuleError(
                 "config has at least one mask-kind table "
                 f"({mask_table_names[0]!r}) but no `sources:` block; "
                 "mask tables require a declared source"
             )
         for table in generate_tables:
             if not isinstance(table.row_count, int) or table.row_count < 0:
-                raise ValueError(
+                raise ConfigRuleError(
                     f"generate table {table.name!r} must declare a non-negative integer `row_count`"
                 )
         return self
@@ -192,7 +254,7 @@ class PipelineConfig(BaseModel):
                 ref_table = extras.get("reference_table")
                 ref_column = extras.get("reference_column")
                 if ref_table not in by_name:
-                    raise ValueError(
+                    raise ConfigRuleError(
                         f"table {table.name!r}: reference column {col.name!r} "
                         f"points to unknown table {ref_table!r}"
                     )
@@ -214,20 +276,20 @@ class PipelineConfig(BaseModel):
                     # catch -- the job hangs in `running`. Reject here
                     # at validation time so the operator sees a clear
                     # error at submit, not a hung job.
-                    raise ValueError(
+                    raise ConfigRuleError(
                         f"table {table.name!r}: reference column {col.name!r} "
                         f"points to mask-kind table {ref_table!r}; generate-to-mask "
                         "FK is deferred to V2.1. Use a generate parent, or wait "
                         "for V2.1."
                     )
                 else:
-                    raise ValueError(
+                    raise ConfigRuleError(
                         f"table {table.name!r}: reference column {col.name!r} "
                         f"points to {ref_table!r} which has no columns OR "
                         "generate_columns; parent must declare at least one"
                     )
                 if ref_column not in parent_cols:
-                    raise ValueError(
+                    raise ConfigRuleError(
                         f"table {table.name!r}: reference column {col.name!r} "
                         f"points to {ref_table}.{ref_column!r}, but "
                         f"{ref_table!r} declares no such column"
@@ -267,14 +329,58 @@ class PipelineConfig(BaseModel):
                     continue
                 ps = state.get(parent_name, WHITE)
                 if ps == GRAY:
-                    idx = path.index(parent_name)
-                    cycle = [*path[idx:], parent_name]
-                    raise ValueError(f"reference cycle in generate config: {' -> '.join(cycle)}")
+                    cycle = " -> ".join([*path[path.index(parent_name) :], parent_name])
+                    raise ConfigRuleError(f"reference cycle in generate config: {cycle}")
                 if ps == WHITE:
                     state[parent_name] = GRAY
                     path.append(parent_name)
                     stack.append((parent_name, iter(deps.get(parent_name, ()))))
         return self
+
+    @model_validator(mode="after")
+    def _unique_domains_valid(self) -> PipelineConfig:
+        """GEN-UNIQUE: a unique reference or junction pair cannot exceed its parents' row counts.
+
+        Uses each parent's declared `row_count`, an upper bound on its key count. The real
+        distinct key count is known only after generation, and the run re-checks it.
+        """
+        if not any(
+            t.unique_together
+            or any((c.model_extra or {}).get("unique") is True for c in t.generate_columns)
+            for t in self.tables
+        ):
+            return self
+        tables = [
+            {
+                "name": t.name,
+                "row_count": t.row_count,
+                "unique_together": t.unique_together,
+                "generate_columns": [
+                    {**(c.model_extra or {}), "name": c.name, "type": c.type}
+                    for c in t.generate_columns
+                ],
+            }
+            for t in self.tables
+        ]
+        problems = cross_table_unique_problems(tables)
+        if problems:
+            raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
+        return self
+
+    @model_validator(mode="after")
+    def _targets_distinct(self) -> PipelineConfig:
+        """Two declared tables cannot write to one destination; the second write would replace the first."""
+        groups = duplicate_target_groups(self.targets, [t.name for t in self.tables])
+        if not groups:
+            return self
+        code = str(reasons.config.TARGET_SHARED_DESTINATION)
+        clashing = {name for group in groups for name in group}
+        problems: list[tuple[tuple[str | int, ...], str]] = [
+            (("targets", name, target.destination_field), code)
+            for name, target in self.targets.items()
+            if name in clashing
+        ]
+        raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
 
     @model_validator(mode="after")
     def _subset_stage_constraints(self) -> PipelineConfig:
@@ -283,11 +389,7 @@ class PipelineConfig(BaseModel):
         1. Every `subset.seeds[].table` must be a declared mask-kind table
            with a source (subsetting operates on the same tables masking
            reads).
-        2. Every source referenced by a subsetted or relationship-bearing
-           table must be `format == "parquet"` -- a submit-time mirror of
-           preflight check 5.0, so the operator sees the reject at
-           validation time, not at run time.
-        3. Subset-after-mask rejection: the run path is structurally
+        2. Subset-after-mask rejection: the run path is structurally
            subset-stage -> mask-stage; there is no syntax to express
            mask-then-subset within one config. The one shape that WOULD
            express it is pointing the subset job's sources at this same
@@ -299,21 +401,9 @@ class PipelineConfig(BaseModel):
         mask_table_names = {t.name for t in self.tables if t.columns}
         for seed in self.subset.seeds:
             if seed.table not in mask_table_names:
-                raise ValueError(
+                raise ConfigRuleError(
                     f"subset seed names table {seed.table!r}, which is not a declared "
                     "mask-kind table with a source in this config"
-                )
-
-        tables_needing_parquet = {seed.table for seed in self.subset.seeds}
-        for rel in self.relationships:
-            tables_needing_parquet.add(rel.parent.table)
-            tables_needing_parquet.update(c.table for c in rel.children)
-        for name in tables_needing_parquet:
-            src = self.sources.get(name)
-            if src is not None and src.format != "parquet":
-                raise ValueError(
-                    f"subsetting is configured but source {name!r} is "
-                    f"{src.format!r}; convert to Parquet for subsetting"
                 )
 
         target_paths = {
@@ -323,7 +413,7 @@ class PipelineConfig(BaseModel):
             if not isinstance(src, FileSource):
                 continue
             if os.path.normpath(src.path) in target_paths:
-                raise ValueError(
+                raise ConfigRuleError(
                     f"subset input {src.path!r} is also a mask target of this pipeline; "
                     "subsetting runs BEFORE masking (subset-then-mask), it cannot consume "
                     "masked output"

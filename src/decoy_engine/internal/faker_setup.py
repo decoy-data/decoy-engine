@@ -211,7 +211,7 @@ def load_custom_providers(
     Provider name = ``custom.<filename_stem>``. After this returns,
     pipelines can reference the lists via ``faker_type: custom.<stem>``.
 
-    Default directory comes from the ``CUSTOM_PROVIDERS_DIR`` env-var,
+    Default directory comes from the ``DECOY_CUSTOM_PROVIDERS_DIR`` env-var,
     falling back to ``custom_providers`` relative to the cwd. The directory is a
     directory capability the file-access policy issues for the custom-provider role; a
     child is opened only beneath that already-open directory.
@@ -220,7 +220,7 @@ def load_custom_providers(
     inspect or log what was registered.
     """
     if custom_dir is None:
-        custom_dir = Path(os.getenv("CUSTOM_PROVIDERS_DIR", "custom_providers"))
+        custom_dir = Path(os.getenv("DECOY_CUSTOM_PROVIDERS_DIR", "custom_providers"))
 
     custom_dir = Path(custom_dir)
     policy = fileaccess.current()
@@ -413,28 +413,27 @@ def _coerce_to_str(value: Any) -> Any:
     return str(value)
 
 
+def reflected_kwargs(method: Callable[..., Any]) -> tuple[bool, set[str]]:
+    """(takes any keyword, keyword names) of a bound Faker method; an unreadable signature takes any.
+
+    The one signature read behind the reflected provider's filter and the plan check on kwargs."""
+    try:
+        params = _inspect.signature(method).parameters.values()
+    except (TypeError, ValueError):
+        return True, set()
+    named = (_inspect.Parameter.KEYWORD_ONLY, _inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    return (
+        any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in params),
+        {p.name for p in params if p.kind in named} - {"self"},
+    )
+
+
 def _make_reflected_provider(method: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap a bound Faker method so the engine can call it with arbitrary
     keyword args from a YAML ``faker_kwargs:`` block. Invalid kwargs are
     silently dropped rather than raised so a stale YAML doesn't kill a
     job -- the masker emits a warning at the call site."""
-    try:
-        sig = _inspect.signature(method)
-        has_var_keyword = any(
-            p.kind == _inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        param_names = {
-            p.name
-            for p in sig.parameters.values()
-            if p.kind
-            in (
-                _inspect.Parameter.KEYWORD_ONLY,
-                _inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-        } - {"self"}
-    except (TypeError, ValueError):
-        has_var_keyword = True
-        param_names = set()
+    has_var_keyword, param_names = reflected_kwargs(method)
 
     def call(**kwargs: Any) -> Any:
         if not kwargs:

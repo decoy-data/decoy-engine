@@ -686,7 +686,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       },
       {
        "column": "p",
@@ -701,7 +703,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 1.0
+       "missing_value_similarity": 1.0,
+       "similarity": 1.0,
+       "value_similarity": 1.0
       },
       {
        "column": "r",
@@ -715,7 +719,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       },
       {
        "column": "tr",
@@ -729,7 +735,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       }
      ],
      "score": 0.25
@@ -878,7 +886,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        },
        {
         "column": "p",
@@ -893,7 +903,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 1.0
+        "missing_value_similarity": 1.0,
+        "similarity": 1.0,
+        "value_similarity": 1.0
        },
        {
         "column": "r",
@@ -907,7 +919,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        },
        {
         "column": "tr",
@@ -921,7 +935,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        }
       ],
       "score": 0.25
@@ -1239,7 +1255,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       },
       {
        "column": "parent_id",
@@ -1253,7 +1271,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       }
      ],
      "score": 0.0
@@ -1371,7 +1391,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       },
       {
        "column": "note",
@@ -1385,7 +1407,9 @@
         }
        },
        "method": "tvd",
-       "similarity": 0.0
+       "missing_value_similarity": 1.0,
+       "similarity": 0.0,
+       "value_similarity": 0.0
       }
      ],
      "score": 0.0
@@ -1514,7 +1538,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        },
        {
         "column": "parent_id",
@@ -1528,7 +1554,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        }
       ],
       "score": 0.0
@@ -1646,7 +1674,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        },
        {
         "column": "note",
@@ -1660,7 +1690,9 @@
          }
         },
         "method": "tvd",
-        "similarity": 0.0
+        "missing_value_similarity": 1.0,
+        "similarity": 0.0,
+        "value_similarity": 0.0
        }
       ],
       "score": 0.0
@@ -1729,6 +1761,64 @@
        "source": "fidelity"
       }
      ]
+    }
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
     }
    }
   },
@@ -1930,6 +2020,64 @@
     "loaded_fully_in_memory": true,
     "outputs_streamed": false,
     "route_reason": "generate_plus_mask"
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
    }
   },
   "row_errors": [],
@@ -2032,8 +2180,8 @@
         "field_name": "seq",
         "metadata": null,
         "name": "seq",
-        "numpy_type": "object",
-        "pandas_type": "unicode"
+        "numpy_type": "int64",
+        "pandas_type": "int64"
        }
       ],
       "index_columns": []
@@ -2041,15 +2189,15 @@
     },
     "rows": {
      "seq": [
-      "1",
-      "2",
-      "3"
+      1,
+      2,
+      3
      ]
     },
     "schema": [
      [
       "seq",
-      "string",
+      "int64",
       true
      ]
     ]
@@ -2143,10 +2291,7 @@
    "timing_count_positive": true,
    "timings": "tuple"
   },
-  "warnings": [
-   "QualityWarning(code='undeclared_output_columns', provider='output_projection', column=None, detail={'table': 'parent', 'undeclared_columns': ['note']})",
-   "QualityWarning(code='undeclared_output_columns', provider='output_projection', column=None, detail={'table': 'child', 'undeclared_columns': ['cid']})"
-  ]
+  "warnings": []
  },
  "ff_legacy_single": {
   "execution": {
@@ -4387,12 +4532,79 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source",
      "no sink (the whole output is held resident)"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -4568,12 +4780,79 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source",
      "no sink (the whole output is held resident)"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": 536870912,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -4749,12 +5028,79 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source",
      "no sink (the whole output is held resident)"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -4930,12 +5276,25 @@
      "table": "child"
     }
    ],
+   "post_scan_gate_deferred": {
+    "code": "gate_deferred_route",
+    "namespace": "post_scan"
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "no sink (the whole output is held resident)",
      "a source_loader (returns an unbounded resident table)"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -5111,11 +5470,78 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -5291,7 +5717,74 @@
      "reason": "crypto_extension_unavailable",
      "table": "child"
     }
-   ]
+   ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
+   }
   },
   "row_errors": [],
   "sink_tables": {
@@ -5472,12 +5965,79 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source",
      "no sink (the whole output is held resident)"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -5653,11 +6213,78 @@
      "table": "child"
     }
    ],
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "residency": {
     "caller_managed": true,
     "shapes": [
      "a resident pa.Table source"
     ]
+   },
+   "resources": {
+    "out_of_core": {
+     "applied": {
+      "__volatile__": "list"
+     },
+     "memory_cap_bytes": null,
+     "thread_cap": null
+    }
    }
   },
   "row_errors": [],
@@ -5818,6 +6445,64 @@
     "loaded_fully_in_memory": true,
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
    },
    "sequential_hash": [
     {
@@ -6060,6 +6745,64 @@
      "sequential_relationship": "DEFERRED to the live router: job has FK relationship edges (relationship-route candidate); the sequential-vs-out-of-core-vs-full-frame decision is made by run_pipeline's decide_execution_route from job size + out-of-core compatibility, not by this planner (PLANNER_ROUTING_ENABLED stays False)."
     }
    },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "sequential_hash": [
     {
      "column": "id",
@@ -6284,6 +7027,64 @@
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
    },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "sequential_hash": [
     {
      "column": "id",
@@ -6507,6 +7308,64 @@
     "loaded_fully_in_memory": true,
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
    },
    "sequential_hash": [
     {
@@ -6739,6 +7598,64 @@
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
    },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 4,
+       "orphan_rows": 4,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "sequential_hash": [
     {
      "column": "id",
@@ -6964,6 +7881,64 @@
     "loaded_fully_in_memory": true,
     "outputs_streamed": true,
     "route_reason": "pure_mask_fk"
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
    },
    "sequential_hash": [
     {
@@ -7193,6 +8168,64 @@
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
    },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
+   },
    "sequential_hash": [
     {
      "column": "id",
@@ -7419,6 +8452,64 @@
     "out_of_core_declined": "per_table_transforms_present",
     "outputs_streamed": false,
     "route_reason": "pure_mask_fk"
+   },
+   "post_scan_integrity": {
+    "keys": [
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "id"
+      ],
+      "kind": "primary",
+      "output": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "parent": [],
+      "source": {
+       "duplicate_excess": 0,
+       "null_key_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "parent"
+     },
+     {
+      "baseline": "measured",
+      "bounded": true,
+      "codes": [],
+      "columns": [
+       "parent_id"
+      ],
+      "kind": "foreign",
+      "output": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "parent": [
+       "parent"
+      ],
+      "source": {
+       "null_key_rows": 0,
+       "orphan_distinct_keys": 0,
+       "orphan_rows": 0,
+       "rows": 20
+      },
+      "status": "checked",
+      "table": "child"
+     }
+    ],
+    "schema_version": "post-scan-integrity/v3",
+    "verdict": {
+     "blocking": false,
+     "codes": [],
+     "warnings": []
+    }
    },
    "sequential_hash": [
     {

@@ -23,7 +23,7 @@ import pytest
 
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution._strategies._nested import (
+from decoy_engine.execution._strategies.nested._handler import (
     NestedStrategyHandler,
     _has_prefix_overlap,
     _path_segments,
@@ -33,37 +33,11 @@ from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests.unit.execution._nested_strategy_support import _JOB_SEED, _FakeCtx, _seed
 
 _REG = get_default_registry()
 _GRAPH = RelationshipGraph(edges=(), ordering=())
 _NS = NamespaceRegistry(bindings=())
-_JOB_SEED = b"\xca\xfe" * 4  # 8 bytes
-
-
-def _seed(provider_config: dict, namespace: str | None = None) -> ColumnSeed:
-    return ColumnSeed(
-        namespace=namespace,
-        strategy="nested",
-        provider=None,
-        backend_type="decoy_native",
-        backend_version="1",
-        cardinality_mode="reuse",
-        deterministic=False,
-        provider_config=tuple(sorted(provider_config.items())),
-    )
-
-
-class _FakeCtx:
-    def __init__(self) -> None:
-        # Real StrategyContext carries a `row_errors` list; the malformed-cell
-        # fail-closed path appends to it, so the stand-in needs one too.
-        self.row_errors: list = []
-        # A seeded categorical child reads the mask key and the row offset.
-        self.job_seed = _JOB_SEED
-        self.mask_key = _JOB_SEED
-        self.row_offset = 0
-
-
 # ── happy paths ───────────────────────────────────────────────────────
 
 
@@ -549,7 +523,7 @@ class TestNestedWhenGateFailClosed:
 
 # ── mutation-hardening (TQ crown-jewels, 2026-07-26) ───────────────────
 #
-# Kills the LOGIC survivors from the mutmut run on `_nested.py`. Grouped
+# Kills the LOGIC survivors from the mutmut run on `nested/_handler.py`. Grouped
 # by the invariant / method each pins. See
 # docs/quality/mutation-ledgers/execution_strategies_nested.md.
 

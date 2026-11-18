@@ -1,0 +1,61 @@
+"""The one canonical JSON owner: the digest form and the frozen seed form, and the strict reader specs."""
+
+from __future__ import annotations
+
+from decoy_engine._canonical._json import (
+    MASK_CELL_BYTES,
+    MASK_MAX_DEPTH,
+    CanonicalJsonError,
+    CanonicalStringError,
+    JsonNumber,
+    StrictJsonError,
+    canonical_json_bytes,
+    seed_fingerprint_bytes,
+    strict_json_loads,
+    strict_json_plain,
+    strict_json_read,
+    strict_json_write,
+)
+from decoy_engine._canonical._strict_spec import (
+    CountSpec,
+    ExactSpec,
+    ListSpec,
+    NullableSpec,
+    ObjectSpec,
+    OneOfSpec,
+    RelPathSpec,
+    ShapedSpec,
+    Spec,
+    SpecCheck,
+    SpecRefusedError,
+    attempt,
+    parse_or_token,
+)
+
+__all__ = [
+    "MASK_CELL_BYTES",
+    "MASK_MAX_DEPTH",
+    "CanonicalJsonError",
+    "CanonicalStringError",
+    "CountSpec",
+    "ExactSpec",
+    "JsonNumber",
+    "ListSpec",
+    "NullableSpec",
+    "ObjectSpec",
+    "OneOfSpec",
+    "RelPathSpec",
+    "ShapedSpec",
+    "Spec",
+    "SpecCheck",
+    "SpecRefusedError",
+    "StrictJsonError",
+    "attempt",
+    "canonical_json_bytes",
+    "parse_or_token",
+    "seed_fingerprint_bytes",
+    "strict_json_loads",
+    "strict_json_plain",
+    "strict_json_read",
+    "strict_json_write",
+]

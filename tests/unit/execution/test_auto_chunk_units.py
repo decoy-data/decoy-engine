@@ -229,7 +229,9 @@ def test_run_auto_chunk_dispatcher_lane_returns_the_five_part_shape() -> None:
     assert isinstance(timings, tuple) and {t.column for t in timings} == {"r", "p"}
     assert conversion_ms == 0.0
     assert warnings == ()
-    assert metrics["auto_chunk"] == {"lane": "dispatcher", "lane_reason": None, "native_threads": 2}
+    stamp = dict(metrics["auto_chunk"])
+    assert stamp.pop("native_thread_clamp")["requested"] == 2  # E1b: the clamp record, host-bound
+    assert stamp == {"lane": "dispatcher", "lane_reason": None, "native_threads": 2}
     route = metrics["chunked_route"]
     assert route["table"] == "t"
     assert route["native_admitted"] is True and route["reroute_reason"] is None
@@ -246,7 +248,9 @@ def test_run_auto_chunk_legacy_lane_reports_the_same_shape_on_pandas() -> None:
     )
     assert outputs["t"].num_rows == support.ROWS and conversion_ms > 0.0
     assert {t.column for t in timings} == {"r", "p"}
-    assert metrics["auto_chunk"] == {
+    stamp = dict(metrics["auto_chunk"])
+    assert stamp.pop("native_thread_clamp")["requested"] == 7  # E1b: the clamp record, host-bound
+    assert stamp == {
         "lane": "legacy_oracle",
         "lane_reason": "dispatcher_disabled",
         "native_threads": 7,
@@ -397,9 +401,9 @@ def _schema_disagreement(monkeypatch: pytest.MonkeyPatch, target: Any, name: str
 def test_a_join_failure_on_the_dispatcher_lane_names_the_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
-    _schema_disagreement(monkeypatch, _chunked_entry, "run_mask_chunked")
+    _schema_disagreement(monkeypatch, _native_core, "mask_chunked")
     cfg, src = _native_table()
     with pytest.raises(ExecutionError) as raised:
         _call(cfg, src, table="people")
@@ -409,9 +413,9 @@ def test_a_join_failure_on_the_dispatcher_lane_names_the_table(
 def test_a_join_failure_on_the_legacy_lane_names_the_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from decoy_engine.execution import _chunked
+    from decoy_engine.execution import _chunked_oracle
 
-    _schema_disagreement(monkeypatch, _chunked, "run_mask_pipeline_chunked")
+    _schema_disagreement(monkeypatch, _chunked_oracle, "_mask_pipeline_chunked")
     cfg, src = _native_table()
     with pytest.raises(ExecutionError) as raised:
         _call(cfg, src, table="people", dispatcher_enabled=False)

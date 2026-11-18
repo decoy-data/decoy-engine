@@ -1,0 +1,9 @@
+{
+ "sentry_id": "post-scan-commit",
+ "created_in": "PS-8",
+ "entries": {
+  "decoy_engine/execution/_sequential.py::_has_transactional_write_contract::getattr-commit::0": {
+   "reason": "a protocol probe for a sink's method, not a commit"
+  }
+ }
+}
