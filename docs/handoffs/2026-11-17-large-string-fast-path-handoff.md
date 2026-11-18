@@ -2,6 +2,8 @@
 
 Status: ready to build. Written 2026-11-17. One engine slice, one PR.
 
+Repo: `decoy-engine`. Branch: `perf/large-string-fast-path` from current main.
+
 Rules consulted: 00-universal, risk-and-exceptions, development-loop, performance, testing,
 architecture, cross-cutting-concerns, proportionality, documentation
 
@@ -68,6 +70,15 @@ The helper is the one owner of offset-width normalization. Its call sits inside 
    commit.
 9. Open the PR; after merge, update row 24zy in the CLI repo roadmap to MERGED with the PR number and
    merge commit, and add it to `RECENTLY-SHIPPED.md`.
+
+## Worker rules
+
+- Name the recurring-defect class of each finding.
+- Write the generated tests first and record that they fail before the fix.
+- Attack your own diff with the plan's mutations after the final source change.
+- Run before and after baselines in the same environment from `uv.lock`.
+- Never widen a threshold or skip a test to make a gate pass.
+- Stop and report if a catalogued class repeats after its fix.
 
 ## Gotchas
 

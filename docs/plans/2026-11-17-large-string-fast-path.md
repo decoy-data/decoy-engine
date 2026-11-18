@@ -104,6 +104,28 @@ source against about 1.4 s (`redact`) and 3.6 s (`truncate`) for `string`.
   Polars and DuckDB each keep a single internal string representation and convert Arrow input at
   the edge, rather than keeping a kernel per offset width.
 
+## Reuse inventory
+
+- `src/decoy_engine/_arrow_types.py` owns the `string`/`large_string` rules; `narrow_text` goes there, next to `is_text`.
+- The existing fast paths and frozen references in `src/decoy_engine/kernel/_scalar.py` are reused as they are.
+- The differential harness and route spies in `tests/unit/kernel/test_scalar_vectorized_parity.py` are extended, not copied.
+
+## Recurring defect classes
+
+| Class | Applicability | Closing structure | Sentry or property test | Mutation |
+|---|---|---|---|---|
+| 1 | Anchored value validation | N/A: no regex or token validator changes. | N/A | N/A |
+| 2 | Strict wire and stored types; cleanup | N/A: no wire or stored model changes. | N/A | N/A |
+| 3 | No exception context or leaked state | N/A: no new raised error or error surface. | N/A | N/A |
+| 4 | Versioned read models and routes | N/A: no persisted format or reader changes. | N/A | N/A |
+| 5 | Normalized guard scanners and referential checks | N/A: no scanner changes. | N/A | N/A |
+| 6 | No private-module imports for untrusted boundaries | N/A: no cross-package import changes. | N/A | N/A |
+| 7 | No hidden CI failures or TOCTOU checks | N/A: no CI or check-then-use changes. | N/A | N/A |
+| 8 | One input trust class per entry point; no weak split | N/A: no entry point or trust split changes. | N/A | N/A |
+| 9 | Mutations on the final head after refactor | Required | Record the final HEAD. | Rerun the central-helper mutation. | Remove either guard call; the guard test must fail. |
+| 10 | Checked allowlisted helpers and frozen sentries | N/A: no sentry allowlist changes. | N/A | N/A |
+| 11 | No raised caps | Required | Keep `_scalar.py` at or below 235 lines. | Run the size gate. | Raising the ceiling is rejected. |
+
 ## Design
 
 Add `narrow_text(array)` to `src/decoy_engine/_arrow_types.py`, the existing owner of the
@@ -157,7 +179,7 @@ Rejected:
 - **Cast at source read** (`LazySource`, CLI reader). That changes the source schema seen by
   passthrough columns, profiling and the post-scan, so it is a much larger change in behavior.
 
-## Tests (land the assertions first, red, then the fix)
+## Acceptance tests (land the assertions first, red, then the fix)
 
 The scalar parity and route-spy cases live in
 `tests/unit/kernel/test_scalar_vectorized_parity.py`; helper and route tests stay with their owning
@@ -205,6 +227,31 @@ timing assertion goes into CI.
 | Guard calls | `src/decoy_engine/kernel/_scalar.py` | Pure Arrow masking kernels | `redact_array`, `truncate_array` |
 | Parity and guard tests | `tests/unit/kernel/test_scalar_vectorized_parity.py` and `tests/unit/test_arrow_types.py` | Unit tests mirror source ownership | Existing scalar/type predicate tests |
 | Route proof | Existing file under `tests/unit/execution/` beside auto-chunk route tests | Execution route tests | Existing `run_pipeline` auto-chunk tests |
+
+## Enumerations
+
+### Exit paths
+
+- Text narrowing succeeds, then the existing fast path returns from `src/decoy_engine/kernel/_scalar.py:82` or `src/decoy_engine/kernel/_scalar.py:155`.
+- Narrowing, validation or compute failure reaches the existing reference fallback in the same dispatcher.
+
+### Routes
+
+- Out-of-core calls the shared guards at `src/decoy_engine/execution/out_of_core/_mask.py:216` and `src/decoy_engine/execution/out_of_core/_mask.py:221`.
+- Native scalar and auto-chunk call them through `src/decoy_engine/execution/native/_kernels_scalar.py:98` and `src/decoy_engine/execution/native/_kernels_scalar.py:141`.
+
+### FK shapes
+
+- N/A: this change does not read or write foreign keys.
+
+### Fields
+
+- N/A: this change adds no wire, stored or record fields.
+
+### Output surfaces
+
+- Kernel return values retain the existing values, null mask, container and Arrow type contract.
+- Benchmark timings and reference-call counts appear only in the PR evidence, not product output.
 
 ## Slices
 
