@@ -30,6 +30,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 if str(HERE) not in sys.path:  # loaded by file path in tests: the sibling modules need this
@@ -385,10 +390,13 @@ def capture(
 ) -> dict[str, Any]:
     """Run clock A at each hash seed and clock B at seed 0, concurrently, and classify.
 
-    A few hash seeds can agree by chance for a provider that depends on hash order, and the
-    chance differs between CPython minors (3.11 changed the str hash). With `baseline`, a cell it
-    records `unstable` that these seeds saw agree is re-run over `RECHECK_SEEDS` before it counts
-    as reproducible, so only a cell that agrees across all of them reads as newly reproducible."""
+    The dominant unstable cells are providers that draw from unseeded module-level `random`
+    (the `passport_*` providers, about 428 fields in all). Two processes still agree on all 8 draws
+    of one such field about 0.3% of the time, so a two-seed run would read a few of them as
+    reproducible on every run. With `baseline`, a cell it records `unstable` that these seeds saw
+    agree is re-run over `RECHECK_SEEDS`, and it reads as newly reproducible only if all 8 seeds
+    (the two here plus those six) agree. Hash-order providers (the `it_IT` city set) can also agree
+    by chance, and the chance differs between CPython minors (3.11 changed the str hash)."""
     run = runner or run_worker
     with ThreadPoolExecutor(max_workers=len(a_seeds) + 1) as pool:
         a_futs = [pool.submit(run, CLOCK_A, s, locales, stub, python_exe) for s in a_seeds]
@@ -410,11 +418,14 @@ def capture(
 
 
 def pinned_faker() -> str:
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    m = re.search(r'^\s*"faker==(\d+\.\d+\.\d+)",', text, re.MULTILINE)
-    if m is None:
-        raise OutputLockError("pyproject.toml has no exact faker pin")
-    return m.group(1)
+    """The one exact `faker==` pin in pyproject.toml; the pin sentry reads it through this."""
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
+    pins = [d.split("==", 1)[1] for d in deps if d.startswith("faker==")]
+    if len(pins) != 1 or re.fullmatch(r"\d+\.\d+\.\d+", pins[0]) is None:
+        raise OutputLockError("pyproject.toml must carry exactly one exact faker pin")
+    return pins[0]
 
 
 def build_lock(locales: dict[str, Any], faker_version: str) -> dict[str, Any]:

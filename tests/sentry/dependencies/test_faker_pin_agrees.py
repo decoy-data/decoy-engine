@@ -7,10 +7,12 @@ capture was taken under, so a capture under a different version is stale.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,16 +25,22 @@ ROOT = Path(__file__).resolve().parents[3]
 _VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
+def _lock_tool() -> Any:
+    """The output-lock tool, whose `pinned_faker` is the one reader of the pin."""
+    path = ROOT / "scripts" / "faker-determinism" / "output_lock.py"
+    spec = importlib.util.spec_from_file_location("output_lock", path)
+    assert spec is not None and spec.loader is not None
+    sys.path.insert(0, str(path.parent))
+    try:
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(path.parent))
+    return mod
+
+
 def _pyproject() -> str:
-    pins = [
-        d.split("==", 1)[1]
-        for d in tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-            "dependencies"
-        ]
-        if d.startswith("faker==")
-    ]
-    assert len(pins) == 1, "pyproject.toml must carry exactly one faker== pin"
-    return pins[0]
+    return _lock_tool().pinned_faker()
 
 
 def _uv_lock() -> str:

@@ -13,11 +13,20 @@ import copy
 import importlib.util
 import json
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests.sentry.dependencies._faker_lock_lists import (
+    ANCHORS,
+    EN_US_DIGEST_FLOOR,
+    EXPECTED_CALENDAR,
+    EXPECTED_RAISES,
+    EXPECTED_UNSTABLE,
+    Entry,
+    Everywhere,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOL_DIR = ROOT / "scripts" / "faker-determinism"
@@ -33,225 +42,6 @@ _spec.loader.exec_module(output_lock)
 LOCK_FILE = output_lock.LOCK_PATH
 SMALL = ["en_US", "pt_BR"]
 WORKER_CELL = [pytest.mark.faker_output_lock, pytest.mark.timeout(180)]
-
-
-@dataclass(frozen=True)
-class Everywhere:
-    """Every locale of the lock that has the provider, minus `except_`."""
-
-    except_: tuple[str, ...] = field(default=())
-
-
-Entry = tuple["Everywhere | tuple[str, ...]", str]
-
-UNSTABLE_REASON = "differs between processes at one frozen clock; cause not traced (F-5)"
-RAISES_REASON = "provider raises with no arguments in this locale"
-CALENDAR_REASON = "reads the date or time (clock-reading provider)"
-
-EXPECTED_UNSTABLE: dict[tuple[str, str], tuple[Everywhere | tuple[str, ...], str]] = {
-    ("adapter", "address_city"): (("it_IT",), UNSTABLE_REASON),
-    ("reflected", "cif"): (("es", "es_CA", "es_ES"), UNSTABLE_REASON),
-    ("reflected", "city"): (("it_IT",), UNSTABLE_REASON),
-    ("reflected", "curp"): (("es_MX",), UNSTABLE_REASON),
-    ("reflected", "diplomatic_license_plate"): (("uk_UA",), UNSTABLE_REASON),
-    ("reflected", "elector_code"): (("es_MX",), UNSTABLE_REASON),
-    ("reflected", "license_plate"): (("uk_UA",), UNSTABLE_REASON),
-    ("reflected", "nie"): (("es", "es_CA", "es_ES"), UNSTABLE_REASON),
-    ("reflected", "nif"): (("es", "es_CA", "es_ES"), UNSTABLE_REASON),
-    ("reflected", "nuss"): (("es", "es_CA", "es_ES"), UNSTABLE_REASON),
-    ("reflected", "org_and_vat_id"): (("sv_SE",), UNSTABLE_REASON),
-    ("reflected", "org_id"): (("sv_SE",), UNSTABLE_REASON),
-    ("reflected", "passport_full"): (
-        Everywhere(),
-        "differs between processes at one frozen clock (hash seed); cause not traced (F-5)",
-    ),
-    ("reflected", "passport_gender"): (
-        Everywhere(),
-        "differs between processes at one frozen clock (hash seed); cause not traced (F-5)",
-    ),
-    ("reflected", "plate_letter_prefix"): (("uk_UA",), UNSTABLE_REASON),
-    ("reflected", "plate_region_code"): (("uk_UA",), UNSTABLE_REASON),
-    ("reflected", "rfc"): (("es_MX",), UNSTABLE_REASON),
-    ("reflected", "ssn"): (("th", "th_TH", "uk_UA"), UNSTABLE_REASON),
-    ("reflected", "tin"): (("el_GR",), UNSTABLE_REASON),
-    ("reflected", "vat_id"): (("el_GR", "sv_SE", "th", "th_TH"), UNSTABLE_REASON),
-}
-
-EXPECTED_RAISES: dict[tuple[str, str], tuple[Everywhere | tuple[str, ...], str]] = {
-    ("adapter", "address_state"): (
-        (
-            "ar_DZ",
-            "az_AZ",
-            "bn_BD",
-            "de_CH",
-            "el_GR",
-            "en_BD",
-            "en_CA",
-            "en_GB",
-            "en_IE",
-            "en_NZ",
-            "en_PH",
-            "es_AR",
-            "es_CL",
-            "es_CO",
-            "fil_PH",
-            "fr_CA",
-            "fr_CH",
-            "fr_DZ",
-            "fr_FR",
-            "he_IL",
-            "hu_HU",
-            "ja_JP",
-            "ka_GE",
-            "ko_KR",
-            "ne_NP",
-            "nl_BE",
-            "nl_NL",
-            "no_NO",
-            "pl_PL",
-            "pt_PT",
-            "ru_RU",
-            "th",
-            "th_TH",
-            "tl_PH",
-            "uk_UA",
-            "zh_CN",
-            "zh_TW",
-            "zu_ZA",
-        ),
-        "no state list in this locale (adapter wraps AttributeError)",
-    ),
-    ("adapter", "person_phone"): (
-        ("en_PH", "fil_PH", "tl_PH"),
-        "no phone format in this locale (adapter wraps AttributeError)",
-    ),
-    ("reflected", "bank"): (
-        (
-            "bn_BD",
-            "cs_CZ",
-            "da_DK",
-            "de",
-            "de_AT",
-            "de_DE",
-            "en_IE",
-            "en_PH",
-            "es",
-            "es_ES",
-            "fi_FI",
-            "fil_PH",
-            "fr_FR",
-            "it_IT",
-            "nl_NL",
-            "no_NO",
-            "pl_PL",
-            "pt_PT",
-            "ro_RO",
-            "sk_SK",
-            "th",
-            "th_TH",
-            "tl_PH",
-            "tr_TR",
-        ),
-        "no bank list in this locale (AttributeError)",
-    ),
-    ("reflected", "current_country"): (("en_MS",), "locale has no current country"),
-    ("reflected", "del_arguments"): (
-        Everywhere(),
-        "Faker helper that needs arguments; reflected with none",
-    ),
-    ("reflected", "get_formatter"): (
-        Everywhere(),
-        "Faker helper that needs arguments; reflected with none",
-    ),
-    ("reflected", "is_leap_year"): (("it_IT",), "helper that needs an argument"),
-    ("reflected", "name_female"): (("es_AR",), "locale has no female name list"),
-    ("reflected", "name_male"): (("es_AR",), "locale has no male name list"),
-    ("reflected", "pesel_compute_check_digit"): (("pl_PL",), "helper that needs an argument"),
-    ("reflected", "pricetag"): (("bn_BD",), "locale has no currency symbol entry"),
-    ("reflected", "provider"): (
-        Everywhere(),
-        "Faker helper that needs arguments; reflected with none",
-    ),
-    ("reflected", "pwz_doctor_compute_check_digit"): (("pl_PL",), "helper that needs an argument"),
-    ("reflected", "xml"): (("fr_FR", "pl_PL"), "xml() rejects the default size in this locale"),
-}
-
-EXPECTED_CALENDAR: dict[tuple[str, str], tuple[Everywhere | tuple[str, ...], str]] = {
-    ("reflected", "am_pm"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "ascii_company_email"): (("bg_BG", "ru_RU"), CALENDAR_REASON),
-    ("reflected", "ascii_email"): (("az_AZ", "ru_RU"), CALENDAR_REASON),
-    ("reflected", "ascii_free_email"): (("bg_BG",), CALENDAR_REASON),
-    ("reflected", "ascii_safe_email"): (("bg_BG",), CALENDAR_REASON),
-    ("reflected", "birth_number"): (
-        ("cs_CZ", "sk_SK"),
-        "birth number reads today for the century digit",
-    ),
-    ("reflected", "company_email"): (("bg_BG", "ru_RU"), CALENDAR_REASON),
-    ("reflected", "credit_card_expire"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "credit_card_full"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_between"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_between_dates"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_object"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_this_century"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_this_decade"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_this_month"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_this_year"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_ad"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_between"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_between_dates"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_this_century"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_this_decade"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_this_month"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "date_time_this_year"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "day_of_month"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "day_of_week"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "day_of_week_in_guj"): (("gu_IN",), CALENDAR_REASON),
-    ("reflected", "email"): (("bg_BG",), "email local part reads the clock in this locale"),
-    ("reflected", "free_email"): (("bg_BG",), CALENDAR_REASON),
-    ("reflected", "future_date"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "future_datetime"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "iso8601"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "minguo_year"): (("zh_TW",), CALENDAR_REASON),
-    ("reflected", "month"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "month_in_guj"): (("gu_IN",), CALENDAR_REASON),
-    ("reflected", "month_name"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "month_name_in_guj"): (("gu_IN",), CALENDAR_REASON),
-    ("reflected", "passport_dates"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "passport_dob"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "past_date"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "past_datetime"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "pesel"): (("pl_PL",), "check date reads today"),
-    ("reflected", "rvnr"): (("de", "de_DE"), "insurance number reads today"),
-    ("reflected", "safe_email"): (("bg_BG",), CALENDAR_REASON),
-    ("reflected", "ssn"): (
-        ("de_AT", "el_GR", "et_EE", "fi_FI", "lv_LV", "nl_BE", "no_NO", "pl_PL", "sv_SE", "zh_CN"),
-        "national id embeds the birth date or age from today",
-    ),
-    ("reflected", "time"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "traditional_month_name"): (("ja_JP",), CALENDAR_REASON),
-    ("reflected", "unix_time"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "user_name"): (("az_AZ", "bg_BG", "ru_RU"), CALENDAR_REASON),
-    ("reflected", "uuid1"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "uuid7"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "xml"): (Everywhere(), CALENDAR_REASON),
-    ("reflected", "year"): (Everywhere(), CALENDAR_REASON),
-}
-
-# Pairs that must be digests on both surfaces where they exist (the 2026-07-23 confusion was
-# about names and addresses, so they are anchored).
-ANCHORS: tuple[tuple[str, str, str], ...] = (
-    ("en_US", "reflected", "first_name"),
-    ("en_US", "reflected", "email"),
-    ("en_US", "reflected", "address"),
-    ("en_US", "reflected", "currency_code"),
-    ("es_ES", "reflected", "bban"),
-    ("en_GB", "reflected", "vat_id"),
-    ("en_US", "adapter", "person_first_name"),
-    ("en_US", "adapter", "person_email"),
-)
-EN_US_DIGEST_FLOOR = 253  # en_US reflected pairs whose two fields are digests, as captured
 
 
 # --- helpers -----------------------------------------------------------------------------------
@@ -282,8 +72,14 @@ def _expand(
     for (surface, name), (where, reason) in table.items():
         assert reason, f"{surface} {name} needs a reason"
         if isinstance(where, Everywhere):
-            have = [loc for loc, e in locales.items() if name in e[surface]]
-            out |= {(loc, surface, name) for loc in have if loc not in where.except_}
+            have = {
+                (loc, surface, name)
+                for loc, e in locales.items()
+                if name in e[surface] and loc not in where.except_
+            }
+            # A locale that joins the lock widens "everywhere"; the count makes that an edit.
+            assert len(have) == where.count, f"{surface} {name} now covers {len(have)} locales"
+            out |= have
         else:
             out |= {(loc, surface, name) for loc in where}
     return out
@@ -431,6 +227,13 @@ def test_non_canonical_bytes_are_refused() -> None:
 def test_expected_unstable_equals_the_lock() -> None:
     locales = _load_lock()["locales"]
     assert _pairs(locales, _unstable) == _expand(locales, EXPECTED_UNSTABLE)
+
+
+def test_a_new_locale_joining_an_everywhere_entry_is_caught() -> None:
+    locales = copy.deepcopy(_load_lock()["locales"])
+    locales["zz_ZZ"] = copy.deepcopy(locales["en_US"])
+    with pytest.raises(AssertionError, match="now covers"):
+        _expand(locales, EXPECTED_UNSTABLE)
 
 
 def test_a_stable_pair_marked_unstable_is_caught() -> None:
@@ -674,8 +477,6 @@ def test_clock_a_hash_seed_disagreement_is_unstable(
     assert "en_US reflected first_name per_seed" in diff["newly unstable"]
 
 
-@pytest.mark.faker_output_lock
-@pytest.mark.timeout(180)
 def test_unstable_set_in_the_lock_is_not_compared_by_digest() -> None:
     old = _minimal_lock()["locales"]
     old["en_US"]["reflected"]["first_name"]["per_seed"] = "unstable"
