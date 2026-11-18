@@ -68,6 +68,9 @@ def _row(column: str, detector: str, severity: str = "warning", **kw: Any) -> di
         "column": column,
         "detector_id": detector,
         "match_rate": 0.9,
+        "sample_match_count": 3,
+        "message": "",
+        "band": None,
         "severity": severity,
         # What the plan said at scan time; the config above holds the same strategies.
         "configured_strategy": _STRATEGY.get(column),
@@ -335,6 +338,89 @@ def test_a_malformed_row_raises_the_value_free_error(rows: list[Any]) -> None:
     report = {"schema_version": "post-scan-integrity/v3", "residual_pii": rows}
     err = _refusal(lambda: finding_edits(_config(), report, []))
     assert isinstance(err, ReviewEntryError)
+
+
+_V3_FIELDS = [
+    "table",
+    "column",
+    "detector_id",
+    "severity",
+    "match_rate",
+    "configured_strategy",
+    "sample_match_count",
+    "message",
+    "source_identity_rate",
+    "source_compared",
+    "source",
+    "model",
+    "band",
+    "dismissed",
+    "promoted",
+]
+
+
+@pytest.mark.parametrize("missing", _V3_FIELDS)
+def test_a_v3_row_must_carry_every_field(missing: str) -> None:
+    """The v2 defaults must not leak into v3: a v3 row missing a field is malformed."""
+    row = {k: v for k, v in EMAIL.items() if k != missing}
+    err = _refusal(lambda: finding_edits(_config(), _report(row), []))
+    assert isinstance(err, ReviewEntryError)
+
+
+@pytest.mark.parametrize("dropped", ["source", "model", "band", "dismissed", "promoted"])
+def test_the_v3_only_fields_default_for_a_v2_row_alone(dropped: str) -> None:
+    v2 = {
+        k: v
+        for k, v in EMAIL.items()
+        if k not in ("source", "model", "band", "dismissed", "promoted")
+    }
+    assert (
+        finding_edits(
+            _config(), {"schema_version": "post-scan-integrity/v2", "residual_pii": [v2]}, []
+        )
+        == ()
+    )
+    v3 = {k: v for k, v in EMAIL.items() if k != dropped}
+    _refusal(lambda: finding_edits(_config(), _report(v3), []))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dismissed", "true"),
+        ("dismissed", 1),
+        ("promoted", "yes"),
+        ("promoted", 0),
+        ("source_compared", "False"),
+        ("sample_match_count", True),
+        ("sample_match_count", "3"),
+        ("match_rate", True),
+        ("match_rate", "0.9"),
+        ("message", 3),
+        ("band", 7),
+        ("severity", "critical"),
+        ("severity", ["warning"]),
+        ("source", ["regex"]),
+    ],
+)
+@pytest.mark.parametrize("version", ["post-scan-integrity/v3", "post-scan-integrity/v2"])
+def test_every_consumed_field_is_type_checked(field: str, value: Any, version: str) -> None:
+    row = {**EMAIL, field: value}
+    report = {"schema_version": version, "residual_pii": [row]}
+    assert isinstance(_refusal(lambda: finding_edits(_config(), report, [])), ReviewEntryError)
+
+
+@pytest.mark.parametrize("version", [["post-scan-integrity/v3"], {"a": 1}, 3, None, b"x"])
+def test_an_unhashable_or_foreign_schema_version_is_a_coded_refusal(version: Any) -> None:
+    report = {"schema_version": version, "residual_pii": []}
+    assert isinstance(_refusal(lambda: finding_edits(_config(), report, [])), ReviewEntryError)
+
+
+def test_a_report_that_is_not_a_mapping_is_refused() -> None:
+    for report in ([], "report", None):
+        assert isinstance(
+            _refusal(lambda r=report: finding_edits(_config(), r, [])), ReviewEntryError
+        )
 
 
 def test_a_malformed_container_raises_the_value_free_error() -> None:

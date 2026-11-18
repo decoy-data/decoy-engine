@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from decoy_engine import reasons
 from decoy_engine.detection.types import DETECTOR_ORDER, DetectorSource, ModelRef
@@ -35,7 +35,9 @@ from decoy_engine.validation.starter_review import (
 )
 from decoy_engine.verification.postmask import (
     READABLE_SCHEMA_VERSIONS,
+    SCHEMA_VERSION,
     ResidualPIIFinding,
+    Severity,
     is_source_identity_finding,
 )
 
@@ -174,47 +176,103 @@ def _identity(decision: FindingDecision) -> _Identity:
 
 
 def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]]:
-    if report.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
+    if not isinstance(report, Mapping):
+        raise ReviewEntryError("the report is not a mapping")
+    version = report.get("schema_version")
+    # A str test first: an unhashable value must not reach the set lookup.
+    if not isinstance(version, str) or version not in READABLE_SCHEMA_VERSIONS:
         raise ReviewEntryError("the report has an unreadable schema version")
-    rows: dict[_Identity, Mapping[str, Any]] = {}
     listed = report.get("residual_pii")
     if listed is None:
         listed = ()
     if not isinstance(listed, Sequence) or isinstance(listed, str | bytes):
         raise _malformed()
-    for row in listed:
-        if not isinstance(row, Mapping):
-            raise _malformed()
-        # A v2 row predates the model detectors: no `source`, no `model`.
-        source = row.get("source", "regex")
-        model = row.get("model")
-        names = (row.get("table"), row.get("column"), row.get("detector_id"))
-        if (
-            not all(isinstance(n, str) for n in names)
-            or not isinstance(source, str)
-            or source not in DETECTOR_ORDER
-            or not isinstance(row.get("severity"), str)
-            or not (
-                row.get("configured_strategy") is None
-                or isinstance(row["configured_strategy"], str)
-            )
-            or not (model is None or isinstance(model, Mapping))
-            or not _is_rate(row.get("source_identity_rate"))
-        ):
-            raise _malformed()
-        model_id = model_version = None
-        if model is not None:
-            model_id, model_version = model.get("id"), model.get("version")
-            if not isinstance(model_id, str) or not isinstance(model_version, str):
-                raise _malformed()
-        rows[(row["table"], row["column"], source, row["detector_id"], model_id, model_version)] = (
-            row
+    rows: dict[_Identity, Mapping[str, Any]] = {}
+    for raw in listed:
+        row = _read_finding(raw, current=version == SCHEMA_VERSION)
+        model = row["model"]
+        identity = (
+            row["table"],
+            row["column"],
+            row["source"],
+            row["detector_id"],
+            None if model is None else model["id"],
+            None if model is None else model["version"],
         )
+        rows[identity] = row
     return rows
 
 
-def _is_rate(value: object) -> bool:
-    return value is None or (isinstance(value, int | float) and not isinstance(value, bool))
+# The finding fields by type, as `ResidualPIIFinding` writes them into a v3 report. A v2 row
+# predates the model detectors: it has none of `_V3_ONLY`, which read as a regex finding with no
+# model, not dismissed and not promoted. A v3 row must carry every field.
+_V3_ONLY = ("source", "model", "band", "dismissed", "promoted")
+_V3_DEFAULTS: dict[str, Any] = {
+    "source": "regex",
+    "model": None,
+    "band": None,
+    "dismissed": False,
+    "promoted": False,
+}
+_OPTIONAL_V2 = {
+    "configured_strategy": None,
+    "sample_match_count": 0,
+    "message": "",
+    "source_identity_rate": None,
+    "source_compared": False,
+}
+_SEVERITIES = frozenset(get_args(Severity))
+
+
+def _read_finding(raw: object, *, current: bool) -> dict[str, Any]:
+    """One finding row, checked against the whole versioned shape, or a value-free refusal.
+
+    Every field the review reads is typed here, so nothing downstream can fail on a bad value.
+    """
+    if not isinstance(raw, Mapping):
+        raise _malformed()
+    row: dict[str, Any] = dict(raw)
+    required = ("table", "column", "detector_id", "severity", "match_rate")
+    if current:
+        required += tuple(_OPTIONAL_V2) + _V3_ONLY
+    if any(name not in row for name in required):
+        raise _malformed()
+    for name, default in {**_OPTIONAL_V2, **({} if current else _V3_DEFAULTS)}.items():
+        row.setdefault(name, default)
+    model = row["model"]
+    ok = (
+        all(isinstance(row[n], str) for n in ("table", "column", "detector_id"))
+        and isinstance(row["message"], str)
+        and row["severity"] in _SEVERITIES
+        and row["source"] in DETECTOR_ORDER
+        and (row["match_rate"] is None or _is_number(row["match_rate"]))
+        and (row["configured_strategy"] is None or isinstance(row["configured_strategy"], str))
+        and _is_int(row["sample_match_count"])
+        and (row["source_identity_rate"] is None or _is_number(row["source_identity_rate"]))
+        and isinstance(row["source_compared"], bool)
+        and (row["band"] is None or isinstance(row["band"], str))
+        and isinstance(row["dismissed"], bool)
+        and isinstance(row["promoted"], bool)
+        and (
+            model is None
+            or (
+                isinstance(model, Mapping)
+                and isinstance(model.get("id"), str)
+                and isinstance(model.get("version"), str)
+            )
+        )
+    )
+    if not ok:
+        raise _malformed()
+    return row
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _malformed() -> ReviewEntryError:
