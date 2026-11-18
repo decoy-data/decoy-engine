@@ -12,6 +12,7 @@ A new route must add itself here.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,10 +45,13 @@ ALL_EXPRESSIONS = [*OPS, *FLOAT_OPS]
 # Classes whose `v` is still an integer after the run (a top_code column becomes its label text).
 INT_OUTPUT = ["plain", "fk", "declared", "anchor", "group_key"]
 # The classes unified admission takes today. The others are asserted as the explicit fallback.
-UNIFIED_ADMITS = {"declared", "plain"}
+COMPANION = importlib.util.find_spec("decoy_engine_native") is not None
+# With the companion installed `group_key` also runs natively and on the unified lane (it needs the
+# raw-hex extension); without it the job takes the oracle and the full-frame lane.
+UNIFIED_ADMITS = {"declared", "plain"} | ({"group_key"} if COMPANION else set())
 CHUNK_SIZES = [1, 2, 3, len(VALUES)]
 # `run_mask_chunked` takes plain columns natively; the other classes reroute to the oracle.
-NATIVE_ADMITS = {"plain"}
+NATIVE_ADMITS = {"plain"} | ({"group_key"} if COMPANION else set())
 
 
 def _run(cfg: dict[str, Any], tables: dict[str, pa.Table], **kw: Any) -> Any:
