@@ -24,6 +24,14 @@ Bases (2026-11-17): engine `origin/main` `09f6d7c70` (last tag `v0.27.0`, `REGIS
 round); engine `plan/scan-multi` (S3b-cli); engine `plan/postscan-stream`; the engine and CLI
 CODEMAP "Where things go" maps; the code cited below.
 
+Re-anchor (2026-11-18, after the history rewrite; old SHAs map through the rewrite's
+`sha-map.tsv`): engine `origin/main` `84cc7d798`, CLI `origin/main` `9023c606`. Codex round 4 gave
+GO on `d2732c0d7`. Since then: DI-1a MERGED (engine #623, `fb65b70f6`) and D-2a MERGED (CLI #303,
+`ab26ed40`), so the citations below that describe those two slices are the record of what they
+changed; the ones that moved are updated in place. CLI #313 made the saved-scan reader refuse a
+document without `scan_schema` itself (`SAVED_SCAN_SCHEMA_UNSUPPORTED`), so D-2b reuses that refusal
+and adds no second one (4.3). Engine #648 and #649 and CLI #314 touch no cited line.
+
 Risk: R2 overall (config schema, a blocking decision on data, refusing runs). Per-slice tiers in
 section 13.
 
@@ -39,7 +47,11 @@ of it is built:
   id and `build_run_result(pre_checks=...)` (`run_result/_build.py:232`). Not yet in a release.
 - 24e E0 MERGED (engine #611, `854295339`): the per-strategy distribution behaviour table now lives
   in `contracts/distribution_behavior.py`. DI-1a no longer waits on anything.
-- Nothing of the DI slices, DI-3 or the D-2 slices is built.
+- DI-1a MERGED (engine #623, `fb65b70f6`): `NULLS_NOT_PRESERVED`, the `group_key` relabel,
+  `preserved_facts`, the moments and `distribution_findings`.
+- D-2a MERGED (CLI #303, `ab26ed40`): `ScanDiff` and `diff_scan_sets` in `scanning/_diff.py`,
+  exported from `decoy.cli.scanning`.
+- DI-1b, DI-2, DI-3, D-2b and D-2c are not built.
 
 This plan carries the row 31 and row 32 parts of `plan/scan-checks` forward against today's main and
 changes these things:
@@ -145,8 +157,8 @@ Choice and reasons:
   Expectations default), from the Chan merge as `sqrt(M2 / (n - 1))`.
 - Row 32 is not a statistical test. The owner model (2026-11-05) defines drift as what
   `scan diff --strict` flags: a PII bucket went up, a new high-PII field, or a new quasi-identifier
-  group. The per-field rules are today's CLI `compute_scan_diff` (`src/decoy/cli/scan.py:865`),
-  moved unchanged to `scanning/_diff.py` as `diff_scan_sets`. The new code is the rescan, the
+  group. The per-field rules were the CLI `compute_scan_diff` in `src/decoy/cli/scan.py`, which
+  D-2a (CLI #303) moved unchanged to `scanning/_diff.py` as `diff_scan_sets`. The new code is the rescan, the
   detector reproduction and the table matching.
 
 ## 3. Behaviour, row 31 DIST-INTEGRITY
@@ -206,9 +218,9 @@ Where the facts come from:
 - Source side: always `PostScanGate._source(name, caller_source, raw=True)`
   (`execution/pipeline/_post_scan.py:369`), in a source-only pass. That choke point applies the
   declared cast, drops declared-cast quarantined rows and reads `ctx.caller_sources`, the map after
-  any subset. The lockstep pass pairs the sides only when row counts match (`_column_facts.py:190`),
+  any subset. The lockstep pass pairs the sides only when row counts match (`_column_facts.py:318`),
   which fails after quarantine, so it is not used for the source side.
-- Output side: the column-facts output pass that already runs (`_column_facts.py:176`), extended with
+- Output side: the column-facts output pass that already runs (`_column_facts.py:304`), extended with
   null counts and merged moments.
 - `row_count` subtracts the D8 quarantine count. `note_quarantined` (`_post_scan.py:286`) returns
   early today when the gate is deferred (`:290`); DI-1b keeps the per-table removed-row count when
@@ -232,8 +244,8 @@ Which facts apply comes from the one behaviour contract, not a second table:
   sits in `preserved_facts` with that reason in its docstring.
 - One function `preserved_facts` in `verification/postmask/distribution.py` derives the set. A column
   with `when:` gets only `row_count` and, if eligible, `null_rate`.
-- `group_key` is relabelled from `preserves_cardinality_only`
-  (`contracts/distribution_behavior.py:142`) to `destroys_frequency`: its output cardinality is that
+- `group_key` is relabelled from `preserves_cardinality_only` to `destroys_frequency`
+  (done in DI-1a, `contracts/distribution_behavior.py:144`): its output cardinality is that
   of its `group_by` column. The `pipeline_config_hash` does not move. The compiled plan YAML does,
   because `plan/_serialize.py:165` emits the label. The golden pin
   `tests/unit/providers_v2/test_distribution_behavior_metadata.py` moves, with a changelog line.
@@ -261,7 +273,7 @@ Generate tables have no source and are skipped.
   `warning`, `fail`, `error`) and `delta_pct` rounded to 0.1 or null (3.2). No source or output mean,
   std or rate is written.
 - Severity is decided once, in `distribution_findings`, from `on_breach` (the NER promotion pattern,
-  `verification/postmask/_model_findings.py:244`). `post_scan_verdict`
+  `verification/postmask/_model_findings.py:246`). `post_scan_verdict`
   (`verification/postmask/_blocked.py:224`) blocks on any `fail` or `error` row in the section and
   gets no new argument.
 - DI-1b writes `warning` rows only; the config refuses `fail` until DI-2.
@@ -322,10 +334,11 @@ own YAML. `--sample` runs check. `--rows` previews do not.
 - Baseline read: `read_scan_baseline(config_dict, base_dir)` in `src/decoy/cli/io/_scan_set.py`
   reads the file once. A relative `scan_baseline.path` resolves against the YAML folder through the
   existing `resolve_path` (`src/decoy/cli/_sources.py`). The same bytes are parsed with
-  `scan_set_from_data(json.loads(raw))` (`src/decoy/cli/io/_scan_set.py:78`). A document without
-  `scan_schema` (the legacy `profile.to_dict()` shape that `scan_set_from_data` otherwise accepts) is
-  refused with a fixed message: a legacy scan records no sampling or detectors, so it cannot be
-  reproduced. D-2 reads bare `scan-set/v1` files; L2 adds library envelopes inside this same reader.
+  `scan_set_from_data(json.loads(raw))` (`src/decoy/cli/io/_scan_set.py:57`). A document without
+  `scan_schema` (the legacy `profile.to_dict()` shape) is refused by that reader itself since CLI
+  #313, with `SAVED_SCAN_SCHEMA_UNSUPPORTED` and a fixed message; a legacy scan records no
+  sampling or detectors, so it could not be reproduced anyway. `read_scan_baseline` adds no second
+  legacy check: it maps the reader's `ScanSetFormatError` to exit 1 naming `scan_baseline.path`. D-2 reads bare `scan-set/v1` files; L2 adds library envelopes inside this same reader.
   If row 30 B-2 merges first, D-2 extends its `read_scan_baseline` instead of adding one.
 - Descriptors: `resolved_source_config(config_dict, base_dir)["sources"]`
   (`src/decoy/cli/_sources.py:40`), the same descriptors the run reads, after `--duckdb-source`
@@ -480,7 +493,7 @@ CLI (map: CLI `CODEMAP.md` "Where things go"; flat `src/decoy/cli/` is frozen an
 | `src/decoy/cli/scan.py` | changed: imports the diff from the facade; module-size `max` in `tests/sentry/baselines/module-size.json` shrinks from 1157 to the new count | command module (legacy, over the cap, may only shrink) | `_diff` command | D-2a |
 | `src/decoy/ci/adapters.py` | changed: imports `diff_scan_sets` from the facade | CI adapters | existing import | D-2a |
 | `src/decoy/cli/scanning/_drift.py` | new (~220): `rescan_and_diff`, `check_drift`, `DriftVerdict`, `DriftBlockedError` | `decoy scan` internals | `_multi.py` | D-2b |
-| `src/decoy/cli/io/_scan_set.py` | changed: `read_scan_baseline` with the legacy refusal (or B-2's, extended) | Source readers (`io/_scan_set.py`) | `load_scan_set` | D-2b |
+| `src/decoy/cli/io/_scan_set.py` | changed: `read_scan_baseline` (the legacy refusal is the reader's own since CLI #313; B-2 extends the same reader) | Source readers (`io/_scan_set.py`) | `load_scan_set` | D-2b |
 | `src/decoy/cli/run/_drift.py` | new (~70): calls `check_drift`, prints lines, sets `ctx.drift_verdict` | `decoy run` internals (`run/_<noun>.py`) | `run/_prepare.py` | D-2c |
 | `src/decoy/cli/run/_prepare.py`, `run/_context.py` | changed: baseline read after the gate call, one check call after `_require_local_io_endpoints`; `drift_verdict` field | same line | existing phases | D-2c |
 | `src/decoy/cli/run/_errors.py`, `src/decoy/cli/exit_codes.py` | changed: `DriftBlockedError` arm, exit 4 | same line; exit codes | `PostScanBlockedError` arm | D-2c |
@@ -513,7 +526,7 @@ and `decoy.mask()` in D-2c of this plan.
 - New config keys: `post_scan.distribution.tolerance_pct`, `post_scan.distribution.on_breach`.
   Existing: `scan_baseline.on_drift` (`config/_scan_baseline.py:30`).
 - Strategies needing a fact rule: the handlers in `SCALAR_HANDLERS`
-  (`execution/_strategies/__init__.py:48`); labels in `contracts/distribution_behavior.py:70`.
+  (`execution/_strategies/__init__.py:52`); labels in `contracts/distribution_behavior.py:70`.
 - Report fields per DI row: `table`, `column`, `fact`, `severity`, `delta_pct`.
 - Baseline fields read by the drift check: `scan_schema`, `detectors`, per table `name`,
   `sample_strategy`, `sample_row_cap`, `fields`, `quasi_identifier_groups`, `reid_risk_score`.
@@ -614,7 +627,7 @@ D-T1 and D-T2 (config and `pre_checks`) shipped green with D-1 (#613) and stay a
 | D-T9 | D-2b | the bytes parsed are the bytes read (spy counts one open of the baseline); a relative `path` resolves against the YAML folder, not the working directory | no read | MD-9: read twice; MD-9b: resolve from cwd |
 | D-T12 | D-2b | table matching: config table absent from the baseline gives `table_added`; baseline table absent from the config is reported, not drift; no common table gives exactly one `no_common_table` entry and one message | no helper | MD-12: one `table_added` per table |
 | D-T13 | D-2b | detectors: a baseline recording an NER model that is not installed, one recording another NER version, one recording a classifier that is not installed, and one recording another classifier version each refuse with the fixed message before any source is opened (spy on the source open and on `scan_sources`); the regex + classifier + NER baseline rebuilds `pre_scan` with both models at their recorded versions (spy on the `scan_sources` argument); an empty `detectors` list rescans regex only | no helper | MD-13: fall back to the default detectors; MD-13b: skip the version check for the classifier only |
-| D-T8 | D-2b, D-2c | baseline input (D-2b): a missing file, another `scan_schema` and a legacy document without `scan_schema` each refuse with exit 1 naming `scan_baseline.path`. Ordering (D-2c): invalid config plus a missing baseline exits with the gate refusal and never opens the baseline (spy); on `--duckdb-source` the baseline is read after `check_static_before_acquire` and before the database opens (spy), and the rescan reads the staged Parquet; a cloud source with `on_drift` gets the cloud refusal and no rescan (spy); `on_drift` comes from the validated config, not `ctx.raw` | no check | MD-8: read `on_drift` from `ctx.raw`; MD-8b: accept a legacy scan |
+| D-T8 | D-2b, D-2c | baseline input (D-2b): a missing file, another `scan_schema` and a legacy document without `scan_schema` (the reader's `SAVED_SCAN_SCHEMA_UNSUPPORTED`) each refuse with exit 1 naming `scan_baseline.path`. Ordering (D-2c): invalid config plus a missing baseline exits with the gate refusal and never opens the baseline (spy); on `--duckdb-source` the baseline is read after `check_static_before_acquire` and before the database opens (spy), and the rescan reads the staged Parquet; a cloud source with `on_drift` gets the cloud refusal and no rescan (spy); `on_drift` comes from the validated config, not `ctx.raw` | no check | MD-8: read `on_drift` from `ctx.raw`; MD-8b: parse the baseline with `json.loads` alone, skipping `scan_set_from_data` (a legacy scan is accepted) |
 | D-T6 | D-2b, D-2c | stderr, `warnings.warn` text and `DriftVerdict` carry table and field names, never a value (canary sweep); a rescan whose source read fails gives the `_failure_message` text with the canary absent, and the raised error has no `__cause__` or `__context__` | no check | MD-6: echo a sample row; MD-6b: use `str(exc)` |
 | D-T3 | D-2c | e2e: baseline from `decoy scan`, then a source gains a high-PII column: `on_drift: fail` exits 4 before any masking read (read spy) and writes no output; `warn` prints the drift line and runs | no check | MD-3: check after masking |
 | D-T4 | D-2c | no drift: exit 0 and `ctx.drift_verdict.status == "passed"`; no `on_drift`: baseline never opened and no rescan (spy) | no check | MD-4: always rescan |
@@ -636,11 +649,11 @@ At most 10 production files and about 800 lines each (tests counted). Risk per
 | DI-2 | engine | 31 | `on_breach: fail` accepted; `fail` severity; verdict blocks on `fail` and `error` rows; `_ORDER`; `block_location`; `distribution_breach`; engine docs (post-scan guide, compatibility note, CODEMAP lines for the two new modules) | 5 | 430 | R2 (blocking decision) | DI-1b |
 | Release and repin | both | 31, 32 | daily train; repin checklist (memory engine-repin-checklist) | n/a | n/a | per train | 13.2 |
 | D-2a | CLI | 32 | move `ScanDiff` and `compute_scan_diff` to `scanning/_diff.py` as `diff_scan_sets`, export from the facade, update `scan.py` and `ci/adapters.py`, shrink the `scan.py` module-size `max`; no behaviour change | 4 | 300 | R1 (pure move) | none |
-| D-2b | CLI | 32 | `scanning/_drift.py` (`rescan_and_diff`, `check_drift`, `DriftVerdict`, `DriftBlockedError`); detector reproduction; table matching; `read_scan_baseline` with the legacy refusal; failure mapping; unit cells | 3 | 650 | R2 (reads source data, refusal rules) | D-2a; repin to engine 0.28.0 |
+| D-2b | CLI | 32 | `scanning/_drift.py` (`rescan_and_diff`, `check_drift`, `DriftVerdict`, `DriftBlockedError`); detector reproduction; table matching; `read_scan_baseline` (reuses the reader's legacy refusal); failure mapping; unit cells | 3 | 650 | R2 (reads source data, refusal rules) | D-2a; repin to engine 0.28.0 |
 | D-2c | CLI | 32 | `run/_drift.py`, `_prepare.py` hooks, `ctx.drift_verdict`, `_errors.py` and `exit_code_for` arm, `decoy.mask()` hook, sentry, e2e cells, drift docs and `decoy explain exit-codes` text, CHANGELOG | 7 | 620 | R2 (refuses runs, library API) | D-2b |
 | DI-3 | CLI | 31 | breach lines in `run/_render.py`; `report integrity` bucket; chunked refusal text; CLI docs and CHANGELOG; DI-T12 | 3 | 300 | R1 | repin to the release with DI-2 |
 
-Order: DI-1a, DI-1b and DI-2 are serial (shared files). D-2a can start now. D-2b and D-2c need
+Order: DI-1a, DI-1b and DI-2 are serial (shared files). D-2a is merged (CLI #303). D-2b and D-2c need
 engine 0.28.0 for D-1's codes and can run in parallel with the DI slices. D-2a is a separate slice
 because it is a pure R1 move and keeping it apart holds D-2b under the size cap. DI-3 and open CLI PR
 #301 (scan-ml C2a) both edit `run/_render.py`; whichever merges second rebases. D-2c and DI-3 share
