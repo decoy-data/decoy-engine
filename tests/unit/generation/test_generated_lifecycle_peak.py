@@ -59,8 +59,9 @@ def test_a_legacy_run_holds_earlier_arrow_outputs_and_one_tables_objects(tmp_pat
     during_b = _arrow(rows_a) + _objects(rows_b) + _unique(rows_b)
     done = _arrow(rows_a) + _arrow(rows_b)
     assert dict(est.phase_bytes)["execute"] == INTERCEPT + max(during_a, during_b, done)
-    # The sum of both tables' objects was the old, too-high figure.
-    assert dict(est.phase_bytes)["execute"] < INTERCEPT + _objects(rows_a) + _objects(rows_b)
+    # Summing both tables' objects, as the first version did, gave a higher figure.
+    summed = _objects(rows_a) + _objects(rows_b) + _unique(rows_b)
+    assert dict(est.phase_bytes)["execute"] < INTERCEPT + summed
 
 
 def test_the_larger_table_first_sets_the_peak_the_same_way(tmp_path: Path) -> None:
