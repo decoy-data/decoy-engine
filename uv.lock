@@ -554,6 +554,7 @@ dependencies = [
     { name = "dp-accounting" },
     { name = "duckdb" },
     { name = "faker" },
+    { name = "joserfc" },
     { name = "jsonpath-ng" },
     { name = "lark" },
     { name = "lightgbm" },
@@ -567,6 +568,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-stdnum" },
     { name = "pyyaml" },
+    { name = "rfc8785" },
     { name = "scikit-learn" },
     { name = "simpleeval" },
 ]
@@ -646,6 +648,7 @@ requires-dist = [
     { name = "hvac", marker = "extra == 'hashicorp-vault'", specifier = "==2.4.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "import-linter", marker = "extra == 'layers'", specifier = "==2.15" },
+    { name = "joserfc", specifier = ">=1.7.7,<2" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
     { name = "lark", specifier = ">=1.1" },
     { name = "lightgbm", specifier = "==4.6.0" },
@@ -672,6 +675,7 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'xdist'", specifier = ">=3.0" },
     { name = "python-stdnum", specifier = ">=2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rfc8785", specifier = ">=0.1.4,<0.2" },
     { name = "ruff", marker = "extra == 'lint'", specifier = "==0.15.22" },
     { name = "scikit-learn", specifier = "==1.7.2" },
     { name = "simpleeval", specifier = ">=1.0.5" },
@@ -1223,6 +1227,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
+]
+
+[[package]]
+name = "joserfc"
+version = "1.7.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/15/48ff246732232d35ee234228def22b52455fcc55577f06146602399a29b0/joserfc-1.7.7.tar.gz", hash = "sha256:471d0fd12a5a0d1c0942de280f39efe6f597878315033270b504d4d006d25510", size = 237446, upload-time = "2026-10-19T00:30:29.974Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/9f/934db284aa22f37af59708e382903860d4b81329c137b1b0ed2745daeb65/joserfc-1.7.7-py3-none-any.whl", hash = "sha256:06979cfbab78bc802f14c0358f32969826cc26720e13cb38926ffdc86bc0cb2c", size = 71758, upload-time = "2026-10-19T00:30:28.498Z" },
 ]
 
 [[package]]
@@ -2309,6 +2325,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c2/58/1fb6de3503428196df78638f991ec8095274f1ee9723e272ee4d9ff0092b/responses-0.26.1.tar.gz", hash = "sha256:2eb3218553cc8f79b57d257bac23af5e1bf381f5b9390b1767816f0843e01dc2", size = 83088, upload-time = "2026-05-21T19:56:39.747Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3a/31/6a620b4427d546b9e7cca8b3b8c5f0559d9cef2bb9eedcda7f73c1473c19/responses-0.26.1-py3-none-any.whl", hash = "sha256:8aacc4586eb08fb2208ef64a9eb4258d9b0c6e6f4260845f2f018ab847495345", size = 35502, upload-time = "2026-05-21T19:56:38.046Z" },
+]
+
+[[package]]
+name = "rfc8785"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/2f/fa1d2e740c490191b572d33dbca5daa180cb423c24396b856f5886371d8b/rfc8785-0.1.4.tar.gz", hash = "sha256:e545841329fe0eee4f6a3b44e7034343100c12b4ec566dc06ca9735681deb4da", size = 14321, upload-time = "2024-09-27T16:33:31.206Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/78/119878110660b2ad709888c8a1614fce7e2fab39080ab960656dc8605bf6/rfc8785-0.1.4-py3-none-any.whl", hash = "sha256:520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48", size = 9240, upload-time = "2024-09-27T16:33:29.683Z" },
 ]
 
 [[package]]
