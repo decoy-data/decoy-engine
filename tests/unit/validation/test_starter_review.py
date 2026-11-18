@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 
 from decoy_engine import strategy_catalog
 from decoy_engine.config import PipelineConfig, parse_pipeline_config
+from decoy_engine.detection.ner import DEFAULT_NER_MODEL, model_installed, spacy_installed
 from decoy_engine.detection.types import ModelRef
 from decoy_engine.plan import compile_plan, run_config_only_checks
 from decoy_engine.plan.checks import check_required_strategy_settings
@@ -42,6 +43,7 @@ from decoy_engine.validation.starter_review import (
     apply_review,
     column_entry,
 )
+from tests._ner import needs_ner, ner_available
 
 CANARY = "CANARY-e1-7f3a"
 V = ReviewVerdict
@@ -352,12 +354,57 @@ def test_a_config_the_validator_refuses_is_a_coded_error_without_values(
 # AT-E4 ------------------------------------------------------------------------------------
 
 
+def _ner_runnable(entry: dict[str, Any]) -> bool:
+    model = entry.get("ner_model", DEFAULT_NER_MODEL)
+    return spacy_installed() and model_installed(model)
+
+
+def _uses_ner(entry: dict[str, Any]) -> bool:
+    return "ner_model" in entry or "ner_entities" in entry
+
+
 def _example_entries() -> list[dict[str, Any]]:
+    """Every wizard example entry the config validator accepts on this machine.
+
+    An entry that names an NER model validates only where spaCy and the model are installed (the
+    validator reports `ner_spacy_not_installed` otherwise), so the property draws those only
+    there. The two NER tests below pin both outcomes.
+    """
     rows = []
     for info in strategy_catalog():
         if info.offer_in_wizard:
-            rows.append({"strategy": info.name, **info.example_options})
+            entry = {"strategy": info.name, **info.example_options}
+            if not _uses_ner(entry) or _ner_runnable(entry):
+                rows.append(entry)
     return rows
+
+
+@needs_ner
+def test_an_ner_edit_applies_where_the_model_is_installed(starter: StarterConfig) -> None:
+    entry = {
+        "strategy": "text_redact",
+        "ner_model": DEFAULT_NER_MODEL,
+        "ner_entities": ["person_name"],
+    }
+    result = apply_review(starter, [ReviewDecision("customers", "email", V.EDIT, entry=entry)])
+    assert _entry_of(result, "customers", "email")["provider_config"]["ner"]["entities"] == [
+        "person_name"
+    ]
+
+
+@pytest.mark.skipif(ner_available(), reason="the model is installed; the refusal needs it absent")
+def test_an_ner_edit_is_refused_without_values_where_spacy_is_missing(
+    starter: StarterConfig,
+) -> None:
+    entry = {
+        "strategy": "text_redact",
+        "ner_model": DEFAULT_NER_MODEL,
+        "ner_entities": ["person_name"],
+    }
+    err = _refusal(
+        lambda: apply_review(starter, [ReviewDecision("customers", "email", V.EDIT, entry=entry)])
+    )
+    assert err.identity == "config.entry_invalid"
 
 
 @st.composite
