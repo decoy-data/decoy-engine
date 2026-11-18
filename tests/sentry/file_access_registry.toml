@@ -1801,4 +1801,3 @@ dir_test = "tests/unit/execution/test_isolated_run.py::TestNormalJobCompletes::t
 rule = "path handed over by the parent in the payload: an engine-created scratch file or stage directory"
 owner = "cam"
 reason = "the isolated child reads its payload and writes its staged output; the parent refused every policy but the ambient one before spawning it"
-
