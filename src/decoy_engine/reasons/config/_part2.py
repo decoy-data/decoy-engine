@@ -33,6 +33,7 @@ __all__ = [
     "POLICY_SELECTOR_UNMATCHED",
     "POLICY_UNKNOWN_CLASSIFICATION",
     "POLICY_UNKNOWN_STRATEGY",
+    "REMOTE_URI_INVALID",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -207,5 +208,12 @@ POLICY_BLOCK_INVALID = _d(
 POLICY_PROHIBITED = _d(
     "policy_prohibited",
     "A mask column's decided strategy breaks a policy prohibition.",
+    since=UNRELEASED,
+)
+_d = _catalog.config("ConfigError")
+
+REMOTE_URI_INVALID = _d(
+    "remote_uri_invalid",
+    "A remote source argument is not a valid s3://, gs:// or sftp:// URI.",
     since=UNRELEASED,
 )

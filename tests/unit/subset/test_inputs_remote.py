@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 
 from decoy_engine import errors, reasons
-from decoy_engine.subset._errors import SubsetConfigError
 from decoy_engine.subset import subset_inputs_from_config
+from decoy_engine.subset._errors import SubsetConfigError
 
 _REMOTE = {
     "s3": {"type": "s3", "bucket": "secret-bucket", "key": "a/b.parquet", "format": "parquet"},

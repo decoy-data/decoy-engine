@@ -64,6 +64,7 @@ __all__ = [
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
     "SUBSET_MATERIALIZE_COUNT_MISMATCH",
@@ -408,5 +409,13 @@ POST_SCAN_DISTRIBUTION_DEFERRED = _d(
     "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
+# A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
+# (a publication outcome) would name the wrong stage.
+SPOOL_DISK_FULL = _d(
+    "spool_disk_full",
+    "The disk or quota for the local copy of a remote source is too small.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
     since=UNRELEASED,
 )
