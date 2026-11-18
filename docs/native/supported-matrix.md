@@ -28,7 +28,7 @@ Absence of the companion is never silently swallowed mid-run.
 ## 2. Prebuilt companion wheels (approved starter pack)
 
 Four targets, each built for CPython 3.10, 3.11, and 3.12 (twelve wheel rows total),
-via [`native-companion.yml`](https://github.com/louiskeep/decoy-engine/blob/main/.github/workflows/native-companion.yml). All four
+via [`native-companion.yml`](https://github.com/decoy-data/decoy-engine/blob/main/.github/workflows/native-companion.yml). All four
 use `PyO3/maturin-action` (pinned by commit SHA and exact `maturin-version`, with
 `--locked --compatibility pypi`); this repo does not use cibuildwheel anywhere.
 
@@ -40,7 +40,7 @@ use `PyO3/maturin-action` (pinned by commit SHA and exact `maturin-version`, wit
 | macOS arm64 | `macos-15` (Apple Silicon) | maturin-action, native build | native, on the runner |
 
 Every row runs the same reusable script,
-[`decoy-engine-native/scripts/parity_smoke.py`](https://github.com/louiskeep/decoy-engine/blob/main/decoy-engine-native/scripts/parity_smoke.py),
+[`decoy-engine-native/scripts/parity_smoke.py`](https://github.com/decoy-data/decoy-engine/blob/main/decoy-engine-native/scripts/parity_smoke.py),
 against the built wheel: it asserts `abi_version() == "decoy-native-abi-3"`, then the
 hash KAT and the index KAT (both below), including the exact Arrow return type.
 

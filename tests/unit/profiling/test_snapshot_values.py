@@ -341,7 +341,7 @@ def _calendar_edge_frame(stamps: list[str]) -> pd.DataFrame:
 
 def test_datetime_bounds_at_the_first_calendar_year_stay_parseable(force_sensitive: None) -> None:
     df = _calendar_edge_frame(
-        ["0001-03-04T05:06:07"] * 4 + ["0001-09-10T11:12:13"] * 3 + ["0002-06-01T00:00:00"] * 3
+        ["0001-03-04T05:06:07"] * 12 + ["0001-09-10T11:12:13"] * 9 + ["0002-06-01T00:00:00"] * 12
     )
     doc = distribution_snapshot_document(df)
     stats = _col(doc, "admitted")["stats"]

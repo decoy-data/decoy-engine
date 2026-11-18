@@ -91,6 +91,11 @@ CHUNK_VARIANT_WARNING_CODES: frozenset[str] = frozenset(
         reasons.warning.GEO_GENERALIZE_CASCADE,
         reasons.warning.NESTED_CELL_JSON_PARSE_ERROR,
         reasons.warning.NESTED_JSONPATH_PATH_OVERLAP,
+        reasons.warning.NESTED_CELL_OVERSIZED,
+        reasons.warning.NESTED_CELL_TOO_DEEP,
+        reasons.warning.NESTED_CELL_DUPLICATE_KEY,
+        reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE,
+        reasons.warning.NESTED_CHILD_NON_FINITE,
     }
 )
 
