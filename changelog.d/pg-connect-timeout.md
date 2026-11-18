@@ -1,3 +1,3 @@
-### Fixed (a Postgres host that does not answer now reports as unreachable, 2026-11-18)
+### Fixed (a Postgres host that does not answer now reports as unreachable, capped-s2, 2026-11-18)
 
 When a Postgres source host dropped the connection attempt without any reply, the engine waited for the whole job deadline and reported `deadline_exceeded`. Every Postgres connection now carries a connect timeout shorter than the deadline (10 s at most), so the same case reports `source_unreachable` and points the user at the address or firewall. A connect timeout written in the connection string is replaced by the engine value. A key/value connection string that ends in an odd number of backslashes is now refused as `source_unreachable` before any connection is made. No new reason code.
