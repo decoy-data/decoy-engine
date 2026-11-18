@@ -389,11 +389,14 @@ def _national_calc(scheme: str, calc: Callable[[str], str | None]) -> Callable[[
         message = f"{scheme} check-digit body must be {shape}"
         if not isinstance(body, str) or not pattern.fullmatch(body):
             raise ValueError(message) from None
+        failed = False
         try:
             check = calc(body)
         except (KeyError, IndexError, ValueError):
             # Unreachable after the shape check, so this is a calculator fault, not bad
-            # input; stdnum messages carry the body, so it is not chained.
+            # input; stdnum messages carry the body, so it is raised after the block, unchained.
+            failed = True
+        if failed:
             raise ValueError(f"{scheme} check-digit calculation failed") from None
         if check is None:
             raise ValueError(f"{scheme} body has no valid check digit")
