@@ -415,11 +415,10 @@ class GeneratedTerms:
 
     resident_bytes: dict[str, int]
     unique_peak_bytes: int
-    # What the run holds at its largest moment, without and with a unique draw's working set. On
-    # the eligible path every table's Arrow output is resident together. On the legacy path each
-    # table is converted to Arrow before the next starts, so a moment is the earlier tables'
-    # Arrow output plus the current table's Python objects (and its unique set).
-    held_bytes: int
+    # What the run holds at its largest moment. On the eligible path every table's Arrow output is
+    # resident together beside the largest unique set. On the legacy path each table is converted
+    # to Arrow before the next starts, so a moment is the earlier tables' Arrow output plus the
+    # current table's Python objects plus the larger of its unique set and its Arrow buffers.
     peak_bytes: int
     legacy: bool
     columns: tuple[GeneratedColumn, ...]
@@ -512,19 +511,21 @@ def generated_lifecycle_terms(
 
     arrow_of = _resident_by_table(config, admission, arrow_cell)
     if not legacy:
-        held = sum(resident.values())
-        peak = held + unique
+        peak = sum(resident.values()) + unique
     else:
         from decoy_engine.generation.synthesize import generation_order
 
-        held = peak = sum(arrow_of.values())
+        peak = sum(arrow_of.values())
         earlier = 0
         for name in (n for n, _parents in generation_order(config) if n in resident):
-            held = max(held, earlier + resident[name])
-            peak = max(peak, earlier + resident[name] + unique_of.get(name, 0))
+            # The unique seen set lives inside one column's draw (`_unique.py`: "State is
+            # function-local"), so it is gone before `arrow_table(data)` (synthesize.py, the call
+            # after the column loop) builds the Arrow buffers while the lists are still live.
+            building = max(unique_of.get(name, 0), arrow_of[name])
+            peak = max(peak, earlier + resident[name] + building)
             earlier += arrow_of[name]
     columns = tuple(GeneratedColumn(t, c, *f) for (t, c), f in forms.items())
-    return GeneratedTerms(resident, unique, held, peak, legacy, columns, tuple(unpriced))
+    return GeneratedTerms(resident, unique, peak, legacy, columns, tuple(unpriced))
 
 
 def detected_memory_bytes() -> int | None:

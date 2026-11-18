@@ -128,11 +128,10 @@ class TableInputs:
 @dataclass(frozen=True)
 class GeneratedInputs:
     """The generate tables of a job. `tables` are the outputs as written (target attached);
-    `resident_bytes` is what the run holds for them at its largest moment and `peak_bytes` the
-    same with the unique-draw working set of that moment (both from `decoy_engine.generation`)."""
+    `peak_bytes` is what generation holds at its largest moment, Python objects, Arrow buffers and
+    unique sets included (from `decoy_engine.generation`)."""
 
     tables: tuple[TableInputs, ...]
-    resident_bytes: int
     peak_bytes: int
 
 
@@ -351,7 +350,6 @@ def _ingest(inputs: PhaseInputs, intercept: int) -> int:
 
 def _execute(inputs: PhaseInputs, intercept: int) -> int:
     generated = inputs.generated
-    held = 0 if generated is None else generated.resident_bytes
     if not inputs.tables:
         return intercept + (0 if generated is None else generated.peak_bytes)
     base = estimate_peak_bytes(tuple(working_table_spec(t) for t in inputs.tables), inputs.path)
@@ -365,7 +363,14 @@ def _execute(inputs: PhaseInputs, intercept: int) -> int:
         extra = sum(arrows)
     # A declared transform builds a new table beside the resident one.
     extra += sum(a for a, t in zip(arrows, inputs.tables, strict=True) if t.has_transforms)
-    return base.estimated_bytes + extra + held
+    if generated is None:
+        return base.estimated_bytes + extra
+    # `_pipeline_generate_mask.py` runs `generate_tables` first (Step 1) and the mask step second
+    # (Step 2), keeping the generated Arrow outputs. The moments do not overlap: generation beside
+    # the caller-held mask inputs, then masking beside the generated outputs.
+    outputs = sum(arrow_bytes(t) for t in generated.tables)
+    generation_moment = intercept + sum(arrows) + generated.peak_bytes
+    return max(generation_moment, base.estimated_bytes + extra + outputs)
 
 
 def _write(inputs: PhaseInputs, intercept: int) -> int:
