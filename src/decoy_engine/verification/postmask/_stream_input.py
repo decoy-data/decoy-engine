@@ -34,6 +34,9 @@ class TableBatches:
     bounded: bool = True
     # Set only for a resident table, whose model passes read it whole.
     resident: pa.Table | None = None
+    # True when a read may return fewer rows than `num_rows` declares: a declared cast drops
+    # quarantined rows, and the footer count is the count before the drop.
+    drops_rows: bool = False
 
 
 def _require_columns(columns: Sequence[str]) -> None:
@@ -124,7 +127,7 @@ def with_cast(
 
         return batches()
 
-    return TableBatches(table.name, schema, table.num_rows, read, table.bounded)
+    return TableBatches(table.name, schema, table.num_rows, read, table.bounded, drops_rows=True)
 
 
 def missing_columns(table: TableBatches, columns: Sequence[str]) -> tuple[str, ...]:

@@ -18,7 +18,11 @@ no second per-strategy table here. The facts derive from the behaviour contract:
 - A column with a `when:` rule is a mixture of masked and source cells, so it keeps only
   `row_count` and, where its strategy keeps nulls, `null_rate`.
 
-Pure: no data, no I/O. Established practice for the tolerance model: Deequ
+`check_distribution` runs the check over one run's tables. The pure functions above it decide;
+it only reads the source side (`value_facts`, `distinct_counts`) and takes the output side from the
+column facts the suite already computed.
+
+Established practice for the tolerance model: Deequ
 `RelativeRateOfChangeStrategy` and Great Expectations `expect_column_mean_to_be_between` and
 `expect_column_proportion_of_unique_values_to_be_between` (a tolerance on a named summary
 statistic, not a significance test). The streamed moments are in `_column_facts.py`.
@@ -27,15 +31,23 @@ statistic, not a significance test). The streamed moments are in `_column_facts.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Literal, get_args
 
 from decoy_engine.contracts.distribution_behavior import (
     NULLS_NOT_PRESERVED,
     distribution_behavior_for,
 )
-from decoy_engine.verification.postmask._column_facts import ValueFacts
+from decoy_engine.profiling import passes_through
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    ValueFacts,
+    distinct_counts,
+    value_facts,
+)
+from decoy_engine.verification.postmask._stream_input import TableBatches
 
 _Fact = Literal["row_count", "null_rate", "distinct_ratio", "mean", "std"]
 FACTS: tuple[_Fact, ...] = get_args(_Fact)
@@ -245,4 +257,126 @@ def distribution_findings(
         if "distinct_ratio" in c.facts:
             rows.append(_distinct_ratio(table, c, tolerance_pct))
         rows.extend(_moment_facts(table, c, tolerance_pct))
+    return tuple(rows)
+
+
+_AS_WARNING: dict[str, Severity] = {"error": "warning"}
+
+
+def warn_only(findings: Sequence[DistributionFinding]) -> tuple[DistributionFinding, ...]:
+    """Findings as `on_breach: warn` writes them: a fact that could not be read is a `warning`,
+    never an `error`, because nothing blocks on this check yet."""
+    return tuple(replace(f, severity=_AS_WARNING.get(f.severity, f.severity)) for f in findings)
+
+
+@dataclass(frozen=True)
+class DistributionInput:
+    """What one run asks of the check. `columns` maps each mask table to its checked columns and
+    the facts each keeps (`preserved_facts`, without the row count alone). `sources` is each mask
+    table's masking input as the run reads it, and `quarantined` the rows D8 quarantine removed
+    from it. A table in `cast_tables` may drop rows on read, so its source count is read, not
+    taken from the footer."""
+
+    tolerance_pct: float
+    columns: Mapping[str, Mapping[str, frozenset[_Fact]]]
+    sources: Mapping[str, TableBatches]
+    quarantined: Mapping[str, int]
+    cast_tables: frozenset[str] = frozenset()
+
+
+_VALUE_FACTS = frozenset({"null_rate", "mean", "std"})
+
+
+def distribution_value_columns(plan: DistributionInput | None, table: str) -> list[str]:
+    """The columns of `table` whose output null counts and moments the check reads: none without
+    a check, so an unconfigured run tallies nothing."""
+    if plan is None:
+        return []
+    return [c for c, kept in plan.columns.get(table, {}).items() if kept & _VALUE_FACTS]
+
+
+_UNMEASURED = ValueFacts(0, 0, None, "NotMeasured")
+
+
+def _table_findings(
+    name: str,
+    plan: DistributionInput,
+    out: TableBatches,
+    facts: Mapping[str, ColumnFacts],
+    *,
+    scratch: Path,
+    memory_limit: str,
+) -> tuple[DistributionFinding, ...]:
+    src = plan.sources[name]
+    wanted = {
+        c: f
+        for c, f in plan.columns[name].items()
+        if c in src.schema.names and c in out.schema.names
+    }
+    value_cols = [c for c in distribution_value_columns(plan, name) if c in wanted]
+    # The source count is the footer's, except where a declared cast may have dropped rows.
+    read = list(value_cols) or ([src.schema.names[0]] if name in plan.cast_tables else [])
+    measured = value_facts(src, read) if read else {}
+    source_rows = next(iter(measured.values())).rows if measured else src.num_rows
+    distinct = distinct_counts(
+        src,
+        [c for c, f in wanted.items() if "distinct_ratio" in f],
+        scratch=scratch,
+        memory_limit=memory_limit,
+    )
+    sides = []
+    for column, kept in wanted.items():
+        got = facts.get(column)
+        out_values = got.output_values if got is not None else None
+        out_distinct = None if got is None or got.distinct_error else got.output_distinct
+        sides.append(
+            ColumnSides(
+                column,
+                kept,
+                measured.get(column, _UNMEASURED),
+                out_values if out_values is not None else _UNMEASURED,
+                distinct.get(column),
+                out_distinct,
+            )
+        )
+    return distribution_findings(
+        name,
+        source_rows=source_rows,
+        quarantined=plan.quarantined.get(name, 0),
+        output_rows=out.num_rows,
+        columns=sides,
+        tolerance_pct=plan.tolerance_pct,
+    )
+
+
+def check_distribution(
+    plan: DistributionInput,
+    outputs: Mapping[str, TableBatches],
+    facts: Mapping[str, Mapping[str, ColumnFacts]],
+    failed: Mapping[str, str],
+    *,
+    scratch: Path,
+    memory_limit: str,
+) -> tuple[DistributionFinding, ...]:
+    """One row per checked fact of every mask table of `plan` that the run output. A table whose
+    facts or source could not be read gives one `error` row for its row count, naming no value;
+    the other tables are still checked."""
+    rows: list[DistributionFinding] = []
+    for name in plan.columns:
+        out = outputs.get(name)
+        if out is None or name not in plan.sources:
+            continue
+        if name in failed:
+            rows.append(_finding(name, None, "row_count", "error", None))
+            continue
+        try:
+            rows.extend(
+                _table_findings(
+                    name, plan, out, facts.get(name, {}), scratch=scratch, memory_limit=memory_limit
+                )
+            )
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            rows.append(_finding(name, None, "row_count", "error", None))
     return tuple(rows)

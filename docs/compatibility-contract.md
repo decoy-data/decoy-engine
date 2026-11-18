@@ -304,6 +304,18 @@ self-reference with a null root), is compared as an integer key. A column with a
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
 The tag stayed `v2` for that change; the field set only grew.
 
+Row 31 DI-1b (2026-11) adds the optional `post_scan.distribution: {tolerance_pct, on_breach}` config block and an
+optional `distribution` section of the v3 report. `tolerance_pct` is a strict number above 0 and at most 100;
+`on_breach` is `warn` only until the blocking slice, so `fail` is refused at config load. The block needs
+`post_scan.integrity: true` (`config.post_scan_inactive` otherwise), is left out of the dump while absent (a
+config without it keeps its dump and plan hash) and is hashed when set. The report section holds one row per
+checked fact (`table`, `column`, `fact`, `severity`, `delta_pct`), no source or output value, and is absent
+unless the block is set, so a v3 reader that ignores unknown keys is unaffected. A run that asks for the check
+and has a transform-bearing mask table, a source loader or a deferred gate is refused (a transform-bearing table
+with the existing `runtime/post_scan_integrity_transforms_unsupported`, the others with
+`runtime/post_scan_distribution_deferred`, new, `since` unreleased). Registry version and manifests are
+untouched until the release.
+
 `distribution-snapshot/v2` (row 24f, 2026-11) is what a plain `decoy fit` now writes
 (`distribution_snapshot_document` with `include_values=False`). Only the datetime bucket changed:
 `year_bins` entries are `{start_year, end_year, count}` year ranges instead of `{year, count}`.
