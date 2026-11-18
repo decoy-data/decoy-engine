@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -87,15 +87,20 @@ def _requests() -> Any:
     return requests
 
 
-def _home_token_file() -> tuple[str, bool]:
-    """``(token, failed)`` from ``~/.vault-token``, the file ``vault login`` writes.
+def _no_token() -> str:
+    return ""
+
+
+def _home_token_file() -> tuple[Callable[[], str], bool]:
+    """``(reader, failed)`` for ``~/.vault-token``, the file ``vault login`` writes.
 
     hvac opens it (a library read, declared in ``file_access_modules.toml``). hvac checks the
     process ``VAULT_TOKEN`` first, so a process token is never taken for the file's: when the
-    process has one this reads nothing. A missing or empty file is an empty token.
+    process has one this reads nothing. A missing or empty file is an empty token. The text is
+    held by the returned closure, not by a frame local, so a traceback cannot render it.
     """
     if len(os.environ.get("VAULT_TOKEN", "")) > 0:
-        return "", False
+        return _no_token, False
     hvac = _hvac()
     text = ""
     failed = False
@@ -103,7 +108,11 @@ def _home_token_file() -> tuple[str, bool]:
         text = str(hvac.utils.get_token_from_env() or "").strip()
     except Exception:
         failed = True
-    return ("" if failed else text), failed
+
+    def read() -> str:
+        return text
+
+    return (_no_token if failed else read), failed
 
 
 def client_from_env(
@@ -136,22 +145,19 @@ def client_from_env(
     verify: bool | str = (
         False if insecure_skip_tls_verify else (box.open()[0].get("VAULT_CACERT") or True)
     )
-    cert_file = box.open()[0].get("VAULT_CLIENT_CERT")
-    key_file = box.open()[0].get("VAULT_CLIENT_KEY")
+    cert_file, key_file = map(box.open()[0].get, ("VAULT_CLIENT_CERT", "VAULT_CLIENT_KEY"))
     if bool(cert_file) != bool(key_file):
         raise VaultClientConfigError("VAULT_CLIENT_CERT and VAULT_CLIENT_KEY must be set together.")
-    # Last step, after every other setting is validated. The file token goes straight into a box.
-    token_box = OpaqueBox("")
+    # Last step, after every other setting is validated. The file token stays inside a closure.
+    file_token = _no_token
     file_failed = False
     if not box.open()[0].get("VAULT_TOKEN"):
-        file_text, file_failed = _home_token_file()
-        token_box = OpaqueBox(file_text)
-        del file_text
+        file_token, file_failed = _home_token_file()
     if file_failed:
         raise VaultClientConfigError("The Vault token file ~/.vault-token could not be read.")
     return _hvac().Client(
         url=addr,
-        token=box.open()[0].get("VAULT_TOKEN") or token_box.open()[0],
+        token=box.open()[0].get("VAULT_TOKEN") or file_token(),
         namespace=box.open()[0].get("VAULT_NAMESPACE") or None,
         verify=verify,
         cert=(cert_file, key_file) if cert_file and key_file else None,

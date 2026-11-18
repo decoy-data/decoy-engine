@@ -107,6 +107,7 @@ SENTRIES = (
     "tests/sentry/defects/test_ner_mismatch_single_site.py",
     "tests/sentry/defects/test_nested_json_choke_point.py",
     "tests/sentry/defects/test_rng_construction.py",
+    "tests/sentry/defects/test_secret_adapter_kit.py",
     "tests/sentry/defects/test_strategy_docs_agree.py",
     "tests/sentry/defects/test_target_destination_choke_point.py",
     "tests/sentry/defects/test_validation_sites.py",
@@ -124,6 +125,7 @@ SENTRIES = (
     "tests/sentry/source_config/test_declaration_gate.py",
     "tests/sentry/source_config/test_source_dialect_choke_point.py",
     "tests/sentry/tooling/test_ci_lanes.py",
+    "tests/sentry/tooling/test_require_no_skips.py",
     "tests/sentry/tooling/test_ml_base_install.py",
     "tests/sentry/tooling/test_pytest_timeout.py",
     # Named sentries that live outside tests/sentry/.

@@ -280,7 +280,7 @@ concrete path that does not exist. Layer membership will live in `./.importlinte
 | Cross-suite test helpers | `tests/` root | `tests/_<concern>.py` (for example `tests/_changelog.py`, `tests/_dp_cert.py`) | the tests that import them | - |
 | Lightweight automatic PR checks | `.github/workflows/` | `.github/workflows/<concern>.yml`; a workflow with no automatic trigger is listed in `ci/unlaned.toml` | the script it runs | `ci/required-jobs.toml`, `ci/unlaned.toml`, `tests/sentry/tooling/test_ci_lanes.py` |
 | CI lane registries | `ci/` | `ci/<registry>.toml`, closed schema, every entry with a `reason` | `tests/sentry/tooling/test_ci_lanes.py` | the lane sentry (rules M1 to M6, T1 to T4, R1 to R3) |
-| Secret-provider adapter tests | `tests/secret_providers/adapters/` (sub-package of the `tests/secret_providers/` exception) | `_contract.py` kit, `_harness_<adapter>.py` per adapter, `test_<adapter>_conformance.py` | the kit runs for every harness | `tests/sentry/defects/test_secret_adapter_kit.py` (an adapter with no harness fails) |
+| Secret-provider adapter tests | `tests/secret_providers/adapters/` (sub-package of the `tests/secret_providers/` exception) | the kit module _contract.py, a harness module per adapter, `test_<adapter>_conformance.py` | the kit runs for every harness | `tests/sentry/defects/test_secret_adapter_kit.py` (an adapter with no harness fails) |
 | Unit tests | `tests/unit/<package>/` mirroring `src/` | `test_<behavior>.py` | - | current exceptions: `tests/parity/`, `tests/native/`, `tests/physical/`, `tests/fileaccess/`, `tests/secret_providers/`, `tests/generation/`, `tests/connectors/`, and loose files in `tests/unit/` |
 
 Known inconsistencies, listed and not fixed here (the 32 ignore lines in `./.importlinter`
