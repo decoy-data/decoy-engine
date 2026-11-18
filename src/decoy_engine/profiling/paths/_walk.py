@@ -14,7 +14,8 @@ A key that fails a rule is counted under `*` and its text is never stored.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator
+from itertools import islice
 from typing import Any, Final
 
 import numpy as np
@@ -86,14 +87,16 @@ def _union(left: int, right: int) -> int:
 
 
 class _Level:
-    __slots__ = ("cells", "collapsed", "kept", "last", "last_cell", "runs", "seen")
+    __slots__ = ("cells", "collapsed", "kept", "last", "last_cell", "rejected", "seen")
 
     def __init__(self) -> None:
         self.cells = 0  # the cells in which an object with this pattern appears, as a bit mask
         self.seen: dict[str, int] = {}  # key -> the cells it appears in, as a bit mask
         self.last: dict[str, int] = {}  # key -> last cell counted, so a cell counts it once
         self.last_cell = -1  # last cell counted in `cells`
-        self.runs = 0  # detector runs on this level's keys: stored and rejected keys both count
+        # Keys a detector rejected, as hashes: the text is never kept. They count toward the key
+        # limit like the keys in `seen`, and they fold with the level like every other field.
+        self.rejected: set[int] = set()
         self.collapsed = False
         self.kept: frozenset[str] = frozenset()
 
@@ -121,23 +124,25 @@ class Levels:
 
     # -- pass 1 ---------------------------------------------------------------------------------
 
-    def scout(self, pattern: Pattern, mapping: dict[Any, Any]) -> list[Pair]:
-        """The segment of every key of one object, noting keys that pass rules 1 and 2."""
+    def scout(self, pattern: Pattern, mapping: dict[Any, Any]) -> Iterator[Pair]:
+        """The segment of every key of one object, noting keys that pass rules 1 and 2. The pairs
+        come one at a time, so a mapping of any size holds no list of them."""
         level = self._levels.get(pattern)
         if level is None:
             if len(self._levels) >= SCAN_MAX_PATHS:
                 self.truncated = True
-                return [(WILD, child) for child in mapping.values()]
+                return _wild(mapping)
             level = self._levels[pattern] = _Level()
         if level.last_cell != self._cell:
             level.last_cell = self._cell
             level.cells |= self._bit
         if level.collapsed:
-            return [(WILD, child) for child in mapping.values()]
-        pairs = [(self._admit(pattern, level, key), child) for key, child in mapping.items()]
-        if level.collapsed:  # it collapsed while this object was read: no key keeps a name
-            return [(WILD, child) for _, child in pairs]
-        return pairs
+            return _wild(mapping)
+        return self._scouted(pattern, level, mapping)
+
+    def _scouted(self, pattern: Pattern, level: _Level, mapping: dict[Any, Any]) -> Iterator[Pair]:
+        for key, child in mapping.items():
+            yield self._admit(pattern, level, key), child
 
     def _admit(self, pattern: Pattern, level: _Level, key: Any) -> str:
         if level.collapsed:  # it collapsed earlier in this object: no more detector runs
@@ -154,7 +159,7 @@ class Levels:
             self.add(level, key)
         # Keys rejected as data count toward the level's budget too, so an object of endless
         # distinct data-like keys collapses instead of running a detector on every one.
-        if len(level.seen) > SCAN_MAP_KEYS or level.runs > SCAN_MAP_KEYS:
+        if len(level.seen) > SCAN_MAP_KEYS or len(level.rejected) > SCAN_MAP_KEYS:
             self._collapse(pattern, level)
             return WILD
         return WILD if data else key
@@ -171,6 +176,7 @@ class Levels:
         self.key_total -= len(level.seen)
         level.seen = {}
         level.last = {}
+        level.rejected = set()
         level.collapsed = True
         depth = len(pattern)
         named = {
@@ -182,15 +188,20 @@ class Levels:
             self._fold((*pattern, key), (*pattern, WILD))
 
     def _is_data(self, level: _Level, key: str) -> bool:
-        """Key rule 2: a detector hit on the key text. A detector run (not a cached answer) is
-        charged to the level; the cache is bounded, so no more than a few keys are kept."""
+        """Key rule 2: a detector hit on the key text. A rejected key is charged to the level
+        whether the detector ran or the cache answered, and a level never runs a detector twice on
+        one key. The cache is bounded, so no more than a few verdicts are kept."""
+        mark = hash(key)
+        if mark in level.rejected:
+            return True
         verdict = self._verdicts.get(key)
         if verdict is None:
             if len(self._verdicts) >= _VERDICTS:
                 self._verdicts.clear()
-            level.runs += 1
             verdict = bool(run_all_detectors(pd.Series([key], dtype=object), ""))
             self._verdicts[key] = verdict
+        if verdict:
+            level.rejected.add(mark)
         return verdict
 
     def finalize(self) -> None:
@@ -233,6 +244,7 @@ class Levels:
                 continue
             held.cells = _union(held.cells, level.cells)
             held.last_cell = max(held.last_cell, level.last_cell)
+            held.rejected |= level.rejected
             if held.collapsed:
                 continue
             if level.collapsed:
@@ -243,7 +255,7 @@ class Levels:
                     self.key_total += 1
                 held.seen[key] = _union(held.seen.get(key, 0), mask)
                 held.last[key] = max(held.last.get(key, -1), level.last.get(key, -1))
-            if len(held.seen) > SCAN_MAP_KEYS:
+            if len(held.seen) > SCAN_MAP_KEYS or len(held.rejected) > SCAN_MAP_KEYS:
                 self._collapse(destination, held)
 
     def _below_collapsed(self, pattern: Pattern) -> Pattern:
@@ -262,22 +274,26 @@ class Levels:
 
     # -- pass 2 ---------------------------------------------------------------------------------
 
-    def settle(self, pattern: Pattern, mapping: dict[Any, Any]) -> list[Pair]:
+    def settle(self, pattern: Pattern, mapping: dict[Any, Any]) -> Iterator[Pair]:
         """The final segment of every key of one object; counts the keys written as `*`."""
         level = self._levels.get(pattern)
         if level is None or level.collapsed:
-            return [(WILD, child) for child in mapping.values()]
+            return _wild(mapping)
         # A name is kept only for a cell pass 1 counted at this level, so a level that exists only
         # because folds made it (the level cap kept pass 1 from tracking this cell) names no key.
-        counted = (level.cells >> self._cell) & 1
-        pairs: list[Pair] = []
+        return self._settled(level, mapping, bool((level.cells >> self._cell) & 1))
+
+    def _settled(self, level: _Level, mapping: dict[Any, Any], counted: bool) -> Iterator[Pair]:
         for key, child in mapping.items():
             if counted and key in level.kept:
-                pairs.append((key, child))
+                yield key, child
             else:
                 self.suspect += 1
-                pairs.append((WILD, child))
-        return pairs
+                yield WILD, child
+
+
+def _wild(mapping: dict[Any, Any]) -> Iterator[Pair]:
+    return ((WILD, child) for child in mapping.values())
 
 
 class _Row:
@@ -326,18 +342,33 @@ class Tally:
 
 def walk(
     root: Any,
-    expand: Callable[[Pattern, dict[Any, Any]], Sequence[Pair]],
+    expand: Callable[[Pattern, dict[Any, Any]], Iterable[Pair]],
     record: Callable[[Pattern, Any], bool],
 ) -> tuple[bool, int]:
     """Walk one cell without recursion, in document order. Returns whether a container sat deeper
     than `SCAN_MAX_DEPTH` (it is counted, not entered) and how many arrays had items past
     `SCAN_ARRAY_ITEMS`. `expand` names the children of an object; `record` sees every node below
-    the root and may refuse to enter it."""
+    the root and may refuse to enter it.
+
+    Each open container is one iterator frame, so the walk holds at most `SCAN_MAX_DEPTH` frames
+    and never a list of the children of a wide object."""
     too_deep = False
     long_arrays = 0
-    stack: list[tuple[Any, Pattern, int]] = [(root, (), 1)]
-    while stack:
-        value, pattern, depth = stack.pop()
+    frames: list[tuple[Iterator[Pair], Pattern, int]] = []
+    node: tuple[Any, Pattern, int] | None = (root, (), 1)
+    while True:
+        if node is None:
+            while frames:
+                children, parent, depth = frames[-1]
+                step = next(children, None)
+                if step is not None:
+                    node = (step[1], (*parent, step[0]), depth)
+                    break
+                frames.pop()
+            if node is None:
+                return too_deep, long_arrays
+        value, pattern, depth = node
+        node = None
         length = -1
         if isinstance(value, np.ndarray) and value.ndim == 1:
             # A parquet list column reads as a 1-D array. Cut it before converting, so a huge
@@ -350,14 +381,12 @@ def walk(
             if depth > SCAN_MAX_DEPTH:
                 too_deep = True
                 continue
-            pairs = expand(pattern, value)
-            stack.extend((child, (*pattern, seg), depth + 1) for seg, child in reversed(pairs))
+            frames.append((iter(expand(pattern, value)), pattern, depth + 1))
         elif isinstance(value, (list, tuple)):
             if depth > SCAN_MAX_DEPTH:
                 too_deep = True
                 continue
             if max(length, len(value)) > SCAN_ARRAY_ITEMS:
                 long_arrays += 1
-            below = (*pattern, ITEM)
-            stack.extend((child, below, depth + 1) for child in reversed(value[:SCAN_ARRAY_ITEMS]))
-    return too_deep, long_arrays
+            items = ((ITEM, child) for child in islice(value, SCAN_ARRAY_ITEMS))
+            frames.append((items, pattern, depth + 1))

@@ -11,14 +11,18 @@ value, no key that failed a rule and no `sample_misses`.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from itertools import islice
 from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine._canonical import (
+    SCAN_ARRAY_ITEMS,
     SCAN_CELL_BYTES,
     SCAN_MAX_CELLS,
+    SCAN_MAX_DEPTH,
     StrictJsonError,
     strict_json_read,
 )
@@ -32,12 +36,13 @@ _OPENS = re.compile(r"\s*[\[{]")
 _MALFORMED = "malformed"
 _OVERSIZED = "oversized"
 _SCALAR = "scalar"
+_DONE = object()
 
 
 def _read(cell: Any) -> tuple[Any, str | None]:
     """The tree of one cell and no fault, or no tree and the fault: malformed, oversized, scalar."""
     if isinstance(cell, (dict, list, tuple)) or (isinstance(cell, np.ndarray) and cell.ndim == 1):
-        return cell, None
+        return (cell, None) if _fits(cell) else (None, _OVERSIZED)
     if not isinstance(cell, str) or not _OPENS.match(cell):
         return None, _SCALAR
     fault: str | None = None
@@ -59,13 +64,58 @@ def _read(cell: Any) -> tuple[Any, str | None]:
     return None, fault
 
 
+def _fits(root: Any) -> bool:
+    """Whether a native cell is within `SCAN_CELL_BYTES`, counted like the text of a parsed cell:
+    a byte for every member, and the characters of every key and text value, plus two quotes each.
+    It reads only what the walk will read (`SCAN_ARRAY_ITEMS` items of a list, `SCAN_MAX_DEPTH`
+    levels) and stops at the first overrun, so no cell is measured past the limit."""
+    left = SCAN_CELL_BYTES
+    frames: list[tuple[Iterator[Any], int]] = [(iter((root,)), 1)]
+    while frames:
+        members, depth = frames[-1]
+        value = next(members, _DONE)
+        if value is _DONE:
+            frames.pop()
+            continue
+        if isinstance(value, str):
+            left -= len(value) + 2
+        elif isinstance(value, dict):
+            left -= len(value)
+            children: Iterator[Any] = iter(())
+            if depth <= SCAN_MAX_DEPTH and left >= 0:
+                children = _members(value)
+            frames.append((children, depth + 1))
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            left -= len(value)
+            if depth <= SCAN_MAX_DEPTH and left >= 0:
+                frames.append((iter(islice(value, SCAN_ARRAY_ITEMS)), depth + 1))
+        if left < 0:
+            return False
+    return True
+
+
+def _members(mapping: dict[Any, Any]) -> Iterator[Any]:
+    """The keys and values of a mapping, one after the other."""
+    for key, child in mapping.items():
+        yield key
+        yield child
+
+
 def _noop(pattern: _walk.Pattern, value: Any) -> bool:
     return True
 
 
 def _cells(series: pd.Series) -> list[Any]:
-    """The first `SCAN_MAX_CELLS` non-null values, also when the scan read every row."""
-    return series.dropna().head(SCAN_MAX_CELLS).tolist()
+    """The first `SCAN_MAX_CELLS` non-null values, also when the scan read every row. The column is
+    read one value at a time and the read stops at the limit, so a long column is never copied."""
+    cells: list[Any] = []
+    for value in series:
+        if pd.api.types.is_scalar(value) and pd.isna(value):
+            continue
+        cells.append(value)
+        if len(cells) >= SCAN_MAX_CELLS:
+            break
+    return cells
 
 
 def observe_column(series: pd.Series) -> NestedCore | None:
