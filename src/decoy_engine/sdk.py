@@ -1,4 +1,11 @@
-"""Public SDK surface for third-party Decoy connector authors.
+"""Experimental: the public SDK surface for third-party Decoy connector authors.
+
+Every name this module defines is experimental (compatibility contract 3.6): it may change or
+go away in any minor release. That covers `FileSource`, `FileSink`, `ConnectorConfig`,
+`FileMeta`, `CheckResult`, `WriteResult`, `TransientError`, `PermanentError`, `SDK_VERSION` and
+the `CAP_DRY_RUN`, `CAP_INTROSPECTION`, `CAP_MULTIPART`, `CAP_RESUMABLE`, `CAP_SIGNED_URL` and
+`CAP_STREAMING` flags. `ConfigError` and `ConnectorError` are re-exported from
+`decoy_engine.errors` and stay frozen.
 
 `FileSource` and `FileSink` are the two abstract base classes a connector
 inherits from. The engine discovers connectors via the `decoy.connectors`
@@ -79,7 +86,7 @@ CAP_DRY_RUN = "supports_dry_run"
 
 
 class ConnectorConfig(BaseModel):
-    """Pydantic base for connector configuration models.
+    """Experimental: Pydantic base for connector configuration models.
 
     Each connector subclasses this and declares fields. The HiFi UI auto-
     renders the config form from `Subclass.model_json_schema()`. Use
@@ -95,7 +102,7 @@ class ConnectorConfig(BaseModel):
 
 @dataclass(frozen=True)
 class FileMeta:
-    """Lightweight metadata for one file in a `FileSource`.
+    """Experimental: lightweight metadata for one file in a `FileSource`.
 
     Sources that can't cheaply provide `size` / `content_type` / `modified`
     leave them None. The engine treats None as "unknown" and falls back to
@@ -110,7 +117,7 @@ class FileMeta:
 
 @dataclass(frozen=True)
 class CheckResult:
-    """Outcome of `FileSource.check()` / `FileSink.check()`.
+    """Experimental: outcome of `FileSource.check()` / `FileSink.check()`.
 
     `ok=True` means the connector reached the configured location and has
     sufficient permission. `ok=False` with `detail` is for runtime-side
@@ -125,7 +132,7 @@ class CheckResult:
 
 @dataclass(frozen=True)
 class WriteResult:
-    """Outcome of a successful `FileSink.write()` call."""
+    """Experimental: outcome of a successful `FileSink.write()` call."""
 
     path: str
     bytes_written: int
@@ -146,7 +153,7 @@ from decoy_engine.errors import (
 
 
 class TransientError(ConnectorError):
-    """Temporary failure: rate-limit, transient network blip, 5xx from upstream.
+    """Experimental: a temporary failure (rate limit, network blip, 5xx from upstream).
 
     The engine retries with exponential backoff (defaults: 3 attempts, 1s
     base, 2x backoff, +/- 25% jitter).
@@ -154,7 +161,7 @@ class TransientError(ConnectorError):
 
 
 class PermanentError(ConnectorError):
-    """Non-recoverable connector failure. Fails the run immediately, no retry.
+    """Experimental: non-recoverable connector failure. Fails the run immediately, no retry.
 
     Distinct from `ConfigError`: this is a runtime failure (object gone,
     quota exceeded mid-write, etc.) that the user resolves by adjusting
@@ -217,7 +224,7 @@ class _ConnectorBase(Generic[ConfigT], ABC):
 
 
 class FileSource(_ConnectorBase[ConfigT]):
-    """Read files from a remote location.
+    """Experimental: read files from a remote location.
 
     First-party implementations: `S3FileSource` (`decoy_engine.connectors.s3`),
     `GCSFileSource` (`decoy_engine.connectors.gcs`), `SFTPFileSource`
@@ -267,7 +274,7 @@ class FileSource(_ConnectorBase[ConfigT]):
 
 
 class FileSink(_ConnectorBase[ConfigT]):
-    """Write files to a remote location.
+    """Experimental: write files to a remote location.
 
     Symmetric to `FileSource`. A connector can implement both if the
     underlying service supports both directions; many will (S3, GCS, SFTP
