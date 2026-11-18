@@ -341,7 +341,7 @@ def test_gate_verdict_posts_status_on_dispatch_only() -> None:
     for part in (
         "always()",
         "github.event_name == 'workflow_dispatch'",
-        "github.repository_owner == 'louiskeep'",
+        "github.repository_owner == 'decoy-data'",
         "github.actor == 'louiskeep'",
         "!github.event.repository.fork",
     ):

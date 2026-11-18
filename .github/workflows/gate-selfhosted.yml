@@ -167,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: gate
-    if: "always() && github.event_name == 'workflow_dispatch' && github.repository_owner == 'louiskeep' && github.actor == 'louiskeep' && !github.event.repository.fork"
+    if: "always() && github.event_name == 'workflow_dispatch' && github.repository_owner == 'decoy-data' && github.actor == 'louiskeep' && !github.event.repository.fork"
     permissions:
       statuses: write
     steps:
