@@ -26,7 +26,7 @@ from tests.sentry.defects import _defect_scan as scan
 
 OWNER = "_nested_json/_rules.py"
 CHILD_KEYS = ("strategy", "strategy_config")
-# The seven modules the plan names; each must be found as a reader and be migrated.
+# The seven modules that read a nested child at the slice base; each must call the choke point.
 READERS = (
     "execution/_column_access.py",
     "execution/_pipeline_multi_table.py",
@@ -116,11 +116,13 @@ def test_every_reader_of_a_nested_child_uses_the_choke_point() -> None:
     )
 
 
-def test_the_known_readers_are_found_by_the_scan() -> None:
-    found = {
-        p.relative_to(scan.SRC).as_posix() for p in _files() if is_reader(ast.parse(p.read_text()))
-    }
-    assert set(READERS) <= found
+def test_each_known_reader_calls_the_choke_point() -> None:
+    missing = [
+        rel for rel in READERS if not uses_choke_point(ast.parse((scan.SRC / rel).read_text()))
+    ]
+    assert not missing, (
+        f"these modules read a nested child and must call nested_children: {missing}"
+    )
 
 
 def test_the_registry_that_only_names_nested_is_not_a_reader() -> None:
@@ -139,7 +141,7 @@ def test_the_registry_that_only_names_nested_is_not_a_reader() -> None:
         'T = {"scalar:nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'T = {"nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'def f(c, pc):\n    return "nested" == c["strategy"] and pc.get("strategy")\n',
-        'from decoy_engine._nested_json import other\n'
+        "from decoy_engine._nested_json import other\n"
         'def f(c, pc):\n    return c["strategy"] == "nested" and pc.get("strategy")\n',
     ],
 )

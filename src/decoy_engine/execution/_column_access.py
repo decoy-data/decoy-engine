@@ -31,6 +31,8 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
+from decoy_engine._nested_json import nested_children
+
 # Whether an entry reads its own column from the source or produces it. A created column is
 # exempt from "declared but missing from the source" only through `created_targets`.
 OWN_TARGET_SOURCE = "source"
@@ -179,15 +181,17 @@ def _joint_mask(entry: Mapping[str, Any]) -> ColumnAccess:
 def _nested(entry: Mapping[str, Any]) -> ColumnAccess:
     """The child strategy runs on a one-column frame, but its own declaration is applied
     to the child's config, conservatively."""
-    pc = _provider_config(entry)
-    child = {
-        "name": entry.get("name"),
-        "strategy": pc.get("strategy"),
-        "provider_config": pc.get("strategy_config") or {},
-    }
-    declare = SURFACE_DECLARATIONS.get(f"scalar:{child['strategy']}")
-    inner = _WRITES_UNKNOWN if declare is None else declare(child)
-    return _union(ColumnAccess(reads=_siblings(entry)), inner)
+    access = ColumnAccess(reads=_siblings(entry))
+    for nested_child in nested_children(_provider_config(entry)):
+        child = {
+            "name": entry.get("name"),
+            "strategy": nested_child.strategy,
+            "provider_config": nested_child.strategy_config or {},
+        }
+        declare = SURFACE_DECLARATIONS.get(f"scalar:{child['strategy']}")
+        inner = _WRITES_UNKNOWN if declare is None else declare(child)
+        access = _union(access, inner)
+    return access
 
 
 def _when(entry: Mapping[str, Any]) -> ColumnAccess:
