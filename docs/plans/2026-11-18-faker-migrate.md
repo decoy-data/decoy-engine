@@ -468,7 +468,7 @@ Open PRs that touch the same files (checked 2026-11-18): E#583 (Dependabot group
 
 ## 16. Owner questions
 
-Questions A to D were decided by the owner on 2026-11-18 with the recommended answers below. (Earlier text: S2 does not merge until the owner confirms or replaces them.
+Questions A to D were decided by the owner on 2026-11-18 with the recommended answers below.
 
 | Id | Question | Recommended | Why |
 |---|---|---|---|
