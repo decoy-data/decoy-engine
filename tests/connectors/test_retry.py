@@ -88,9 +88,10 @@ def test_deadline_stops_before_a_sleep_that_would_pass_it() -> None:  # AT-E1-4
     policy = RetryPolicy(deadline_s=3.0)
     with pytest.raises(TransientError) as info:
         run_retrying(op, policy=policy, sleep=sleep, clock=lambda: now[0], rand=lambda: 0.5)
-    # Sleeps 1.0 then would need 2.0 more (3.0 total elapsed is not past 3.0, 1.0 + 2.0 == 3.0
-    # is allowed); a third sleep would not exist (3 attempts). Tighten: deadline 2.5 stops at one.
-    assert sum(sleeps) <= 3.0
+    # A 3.0 s deadline allows the sleeps of 1.0 and 2.0 s (3.0 is not past 3.0), so all three
+    # attempts run and the last error leaves after the attempts, not the deadline.
+    assert sleeps == [1.0, 2.0]
+    assert len(calls) == 3
     assert info.value.__cause__ is None and info.value.__context__ is None
     now[0] = 0.0
     sleeps.clear()
@@ -138,6 +139,25 @@ def test_sdk_docstring_defaults_equal_the_policy() -> None:  # AT-E1-8
     assert float(base) == DEFAULT_POLICY.base_s
     assert float(factor) == DEFAULT_POLICY.factor
     assert int(jitter) / 100 == DEFAULT_POLICY.jitter
+
+
+def test_each_report_carries_its_own_operation_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    ids: list[tuple[int, int | None]] = []
+    original = progress.ProgressChannel.retry_report
+
+    def spy(self, retry, **kw):
+        ids.append((retry.attempt, kw.get("operation")))
+        return original(self, retry, **kw)
+
+    monkeypatch.setattr(progress.ProgressChannel, "retry_report", spy)
+    with progress.use_progress(progress.CallbackSink(lambda e: None)):
+        a, _ = _flaky(2)
+        run_retrying(a, sleep=lambda s: None)
+        b, _ = _flaky(1)
+        run_retrying(b, sleep=lambda s: None)
+    assert [attempt for attempt, _ in ids] == [2, 3, 2]
+    first, second, third = (op for _, op in ids)
+    assert first is not None and first == second and third not in (None, first)
 
 
 def test_each_operation_has_its_own_attempt_floor() -> None:  # AT-E1-12

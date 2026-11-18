@@ -38,17 +38,37 @@ class Body:
 class FakeClient:
     """A get_object stand-in over OBJECT that records its calls."""
 
-    def __init__(self, *, die_after: int | None = None, etag: str = ETAG, fail: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        die_after: int | None = None,
+        etag: str | None = ETAG,
+        fail: Any = None,
+        resume_transient_failures: int = 0,
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.bodies: list[Body] = []
         self._die_after, self._etag, self._fail = die_after, etag, fail
+        self._transient_left = resume_transient_failures
 
     def get_object(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(kw)
         if self._fail is not None and "Range" in kw:
             raise self._fail
+        if self._transient_left and "Range" in kw:
+            self._transient_left -= 1
+            raise botocore_exc.ClientError(
+                {"Error": {"Code": "SlowDown"}, "ResponseMetadata": {"HTTPStatusCode": 503}},
+                "GetObject",
+            )
         start = int(kw["Range"].split("=")[1].rstrip("-")) if "Range" in kw else 0
         die = self._die_after if "Range" not in kw else None
-        return {"ETag": self._etag, "Body": Body(OBJECT[start:], die_after=die)}
+        body = Body(OBJECT[start:], die_after=die)
+        self.bodies.append(body)
+        response: dict[str, Any] = {"Body": body}
+        if self._etag is not None:
+            response["ETag"] = self._etag
+        return response
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +86,55 @@ def test_a_mid_stream_read_failure_resumes_at_the_offset_with_if_match() -> None
     assert len(resume.calls) == 1
     assert resume.calls[0]["Range"] == "bytes=3145728-"
     assert resume.calls[0]["IfMatch"] == ETAG
+
+
+def test_a_resume_that_fails_transiently_then_succeeds_is_two_identical_requests() -> None:
+    first, resume = FakeClient(die_after=3 * MIB), FakeClient(resume_transient_failures=1)
+    assert b"".join(_stream_object(first, resume, "bkt", "k")) == OBJECT
+    assert len(resume.calls) == 2
+    assert resume.calls[0] == resume.calls[1]
+    assert resume.calls[1]["Range"] == "bytes=3145728-" and resume.calls[1]["IfMatch"] == ETAG
+
+
+def test_an_object_without_an_etag_is_source_changed_not_an_empty_if_match() -> None:
+    first, resume = FakeClient(die_after=3 * MIB, etag=None), FakeClient()
+    got: list[bytes] = []
+    with pytest.raises(PermanentError) as info:
+        for chunk in _stream_object(first, resume, "bkt", "k"):
+            got.append(chunk)
+    assert info.value.kind == "source_changed"
+    assert resume.calls == []
+    assert b"".join(got) == OBJECT[: 3 * MIB]
+
+
+def test_the_first_body_is_closed_when_the_resume_hits_a_412() -> None:
+    err = botocore_exc.ClientError(
+        {"Error": {"Code": "PreconditionFailed"}, "ResponseMetadata": {"HTTPStatusCode": 412}},
+        "GetObject",
+    )
+    first, resume = FakeClient(die_after=3 * MIB), FakeClient(fail=err)
+    with pytest.raises(PermanentError):
+        list(_stream_object(first, resume, "bkt", "k"))
+    assert [b.closed for b in first.bodies] == [True]
+    assert resume.bodies == []
+
+
+def test_a_consumer_that_stops_early_closes_the_body() -> None:
+    first, resume = FakeClient(), FakeClient()
+    stream = _stream_object(first, resume, "bkt", "k")
+    next(stream)
+    stream.close()
+    assert [b.closed for b in first.bodies] == [True]
+
+
+def test_a_consumer_that_stops_after_a_resume_closes_both_bodies() -> None:
+    first, resume = FakeClient(die_after=3 * MIB), FakeClient()
+    stream = _stream_object(first, resume, "bkt", "k")
+    for _ in range(4):  # three chunks from the first body, then one from the resumed body
+        next(stream)
+    stream.close()
+    assert [b.closed for b in first.bodies] == [True]
+    assert [b.closed for b in resume.bodies] == [True]
 
 
 def test_a_412_on_resume_is_source_changed_and_yields_nothing_more() -> None:  # AT-E1-3

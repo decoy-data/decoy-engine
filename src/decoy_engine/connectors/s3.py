@@ -222,10 +222,13 @@ class _Resumable:
     def start(self) -> None:
         """The first request, on the ordinary client: botocore owns its retry, not the executor."""
         response = _clients.s3_call(self._client.get_object, Bucket=self._bucket, Key=self._key)
-        self._etag = response.get("ETag", "")
+        self._etag = response.get("ETag") or None
         self._attach(response)
 
     def _resume(self) -> None:
+        if self._etag is None:
+            # Without a version to pin, a resume could splice two versions of the object.
+            raise _clients.source_changed("S3")
         changed = False
         try:
             response = _clients.s3_call(
@@ -251,7 +254,7 @@ class _Resumable:
         """The next non-empty chunk, None at the end. A failure drops the body so a retry reopens."""
         if self._chunks is None:
             self._resume()
-        assert self._chunks is not None  # noqa: S101 - set by _open
+        assert self._chunks is not None  # noqa: S101 - set by start() or _resume()
         try:
             while True:
                 chunk = _clients.s3_call(next, self._chunks, None)

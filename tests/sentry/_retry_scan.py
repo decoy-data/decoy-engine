@@ -43,8 +43,19 @@ def dotted(node: ast.AST) -> str | None:
     return None
 
 
-def import_bindings(tree: ast.AST) -> dict[str, str]:
-    """Local name to canonical dotted target for every import in the module."""
+def package_of(relpath: str) -> str:
+    """The dotted package a module (given as a path under ``decoy_engine/``) lives in."""
+    parts = relpath.removesuffix(".py").split("/")
+    parts = parts[:-1]  # an ``__init__`` is its own package, any other module its parent's
+    return ".".join(["decoy_engine", *parts])
+
+
+def import_bindings(tree: ast.AST, package: str | None = None) -> dict[str, str]:
+    """Local name to canonical dotted target for every import in the module.
+
+    ``package`` is the module's own package; with it, relative imports (``from ..x import y``,
+    ``from . import y``) resolve to absolute names. Without it they are skipped.
+    """
     bound: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -54,9 +65,18 @@ def import_bindings(tree: ast.AST) -> dict[str, str]:
                 else:
                     head = alias.name.split(".")[0]
                     bound[head] = head
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                base = node.module
+            elif package is None:
+                continue
+            else:
+                up = package.split(".")[: len(package.split(".")) - (node.level - 1)]
+                base = ".".join([*up, *([node.module] if node.module else [])])
+            if not base:
+                continue
             for alias in node.names:
-                bound[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                bound[alias.asname or alias.name] = f"{base}.{alias.name}"
     return bound
 
 

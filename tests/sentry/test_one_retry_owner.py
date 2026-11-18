@@ -20,6 +20,7 @@ from tests.sentry._retry_scan import (
     canonical,
     dotted,
     import_bindings,
+    package_of,
     rel,
     walk_with_scope,
 )
@@ -36,7 +37,8 @@ OWNER = "connectors/_retry.py"
 # `(publication/_object_pointer.py, <method>)` is added by whichever of F02-E1 and EC3 merges
 # second; before that the file does not exist.
 ALLOWED_RESENDS = frozenset({("connectors/_sftp_client.py", "_resolve_rename")})
-_RETRYABLE = frozenset({"TransientError", "ConnectorError"})
+# Any of these in a handler makes it a connector-failure handler.
+_RETRYABLE = frozenset({"TransientError", "ConnectorError", "PermanentError"})
 
 
 def _names_in_handler(handler_type: ast.expr | None, bindings: dict[str, str]) -> set[str]:
@@ -52,10 +54,12 @@ def _names_in_handler(handler_type: ast.expr | None, bindings: dict[str, str]) -
 
 
 def _callees(statements: list[ast.stmt]) -> set[str]:
-    """Call identities: the callee plus its first argument when that is a dotted name.
+    """Call identities: the callee plus the last attribute of its first dotted argument.
 
-    The first argument keeps ``s3_call(client.get_object, ...)`` and ``s3_call(body.read, ...)``
-    apart, since a wrapper callee runs whatever it is given.
+    The argument keeps ``s3_call(client.get_object, ...)`` and ``s3_call(body.read, ...)`` apart,
+    since a wrapper callee runs whatever it is given. Only the last attribute counts, so the same
+    operation on another receiver (``s3_call(client.put_object)`` then ``s3_call(single.put_object)``)
+    is still the same call.
     """
     out: set[str] = set()
     for statement in statements:
@@ -64,13 +68,38 @@ def _callees(statements: list[ast.stmt]) -> set[str]:
                 name = dotted(node.func)
                 if name:
                     first = dotted(node.args[0]) if node.args else None
-                    out.add(f"{name}({first or ''})")
+                    out.add(f"{name}({first.rsplit('.', 1)[-1] if first else ''})")
+    return out
+
+
+def _in_loop(parents: tuple[ast.AST, ...]) -> bool:
+    """A loop encloses the handler within its own function (a nested ``def`` ends the search)."""
+    for ancestor in reversed(parents):
+        if isinstance(ancestor, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+        if isinstance(ancestor, (ast.For, ast.AsyncFor, ast.While)):
+            return True
+    return False
+
+
+def _following(try_node: ast.Try, parents: tuple[ast.AST, ...]) -> list[ast.stmt]:
+    """Statements that run after ``try_node`` in its own block and in every enclosing block."""
+    out: list[ast.stmt] = []
+    child: ast.AST = try_node
+    for parent in reversed(parents[:-1]):
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            siblings = getattr(parent, field, None)
+            if isinstance(siblings, list) and child in siblings:
+                out += siblings[siblings.index(child) + 1 :]
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            break
+        child = parent
     return out
 
 
 def findings_in(source: str, path: str) -> list[str]:
     tree = ast.parse(source)
-    bindings = import_bindings(tree)
+    bindings = import_bindings(tree, package_of(path))
     found: list[str] = []
     for node, function, parents in walk_with_scope(tree):
         if (
@@ -85,17 +114,12 @@ def findings_in(source: str, path: str) -> list[str]:
         names = _names_in_handler(node.type, bindings)
         if not names & _RETRYABLE or (path, function) in ALLOWED_RESENDS or path == OWNER:
             continue
-        if "TransientError" in names and any(isinstance(p, (ast.For, ast.While)) for p in parents):
-            found.append(f"{path}:{node.lineno} except TransientError inside a loop")
+        if _in_loop(parents):
+            found.append(f"{path}:{node.lineno} connector-error handler inside a loop")
         try_node = parents[-1]
         if not isinstance(try_node, ast.Try):
             continue
-        again = list(node.body)
-        block = parents[-2] if len(parents) > 1 else None
-        for field in ("body", "orelse", "finalbody", "handlers"):
-            siblings = getattr(block, field, None)
-            if isinstance(siblings, list) and try_node in siblings:
-                again += siblings[siblings.index(try_node) + 1 :]
+        again = list(node.body) + _following(try_node, parents)
         repeated = _callees(try_node.body) & _callees(again)
         if repeated:
             found.append(f"{path}:{node.lineno} resends {sorted(repeated)[0]} after a failure")
@@ -143,6 +167,49 @@ def test_seeded_spellings_are_flagged() -> None:
         assert findings_in(source, "connectors/x.py"), name
         assert findings_in(source, "publication/x.py"), name
         assert findings_in(source, "delivery/x.py"), name
+
+
+def test_review_round_one_seeds_are_flagged() -> None:
+    """Spellings the first version missed (Dennis round 1 on #681)."""
+    seeds = {
+        "loop_connector_error": (
+            "def g(c):\n    for _ in range(3):\n        try:\n            return c.put(1)\n"
+            "        except ConnectorError as e:\n            if e.kind != 'transient':\n"
+            "                raise\n"
+        ),
+        "loop_continue": (
+            "def g(c):\n    for _ in range(3):\n        try:\n            return c.put(1)\n"
+            "        except ConnectorError:\n            continue\n"
+        ),
+        "loop_permanent_error": (
+            "def g(c):\n    while True:\n        try:\n            return c.put(1)\n"
+            "        except PermanentError:\n            continue\n"
+        ),
+        "relative_alias_in_loop": (
+            "from ..sdk import TransientError as TE\n"
+            "def g(c):\n    for i in range(3):\n        try:\n            c.f()\n"
+            "        except TE:\n            pass\n"
+        ),
+        "wrapper_on_another_receiver": (
+            "def g(c, single):\n    try:\n        return s3_call(c.put_object, 1)\n"
+            "    except ConnectorError:\n        return s3_call(single.put_object, 1)\n"
+        ),
+        "resend_after_an_enclosing_if": (
+            "def g(c, f):\n    if f:\n        try:\n            c.put(1)\n"
+            "        except ConnectorError:\n            pass\n    c.put(1)\n"
+        ),
+    }
+    for name, source in seeds.items():
+        assert findings_in(source, "connectors/x.py"), name
+
+
+def test_a_loop_in_an_outer_function_does_not_reach_a_nested_def() -> None:
+    source = (
+        "def outer(c):\n    for _ in range(3):\n        def inner():\n            try:\n"
+        "                return c.get(1)\n            except ConnectorError:\n"
+        "                return None\n        inner()\n"
+    )
+    assert findings_in(source, "connectors/x.py") == []
 
 
 def test_the_same_wrapper_over_a_different_call_is_not_a_resend() -> None:

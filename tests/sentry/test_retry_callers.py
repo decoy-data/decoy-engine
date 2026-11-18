@@ -2,7 +2,8 @@
 
 The 4.1 table of the F02 plan names the only operations the executor may wrap. A new caller adds
 a row to that table and to ``PINNED`` in the same change. Covered spellings: the bare name,
-``from ... import run_retrying as x``, ``_retry.run_retrying`` and ``import ..._retry as r``.
+``from ... import run_retrying as x``, ``_retry.run_retrying``, ``import ..._retry as r`` and the
+relative forms (``from . import _retry``, ``from ..connectors._retry import run_retrying``).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from tests.sentry._retry_scan import (
     canonical,
     dotted,
     import_bindings,
+    package_of,
     rel,
     walk_with_scope,
 )
@@ -26,7 +28,7 @@ PINNED = frozenset({("connectors/s3.py", "_stream_object")})
 
 def callers_in(source: str, path: str) -> set[tuple[str, str]]:
     tree = ast.parse(source)
-    bindings = import_bindings(tree)
+    bindings = import_bindings(tree, package_of(path))
     out: set[tuple[str, str]] = set()
     for node, function, _ in walk_with_scope(tree):
         if not isinstance(node, ast.Call):
@@ -53,6 +55,10 @@ def test_every_spelling_is_seen() -> None:
         "import decoy_engine.connectors._retry as r\ndef f():\n    r.run_retrying(g)\n",
         "import decoy_engine.connectors._retry\ndef f():\n"
         "    decoy_engine.connectors._retry.run_retrying(g)\n",
+        "from ..connectors._retry import run_retrying\ndef f():\n    run_retrying(g)\n",
+        "from ..connectors import _retry\ndef f():\n    _retry.run_retrying(g)\n",
+        "from . import _retry\ndef f():\n    _retry.run_retrying(g)\n",
+        "from ._retry import run_retrying as rr\ndef f():\n    rr(g)\n",
     ]
     for source in seeds:
         assert callers_in(source, "connectors/x.py") == {("connectors/x.py", "f")}, source
