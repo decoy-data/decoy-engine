@@ -29,7 +29,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `profile/` | Source profiling, readers (CSV, Parquet, fixed-width), fixed-width writer |
 | `io/` | Bounded source readers shared by CLI and platform: CSV record framer, Parquet/CSV byte-budget chunk cutter (`ChunkBudget`) |
 | `quality/` | Fidelity report, distribution snapshot, DP fit |
-| `anonymize/` | Anonymity enforcement: `type_family` (value identity) and `hierarchies/` (generalization hierarchies, `check_hierarchy`, the level-vector `Lattice`); library only, reached by import |
+| `anonymize/` | Anonymity enforcement: `type_family` (value identity), `hierarchies/` (generalization hierarchies, `check_hierarchy`, the level-vector `Lattice`) and `search/` (least-loss node under privacy models with record suppression, `apply_search`); library only, reached by import |
 | `validators/` | Job-level validators (`validators:` block) |
 | `support/` | Pseudonymised support-bundle types (F32): closed `SupportBundle` dataclasses with no free-text field, `Label` ordinal names and `Version` checked types, with the central `reasons.ReasonRef` registry-checked. Reads `execution`, `profile` and `reasons`; nothing in the engine imports it |
 | `quarantine.py` | Quarantine-row routing (`quarantine:` block) |
