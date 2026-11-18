@@ -155,23 +155,33 @@ def test_the_registry_that_only_names_nested_is_not_a_reader() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        'def f(c, pc):\n    return c["strategy"] == "nested" and pc.get("strategy")\n',
-        'def f(c, pc):\n    return c["strategy"] == "nested" and pc["strategy"]\n',
-        'def f(c, pc):\n    return c["strategy"] != "nested" or pc.get("strategy_config")\n',
-        'def f(c, pc):\n    if c["strategy"] in ("nested", "x"):\n        return pc["strategy_config"]\n',
-        'def f(c, pc):\n    if c["strategy"] in {"x", "nested"}:\n        return pc.get("strategy")\n',
+        'def f(c):\n    pc = c["provider_config"]\n    return c["strategy"] == "nested" and pc.get("strategy")\n',
+        'def f(c):\n    pc = c["provider_config"]\n    return c["strategy"] == "nested" and pc["strategy"]\n',
+        'def f(c):\n    pc = c["provider_config"]\n    return c["strategy"] != "nested" or pc.get("strategy_config")\n',
+        'def f(c):\n    pc = c["provider_config"]\n    if c["strategy"] in ("nested", "x"):\n        return pc["strategy_config"]\n',
+        'def f(c):\n    pc = c["provider_config"]\n    if c["strategy"] in {"x", "nested"}:\n        return pc.get("strategy")\n',
         # A module that calls nested_children and still reads a child key directly.
         "from decoy_engine._nested_json import nested_children\n"
-        "def f(c, pc):\n    kids = nested_children(pc)\n"
+        'def f(c):\n    pc = c["provider_config"]\n    kids = nested_children(pc)\n'
         '    return c["strategy"] == "nested" and pc.get("strategy_config")\n',
         "from decoy_engine._nested_json import nested_children\n"
-        "def f(c, pc):\n    kids = nested_children(pc)\n"
+        'def f(c):\n    pc = c["provider_config"]\n    kids = nested_children(pc)\n'
         '    return c["strategy"] == "nested" and pc["strategy"]\n',
         'T = {"scalar:nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'T = {"nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
-        'def f(c, pc):\n    return "nested" == c["strategy"] and pc.get("strategy")\n',
+        'def f(c):\n    pc = c["provider_config"]\n    return "nested" == c["strategy"] and pc.get("strategy")\n',
         "from decoy_engine._nested_json import other\n"
-        'def f(c, pc):\n    return c["strategy"] == "nested" and pc.get("strategy")\n',
+        'def f(c):\n    pc = c["provider_config"]\n    return c["strategy"] == "nested" and pc.get("strategy")\n',
+        # A renamed receiver, an alias, an inline expression, a comprehension, a helper parameter.
+        'def f(c):\n    p = c["provider_config"]\n    return c["strategy"] == "nested" and p.get("strategy")\n',
+        'def f(c):\n    pc = c.get("provider_config") or {}\n    q = pc\n'
+        '    return c["strategy"] == "nested" and q["strategy"]\n',
+        'def f(c):\n    return c["strategy"] == "nested" and c["provider_config"].get("strategy")\n',
+        'def f(c):\n    kids = c["provider_config"].get("rules", [])\n'
+        '    return c["strategy"] == "nested" and [k.get("strategy") for k in kids]\n',
+        'def f(c):\n    return c["strategy"] == "nested" and [k["strategy"] for k in c["provider_config"]["rules"]]\n',
+        'def h(x):\n    return x.get("strategy")\n'
+        'def f(c):\n    return c["strategy"] == "nested" and h(c["provider_config"])\n',
     ],
 )
 def test_the_scan_is_red_on_each_seeded_shape(source: str) -> None:
@@ -188,6 +198,10 @@ def test_the_scan_is_red_on_each_seeded_shape(source: str) -> None:
         'def f(c):\n    return c["kind"] == "nested"\n',
         'def f(pc):\n    return pc.get("strategy")\n',
         'KNOWN = frozenset({"nested"})\ndef f(pc):\n    return pc.get("strategy")\n',
+        # Column-level reads are not provider-config derived.
+        'def f(t):\n    for col in t["columns"]:\n        s = col.get("strategy")\n'
+        '        if col["strategy"] == "nested":\n            return s\n',
+        'def f(c):\n    return c["strategy"] == "nested" and c.get("provider_config")\n',
     ],
 )
 def test_the_scan_is_green_on_a_migrated_or_unrelated_module(source: str) -> None:
