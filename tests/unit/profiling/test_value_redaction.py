@@ -421,7 +421,7 @@ def test_a_well_typed_sensitive_column_keeps_its_value_free_slots() -> None:
 def test_an_unknown_key_outside_a_sensitive_column_follows_its_scope() -> None:
     doc = {"fields": [{"name": "status", **_SAFE, "note": "kept"}], "dump": ["CANARY"]}
     redacted = redact_profile_dict(doc)
-    assert redacted["fields"][0]["note"] == "kept"
+    assert redacted["fields"][0]["note"] == REDACTED
     assert redacted["dump"] == REDACTED
     assert redact_profile_dict(doc, include_values=True)["dump"] == ["CANARY"]
 
@@ -455,7 +455,9 @@ def test_a_deeply_nested_document_is_copied_without_recursion() -> None:
     out = redact_profile_dict(doc)
     copied = out["fields"][0]["detection_trail"]
     assert copied is not trail
-    assert _depth(copied) == 5000
+    assert copied == [
+        REDACTED
+    ]  # an unflagged column denies an off-shape signal, as a flagged one does
     assert _depth(trail) == 5000
 
 
