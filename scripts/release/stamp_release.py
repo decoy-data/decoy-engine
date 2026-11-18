@@ -148,7 +148,25 @@ def parse_fragment(text: str) -> Fragment:
     return Fragment(breaking, block)
 
 
-_LINK_FOOTER = re.compile(r"^\[[^\]\n]+\]: https?://", re.MULTILINE)
+_LINK_DEF = re.compile(r"\[[^\]\n]+\]: https?://\S*")
+
+
+def _footer_start(text: str) -> int:
+    """Offset where the trailing link-reference block starts (len(text) if there is none).
+
+    Only the block at end of file counts, so a reference definition inside a section body
+    never cuts that section short.
+    """
+    end = len(text)
+    start = end
+    for line in reversed(text.splitlines(keepends=True)):
+        stripped = line.strip()
+        if stripped and not _LINK_DEF.fullmatch(stripped):
+            break
+        end -= len(line)
+        if stripped:
+            start = end
+    return start
 
 
 def release_sections(text: str) -> list[tuple[str, str]]:
@@ -163,8 +181,7 @@ def release_sections(text: str) -> list[tuple[str, str]]:
         if i + 1 < len(marks):
             end = marks[i + 1].start()
         else:
-            footer = _LINK_FOOTER.search(text, m.end())
-            end = footer.start() if footer else len(text)
+            end = max(_footer_start(text), m.end())
         out.append((m.group(1), text[m.start() : end]))
     return out
 
