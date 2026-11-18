@@ -91,6 +91,7 @@ SENTRIES = (
     "tests/sentry/test_vault_writer_routes.py",
     "tests/sentry/test_wave_b_no_registry_version_literal.py",
     "tests/sentry/ci_scan/test_identity.py",
+    "tests/sentry/layout/test_reexport_init.py",
     "tests/sentry/layout/test_import_layers.py",
     "tests/sentry/layout/test_package_fanout.py",
     "tests/sentry/layout/test_vendored_files.py",
