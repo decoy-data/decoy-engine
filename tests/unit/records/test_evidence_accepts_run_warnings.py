@@ -2,23 +2,28 @@
 
 The CLI writes the engine's `QualityWarning` entries into the `cli-local-1` manifest, and
 `EvidencePayload` refuses a warning with an empty provider or a non-scalar `detail`. The
-out-of-core residency warning did both, so those runs stored no evidence. The fix is at the
-producer; this test is the class guard.
+out-of-core residency warning did both, so those runs stored no evidence. The rule is enforced
+where every warning is built, `QualityWarning.__post_init__`, so the guard is on that choke point:
 
-Coverage: the residency warning constructor for every shape subset, three real out-of-core runs,
-and every warning recorded in the R3 within-route baseline (all execution routes). Warnings that
-only validation, profiling or generation paths outside those scenarios raise are not enumerated.
+- a property over arbitrary provider, column and detail inputs: whatever the constructor accepts,
+  the evidence model accepts too. This covers every producer, including ones no scenario here runs;
+- a recorder on the constructor, so every warning built during the real out-of-core runs is
+  checked, whether or not the run result carries it;
+- the residency warning for every shape subset and the warnings of the R3 within-route baseline.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from copy import deepcopy
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._residency_warning import (
@@ -54,6 +59,51 @@ def test_residency_warning_is_accepted_for_every_shape_subset(shapes: tuple[str,
     _accepted([residency_quality_warning(shapes)])
 
 
+_SCALARS = st.one_of(
+    st.none(),
+    st.booleans(),
+    st.integers(min_value=-(2**53), max_value=2**53),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.text(max_size=40),
+)
+_DETAIL_VALUES = st.one_of(
+    _SCALARS,
+    st.lists(st.text(max_size=20), max_size=4),
+    st.lists(st.integers(), max_size=3),  # refused by the constructor
+    st.dictionaries(st.text(max_size=8), st.integers(), max_size=3),  # refused by the constructor
+)
+
+
+@settings(max_examples=150, deadline=None, derandomize=True)
+@given(
+    provider=st.one_of(st.just(""), st.text(min_size=1, max_size=20)),
+    column=st.one_of(st.none(), st.just(""), st.text(min_size=1, max_size=20)),
+    detail=st.dictionaries(st.text(min_size=1, max_size=12), _DETAIL_VALUES, max_size=5),
+)
+def test_whatever_the_constructor_accepts_the_evidence_model_accepts(
+    provider: str, column: str | None, detail: dict[str, Any]
+) -> None:
+    try:
+        warning = QualityWarning(code="orphan_fk", provider=provider, column=column, detail=detail)
+    except (ValueError, TypeError):
+        return  # refused at the choke point: no producer can ship it
+    _accepted([warning])
+
+
+@pytest.fixture
+def built_warnings(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[QualityWarning]]:
+    """Every QualityWarning constructed while the test runs, recorded after the choke point."""
+    built: list[QualityWarning] = []
+    original = QualityWarning.__post_init__
+
+    def record(self: QualityWarning) -> None:
+        original(self)
+        built.append(self)
+
+    monkeypatch.setattr(QualityWarning, "__post_init__", record)
+    return built
+
+
 def _run(tmp_path: Path, **kw: Any) -> Any:
     config = _fk_ooc_config(tmp_path)
     return run_pipeline(
@@ -61,12 +111,16 @@ def _run(tmp_path: Path, **kw: Any) -> Any:
     )
 
 
-def test_ooc_fk_hash_redact_run_warnings_are_accepted(tmp_path: Path) -> None:
+def test_ooc_fk_hash_redact_run_warnings_are_accepted(
+    tmp_path: Path, built_warnings: list[QualityWarning]
+) -> None:
     # The CLI finding: a resident multi-table FK mask on the out-of-core route.
     result = _run(tmp_path)
     assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
     assert result.warnings, "the route must carry the residency warning, or this proves nothing"
     _accepted(list(result.warnings))
+    assert built_warnings, "the recorder saw no warning; it is not on the constructor"
+    _accepted(built_warnings)
 
 
 def test_ooc_run_with_sink_warnings_are_accepted(tmp_path: Path) -> None:
