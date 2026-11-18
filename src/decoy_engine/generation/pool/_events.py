@@ -8,9 +8,13 @@ manifest field. No double-definition.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TypeAlias
+
+DetailValue: TypeAlias = str | int | float | bool | None
+# What a producer may pass: a scalar, or a list of names the constructor joins with ", ".
+DetailInput: TypeAlias = DetailValue | list[str] | tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ class QualityWarning:
     - `generation_fidelity_below_threshold` (statistical fidelity gate): a generated table's
       overall score, or one comparable column's score, is below `fidelity_warn_threshold`.
       `detail` carries `table`, `snapshot_index`, `overall_score`, `threshold`, `trigger`,
-      `worst_columns` and `below_columns`; scores and names only, never a cell value.
+      `worst_columns` and `below_columns` (each `name=score` pairs joined with ", "); scores and names only, never a cell value.
     - `generation_condition_parent_unseen` (conditional statistical column): some rows had a
       `condition_on` parent with no fitted combination and drew from the column's overall counts.
       `detail` carries `table`, `column`, `condition_on`, `rows`, `rows_null_parent`,
@@ -50,7 +54,35 @@ class QualityWarning:
     code: str
     provider: str
     column: str | None = None
-    detail: dict[str, Any] = field(default_factory=dict)
+    detail: Mapping[str, DetailInput] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Make the warning evidence-ready, the one place every producer's warning passes.
+
+        `EvidencePayload` refuses an empty provider and any non-scalar `detail` value. So
+        `provider` names the source (a provider, a strategy or a route) and is never empty, and
+        `detail` ends up scalar-only: a list or tuple of names becomes one string joined with
+        ", " here and nowhere else, and anything else non-scalar is refused (a per-row map must
+        become counts at the producer). Messages name the key, never a value.
+        """
+        if not isinstance(self.provider, str) or not self.provider:
+            raise ValueError(f"QualityWarning {self.code!r}: provider must be a non-empty string")
+        if self.column is not None and (not isinstance(self.column, str) or not self.column):
+            raise ValueError(f"QualityWarning {self.code!r}: column must be None or non-empty")
+        scalar: dict[str, DetailValue] = {}
+        for key, value in self.detail.items():
+            if not isinstance(key, str):
+                raise TypeError(f"QualityWarning {self.code!r}: detail keys must be strings")
+            if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+                scalar[key] = ", ".join(value)
+            elif value is None or isinstance(value, (str, int, float, bool)):
+                scalar[key] = value
+            else:
+                raise TypeError(
+                    f"QualityWarning {self.code!r}: detail[{key!r}] must be a str, int, float, "
+                    "bool, None or a list of strings"
+                )
+        object.__setattr__(self, "detail", scalar)
 
 
 def emit_generation_warning(

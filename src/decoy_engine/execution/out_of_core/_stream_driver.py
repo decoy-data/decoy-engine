@@ -68,6 +68,7 @@ from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core import _join as _join_ooc
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
@@ -77,7 +78,6 @@ from decoy_engine.execution.out_of_core._emit import (
 )
 from decoy_engine.execution.out_of_core._hash_run import OocHashRun
 from decoy_engine.execution.out_of_core._mask import mask_batch, table_seed
-from decoy_engine.execution.out_of_core._mask_group_c import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core._memory_estimate import resolve_phase_memory_limits
 from decoy_engine.execution.out_of_core._payload_store import (
     PayloadStore,
@@ -518,7 +518,9 @@ def stream_table(
                         policy = cfg.get("sub_floor_span")
                         warnings.append(
                             text_mask_sub_floor_warning(
-                                column, str(policy) if policy is not None else None, by_detector
+                                by_detector,
+                                policy=str(policy) if policy is not None else None,
+                                column=column,
                             )
                         )
         finally:

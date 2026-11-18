@@ -4108,7 +4108,7 @@ class TestIndependentChecksumValidationTeeth:
 # ---------------------------------------------------------------------------
 
 
-def _geo_cascade_warning(column: str, cascade_decisions: dict[str, str]) -> Any:
+def _geo_cascade_warning(column: str, rows_by_decision: dict[str, int]) -> Any:
     """Build a QualityWarning matching the real geo_generalize_cascade shape."""
     from decoy_engine.generation.pool._events import QualityWarning
 
@@ -4116,7 +4116,10 @@ def _geo_cascade_warning(column: str, cascade_decisions: dict[str, str]) -> Any:
         code="geo_generalize_cascade",
         provider="geo_generalize",
         column=column,
-        detail={"cascade_decisions": cascade_decisions},
+        detail={
+            "rows_generalized": sum(rows_by_decision.values()),
+            **{f"rows_{d}": n for d, n in rows_by_decision.items()},
+        },
     )
 
 
@@ -4130,7 +4133,7 @@ class TestSafeHarborTeeth:
         output zip5 column instead of being generalized or suppressed.
         """
         out_tbl = pa.table({"zip5": ["03601", "941", "606"]})
-        warning = _geo_cascade_warning("zip5", {"row_1": "zip3", "row_2": "zip3"})
+        warning = _geo_cascade_warning("zip5", {"zip3": 2})
         result = SimpleNamespace(outputs={"members": out_tbl}, warnings=[warning])
         spec = [
             SafeHarborSpec(
@@ -4148,15 +4151,15 @@ class TestSafeHarborTeeth:
 
         RED: 2 restricted-ZIP3 rows were planted and both are correctly
         suppressed in the ACTUAL output ("" in both positions), but the
-        engine's self-reported cascade_decisions detail only records ONE
-        'suppressed' entry -- a bookkeeping bug that dropped a decision. The
+        engine's self-reported rows_suppressed detail only counts ONE
+        suppressed row -- a bookkeeping bug that dropped a decision. The
         independent output-value count (2) now disagrees with the engine's
         self-report (1), and check_safe_harbor must raise on that
         cross-check, not merely trust the (wrong) self-report.
         """
         out_tbl = pa.table({"zip5": ["", "", "941", "606"]})
         warning = _geo_cascade_warning(
-            "zip5", {"row_0": "suppressed"}
+            "zip5", {"suppressed": 1}
         )  # row_1's suppression was dropped from bookkeeping
         result = SimpleNamespace(outputs={"members": out_tbl}, warnings=[warning])
         spec = [
@@ -4173,7 +4176,7 @@ class TestSafeHarborTeeth:
     def test_good_safe_harbor_passes(self) -> None:
         """Correctly suppressed/generalized output with matching counts must NOT raise."""
         out_tbl = pa.table({"zip5": ["", "", "941", "606"]})
-        warning = _geo_cascade_warning("zip5", {"row_0": "suppressed", "row_1": "suppressed"})
+        warning = _geo_cascade_warning("zip5", {"suppressed": 2})
         result = SimpleNamespace(outputs={"members": out_tbl}, warnings=[warning])
         spec = [
             SafeHarborSpec(
@@ -4250,7 +4253,7 @@ class TestSafeHarborPrefixAnyLengthTeeth:
         """
         out_tbl = pa.table({"zip5": ["", "941", "606"]})  # only 1 suppressed, not 2
         warning = _geo_cascade_warning(
-            "zip5", {"row_0": "suppressed", "row_3": "suppressed"}
+            "zip5", {"suppressed": 2}
         )  # engine claims 2 suppressed but only 1 is actually ""
         result = SimpleNamespace(outputs={"members": out_tbl}, warnings=[warning])
         spec = [
@@ -4272,7 +4275,7 @@ class TestSafeHarborPrefixAnyLengthTeeth:
         suppressed to "". No restricted prefix appears at any length.
         """
         out_tbl = pa.table({"zip5": ["941", "606", "", ""]})  # 2 zip3 + 2 suppressed
-        warning = _geo_cascade_warning("zip5", {"row_2": "suppressed", "row_3": "suppressed"})
+        warning = _geo_cascade_warning("zip5", {"suppressed": 2})
         result = SimpleNamespace(outputs={"members": out_tbl}, warnings=[warning])
         spec = [
             SafeHarborSpec(

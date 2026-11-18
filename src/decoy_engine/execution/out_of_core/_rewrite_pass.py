@@ -26,9 +26,10 @@ from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution.out_of_core import _join as _join_ooc
-from decoy_engine.execution.out_of_core import _mask_group_c, _runner, _validate_batch
+from decoy_engine.execution.out_of_core import _runner, _validate_batch
 from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
@@ -296,8 +297,10 @@ def _stream_table(
                         cfg = provider_config_to_dict(column_seed.provider_config)
                         policy = cfg.get("sub_floor_span")
                         warnings.append(
-                            _mask_group_c.text_mask_sub_floor_warning(
-                                column, str(policy) if policy is not None else None, by_detector
+                            text_mask_sub_floor_warning(
+                                by_detector,
+                                policy=str(policy) if policy is not None else None,
+                                column=column,
                             )
                         )
         finally:
