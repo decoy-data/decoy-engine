@@ -6,7 +6,8 @@ form 82-E3b adds, and skip a plan refusal for it. Every such module must call `n
 from `decoy_engine._nested_json`, which is the only reader.
 
 The scan is per module. A module is a reader when it has a `"nested"` literal in a comparison
-(`==`, `!=`, `in`, `not in`) or as a dict key, and a child read: `.get("strategy")`,
+(`==`, `!=`, `in`, `not in`) or as a dict key (`"nested"` or a prefixed key such as
+`"scalar:nested"`), and a child read: `.get("strategy")`,
 `["strategy"]`, `.get("strategy_config")` or `["strategy_config"]`. A reader must import and call
 `nested_children`. Registries that name `"nested"` in a set or table without reading the child
 (for example `validators/_leak_check.py`) have no comparison or key, so the shape does not match
@@ -41,6 +42,15 @@ def _is_nested(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value == "nested"
 
 
+def _is_nested_key(node: ast.AST | None) -> bool:
+    """A dict key for the strategy: `"nested"`, or a prefixed registry key like `"scalar:nested"`."""
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and (node.value == "nested" or node.value.endswith(":nested"))
+    )
+
+
 def _names_nested(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Compare):
@@ -51,7 +61,7 @@ def _names_nested(tree: ast.AST) -> bool:
                     _is_nested(e) for e in side.elts
                 ):
                     return True
-        if isinstance(node, ast.Dict) and any(k is not None and _is_nested(k) for k in node.keys):
+        if isinstance(node, ast.Dict) and any(_is_nested_key(k) for k in node.keys):
             return True
     return False
 
@@ -126,6 +136,7 @@ def test_the_registry_that_only_names_nested_is_not_a_reader() -> None:
         'def f(c, pc):\n    return c["strategy"] != "nested" or pc.get("strategy_config")\n',
         'def f(c, pc):\n    if c["strategy"] in ("nested", "x"):\n        return pc["strategy_config"]\n',
         'def f(c, pc):\n    if c["strategy"] in {"x", "nested"}:\n        return pc.get("strategy")\n',
+        'T = {"scalar:nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'T = {"nested": 1}\ndef f(pc):\n    return pc.get("strategy_config")\n',
         'def f(c, pc):\n    return "nested" == c["strategy"] and pc.get("strategy")\n',
         'from decoy_engine._nested_json import other\n'
@@ -143,7 +154,7 @@ def test_the_scan_is_red_on_each_seeded_shape(source: str) -> None:
         'def f(c, pc):\n    return c["strategy"] == "nested" and nested_children(pc)\n',
         "from decoy_engine._nested_json import nested_children as kids\n"
         'def f(c, pc):\n    return c["strategy"] == "nested" and kids(pc)\n',
-        'def f(c):\n    return c["strategy"] == "nested"\n',
+        'def f(c):\n    return c["kind"] == "nested"\n',
         'def f(pc):\n    return pc.get("strategy")\n',
         'KNOWN = frozenset({"nested"})\ndef f(pc):\n    return pc.get("strategy")\n',
     ],
