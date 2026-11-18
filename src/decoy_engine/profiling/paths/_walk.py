@@ -77,10 +77,11 @@ def kind_of(value: Any) -> str | None:
 
 
 class _Level:
-    __slots__ = ("cells", "collapsed", "counts", "kept", "last", "last_cell")
+    __slots__ = ("cells", "collapsed", "counts", "kept", "last", "last_cell", "runs")
 
     def __init__(self) -> None:
         self.cells = 0  # cells in which an object with this pattern appears
+        self.runs = 0  # detector runs on this level's keys: stored and rejected keys both count
         self.last_cell = -1
         self.counts: dict[str, int] = {}  # key -> cells it appears in
         self.last: dict[str, int] = {}  # key -> last cell counted, so a cell counts once
@@ -125,13 +126,17 @@ class Levels:
                 level.last[key] = self.cell
                 level.counts[key] += 1
             return str(key)
-        if not isinstance(key, str) or not _KEY.fullmatch(key) or self._is_data(key):
+        if not isinstance(key, str) or not _KEY.fullmatch(key):
             return WILD
-        self.add(level, key)
-        if len(level.counts) > SCAN_MAP_KEYS:
+        data = self._is_data(level, key)
+        if not data:
+            self.add(level, key)
+        # Keys rejected as data count toward the level's budget too, so an object of endless
+        # distinct data-like keys collapses instead of running a detector on every one.
+        if len(level.counts) > SCAN_MAP_KEYS or level.runs > SCAN_MAP_KEYS:
             self._collapse(pattern, level)
             return WILD
-        return key
+        return WILD if data else key
 
     def add(self, level: _Level, key: str) -> None:
         """Store a key that passed rules 1 and 2. The only place a key text enters the state."""
@@ -150,13 +155,14 @@ class Levels:
         ]:
             self.key_total -= len(self._levels.pop(below).counts)
 
-    def _is_data(self, key: str) -> bool:
-        """Key rule 2: a detector hit on the key text. The answer is cached, never the text kept
-        past a bounded number of keys."""
+    def _is_data(self, level: _Level, key: str) -> bool:
+        """Key rule 2: a detector hit on the key text. A detector run (not a cached answer) is
+        charged to the level; the cache is bounded, so no more than a few keys are kept."""
         verdict = self._verdicts.get(key)
         if verdict is None:
             if len(self._verdicts) >= _VERDICTS:
                 self._verdicts.clear()
+            level.runs += 1
             verdict = bool(run_all_detectors(pd.Series([key], dtype=object), ""))
             self._verdicts[key] = verdict
         return verdict
