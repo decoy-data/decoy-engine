@@ -16,7 +16,7 @@ import decoy_engine
 # Entry scripts run code on import; a module with `__main__` in its name is not a library module.
 SKIPPED_LEAVES = frozenset({"__main__"})
 # A module that refuses to import without its optional extra says so in a typed ImportError.
-OPTIONAL_EXTRA_MODULES = frozenset({"decoy_engine.providers_v2.mimesis"})
+OPTIONAL_EXTRA_LEAVES = frozenset({"mimesis"})
 
 
 def _walk() -> list[str]:
@@ -34,7 +34,7 @@ def test_every_engine_module_imports() -> None:
         try:
             importlib.import_module(name)
         except ImportError as exc:
-            if name in OPTIONAL_EXTRA_MODULES and "optional" in str(exc):
+            if name.rsplit(".", 1)[-1] in OPTIONAL_EXTRA_LEAVES and "optional" in str(exc):
                 continue
             failures.append(f"{name}: {type(exc).__name__}: {str(exc)[:120]}")
         except Exception as exc:

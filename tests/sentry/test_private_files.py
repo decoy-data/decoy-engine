@@ -21,7 +21,7 @@ execute bit or is not a constant.
 
 P5 an `os.open` that creates a file with mode 0600 and no `O_NOFOLLOW`, flags read
 through `os.O_*` and `_osflags.X` (mapped by `POSIX_NAME`; a module-level or local name is
-followed one step).
+followed to its assignment).
 
 Named limits: `duckdb.connection.execute` SQL is not read, so those dispositions are the hand
 review's; P3 and P4 see what the file-access scan (`tests/sentry/fa/`, reused here) records
@@ -258,15 +258,20 @@ def _module_assigns(root: Path, module: str) -> dict[str, ast.expr]:
     }
 
 
-def _flags_of(expr: ast.AST, local: dict[str, ast.expr], module: dict[str, ast.expr]) -> set[str]:
+def _flags_of(
+    expr: ast.AST,
+    local: dict[str, ast.expr],
+    module: dict[str, ast.expr],
+    seen: frozenset[str] = frozenset(),
+) -> set[str]:
     names: set[str] = set()
     for sub in ast.walk(expr):
         if isinstance(sub, ast.Attribute):
             names.add(_flag_name(sub))
-        elif isinstance(sub, ast.Name) and sub.id not in FLAG_MODULES:
+        elif isinstance(sub, ast.Name) and sub.id not in FLAG_MODULES and sub.id not in seen:
             followed = local.get(sub.id) or module.get(sub.id)
-            if followed is not None and followed is not expr:
-                names |= _flags_of(followed, {}, {})
+            if followed is not None:
+                names |= _flags_of(followed, {}, module, seen | {sub.id})
     return names
 
 
