@@ -26,7 +26,7 @@ from pydantic import (
 )
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from decoy_engine._value_free import PLAIN_NAME_MAX, PLAIN_NAME_PATTERN, Count, SharedRules
+from decoy_engine._value_free import Count, SharedRules
 from decoy_engine.run_result import SafeName, Sha256
 
 __all__ = ["EvidencePayload", "ExportLayout", "SampleRunPayload"]
@@ -35,10 +35,9 @@ Number = StrictInt | StrictFloat
 # The `cli-local-1` manifest predates the shared value-free types, so its names and paths
 # keep their wider shape: a manifest already on disk must still read. New payloads use SafeName,
 # Sha256 and the other shared types.
-_PLAIN = PLAIN_NAME_PATTERN
-Name = Annotated[
-    StrictStr, StringConstraints(min_length=1, max_length=PLAIN_NAME_MAX, pattern=_PLAIN)
-]
+_PLAIN = r"^[^\x00-\x1f\x7f]+$"
+# A name is any non-empty str: the shared rule `is_plain_name`, which accepts every name the config does.
+Name = Annotated[StrictStr, StringConstraints(min_length=1)]
 RelPath = Annotated[StrictStr, StringConstraints(min_length=1, max_length=1024, pattern=_PLAIN)]
 # Sample-run paths are machine paths, reduced to file names by export, so they stay loose too.
 PathText = RelPath

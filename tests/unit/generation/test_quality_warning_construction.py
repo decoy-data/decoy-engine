@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.config._tables import ColumnConfig
 from decoy_engine.execution.native._text_mask_route import text_mask_sub_floor_warning
 from decoy_engine.generation.pool._events import QualityWarning
 from tests.unit.records._helpers import corpus, make
@@ -70,12 +71,12 @@ def test_empty_column_is_refused_but_none_is_allowed() -> None:
         QualityWarning(code="c", provider="p", column="")
 
 
-_BAD_NAMES = ["\x1f", "a\nb", "tab\there", "nul\x00", "del\x7f", "x" * 257, 5]
+_BAD_NAMES = [5, b"x", 1.5]
 
 
 @pytest.mark.parametrize("bad", _BAD_NAMES)
 def test_code_provider_and_column_must_be_plain_names(bad: Any) -> None:
-    """The evidence model's name rule (no control character, at most 256 characters)."""
+    """A name is a non-empty str; a non-str is refused."""
     with pytest.raises(ValueError):
         QualityWarning(code=bad, provider="p")
     with pytest.raises(ValueError):
@@ -84,10 +85,17 @@ def test_code_provider_and_column_must_be_plain_names(bad: Any) -> None:
         QualityWarning(code="c", provider="p", column=bad)
 
 
-def test_the_longest_plain_name_is_accepted_and_the_refusal_names_no_value() -> None:
-    QualityWarning(code="c", provider="p" * 256, column="é" * 256)
+@pytest.mark.parametrize("name", ["p" * 257, "é" * 5000, "a\x1fb", "a\nb", "nul\x00", "del\x7f"])
+def test_every_name_the_config_admits_is_accepted(name: str) -> None:
+    """The config admits any str as a column name, so the warning must build for it."""
+    ColumnConfig(name=name, strategy="s")
+    warning = QualityWarning(code="c", provider=name, column=name)
+    assert warning.column == name
+
+
+def test_the_refusal_names_no_value() -> None:
     with pytest.raises(ValueError) as caught:
-        QualityWarning(code="c", provider="SECRET\x1f-VALUE")
+        QualityWarning(code="c", provider=5, column="SECRET-VALUE")  # type: ignore[arg-type]
     assert "SECRET" not in str(caught.value)
 
 

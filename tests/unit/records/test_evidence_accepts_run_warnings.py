@@ -25,6 +25,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from decoy_engine.config._tables import ColumnConfig
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._residency_warning import (
     _SHAPE_FLAGS,
@@ -74,10 +75,16 @@ _DETAIL_VALUES = st.one_of(
 )
 
 
+# Every column name the public configuration admits: any str, so any length and any character.
+_CONFIG_NAMES = st.text(min_size=1, max_size=600).filter(
+    lambda n: ColumnConfig(name=n, strategy="s") is not None
+)
+
+
 @settings(max_examples=150, deadline=None, derandomize=True)
 @given(
-    provider=st.one_of(st.just(""), st.text(min_size=1, max_size=20)),
-    column=st.one_of(st.none(), st.just(""), st.text(min_size=1, max_size=20)),
+    provider=st.one_of(st.just(""), _CONFIG_NAMES),
+    column=st.one_of(st.none(), st.just(""), _CONFIG_NAMES),
     detail=st.dictionaries(st.text(min_size=1, max_size=12), _DETAIL_VALUES, max_size=5),
 )
 def test_whatever_the_constructor_accepts_the_evidence_model_accepts(
@@ -178,3 +185,19 @@ def test_residency_warning_refuses_an_unknown_shape() -> None:
     # A new shape must get a flag in `_SHAPE_FLAGS`; dropping it silently would hide the shape.
     with pytest.raises(KeyError):
         residency_quality_warning(("a shape with no flag",))
+
+
+@pytest.mark.parametrize("column", ["c" * 257, "c" * 1000, "age\x1f", "a\nb", "tab\there", "x\x7f"])
+def test_top_code_warning_for_a_config_admitted_column_name_is_built_and_accepted(
+    column: str,
+) -> None:
+    """The real top_code producer on a column name the config admits: no ValueError, record accepts."""
+    import pyarrow as pa
+
+    from tests.unit.execution.test_top_code import _col, _plan, _run
+
+    ColumnConfig(name=column, strategy="top_code")  # the config admits this name
+    out = _run(_plan(column, _col((("preset", "hipaa_age"),))), pa.table({column: [89, 105]}))
+    (warning,) = out.warnings
+    assert warning.column == column
+    _accepted([warning])

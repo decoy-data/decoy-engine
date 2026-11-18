@@ -24,8 +24,6 @@ from annotated_types import Ge
 from pydantic import BaseModel, Field, Strict, create_model
 
 __all__ = [
-    "PLAIN_NAME_MAX",
-    "PLAIN_NAME_PATTERN",
     "Count",
     "SharedRules",
     "ValueFree",
@@ -35,22 +33,14 @@ __all__ = [
 ]
 
 
-# A plain name: 1 to PLAIN_NAME_MAX characters, none of them a control character. The one rule for
-# the names a manifest holds (a warning's code, provider and column, a strategy, a table), so the
-# producer that builds one and the record that stores it cannot disagree.
-PLAIN_NAME_PATTERN = r"^[^\x00-\x1f\x7f]+$"
-PLAIN_NAME_MAX = 256
-
-
+# A plain name: a non-empty str, with no limit on length or characters. The public configuration
+# admits any str as a column, table or strategy name, so the one rule for the names a manifest holds
+# (a warning's code, provider and column, a strategy, a table) refuses nothing a config accepts. A
+# narrower rule made a producer raise on a name the config let through. The producer that builds a
+# name and the record that stores it share this rule, so they cannot disagree.
 def is_plain_name(value: object) -> bool:
-    """True when `value` is a str the record model accepts as a name."""
-    # The same rule as PLAIN_NAME_PATTERN, without a Python `re` (its `$` accepts a trailing
-    # newline, which the pydantic pattern refuses).
-    return (
-        isinstance(value, str)
-        and 0 < len(value) <= PLAIN_NAME_MAX
-        and not any(ord(c) < 0x20 or c == "\x7f" for c in value)
-    )
+    """True when `value` is a non-empty str, a structural name the record model accepts."""
+    return isinstance(value, str) and len(value) > 0
 
 
 class SharedRules(BaseModel):
