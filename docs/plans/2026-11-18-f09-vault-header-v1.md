@@ -1,4 +1,4 @@
-Status: plan (revision 2, 2026-11-18; Dennis round 1 folded; owner answers of 2026-11-18 recorded; next: Codex plan gate)
+Status: plan (revision 2.1, 2026-11-18; Dennis round 1 and Codex plan gate folded; owner answers of 2026-11-18 recorded)
 
 # F09 1.0 cut: authenticated, versioned vault header (roadmap row 79) and the F29 close-out (row 66)
 
@@ -12,9 +12,9 @@ Anchors: a path with no prefix is in decoy-engine; a path with the prefix `C:` i
 
 Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN: guarantee, non-goals, size, design notes, choke point, placement, established solutions, acceptance tests first), `security.md` (vetted crypto, no custom protocol, secrets out of errors), `config-secrets-and-supply-chain.md` (a new pinned dependency), `api-and-compatibility.md`, `data-and-migrations.md`, `cross-cutting-concerns.md` (one choke point plus a guard test and its mutation), `refactoring.md` (pure move first), `reuse-first.md`, `testing.md` (T0 to T2, escalation triggers, mutations), `proportionality.md`, `documentation.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md`.
 
-Risk: R2 overall. E1 changes a frozen on-disk format and the crypto of the most sensitive artifact the engine writes. E-DEP adds a base dependency (a dependency-lock change, so a full-suite escalation trigger). E0 is R1 (pure move). E7 is R0 (docs plus one doc test). C1 is R2 (a frozen `--json` shape gets new keys, error text changes, and the certified dependency set moves). Approver: Cam (owner). Plan gate: Dennis round 1 done (GO-WITH-FIXES, folded here), Codex next. Build gates for E-DEP, E1 and C1: Dennis then Codex.
+Risk: R2 overall. E1 changes a frozen on-disk format and the crypto of the most sensitive artifact the engine writes. E-DEP adds a base dependency (a dependency-lock change, so a full-suite escalation trigger). E0 is R1 (pure move). E7 is R0 (docs plus one doc test). C1 is R2 (a frozen `--json` shape gets new keys, error text changes, and the certified dependency set moves). Approver: Cam (owner). Plan gate: Dennis round 1 (GO-WITH-FIXES) and Codex (GO-WITH-FIXES on `fe357ec37`) both folded here. Build gates for E-DEP, E1 and C1: Dennis then Codex.
 
-Why 1.0: row 79's 1.0 test is "freeze". `decoy-vault/v2` becomes permanent at the first real v2 vault under the compatibility contract (section 3.2, pre-GA vault key floor note). After 1.0 a header change costs a second hard cut and a reader kept forever. It must merge before the D-4 engine freeze after the 2026-12-04 build target.
+Why 1.0: row 79's 1.0 test is "freeze". `decoy-vault/v2` becomes permanent at the first real v2 vault under the compatibility contract (section 3.2, pre-GA vault key floor note). After 1.0 a header change costs a second hard cut and a reader kept forever. The 1.0 build target is 2026-12-04 and the D-4 engine freeze follows it; this plan targets the E1 merge for 2026-11-27 (section 12) so that C1 lands before the build target.
 
 ## Owner decisions (2026-11-18)
 
@@ -35,7 +35,7 @@ Dennis round 1 on `ecbfe65ab`: GO-WITH-FIXES (0 BLOCKER, 4 HIGH, 8 MEDIUM, 7 LOW
 | H1 engine `unmask.py:294-297` re-raises every `VaultError` as `ExecutionError(code=exc.code)`, and the CLI catches `(ExecutionError, ConfigError)` (`C:src/decoy/cli/unmask.py:245`) before `except VaultError` (`:248`) | `vault_error_text` takes `(code, message)`. The CLI routes any exception whose `code` is in one vault code set (the engine's `VAULT_REFUSAL_CODES`, built from `reasons.runtime` constants), whatever its class. CV-5 runs the real `unmask` path. CV-7 fails on vault-code text built anywhere outside `cli/vault/_errors.py`, inside `ExecutionError` branches too | 4.4, 8.2 |
 | H2 a KCV already exists in `delivery/resume/_fingerprint.py:28,109-118` | One function `key_check_value(key_source, label, context="")` in `internal/crypto.py` with one label table. Resume moves onto it byte for byte (its store is frozen). A sentry fails on any other KCV construction. Why a key-source callable and not raw bytes or a `PreparedSecret` method: section 10 | 4.3, 8.1 AT-K1 to AT-K3, 10 |
 | H3 the secret-material census is shrink-only | Owner chose the no-growth design. Section 6.1 names every census, registry and frozen-surface key that moves, shrinks or is added. AT-V16 fails on any added census entry that is not a `moved_from` rehome | 6.1, 8.1 |
-| H4 two named mutations could not turn red | A `_format` test seam (`_open_stream`, `_push_segment`, the header model) lets tests build authenticated but inconsistent files. AT-V5b and AT-V5c cover "no final tag" and "entry_count off by one". "Ignore the final tag" is defined precisely | 8 |
+| H4 two named mutations could not turn red | A `_format` test seam (`_open_stream`, `_push_segment`, the `_HEADER` declaration) lets tests build authenticated but inconsistent files. AT-V5b and AT-V5c cover "no final tag" and "entry_count off by one". "Ignore the final tag" is defined precisely | 8 |
 | M1 the framing record overstated "copies Tink" | Superseded by owner decision Q-B C: libsodium secretstream does the framing. Section 2 cites the libsodium documentation; section 2.1 lists only what Decoy adds around the stream. Known-answer test AT-V19. `vault/_format.py` registered in `docs/methodology-registry.yaml` with a `Pattern:` line | 2, 2.1, 8.1, 9 |
 | M2 no byte cap per segment | Plaintext cap of 64 MiB per segment (secretstream allows about 256 GB per message, so the cap bounds memory, not the cipher). The writer halves a row window that is too big. One entry over the cap gives `vault_entry_too_large`. The reader refuses a frame longer than the cap plus 17 bytes before it decrypts. AT-V20 | 4.1, 4.2, 8.1 |
 | M3 `vault_id` lifetime | Drawn fresh in every `serialize()` call, never cached. AT-V21 | 4.1, 8.1 |
@@ -52,13 +52,27 @@ Dennis round 1 on `ecbfe65ab`: GO-WITH-FIXES (0 BLOCKER, 4 HIGH, 8 MEDIUM, 7 LOW
 | L6 | Namespace reservation recorded as a follow-up | 17 |
 | L7 | AT-V17 asserts `__cause__` and `__context__` are None | 8.1 |
 
+## Revision 2.1 changes
+
+Codex plan gate on `fe357ec37`: GO-WITH-FIXES (3 V1, 1 DESIGN, 3 V2-LOG). It confirmed the core crypto design. Each finding is folded:
+
+| Finding | Change | Where |
+|---|---|---|
+| V1 DP certification in the wrong slice: promoting PyNaCl to the base closure changes the engine DP lock fingerprint when E-DEP lands, and `tests/sentry/test_dp_lock_row.py:71` requires `_CERTIFIED_STACKS` to move in the same lock change | E-DEP adds the new engine-profile row to `quality/dp_provenance.py` `_CERTIFIED_STACKS` (released rows kept). Before the engine release that carries E1, release prep adds the projected CLI runtime row (new engine version plus PyNaCl). C1 pins the matching `requirements-certified.txt` header. AT-P3 | 2.2, 8.1, 12 |
+| V1 the tamper guarantee contradicted the reader: with the right secret, an edited `key_check` or `vault_id` fails the KCV check first and gives `vault_key_mismatch` | Guarantee 1 and 3, read step 6 and FM-3 now say so. A KCV mismatch means a different secret or an edited `key_check` or `vault_id`; the engine cannot tell these apart, and the hint names both fields. New cell AT-V8b for a `vault_id` edit | 1.1, 4.2, 7, 8.1 |
+| DESIGN `_VaultHeaderModel` plus `object_pairs_hook` copied the central strict-record machinery | The header is one `ObjectSpec` declaration built from `decoy_engine._canonical` (`ExactSpec`, `VersionSpec`, `CountSpec`, `ShapedSpec`), read with `parse_or_token` and `attempt`, written with `canonical_json_bytes(spec.dump(...))`, as `delivery/resume/_records.py` does. Only the vault rules stay local: `format` first, `segment_rows != 0`, and the mapping from closed tokens to vault codes | 4.1, 4.2, 8, 9 |
+| V1 AT-V19 could not exercise production: `_open_vault` returns rows decoded from Parquet, but the fixture used raw `b"segment-0"` | The fixture is a whole v3 vault file made once by the production writer, with real Parquet segments. The test asserts the mapping and header through `_open_vault`, and separately decrypts the same frames with raw PyNaCl bindings and reads the plaintexts with pyarrow. Stored bytes make the fixture independent of the pyarrow version that reads it | 8.1 |
+| V2-LOG D-4 date | Line on why 1.0 corrected: build target 2026-12-04, E1 target 2026-11-27 | top |
+| V2-LOG the wheel-tag check is not an install test | 2.2 says AT-P1 reads wheel tags only; a real Windows install, import and secretstream smoke belongs to WIN-FEAS (row 89) and WIN-RUNNER (row 6), recorded as a follow-up | 2.2, 17 |
+| V2-LOG wording | 2.1 says "no custom cipher or AEAD construction" | 2.1 |
+
 ## 1. Guarantee and non-goals
 
 ### 1.1 What this change promises
 
-1. A vault written by this engine is `decoy-vault/v3`. Its segments are one libsodium secretstream, and the header is bound to every segment as additional data. Any change to a header field, any reordering, dropping, duplication or truncation of segments, a stream without its final tag, and any bytes after the final segment make `load_vault` refuse with the new code `vault_tampered`. No partial mapping is returned.
+1. A vault written by this engine is `decoy-vault/v3`. Its segments are one libsodium secretstream, and the header is bound to every segment as additional data. Every change to the file is refused and no partial mapping is returned. With the right secret: an edited `key_check` or `vault_id` gives `vault_key_mismatch` (the KCV check runs first; see 3); an edited `format` gives `vault_format_unsupported`; an edited `seed_protocol_version` gives `vault_protocol_version_mismatch`; a header that breaks the field rules gives `vault_unreadable`; any other header edit that keeps the rules (`key_version`, `stream_header`, `ambiguous_dropped`, `entry_count`, `segment_rows`), any reordering, dropping, duplication or truncation of segments, a stream without its final tag, and any bytes after the final segment give the new code `vault_tampered`.
 2. Each vault has its own key. `vault_id` is 32 bytes from `os.urandom`, drawn fresh in every `serialize()` call, and the stream key is `derive(mask_key, "vault", b"vault-key/v2" + uint32be(32) + vault_id)`. Two vaults written under the same secret never share a key.
-3. The header carries a key check value (`key_check`) bound to `vault_id`. A wrong secret is refused with `vault_key_mismatch` before any segment is decrypted, and the message names the vault's recorded `key_version`. A right secret with a damaged file gives `vault_tampered`. The two causes have different remedies, so the user is told which one it is.
+3. The header carries a key check value (`key_check`) bound to `vault_id`. A KCV mismatch is refused with `vault_key_mismatch` before any segment is decrypted, and the message names the vault's recorded `key_version`. A mismatch has two possible causes that the engine cannot tell apart: a different secret, or an edited `key_check` or `vault_id` field. The hint names both, including both field names. Damage anywhere else, with the right secret, gives `vault_tampered`.
 4. The header records `key_version` (the prepared secret's non-secret label) and `entry_count`. `decoy report vault` shows the format, the recorded key version and a short vault id, and its `--json` gains `format`, `key_version` and `vault_id`.
 5. A file with any other vault magic (`DCYVAULT2\n` today) is refused with `vault_format_unsupported` and a remedy: re-run the mask with `--vault` under this version (decision Q2).
 6. Every existing guarantee holds: the 32-byte key floor (`weak_mask_secret` before any file is read), `vault_crypto_not_installed` (now about PyNaCl), `vault_protocol_version_mismatch`, no key in any traceback frame (`_opaque` rules and the secret-material census, which does not grow), no value and no path in error text, F22 adopt-or-refuse (`adopt_vault`, `issue_commit` as the only `VaultCommit` issuer), and the existing public names other than the `VaultWriter` constructor.
@@ -102,7 +116,7 @@ libsodium does all segment encryption, nonces, counters, rekeying and the end-of
 | `entry_count` and `segment_rows` | Rows are the unit the reader rebuilds; the count is a second check that the row set is whole |
 | Length-prefix framing (`_frame`, existing) | secretstream ciphertexts carry no length of their own; the existing 4-byte frame is reused |
 
-No security exception record is needed: there is no cipher or framing code of ours.
+No security exception record is needed: there is no custom cipher or AEAD construction.
 
 ### 2.2 Dependency record (PyNaCl)
 
@@ -115,8 +129,9 @@ No security exception record is needed: there is no cipher or framing code of ou
   - engine `NOTICE` regenerated with `scripts/dev/licenses_write.sh` (the `pynacl` line goes from `[extra: sftp]` to `[runtime]`; libsodium's ISC notice is in the PyNaCl wheel's license file);
   - engine `docs/license-policy.md` (no new exception; one line in the runtime list if the doc lists packages);
   - engine SBOM (`scripts/release/sbom.sh` reads the base profile from `uv.lock`, so PyNaCl appears with no script change; `tests/packaging/test_sbom.py` checks the count against the export);
-  - a new wheel check `tests/packaging/test_base_wheels.py` (there is none today for third-party base dependencies): for each package in the base runtime closure of `uv.lock`, require a `py3-none-any` wheel or wheels for `win_amd64`, a macOS `arm64` or `universal2` tag, and manylinux `x86_64` and `aarch64`. Gaps that exist on main today go into an allowlist in the test with a reason each; PyNaCl may not be on it;
-  - CLI `C:requirements-certified.txt` gains `pynacl==1.6.2` at the repin that carries E1 (it is the full third-party closure of the certified install, and `cffi` is already there). That changes the DP proof-stack fingerprint; the engine `quality/dp_provenance.py` `_CERTIFIED_STACKS` row and the CLI file header move through the existing per-release certification step, as on every engine version bump (`C:tests/e2e/test_dp_provenance_certification.py`, `C:tests/sentry/test_ci_lock_installs.py`);
+  - a new wheel check `tests/packaging/test_base_wheels.py` (there is none today for third-party base dependencies): for each package in the base runtime closure of `uv.lock`, require a `py3-none-any` wheel or wheels for `win_amd64`, a macOS `arm64` or `universal2` tag, and manylinux `x86_64` and `aarch64`. Gaps that exist on main today go into an allowlist in the test with a reason each; PyNaCl may not be on it. This check reads wheel tags from the lock only. It does not install, import or run secretstream on Windows; that smoke belongs to WIN-FEAS (row 89) and WIN-RUNNER (row 6) (section 17);
+  - engine DP certification, in E-DEP itself: the base closure changes, so the engine lock-profile fingerprint changes when E-DEP lands, and `tests/sentry/test_dp_lock_row.py:71` requires `quality/dp_provenance.py` `_CERTIFIED_STACKS` to hold the new row in the same lock change. E-DEP writes the new engine-profile row with `scripts/release/dp_rows.py` and keeps every released row (AT-P3);
+  - CLI DP certification: before the engine release that carries E1, release prep adds the projected CLI runtime row to `_CERTIFIED_STACKS` (the new engine version plus PyNaCl). C1 then adds `pynacl==1.6.2` to `C:requirements-certified.txt` (the full third-party closure of the certified install; `cffi` is already there) and pins the matching fingerprint in its header (`C:tests/e2e/test_dp_provenance_certification.py`, `C:tests/sentry/test_ci_lock_installs.py`);
   - CLI SBOM: `C:scripts/release/sbom.sh` reads `requirements-certified.txt`, so no script change;
   - the engine repin checklist (compat, fences, FROZEN, docs, `PIN_PREFIX`, Dockerfile ARG, catalog): no extra item; the Dockerfile installs from wheels.
 
@@ -145,19 +160,19 @@ frame(c_0)       uint32be length + secretstream push(segment 0, ad, TAG_MESSAGE)
 frame(c_n)       the last segment, pushed with TAG_FINAL; nothing follows it
 ```
 
-One header model, `_VaultHeaderModel` in `vault/_format.py`, writes and parses the header for both the writer and the reader. Fields (a closed set of nine):
+One header declaration in `vault/_format.py`, `_HEADER = ObjectSpec(_HeaderRecord, _HEADER_FIELDS)` built from `decoy_engine._canonical` (as `delivery/resume/_records.py`), reads and writes the header for both the writer and the reader. The writer emits `canonical_json_bytes(_HEADER.dump(record))`; the reader uses `parse_or_token` (strict JSON: duplicate keys, non-finite numbers and lone surrogates refused) and `attempt(_HEADER.load, parsed)`, so a refusal comes back as a closed token outside any handler. No parser or hook of its own. Fields (a closed set of nine; spec in brackets):
 
 | Field | Type and rule |
 |---|---|
-| `format` | `"decoy-vault/v3"` |
-| `seed_protocol_version` | int (not bool), equal to `SEED_PROTOCOL_VERSION` |
-| `key_version` | str, `is_key_version_label` true |
-| `key_check` | str, fullmatch `[0-9a-f]{16}` |
-| `vault_id` | str, fullmatch `[0-9a-f]{64}` |
-| `stream_header` | str, fullmatch `[0-9a-f]{48}` (the 24-byte secretstream header) |
-| `ambiguous_dropped` | int (not bool, not a numeric string), at least 0 |
-| `entry_count` | int (not bool, not a numeric string), at least 0 |
-| `segment_rows` | int (not bool, not a numeric string), from 1 to 1,048,576 |
+| `format` | `"decoy-vault/v3"` [`ExactSpec`] |
+| `seed_protocol_version` | int (not bool), equal to `SEED_PROTOCOL_VERSION` [`VersionSpec`] |
+| `key_version` | str, `is_key_version_label` true [`ShapedSpec`] |
+| `key_check` | str, fullmatch `[0-9a-f]{16}` [`ShapedSpec`] |
+| `vault_id` | str, fullmatch `[0-9a-f]{64}` [`ShapedSpec`] |
+| `stream_header` | str, fullmatch `[0-9a-f]{48}` (the 24-byte secretstream header) [`ShapedSpec`] |
+| `ambiguous_dropped` | int (not bool, not a numeric string), at least 0 [`CountSpec`] |
+| `entry_count` | int (not bool, not a numeric string), at least 0 [`CountSpec`] |
+| `segment_rows` | int (not bool, not a numeric string), at most 1,048,576 [`CountSpec`], and not 0 (the one local check) |
 
 Keys and segments:
 
@@ -176,9 +191,9 @@ What the KCV reveals (L1): the mask root is an HKDF output of the user's secret,
 1. Key floor (`weak_mask_secret`) and crypto import (`vault_crypto_not_installed`, which now names PyNaCl), before the file is read. Unchanged order.
 2. Read the bytes (`vault_unreadable` on an OS error, as today).
 3. Magic. `DCYVAULT3\n` continues. Any other match of `DCYVAULT[0-9]+\n` gives `vault_format_unsupported` with the re-mask remedy. Anything else gives `vault_unreadable`.
-4. Header frame: length at most 4096, else `vault_unreadable`. JSON with duplicate keys refused (`object_pairs_hook`), else `vault_unreadable`.
-5. `format` (read first): other than v3 gives `vault_format_unsupported`. Then the closed field set and types through the header model: `vault_unreadable`. Then `seed_protocol_version` other than the engine's: `vault_protocol_version_mismatch` (text unchanged).
-6. KCV: `hmac.compare_digest(key_check, expected_check)` false gives `vault_key_mismatch`. The message says "this vault records key version '<label>'; open it with the mask secret of the run that wrote it". The hint covers both causes: a different secret, or a changed `key_check` field. No segment is decrypted.
+4. Header frame: length at most 4096, else `vault_unreadable`. `parse_or_token` (strict JSON, duplicate keys refused): any token gives `vault_unreadable`.
+5. Local rule: if the parsed value is an object whose `format` is present and is not `"decoy-vault/v3"`, `vault_format_unsupported` (format is checked before the closed set, M5). Then `attempt(_HEADER.load, parsed)`. Token mapping, local to `vault/_format.py`: `schema_unknown` can now come only from `seed_protocol_version` (`format` already passed), so it gives `vault_protocol_version_mismatch` (text unchanged); every other token gives `vault_unreadable`. Then the local check `segment_rows != 0`, else `vault_unreadable`.
+6. KCV: `hmac.compare_digest(key_check, expected_check)` false gives `vault_key_mismatch`. The message says "this vault records key version '<label>'; open it with the mask secret of the run that wrote it". The hint covers both causes, which the engine cannot tell apart: a different secret, or an edited `key_check` or `vault_id` field (restore the stored copy). No segment is decrypted.
 7. `init_pull` with `stream_header`, then each frame in order. From here on, any framing error, a frame longer than the cap plus `ABYTES` (17), a `pull` failure, a tag other than `TAG_MESSAGE` or `TAG_FINAL`, a `TAG_FINAL` before the last frame, bytes after the `TAG_FINAL` frame, end of file without `TAG_FINAL`, a segment with more than `segment_rows` rows, a row total that differs from `entry_count`, or a malformed or duplicate row gives `vault_tampered`. The mapping built so far is dropped; nothing is returned. The refusal is raised after the `except` block, so it carries no context.
 
 Rule for users: before the header is understood, a bad file is "unreadable"; after the header is understood and the key is right, any damage is "tampered".
@@ -249,7 +264,7 @@ Engine (`_open_vault` and the writer; every refusal is a `VaultError` unless nam
 - `vault_unreadable`: OS error, magic that is not a vault magic, bad header frame, duplicate keys, JSON or field set (AT-V2).
 - `vault_format_unsupported`: any `DCYVAULT<n>\n` other than 3, or another `format` (AT-V9).
 - `vault_protocol_version_mismatch`: other `SEED_PROTOCOL_VERSION` (existing test).
-- `vault_key_mismatch`: KCV differs (AT-V7, AT-V8).
+- `vault_key_mismatch`: KCV differs: a different secret, or an edited `key_check` or `vault_id` (AT-V7, AT-V8, AT-V8b).
 - `vault_tampered`: any failure after the KCV (AT-V3 to AT-V6, AT-V5b, AT-V5c, AT-V10, AT-V20).
 - `vault_entry_too_large`: writer, one entry over the segment cap (AT-V20).
 - `FileAccessUnavailable`: path string under a non-ambient policy (unchanged, existing test).
@@ -335,14 +350,14 @@ E1 (no growth; decision on census growth):
 |---|---|---|---|
 | FM-1 | Wrong secret | `vault_key_mismatch` before any decrypt; names the recorded key version | AT-V7 |
 | FM-2 | Header field edited (for example `ambiguous_dropped`) | `vault_tampered` (additional data mismatch) | AT-V3 |
-| FM-3 | `key_check` edited | `vault_key_mismatch`; the hint names both causes. No data comes out either way | AT-V8 |
+| FM-3 | `key_check` or `vault_id` edited, right secret | `vault_key_mismatch` (the KCV check runs before decrypting, and a mismatch cannot be told apart from a wrong secret); the hint names a different secret and both field names. No data comes out either way | AT-V8, AT-V8b |
 | FM-4 | Segments reordered, dropped or duplicated | `vault_tampered` | AT-V4 |
 | FM-5 | Truncated at a segment boundary, inside a frame, or extra bytes after the final segment | `vault_tampered` | AT-V5 |
 | FM-5b | Authenticated segments with no `TAG_FINAL`; `TAG_FINAL` in the middle; a `TAG_PUSH` or `TAG_REKEY` segment; `entry_count` that does not match the rows | `vault_tampered` | AT-V5b, AT-V5c |
 | FM-6 | Empty vault | one `TAG_FINAL` segment; round-trips; with that segment removed, `vault_tampered` | AT-V6 |
 | FM-7 | A file with another vault magic passed to `load_vault`, `unmask`, `report vault` | `vault_format_unsupported` with the re-mask remedy | AT-V9, CV-3 |
 | FM-8 | A v2 or damaged file already at the vault path on `decoy run --vault` | `publish` raises `vault_exists`; `adopt_vault` finds `reads_as_own` False and returns `VaultConflict`; the receipt refuses with `publication_vault_conflict`; the file is not overwritten | AT-V14 |
-| FM-9 | Header over 4096 bytes, not JSON, duplicate keys, an extra key, a bool or numeric string in an int field, uppercase or short hex | `vault_unreadable` | AT-V2 |
+| FM-9 | Header over 4096 bytes, not JSON, duplicate keys, an extra key, a bool or numeric string in a count field, `segment_rows` 0, uppercase or short hex | `vault_unreadable` | AT-V2 |
 | FM-10 | `os.urandom` or libsodium's random source fails | the error propagates from `serialize`; nothing is written | none (not reachable in tests; noted) |
 | FM-11 | Bad `PreparedSecret` passed to `VaultWriter` | `ValueError`, `SecretClosedError` or `TypeError` at construction, fixed text | AT-V12 |
 | FM-12 | Error text | no source value, no masked value, no key, no KCV; no exception context or cause | AT-V17 |
@@ -358,7 +373,7 @@ E1 (no growth; decision on census growth):
 
 Each test is written first and fails on the slice base for the stated reason, then passes on the slice head. Each named mutation must turn its test red on the final slice head.
 
-Test seam (H4): `vault/_format.py` exposes `_VaultHeaderModel`, `_open_stream(key_source, vault_id) -> (state, stream_header)` and `_push_segment(state, plaintext, ad, final)`, the primitives the production writer loops over. Tests compose them with a real key to build files that are authenticated but inconsistent. To build a `TAG_PUSH` or `TAG_REKEY` cell, a test calls `nacl.bindings` `push` with that tag on the seam's state. Production code has no test-only parameter.
+Test seam (H4): `vault/_format.py` exposes the `_HEADER` declaration and `_HeaderRecord`, `_open_stream(key_source, vault_id) -> (state, stream_header)` and `_push_segment(state, plaintext, ad, final)`, the primitives the production writer loops over. Tests compose them with a real key to build files that are authenticated but inconsistent. To build a `TAG_PUSH` or `TAG_REKEY` cell, a test calls `nacl.bindings` `push` with that tag on the seam's state. Production code has no test-only parameter.
 
 "Ignore the final tag" (the AT-V5b mutation) means: the reader accepts end of file after a `TAG_MESSAGE` frame.
 
@@ -369,11 +384,12 @@ Test seam (H4): `vault/_format.py` exposes `_VaultHeaderModel`, `_open_stream(ke
 | AT-E0 | `scripts/check_pure_move.py` over the E0 diff; `from decoy_engine.vault import <each name in the old module's public set>` resolves; the `fileaccess` entry-point sentry and the census pass with the rehomed paths | no package | leave one `ENTRY_POINTS` name on `decoy_engine.vault.load_vault` | E0 |
 | AT-P1 | `tests/packaging/test_base_wheels.py`: every package of the base runtime closure in `uv.lock` has a `py3-none-any` wheel or wheels for `win_amd64`, macOS `arm64` or `universal2`, manylinux `x86_64` and `aarch64`; `pynacl` is in the base closure and not on the allowlist; a seeded lock with a Linux-only wheel fails | no PyNaCl in base; no test | add `pynacl` to the allowlist | E-DEP |
 | AT-P2 | existing `tests/packaging/test_sbom.py` and the `NOTICE` check pass with `pynacl` marked `[runtime]` | `NOTICE` says `[extra: sftp]` | leave the old `NOTICE` | E-DEP |
+| AT-P3 | existing `tests/sentry/test_dp_lock_row.py::test_lock_profile_is_a_certified_row` passes on the E-DEP head, with every previously released `_CERTIFIED_STACKS` row still present | the lock profile changed without a row | drop the new row from `_CERTIFIED_STACKS` | E-DEP |
 | AT-K1 | `tests/unit/internal/test_key_check_value.py`: `key_check_value(lambda: k, L)` equals `hmac_hex(k, L)[:16]`; with context equals `hmac_hex(k, L + "\x1f" + C)[:16]`; 16 lowercase hex | no function | truncate to 15 | E1 |
 | AT-K2 | `tests/unit/delivery/resume/test_fingerprint_kcv_frozen.py`: for a fixed key and config, `build_fingerprint(...).key_check` equals a pinned 16-character value computed on `ad36687a6` | n/a (guard; green on base, must stay green) | change `RESUME_KEY_CHECK_LABEL` by one character | E1 |
 | AT-K3 | `tests/sentry/test_one_key_check.py` (AST walk of `src/`): a `[:16]` or `[:_KEY_CHECK_HEX]` slice of an `hmac_hex`, `hmac.new` or `derive` result appears only in `internal/crypto.py`; string constants containing `key-check` appear only there; seeded cells fail. Plus: two vaults under one key have different `key_check` | second construction possible | re-add `hmac_hex(...)[:16]` in `_fingerprint.py`; drop `context` from the vault call | E1 |
-| AT-V1 | `tests/unit/vault/test_v3_format.py::test_round_trip_and_header`: write rows with one ambiguous pair; `open_vault` returns the mapping, `ambiguous_dropped == 1`, header `format == "decoy-vault/v3"`, `key_version == "v1"`, 64-hex `vault_id`, `entry_count == len(mapping)`; the file starts with `DCYVAULT3\n` | v2 writer | drop `entry_count` from the header model | E1 |
-| AT-V2 | `test_v3_format.py::test_header_closed_set` (cells: extra key, missing key, duplicate key, `true` and `"5"` in each int field, uppercase `vault_id`, 15-character `key_check`, 47-character `stream_header`, `vault_id` plus a trailing newline, 4097-byte header, non-JSON) | no closed-set check | replace a hex `fullmatch` with `match` | E1 |
+| AT-V1 | `tests/unit/vault/test_v3_format.py::test_round_trip_and_header`: write rows with one ambiguous pair; `open_vault` returns the mapping, `ambiguous_dropped == 1`, header `format == "decoy-vault/v3"`, `key_version == "v1"`, 64-hex `vault_id`, `entry_count == len(mapping)`; the file starts with `DCYVAULT3\n` | v2 writer | drop `entry_count` from the `_HEADER` declaration | E1 |
+| AT-V2 | `test_v3_format.py::test_header_closed_set` (cells: extra key, missing key, duplicate key, `true` and `"5"` in `ambiguous_dropped`, `entry_count` and `segment_rows`, `segment_rows` 0, `true` in `seed_protocol_version` (gives `vault_protocol_version_mismatch`, the `VersionSpec` token), uppercase `vault_id`, 15-character `key_check`, 47-character `stream_header`, `vault_id` plus a trailing newline, 4097-byte header, non-JSON) | no closed-set check | replace a hex `fullmatch` with `match` | E1 |
 | AT-V3 | `tests/unit/vault/test_v3_tamper.py::test_header_edit_is_tampered`: rewrite `ambiguous_dropped` 0 to 5 and re-frame | Fernet ignores the header | pass `None` as additional data | E1 |
 | AT-V4 | `test_v3_tamper.py::test_segment_order` (cells: swap segments 0 and 1, drop segment 1, repeat segment 0), with `segment_rows` 2 and 5 rows | Fernet tokens are independent | create a fresh pull state per frame | E1 |
 | AT-V5 | `test_v3_tamper.py::test_truncation` (cells: drop the final segment, cut inside a frame, append one byte, append a whole extra frame) | v2 reads to the end | stop at the first frame that fails to parse and return what was read | E1 |
@@ -381,7 +397,8 @@ Test seam (H4): `vault/_format.py` exposes `_VaultHeaderModel`, `_open_stream(ke
 | AT-V5c | `test_v3_tamper.py::test_entry_count_mismatch`: correct tags, header `entry_count` one more than the rows (and one less) | no count | skip the `entry_count` check | E1 |
 | AT-V6 | `test_v3_tamper.py::test_empty_vault` (round-trip; then remove the only segment) | v2 writes no chunk for no rows | write zero segments when there are no rows | E1 |
 | AT-V7 | `test_v3_tamper.py::test_wrong_key_is_key_mismatch`: second 32-byte key; code `vault_key_mismatch`; message holds `"v1"`; a spy on `init_pull` saw no call | v2 has no KCV | skip the KCV compare (the code becomes `vault_tampered`) | E1 |
-| AT-V8 | `test_v3_tamper.py::test_kcv_edit_is_key_mismatch` | no KCV | treat a KCV mismatch as tampered | E1 |
+| AT-V8 | `test_v3_tamper.py::test_kcv_edit_is_key_mismatch`: right secret, one hex digit of `key_check` changed and re-framed: `vault_key_mismatch`; the hint names both `key_check` and `vault_id` | no KCV | treat a KCV mismatch as tampered | E1 |
+| AT-V8b | `test_v3_tamper.py::test_vault_id_edit_is_key_mismatch`: right secret, one hex digit of `vault_id` changed and re-framed: `vault_key_mismatch`, no `pull` call | no KCV | compute the KCV without the `vault_id` context (the cell then reaches `pull` and gives `vault_tampered`) | E1 |
 | AT-V9 | `test_v3_format.py::test_other_magic_refused_with_remedy` (cells: the retired v2 fixture, a synthetic `DCYVAULT4\n`, `DCYVAULT\n`); code `vault_format_unsupported` for the first two, `vault_unreadable` for the third; message holds "re-run" and "--vault" | v2 opens | match only `DCYVAULT2\n` (the v4 cell becomes `vault_unreadable`) | E1 |
 | AT-V10 | `test_v3_format.py::test_per_vault_key`: same key and rows, two writers: different `vault_id`; a segment frame spliced from vault A into vault B gives `vault_tampered`; the key-derivation input differs for two ids | one key per secret | drop `vault_id` from the key label | E1 |
 | AT-V11 | existing key-floor and crypto-missing tests in `tests/unit/test_vault.py` pass with v3 (the crypto-missing cell hides `nacl`; the message names PyNaCl) | n/a (guard) | move the floor check after the file read | E1 |
@@ -392,7 +409,7 @@ Test seam (H4): `vault/_format.py` exposes `_VaultHeaderModel`, `_open_stream(ke
 | AT-V16 | `tests/sentry/test_secret_material_census.py` passes, and a new cell compares the census with its E0-head copy: no entry is added except a `moved_from` rehome; the three removed entries in 6.1 are gone; `tests/fileaccess/test_secret_material_frames.py` covers `_open_vault`, `open_vault` and `key_check_value` (no 32-byte key or derived key is a local in any failing frame) | new code not in the census | bind the derived stream key to a local named `stream_key` in `_open_stream` | E1 |
 | AT-V17 | `test_v3_tamper.py::test_no_values_in_errors`: for every refusal cell above, `str(exc)` holds no source value, no masked value and no KCV, and `exc.__cause__ is None` and `exc.__context__ is None` | n/a | raise `vault_tampered` inside the `except` block around `pull` | E1 |
 | AT-V18 | `tests/sentry/test_vault_crypto_choke_point.py` (AST walk of `src/`, resolving aliases, `from` imports and `importlib` strings): `nacl` is imported only in `vault/_format.py`; the bytes `b"vault-key/v2"` appear once in `src/`; `cryptography.fernet` is imported nowhere; seeded cells fail | no sentry | add `import nacl.bindings` to `vault/_reader.py` | E1 |
-| AT-V19 | `tests/unit/vault/test_v3_known_answer.py`: (a) for mask key 32 bytes of `0x01` and `vault_id` 32 bytes of `0x02`, the stream key equals a pinned hex value and the KCV equals a pinned 16-hex value; (b) a pinned hex fixture `tests/unit/vault/fixtures/v3_known_answer.hex` (header frame, stream header and two segments with plaintexts `b"segment-0"` and `b"segment-1"`, made once with libsodium under that key) opens through `_open_vault`'s stream path to those plaintexts with tags `TAG_MESSAGE` then `TAG_FINAL`; (c) the test decrypts the same fixture with raw `nacl.bindings` calls and an additional-data value it computes from section 4.1 itself. Writer bytes cannot be pinned: `init_push` draws a random header | no v3 | drop the length prefix from the key label | E1 |
+| AT-V19 | `tests/unit/vault/test_v3_known_answer.py` over `tests/unit/vault/fixtures/v3_known_answer.vault`, a whole v3 vault file made once by the production writer under mask key 32 bytes of `0x01`, with `segment_rows` 1 and two entries, so it has two real Parquet segments (`TAG_MESSAGE` then `TAG_FINAL`). Stored bytes are read, never re-written, so the test does not depend on the pyarrow version. (a) For that key and the fixture's `vault_id`, the stream key equals a pinned hex value and `key_check` equals a pinned 16-hex value. (b) `_open_vault` on the fixture returns the pinned two-entry mapping, `ambiguous_dropped == 0` and the pinned header. (c) Independently of production code: the test splits the frames itself, computes the additional data from section 4.1, calls raw `nacl.bindings` `init_pull` and `pull` with the pinned stream key, checks the tags, and reads each plaintext with `pyarrow.parquet` to the same rows | no v3 | drop the length prefix from the key label | E1 |
 | AT-V20 | `test_v3_format.py::test_segment_byte_cap` (cap patched to 4 KiB): rows whose window is over the cap round-trip in more segments; one entry over the cap gives `vault_entry_too_large` and no file; a crafted frame longer than the cap plus 17 gives `vault_tampered` and `pull` is not called | no cap | skip the halving | E1 |
 | AT-V21 | `test_v3_format.py::test_vault_id_per_serialize`: two `serialize()` calls on one writer give different `vault_id`s and different first segment frames, and both load to the same rows | n/a | cache `vault_id` on the writer | E1 |
 | AT-R1 | reason tests: `runtime.VAULT_TAMPERED` and `runtime.VAULT_ENTRY_TOO_LARGE` registered, `since=UNRELEASED`; `VAULT_REFUSAL_CODES` equals the set of `VAULT_*` runtime reasons that the vault package raises (walked from the source); the changelog fragment passes `tests/unit/scripts/test_check_fragment.py` | no reason | leave `VAULT_ENTRY_TOO_LARGE` out of `VAULT_REFUSAL_CODES` | E1 |
@@ -421,7 +438,7 @@ Engine (rows of `CODEMAP.md` "Where Things Go"; the package root is at its fan-o
 | File | New or changed | CODEMAP row | Sits beside |
 |---|---|---|---|
 | `src/decoy_engine/vault/__init__.py` | new (E0): docstring and public re-exports, same names as `vault.py`; E1 adds `open_vault`, `OpenedVault`, `VaultHeader`, `VAULT_REFUSAL_CODES` | Public API; a sub-package because the root is at its fan-out cap, as `_canonical/` and `_nested_json/` | `publication/` |
-| `src/decoy_engine/vault/_format.py` | new (E0 move of framing and Fernet helpers; E1 replaces them with the header model, `_open_stream`, `_push_segment`, `_pull_segments`; `Pattern:` docstring line citing libsodium secretstream) | same; the one crypto and layout module | |
+| `src/decoy_engine/vault/_format.py` | new (E0 move of framing and Fernet helpers; E1 replaces them with the `_HEADER` declaration, `_open_stream`, `_push_segment`, `_pull_segments`; `Pattern:` docstring line citing libsodium secretstream) | same; the one crypto and layout module | |
 | `src/decoy_engine/vault/_writer.py` | new (E0 move): `VaultWriter`, `VaultCommit`, `issue_commit`, `_publish` | same | |
 | `src/decoy_engine/vault/_reader.py` | new (E0 move): `load_vault`; E1 adds `_open_vault`, `open_vault`, `OpenedVault`, `VaultHeader` | same | |
 | `src/decoy_engine/vault/_config.py` | new (E0 move): `vault_writer_for_config`, `assert_vault_writer_keyed` | same | |
@@ -432,11 +449,12 @@ Engine (rows of `CODEMAP.md` "Where Things Go"; the package root is at its fan-o
 | `src/decoy_engine/fileaccess/__init__.py` | changed: `ENTRY_POINTS` names (E0), `open_vault` (E1) | Secret providers, file access | |
 | `src/decoy_engine/__init__.py` | changed (E1): four exports | Public API | line 335 |
 | `pyproject.toml`, `uv.lock`, `NOTICE`, `docs/license-policy.md` | changed (E-DEP) | Packaging | |
+| `src/decoy_engine/quality/dp_provenance.py` | changed (E-DEP: the new engine-profile row; before the E1 release: the projected CLI runtime row) | DP provenance | `_CERTIFIED_STACKS` |
 | `tests/packaging/test_base_wheels.py` | new (E-DEP) | Packaging tests | `tests/packaging/test_sbom.py` |
 | `CODEMAP.md` | changed (E0): a "Token vault" row | | |
 | `.importlinter` | changed only if a contract names `decoy_engine.vault` in a way a package breaks (E0 checks; a package keeps the name) | Layer contracts | |
 | `docs/methodology-registry.yaml` | changed (E1): `vault/_format.py` entry | | |
-| `tests/unit/vault/test_v3_format.py`, `test_v3_tamper.py`, `test_v3_config.py`, `test_v3_known_answer.py`, `_support.py`, `fixtures/decoy-vault-v2__retired.vault`, `fixtures/v3_known_answer.hex` | new (E1) | Unit tests (mirrors `vault/`) | `tests/unit/vault/test_run_entries.py` |
+| `tests/unit/vault/test_v3_format.py`, `test_v3_tamper.py`, `test_v3_config.py`, `test_v3_known_answer.py`, `_support.py`, `fixtures/decoy-vault-v2__retired.vault`, `fixtures/v3_known_answer.vault` | new (E1) | Unit tests (mirrors `vault/`) | `tests/unit/vault/test_run_entries.py` |
 | `tests/unit/internal/test_key_check_value.py`, `tests/unit/delivery/resume/test_fingerprint_kcv_frozen.py` | new (E1) | Unit tests | |
 | `tests/sentry/test_vault_crypto_choke_point.py`, `tests/sentry/test_one_key_check.py` | new (E1) | Sentry test | `tests/sentry/test_vault_writer_routes.py` |
 | `tests/sentry/secret_material_census.json`, `tests/sentry/file_access_registry.toml` | changed (E0 rehome, E1 removals per 6.1) | Sentry baselines | |
@@ -463,7 +481,7 @@ CLI (rows of `C:CODEMAP.md` "Where Things Go"):
 ## 10. Design notes
 
 - Choke points.
-  - Engine format and crypto: `vault/_format.py` is the only module that imports `nacl` and knows the magic and the header model. Guard: AT-V18. Mutation: `import nacl.bindings` in `vault/_reader.py`.
+  - Engine format and crypto: `vault/_format.py` is the only module that imports `nacl` and knows the magic and the `_HEADER` declaration. Guard: AT-V18. Mutation: `import nacl.bindings` in `vault/_reader.py`.
   - Engine KCV: `internal/crypto.key_check_value` is the only KCV, for the resume store and the vault. Guard: AT-K3. Mutation: `hmac_hex(...)[:16]` re-added in `_fingerprint.py`.
   - Engine read path: `_open_vault` is the only reader; `load_vault`, `open_vault` and `reads_as_own` call it.
   - CLI: `decoy.cli.vault._errors.vault_error_text` is the only renderer of engine vault codes, keyed on the code. Guard: CV-7. Mutation: a vault-code comparison inside an `except ExecutionError` branch.
@@ -493,12 +511,12 @@ Every slice is under 800 changed lines of product code. E1's test lines are high
 | Slice | Repo | Content | Risk | Acceptance tests | Depends on | Test gate |
 |---|---|---|---|---|---|---|
 | E0 | engine | Move Module: `git mv` of `vault.py` into `vault/` (four private modules plus the facade), body unchanged; `ENTRY_POINTS` names; census and file-access registry rehomes with `moved_from`; monkeypatch targets in tests; CODEMAP row; `docs/frozen-surfaces.md` path column | R1 (pure move) | AT-E0 | none | T1 impact set (vault, fileaccess, publication, unmask, sentry); `check_pure_move.py`; Codex review |
-| E-DEP | engine | PyNaCl base dependency: `pyproject.toml`, `uv.lock`, `NOTICE`, license doc, wheel check, fragment. No import of `nacl` yet | R1 (dependency lock) | AT-P1, AT-P2 | none | full suite (dependency-lock escalation trigger) against the saved main baseline; Dennis then Codex |
-| E1 | engine | v3 format on secretstream, header model, byte cap, KCV function and resume move, `VaultWriter(prepared)`, `open_vault`, two reasons, `VAULT_REFUSAL_CODES`, corpus swap, retired v2 fixture, known-answer fixture, sentries, census removals, methodology registry, docs, Breaking fragment | R2 (crypto, frozen format) | AT-K1 to AT-K3, AT-V1 to AT-V21 with AT-V5b and AT-V5c, AT-R1, AT-M1 | E0, E-DEP | T1 on the head plus T2: each named mutation on `vault/_format.py`, `vault/_reader.py`, `vault/_writer.py`, `internal/crypto.py` and `_fingerprint.py`; compat corpus; secret census; resume tests. Dennis then Codex, crypto brief |
+| E-DEP | engine | PyNaCl base dependency: `pyproject.toml`, `uv.lock`, `NOTICE`, license doc, wheel check, the new engine-profile row in `_CERTIFIED_STACKS`, fragment. No import of `nacl` yet | R1 (dependency lock) | AT-P1, AT-P2, AT-P3 | none | full suite (dependency-lock escalation trigger) against the saved main baseline; Dennis then Codex |
+| E1 | engine | v3 format on secretstream, `_HEADER` declaration, byte cap, KCV function and resume move, `VaultWriter(prepared)`, `open_vault`, two reasons, `VAULT_REFUSAL_CODES`, corpus swap, retired v2 fixture, known-answer fixture, sentries, census removals, methodology registry, docs, Breaking fragment | R2 (crypto, frozen format) | AT-K1 to AT-K3, AT-V1 to AT-V21 with AT-V5b and AT-V5c, AT-R1, AT-M1 | E0, E-DEP | T1 on the head plus T2: each named mutation on `vault/_format.py`, `vault/_reader.py`, `vault/_writer.py`, `internal/crypto.py` and `_fingerprint.py`; compat corpus; secret census; resume tests. Dennis then Codex, crypto brief |
 | E7 | engine | `docs/reasons.md` "Consumers"; the doc test | R0 | AT-D1 | none | T0 |
 | C1 | CLI | `cli/vault/` sub-package, `report vault` move and new fields, one code-keyed renderer, `unmask` routing, writer close, `admitted_prepared_secret`, certified-set pin, sentry, docs | R2 (frozen `--json` additive, error text, dependency set) | CV-1, CV-2, CV-3, CV-5 to CV-9 | the engine release that carries E1, the CLI repin to it, and row 24zw C1 merged | T1 (`tests/e2e/vault/`, unmask and report e2e, sentries, packaging) plus T2 on the head; full suite because the certified dependency set changes; Dennis then Codex (R2, required) |
 
-Order and timing (dates in CST): E0, E-DEP and E7 can start now. E1 follows E0 and E-DEP; target merge 2026-11-27 so that C1 has a week before 2026-12-04. C1 rides the repin that follows that release. It is not part of the 0.28.0 repin.
+Order and timing (dates in CST): E0, E-DEP and E7 can start now. E1 follows E0 and E-DEP; target merge 2026-11-27 so that C1 has a week before 2026-12-04. Release prep for the engine release that carries E1 adds the projected CLI runtime row to `_CERTIFIED_STACKS`. C1 rides the repin that follows that release. It is not part of the 0.28.0 repin.
 
 Open PRs that touch the same files (checked 2026-11-18 about 14:00 CST):
 
@@ -529,9 +547,9 @@ The engine files are ledger-style; keep both sides on rebase. `uv.lock` conflict
 | 3 | State completeness (every read outcome covered) | the read order in 4.2 is one ordered list; each step has its own code and its own cell | AT-V2 to AT-V12, AT-V5b, AT-V5c, AT-V20 | merge `vault_tampered` into `vault_unreadable` | E1 |
 | 4 | Route coverage | one writer for all routes (5.3); the CLI routes by code whatever the exception class | existing route sentry, AT-V13, CV-5 | remove the `ExecutionError` route in CLI `unmask` | E1, C1 |
 | 5 | Referential integrity | N/A: no FK or cross-table state changes (5.4) | none | none | none |
-| 6 | Untrusted input (the vault file is read from disk) | magic, a 4096-byte header cap, duplicate keys refused, `format` first, a closed field set with strict types and fullmatch, a frame-length cap before decrypting, an authenticated stream with a required final tag | AT-V2, AT-V3, AT-V5, AT-V5b, AT-V20 | lift the header cap | E1 |
+| 6 | Untrusted input (the vault file is read from disk) | magic, a 4096-byte header cap, the shared `_canonical` strict reader (duplicate keys refused, closed field set, strict types, fullmatch), `format` first, a frame-length cap before decrypting, an authenticated stream with a required final tag | AT-V2, AT-V3, AT-V5, AT-V5b, AT-V20 | lift the header cap | E1 |
 | 7 | TOCTOU (header read and data read seeing different files) | one read of the file into memory; additional data over the bytes as read; `open_vault` returns the header and the mapping from the same bytes | AT-V1, AT-V3 | hash a re-serialized header for the additional data | E1 |
-| 8 | Weak proof (a wrong key reported as damage, or damage accepted) | KCV before decrypt; secretstream tag, order and final tag, plus `entry_count`, all checked; known-answer test | AT-V4 to AT-V8, AT-V5b, AT-V5c, AT-V19 | skip the `entry_count` check | E1 |
+| 8 | Weak proof (a wrong key reported as damage, or damage accepted) | KCV before decrypt (a KCV-field edit is reported as a key mismatch with both causes named, never accepted); secretstream tag, order and final tag, plus `entry_count`, all checked; known-answer test through production and raw bindings | AT-V4 to AT-V8, AT-V8b, AT-V5b, AT-V5c, AT-V19 | skip the `entry_count` check | E1 |
 | 9 | Refactor drift (behaviour change hidden in the move; resume KCV changed by the extraction) | E0 is a pure move proven by `check_pure_move.py`; the resume KCV value is pinned from the base | AT-E0, AT-K2 | change one line inside a moved body; change the resume label | E0, E1 |
 | 10 | Frozen contract drift | format, labels, corpus, contract note, public names, dependency set and fragments change together; `--json` change is additive; resume bytes unchanged | AT-V15, AT-K2, AT-P1, CV-1, CV-9, `docs/frozen-surfaces.md` rows | keep `decoy-vault/v2` in the frozen-surface row | E-DEP, E1, C1 |
 
@@ -569,4 +587,5 @@ None that blocks a slice. If Q4 is answered B, the SQLite token store becomes a 
 ## 17. Follow-ups (not 1.0 blockers)
 
 - Reserve the derive namespaces `vault` and `key-check` in `NamespaceRegistry` so that no user column namespace can equal them (Dennis L6). Today `vault_id` makes a collision useless to an attacker, but the reservation states the rule.
+- A real Windows install, import and secretstream round trip of the engine wheel set (AT-P1 only reads wheel tags). Owned by WIN-FEAS (row 89) and WIN-RUNNER (row 6).
 - Move `assert_keyed_with` and the execution callers to `PreparedSecret` when the execution key path moves (would remove two more census entries).
