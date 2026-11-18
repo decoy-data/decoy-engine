@@ -19,6 +19,9 @@ from decoy_engine.profiling._model_pass import Band
 from decoy_engine.profiling._scan_integrity import Status
 
 Strategy = Literal["head", "random", "full"]
+# The JSON value kinds a path can hold. The read model opens this to any string (`_relaxed`), so a
+# reader from before a new kind still accepts the record.
+PathKind = Literal["string", "integer", "number", "boolean", "object", "array"]
 
 # ---------------------------------------------------------------------------
 # The persisted core
@@ -69,6 +72,34 @@ _DetectorRunCore = Annotated[Union[RegexRunCore, ModelRunCore], Field(discrimina
 _RUN_CORE: TypeAdapter[Any] = TypeAdapter(_DetectorRunCore)
 
 
+class PathObservationCore(_Core):
+    """One path pattern of a JSON column (`$.user.email`, `$.items[*].sku`). Names are keys that
+    passed the key rule; every other key is `*`. Counts are cells, not occurrences."""
+
+    path: str
+    present_count: int
+    null_count: int
+    kinds: list[PathKind]
+    detector_hits: list[str]
+
+
+class NestedCore(_Core):
+    """What the bounded path scan found in one JSON column: cell outcomes, the bounds that
+    fired and the observed paths, sorted by `path`."""
+
+    cells_sampled: int
+    cells_parsed: int
+    cells_malformed: int
+    cells_oversized: int
+    cells_scalar: int
+    depth_truncated_cells: int
+    arrays_truncated: int
+    key_suspect_collapsed: int
+    map_collapsed: int
+    paths_truncated: bool
+    paths: list[PathObservationCore]
+
+
 class FieldCore(_Core):
     name: str
     dtype: str
@@ -81,6 +112,8 @@ class FieldCore(_Core):
     leading_zero_count: int | None
     # Defaults keep a record written before M3a readable and valid.
     model_hits: list[ModelHitCore] = Field(default_factory=list)
+    # `None` for a column that is not JSON, or when the scan ran with `nested_paths=False`.
+    nested: NestedCore | None = None
 
 
 class TableCore(_Core):
@@ -132,6 +165,8 @@ def _relaxed(model: type[BaseModel]) -> type[BaseModel]:
     """`model` with unknown fields ignored, nested models included."""
 
     def swap(annotation: Any) -> Any:
+        if annotation == PathKind:
+            return str
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
             return _relaxed(annotation)
         origin = get_origin(annotation)

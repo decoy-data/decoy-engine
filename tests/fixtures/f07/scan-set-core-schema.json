@@ -111,6 +111,17 @@
             "title": "Name",
             "type": "string"
           },
+          "nested": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NestedCore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "null_count": {
             "title": "Null Count",
             "type": "integer"
@@ -255,6 +266,123 @@
           "model"
         ],
         "title": "ModelRunCore",
+        "type": "object"
+      },
+      "NestedCore": {
+        "additionalProperties": false,
+        "description": "What the bounded path scan found in one JSON column: cell outcomes, the bounds that\nfired and the observed paths, sorted by `path`.",
+        "properties": {
+          "arrays_truncated": {
+            "title": "Arrays Truncated",
+            "type": "integer"
+          },
+          "cells_malformed": {
+            "title": "Cells Malformed",
+            "type": "integer"
+          },
+          "cells_oversized": {
+            "title": "Cells Oversized",
+            "type": "integer"
+          },
+          "cells_parsed": {
+            "title": "Cells Parsed",
+            "type": "integer"
+          },
+          "cells_sampled": {
+            "title": "Cells Sampled",
+            "type": "integer"
+          },
+          "cells_scalar": {
+            "title": "Cells Scalar",
+            "type": "integer"
+          },
+          "depth_truncated_cells": {
+            "title": "Depth Truncated Cells",
+            "type": "integer"
+          },
+          "key_suspect_collapsed": {
+            "title": "Key Suspect Collapsed",
+            "type": "integer"
+          },
+          "map_collapsed": {
+            "title": "Map Collapsed",
+            "type": "integer"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/$defs/PathObservationCore"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "paths_truncated": {
+            "title": "Paths Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cells_sampled",
+          "cells_parsed",
+          "cells_malformed",
+          "cells_oversized",
+          "cells_scalar",
+          "depth_truncated_cells",
+          "arrays_truncated",
+          "key_suspect_collapsed",
+          "map_collapsed",
+          "paths_truncated",
+          "paths"
+        ],
+        "title": "NestedCore",
+        "type": "object"
+      },
+      "PathObservationCore": {
+        "additionalProperties": false,
+        "description": "One path pattern of a JSON column (`$.user.email`, `$.items[*].sku`). Names are keys that\npassed the key rule; every other key is `*`. Counts are cells, not occurrences.",
+        "properties": {
+          "detector_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detector Hits",
+            "type": "array"
+          },
+          "kinds": {
+            "items": {
+              "enum": [
+                "string",
+                "integer",
+                "number",
+                "boolean",
+                "object",
+                "array"
+              ],
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "null_count": {
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "present_count": {
+            "title": "Present Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "present_count",
+          "null_count",
+          "kinds",
+          "detector_hits"
+        ],
+        "title": "PathObservationCore",
         "type": "object"
       },
       "RegexRunCore": {
@@ -662,6 +790,17 @@
             "title": "Name",
             "type": "string"
           },
+          "nested": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NestedCoreRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "null_count": {
             "title": "Null Count",
             "type": "integer"
@@ -803,6 +942,111 @@
           "model"
         ],
         "title": "ModelRunCoreRead",
+        "type": "object"
+      },
+      "NestedCoreRead": {
+        "properties": {
+          "arrays_truncated": {
+            "title": "Arrays Truncated",
+            "type": "integer"
+          },
+          "cells_malformed": {
+            "title": "Cells Malformed",
+            "type": "integer"
+          },
+          "cells_oversized": {
+            "title": "Cells Oversized",
+            "type": "integer"
+          },
+          "cells_parsed": {
+            "title": "Cells Parsed",
+            "type": "integer"
+          },
+          "cells_sampled": {
+            "title": "Cells Sampled",
+            "type": "integer"
+          },
+          "cells_scalar": {
+            "title": "Cells Scalar",
+            "type": "integer"
+          },
+          "depth_truncated_cells": {
+            "title": "Depth Truncated Cells",
+            "type": "integer"
+          },
+          "key_suspect_collapsed": {
+            "title": "Key Suspect Collapsed",
+            "type": "integer"
+          },
+          "map_collapsed": {
+            "title": "Map Collapsed",
+            "type": "integer"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/$defs/PathObservationCoreRead"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "paths_truncated": {
+            "title": "Paths Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cells_sampled",
+          "cells_parsed",
+          "cells_malformed",
+          "cells_oversized",
+          "cells_scalar",
+          "depth_truncated_cells",
+          "arrays_truncated",
+          "key_suspect_collapsed",
+          "map_collapsed",
+          "paths_truncated",
+          "paths"
+        ],
+        "title": "NestedCoreRead",
+        "type": "object"
+      },
+      "PathObservationCoreRead": {
+        "properties": {
+          "detector_hits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Detector Hits",
+            "type": "array"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "null_count": {
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "present_count": {
+            "title": "Present Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "present_count",
+          "null_count",
+          "kinds",
+          "detector_hits"
+        ],
+        "title": "PathObservationCoreRead",
         "type": "object"
       },
       "RegexRunCoreRead": {

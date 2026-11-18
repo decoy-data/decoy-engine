@@ -134,6 +134,25 @@ def _distribution_snapshot_artifact() -> dict:
     }
 
 
+def _scan_set_artifact() -> dict:
+    """A hand-written `scan-set/v1` record with a `nested` member (F07 82-E2b). The sample file
+    is kept as is; this entry records how to read it back."""
+    path = HERE / "scan-set-v1__synthetic.json"
+    return {
+        "tag": "scan-set/v1",
+        "kind": "scan_set",
+        "synthetic": True,
+        "produced_by_engine_version": "0.27.0",
+        "path": path.name,
+        "expected_paths": [
+            ["$.items", 3],
+            ["$.items[*].sku", 3],
+            ["$.user", 3],
+            ["$.user.email", 3],
+        ],
+    }
+
+
 def main() -> None:
     # NOTE: masked CSV/Parquet output is intentionally NOT frozen here -- the
     # engine never reads its own masked output back, so there is no decoy-owned
@@ -153,6 +172,7 @@ def main() -> None:
         "artifacts": [
             _vault_artifact(),
             _distribution_snapshot_artifact(),
+            _scan_set_artifact(),
         ],
     }
     (HERE / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
