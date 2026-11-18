@@ -523,7 +523,7 @@ ignore = [
 # shells out to `git diff` with fully code-constructed, non-user-controlled
 # args to compare this checkout against origin/main (S603/S607 partial-path
 # subprocess call is intentional and trusted, matching the harnesses above).
-"tests/sentry/test_physical_seam_disconnection.py" = ["S603", "S607"]
+"tests/sentry/test_physical_seam_disconnection.py" = ["S603"]
 # Benchmark suite has measurement loops that look stylistically loud.
 "tests/benchmark/**" = ["S101", "S105", "S106", "N802", "N806", "PT011"]
 # Intentional design / math-notation exceptions (no removal trigger;
