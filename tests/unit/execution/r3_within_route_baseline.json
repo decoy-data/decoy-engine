@@ -4742,7 +4742,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source', 'no sink (the whole output is held resident)'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'no_sink': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_budget_bytes": {
@@ -4990,7 +4990,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source', 'no sink (the whole output is held resident)'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'no_sink': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_forced": {
@@ -5238,7 +5238,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source', 'no sink (the whole output is held resident)'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'no_sink': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_forced_loader": {
@@ -5432,7 +5432,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['no sink (the whole output is held resident)', 'a source_loader (returns an unbounded resident table)'], 'message': \"out-of-core residency bound not guaranteed for this call: no sink (the whole output is held resident); a source_loader (returns an unbounded resident table). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'no_sink': True, 'source_loader': True, 'message': \"out-of-core residency bound not guaranteed for this call: no sink (the whole output is held resident); a source_loader (returns an unbounded resident table). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_forced_sink": {
@@ -5680,7 +5680,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source. Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source. Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_lazy_sources_sink": {
@@ -6175,7 +6175,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source', 'no sink (the whole output is held resident)'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'no_sink': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source; no sink (the whole output is held resident). Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "ooc_fk_orphans_warn_sink": {
@@ -6423,8 +6423,8 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': ['id'], 'child_table': 'child', 'child_columns': ['parent_id'], 'orphan_rows': 4})",
-   "QualityWarning(code='out_of_core_caller_managed_residency', provider='', column=None, detail={'shapes': ['a resident pa.Table source'], 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source. Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
+   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': 'id', 'child_table': 'child', 'child_columns': 'parent_id', 'orphan_rows': 4})",
+   "QualityWarning(code='out_of_core_caller_managed_residency', provider='out_of_core_route', column=None, detail={'resident_source': True, 'message': \"out-of-core residency bound not guaranteed for this call: a resident pa.Table source. Engine-controlled peak residency is bounded with respect to table row cardinality only when every source is a LazySource and the sink consumes write_batches incrementally without retaining the stream (e.g. ParquetTransactionalSink). To run bounded, pass a LazySource per table plus such a sink; or force execution_mode='full_frame' to run resident at your own memory risk.\"})"
   ]
  },
  "seq_fk": {
@@ -7860,7 +7860,7 @@
    "timings": "tuple"
   },
   "warnings": [
-   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': ['id'], 'child_table': 'child', 'child_columns': ['parent_id'], 'orphan_rows': 4})"
+   "QualityWarning(code='orphan_fk', provider='ns', column='parent_id', detail={'parent_table': 'parent', 'parent_columns': 'id', 'child_table': 'child', 'child_columns': 'parent_id', 'orphan_rows': 4})"
   ]
  },
  "seq_fk_sink": {

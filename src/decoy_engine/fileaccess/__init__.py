@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._ambient_tree import open_ambient_tree
 from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
@@ -171,6 +172,7 @@ __all__ = [
     "is_valid_component",
     "keeps_class",
     "map_in_context",
+    "open_ambient_tree",
     "open_protected_dir",
     "own_entry",
     "position_key",
