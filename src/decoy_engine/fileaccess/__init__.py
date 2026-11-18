@@ -123,8 +123,8 @@ ENTRY_POINTS: tuple[str, ...] = (
     "decoy_engine.transforms.joint_mask.validate_joint_mask_config",
     "decoy_engine.unmask.unmask_pipeline",
     "decoy_engine.validation._config.validate_config",
-    "decoy_engine.vault.load_vault",
-    "decoy_engine.vault.vault_writer_for_config",
+    "decoy_engine.vault._reader.load_vault",
+    "decoy_engine.vault._writer.vault_writer_for_config",
 )
 
 __all__ = [
