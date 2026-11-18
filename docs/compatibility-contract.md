@@ -221,7 +221,7 @@ quality-shape-fidelity/v1  post-scan-integrity/v3    name-hints/v1
 ssn/v1  npi/v1  pan/v1  iban/v1  ein/v1  mrn/v1  ndc/v1  icd10/v1
 cusip/v1  address/v1  locality/v1  person/v1  provider/v1
 composite/v1  custom/v1   ... (every disguise spec)
-subset-manifest/v1         decoy-run-result/v1
+subset-manifest/v1         decoy-run-result/v1   risk-utility-report/v1
 decoy-record/v1            sample-run/v1         decoy-library-export/v1
 decoy-job-log/v1
 scan-set/v1             scan-diff/v1
@@ -334,6 +334,15 @@ assumes a number needs a `null` case. The report gains `detectors` (the runs), `
 - **New fields are additive and optional.** Adding an optional field to a `/v1`
   artifact that old readers safely ignore is allowed and preferred over a version
   bump. Removing or repurposing a field is not.
+
+`risk-utility-report/v1` is the anonymity risk and utility document
+(`decoy_engine.anonymize.report`, library only until it is wired into evidence). It follows the
+run-result rules: one strict writer (`RiskUtilityReport`) and a reader derived from it
+(`RiskUtilityReportRead`, through `decoy_engine._value_free.derive_read`, as the run result's reader is); the `schema` key is
+required on read and accepts only `risk-utility-report/v1`; tokens tolerate later minors; numbers
+are strict and range-checked; every string is the tag, an approved column name or a token, never a
+data value. A synthetic sample is in the corpus manifest, with hand-authored next-minor and
+other-major variants in `tests/integration/compat_corpus/risk_utility_report/`.
 
 **New in Sprint G (2026-07-03):** FK-aware subsetting (`decoy_engine.subset`)
 writes a `subset-manifest.json` evidence artifact tagged `subset-manifest/v1`
@@ -1160,6 +1169,11 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
   - `distribution-snapshot/v1`: full `load_spec` round-trip for each reader branch
     (numeric, categorical, conditioned-joint) plus a `schema_version` tamper
     bite-test.
+
+  - `risk-utility-report/v1`: read back through `RiskUtilityReportRead` and compared with the
+    manifest's `expected_values`, plus a tamper bite-test (`/v2` refused), a next-minor variant
+    that reads and an other-major variant that is refused. A separate producer check mints the
+    sample into a temporary directory and compares it with the committed file.
 
   Intentionally **not** in corpus scope for now: masked CSV/Parquet output (the
   engine has no owned reader for its own masked output; freezing it would only

@@ -294,6 +294,18 @@ modules:
     pattern: SSE/SST information loss (Domingo-Ferrer and Mateo-Sanz 2002)
     source: Domingo-Ferrer and Mateo-Sanz, Practical data-oriented microaggregation for statistical disclosure control, IEEE TKDE 14(1) 2002
 
+  - path: src/decoy_engine/quality/anonymity/_risk.py
+    pattern: ARX sample risk summary
+    source: ARX RiskModelSampleSummary (Apache-2.0); El Emam and Dankar, JAMIA 15(5) 2008; Dankar and El Emam, marketer risk, EDBT/ICDT workshops 2010; El Emam, Guide to the De-Identification of Personal Health Information, 2013
+
+  - path: src/decoy_engine/anonymize/report/__init__.py
+    pattern: ARX sample risk summary
+    source: ARX RiskModelSampleSummary (Apache-2.0); HHS OCR, Guidance Regarding Methods for De-identification of PHI (Expert Determination), November 2012
+
+  - path: src/decoy_engine/anonymize/report/_build.py
+    pattern: ARX risk analysis of an anonymized output
+    source: ARX RiskModelSampleSummary (Apache-2.0); HHS OCR Expert Determination guidance, November 2012, section 2
+
   # Removed 2026-06-02: the entire `forecast/` module (Recommender +
   # ForecastReport + DisguiseRecommendation + FieldRecommendation +
   # RiskFlag) was deleted under the pre-scan-reframe-C clean break

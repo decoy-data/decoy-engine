@@ -332,7 +332,8 @@ def _report_classes() -> list[type]:
 
 
 def test_every_report_class_is_found() -> None:
-    assert len(_report_classes()) == 3
+    assert len(_report_classes()) == 4
+    assert anonymity.ReidentificationRiskReport in _report_classes()
     exported = {n for n in anonymity.__all__ if dataclasses.is_dataclass(getattr(anonymity, n))}
     assert exported >= _NOT_REPORTS
 
@@ -358,6 +359,11 @@ def _all_reports() -> list[Any]:
         measure_t_closeness_equal(frame, qi, sensitive, t_target=0.3),
         measure_t_closeness_ordered(frame, qi, sensitive, t_target=0.3),
     ]
+    reports.append(
+        anonymity.measure_reidentification_risk(
+            frame, qi, risk_threshold=0.2, population=pd.concat([frame, frame])
+        )
+    )
     table = pa.Table.from_pandas(frame, preserve_index=False)
     reports.append(measure_k_anonymity(table, qi, k_target=2))
     reports.append(measure_t_closeness_ordered(table, qi, sensitive, t_target=0.3))
@@ -545,37 +551,59 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
 _ALLOWED_ENGINE_MODULES = frozenset({"decoy_engine._value_family"})
 
 
+_PACKAGE = "decoy_engine.quality.anonymity"
+_ALLOWED_ROOTS = ({"numpy", "pandas", "pyarrow", "__future__"} | set(sys.stdlib_module_names)) - {
+    "importlib"
+}
+
+
+def _refused_imports(tree: ast.AST) -> list[str]:
+    """Imports a module of the package may not make (relative ones resolved)."""
+    refused = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [_resolve(node, _PACKAGE)]
+        elif isinstance(node, ast.Name) and node.id == "__import__":
+            refused.append("__import__")
+            continue
+        else:
+            continue
+        for name in names:
+            root = name.split(".")[0]
+            inside = name == _PACKAGE or name.startswith(_PACKAGE + ".")
+            if not (root in _ALLOWED_ROOTS or inside or name in _ALLOWED_ENGINE_MODULES):
+                refused.append(name)
+    return refused
+
+
 def test_package_imports_only_data_libraries() -> None:
     """``import decoy_engine`` already loads the pipeline, so a sys.modules check
     cannot show darkness; the syntax tree of every module in the package can.
     Relative imports are resolved against the package; dynamic import
     machinery is refused so the walk cannot be sidestepped."""
-    package = "decoy_engine.quality.anonymity"
-    forbidden = {"importlib"}
-    allowed_roots = (
-        {"numpy", "pandas", "pyarrow", "__future__"} | set(sys.stdlib_module_names)
-    ) - forbidden
     package_dir = Path(anonymity.__file__).parent
     modules = sorted(package_dir.glob("*.py"))
     assert len(modules) >= 5
     for path in modules:
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                names = [_resolve(node, package)]
-            elif isinstance(node, ast.Name) and node.id == "__import__":
-                raise AssertionError((path.name, "__import__"))
-            else:
-                continue
-            for name in names:
-                root = name.split(".")[0]
-                inside = name == package or name.startswith(package + ".")
-                assert root in allowed_roots or inside or name in _ALLOWED_ENGINE_MODULES, (
-                    path.name,
-                    name,
-                )
+        assert _refused_imports(tree) == [], path.name
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from decoy_engine.anonymize import type_family",
+        "from decoy_engine.anonymize.hierarchies import Lattice",
+        "from decoy_engine.anonymize.search import search_lattice",
+    ],
+)
+def test_nothing_in_anonymize_is_allowed(source: str) -> None:
+    """Seeded: the walk refuses every anonymize module; value identity comes from _value_family."""
+    assert _refused_imports(ast.parse(source)) != [], source
+    assert _refused_imports(ast.parse("from decoy_engine._value_family import type_family")) == []
+    assert _refused_imports(ast.parse("import importlib")) == ["importlib"]
 
 
 def test_only_the_value_family_module_is_allowed() -> None:
