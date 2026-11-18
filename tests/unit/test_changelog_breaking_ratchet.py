@@ -517,3 +517,24 @@ def test_the_pins_catch_an_entry_filed_under_an_old_release() -> None:
     actual = {v: _digest(s) for v, s in _releases(mutated)[1:]}
     pinned = json.loads(PINS.read_text(encoding="utf-8"))
     assert actual[old_version] != pinned[old_version]
+
+
+def test_editing_the_link_footer_moves_no_pin() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    edited = text.rstrip("\n") + "\n[0.0.1]: https://example.invalid/moved\n"
+    before = {v: _digest(s) for v, s in _releases(text)}
+    after = {v: _digest(s) for v, s in _releases(edited)}
+    assert before == after
+
+
+def test_a_reference_inside_the_oldest_section_stays_in_its_digest() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    oldest = _releases(text)[-1][0]
+    head, sep, tail = text.partition(f"## [{oldest}]")
+    assert sep
+    body_end = tail.index("\n\n") + 2
+    inner = tail[:body_end] + "[ref]: https://example.invalid/x\n\nmore text\n\n" + tail[body_end:]
+    edited = head + sep + inner
+    section = dict(_releases(edited))[oldest]
+    assert "more text" in section
+    assert "[ref]: https://example.invalid/x" in section
