@@ -20,10 +20,6 @@ def _blank(value: Any) -> bool:
     return not isinstance(value, str) or not value.strip()
 
 
-def _refuse(code: str, column: str, path: str, message: str) -> PlanCompileError:
-    return PlanCompileError(code=code, path=f"{column}.{path}", message=message)
-
-
 def check_nested_rules(config: dict[str, Any]) -> None:
     """Refuse the first nested `rules` column that is malformed.
 
@@ -46,52 +42,48 @@ def check_nested_rules(config: dict[str, Any]) -> None:
 def _check_column(where: str, pc: dict[str, Any]) -> None:
     rules = pc["rules"]
     if "target" in pc or "strategy" in pc:
-        raise _refuse(
-            reasons.plan.NESTED_RULES_AND_TARGET_BOTH_SET,
-            where,
-            "provider_config.rules",
-            "A nested column sets `rules` and also a single `target` or `strategy`. Use one form.",
+        raise PlanCompileError(
+            code=reasons.plan.NESTED_RULES_AND_TARGET_BOTH_SET,
+            path=f"{where}.provider_config.rules",
+            message="A nested column sets `rules` and also a single `target` or `strategy`. "
+            "Use one form.",
         )
     if not isinstance(rules, list) or not rules:
-        raise _refuse(
-            reasons.plan.NESTED_RULES_EMPTY,
-            where,
-            "provider_config.rules",
-            "A nested column's `rules` must be a non-empty list.",
+        raise PlanCompileError(
+            code=reasons.plan.NESTED_RULES_EMPTY,
+            path=f"{where}.provider_config.rules",
+            message="A nested column's `rules` must be a non-empty list.",
         )
     seen_targets: set[str] = set()
     code_set_seen = False
     for child in nested_children(pc):
-        prefix = child.config_path
+        at = f"{where}.{child.config_path}"
         if _blank(child.target):
-            raise _refuse(
-                reasons.plan.NESTED_TARGET_UNSET,
-                where,
-                f"{prefix}.target",
-                "A nested rule needs a target path; set `target`.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_TARGET_UNSET,
+                path=f"{at}.target",
+                message="A nested rule needs a target path; set `target`.",
             )
         if _blank(child.strategy):
-            raise _refuse(
-                reasons.plan.NESTED_STRATEGY_UNSET,
-                where,
-                f"{prefix}.strategy",
-                "A nested rule needs a child strategy; set `strategy`.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_STRATEGY_UNSET,
+                path=f"{at}.strategy",
+                message="A nested rule needs a child strategy; set `strategy`.",
             )
         if child.target in seen_targets:
-            raise _refuse(
-                reasons.plan.NESTED_RULE_TARGET_DUPLICATE,
-                where,
-                f"{prefix}.target",
-                "Two rules of one nested column have the same target. Merge them into one rule.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_RULE_TARGET_DUPLICATE,
+                path=f"{at}.target",
+                message="Two rules of one nested column have the same target. "
+                "Merge them into one rule.",
             )
         seen_targets.add(child.target)
         if child.strategy == "code_set":
             if code_set_seen:
-                raise _refuse(
-                    reasons.plan.NESTED_RULES_CODE_SET_REPEATED,
-                    where,
-                    f"{prefix}.strategy",
-                    "A nested column may have only one `code_set` rule: its corpus is pinned "
-                    "once per column.",
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_RULES_CODE_SET_REPEATED,
+                    path=f"{at}.strategy",
+                    message="A nested column may have only one `code_set` rule: its corpus is "
+                    "pinned once per column.",
                 )
             code_set_seen = True

@@ -12,7 +12,7 @@ __all__ = [
     "NESTED_RULE_TARGET_DUPLICATE",
 ]
 
-_d = _catalog.plan("decoy_engine.nested_rules")
+_d = _catalog.plan("PlanCompileError")
 # A pipeline config is checked at validation time and again when the plan compiles.
 _BOTH = (Phase.CONFIGURATION, Phase.COMPILE)
 
