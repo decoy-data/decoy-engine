@@ -117,10 +117,10 @@ def test_the_adapter_ingests_with_the_union_of_every_role(tmp_path: Path, cls: s
     # Only the `plain` column is in the set because a `when:` reads it; every other role must put
     # `v` there by itself, so the predicate reads `id` instead.
     cfg, tables = build_case(cls, tmp_path, "v == 5" if cls == "plain" else "id == 5")
-    seen: list[dict[str, set[str]]] = []
+    seen: list[_fk_keys.LosslessInts] = []
     real = _fk_keys.lossless_int_columns
 
-    def spy(*args: object, **kwargs: object) -> dict[str, set[str]]:
+    def spy(*args: object, **kwargs: object) -> _fk_keys.LosslessInts:
         out = real(*args, **kwargs)
         seen.append(out)
         return out
@@ -136,4 +136,4 @@ def test_the_adapter_ingests_with_the_union_of_every_role(tmp_path: Path, cls: s
             unified_slice_enabled=False,
         )
     assert seen, "the adapter did not build its ingestion set through lossless_int_columns"
-    assert "v" in seen[0].get("t", set()), (cls, seen[0])
+    assert "v" in seen[0].for_table("t"), (cls, seen[0])
