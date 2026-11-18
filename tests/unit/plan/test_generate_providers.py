@@ -11,8 +11,10 @@ import logging
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from decoy_engine import reasons, run_config_only_checks
+from decoy_engine.config import PipelineConfig
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._window_admission import classify_window_table
 from decoy_engine.generation.pinned import PinnedModeError, compile_pinned_plan
@@ -111,10 +113,22 @@ def test_a_field_or_group_is_unexpected_on_a_scalar_provider(key: str) -> None:
     )
 
 
+def _config_errors(col: dict[str, Any]) -> list[str]:
+    full = {
+        "version": 2,
+        "global_settings": {"seed": 1},
+        "sources": {},
+        "tables": [{"name": "t", "row_count": 3, "generate_columns": [col]}],
+        "targets": {"t": {"type": "file", "format": "csv", "path": "o.csv"}},
+    }
+    with pytest.raises(ValidationError) as info:
+        PipelineConfig.model_validate(full)
+    return [str(e["type"]) for e in info.value.errors()]
+
+
 def test_unique_is_refused_on_a_provider_column() -> None:
-    with pytest.raises(Exception) as info:
-        run_config_only_checks(cfg([prov("synthetic_npi", unique=True)]))
-    assert "generate_unique_unsupported" in str(info.value)
+    errors = _config_errors(prov("synthetic_npi", unique=True))
+    assert str(reasons.config.GENERATE_UNIQUE_UNSUPPORTED) in errors
 
 
 def test_a_locale_the_provider_does_not_declare_is_refused() -> None:
@@ -136,11 +150,24 @@ def test_a_declared_locale_passes_and_a_locale_free_identifier_takes_any_engine_
     assert_accepted(cfg([prov("synthetic_cusip", locale="en_CA")]))
 
 
-def test_a_non_string_option_is_a_config_error_not_a_coercion() -> None:
-    for bad in ({"provider": 5}, {"locale": ["en_US"]}):
-        col = {**prov("synthetic_npi"), **bad}
-        with pytest.raises(Exception):
-            run_config_only_checks(cfg([col]))
+def test_cusip_en_ca_passes_the_compile_path_and_fr_fr_does_not() -> None:
+    assert_accepted(cfg([prov("synthetic_cusip", locale="en_CA")]))
+    assert_accepted(cfg([prov("synthetic_cusip", locale="en_US")]))
+    assert_refused(
+        cfg([prov("synthetic_cusip", locale="fr_FR")]),
+        "generate_provider_locale_unsupported",
+        p("x", "locale"),
+    )
+
+
+@pytest.mark.parametrize("bad", [{"provider": 5}, {"locale": ["en_US"]}, {"field": 3}])
+def test_a_non_string_option_is_a_config_error_not_a_coercion(bad: dict[str, Any]) -> None:
+    errors = _config_errors({**prov("synthetic_npi"), **bad})
+    assert str(reasons.config.GENERATE_OPTION_TYPE) in errors
+
+
+def test_the_provider_key_is_required() -> None:
+    assert "missing" in _config_errors({"name": "x", "type": "provider"})
 
 
 # ---- faker hint ------------------------------------------------------------------------------
@@ -185,6 +212,16 @@ def test_the_instance_default_locale_is_checked_at_every_choke_point(
     assert info.value.code == LOCALE_CODE and info.value.__context__ is None
     with pytest.raises(PlanCompileError) as info:
         classify_window_table(config, "t", statistical_specs={}, instance_default_locale=default)
+    assert info.value.code == LOCALE_CODE
+
+
+def test_an_instance_default_of_en_ca_passes_for_cusip_and_refuses_npi() -> None:
+    cusip = cfg([prov("synthetic_cusip")])
+    run_config_only_checks(cusip, instance_default_locale="en_CA")
+    _compile(cusip, instance_default_locale="en_CA")
+    assert synthesize.generate_tables(_plan(cusip), instance_default_locale="en_CA")["t"].num_rows
+    with pytest.raises(PlanCompileError) as info:
+        run_config_only_checks(cfg([prov("synthetic_npi")]), instance_default_locale="en_CA")
     assert info.value.code == LOCALE_CODE
 
 

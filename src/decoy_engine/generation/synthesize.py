@@ -49,11 +49,13 @@ from decoy_engine.generation.kinds import (
     constant_values,
     lookup_digests,
     parametric_values,
+    provider_generate,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
 if TYPE_CHECKING:
@@ -371,20 +373,17 @@ def _generate_column(
     elif kind == "derived_aggregate":
         values = generate_derived_aggregate_column(col, n, generated or {})
     elif kind in ("grouped_series", "windowed_date", "group_key"):
-        from decoy_engine.generation._grouped_windowed_generators import (
-            _group_key_generate,
-            _grouped_series_generate,
-            _windowed_date_generate,
-        )
+        from decoy_engine.generation._grouped_windowed_generators import grouped_windowed_values
 
-        if kind == "grouped_series":
-            values = _grouped_series_generate(col, n, seed, generated or {})
-        elif kind == "windowed_date":
-            values = _windowed_date_generate(
-                col, n, seed, generated or {}, reference_date=reference_date
-            )
-        else:
-            values = _group_key_generate(col, n, seed, generated or {})
+        values = grouped_windowed_values(
+            kind, col, n, seed, generated or {}, reference_date=reference_date
+        )
+    elif kind == "provider":
+        ctx = GenDeriveContext.for_column(
+            derive_key=derive_key, column_config=col, fallback_seed=seed
+        )
+        locale = str(col.get("locale") or instance_default_locale or "en_US")
+        values = provider_generate(col, n, ctx, get_default_registry(), locale)
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -38,6 +38,7 @@ __all__ = [
     "FPE_UNENCRYPTABLE_LENGTH",
     "FPE_UNENCRYPTABLE_VALUE",
     "GENERATION_NOT_REPRODUCIBLE",
+    "GENERATION_PROVIDER_FAILED",
     "INVALID_SUBSTRATE",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISSING",
@@ -399,4 +400,13 @@ POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.27.0",
+)
+
+_d = _catalog.runtime("GenerationError")
+
+# The one fixed-text translation of an adapter or pool failure on a provider column.
+GENERATION_PROVIDER_FAILED = _d(
+    "generation_provider_failed",
+    "A provider column could not be generated.",
+    since=UNRELEASED,
 )

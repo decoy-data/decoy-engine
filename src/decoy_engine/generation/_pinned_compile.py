@@ -60,6 +60,10 @@ REJECTED_TYPES = {
         "pinned_faker_unsupported",
         "faker columns are not available in pinned mode",
     ),
+    "provider": (
+        str(reasons.plan.PINNED_PROVIDER_UNSUPPORTED),
+        "provider columns are not available in pinned mode",
+    ),
     "formula": (
         "pinned_formula_unsupported",
         "formula columns are not available in pinned mode",

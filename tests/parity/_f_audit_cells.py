@@ -266,6 +266,12 @@ def cfg_lookup() -> dict[str, Any]:
     return fx.config([_t("t", 30, [{"name": "x", "type": "lookup", "codeset": "hcpcs"}])])
 
 
+def cfg_provider() -> dict[str, Any]:
+    return fx.config(
+        [_t("t", 30, [{"name": "x", "type": "provider", "provider": "synthetic_npi"}])]
+    )
+
+
 def cfg_fresh() -> dict[str, Any]:
     cols = [
         {"name": "cat", "type": "categorical", "categories": ["a", "b"], "determinism": "fresh"}
@@ -679,6 +685,7 @@ def legacy_cells(unmarked_windowed: Callable[..., list[Any]]) -> tuple[Cell, ...
         Cell("grouped-series", fx.cfg_grouped_windowed, {}, admission_key=("gw", "cum")),
         Cell("group-key", fx.cfg_grouped_windowed, {}, admission_key=("gw", "gkey")),
         Cell("lookup", cfg_lookup, {}, admission_key=("t", "x")),
+        Cell("provider", cfg_provider, {}, admission_key=("t", "x")),
         Cell(
             "determinism-fresh",
             cfg_fresh,

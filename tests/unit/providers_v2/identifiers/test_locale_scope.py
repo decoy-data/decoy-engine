@@ -14,11 +14,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-from decoy_engine.providers_v2.identifiers._locale import ENGINE_LOCALES, require_locale
 from faker.config import AVAILABLE_LOCALES
 
 from decoy_engine import reasons
 from decoy_engine.providers_v2 import ProviderError, get_default_registry
+from decoy_engine.providers_v2.identifiers._locale import ENGINE_LOCALES, require_locale
 
 MODULES = {
     "synthetic_ssn": "_ssn",
@@ -43,7 +43,6 @@ EXPECTED: dict[str, tuple[str, ...]] = {
     "synthetic_icd10": ENGINE_LOCALES,
     "synthetic_mrn": ENGINE_LOCALES,
 }
-LOCALES = ("en_US", "fr_FR")
 
 
 def _generator(name: str) -> Callable[..., str]:
@@ -76,33 +75,34 @@ def test_the_declared_scope_is_the_owners_choice(name: str) -> None:
     assert _declared(name) == EXPECTED[name]
 
 
-@pytest.mark.parametrize("locale", LOCALES)
-@pytest.mark.parametrize("name", sorted(MODULES))
-def test_generate_random_returns_a_value_exactly_when_the_locale_is_declared(
-    name: str, locale: str
-) -> None:
-    generate = _generator(name)
-    if locale in _declared(name):
-        assert isinstance(generate(np.random.default_rng(7), locale), str)
-        return
-    with pytest.raises(ProviderError) as info:
-        generate(np.random.default_rng(7), locale)
-    assert info.value.code == reasons.provider.UNSUPPORTED_LOCALE
+def _probe(name: str) -> str:
+    """One locale the identifier does not declare."""
+    return "xx_XX" if _declared(name) == ENGINE_LOCALES else "fr_FR"
 
 
 @pytest.mark.parametrize("name", sorted(MODULES))
-def test_a_declared_locale_has_no_effect_on_the_value(name: str) -> None:
+def test_every_declared_locale_gives_the_en_us_value_and_the_probe_refuses(name: str) -> None:
     generate = _generator(name)
     base = generate(np.random.default_rng(7), "en_US")
     for locale in _declared(name):
-        assert generate(np.random.default_rng(7), locale) == base
+        assert generate(np.random.default_rng(7), locale) == base, locale
+    with pytest.raises(ProviderError) as info:
+        generate(np.random.default_rng(7), _probe(name))
+    assert info.value.code == reasons.provider.UNSUPPORTED_LOCALE
 
 
-def test_a_locale_outside_the_engine_set_is_refused_by_the_locale_free_identifiers() -> None:
-    for name in ("synthetic_iban", "synthetic_pan", "synthetic_icd10", "synthetic_mrn"):
-        with pytest.raises(ProviderError) as info:
-            _generator(name)(np.random.default_rng(7), "zz_ZZ")
-        assert info.value.code == reasons.provider.UNSUPPORTED_LOCALE
+def test_the_probe_is_outside_the_engine_set() -> None:
+    assert "xx_XX" not in ENGINE_LOCALES and "fr_FR" in ENGINE_LOCALES
+
+
+def test_cusip_takes_en_ca_and_refuses_fr_fr() -> None:
+    generate = _generator("synthetic_cusip")
+    assert "en_CA" in _declared("synthetic_cusip")
+    assert generate(np.random.default_rng(7), "en_CA") == generate(
+        np.random.default_rng(7), "en_US"
+    )
+    with pytest.raises(ProviderError):
+        generate(np.random.default_rng(7), "fr_FR")
 
 
 def test_require_locale_text_names_the_identifier_not_the_locale() -> None:

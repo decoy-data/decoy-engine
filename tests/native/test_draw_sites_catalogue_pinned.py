@@ -155,8 +155,9 @@ _ENTRY_DIGESTS = [
 
 _MAP_DIGESTS = {
     "MASK_STRATEGY_TO_SITE": "e42b340fc017f0608c08ec988fb697bb52c84f5cbb657dfa99b9531cd56681e9",
-    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution) and E3 (lookup).
-    "GEN_KIND_TO_SITE": "2174d2a884f6f011bb2aa63cd15507fe60ba168a9be1f30fd9ba24bf9f04f35d",
+    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution), E3 (lookup) and
+    # GEN-PROVIDERS E1 (provider, mapped to the existing gen.derive_context).
+    "GEN_KIND_TO_SITE": "80bf3649e287c8eb11094b836b24417b56214848d87b996160e884d13f4ac2a7",
     "PROVIDER_IDENTIFIER_SITES": "19593ad7e4ac52025cdc024aa16bdb04ab776755b83e6f7c0e546210b6fc7cd6",
     "FAMILIES": "cbbf3f70f90b3995c7bb16f11bf1560ce135af11761cc6444aa41feaf659e811",
     "ENTROPY_ROOTS": "4f3fdb974258ed94e92188bd4dd456363696dba2d2a4a90a4f744c53879949f8",

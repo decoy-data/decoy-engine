@@ -17,6 +17,7 @@ SRC = Path(__file__).resolve().parents[3] / "src" / "decoy_engine"
 MODULES = ("generation/kinds/_provider.py",)
 FORBIDDEN_TOKENS = frozenset({"derive", "derive_value", "default_rng", "Faker", "seed_instance"})
 IDENTIFIERS = "decoy_engine.providers_v2.identifiers"
+COMPOSITE_PRIVATE = "decoy_engine.generation.composite" + "._"
 ALLOWED_IDENTIFIER_NAMES = frozenset({"IdentifierError"})
 
 
@@ -38,7 +39,7 @@ def scan(source: str) -> list[str]:
                     found.append(f"identifier import {alias.name}")
                 if module.startswith(IDENTIFIERS + "._"):
                     found.append(f"private identifier module {module}")
-                if module.startswith("decoy_engine.generation.composite._"):
+                if module.startswith(COMPOSITE_PRIVATE):
                     found.append(f"private composite module {module}")
                 if alias.name.startswith("_") and module.startswith(IDENTIFIERS):
                     found.append(f"private identifier name {alias.name}")

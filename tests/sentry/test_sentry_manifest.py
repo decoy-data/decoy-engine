@@ -105,6 +105,7 @@ SENTRIES = (
     "tests/sentry/defects/test_lazy_builder_registry.py",
     "tests/sentry/defects/test_ner_mismatch_single_site.py",
     "tests/sentry/defects/test_nested_json_choke_point.py",
+    "tests/sentry/defects/test_provider_reuse.py",
     "tests/sentry/defects/test_rng_construction.py",
     "tests/sentry/defects/test_strategy_docs_agree.py",
     "tests/sentry/defects/test_target_destination_choke_point.py",

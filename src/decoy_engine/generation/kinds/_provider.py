@@ -1,0 +1,150 @@
+"""The `provider` generate type: a column drawn from the masking provider registry.
+
+The registry (`providers_v2.get_default_registry()`) is the only source of provider names,
+adapters and capabilities, so a scalar provider that masking can use works here with no edit.
+How a value is drawn follows from the provider's capability row, never from a name list:
+
+- a poolable Faker or Mimesis provider builds one pool and samples it, as the faker pool bridge
+  does, through the registry's pool seam;
+- a `decoy_native` identifier draws each row through the adapter's keyed path with the row
+  ordinal as the source value, the same pattern masking uses for a positional column;
+- a non-poolable Faker provider asks the adapter for one seeded batch.
+
+Every failure inside a draw is caught at one site and re-raised after the `except` block closes,
+so the new error has no cause and no context. Adapter and pool messages can quote a provider
+name or a value, so they are never forwarded.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal
+
+from decoy_engine import reasons
+from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext
+
+if TYPE_CHECKING:
+    from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
+
+__all__ = ["COMPOSITE_BACKEND", "draw_path", "provider_generate"]
+
+COMPOSITE_BACKEND = "composite"
+
+DrawPath = Literal["pool", "keyed", "batch"]
+
+# The pool labels the faker pool bridge uses, so the two bridges stay one pattern.
+_POOL_BUILD = "faker_pool_build"
+_POOL_SELECTION = "faker_pool_selection"
+# A provider column is the registry-backed sibling of a faker column and draws from its family.
+_VALUE_FAMILY = "faker"
+
+
+def draw_path(caps: CapabilityMatrix) -> DrawPath | None:
+    """How a provider's values are drawn, or None when generation has no path for its backend."""
+    if caps.backend_type in ("faker", "mimesis") and caps.poolable:
+        return "pool"
+    if caps.backend_type == "decoy_native":
+        return "keyed"
+    if caps.backend_type == "faker":
+        return "batch"
+    return None
+
+
+def provider_generate(
+    col: dict[str, Any],
+    n: int,
+    gen_ctx: GenDeriveContext,
+    registry: ProviderRegistry,
+    locale: str,
+) -> list[Any]:
+    """``n`` values of the provider ``col`` names, in the effective ``locale``."""
+    # Imported here: the provider and pool packages import `generation` while it initializes.
+    from decoy_engine.determinism import DeterminismError
+    from decoy_engine.generation.composite import CompositeError
+    from decoy_engine.generation.pool import GenerationError, PoolCapacityError
+    from decoy_engine.providers_v2 import ProviderError
+    from decoy_engine.providers_v2.identifiers import IdentifierError
+
+    failed = False
+    values: list[Any] = []
+    try:
+        values = _draw(col, n, gen_ctx, registry, locale)
+    except (
+        ProviderError,
+        CompositeError,
+        IdentifierError,
+        DeterminismError,
+        PoolCapacityError,
+        GenerationError,
+    ):
+        failed = True
+    if failed:
+        raise GenerationError(
+            code=reasons.runtime.GENERATION_PROVIDER_FAILED,
+            message=(
+                "A provider column could not be generated. "
+                f"At table {col.get(TABLE_KEY)!r}, column {col.get('name')!r}."
+            ),
+        )
+    return values
+
+
+def _draw(
+    col: dict[str, Any],
+    n: int,
+    gen_ctx: GenDeriveContext,
+    registry: ProviderRegistry,
+    locale: str,
+) -> list[Any]:
+    from decoy_engine.generation.pool import (
+        CardinalityMode,
+        PoolBuilder,
+        PoolSampler,
+    )
+    from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
+    from decoy_engine.providers_v2 import ProviderError, ProviderSpec
+
+    provider = str(col.get("provider"))
+    caps = registry.get_capabilities(provider)
+    # The plan check ran earlier; a registry override can change the row since.
+    if locale not in caps.supported_locales:
+        raise ProviderError(code=reasons.provider.UNSUPPORTED_LOCALE)
+    path = draw_path(caps)
+    adapter = registry.get_adapter(provider)
+    namespace = f"gen-provider/{col.get(TABLE_KEY)}/{col.get('name')}"
+    if path == "pool":
+        pool = PoolBuilder(registry).build(
+            provider,
+            size=DEFAULT_POOL_SIZE,
+            job_seed=gen_ctx.family_bytes(_POOL_BUILD)[:8],
+            locale=locale,
+        )
+        sampled = PoolSampler().sample(
+            pool,
+            n,
+            mode=CardinalityMode.REUSE,
+            seed=gen_ctx.family_bytes(_POOL_SELECTION)[:8],
+            deterministic=False,
+        )
+        return list(sampled.tolist())
+    if path == "keyed":
+        spec = ProviderSpec(
+            locale=locale,
+            deterministic=True,
+            namespace=namespace,
+            seed=gen_ctx.family_bytes(_VALUE_FAMILY),
+        )
+        # The identifier adapters take the row ordinal as the source value; the protocol types
+        # it narrower than they accept.
+        return [
+            adapter.generate(provider, spec=spec, source_value=i)  # type: ignore[arg-type]
+            for i in range(n)
+        ]
+    if path == "batch":
+        spec = ProviderSpec(
+            locale=locale,
+            deterministic=False,
+            namespace=namespace,
+            seed=gen_ctx.family_bytes(_POOL_BUILD)[:8],
+        )
+        return list(adapter.generate_batch(provider, spec=spec, count=n))
+    raise ProviderError(code=reasons.provider.CAPABILITY_VIOLATION)

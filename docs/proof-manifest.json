@@ -3,7 +3,7 @@
   "generated_at": "2026-06-14",
   "surface": {
     "mask": 24,
-    "generate": 14,
+    "generate": 15,
     "providers": 34
   },
   "hero": {
@@ -1251,6 +1251,7 @@
     "group_key",
     "grouped_series",
     "lookup",
+    "provider",
     "reference",
     "sequence",
     "statistical",
