@@ -53,6 +53,7 @@ CI_NAMES = [
     "dp-certified-gate",
     "determinism",
     "pg-gate",
+    "secret-provider-sdks",
 ]
 IMPORT_SMOKE = ["import-smoke (3.11.9)", "import-smoke (3.12.7)"]
 MERGE = {
@@ -258,7 +259,7 @@ def test_contexts_prints_the_merge_tier_as_json(
     out = capsys.readouterr().out
     got = json.loads(out)
     assert sorted(got) == sorted(n for names in MERGE.values() for n in names)
-    assert len(got) == len(set(got)) == 28
+    assert len(got) == len(set(got)) == 29
 
 
 # --- AT-21: verify --tier merge -------------------------------------------------------------

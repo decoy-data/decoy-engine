@@ -135,6 +135,9 @@ def test_operator_environment_exceptions_are_current() -> None:
             if isinstance(n, ast.FunctionDef) and n.name == entry["function"]
         ]
         assert len(funcs) == 1, f"{entry['module']}::{entry['function']} not found"
+        if entry.get("resolved_by"):
+            _assert_library_resolved(entry, tree, funcs[0])
+            continue
         read = {
             n.value
             for n in ast.walk(funcs[0])
@@ -142,6 +145,28 @@ def test_operator_environment_exceptions_are_current() -> None:
         }
         path_vars = {v for v in read if v.endswith(("_CACERT", "_CERT", "_KEY", "_FILE", "_PATH"))}
         assert path_vars == set(entry["variables"]), (entry["function"], sorted(path_vars))
+
+
+def _assert_library_resolved(entry: dict, tree: ast.Module, func: ast.FunctionDef) -> None:
+    """A library opens the paths, so no literal read is visible. Require instead a live function
+    that imports the library, calls its named constructor, and variables the docs name."""
+    library, constructor = entry["resolved_by"], entry["constructor"]
+    imported = {
+        alias.name.split(".")[0]
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Import)
+        for alias in n.names
+    } | {(n.module or "").split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    assert library in imported, f"{entry['module']} does not import {library}"
+    assert any(
+        isinstance(n, ast.Call) and getattr(n.func, "attr", None) == constructor
+        for n in ast.walk(func)
+    ), f"{entry['function']} does not call {library}...{constructor}"
+    docs = (HERE.parents[1] / "docs" / "security" / "secret-providers.md").read_text(
+        encoding="utf-8"
+    )
+    for variable in entry["variables"]:
+        assert variable in docs, f"{variable} is not documented"
 
 
 def test_ambient_only_entries_sit_behind_the_ambient_guard() -> None:

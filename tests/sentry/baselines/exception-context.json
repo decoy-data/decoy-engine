@@ -110,21 +110,6 @@
   "decoy_engine/run_result/_outcome.py::derive_outcome::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
-  "decoy_engine/secret_providers/_types.py::_parse_vault::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/secret_providers/_types.py::_parse_vault::1": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/secret_providers/vault.py::VaultKV2Provider._to_resolved::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/secret_providers/vault.py::_hvac::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
-  "decoy_engine/secret_providers/vault.py::_parse_rfc3339::0": {
-   "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
-  },
   "decoy_engine/transforms/_codeset_loader.py::_resolve_read_path::0": {
    "reason": "existing raise-from-None inside an except block at the B1 base; hoist is V2 corrective work"
   },
