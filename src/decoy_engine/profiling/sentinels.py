@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine.detection.detectors import PreparedValues, _series_str
+from decoy_engine.profiling._value_redaction import _conforms
 from decoy_engine.profiling.types import SentinelFlag
 
 # ── known sentinel values ─────────────────────────────────────────────────────
@@ -75,6 +76,46 @@ _STRING_SENTINELS: set[str] = {
     "xxxx",
     "xxxxx",
 }
+
+
+# The two notes of a `date_out_of_range` flag; its `value` is `f"{count} value(s)"`.
+_DOB_RANGE_NOTE = "DOB values outside 1880-today"
+_DATE_RANGE_NOTE = "date values outside 1900-2100"
+
+
+def _numeric_text(f: float) -> str:
+    """The text a numeric sentinel's `value` holds for the table key `f`."""
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def _string_note(normalized: str) -> str:
+    """The note of a string sentinel; `normalized` is the table member."""
+    return f"placeholder string {normalized!r} - probably means missing data"
+
+
+def is_table_sentinel(kind: Any, value: Any, note: Any, count: Any) -> bool:
+    """True when a sentinel flag's `value` and `note` are the fixed table text for its `kind`.
+
+    The scanners write table text and counts only, never the raw cell, so a flag that matches
+    its table cannot hold a cell. A date out-of-range `value` must also equal what the flag's own
+    `count` produces. Anything else (a loaded or hand-edited flag) does not match.
+    """
+    if not (isinstance(kind, str) and isinstance(value, str) and isinstance(note, str)):
+        return False
+    if kind == "date_sentinel":
+        return any(value == d.isoformat() and note == n for d, n in _DATE_SENTINELS.items())
+    if kind == "numeric_sentinel":
+        return any(value == _numeric_text(f) and note == n for f, n in _NUMERIC_SENTINELS.items())
+    if kind == "string_sentinel":
+        return value in _STRING_SENTINELS and note == _string_note(value)
+    if kind == "date_out_of_range":
+        return (
+            _conforms(count, int)
+            and count >= 1
+            and value == f"{count} value(s)"
+            and note in (_DOB_RANGE_NOTE, _DATE_RANGE_NOTE)
+        )
+    return False
 
 
 # ── thresholds for "out of plausible range" date detection ────────────────────
@@ -208,11 +249,7 @@ def _scan_dates(non_null: pd.Series, col_name: str) -> list[SentinelFlag]:
                 kind="date_out_of_range",
                 value=f"{out_of_range_count} value(s)",
                 count=out_of_range_count,
-                note=(
-                    "DOB values outside 1880-today"
-                    if is_dob_column
-                    else "date values outside 1900-2100"
-                ),
+                note=_DOB_RANGE_NOTE if is_dob_column else _DATE_RANGE_NOTE,
             )
         )
 
@@ -233,7 +270,7 @@ def _scan_numerics(non_null: pd.Series) -> list[SentinelFlag]:
         flags.append(
             SentinelFlag(
                 kind="numeric_sentinel",
-                value=str(int(f)) if f.is_integer() else str(f),
+                value=_numeric_text(f),
                 count=count,
                 note=_NUMERIC_SENTINELS[f],
             )
@@ -255,7 +292,7 @@ def _scan_strings(values: PreparedValues) -> list[SentinelFlag]:
                 kind="string_sentinel",
                 value=normalized,
                 count=count,
-                note=f"placeholder string {normalized!r} - probably means missing data",
+                note=_string_note(normalized),
             )
         )
     return flags

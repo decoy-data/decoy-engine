@@ -1,0 +1,3 @@
+### Fixed (memory-capped jobs no longer crash on hosts with many cores, main-red, 2026-11-18)
+
+A job run under a memory cap could stop with a segmentation fault on a host with many CPU cores. numpy's bundled OpenBLAS starts one thread per core when the worker imports numpy, and each thread reserves about 40 MiB before the cap is applied. On a 26-core host the worker was over a 768 MiB cap before it read any data. The capped worker now starts with `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS` and `MKL_NUM_THREADS` set to 1. The engine does no BLAS work and sizes its own native threads, so output and speed do not change.
