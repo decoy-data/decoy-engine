@@ -40,6 +40,20 @@ __all__ = [
 #: The `QualityWarning.code` a caller filters on to find the residency heads-up.
 RESIDENCY_WARNING_CODE = reasons.warning.OUT_OF_CORE_CALLER_MANAGED_RESIDENCY
 
+#: The route-level `provider` of that warning: the out-of-core route, not a masking provider.
+RESIDENCY_WARNING_PROVIDER = "out_of_core_route"
+
+_SHAPE_RESIDENT = "a resident pa.Table source"
+_SHAPE_NO_SINK = "no sink (the whole output is held resident)"
+_SHAPE_LOADER = "a source_loader (returns an unbounded resident table)"
+
+#: `detail` flag per shape; scalar values only, so the evidence record accepts the warning.
+_SHAPE_FLAGS = {
+    _SHAPE_RESIDENT: "resident_source",
+    _SHAPE_NO_SINK: "no_sink",
+    _SHAPE_LOADER: "source_loader",
+}
+
 
 def caller_managed_residency_shapes(
     sources: Mapping[str, Any], *, sink: Any, source_loader: Any
@@ -53,11 +67,11 @@ def caller_managed_residency_shapes(
     """
     shapes: list[str] = []
     if any(isinstance(value, pa.Table) for value in sources.values()):
-        shapes.append("a resident pa.Table source")
+        shapes.append(_SHAPE_RESIDENT)
     if sink is None:
-        shapes.append("no sink (the whole output is held resident)")
+        shapes.append(_SHAPE_NO_SINK)
     if source_loader is not None:
-        shapes.append("a source_loader (returns an unbounded resident table)")
+        shapes.append(_SHAPE_LOADER)
     return tuple(shapes)
 
 
@@ -84,11 +98,11 @@ def residency_warning_message(shapes: tuple[str, ...]) -> str:
 def residency_quality_warning(shapes: tuple[str, ...]) -> QualityWarning:
     """The structured, control-flow-neutral residency warning for `.warnings`.
 
-    Route-level, not provider-attributed (`provider=""`); the shapes and the
-    human-readable message ride in `detail`.
+    Route-level: `provider` names the route, not a masking provider. `detail` holds scalars
+    only (one `True` flag per shape, plus the message) so the evidence record accepts it.
     """
+    detail: dict[str, Any] = {_SHAPE_FLAGS[s]: True for s in shapes}
+    detail["message"] = residency_warning_message(shapes)
     return QualityWarning(
-        code=RESIDENCY_WARNING_CODE,
-        provider="",  # route-level, not provider-attributed; column defaults to None
-        detail={"shapes": list(shapes), "message": residency_warning_message(shapes)},
+        code=RESIDENCY_WARNING_CODE, provider=RESIDENCY_WARNING_PROVIDER, detail=detail
     )

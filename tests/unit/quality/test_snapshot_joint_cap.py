@@ -76,7 +76,7 @@ def test_at3a_default_cap_reports_the_cut() -> None:
     (w,) = snapshot_joint_warnings(doc, contingency_top_k=DEFAULT_CONTINGENCY_TOP_K)
     assert w.code == reasons.warning.FIT_JOINT_CELLS_TRUNCATED
     assert w.detail == {
-        "columns": ["kid", "parent"],
+        "columns": "kid, parent",
         "cell_count": 36,
         "cells_kept": 25,
         "cap_dropped": 11,
