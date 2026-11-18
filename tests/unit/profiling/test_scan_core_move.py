@@ -65,9 +65,7 @@ def test_scan_set_keeps_no_re_export_of_the_moved_names() -> None:
         "FieldCore", "TableCore", "ChildFactsCore", "RelationshipFactsCore", "ScanSetCore",
         "ScanSetCoreRead", "_relaxed", "_Core", "_DetectorRunCore",
     }  # fmt: skip
-    tree = ast.parse(
-        (_ROOT / "src/decoy_engine/profiling/scan_set.py").read_text(encoding="utf-8")
-    )
+    tree = ast.parse((_ROOT / "src/decoy_engine/profiling/scan_set.py").read_text(encoding="utf-8"))
     defined = {
         t.id
         for n in tree.body

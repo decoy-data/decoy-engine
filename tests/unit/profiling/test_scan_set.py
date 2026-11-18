@@ -27,8 +27,8 @@ from decoy_engine.profiling import (
     scan_sources,
 )
 from decoy_engine.profiling import scan_set as scan_module
+from decoy_engine.profiling._scan_core import TableCore
 from decoy_engine.profiling._scan_text_checks import GUARD_DETECTORS
-from decoy_engine.profiling.scan_set import TableCore
 from decoy_engine.reason_adapter import reason_from_exception
 
 CANARY = "CANARY-9f3a71"

@@ -51,7 +51,7 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 | `sample-run/v1` | contract 3.1 | `src/decoy_engine/records/_kinds.py` | `tests/unit/records/test_corpus.py`, `tests/unit/records/test_kinds.py` |
 | `decoy-library-export/v1` | contract 3.1 | `src/decoy_engine/records/_export.py` | `tests/unit/records/test_corpus.py`, `tests/unit/records/test_export.py` |
 | `decoy-job-log/v1` | contract 3.1 | `src/decoy_engine/records/_joblog.py` | `tests/unit/records/test_corpus.py`, `tests/unit/records/test_joblog.py` |
-| `scan-set/v1` | contract 3.1 | `src/decoy_engine/profiling/scan_set.py` | `tests/unit/profiling/test_scan_set.py` |
+| `scan-set/v1` | contract 3.1 | `src/decoy_engine/profiling/scan_set.py`, `src/decoy_engine/profiling/_scan_core.py` | `tests/unit/profiling/test_scan_set.py` |
 | `scan-diff/v1` | contract 3.1 | `src/decoy_engine/profiling/scan_diff.py` | `tests/unit/profiling/test_scan_diff.py`, `tests/integration/compat_corpus/scan_diff/` |
 | `decoy-resume-run/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-run-v1.json` |
 | `decoy-resume-table/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-table-v1.json` |

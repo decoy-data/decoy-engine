@@ -417,8 +417,8 @@ def test_every_relationship_status_round_trips_through_the_scan_set_core() -> No
 
     from pydantic import ValidationError
 
+    from decoy_engine.profiling._scan_core import RelationshipFactsCore
     from decoy_engine.profiling._scan_integrity import Status
-    from decoy_engine.profiling.scan_set import RelationshipFactsCore
 
     base = {
         "parent": "p",
