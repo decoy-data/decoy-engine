@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
@@ -42,8 +43,11 @@ from decoy_engine.execution._gated_string_guard import (
 )
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.expressions._when_parser import (
+    Scalar,
     parse_when,
     parse_when_cached,
+    when_column_refs,
+    when_literals_by_ref,
 )
 
 _log = logging.getLogger(__name__)
@@ -112,6 +116,58 @@ def _require_closed_grammar(expression: object, strategy: str, column: str | Non
     )
 
 
+# The integers a float64 holds exactly. A value or integer literal outside it is compared as a
+# Python int, so no route rounds it.
+_EXACT_FLOAT_INT = 2**53
+
+
+def _exact_column(col: pd.Series, literals: Sequence[Scalar]) -> pd.Series:
+    """One referenced column as the evaluator reads it.
+
+    An integer column (a NumPy integer or a pandas nullable `Int`/`UInt`) is compared as Python
+    integers when a value, an integer literal or any float literal could not be handled exactly
+    as float64; a blank is `NaN`, never `pd.NA`. Otherwise a nullable integer column becomes
+    float64 with `NaN`, which is exact in range. Every other column is returned as is.
+    """
+    if not pd.api.types.is_integer_dtype(col.dtype):
+        return col
+    wide = any(
+        isinstance(x, float) or (isinstance(x, int) and abs(x) > _EXACT_FLOAT_INT)
+        for x in literals
+        if not isinstance(x, bool)
+    )
+    if not wide and len(col):
+        low, high = col.min(), col.max()  # blanks are skipped; all blank gives `pd.NA`
+        # Python ints: NumPy would compare a uint64 with a negative bound through float64.
+        wide = low is not pd.NA and (int(low) < -_EXACT_FLOAT_INT or int(high) > _EXACT_FLOAT_INT)
+    if wide:
+        values = col.to_numpy(dtype=object, na_value=np.nan)
+        return pd.Series(values, index=col.index, name=col.name, dtype=object)
+    if isinstance(col.dtype, np.dtype):
+        return col
+    return pd.Series(col.to_numpy(dtype=np.float64, na_value=np.nan), index=col.index)
+
+
+def when_eval_frame(
+    frame: pd.DataFrame, refs: Sequence[str], literals: Mapping[str, Sequence[Scalar]]
+) -> pd.DataFrame:
+    """The frame a predicate is evaluated on, built after ingestion on every route.
+
+    One rule for every ingestion dtype: a blank is `NaN` (so `!=`, `not in` and a `not` around a
+    comparison select it, and nothing else does), and integers compare exactly. Only the columns
+    the predicate reads are copied.
+    """
+    data: dict[str, pd.Series] = {}
+    for name in refs:
+        if name not in frame.columns:
+            continue
+        col = frame[name]
+        if not isinstance(col, pd.Series):  # duplicate column labels: let pandas report them
+            return frame
+        data[name] = _exact_column(col, literals.get(name, ()))
+    return pd.DataFrame(data, index=frame.index)
+
+
 def _eval_predicate(
     pdf: pd.DataFrame,
     expression: str,
@@ -144,9 +200,18 @@ def _eval_predicate(
         # unmonitored RuntimeWarning.
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
-            mask = pdf.eval(
+            ast = parse_when_cached(expression)
+            frame = when_eval_frame(pdf, when_column_refs(ast), when_literals_by_ref(ast))
+            # numexpr has no object arithmetic: exact integers use pandas' own Python engine,
+            # under the same empty scopes and the same closed grammar.
+            exact = any(
+                frame[c].dtype == object and pd.api.types.is_integer_dtype(pdf[c].dtype)
+                for c in frame.columns
+                if c in pdf.columns and isinstance(frame[c], pd.Series)
+            )
+            mask = frame.eval(
                 expression,
-                engine="numexpr",
+                engine="python" if exact else "numexpr",
                 local_dict={},
                 global_dict={},
             )

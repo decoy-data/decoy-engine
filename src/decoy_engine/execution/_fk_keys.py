@@ -48,8 +48,8 @@ contract now covers signed, unsigned, and narrower-than-int64 FK keys, not
 from __future__ import annotations
 
 import numbers
-from collections.abc import Collection, Iterable, Sequence
-from typing import TYPE_CHECKING, Final, NoReturn
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import pandas as pd
 import pyarrow as pa
@@ -69,6 +69,8 @@ from decoy_engine.internal.pandas_compat import (
 )
 
 if TYPE_CHECKING:
+    from decoy_engine.plan._types import Plan
+    from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships._graph import RelationshipEdge
 
 # The SAME stable code every route raises for "no dtype can hold this FK
@@ -311,6 +313,84 @@ def fk_columns_for_table(edges: Iterable[RelationshipEdge], table: str) -> set[s
     return cols
 
 
+def _when_read_columns(
+    per_table_columns: Iterable[tuple[str, Iterable[tuple[str, object]]]],
+) -> dict[str, set[str]]:
+    """Per table, the columns any column's `when:` predicate reads (an integer among them must
+    ingest losslessly, or a null widens it to float64 and the predicate compares rounded values)."""
+    from decoy_engine.errors import ValidationError
+    from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
+
+    out: dict[str, set[str]] = {}
+    for table, columns in per_table_columns:
+        for _name, when in columns:
+            if not isinstance(when, str):
+                continue
+            try:
+                refs = when_column_refs(parse_when_cached(when))
+            except ValidationError:
+                continue  # the evaluator raises its coded error; nothing to protect here
+            out.setdefault(table, set()).update(refs)
+    return out
+
+
+def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> dict[str, set[str]]:
+    """Per table, every column that must ingest as an exact nullable integer.
+
+    The ONE construction of the set every Arrow-to-pandas ingestion site passes to
+    `to_pandas_fk_safe`: FK parent and child keys, `date_shift`/`joint_mask` source anchors,
+    `top_code` columns, `group_key` `group_by` siblings, declared integers, and the columns a
+    `when:` predicate reads. A column that is not Arrow-integer-typed is left alone by the
+    conversion, so naming a string column here is harmless.
+    """
+    from decoy_engine.declared_casting._boundary import declared_integer_columns
+    from decoy_engine.execution._runner import (
+        group_key_group_by_columns,
+        source_anchor_columns,
+        top_code_columns,
+    )
+
+    per_table: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        for table in (edge.parent_table, edge.child_table):
+            per_table.setdefault(table, set()).update(fk_columns_for_table(graph.edges, table))
+    when_read = _when_read_columns(
+        (table, ((n, seed.when) for n, seed in table_seed.per_column))
+        for table, table_seed in plan.seed_envelope.per_table
+    )
+    for source in (
+        source_anchor_columns(plan, registry),
+        top_code_columns(plan, registry),
+        group_key_group_by_columns(plan, registry),
+        declared_integer_columns(plan),
+        when_read,
+    ):
+        for table, cols in source.items():
+            per_table.setdefault(table, set()).update(cols)
+    return per_table
+
+
+def lossless_int_columns_from_config(config: Mapping[str, Any], table: str) -> set[str]:
+    """`lossless_int_columns` for one table from the validated config, for a caller that has no
+    compiled plan (unified admission). It covers what that route admits: declared integers,
+    `group_key` `group_by` siblings, and the columns a `when:` reads. Relationships are declined
+    upstream and `date_shift`/`top_code` never reach it."""
+    from decoy_engine._lexeme import integer_columns_by_table
+
+    cols: set[str] = set(integer_columns_by_table(config).get(table, ()))
+    entries = next(
+        (t.get("columns") or () for t in config.get("tables") or () if t.get("name") == table), ()
+    )
+    for entry in entries:
+        group_by = (entry.get("provider_config") or {}).get("group_by")
+        if entry.get("strategy") == "group_key" and isinstance(group_by, str) and group_by:
+            cols.add(group_by)
+    cols |= _when_read_columns([(table, ((e.get("name"), e.get("when")) for e in entries))]).get(
+        table, set()
+    )
+    return cols
+
+
 def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFrame:
     """Convert one Arrow table to pandas, keeping every FK-relevant integer
     column exact.
@@ -376,5 +456,7 @@ __all__ = [
     "fk_key_value",
     "fk_nullable_int_array",
     "lossless_fk_int_values",
+    "lossless_int_columns",
+    "lossless_int_columns_from_config",
     "to_pandas_fk_safe",
 ]

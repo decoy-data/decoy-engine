@@ -44,7 +44,7 @@ ALL_EXPRESSIONS = [*OPS, *FLOAT_OPS]
 # Classes whose `v` is still an integer after the run (a top_code column becomes its label text).
 INT_OUTPUT = ["plain", "fk", "declared", "anchor", "group_key"]
 # The classes unified admission takes today. The others are asserted as the explicit fallback.
-UNIFIED_ADMITS = {"declared"}
+UNIFIED_ADMITS = {"declared", "plain"}
 CHUNK_SIZES = [1, 2, 3, len(VALUES)]
 # `run_mask_chunked` takes plain columns natively; the other classes reroute to the oracle.
 NATIVE_ADMITS = {"plain"}
@@ -230,11 +230,15 @@ def test_chunked_routes_write_the_blank_bearing_integer_as_int64(
     assert _types(out) == {"int64"}, (cls, size)
 
 
-def test_unified_flag_on_and_off_agree_on_values_types_and_metadata(tmp_path: Path) -> None:
-    on_cfg, tables = build_case("declared", tmp_path, OPS[1])
-    on = _run(on_cfg, tables, **_kwargs("unified"))
+@pytest.mark.parametrize("cls", sorted(UNIFIED_ADMITS))
+@pytest.mark.parametrize("expression", [OPS[0], OPS[1], OPS[7]])
+def test_unified_flag_on_and_off_agree_on_values_types_and_metadata(
+    tmp_path: Path, cls: str, expression: str
+) -> None:
+    cfg, tables = build_case(cls, tmp_path, expression)
+    on = _run(cfg, tables, **_kwargs("unified"))
     assert "unified_slice_activation" in on.quality_metrics
-    off = _run(on_cfg, tables, **_kwargs("full_frame"))
+    off = _run(cfg, tables, **_kwargs("full_frame"))
     assert "unified_slice_activation" not in off.quality_metrics
     a, b = on.outputs["t"], off.outputs["t"]
     assert a.equals(b)
