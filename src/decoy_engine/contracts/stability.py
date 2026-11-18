@@ -5,9 +5,10 @@ name: one object exported from two places has one tier. This module holds the ru
 in `tests/sentry/release/_census.py` applies them to every export and fails on a name with no
 tier, an object with two, or a marker that disagrees with the registry.
 
-Order of the rules for one export: an explicit `TIER_EXCEPTIONS` row; then identity (an object in
-`EXPERIMENTAL_OBJECTS`, or an object a frozen package already exports); then the package rule.
-A public subpackage that contract 3.4 does not name is documented internal.
+Order of the rules for one export: an explicit `TIER_EXCEPTIONS` row; then identity (an object
+`sdk` defines, an object in `EXPERIMENTAL_OBJECTS`, or an object a frozen path already exports);
+then the package rule. A public subpackage that contract 3.4 does not name is documented
+internal.
 """
 
 from __future__ import annotations
@@ -22,32 +23,36 @@ TIERS: Final = (FROZEN, EXPERIMENTAL, INTERNAL)
 # A class or function docstring starts with this; a constant's module docstring does.
 EXPERIMENTAL_MARKER: Final = "Experimental:"
 
-# Modules and packages whose exports are frozen (contract 3.4 names each). Any other public
-# package defaults to INTERNAL, unless one of its objects is also exported by a frozen one.
+# Modules whose exports are frozen whole (contract 3.4: `__init__.py` and `sdk.py`). Every other
+# public package defaults to INTERNAL, unless one of its objects is also exported by a frozen
+# path or carries a FROZEN row in `TIER_EXCEPTIONS`.
 PACKAGE_TIERS: Final[dict[str, str]] = {
     "decoy_engine": FROZEN,
     "decoy_engine.sdk": FROZEN,
-    "decoy_engine.detection": FROZEN,
-    "decoy_engine.plan.checks": FROZEN,
-    "decoy_engine.profile": FROZEN,
-    "decoy_engine.profiling": FROZEN,
 }
 
-# `(module, name, tier)`: a name that must differ from its rule. Empty at the freeze.
-TIER_EXCEPTIONS: Final[tuple[tuple[str, str, str], ...]] = ()
+# `(module, name, tier)`: a name that must differ from its package rule. These are the subpackage
+# names section 3.4 lists explicitly; each object stays frozen under every import path.
+TIER_EXCEPTIONS: Final[tuple[tuple[str, str, str], ...]] = (
+    ("decoy_engine.detection", "DetectorRun", FROZEN),
+    ("decoy_engine.detection", "ModelRef", FROZEN),
+    ("decoy_engine.detection", "NerRate", FROZEN),
+    ("decoy_engine.detection", "log_detector_models", FROZEN),
+    ("decoy_engine.detection", "log_detector_run", FROZEN),
+    ("decoy_engine.detection", "ner_rates", FROZEN),
+    ("decoy_engine.plan.checks", "StrategyRequirement", FROZEN),
+    ("decoy_engine.profile", "profile_relationships_from_config", FROZEN),
+    ("decoy_engine.profiling", "ModelHit", FROZEN),
+)
 
-# Experimental objects by identity: `(defining module, qualified name)`. Every export of the
-# object, at the root, in `sdk` or in `providers`, takes the tier. `ConfigError` and
-# `ConnectorError` are `errors` objects that `sdk` re-exports, so they are not listed.
+# Everything `sdk.py` defines is experimental, derived by the census: a class or function whose
+# `__module__` is this module, and a module-level constant assigned in its source. `ConfigError`
+# and `ConnectorError` are `errors` objects that `sdk` re-exports, so they stay frozen.
+EXPERIMENTAL_MODULE: Final = "decoy_engine.sdk"
+
+# Experimental objects that live outside `sdk`, by identity: `(defining module, qualified name)`.
+# Every export of the object, at the root, in `providers` or elsewhere, takes the tier.
 EXPERIMENTAL_OBJECTS: Final[tuple[tuple[str, str], ...]] = (
-    ("decoy_engine.sdk", "CheckResult"),
-    ("decoy_engine.sdk", "ConnectorConfig"),
-    ("decoy_engine.sdk", "FileMeta"),
-    ("decoy_engine.sdk", "FileSink"),
-    ("decoy_engine.sdk", "FileSource"),
-    ("decoy_engine.sdk", "PermanentError"),
-    ("decoy_engine.sdk", "TransientError"),
-    ("decoy_engine.sdk", "WriteResult"),
     ("decoy_engine.internal.faker_setup", "atomic_swap_db_providers"),
     ("decoy_engine.internal.faker_setup", "load_custom_providers"),
     ("decoy_engine.internal.faker_setup", "register_faker_list_provider"),
@@ -56,19 +61,33 @@ EXPERIMENTAL_OBJECTS: Final[tuple[tuple[str, str], ...]] = (
     ("decoy_engine.providers_v2._faker_adapter", "register_faker_provider_v2"),
 )
 
-# Experimental constants: `(defining module, names)`. A constant has no docstring, so the
-# module docstring carries the marker and names each one.
-EXPERIMENTAL_CONSTANTS: Final[tuple[str, tuple[str, ...]]] = (
-    "decoy_engine.sdk",
-    (
-        "CAP_DRY_RUN",
-        "CAP_INTROSPECTION",
-        "CAP_MULTIPART",
-        "CAP_RESUMABLE",
-        "CAP_SIGNED_URL",
-        "CAP_STREAMING",
-        "SDK_VERSION",
-    ),
+# Public packages (paths under `decoy_engine`) that declare no `__all__`, so export nothing the
+# census can classify. The list is exact and counted: a new package without `__all__` fails the
+# census until it declares one or is added here with a reason in review.
+NO_ALL_PACKAGES: Final[tuple[str, ...]] = (
+    "codesets",
+    "contracts",
+    "detection.name_hints",
+    "execution.native.chunked",
+    "execution.native.protocol",
+    "fileaccess.adapters",
+    "internal",
+    "reasons.config",
+    "reasons.connector",
+    "reasons.decoy",
+    "reasons.physical",
+    "reasons.plan",
+    "reasons.platform",
+    "reasons.post_scan",
+    "reasons.pre_scan",
+    "reasons.provider",
+    "reasons.quality",
+    "reasons.route",
+    "reasons.runtime",
+    "reasons.safe_output",
+    "reasons.subset",
+    "reasons.verification",
+    "reasons.warning",
 )
 
 # A public package that needs an optional extra, keyed by its path under `decoy_engine`: the one

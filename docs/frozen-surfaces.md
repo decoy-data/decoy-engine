@@ -60,7 +60,7 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 ## Public names (contract 3.4)
 
 `tests/unit/test_public_api.py` (`test_all_lists_every_public_name`) holds `decoy_engine.__all__`
-to its expected set. Names exported again by `decoy_engine.sdk` are listed as `sdk.<name>`; this
+to its expected set. Names exported again by `decoy_engine.sdk` are listed as `sdk.<name>`, and a subpackage name that 3.4 lists is listed as `<package>.<name>`; this
 page's sentry is what holds `sdk.__all__`, because a name added to or dropped from it fails the
 row check. Both pin that a name exists, not its signature or fields; rows that cite `RGF1-KL-4`
 have nothing more. `JobEstimate` gained three defaulted fields after `notes` (`lifecycle_peak_bytes`,
@@ -73,6 +73,7 @@ not rows here.
 | Run entry point: `ExecutionResult`, `run_pipeline` | `decoy_engine.__all__` | `src/decoy_engine/execution/`, `src/decoy_engine/__init__.py` | `tests/unit/execution/test_r3_public_signature_freeze.py`, `tests/unit/test_public_api.py` |
 | Pipeline config model: `PipelineConfig` | `decoy_engine.__all__` | `src/decoy_engine/config/` | `tests/snapshots/test_frozen_schemas.py`, `tests/snapshots/frozen_schemas/pipeline-config.schema.json`, `tests/unit/test_public_api.py` |
 | Run result: `RUN_RESULT_SCHEMA`, `RunResult`, `RunResultRead`, `derive_outcome` | `decoy_engine.__all__` | `src/decoy_engine/run_result/` | `tests/snapshots/test_frozen_schemas.py`, `tests/unit/run_result/test_model_shapes.py`, `tests/unit/run_result/test_outcome.py`, `tests/unit/test_public_api.py` |
+| Subpackage names section 3.4 lists: `detection.DetectorRun`, `detection.ModelRef`, `detection.NerRate`, `detection.log_detector_models`, `detection.log_detector_run`, `detection.ner_rates`, `plan.checks.StrategyRequirement`, `profile.profile_relationships_from_config`, `profiling.ModelHit` | contract 3.4 | `src/decoy_engine/detection/`, `src/decoy_engine/plan/checks/`, `src/decoy_engine/profile/`, `src/decoy_engine/profiling/` | `tests/unit/test_public_api.py`, `accepted-known-limit: RGF1-KL-4` |
 | Errors: `sdk.ConfigError`, `sdk.ConnectorError`, `ConfigError`, `ConfigRuleError`, `ConnectorAuthError`, `ConnectorError`, `DecoyError`, `FixedWidthParseError`, `FlagPauseSignal`, `LicenseError`, `LicenseExpiredError`, `PipelineValidationError`, `PostScanBlockedError`, `ValidationError` | `decoy_engine.__all__` | `src/decoy_engine/errors.py`, `src/decoy_engine/verification/postmask/_blocked.py` | `tests/sentry/test_exception_hierarchy.py`, `tests/unit/detection_verification/postscan/test_blocked.py`, `tests/unit/test_public_api.py`, `accepted-known-limit: RGF1-KL-4` |
 | Context and logging: `ExecutionContext`, `Logger`, `StructuredEvents`, `TelemetryClient`, `emit_fidelity`, `emit_lineage`, `emit_quarantine`, `emit_step`, `emit_throughput_sample`, `make_key_resolver` | `decoy_engine.__all__` | `src/decoy_engine/context.py` | `tests/unit/test_public_api.py`, `accepted-known-limit: RGF1-KL-4` |
 | Constants: `FILE_SOURCE_PATH_FIELDS`, `RELEASE_PHASE`, `ReleasePhase`, `SEED_PROTOCOL_VERSION` | `decoy_engine.__all__` | `src/decoy_engine/release.py`, `src/decoy_engine/determinism/`, `src/decoy_engine/config/` | `tests/unit/determinism/test_derive_vectors.py`, `tests/unit/test_public_api.py`, `accepted-known-limit: RGF1-KL-4` |
