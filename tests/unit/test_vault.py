@@ -280,7 +280,7 @@ def _patch_vault_header(path, **overrides) -> None:
     """Rewrite the unencrypted decoy-vault/v2 header in place, leaving the
     encrypted chunks intact. Used to simulate a vault written under a
     different SEED_PROTOCOL_VERSION without monkeypatching the constant."""
-    from decoy_engine.vault import _MAGIC
+    from decoy_engine.vault._format import _MAGIC
 
     blob = path.read_bytes()
     assert blob.startswith(_MAGIC)
