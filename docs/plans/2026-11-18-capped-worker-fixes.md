@@ -391,9 +391,10 @@ wrap itself is not bypassed.
 
 ### 2.7 Placement
 
-No new file. Tests go in the existing `tests/connectors/test_postgres_session.py` and
+No new source file. Tests go in the existing `tests/connectors/test_postgres_session.py` and
 `tests/connectors/test_postgres_snapshot_unit.py` (CODEMAP Connectors row: tests in
-`tests/connectors/`).
+`tests/connectors/`). One new changelog fragment, `changelog.d/pg-connect-timeout.md` (CODEMAP
+changelog.d row: one fragment per user-visible change).
 
 ### 2.8 Acceptance tests (write first)
 
