@@ -99,7 +99,7 @@ def _home_token_file() -> tuple[Callable[[], str], bool]:
     process has one this reads nothing. A missing or empty file is an empty token. The text is
     held by the returned closure, not by a frame local, so a traceback cannot render it.
     """
-    if len(os.environ.get("VAULT_TOKEN", "")) > 0:
+    if "VAULT_TOKEN" in os.environ:
         return _no_token, False
     hvac = _hvac()
     text = ""
@@ -198,15 +198,14 @@ def _text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def _resolved_verify(verify: bool | str) -> bool | str:
-    """``verify=True`` the way ``requests`` resolves it at send time, but once, at build."""
+def _resolved_verify(verify: bool | str, address: str) -> bool | str:
+    """``verify=True`` the way ``requests`` resolves it at send time (``REQUESTS_CA_BUNDLE``, then
+    ``CURL_CA_BUNDLE``), but once, at build. ``requests`` does the lookup itself."""
     if verify is not True:
         return verify
-    for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
-        bundle = os.environ.get(name)
-        if bundle:
-            return bundle
-    return True
+    settings = _requests().Session().merge_environment_settings(address, {}, None, True, None)
+    resolved = settings["verify"]
+    return resolved if isinstance(resolved, (bool, str)) else True
 
 
 def _flat_proxies(mapping: Mapping[object, object]) -> tuple[str, ...]:
@@ -244,7 +243,7 @@ def _context_of(client: Any) -> VaultContext:
         address=address,
         namespace=_text(getattr(adapter, "namespace", None)),
         token=_text(getattr(client, "token", None)),
-        verify=_resolved_verify(verify),
+        verify=_resolved_verify(verify, address),
         cert=cert or None,
         proxies=_flat_proxies(proxies),
     )
