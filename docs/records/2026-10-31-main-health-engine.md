@@ -2,7 +2,7 @@
 
 Status: record (survey only; no code changed)
 
-Audited head: `origin/main` = `a6e5c252ec55e63f86ca24342112d485080d78eb` (H-1 Wave A, #348, 2026-10-30).
+Audited head: `origin/main` = `6ff568155d97c4da8c68c6e622a22c8e52d4cd26` (H-1 Wave A, #348, 2026-10-30).
 Branch: `review/main-health-engine`, cut from that head. This record is the only change on it.
 
 ## Verdict

@@ -26,8 +26,8 @@ report incorporates those corrections; the original challenge note is retained f
 
 ## Revision Boundary
 
-- Behavioral review baseline: `1e80016bdbf1aa100f7f21215c919df4c69f41b1`.
-- Frozen reviewed revision: `c1c4f2c2b33af39e1de4874788a7df78a352970c` on `main`.
+- Behavioral review baseline: `f9d5479a51c0fdb2fd55c94c79dbc6933bc929f6`.
+- Frozen reviewed revision: `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1` on `main`.
 - The only intervening source changes were typing annotations in the isolated-run modules; the
   other changes pinned pandas below 3 and widened mypy strict-module coverage. None changed a
   finding's behavioral evidence.

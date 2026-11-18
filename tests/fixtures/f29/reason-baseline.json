@@ -1,5 +1,5 @@
 {
- "baseline_commit": "2a44723ff26ffd16c69f026582ec93998d67ca5d",
+ "baseline_commit": "ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b",
  "note": "append-only; a code may be added, never removed, re-homed or re-interpreted",
  "identities": [
   {"code": "cloud_io.unsupported_format", "namespace": "config", "owners": ["CODES"], "sources": ["validation_result.py#class_attr:CODES.CLOUD_IO_UNSUPPORTED_FORMAT"]},

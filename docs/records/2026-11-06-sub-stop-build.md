@@ -4,7 +4,7 @@ Status: record
 
 ## Environment
 
-Base `41a86f47eed491030c5d235d1046e426d387f22d` (origin/main, unchanged at push time). Tests on GCP VM
+Base `08bc1d8f7fa6586d7ef27c21b5219b71f0043588` (origin/main, unchanged at push time). Tests on GCP VM
 `decoy-test-2` and `decoy-test-5` through `vm-run engine` (venv from `uv.lock`, Python 3.10). Mutations M4 to M10
 ran on the VM; M1 to M3 ran on the devbox through `pytest-one` after the VM gates run was cancelled (see Not verified).
 

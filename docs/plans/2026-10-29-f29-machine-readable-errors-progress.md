@@ -2,7 +2,7 @@ Status: plan (engine slices E0-E6 built; see [the build record](../records/2026-
 
 Summary: Give engine errors and progress one versioned reason registry, safe structured records, and enforceable producer boundaries.
 
-Baseline commit: `2a44723ff26ffd16c69f026582ec93998d67ca5d` (`git rev-parse HEAD`, this checkout, 2026-10-29).
+Baseline commit: `ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b` (`git rev-parse HEAD`, this checkout, 2026-10-29).
 
 # F29: FRAME + PLAN
 
