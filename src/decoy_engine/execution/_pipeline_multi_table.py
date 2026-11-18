@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons as reason_codes
+from decoy_engine._nested_json import nested_children
 from decoy_engine.execution import _chunked_input, _pipeline_auto_chunk
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import provider_config_to_dict
@@ -101,8 +102,8 @@ def _non_deterministic_nodes(
                 continue
             strategy = seed.strategy
             if strategy == "nested":
-                child = provider_config_to_dict(seed.provider_config).get("strategy")
-                if child in strategies:
+                children = nested_children(provider_config_to_dict(seed.provider_config))
+                if any(c.strategy in strategies for c in children):
                     found.append((table, column, strategy))
             elif strategy in strategies:
                 found.append((table, column, strategy))

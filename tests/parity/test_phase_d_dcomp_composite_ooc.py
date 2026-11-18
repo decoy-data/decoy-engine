@@ -45,9 +45,9 @@ COMPOSITE_WARNING = (
     "k,j",
     {
         "parent_table": "P",
-        "parent_columns": ["k", "j"],
+        "parent_columns": "k,j",
         "child_table": "C",
-        "child_columns": ["k", "j"],
+        "child_columns": "k,j",
         "orphan_rows": 1,
     },
 )

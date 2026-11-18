@@ -19,6 +19,21 @@ def is_text(t: pa.DataType) -> bool:
     return pa.types.is_string(t) or pa.types.is_large_string(t)
 
 
+def narrow_text(array: pa.Array) -> pa.Array:
+    """Return `array` as a `string` array: `string` unchanged, `large_string` safely cast.
+
+    The one owner of offset-width normalization for kernels that have a `string` fast path.
+    The cast copies offsets and leaves the value bytes alone, so it does not check UTF-8: the
+    caller still validates. It raises `pa.ArrowInvalid` when the text does not fit 32-bit
+    offsets, and `TypeError` for any other type.
+    """
+    if pa.types.is_string(array.type):
+        return array
+    if pa.types.is_large_string(array.type):
+        return array.cast(pa.string())
+    raise TypeError(f"narrow_text needs a string or large_string array, got {array.type}")
+
+
 def is_text_or_null(t: pa.DataType) -> bool:
     """`is_text`, or the `null` type of an all-null batch the reader could not type."""
     return is_text(t) or pa.types.is_null(t)
@@ -47,3 +62,21 @@ def exact_key_cast(chunk: pa.Array, target: pa.DataType) -> pa.Array:
     except pa.ArrowException as exc:
         failed = type(exc)
     raise failed(f"cannot cast a key chunk {chunk.type} -> {target} exactly")
+
+
+# One int32 offset per row of a variable-width Arrow column.
+_OFFSET_BYTES = 4
+
+
+def arrow_column_bytes(arrow_type: pa.DataType, rows: int, width: float) -> int:
+    """Bytes of one Arrow column's data buffers (no validity bitmap).
+
+    A fixed-width column is `bit_width` bits a value, rounded up to whole bytes so a 1-bit
+    boolean stays an integer count. A variable-width column holds one int32 offset a value
+    plus `width` payload bytes a value (`width` is the mean, 0 when the caller has none).
+    """
+    try:
+        bit_width = arrow_type.bit_width
+    except ValueError:  # variable-width types have no bit width
+        return int(rows * (_OFFSET_BYTES + width))
+    return (rows * bit_width + 7) // 8

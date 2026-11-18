@@ -11,26 +11,15 @@ fail-closed `StrategyError` the handler raises when a span cannot be FF1-encrypt
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from decoy_engine import reasons
 from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.generation.pool._events import QualityWarning
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 
 __all__ = [
     "text_mask_fail_closed_error",
     "text_mask_sub_floor_warning",
 ]
-
-# The exact note `TextMaskHandler.run` attaches, so the native warning's detail is byte-identical
-# to the oracle's (the warning is compared field for field against the oracle's on both routes).
-_SUB_FLOOR_NOTE = (
-    "these spans' domain was below the FF1 minimum admissible "
-    "domain, or failed checksum validation, and could not be "
-    "FF1-encrypted; they were handled under the configured "
-    "sub_floor_span policy instead (non-reversible)."
-)
 
 
 def text_mask_fail_closed_error(exc: FpeUnencryptableError, column: str) -> StrategyError:
@@ -46,25 +35,4 @@ def text_mask_fail_closed_error(exc: FpeUnencryptableError, column: str) -> Stra
             f"column {column!r}: {exc}. The engine fails closed rather than "
             "silently choose a sub_floor_span fallback."
         ),
-    )
-
-
-def text_mask_sub_floor_warning(
-    notices: Mapping[str, int], *, policy: str | None, column: str
-) -> QualityWarning:
-    """The one aggregate `text_mask_sub_floor_span_handled` warning for `notices`.
-
-    Byte-identical to the warning `TextMaskHandler.run` builds for the same per-detector counts
-    and policy, at the oracle's scope: the whole column (unified, counts summed across batches) or
-    one oracle-equivalent chunk (chunked)."""
-    return QualityWarning(
-        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-        provider="text_mask",
-        column=column,
-        detail={
-            "policy": policy,
-            "by_detector": dict(notices),
-            "total": sum(notices.values()),
-            "note": _SUB_FLOOR_NOTE,
-        },
     )

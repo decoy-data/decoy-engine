@@ -53,6 +53,8 @@ import _f4a_gen
 from _supervisor import classify_failure, run_worker
 from bench_worker_fk import _DiskPeakSampler, _percentile
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV
+
 SCHEMA = "f4-mixed/v1"
 ORACLE_SCHEMA = "f4-mixed-oracle/v1"
 _MIB = 1024 * 1024
@@ -341,7 +343,14 @@ def _one_run(args: argparse.Namespace, run_no: int) -> dict[str, Any]:
     work = Path(tempfile.mkdtemp(prefix=f"f4-mixed-{args.mode}{run_no}-", dir=args.work_root))
     scratch = work / "scratch"
     scratch.mkdir()
-    env = {**os.environ, "TMPDIR": str(scratch), "ARROW_DEFAULT_MEMORY_POOL": "system"}
+    # A run that declares an RSS ceiling gets the engine's one capped env (allocator and BLAS
+    # pins); a run without one keeps its own env so bench numbers stay comparable.
+    env = {
+        **os.environ,
+        **(CAPPED_ENV if args.rss_ceiling_mb else {}),
+        "TMPDIR": str(scratch),
+        "ARROW_DEFAULT_MEMORY_POOL": "system",
+    }
     try:
         outcome = run_worker(
             _child_cmd(args, work, work / "result.json"),

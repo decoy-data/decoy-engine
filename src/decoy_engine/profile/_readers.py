@@ -112,6 +112,8 @@ class FooterFacts:
     null_counts: tuple[tuple[str, int | None], ...]
     row_groups: int
     max_row_group_rows: int
+    # Largest row group's `total_byte_size` (uncompressed), for the lifecycle estimate.
+    max_row_group_bytes: int = 0
 
 
 def _footer_null_counts(metadata: pq.FileMetaData) -> dict[str, int | None]:
@@ -147,6 +149,10 @@ def footer_facts_of(parquet_file: pq.ParquetFile) -> FooterFacts:
         null_counts=tuple(_footer_null_counts(metadata).items()),
         row_groups=len(groups),
         max_row_group_rows=max(groups, default=0),
+        max_row_group_bytes=max(
+            (metadata.row_group(i).total_byte_size for i in range(metadata.num_row_groups)),
+            default=0,
+        ),
     )
 
 

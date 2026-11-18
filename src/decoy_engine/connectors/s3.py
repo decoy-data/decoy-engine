@@ -20,17 +20,19 @@ Error mapping:
 * `botocore` `NoSuchBucket` / `NoSuchKey` / 404 / 403 are surfaced as
   `PermanentError` so the engine doesn't retry them.
 * Networking errors (`EndpointConnectionError`, transient 5xx) raise
-  `TransientError` so the engine's retry logic kicks in.
+  `TransientError`. botocore retries a request once; a body read that fails mid-stream is
+  resumed by `connectors/_retry.py` (see `_stream_object`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import Field, SecretStr
 
 from decoy_engine.connectors import _clients
+from decoy_engine.connectors._retry import run_retrying
 from decoy_engine.sdk import (
     CAP_INTROSPECTION,
     CAP_MULTIPART,
@@ -39,6 +41,7 @@ from decoy_engine.sdk import (
     CAP_STREAMING,
     CheckResult,
     ConnectorConfig,
+    ConnectorError,
     FileMeta,
     FileSink,
     FileSource,
@@ -124,11 +127,18 @@ class S3FileSource(FileSource[S3Config]):
         # Lazy: defer client construction until first call so that
         # constructing the source object is cheap and side-effect-free.
         self._client = None
+        self._resume_client = None
 
     def _client_or_build(self):
         if self._client is None:
             self._client = _build_s3_client(self.config)
         return self._client
+
+    def _resume_client_or_build(self):
+        """The one-attempt client a mid-stream resume uses, so the executor is its only retry."""
+        if self._resume_client is None:
+            self._resume_client = _build_s3_client(self.config, single_request=True)
+        return self._resume_client
 
     def check(self) -> CheckResult:
         """Verify the bucket exists and the configured credentials reach it."""
@@ -187,21 +197,95 @@ class S3FileSource(FileSource[S3Config]):
         This matches what `list()` returned: callers iterate list, pick
         a key, pass it to open. Re-joining would double-prefix.
         """
-        yield from _stream_object(self._client_or_build(), self.config.bucket, path)
+        yield from _stream_object(
+            self._client_or_build(), self._resume_client_or_build(), self.config.bucket, path
+        )
 
 
-def _stream_object(client, bucket: str, key: str) -> Iterator[bytes]:
-    """The one S3 object read loop, shared by the source and the object store."""
-    response = _clients.s3_call(client.get_object, Bucket=bucket, Key=key)
-    body = response["Body"]
+class _Resumable:
+    """One object read that can reopen its body at the byte it reached.
+
+    The first request goes on the ordinary client. After a ``transient`` failure the next
+    attempt reopens with ``Range`` from the bytes already yielded and ``IfMatch`` on the first
+    ETag, on the one-attempt client, so the executor is the only retry layer. A 412 means the
+    object changed: ``source_changed``, never retried.
+    """
+
+    def __init__(self, client: Any, resume_client: Any, bucket: str, key: str) -> None:
+        self._client, self._resume_client = client, resume_client
+        self._bucket, self._key = bucket, key
+        self._chunks: Iterator[bytes] | None = None
+        self._body: Any = None
+        self._etag: str | None = None
+        self.offset = 0
+
+    def start(self) -> None:
+        """The first request, on the ordinary client: botocore owns its retry, not the executor."""
+        response = _clients.s3_call(self._client.get_object, Bucket=self._bucket, Key=self._key)
+        self._etag = response.get("ETag") or None
+        self._attach(response)
+
+    def _resume(self) -> None:
+        if self._etag is None:
+            # Without a version to pin, a resume could splice two versions of the object.
+            raise _clients.source_changed("S3")
+        changed = False
+        try:
+            response = _clients.s3_call(
+                self._resume_client.get_object,
+                Bucket=self._bucket,
+                Key=self._key,
+                Range=f"bytes={self.offset}-",
+                IfMatch=self._etag,
+            )
+        except ConnectorError as err:
+            if err.kind != "precondition_failed":
+                raise
+            changed = True
+        if changed:
+            raise _clients.source_changed("S3")
+        self._attach(response)
+
+    def _attach(self, response: Any) -> None:
+        self._body = response["Body"]
+        self._chunks = self._body.iter_chunks(chunk_size=_DEFAULT_READ_CHUNK_BYTES)
+
+    def next_chunk(self) -> bytes | None:
+        """The next non-empty chunk, None at the end. A failure drops the body so a retry reopens."""
+        if self._chunks is None:
+            self._resume()
+        assert self._chunks is not None  # noqa: S101 - set by start() or _resume()
+        try:
+            while True:
+                chunk = _clients.s3_call(next, self._chunks, None)
+                if chunk is None:
+                    return None
+                if chunk:
+                    self.offset += len(chunk)
+                    return chunk
+        except ConnectorError:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        body, self._body, self._chunks = self._body, None, None
+        if body is not None:
+            body.close()
+
+
+def _stream_object(client, resume_client, bucket: str, key: str) -> Iterator[bytes]:
+    """The one S3 object read loop, shared by the source and the object store.
+
+    Each chunk read runs under ``run_retrying``; a failed one reopens the body at the offset
+    already yielded (``_Resumable``), so no byte is yielded twice.
+    """
+    reader = _Resumable(client, resume_client, bucket, key)
+    reader.start()
     try:
-        # Each `next` reads from the network, so it needs translating like any call.
-        chunks, done = body.iter_chunks(chunk_size=_DEFAULT_READ_CHUNK_BYTES), object()
-        while (chunk := _clients.s3_call(next, chunks, done)) is not done:
-            if chunk:
-                yield chunk
+        while (chunk := run_retrying(reader.next_chunk)) is not None:
+            yield chunk
     finally:
-        body.close()
+        reader.close()
 
 
 class S3FileSink(FileSink[S3Config]):

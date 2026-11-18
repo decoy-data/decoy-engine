@@ -55,8 +55,6 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for GEN-TYPES E1: gen.distribution appended at the end of the catalogue.
 # Re-pinned for GEN-TYPES E3: gen.lookup appended after gen.distribution.
 # Re-pinned for B-6: mask.tokenize derives under the vault-scoped subkey (call site moved).
-# Re-pinned for GEN-REL E1: gen.reference names the relational repair and its randrange fill.
-# Re-pinned for GEN-REL E2: gen.reference names the self-reference tree draw on its stream.
 # Re-pinned for DUP-FREEZE E2: two joint_mask stream sites after mask.joint_mask_keyed_row, and the
 # gen.composite_build_pool seed text names resolve_seed. MASK_STRATEGY_TO_SITE maps each strategy to
 # one site, so its digest does not move.
@@ -66,7 +64,8 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
 # Re-pinned at the GEN-INHERIT E2 main merge: row 24ze G1's form plus GEN-REL's gen.reference sites.
-_CATALOGUE_DIGEST = "103f6f829e76feb7871794cb2814ccb2ea1c12aefa57cfe7465a73638428c778"
+# Re-pinned at the GEN-INHERIT E2 merge of GEN-REL E3b: gen.reference sites after the E3b merge.
+_CATALOGUE_DIGEST = "ccfc988839f27b38a817991ee5b43e9b5428d0c5c5df2c3966babb9f139ccc60"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -133,7 +132,7 @@ _ENTRY_DIGESTS = [
     "b22ab37e973ad02b943c741bf53e598e9e213a56df6e184144ad95adeca516fd",  # gen.faker_per_row
     "c26b56c364cecf593b15abddab6bb7a4ca9ada7a578b0748f714e4637cd4c7fa",  # gen.categorical
     # gen.reference carries GEN-REL E1/E2 (relational repair, self-reference) in path::function form.
-    "d43d681f6661e934dfd8b113d25d75c35f7371fe33c7230fb7eedbe25abe4c3d",  # gen.reference
+    "d708861d65e4f7efd8c6b39464a1200a8e2158e1c7b5862f7bbf40a84bbafe4e",  # gen.reference
     "8b47094cdc123d559a1b924657ac2d84aa012ed0d92fe1a4030b763b04c55f1c",  # gen.formula_per_row
     "8eee3a31f0bf72952a59e8528cecfda9a4d05e97b123e382b2cab08c76c1e1b9",  # gen.statistical_per_row
     "c5a8c289a8a94d363e365084d2148580330cdccdc27d4144bc983f482ddaab17",  # gen.null_probability

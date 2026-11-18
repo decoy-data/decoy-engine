@@ -187,7 +187,7 @@ restricted-skip regression could have leaked a 3-character or zip+4-shaped
 prefix invisibly under the old check. The count of suppressed rows is
 computed independently from the actual output data (counting the literal `""`
 suppression marker in the column, not the engine's self-reported
-`cascade_decisions` detail) and cross-checked against both the planted count
+`rows_suppressed` detail) and cross-checked against both the planted count
 and the engine's `geo_generalize_cascade` warning, which must also be
 present.
 

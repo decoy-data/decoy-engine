@@ -24,7 +24,8 @@ knee clamp, up to 8 GCP runs reserving prodsim headroom). FRAME survey: the nati
   native CHUNKED route has no type gate and hits ~97s; a byte-identical `pc.cast(large_string->string)`
   (~0.26s/100M) closes it — a DEFERRED defensive add, land only if enterprise `large_string`/
   `string[pyarrow]` sources are in scope, NOT a throughput lever.) See [[decoy-redact-truncate-fallback-
-  cost]].
+  cost]]. DONE: roadmap row 24zy LARGE-STRING-FAST (`docs/plans/2026-11-17-large-string-fast-path.md`)
+  casts `large_string` to `string` inside both guards.
 - **This PR = PR-2 (native `categorical`) only.** Track B below is the live scope; Track A / PR-1a /
   PR-1b sections are retained as record. A separate 1-GCP-run regenerates the stale `results_native_
   100m.json` on current main to kill the misleading 142s source-of-truth.

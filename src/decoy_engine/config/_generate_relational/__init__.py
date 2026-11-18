@@ -68,7 +68,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import _capacity, reasons
-from decoy_engine.config._generate_options import GENERATE_OPTIONS, OptionSpec, parent_lookup_keys
+from decoy_engine.config._generate_options import (
+    GENERATE_OPTIONS,
+    NamedProblem,
+    OptionSpec,
+    parent_lookup_keys,
+)
 from decoy_engine.config._generate_type_checks import numeric_as_text_read
 from decoy_engine.config._tables import generate_columns_of
 from decoy_engine.expressions import column_refs, compile_expr
@@ -90,8 +95,6 @@ __all__ = [
 ]
 
 Problem = tuple[tuple[str | int, ...], str]
-# A problem whose message adds value-free names to the code's summary.
-NamedProblem = tuple[tuple[str | int, ...], str, str]
 
 _BOUNDS_CONFLICT = str(reasons.config.GENERATE_PER_PARENT_BOUNDS_CONFLICT)
 _FITTED_CONFLICT = str(reasons.config.GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT)

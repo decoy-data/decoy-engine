@@ -45,6 +45,7 @@ from decoy_engine.contracts.distribution_snapshot import (
     encode_datetime_buckets,
 )
 from decoy_engine.generation.pool._events import QualityWarning
+from decoy_engine.internal.pandas_compat import finite_numeric_cells
 from decoy_engine.profiling._value_redaction import (
     DATA_RULES,
     MIN_RELEASE_COUNT,
@@ -59,6 +60,7 @@ from decoy_engine.profiling._value_redaction import (
     stamp_value_policy,
     value_sensitive_names,
 )
+from decoy_engine.profiling.cell_format import add_cell_format, scrub_cell_format
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.quality.snapshot import (
     DEFAULT_CATEGORICAL_TOP_K,
@@ -67,7 +69,6 @@ from decoy_engine.quality.snapshot import (
     DistributionSnapshotError,
     check_contingency_top_k,
     compute_distribution_snapshot,
-    finite_numeric_cells,
     freetext_stats,
     numeric_stats,
 )
@@ -213,12 +214,50 @@ def labels_read_as_sentences(labels: Collection[str]) -> bool:
     )
 
 
+def _kth_index(ranges: Sequence[tuple[int, int, int | float]]) -> int:
+    """Index of the range that holds the `MIN_RELEASE_COUNT`-th row, counting in the order given."""
+    running: int | float = 0
+    for i, (_, _, count) in enumerate(ranges):
+        running += count
+        if running >= MIN_RELEASE_COUNT:
+            return i
+    raise ValueError("fewer than MIN_RELEASE_COUNT rows")
+
+
+def release_ranges_at_k(
+    ranges: Sequence[tuple[int, int, int | float]],
+) -> list[tuple[int, int, int | float]]:
+    """Bottom and top code ordered `(start, end, count)` ranges at the K-th row, then fold them.
+
+    Every range below the one that holds the `MIN_RELEASE_COUNT`-th lowest row counts under that
+    range, and likewise above the K-th highest, so the outer edges of what is released are those of
+    the K-th row from each end and never name one of the K-1 rows at either end. Then
+    `fold_ranges_under_k` merges until each range holds K rows. Fewer than K rows in all, or K-th
+    rows that cross (fewer than 2K-1 rows), release nothing, as numeric columns already do. Top
+    and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al., Statistical Disclosure
+    Control (Wiley, 2012), section 3.4. The one coder for the snapshot's years and a profile
+    document's decades.
+    """
+    counts = [count for _, _, count in ranges]
+    if sum(counts) < MIN_RELEASE_COUNT:
+        return []
+    low, high = _kth_index(ranges), len(ranges) - 1 - _kth_index(ranges[::-1])
+    if low > high:
+        return []
+    if low == high:
+        return [(ranges[low][0], ranges[low][1], sum(counts))]
+    first = (ranges[low][0], ranges[low][1], sum(counts[: low + 1]))
+    last = (ranges[high][0], ranges[high][1], sum(counts[high:]))
+    return fold_ranges_under_k([first, *ranges[low + 1 : high], last])
+
+
 def fold_year_bins(stats: dict[str, Any]) -> None:
     """Replace a datetime column's one-year bins with folded v2 ranges, flagged or not.
 
     A column with fewer than K rows in all has nothing it may release, so it keeps no range. A
     year past the last sampled year (a 9999 sentinel) is counted under the last sampled year: a
     multi-year range cannot end later, and a bucket of its own would hold the few sentinel rows.
+    The years are then coded and folded by `release_ranges_at_k`.
     """
     raw = stats.get("year_bins")
     if not raw:
@@ -226,8 +265,7 @@ def fold_year_bins(stats: dict[str, Any]) -> None:
     by_year: Counter[int] = Counter()
     for b in raw:
         by_year[min(b["year"], MAX_SAMPLED_YEAR)] += b["count"]
-    folded = fold_ranges_under_k([(y, y, c) for y, c in sorted(by_year.items())])
-    kept = folded if sum(c for _, _, c in folded) >= MIN_RELEASE_COUNT else []
+    kept = release_ranges_at_k([(y, y, c) for y, c in sorted(by_year.items())])
     stats["year_bins"] = encode_datetime_buckets([DatetimeBucket(*r) for r in kept])
 
 
@@ -247,9 +285,6 @@ def _redact_column(non_null: pd.Series, col: dict[str, Any]) -> None:
     if kind == "datetime":
         fold_year_bins(stats)
     if "cell_format" in col:
-        # Lazy, as in `quality/snapshot.py`: `generation` imports `quality` and `profiling`.
-        from decoy_engine.generation.statistical import scrub_cell_format
-
         col["cell_format"] = scrub_cell_format(kind, col["cell_format"])
     data_keys = {k: r for k, r in snapshot_rules(kind).items() if r in DATA_RULES}
     coarse = [k for k, r in data_keys.items() if r is Rule.COARSE_RANGE]
@@ -397,9 +432,6 @@ def _floor_column(non_null: pd.Series, col: dict[str, Any], *, numeric_bins: int
 
 def _to_freetext(df: pd.DataFrame, name: Any, col: dict[str, Any], *, numeric_bins: int) -> None:
     """Rewrite a sentence-like categorical column as free text: length statistics only."""
-    # Lazy, as in `_redact_column`: `generation` imports `quality` and `profiling`.
-    from decoy_engine.generation.statistical import add_cell_format
-
     only = df[[name]]
     col["kind"] = "freetext"
     col["stats"] = freetext_stats(only[name].dropna().astype(str), bins=numeric_bins)

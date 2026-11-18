@@ -58,11 +58,11 @@ case "$cmd" in
 
   mutants-pilot)
     cd "$CRATE_DIR"
-    echo "=== pilot 1: batch.rs (whole file, ~11 mutants, proves killed vs survived) ==="
+    echo "=== pilot 1: src/batch/ (whole module, ~11 mutants, proves killed vs survived) ==="
     # cargo-mutants exits nonzero when it finds a surviving mutant, which is the
     # expected pilot outcome here, not a script failure -- don't let `set -e` abort
     # the run before pilot 2.
-    cargo mutants -f 'src/batch.rs' --timeout 120 -j 2 "$@" || true
+    cargo mutants -f 'src/batch/**/*.rs' --timeout 120 -j 2 "$@" || true
     echo
     echo "=== pilot 2: import_ffi only, ffi_import.rs (proves the PyO3-boundary scoping) ==="
     cargo mutants -f 'src/ffi_import.rs' -F 'import_ffi' --timeout 120 -j 2 "$@" || true
@@ -77,7 +77,7 @@ case "$cmd" in
     cargo mutants \
       -f 'src/derive.rs' \
       -f 'src/canonicalize.rs' \
-      -f 'src/batch.rs' \
+      -f 'src/batch/**/*.rs' \
       -f 'src/ffi_import.rs' \
       -f 'src/arrow_ffi.rs' \
       --exclude-re "$PYO3_ONLY_FNS" \

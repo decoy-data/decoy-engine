@@ -51,8 +51,11 @@ from decoy_engine.execution._fk_keys import (
     lossless_fk_int_values,
     to_pandas_fk_safe,
 )
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, resolve_fk_keys
-from decoy_engine.execution.out_of_core._join import orphan_fk_warning
+from decoy_engine.execution._fk_resolve import (
+    orphan_fk_violation_error,
+    orphan_fk_warning,
+    resolve_fk_keys,
+)
 from decoy_engine.relationships._graph import OrphanPolicy
 
 if TYPE_CHECKING:

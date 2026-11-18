@@ -225,15 +225,20 @@ def generate_column_width_bytes(gen_col: GenerateColumnConfig) -> float | None:
     guess" default (§3.5), not an omission; a later sprint can extend this
     function as real per-type metadata becomes available.
     """
-    extras = gen_col.model_extra or {}
-    if gen_col.type == "categorical":
+    return generate_dict_column_width_bytes(gen_col.type, gen_col.model_extra or {})
+
+
+def generate_dict_column_width_bytes(column_type: str, extras: Mapping[str, Any]) -> float | None:
+    """`generate_column_width_bytes` for a column held as a dict (a config dump): the same table
+    and rules, read from the column's `type` and its type-specific keys."""
+    if column_type == "categorical":
         # Every category the column can draw, `by` entries included; none prices as unpriceable.
         categories = categorical_categories({"categories": [], **extras}) or []
         str_categories = [c for c in categories if isinstance(c, str)]
         if not str_categories:
             return None
         return float(max(len(c.encode("utf-8")) for c in str_categories))
-    if gen_col.type == "faker":
+    if column_type == "faker":
         faker_type = extras.get("faker_type")
         if isinstance(faker_type, str):
             return _GENERATE_FAKER_TYPE_WIDTH_BYTES.get(faker_type)
@@ -282,6 +287,7 @@ def table_size_spec_from_generate_table(table: TableConfig) -> TableSizeSpec:
 
 __all__ = [
     "generate_column_width_bytes",
+    "generate_dict_column_width_bytes",
     "sample_average_string_bytes",
     "table_size_spec_from_generate_table",
     "table_size_spec_from_profile",
