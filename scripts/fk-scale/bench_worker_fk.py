@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _supervisor import classify_failure, run_worker
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV, apply_mem_cap
+
 SCHEMA = "fk-scale/v1"
 _MIB = 1024 * 1024
 TABLES = ("parent", "child", "grandchild")
@@ -189,13 +191,6 @@ def _resolve_threshold(reorder: str, counts: dict[str, int]) -> int | None:
     return int(reorder)
 
 
-def _apply_mem_cap(cap_mb: int) -> None:
-    import resource
-
-    cap = cap_mb * _MIB
-    resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
-
-
 def _error_record(exc: BaseException) -> dict[str, Any]:
     # Class, coded error, and call-site frames only: a message or a frame's locals/source
     # line can carry a data value (log hygiene). Frames are file:line:function, so a future
@@ -212,7 +207,7 @@ def run_child(args: argparse.Namespace) -> int:
     record: dict[str, Any] = {"completed_inner": False}
     try:
         if args.mem_cap_mb:
-            _apply_mem_cap(args.mem_cap_mb)
+            apply_mem_cap(args.mem_cap_mb * _MIB, "data")
         record.update(_run_pipeline_once(args))
     except BaseException as exc:
         record["error"] = _error_record(exc)
@@ -318,7 +313,14 @@ def _one_run(args: argparse.Namespace, run_no: int) -> dict[str, Any]:
     work = Path(tempfile.mkdtemp(prefix=f"fk-scale-run{run_no}-", dir=args.work_root))
     scratch = work / "scratch"
     scratch.mkdir()
-    env = {**os.environ, "TMPDIR": str(scratch), "ARROW_DEFAULT_MEMORY_POOL": "system"}
+    # A capped run gets the engine's one capped env; an uncapped run keeps today's env so
+    # bench numbers stay comparable.
+    env = {
+        **os.environ,
+        **(CAPPED_ENV if args.mem_cap_mb else {}),
+        "TMPDIR": str(scratch),
+        "ARROW_DEFAULT_MEMORY_POOL": "system",
+    }
     try:
         outcome = run_worker(
             _child_cmd(args, work, work / "result.json"),

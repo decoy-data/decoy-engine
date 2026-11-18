@@ -112,7 +112,9 @@ ISOLATED_OUTCOMES: tuple[str, ...] = get_args(IsolatedRunOutcome)
 # address space the way 'as' can; 'as' is the blunter total-address-space cap.
 RLIMIT_KINDS: dict[str, int] = {"as": resource.RLIMIT_AS, "data": resource.RLIMIT_DATA}
 
-# Ported verbatim from fk_memory_probe._CAPPED_ENV: MALLOC_ARENA_MAX pins
+# The one capped env: `scripts/fk_memory_probe.py`, the bench and perf
+# scripts and tests import this constant instead of keeping copies.
+# MALLOC_ARENA_MAX pins
 # glibc to the system allocator's per-thread-arena count and
 # ARROW_DEFAULT_MEMORY_POOL="system" retires Arrow's jemalloc/mimalloc pool,
 # both of which otherwise reserve address space far beyond live data (~2.5 GB
