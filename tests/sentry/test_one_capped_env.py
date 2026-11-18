@@ -14,10 +14,13 @@ scripts, testflight and ci, and reports `path:line` for each of these outside
    other than `RLIMIT_DATA` and `RLIMIT_AS`, so computed first arguments are findings;
 4. a recognized capped spawn whose `env=` is not built from `CAPPED_ENV`. A module is capped
    when it calls `apply_mem_cap` or `setrlimit`, passes `mem_cap_bytes` or `mem_cap_mb`,
-   holds a string starting with `--mem-cap`, or references `CAPPED_ENV`. Spawns are
-   `subprocess.Popen`, `run`, `call`, `check_call` and `check_output` under any module or
-   direct-import alias, plus the fk-scale helper `run_worker`. Every reaching definition of
-   the `env=` name must derive from `CAPPED_ENV`.
+   holds a string starting with a memory-ceiling flag (`--mem-cap`, `--rss-ceiling`,
+   `--ceiling-mib`, `--rlimit-mib`), holds a string ending in the name of a
+   capped worker script (`bench_worker_fk.py`, `fk_memory_probe.py`), or references
+   `CAPPED_ENV`. Spawns are `subprocess.Popen`, `run`, `call`, `check_call` and
+   `check_output` under any module or direct-import alias, plus the fk-scale supervisor's
+   `run_worker` imported from `_supervisor` (by name, aliased, or as `sup.run_worker`). Every reaching
+   definition of the `env=` name must derive from `CAPPED_ENV`.
 
 The one exemption: the constant of rule 1 as the first positional argument of `.get(...)` or
 `getenv(...)`, which only read. Covered shapes are the ones above; other spellings (built
@@ -43,6 +46,8 @@ _VAR = next(k for k in CAPPED_ENV if k.startswith("MALLOC"))
 _SPAWNS = frozenset({"Popen", "run", "call", "check_call", "check_output"})
 _READ_CALLS = frozenset({"get", "getenv"})
 _UNCAPPED_LIMITS = frozenset({"RLIMIT_DATA", "RLIMIT_AS"})
+_CEILING_FLAGS = ("--mem-cap", "--rss-ceiling", "--ceiling-mib", "--rlimit-mib")
+_CAPPED_SCRIPTS = ("bench_worker_fk.py", "fk_memory_probe.py")
 _UNKNOWN = frozenset({False})
 
 State = dict[str, frozenset[bool]]
@@ -64,23 +69,30 @@ def _is_capped_module(tree: ast.Module) -> bool:
             if any(k.arg in {"mem_cap_bytes", "mem_cap_mb"} for k in node.keywords):
                 return True
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value.startswith("--mem-cap"):
+            if node.value.startswith(_CEILING_FLAGS) or node.value.endswith(_CAPPED_SCRIPTS):
                 return True
         elif _terminal(node) == "CAPPED_ENV":
             return True
     return False
 
 
-def _spawn_aliases(tree: ast.Module) -> tuple[set[str], set[str]]:
-    """Local names bound to the subprocess module, and to one of its spawn functions."""
+def _spawn_aliases(tree: ast.Module) -> tuple[set[str], set[str], set[str]]:
+    """Local names bound to the subprocess module, to one of its spawn functions, and to
+    the fk-scale supervisor's `run_worker` (the module `_supervisor` is tracked as a module)."""
     modules: set[str] = set()
     functions: set[str] = set()
+    supervisors: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules |= {a.asname or a.name for a in node.names if a.name == "subprocess"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess" and node.level == 0:
-            functions |= {a.asname or a.name for a in node.names if a.name in _SPAWNS}
-    return modules, functions
+            supervisors |= {a.asname or a.name for a in node.names if a.name == "_supervisor"}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            if node.module == "subprocess":
+                functions |= {a.asname or a.name for a in node.names if a.name in _SPAWNS}
+            elif node.module == "_supervisor":
+                functions |= {a.asname or a.name for a in node.names if a.name == "run_worker"}
+                supervisors |= {a.asname or a.name for a in node.names if a.name == "_supervisor"}
+    return modules, functions, supervisors
 
 
 class _Rule4:
@@ -92,7 +104,7 @@ class _Rule4:
 
     def __init__(self, tree: ast.Module, path: str) -> None:
         self.path = path
-        self.modules, self.functions = _spawn_aliases(tree)
+        self.modules, self.functions, self.supervisors = _spawn_aliases(tree)
         self.found: list[str] = []
         self.deferred: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, State]] = []
         end = self.block(tree.body, {})
@@ -138,12 +150,12 @@ class _Rule4:
     def is_spawn(self, call: ast.Call) -> bool:
         func = call.func
         if isinstance(func, ast.Attribute):
-            return (
-                isinstance(func.value, ast.Name)
-                and func.value.id in self.modules
-                and func.attr in _SPAWNS
+            if not isinstance(func.value, ast.Name):
+                return False
+            return (func.value.id in self.modules and func.attr in _SPAWNS) or (
+                func.value.id in self.supervisors and func.attr == "run_worker"
             )
-        return isinstance(func, ast.Name) and (func.id in self.functions or func.id == "run_worker")
+        return isinstance(func, ast.Name) and func.id in self.functions
 
     def check_calls(self, nodes: list[ast.AST], state: State) -> None:
         for root in nodes:
@@ -275,6 +287,7 @@ _SP = "import subprocess as sp\n"
 _FROM = "from subprocess import Popen\n"
 _FROM_AS = "from subprocess import run as r\n"
 _IMPORT = "from decoy_engine.execution._isolated_common import CAPPED_ENV\n"
+_SUP = "from _supervisor import run_worker\n"
 _PLAIN = "{**os.environ}"
 _CAPPED = "{**os.environ, **CAPPED_ENV}"
 
@@ -297,7 +310,7 @@ FOUND = {
     "local plain env": (
         _MARK + "import subprocess\nenv = dict(os.environ)\nsubprocess.run(cmd, env=env)\n"
     ),
-    "run_worker plain env": _MARK + f"plain = {_PLAIN}\nrun_worker(cmd, env=plain)\n",
+    "run_worker plain env": (_MARK + _SUP + f"plain = {_PLAIN}\nrun_worker(cmd, env=plain)\n"),
     "branch replaces capped": (
         _IMPORT
         + "import subprocess\n"
@@ -312,6 +325,19 @@ FOUND = {
         + f"    env = {_CAPPED}\n"
         + f"    if flag:\n        env = {_PLAIN}\n"
         + "    subprocess.run(cmd, env=env)\n"
+    ),
+    "rss-ceiling flag, plain env": (
+        "import subprocess\n"
+        + 'subprocess.run(["x", "--rss-ceiling-mb", "9"], env={**os.environ})\n'
+    ),
+    "rss-ceiling flag, no env": (
+        'import subprocess\nsubprocess.run(["x", "--rss-ceiling-mb", "9"])\n'
+    ),
+    "capped script path, no env": (
+        'import subprocess\nsubprocess.run(["py", str(D / "bench_worker_fk.py")])\n'
+    ),
+    "attribute run_worker, plain env": (
+        _MARK + "import _supervisor as sup\n" + f"sup.run_worker(cmd, env={_PLAIN})\n"
     ),
     "env is a parameter": (
         _MARK + "import subprocess\ndef go(env):\n    subprocess.run(cmd, env=env)\n"
@@ -345,6 +371,15 @@ NOT_FOUND = {
         + f"else:\n    env = {_CAPPED}\n"
         + "subprocess.run(cmd, env=env)\n"
     ),
+    "rss-ceiling flag, capped env": (
+        _IMPORT
+        + "import subprocess\n"
+        + f'subprocess.run(["x", "--rss-ceiling-mb", "9"], env={_CAPPED})\n'
+    ),
+    "attribute run_worker, capped env": (
+        _MARK + _IMPORT + "import _supervisor as sup\n" + f"sup.run_worker(cmd, env={_CAPPED})\n"
+    ),
+    "other run_worker helper": _MARK + "from runner import run_worker\nrun_worker(cmd)\n",
     "unmarked module": "import subprocess\nsubprocess.run(cmd)\n",
 }
 
