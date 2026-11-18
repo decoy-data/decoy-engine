@@ -20,6 +20,7 @@ from typing import Any, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     SerializerFunctionWrapHandler,
     field_validator,
     model_serializer,
@@ -75,6 +76,16 @@ class Dismissal(BaseModel):
         return self
 
 
+class DistributionCheck(BaseModel):
+    """`post_scan.distribution`: the tolerance, in percent, and what a breach does."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, frozen=True, strict=True)
+
+    # Strict, so `True` and `"5"` are refused instead of read as 1 and 5.
+    tolerance_pct: float = Field(gt=0, le=100, strict=True)
+    on_breach: Literal["warn"] = "warn"
+
+
 class PostScanConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -83,6 +94,7 @@ class PostScanConfig(BaseModel):
     ner_model: str = DEFAULT_NER_MODEL
     ner_findings: Literal["warn", "fail"] = "warn"
     dismissed: tuple[Dismissal, ...] = ()
+    distribution: DistributionCheck | None = None
 
     @field_validator("detectors")
     @classmethod
@@ -103,6 +115,8 @@ class PostScanConfig(BaseModel):
                 raise inactive("post_scan.ner_findings", "post_scan.integrity: true")
             if self.dismissed:
                 raise inactive("post_scan.dismissed", "post_scan.integrity: true")
+            if self.distribution is not None:
+                raise inactive("post_scan.distribution", "post_scan.integrity: true")
         if "ner" not in self.detectors:
             if self.ner_findings == "fail":
                 raise inactive("post_scan.ner_findings", "ner in post_scan.detectors")
@@ -121,6 +135,8 @@ class PostScanConfig(BaseModel):
             data.pop("ner_findings", None)
         if not data.get("dismissed"):
             data.pop("dismissed", None)
+        if data.get("distribution") is None:
+            data.pop("distribution", None)
         return data
 
     @classmethod
@@ -134,6 +150,18 @@ def post_scan_integrity_requested(config: Mapping[str, Any]) -> bool:
     """True when a validated config dict opts in to Post-scan integrity."""
     block = config.get("post_scan")
     return bool(block.get("integrity")) if isinstance(block, Mapping) else False
+
+
+def post_scan_distribution_tolerance(config: Mapping[str, Any]) -> float | None:
+    """The run's `post_scan.distribution.tolerance_pct`, or `None` when the check is not asked for.
+    Like the other readers it trusts a validated dict, and only an enabled suite asks."""
+    if not post_scan_integrity_requested(config):
+        return None
+    block = config["post_scan"].get("distribution")
+    if not isinstance(block, Mapping):
+        return None
+    value = block.get("tolerance_pct")
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def post_scan_gate_applies(config: Mapping[str, Any]) -> bool:

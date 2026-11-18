@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -51,6 +51,7 @@ __all__ = [
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NUMEXPR_REQUIRED",
+    "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
     "RECORD_CORRUPT",
@@ -399,4 +400,13 @@ POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.27.0",
+)
+# `post_scan.distribution` needs the run's inputs readable before the route runs; a loader run or
+# any other deferred gate cannot give that, so it is refused rather than left unchecked.
+POST_SCAN_DISTRIBUTION_DEFERRED = _d(
+    "post_scan_distribution_deferred",
+    "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
 )
