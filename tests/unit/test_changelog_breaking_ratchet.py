@@ -36,10 +36,10 @@ TRIAGED: dict[tuple[str, str], str] = {
         "new verifier; the refusals named are its own and nothing calls it yet"
     ),
     ("0.28.0", "The `out_of_core_caller_managed_residency` warning carried a"): (
-        "fix: these warnings were refused by `EvidencePayload` before, so the run stored no record; the run itself is unchanged"
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
     ),
     ("0.28.0", "`EvidencePayload` refuses an empty `provider` and any non-sc"): (
-        "the constructor now stops what `EvidencePayload` already refused; the run is unchanged"
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
     ),
     ("0.28.0", "`subset_inputs_from_config(config, *, local_copies=None)` ta"): (
         "new optional argument; without it the existing refusal stands"
@@ -60,7 +60,7 @@ TRIAGED: dict[tuple[str, str], str] = {
         "new opt-in check; the refusals named are its own"
     ),
     ("0.28.0", "The `nested` strategy no longer rewrites a number it does no"): (
-        "pre-GA behavior change the entry names, with a coded row warning; no config is refused at load"
+        "the Breaking bullet on the `nested` strategy covers it"
     ),
     ("0.28.0", "`estimate_job` now returns three more fields on `JobEstimate"): (
         "new fields; the estimate is advisory and never raises, gates or changes a route"
@@ -78,7 +78,7 @@ TRIAGED: dict[tuple[str, str], str] = {
         "same refusal with one message across surfaces; no run that passed before is refused"
     ),
     ("0.28.0", "`build_fingerprint` now adds one engine-owned `decoy-ner:<su"): (
-        "Breaking: a run resumed under a different NER model is refused and a `decoy-ner:` caller component raises"
+        "the Breaking bullet on `build_fingerprint` covers it"
     ),
     ("0.28.0", "New package `decoy_engine.config.policy` with the models of "): (
         "new package; the refusals named are its own"
