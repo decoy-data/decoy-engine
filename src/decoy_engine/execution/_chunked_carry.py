@@ -215,10 +215,11 @@ def plan_carry(
 def adapter_fk_safe_columns(plan: Any, registry: Any, graph: Any, table: str) -> set[str]:
     """The columns the stock adapter ingests losslessly (the set it passes to
     `to_pandas_fk_safe`), so a diagnosis, the native `when:` mask and the Faker null mask convert a
-    column exactly as the adapter did. It is `lossless_int_columns` itself, never a second union."""
+    column exactly as the adapter did. It is `lossless_int_columns` itself, never a second union; a
+    null-free `when:`-read integer is included too (a superset the adapter narrows by its data)."""
     from decoy_engine.execution._fk_keys import lossless_int_columns
 
-    return set(lossless_int_columns(plan, registry, graph).get(table, set()))
+    return lossless_int_columns(plan, registry, graph).for_table(table)
 
 
 __all__ = [

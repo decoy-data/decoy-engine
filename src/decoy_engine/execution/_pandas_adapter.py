@@ -196,7 +196,7 @@ class PandasExecutionAdapter:
         group_anchor_cols = source_anchor_columns(plan, registry)
         lossless = lossless_int_columns(plan, registry, relationship_graph)
         frames: dict[str, pd.DataFrame] = {
-            t: to_pandas_fk_safe(tbl, lossless.get(t, set())) for t, tbl in sources.items()
+            t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
         }
         conversion_ms = (time.perf_counter() - t0) * 1000.0
         # HC-3a P1 #1: snapshot each group_by anchor column PRE-MASK (before the
