@@ -5,49 +5,38 @@ Status: plan
 Owner: Cam. Author: Opus plan agent. Date: 2026-11-18. Scope: engine only, V1 fix rows.
 
 Rules consulted: `dev-rules/README.md` (routing), `00-universal.md`, `risk-and-exceptions.md`,
-`development-loop.md` (Proportion; PLAN: guarantee, size, design notes, choke point, Placement,
-Established solutions), `profiles/local-operations.md`, `bugfix.md`, `testing.md` (Test depth,
-full-suite triggers), `cross-cutting-concerns.md`, `architecture.md` (layout, size),
-`security.md`, `observability-and-resilience.md` (timeouts, value-free errors), `performance.md`
-(speed trade-off evidence), `catalogs/recurring-defects.md` (classes 3, 5, 6, 7, 9, 11),
-`workspace-and-vcs.md` (Commit messages); engine `CLAUDE.md` (cite the method; modules aim for
-600 lines, hard max 700); engine `CODEMAP.md` "Where Things Go" (rows Pipeline spine, Connectors,
-Sentry test, Dev tooling).
+`development-loop.md` (Proportion and PLAN), `profiles/local-operations.md`, `bugfix.md`,
+`testing.md`, `cross-cutting-concerns.md`, `architecture.md`, `security.md`,
+`observability-and-resilience.md`, `performance.md`, `catalogs/recurring-defects.md` (classes 3, 5,
+6, 7, 9, 11), `workspace-and-vcs.md`; engine `CLAUDE.md` and `CODEMAP.md` "Where Things Go".
 
-Base: engine `origin/main` `2c869dce63833f90b50fee216b2b71f057e37a1e`, with PR #666
-(`fix/main-red-1118`) merged. All three slices build on its `CAPPED_ENV` (with
-`OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS` and `MKL_NUM_THREADS` set to `"1"`), its guard test
-`tests/unit/execution/test_isolated_run_env_flag.py:61`
-`test_the_spawned_child_starts_no_blas_thread_pool`, and its `closing_port` fixture
-(`tests/connectors/test_postgres_snapshot_unit.py:213`). Each builder branches from `origin/main`.
-Every `path:line` in this plan was re-checked against `2c869dce`; between `84cc7d798` and it only
-`_isolated_common.py`, `_isolated_run.py` and the two test files above changed, which moved the
-spawn env from `_isolated_run.py:454` to `:455`. The probe call is cited at `_probe.py:256`, where
-`run_isolated(` starts (r2 said `:257`).
+Base: engine `origin/main` `2c869dce63833f90b50fee216b2b71f057e37a1e`, with PR #666 merged.
+All slices build on its `CAPPED_ENV` with three BLAS knobs set to `"1"`, its guard at
+`tests/unit/execution/test_isolated_run_env_flag.py:61`, and `closing_port` at
+`tests/connectors/test_postgres_snapshot_unit.py:213`. Each builder branches from `origin/main`.
+All citations were re-checked against `2c869dce`; the spawn env is `_isolated_run.py:455` and the
+probe's `run_isolated(` starts at `_probe.py:256`.
 
 Source: the root cause of the red main on 2026-11-18 (gate-selfhosted run 44221036975, Dell
 runners, 26 cores) and the two V2-LOG items Codex left on #666.
 
-Revision 2 (2026-11-18): applies Dennis r1 on `bc836eb6` (GO-WITH-FIXES: 4 MAJOR, 7 MINOR, 3 LOW),
-all in place. D1: the child computes its own out-of-core budget (3.3 item 1, AT-A3, AT-A8, M-A1).
-D2: the routing probe's capped children are listed and get a parity AT (3.1, AT-A9, 3.9, 5.3). D3:
-`native_threads` leaves `child_pool_threads` (3.3 item 2, AT-A4, speed trade-off). D4: AT-B3 runs
-the connect in a thread with a bounded join (2.8, M-B3). D5: DSN edge cases (2.4, AT-B2 to B5). D6:
-multi-address row (2.2, 2.5). D7: guard shapes (2.6, AT-B6). D8: sentry by constant equality (1.4,
-AT-C2). D9: RLIMIT setter copies and a setrlimit shape (1.1 to 1.4). D10: registration (1.4). D11:
-AT-A6 host-independent. D12: AT-A3 fail-before wording. D13: no new test file in the flat
-directory (3.5). D14: the 128 MiB figure is an estimate (3.3 item 2). S3's changelog says that it
-restores the Arrow parallelism that #666 removed.
+Revision 2 (2026-11-18): applies Dennis r1 on `bc836eb6`. D1 to D3: child budget, probe parity and
+pool sizing (3.1 to 3.9, AT-A3, AT-A4, AT-A8, AT-A9, M-A1). D4 to D10: bounded connect, DSN edge
+cases, multi-address scope, guard shapes, constant equality, RLIMIT copies and sentry registration
+(1.1 to 2.8, AT-B2 to B6, AT-C2, M-B3). D11 to D14: host-independent AT-A6, precise fail-before,
+flat-directory placement and the estimated 128 MiB reserve. S3 documents restored Arrow parallelism.
 
-Revision 3 (2026-11-18): applies Codex on `b3f9492` (GO-WITH-FIXES; agrees with the quarter-of-cap
-pool rule). V1-1: `with_connect_timeout` never changes existing DSN bytes; a malformed key/value DSN
-is left for libpq to reject (2.4, AT-B2, AT-B7, M-B5). V1-2: a remainder under the budget floor is
-a classified memory failure before DuckDB opens, not an overcommit (3.3 item 1, 3.4, AT-A10,
-AT-A11, M-A7). DESIGN: S1's guarantee is narrowed to deduplication plus a guard, and the sentry
-gains a spawn-site rule (1.2 to 1.4, AT-C2, M-C6). V2-LOG items done now: the S2 guarantee covers
-one attempted address (2.2); AT-C4, AT-A7, AT-A8 and AT-A9 are marked as supporting evidence;
-named mutations for AT-C5, AT-B4 and AT-B6 (M-C7, M-B7, M-B6); the base is `2c869dce` and every
-cited line is re-checked.
+Revision 3 (2026-11-18): applies Codex on `b3f9492`. V1: append-only DSNs and classified
+below-floor memory failure (2.4, 3.3, AT-B2, AT-B7, AT-A10, AT-A11, M-B5, M-A7). DESIGN: narrow
+S1 guarantee and spawn-site sentry (1.2 to 1.4, AT-C2, M-C6). V2-LOG: per-address scope;
+supporting-evidence labels on AT-C4, AT-A7 to A9; mutations M-C7, M-B7 and M-B6; refreshed base and
+citations.
+
+Revision 4 (2026-11-18): applies Codex round 2. V1: odd terminal backslash runs in key/value DSNs
+fail value-free before ATTACH (2.2, 2.4, AT-B8, M-B8). DESIGN: sentry rule 4 normalizes subprocess
+imports and aliases and rejects every reaching env definition unless all derive from `CAPPED_ENV`
+(1.4, AT-C2, M-C8, M-C9). DESIGN: repetition was cut to 880 lines; re-review routes S3's floor
+through its package API (3.3, 5.5). V2-LOG: citation fixed to `src/decoy_engine/reason_adapter.py:111`.
 
 ## 0. Slices
 
@@ -55,7 +44,7 @@ cited line is re-checked.
 |---|---|---|---|---|---|---|
 | S1 CAPPED-ENV-ONE | (c) one capped env and one RLIMIT setter, sentry with a spawn-site rule, guard asserts all three BLAS knobs | R1 | 0 src, 4 scripts | about -60 / +260 | Codex | #666 (merged) |
 | S2 PG-CONNECT-TIMEOUT | (b) libpq `connect_timeout` below the session deadline | R2 (credential text, value-leak area) | 2 | about +65 / +240 | Dennis, then Codex | #666 (`closing_port`, merged) |
-| S3 CHILD-THREADS | (a) size DuckDB and per-core pools in the capped child | R2 (resource limits, execution path) | 4 | about +90 / +280 | Dennis, then Codex | #666 (merged); rebases on S1 |
+| S3 CHILD-THREADS | (a) size DuckDB and per-core pools in the capped child | R2 (resource limits, execution path) | 5 | about +95 / +280 | Dennis, then Codex | #666 (merged); rebases on S1 |
 
 The slices are independent in code. S3 edits a test file that S1 also edits, so S3 rebases after
 S1. S1 and S2 can build in parallel in separate worktrees. Merge order: S1, S2, S3.
@@ -67,18 +56,11 @@ made in 3.3 with its reason. A reviewer may challenge it.
 
 ### 1.1 Problem
 
-The capped spawn env is defined once in
-`src/decoy_engine/execution/_isolated_common.py::CAPPED_ENV`. Seven other files keep their own
-`_CAPPED_ENV` copy with only `ARROW_DEFAULT_MEMORY_POOL` and `MALLOC_ARENA_MAX`, so none of them got
-#666's BLAS knobs:
-
-- `scripts/fk_memory_probe.py:221` (the original that the engine copy was ported from)
-- `scripts/route_reorder_vs_batchjoin_ab.py:37`
-- `tests/perf/test_out_of_core_reorder_memory.py:39`
-- `tests/perf/test_out_of_core_reorder_multi_edge_memory.py:74`
-- `tests/perf/test_out_of_core_reorder_wide_raw_memory.py:41`
-- `tests/perf/test_ooc_external_sort_memory.py:48`
-- `tests/perf/test_out_of_core_relation_dedup_memory.py:55`
+The canonical env is `_isolated_common.py::CAPPED_ENV`. Seven copies lack #666's BLAS knobs:
+`scripts/fk_memory_probe.py:221`, `scripts/route_reorder_vs_batchjoin_ab.py:37`, and the perf files
+`test_out_of_core_reorder_memory.py:39`, `test_out_of_core_reorder_multi_edge_memory.py:74`,
+`test_out_of_core_reorder_wide_raw_memory.py:41`, `test_ooc_external_sort_memory.py:48`, and
+`test_out_of_core_relation_dedup_memory.py:55`.
 
 The row named the three `reorder*` files and the probe. The other three copies are the same class,
 and the sentry in 1.4 fails on them, so S1 converts all seven.
@@ -92,20 +74,11 @@ Two scripts also keep their own RLIMIT setter instead of `_isolated_common.apply
 
 S1 converts both setters and the bench driver's spawn env (1.3).
 
-Spawn sites that start a capped child, at `2c869dce` (the recognition rule is in 1.4, rule 4):
-- `src/decoy_engine/execution/_isolated_run.py:456` (`Popen`, env built at `:455` from
-  `CAPPED_ENV`): already correct.
-- The seven copy modules: `scripts/fk_memory_probe.py:859` (and its uncapped sweep at `:754`, no
-  env), `scripts/route_reorder_vs_batchjoin_ab.py:301`,
-  `tests/perf/test_out_of_core_reorder_memory.py:323`,
-  `tests/perf/test_out_of_core_reorder_multi_edge_memory.py:371`,
-  `tests/perf/test_out_of_core_reorder_wide_raw_memory.py:306`,
-  `tests/perf/test_ooc_external_sort_memory.py:258`,
-  `tests/perf/test_out_of_core_relation_dedup_memory.py:272`: env from the local copy.
-- `scripts/fk-scale/bench_worker_fk.py:323` (`run_worker`, env from `:321`): no `CAPPED_ENV`.
-- Tests that spawn a script with `--mem-cap-mb` and no env:
-  `tests/perf/test_out_of_core_memory_sentinel.py:122`, `:185`, `:188`, `:229`;
-  `tests/unit/test_fk_memory_probe_strategy.py:49`, `:92`; `tests/unit/scripts/test_fk_scale_infra.py:215`.
+Recognized capped spawns at `2c869dce`: `_isolated_run.py:456` is already correct. Copy users are
+`fk_memory_probe.py:859` (plus sweep `:754`), `route_reorder_vs_batchjoin_ab.py:301`, and the five
+perf files above at `:323`, `:371`, `:306`, `:258`, `:272`. `bench_worker_fk.py:323` lacks
+`CAPPED_ENV`. No-env test spawns are `test_out_of_core_memory_sentinel.py:122,185,188,229`,
+`test_fk_memory_probe_strategy.py:49,92`, and `test_fk_scale_infra.py:215`.
 
 ### 1.2 Guarantee and non-goals
 
@@ -178,14 +151,14 @@ and reports `path:line` for each of these outside `src/decoy_engine/execution/_i
    `RLIMIT_DATA`, `RLIMIT_AS` and any computed first argument (`_RLIMITS[kind]`) are findings, and
    `RLIMIT_CORE` is not.
 4. a recognized capped spawn site whose env is not built from `CAPPED_ENV`. A module is capped when
-   it calls `apply_mem_cap` or `setrlimit`, passes a keyword `mem_cap_bytes` or `mem_cap_mb`, holds a
-   string constant that starts with `--mem-cap`, or references the name `CAPPED_ENV`. In a capped
-   module, a spawn site is a call to `subprocess.Popen`, `subprocess.run`, `subprocess.call`,
-   `subprocess.check_call`, `subprocess.check_output`, or the fk-scale helper `run_worker`. The site
-   passes when its `env=` value references the name `CAPPED_ENV`, or is a local name whose
-   assignment in the same function references it. A site with no `env=`, or with an env that does
-   not reference `CAPPED_ENV`, is a finding. At `2c869dce` the rule finds the sites listed in 1.1
-   except `_isolated_run.py:456`.
+   it calls `apply_mem_cap` or `setrlimit`, passes `mem_cap_bytes` or `mem_cap_mb`, holds a string
+   starting with `--mem-cap`, or references `CAPPED_ENV`. Normalize imports before recognizing
+   `subprocess.Popen`, `run`, `call`, `check_call` and `check_output`: this includes module aliases
+   and direct imports with or without aliases. Also recognize the fk-scale helper `run_worker`.
+   For each spawn, walk control flow to collect every reaching assignment of its `env=` name. The
+   direct expression, or every possible reaching definition, must derive from `CAPPED_ENV`; a
+   missing env, an unknown definition, or any branch that replaces it without `CAPPED_ENV` is a
+   finding. At `2c869dce` the rule finds the sites in 1.1 except `_isolated_run.py:456`.
 
 The one exemption: a constant of rule 1 that is the first positional argument of a call whose
 function is an attribute named `get` or a name or attribute named `getenv` (`os.environ.get(...)`,
@@ -219,12 +192,15 @@ No other new file.
   found: `os.environ.get("MALLOC_ARENA_MAX")`; `os.getenv("MALLOC_ARENA_MAX")`; a docstring that
   mentions MALLOC_ARENA_MAX in a sentence; `resource.setrlimit(resource.RLIMIT_CORE, ...)`; a
   string literal that contains `resource.setrlimit(resource.RLIMIT_DATA, ...)`.
-  Rule 4 cells, each in a seeded module that holds a `--mem-cap-mb` constant. Found:
-  `subprocess.Popen(cmd)` with no env; `subprocess.run(cmd, env={**os.environ})`;
-  `env = {**os.environ}` then `subprocess.run(cmd, env=env)`; `run_worker(cmd, env=env, ...)` with
-  `env` not from `CAPPED_ENV`. Not found: `subprocess.run(cmd, env={**os.environ, **CAPPED_ENV})`;
-  `env = {**os.environ, **CAPPED_ENV}` then `Popen(cmd, env=env)`; the conditional form
-  `**(CAPPED_ENV if capped else {})`; and `subprocess.run(cmd)` in a module with no rule-4 marker.
+  Rule 4 cells each hold a `--mem-cap-mb` marker. Found and not-found pairs, respectively, are:
+  `import subprocess as sp; sp.Popen(..., env=plain/capped)`; `from subprocess import Popen;
+  Popen(..., env=plain/capped)`; and `from subprocess import run as r; r(..., env=plain/capped)`.
+  Also found: no env; direct `env={**os.environ}`; a local env defined only from `os.environ`;
+  `run_worker(..., env=plain)`; and `env=plain; if flag: env=capped` before a spawn. Also not found:
+  direct or local envs derived from `CAPPED_ENV`; the conditional unpack
+  `**(CAPPED_ENV if capped else {})`; both branches deriving from `CAPPED_ENV`; and an unmarked
+  module's `subprocess.run(cmd)`. Here `plain` and `capped` are full seeded expressions, not helper
+  variables whose definitions the fixture omits.
 - AT-C3 edit `tests/unit/execution/test_isolated_run_env_flag.py::test_the_spawned_child_starts_no_blas_thread_pool`:
   the parent sets all three knobs to `"8"` with `monkeypatch.setenv`, and the test asserts
   `{k: seen[k] for k in BLAS_KNOBS} == dict.fromkeys(BLAS_KNOBS, "1")` before the thread-count
@@ -249,6 +225,9 @@ No other new file.
 - M-C6 accept any `env=` in rule 4 (drop the `CAPPED_ENV` reference check): the
   `env={**os.environ}` cells of AT-C2 red, and AT-C1 stays red on any unconverted site.
 - M-C7 build the bench env without `CAPPED_ENV` in the capped branch: AT-C5 red.
+- M-C8 stop normalizing module or direct-import aliases: the three import-form pairs in AT-C2 red.
+- M-C9 inspect only the nearest assignment instead of every reaching definition: AT-C2's branch
+  replacement cell red.
 
 ### 1.8 Test scope
 
@@ -295,16 +274,13 @@ Guarantee: every ATTACH the engine issues carries a libpq `connect_timeout` that
 the session deadline when `deadline_s >= 4`. For a well-formed DSN whose connect makes a single
 attempt (one host that resolves to one address), a host that drops SYNs, or a server that never
 answers the startup packet, then fails as `source_unreachable` before the deadline. More attempts
-are bounded per attempt only (non-goals). Errors stay value-free:
+are bounded per attempt only (non-goals). A key/value DSN with an odd terminal run of backslashes
+is refused as `source_unreachable` before ATTACH because appending would change how libpq parses
+the last value. Errors stay value-free:
 no DSN, host, port, user, database, password or timeout figure in the message, the logs,
 `__cause__` or `__context__`.
 
 Non-goals:
-- The engine never changes the bytes of the user's DSN; it only appends. A key/value DSN that ends
-  in an unpaired backslash escapes the separator space, so libpq reads the appended keyword as part
-  of the last value and accepts the string. That DSN gets no engine connect timeout and keeps
-  today's behavior (the session deadline). A DSN that libpq rejects (an unterminated quote) fails
-  as `source_unreachable` before any connect (AT-B7).
 - A `connect_timeout` that the user put in the DSN is replaced by the engine value (the later value
   wins, see 2.3). Keeping a smaller user value would need a DSN parser. V2-LOG.
 - A DNS lookup that hangs (`getaddrinfo`) is not covered by `connect_timeout`. It stays
@@ -353,20 +329,21 @@ In `_postgres_session.py`:
   `max(2, min(PG_CONNECT_TIMEOUT_S, deadline_s - 2))`. The floor of 2 matches older libpq
   releases, which documented a 2 s minimum. The 2 s gap keeps the connect failure clear of the
   deadline timer.
-- `with_connect_timeout(dsn_text: str, seconds: int) -> str`. Pure; it never raises and never logs.
+- `with_connect_timeout(dsn_text: str, seconds: int) -> str`. It never logs or rewrites input.
   - URI form (libpq's rule: the text starts with `postgresql://` or `postgres://`): when the text
     ends in `?` or `&`, append `connect_timeout=N` with no separator; else append
     `&connect_timeout=N` when the text has a `?`, else `?connect_timeout=N`.
-  - Key/value form, including the empty DSN (connect from `PG*` env vars): append
-    ` connect_timeout=N`.
+  - Key/value form: count the terminal run of backslashes. If it is odd, raise the existing
+    value-free `PostgresSnapshotError` with code `source_unreachable` before ATTACH. Do not include
+    the DSN or any value in the message or a log, and leave cause and context empty. Otherwise,
+    including the empty DSN (connect from `PG*` env vars), append ` connect_timeout=N`.
   - Existing DSN bytes are never changed, stripped or re-quoted. Malformed key/value input is left
     for libpq: an unterminated quote stays unterminated, libpq rejects the string, and the ATTACH
-    fails as `source_unreachable` with no connect (AT-B7). An unpaired trailing backslash is the
-    one malformed shape libpq accepts; 2.2 records what it does.
+    fails as `source_unreachable` with no connect (AT-B7).
 - `attach_read_only` gains a `connect_timeout_s: int` parameter and builds the ATTACH from
   `sql_literal(with_connect_timeout(dsn.get_secret_value(), connect_timeout_s))`.
-  `open_read_session` passes `connect_timeout_s(config.deadline_s)`. The composed text exists only
-  as a local in `attach_read_only`.
+  `open_read_session` passes `connect_timeout_s(config.deadline_s)`. Build the wrapped DSN before
+  the ATTACH try so an odd terminal run cannot reach `connection.execute`; keep it local.
 
 The existing leak rule stays: the `except` block records only `type(exc).__name__`, and the coded
 error is raised after the block has closed (class 3). Nothing new is logged.
@@ -379,6 +356,7 @@ production files.
 | Case | Before | After |
 |---|---|---|
 | Refused or reset (RST), DNS NXDOMAIN, bad password | `source_unreachable` | `source_unreachable` |
+| Key/value DSN with an odd terminal backslash run | may connect without an engine timeout | `source_unreachable` before ATTACH |
 | SYN dropped, or a server that accepts and never answers, `deadline_s >= 4` | `deadline_exceeded` | `source_unreachable` after about `connect_timeout_s(deadline_s)` |
 | Same, `deadline_s` from 1 to 3 | `deadline_exceeded` | either code; the timers coincide, and both are true |
 | DNS lookup hangs | `deadline_exceeded` | `deadline_exceeded` |
@@ -426,10 +404,9 @@ Pure functions (fast):
   `"postgres://u@h/d?sslmode=require"` -> `"postgres://u@h/d?sslmode=require&connect_timeout=7"`;
   `"postgresql://u@h/d?"` -> `"postgresql://u@h/d?connect_timeout=7"`;
   `"postgresql://u@h/d?sslmode=require&"` -> `"postgresql://u@h/d?sslmode=require&connect_timeout=7"`;
-  `"host=h password=a\\"` (one trailing backslash) -> `"host=h password=a\\ connect_timeout=7"`
-  (the backslash is kept; the input is a prefix of the output);
-  `"host=h password=a\\\\"` (two) -> the same two backslashes, then ` connect_timeout=7`;
-  for every cell, `out.startswith(dsn)` holds (no existing byte changes);
+  key/value DSNs ending in one and three backslashes raise the value-free
+  `PostgresSnapshotError(source_unreachable)`; DSNs ending in two and four preserve every
+  backslash and append ` connect_timeout=7`; for every successful cell, `out.startswith(dsn)`;
   a key/value DSN with a quoted value that contains `?` stays in key/value form.
 
 Behaviour against the bundled extension (in `test_postgres_snapshot_unit.py`, which already has
@@ -466,6 +443,13 @@ Behaviour against the bundled extension (in `test_postgres_snapshot_unit.py`, wh
   or `connect_timeout` in the traceback, `str`, `repr` or caplog, and no `__cause__` or
   `__context__`. Before the build the same DSN gives the same code; the cell pins that the append
   keeps a rejected DSN rejected and value-free.
+- AT-B8 bounded refusal cell: run the snapshot call with a key/value DSN ending in the secret
+  `PW_SECRET` followed by exactly one backslash, in the same daemon-thread harness and 15 s join
+  as AT-B3. It finishes before the
+  bound with `PostgresSnapshotError(code="source_unreachable")`; a fake connection proves ATTACH
+  was never executed. The traceback, `str`, `repr` and every caplog message contain none of the
+  DSN, `PW_SECRET`, host, port, user or database values, and cause and context are both `None`.
+  Repeat with three terminal backslashes so the test pins run parity, not one literal.
 - Existing `test_connect_failure_leaks_no_dsn` (#666's `closing_port`) stays green.
 
 Host evidence (PR, not CI): on the Dell, the old DSN `host=127.0.0.1 port=1` with `deadline_s=20`
@@ -480,11 +464,12 @@ ports, so the Dell reproduces a SYN-dropping host with no extra setup. Record th
 - M-B3 put the keyword first instead of last: the AT-B3 user-value cell red, by the 15 s join bound
   (the user's 600 s wins), not by a hang.
 - M-B4 raise the coded error inside the `except` block: the AT-B4 context cell red.
-- M-B5 strip or rewrite any existing DSN byte (for example strip a trailing backslash), or drop
-  the `?`/`&` ending case: the matching AT-B2 cell and its `startswith` check red.
+- M-B5 rewrite any existing DSN byte, or drop the `?`/`&` ending case: the matching AT-B2 cell and
+  its `startswith` check red.
 - M-B7 put the exception text (or `str(exc)`) into the coded error's message: the AT-B4 and AT-B7
   `PW_SECRET` cells red.
 - M-B6 make the guard case-sensitive: the lowercase `type postgres` cell of AT-B6 red.
+- M-B8 remove or invert the odd-run refusal: AT-B2's parity cells and AT-B8 red.
 
 ### 2.10 Test scope
 
@@ -586,14 +571,15 @@ knobs that the libraries document.
 
    `child_ooc_budget` is a new pure function in `_isolated_common.py`. It computes the remainder
    first, `remainder = cap - baseline - pool_threads * CHILD_THREAD_RESERVE_BYTES`. When
-   `remainder < _MIN_BUDGET_BYTES` it raises a bare `MemoryError()` (no message, so nothing
+   `remainder < MIN_BUDGET_BYTES` it raises a bare `MemoryError()` (no message, so nothing
    value-bearing). Otherwise it returns `remainder` unchanged; it never rounds up to the floor, so
-   the budget never promises memory the child does not have. `_MIN_BUDGET_BYTES` is imported from
-   `out_of_core/_budget.py` (one floor, not a copy). Because the call sits inside the worker's
+   the budget never promises memory the child does not have. Rename the owning `_budget.py`
+   constant to `MIN_BUDGET_BYTES`, export it from `execution.out_of_core`, and import only that
+   package API in `_isolated_common.py` (one floor, not a copy). Because the call sits inside the worker's
    `try`, the existing `except BaseException` path classifies it: `is_memory_failure` gives outcome
    `oom_killed`, and `reason_from_exception` maps `MemoryError` to the existing
-   `process_out_of_memory` (`reason_adapter.py:111`, fixed message "The process ran out of
-   memory."). No new reason code. Sources are not loaded and DuckDB never opens. It never
+   `process_out_of_memory` (`src/decoy_engine/reason_adapter.py:111`, fixed message "The process ran
+   out of memory."). No new reason code. Sources are not loaded and DuckDB never opens. It never
    overrides an explicit budget, so governed jobs and any caller that passes a budget keep today's
    behavior. `resolve_ooc_memory_limit` then divides this budget across the co-live instances as
    it does for the governor, and `_threads_for_memory_limit` gives one thread for any per-instance
@@ -641,11 +627,9 @@ Speed trade-off:
 Size: `_isolated_common.py` about +45 (about 510 after #666; stays under 600). `_isolated_run.py`
 about +6 (591 after #666; must end at 600 or less, so trim its module docstring item 2 if needed;
 no census entry). `_isolated_worker.py` about +20. `_governor.py` unchanged. One `changelog.d/`
-fragment. Four production files. All three execution modules are already on the physical-seam
-sentry's allowlist, and none imports `execution.physical`. The new import of
-`out_of_core._budget._MIN_BUDGET_BYTES` into `_isolated_common.py` is inside `execution` (class 6
-check: if the import linter flags the private name, re-export it as a public constant in
-`_budget.py` instead of copying it).
+fragment. Five production files, including `_budget.py` and the existing `out_of_core/__init__.py`
+for the public export. All three execution modules are on the physical-seam allowlist; none imports
+`execution.physical`, and `_isolated_common.py` reaches `out_of_core` only through its public API.
 
 ### 3.4 Guarantee and non-goals
 
@@ -653,7 +637,7 @@ Guarantee: in a child that `run_pipeline_isolated` spawns with `mem_cap_bytes` a
 `out_of_core_budget_bytes`, every DuckDB connection opened through `connect_duckdb` takes its
 `memory_limit` from a budget of at most `cap - baseline - reserve`, where the baseline is the
 child's own measured usage after the cap is set. When that remainder is under
-`_MIN_BUDGET_BYTES`, the child returns outcome `oom_killed` with reason `process_out_of_memory`
+`MIN_BUDGET_BYTES`, the child returns outcome `oom_killed` with reason `process_out_of_memory`
 before it loads sources or opens DuckDB; it never overcommits. Its thread count is
 `max(1, min(usable CPUs, out_of_core_threads, memory_limit // 2 GiB))`. Arrow's CPU pool and
 Polars' pool hold at most `child_pool_threads(...)` threads. Once the cap term is the smallest,
@@ -743,7 +727,7 @@ and note it in the PR.
   test asserts the verdict, and the PR records both peaks.
 - AT-A10 `child_ooc_budget` cells (cap, baseline, pool threads): (768 MiB, 500 MiB, 1) -> 140 MiB;
   (4 GiB, 500 MiB, 8) -> 2572 MiB; exact floor (692 MiB, 500 MiB, 1) -> 64 MiB, which equals
-  `_MIN_BUDGET_BYTES`; just below the floor (692 MiB - 1, 500 MiB, 1) raises `MemoryError` with
+  `MIN_BUDGET_BYTES`; just below the floor (692 MiB - 1, 500 MiB, 1) raises `MemoryError` with
   empty `args`; (768 MiB, 500 MiB, 6) and (600 MiB, 700 MiB, 1) raise `MemoryError`.
 - AT-A11 in-process `_isolated_worker._run` with `apply_mem_cap` stubbed and `read_vm_fields`
   patched to a 700 MiB baseline, cap 768 MiB: the envelope has outcome `oom_killed` and reason
@@ -764,7 +748,7 @@ and note it in the PR.
 - M-A4 remove the worker's `set_cpu_count` call, or the `POLARS_MAX_THREADS` env entry: AT-A6 red.
 - M-A5 read `VmData` for `rlimit_kind="as"`: the AT-A2 kind cell red.
 - M-A6 compute the budget before `apply_mem_cap` or skip it when the kwargs are empty: AT-A1 red.
-- M-A7 restore `max(remainder, _MIN_BUDGET_BYTES)` instead of raising: the below-floor cells of
+- M-A7 restore `max(remainder, MIN_BUDGET_BYTES)` instead of raising: the below-floor cells of
   AT-A10 and AT-A11 red.
 - M-A8 move the budget step outside the worker's `try`: AT-A11 red (the child crashes instead of
   returning a classified envelope).
@@ -808,24 +792,24 @@ usual. Reviewers: Dennis, then Codex.
   floor.
 - No thread pool in a capped child grows with the host core count once the cap is the smallest
   term.
-- Every engine Postgres ATTACH carries a connect timeout below the session deadline (per
-  attempted address), the user's DSN bytes are never changed, and no failure path carries DSN
-  text.
+- Every accepted engine Postgres ATTACH carries a connect timeout below the session deadline per
+  attempted address. The user's DSN bytes are never changed; an unsafe append is refused, and no
+  failure path carries DSN text.
 
 ### 5.2 Class table
 
 | # | Class | Closing structure | Sentry or test | Mutation |
 |---|---|---|---|---|
-| 1 | Value-bearing output (DSN text in S2) | `attach_read_only` keeps the composed DSN local; coded error raised after the `except` closes | AT-B4 and AT-B7 leak cells over traceback, str, repr, caplog, cause and context | M-B4 raise inside the `except`, M-B7 put exception text in the message |
+| 1 | Value-bearing output (DSN text in S2) | `attach_read_only` keeps the composed DSN local; coded errors are value-free with empty cause and context | AT-B4, AT-B7 and AT-B8 leak cells over traceback, str, repr, caplog, cause and context | M-B4 raise inside the `except`, M-B7 put exception text in the message |
 | 2 | Cleanup on exit paths | N/A: no slice adds a resource owner; S2 reuses `connected_session`, which closes the connection and cancels the deadline on every exit | existing `test_postgres_snapshot_unit.py` staged-file and close cells stay green | N/A, no new disposal code |
 | 3 | State and concurrency (deadline timer vs connect timeout) | 2 s gap between the two timers; `raise_for_interrupt` checks the deadline flag first | AT-B1 clamp cells, AT-B3 timing | M-B2 remove the clamp |
 | 4 | Route parity and silent fallback (capped child vs governed spawn; probe verdict) | the worker computes the budget only when none is explicit; the governor's explicit budget is untouched; the probe's verdict is pinned | AT-A1, AT-A2, AT-A3, AT-A9, AT-A10, AT-A11 | M-A1 drop the baseline subtraction, M-A2 override an explicit budget, M-A7 restore the floor `max()` |
 | 5 | Referential integrity | N/A: no FK handling changes; AT-A3 uses an FK job only to open DuckDB connections | none needed | none |
-| 6 | Untrusted producer (user DSN text into libpq) | `with_connect_timeout` only appends one keyword (with the `?`/`&` ending handled), never changes existing bytes, and never parses or echoes the DSN; libpq rejects malformed input | AT-B2 edge and prefix cells, AT-B3 user-value cell in both forms, AT-B7 rejection | M-B3 prepend instead of append, M-B5 rewrite a byte |
+| 6 | Untrusted producer (user DSN text into libpq) | `with_connect_timeout` appends without rewriting, refuses odd terminal backslash runs, and never echoes the DSN; libpq rejects other malformed input | AT-B2 parity and prefix cells, AT-B3 both forms, AT-B7, AT-B8 | M-B3 prepend, M-B5 rewrite a byte, M-B8 remove parity refusal |
 | 7 | Check then use on a path (TOCTOU) | N/A: no slice reads or opens a path by name | none needed | none |
 | 8 | Weak tests and overclaimed evidence | fail-before proof per AT; AT-B3 bounded by a 15 s join so a hang fails instead of stalling; AT-A6 expected value computed on the host; Dell census and timings recorded with the head they ran on | AT-C1, AT-B3, AT-A1, AT-A3 red on main | M-C2, M-A3, M-B3 |
 | 9 | Refactor drift (seven env copies, two RLIMIT setters, one budget floor) | one constant, one setter, one floor, imported, never copied | S1 sentry `test_one_capped_env.py` (constant, keyword, setrlimit and spawn-site rules) | M-C1 re-add a copy, M-C5 drop the computed-argument rule, M-C6 accept any env |
-| 10 | Frozen contract drift | N/A: no reason code, artifact, CLI or public name changes (5.5) | `test_reason_baseline_frozen.py` stays green | none |
+| 10 | Frozen contract drift | no reason code, artifact or CLI change; the floor gains one internal package export | reason baseline and import-linter stay green | none |
 
 ### 5.3 Enumerations
 
@@ -872,7 +856,7 @@ connections.
 
 - `CAPPED_ENV`, `apply_mem_cap`, `RLIMIT_KINDS` in `_isolated_common.py`.
 - `read_vm_fields` in `_isolated_memwatch.py` for the child's baseline.
-- `resolve_ooc_memory_limit` and `_MIN_BUDGET_BYTES` in `out_of_core/_budget.py`.
+- `resolve_ooc_memory_limit` and the public `MIN_BUDGET_BYTES` export from `out_of_core`.
 - `_threads_for_memory_limit`, `bind_duckdb_run` and `AppliedConnection` in `out_of_core/_duckdb.py`.
 - `detect_usable_cpus` in `execution/pipeline/_host.py`.
 - `raise_for_interrupt`, `raise_for_setup_interrupt`, `sql_literal` in `_postgres_session.py`.
@@ -881,29 +865,16 @@ connections.
 
 ### 5.5 Frozen contracts
 
-None touched. Reason codes are unchanged (S2 reuses `source_unreachable`). No public name, CLI flag,
-artifact shape or determinism baseline changes. The capped spawn env gains `POLARS_MAX_THREADS`
-(S3), which is internal.
+No external frozen contract changes. S2 reuses `source_unreachable`; S3 adds the internal
+`out_of_core.MIN_BUDGET_BYTES` export and `POLARS_MAX_THREADS` env.
 
 ### 5.6 Pre-mortem
 
-- S2: the bundled extension does not apply a repeated `connect_timeout` (AT-B3 user-value cell
-  fails). Fallback: refuse a user DSN that already sets `connect_timeout` with a value-free code,
-  after an owner call. The AT finds this before review.
-- S3: the census shows the b6b DuckDB threads come from a connection outside `connect_duckdb`.
-  The builder stops; the plan gets an amendment.
-- S3: the child's computed budget changes routing for a directly capped test that relied on
-  host-sized routing. That test moves to an explicit `out_of_core_budget_bytes`; the AT stays.
-- S3: AT-A9 shows the probe verdict moving, because restored Arrow threads raise the probe child's
-  peak. The builder stops and reports with both peaks; the fallback is to pass `pool_threads=1` from
-  the probe until the route's price model is re-fit, an owner-visible change.
-- S3: the measured import baseline differs between hosts (Mac vs Dell). AT-A3 uses a 200 MiB
-  floor, not the 500 MiB figure, so it holds on both; the PR records each host's baseline.
-- S1: a perf test's wall time grows past a timing assertion because Arrow runs single-threaded.
-  Record it and report; do not widen the threshold. S3 restores the pool.
-- S1: a test that gains `CAPPED_ENV` under rule 4 (sentinel, probe strategy, fk-scale infra)
-  asserts on its child's env or memory and moves. Record it; the env change is the fix, so update
-  the expectation only if it named the old allocator env, and say so in the PR.
-- S2: AT-B3's join times out on a slow runner because the extension load is slow. The bound is
-  15 s against a 6 s deadline; if it is still tight, load the extension in the fixture before the
-  timed call, and never raise the bound past 30 s.
+- S2: if repeated `connect_timeout` does not work, AT-B3 fails; after an owner call, refuse a user timeout value-free.
+- S3: if the census finds a DuckDB connection outside `connect_duckdb`, stop and amend the plan.
+- S3: if a directly capped route changes, give that test an explicit budget; keep its AT.
+- S3: if AT-A9's probe verdict moves, stop and report both peaks; owner fallback is probe `pool_threads=1` until price-model refit.
+- S3: host baselines may differ; AT-A3 uses a 200 MiB floor and the PR records each host.
+- S1: if Arrow breaks a timing assertion, report it without widening; S3 restores the pool.
+- S1: if a newly capped test's env or memory assertion moves, update only an expectation naming the old allocator env and report it.
+- S2: if AT-B3's 15 s join is tight after fixture extension load, preload it; never exceed 30 s.
