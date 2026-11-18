@@ -9,6 +9,9 @@ __all__ = [
     "NESTED_RULES_AND_TARGET_BOTH_SET",
     "NESTED_RULES_CODE_SET_REPEATED",
     "NESTED_RULES_EMPTY",
+    "NESTED_RULE_FAKER_PROVIDER_MISSING",
+    "NESTED_RULE_KEY_UNKNOWN",
+    "NESTED_RULE_NAMESPACE_INVALID",
     "NESTED_RULE_TARGET_DUPLICATE",
 ]
 
@@ -37,6 +40,24 @@ NESTED_RULE_TARGET_DUPLICATE = _d(
 NESTED_RULES_CODE_SET_REPEATED = _d(
     "nested_rules_code_set_repeated",
     "A nested column has more than one code_set rule.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_RULE_KEY_UNKNOWN = _d(
+    "nested_rule_key_unknown",
+    "A nested rule sets a key other than target, strategy, strategy_config or namespace.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_RULE_NAMESPACE_INVALID = _d(
+    "nested_rule_namespace_invalid",
+    "A nested rule's namespace is not a non-blank string.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_RULE_FAKER_PROVIDER_MISSING = _d(
+    "nested_rule_faker_provider_missing",
+    "A nested faker rule has no provider in its strategy_config or on the column.",
     phases=_BOTH,
     since=UNRELEASED,
 )

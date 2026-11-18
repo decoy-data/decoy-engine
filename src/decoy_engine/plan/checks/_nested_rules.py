@@ -16,6 +16,14 @@ from decoy_engine.plan._errors import PlanCompileError
 __all__ = ["check_nested_rules"]
 
 
+_RULE_KEYS = frozenset({"target", "strategy", "strategy_config", "namespace"})
+
+
+def _provider_named(strategy_config: Any, column_provider: Any) -> bool:
+    own = strategy_config.get("provider") if isinstance(strategy_config, dict) else None
+    return not _blank(own) or not _blank(column_provider)
+
+
 def _blank(value: Any) -> bool:
     return not isinstance(value, str) or not value.strip()
 
@@ -36,10 +44,11 @@ def check_nested_rules(config: dict[str, Any]) -> None:
             pc = col.get("provider_config")
             if not isinstance(pc, dict) or "rules" not in pc:
                 continue
-            _check_column(f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}", pc)
+            where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+            _check_column(where, pc, column_provider=col.get("provider"))
 
 
-def _check_column(where: str, pc: dict[str, Any]) -> None:
+def _check_column(where: str, pc: dict[str, Any], *, column_provider: Any) -> None:
     rules = pc["rules"]
     if "target" in pc or "strategy" in pc:
         raise PlanCompileError(
@@ -56,8 +65,22 @@ def _check_column(where: str, pc: dict[str, Any]) -> None:
         )
     seen_targets: set[str] = set()
     code_set_seen = False
-    for child in nested_children(pc):
+    for child, rule in zip(nested_children(pc), rules, strict=True):
         at = f"{where}.{child.config_path}"
+        for key in rule if isinstance(rule, dict) else ():
+            if key not in _RULE_KEYS:
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_RULE_KEY_UNKNOWN,
+                    path=f"{at}.{key}",
+                    message="A nested rule may set only `target`, `strategy`, `strategy_config` "
+                    "and `namespace`.",
+                )
+        if "namespace" in (rule if isinstance(rule, dict) else ()) and _blank(child.namespace):
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_RULE_NAMESPACE_INVALID,
+                path=f"{at}.namespace",
+                message="A nested rule's `namespace` must be a non-blank string.",
+            )
         if _blank(child.target):
             raise PlanCompileError(
                 code=reasons.plan.NESTED_TARGET_UNSET,
@@ -69,6 +92,15 @@ def _check_column(where: str, pc: dict[str, Any]) -> None:
                 code=reasons.plan.NESTED_STRATEGY_UNSET,
                 path=f"{at}.strategy",
                 message="A nested rule needs a child strategy; set `strategy`.",
+            )
+        if child.strategy == "faker" and not _provider_named(
+            child.strategy_config, column_provider
+        ):
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_RULE_FAKER_PROVIDER_MISSING,
+                path=f"{at}.strategy_config.provider",
+                message="A nested faker rule needs a provider: set `strategy_config.provider` "
+                "or the column's `provider`.",
             )
         if child.target in seen_targets:
             raise PlanCompileError(

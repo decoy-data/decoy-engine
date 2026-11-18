@@ -87,6 +87,13 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 
 
+def _rule_provider(child: NestedChild, plan: ColumnSeed) -> str | None:
+    """A rule's own `strategy_config.provider` wins; else the column's, as the single form does."""
+    cfg = child.strategy_config
+    own = cfg.get("provider") if child.index is not None and isinstance(cfg, dict) else None
+    return own if isinstance(own, str) and own.strip() else plan.provider
+
+
 @dataclass(frozen=True)
 class _Rule:
     """One rule ready to run: its child, resolved handler and seed, and parsed target."""
@@ -179,7 +186,13 @@ class NestedStrategyHandler:
         # carrying the child strategy + config.
         child_provider_config: tuple[tuple[str, Any], ...]
         if isinstance(child_strategy_config, dict):
-            child_provider_config = tuple(sorted(child_strategy_config.items()))
+            # A rule's `provider` is the seed's provider, not a setting the child passes on.
+            kept = {
+                k: v
+                for k, v in child_strategy_config.items()
+                if not (child.index is not None and k == "provider")
+            }
+            child_provider_config = tuple(sorted(kept.items()))
         else:
             child_provider_config = ()
         # QA-3 F7 (2026-05-31): resolve the CHILD's technique class. The
@@ -194,7 +207,7 @@ class NestedStrategyHandler:
             if child.index is not None and child.namespace
             else plan.namespace,
             strategy=child_strategy_name,
-            provider=plan.provider,
+            provider=_rule_provider(child, plan),
             backend_type=plan.backend_type,
             backend_version=plan.backend_version,
             cardinality_mode=plan.cardinality_mode,
@@ -356,15 +369,26 @@ class NestedStrategyHandler:
                             },
                         )
                     )
+                if faulted:
+                    # An earlier rule already failed this row. The rule still matched, so it is
+                    # not a zero-match misconfiguration.
+                    rule_fault[ri] = True
+                    continue
                 try:
                     cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
                 except StrictJsonError as exc:
                     record_fault(ctx, warnings, column, pos, exc.token)
-                    rule_fault[ri] = True  # the target matched; the row fails
+                    rule_fault[ri] = True  # the target matched; the row error fails it
                     faulted = True
-                    break
+                    continue
                 found.append((ri, ordered_matches, cell_leaves))
-            if faulted or not found:
+            if faulted:
+                # Rules that matched before the fault lose this row's leaves; none of them is a
+                # zero-match misconfiguration.
+                for ri, _matches, _leaves in found:
+                    rule_fault[ri] = True
+                continue
+            if not found:
                 continue
             refuse_rule_overlap(column, [(i, [match_path(m) for m in ms]) for i, ms, _ in found])
             for i, _matches, cell_leaves in found:

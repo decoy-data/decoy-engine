@@ -103,9 +103,7 @@ class TestFakerRuleCarriesItsOwnProvider:
             backend_type="faker",
             backend_version="v",
         )
-        out, _ = NestedStrategyHandler().run(
-            pd.DataFrame({"payload": cells}), "payload", seed, ctx
-        )
+        out, _ = NestedStrategyHandler().run(pd.DataFrame({"payload": cells}), "payload", seed, ctx)
         parsed = json.loads(out["payload"].iloc[0])
         email = parsed["user"]["email"]
         assert "@" in email and email != "a@x.com"

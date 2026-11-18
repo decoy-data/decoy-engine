@@ -1086,7 +1086,12 @@ required-settings rows for `nested` carry an additive `unless_present` path, so 
 a missing top-level target or strategy. At run time every rule matches on the parsed cell before any write; two
 rules that reach the same position, or an ancestor and its descendant, fail the column (`nested_rules_overlap`).
 Each rule draws on its own identity (`<column>.rules[<i>]`) while `code_set` evidence and attribution keep the real
-column. The single form is unchanged.
+column. The draw identity is the rule's position in the list, so reordering rules changes their draws. A
+rule is a closed set of keys (`target`, `strategy`, `strategy_config`, `namespace`); any other key, such as
+`when`, is refused (`nested_rule_key_unknown`), and a `namespace` that is not a non-blank string is refused
+(`nested_rule_namespace_invalid`). A `faker` rule takes its provider from its own `strategy_config.provider`, else
+from the column's `provider`; with neither it is refused (`nested_rule_faker_provider_missing`). The single form
+is unchanged and keeps taking the column's `provider`.
 
 ### 3.5 Disguises
 
