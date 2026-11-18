@@ -140,7 +140,7 @@ def test_the_mismatch_code_is_in_the_nested_warning_registries() -> None:
 def test_references_without_a_bound_key_kind_fail_the_column_closed() -> None:
     with pytest.raises(StrategyError) as exc:
         _run([json.dumps({"customer_id": 1})], _rule(None))
-    assert exc.value.code == "nested_reference_requires_profile"
+    assert exc.value.code == "nested_reference_key_kind_unbound"
 
 
 def test_references_do_not_change_the_child_seed() -> None:

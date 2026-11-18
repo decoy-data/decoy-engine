@@ -46,6 +46,7 @@ __all__ = [
     "NESTED_CHILD_STRATEGY_UNKNOWN",
     "NESTED_JSONPATH_PARSE_ERROR",
     "NESTED_RECURSIVE_NESTED_REJECTED",
+    "NESTED_REFERENCE_KEY_KIND_UNBOUND",
     "NESTED_RULES_OVERLAP",
     "NESTED_STRATEGY_UNSET",
     "NESTED_TARGET_MATCHED_NOTHING",
@@ -167,6 +168,11 @@ NESTED_CHILD_STRATEGY_UNKNOWN = _d(
 NESTED_JSONPATH_PARSE_ERROR = _d("nested_jsonpath_parse_error", "Nested jsonpath parse error.")
 NESTED_RECURSIVE_NESTED_REJECTED = _d(
     "nested_recursive_nested_rejected", "Nested recursive nested rejected."
+)
+NESTED_REFERENCE_KEY_KIND_UNBOUND = _d(
+    "nested_reference_key_kind_unbound",
+    "A nested rule with references has no key kind, so the plan was not compiled with a profile.",
+    since=UNRELEASED,
 )
 NESTED_RULES_OVERLAP = _d(
     "nested_rules_overlap",

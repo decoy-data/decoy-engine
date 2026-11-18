@@ -234,7 +234,7 @@ def reference_key_kind(child: NestedChild) -> str | None:
     if kind in ("integer", "string"):
         return str(kind)
     raise StrategyError(
-        code=reasons.plan.NESTED_REFERENCE_REQUIRES_PROFILE,
+        code=reasons.runtime.NESTED_REFERENCE_KEY_KIND_UNBOUND,
         strategy="nested",
         message="a nested rule with `references` has no key kind: compile the plan with a profile.",
     )

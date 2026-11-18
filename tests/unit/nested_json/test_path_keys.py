@@ -15,7 +15,6 @@ import pytest
 
 from decoy_engine._nested_json import PathRelation, path_relations
 from decoy_engine._nested_json._paths import (
-    UnsupportedKeyTypeError,
     path_key_batches,
     singular_path,
 )
@@ -108,7 +107,7 @@ def test_an_integer_outside_the_parent_type_is_unreadable() -> None:
 
 
 def test_a_parent_of_another_type_is_refused_without_reading() -> None:
-    with pytest.raises(UnsupportedKeyTypeError):
+    with pytest.raises(ValueError, match="integer or a string"):
         list(path_key_batches([pa.array(["{}"])], "$.k", pa.float64()))
 
 

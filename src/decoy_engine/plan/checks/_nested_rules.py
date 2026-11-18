@@ -176,10 +176,6 @@ def _check_faker_provider(at: str, child: Any, column_provider: Any, where: str)
         )
 
 
-def _refuse(code: str, path: str, message: str) -> PlanCompileError:
-    return PlanCompileError(code=code, path=path, message=message)
-
-
 def _parent_column(config: Mapping[str, Any], child: NestedChild) -> dict[str, Any] | None:
     ends = reference_ends(child)
     for table in config.get("tables") or []:
@@ -200,52 +196,52 @@ def _check_references(
         at = f"{where}.{child.config_path}"
         refs = child.references[0]
         if isinstance(refs, Mapping) and "key_kind" in refs:
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_KEY_KIND_RESERVED,
-                f"{at}.references.key_kind",
-                "`references.key_kind` is set by the planner from the profile. Remove it.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_KEY_KIND_RESERVED,
+                path=f"{at}.references.key_kind",
+                message="`references.key_kind` is set by the planner from the profile. Remove it.",
             )
         if singular_path(child.target) is None:
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_PATH_NOT_SINGULAR,
-                f"{at}.target",
-                "A rule with `references` needs a singular path of names, such as "
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_PATH_NOT_SINGULAR,
+                path=f"{at}.target",
+                message="A rule with `references` needs a singular path of names, such as "
                 "`$.customer_id` or `$.ref.customer_id`.",
             )
         parent = _parent_column(config, child)
         if parent is None:
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_PARENT_UNKNOWN,
-                f"{at}.references",
-                "`references` must name a table and a column that the config declares.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_PARENT_UNKNOWN,
+                path=f"{at}.references",
+                message="`references` must name a table and a column that the config declares.",
             )
         if parent.get("when"):
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_PARENT_CONDITIONAL,
-                f"{at}.references",
-                "The referenced column has a `when` condition, so rows it skips keep their "
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_PARENT_CONDITIONAL,
+                path=f"{at}.references",
+                message="The referenced column has a `when` condition, so rows it skips keep their "
                 "source key and would not match the path leaf. Reference a column that "
                 "is masked on every row.",
             )
         if parent.get("strategy") not in _JOIN_SAFE:
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_STRATEGY_NOT_JOIN_SAFE,
-                f"{at}.references",
-                "The referenced column must be masked with `hash` or `tokenize`.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_STRATEGY_NOT_JOIN_SAFE,
+                path=f"{at}.references",
+                message="The referenced column must be masked with `hash` or `tokenize`.",
             )
         if child.strategy != parent.get("strategy") or (child.strategy_config or {}) != (
             parent.get("provider_config") or {}
         ):
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_STRATEGY_MISMATCH,
-                f"{at}.strategy",
-                "The rule must use the same strategy and config as the referenced column.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_STRATEGY_MISMATCH,
+                path=f"{at}.strategy",
+                message="The rule must use the same strategy and config as the referenced column.",
             )
         if (child.namespace or col.get("namespace")) != parent.get("namespace"):
-            raise _refuse(
-                reasons.plan.NESTED_REFERENCE_NAMESPACE_MISMATCH,
-                f"{at}.namespace",
-                "The rule must use the same namespace as the referenced column.",
+            raise PlanCompileError(
+                code=reasons.plan.NESTED_REFERENCE_NAMESPACE_MISMATCH,
+                path=f"{at}.namespace",
+                message="The rule must use the same namespace as the referenced column.",
             )
 
 
@@ -284,10 +280,10 @@ def bind_reference_key_kinds(config: dict[str, Any], profile: Profile | None) ->
                 continue
             at = f"{where}.{child.config_path}"
             if profile is None:
-                raise _refuse(
-                    reasons.plan.NESTED_REFERENCE_REQUIRES_PROFILE,
-                    f"{at}.references",
-                    "`references` needs the parent column's profiled type. Compile with a profile.",
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_REFERENCE_REQUIRES_PROFILE,
+                    path=f"{at}.references",
+                    message="`references` needs the parent column's profiled type. Compile with a profile.",
                 )
             parent = _parent_column(bound, child)
             dtype = dtypes.get(ends)
@@ -297,10 +293,10 @@ def bind_reference_key_kinds(config: dict[str, Any], profile: Profile | None) ->
                 else _key_kind(dtype, parent.get("strategy"))
             )
             if kind is None:
-                raise _refuse(
-                    reasons.plan.NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED,
-                    f"{at}.references",
-                    "The referenced column must be an integer or a string key, "
+                raise PlanCompileError(
+                    code=reasons.plan.NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED,
+                    path=f"{at}.references",
+                    message="The referenced column must be an integer or a string key, "
                     "and `tokenize` takes string keys only.",
                 )
             rule = pc["rules"][child.index]

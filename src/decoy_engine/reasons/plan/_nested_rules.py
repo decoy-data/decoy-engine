@@ -130,6 +130,6 @@ NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED = _d(
 NESTED_REFERENCE_REQUIRES_PROFILE = _d(
     "nested_reference_requires_profile",
     "A nested rule with references has no profiled key kind: compile it with a profile.",
-    phases=(Phase.COMPILE, Phase.MASK),
+    phases=(Phase.COMPILE,),
     since=UNRELEASED,
 )

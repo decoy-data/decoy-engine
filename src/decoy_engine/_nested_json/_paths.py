@@ -29,13 +29,9 @@ from decoy_engine._canonical import (
     strict_json_read,
 )
 
-__all__ = ["PathKeyBatch", "UnsupportedKeyTypeError", "path_key_batches", "singular_path"]
+__all__ = ["PathKeyBatch", "path_key_batches", "singular_path"]
 
 _NAME_SEGMENT: Final = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)")
-
-
-class UnsupportedKeyTypeError(ValueError):
-    """The parent key column is neither an integer nor a string type."""
 
 
 @dataclass(frozen=True)
@@ -66,7 +62,7 @@ def _kind(parent_type: pa.DataType) -> str:
         return "integer"
     if pa.types.is_string(parent_type) or pa.types.is_large_string(parent_type):
         return "string"
-    raise UnsupportedKeyTypeError("a path key needs an integer or a string parent key column")
+    raise ValueError("a path key needs an integer or a string parent key column")
 
 
 def _bounds(parent_type: pa.DataType) -> tuple[int, int] | None:
@@ -89,8 +85,8 @@ def path_key_batches(
     """Yield the key column of each payload batch, read at `path` and typed as `parent_type`.
 
     Raises:
-        ValueError: `path` is not a singular path of name segments.
-        UnsupportedKeyTypeError: `parent_type` is neither an integer nor a string type.
+        ValueError: `path` is not a singular path of name segments, or `parent_type`
+            is neither an integer nor a string type.
     """
     names = singular_path(path)
     if names is None:
