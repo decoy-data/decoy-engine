@@ -33,6 +33,7 @@ __all__ = [
     "POLICY_SELECTOR_UNMATCHED",
     "POLICY_UNKNOWN_CLASSIFICATION",
     "POLICY_UNKNOWN_STRATEGY",
+    "SCAN_BASELINE_UNBOUND",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -207,5 +208,10 @@ POLICY_BLOCK_INVALID = _d(
 POLICY_PROHIBITED = _d(
     "policy_prohibited",
     "A mask column's decided strategy breaks a policy prohibition.",
+    since=UNRELEASED,
+)
+SCAN_BASELINE_UNBOUND = _d(
+    "scan_baseline_unbound",
+    "scan_baseline.on_drift: fail needs scan_baseline.sha256, so the baseline is bound.",
     since=UNRELEASED,
 )

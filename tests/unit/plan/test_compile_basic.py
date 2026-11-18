@@ -137,6 +137,28 @@ class TestCompileDeterminism:
         assert len({bare, warn, fail}) == 3
         assert hash_of({**pointer, "path": "elsewhere/y.json", "on_drift": "warn"}) == warn
 
+    def test_the_baseline_digest_moves_the_hash_only_when_on_drift_is_set(
+        self, simple_config: dict, simple_profile: Profile
+    ) -> None:
+        def hash_of(block: dict) -> str:
+            return compile_plan(
+                {**simple_config, "scan_baseline": block},
+                simple_profile,
+                decoy_engine_version="0.1.0",
+            ).pipeline_config_hash
+
+        pointer = {"path": "x.json", "schema": "scan-set/v1"}
+        one, two = "a" * 64, "b" * 64
+        warn = hash_of({**pointer, "on_drift": "warn"})
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != warn
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != hash_of(
+            {**pointer, "on_drift": "warn", "sha256": two}
+        )
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one, "path": "z.json"}) == hash_of(
+            {**pointer, "on_drift": "warn", "sha256": one}
+        )
+        assert hash_of({**pointer, "sha256": one}) == hash_of(pointer)
+
     def test_two_compiles_equal(self, simple_config: dict, simple_profile: Profile) -> None:
         p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         p2 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")

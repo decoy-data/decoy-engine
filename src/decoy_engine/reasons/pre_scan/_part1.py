@@ -6,6 +6,8 @@ from decoy_engine.reasons import _catalog
 from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, RetryClass, Severity
 
 __all__ = [
+    "BASELINE_DIGEST_MISMATCH",
+    "BASELINE_UNREADABLE",
     "DRIFT_BLOCKED",
     "DRIFT_DETECTED",
     "PROFILE_FAILED",
@@ -31,6 +33,19 @@ DRIFT_BLOCKED = _d(
     kind=Kind.FINDING,
     severity=Severity.ERROR,
     outcome=Outcome.FINDINGS,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
+# F15: a bound baseline (`scan_baseline.sha256`) is checked before it is read as a scan.
+BASELINE_DIGEST_MISMATCH = _d(
+    "baseline_digest_mismatch",
+    "The scan baseline file does not match scan_baseline.sha256, so the run stopped.",
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
+)
+BASELINE_UNREADABLE = _d(
+    "baseline_unreadable",
+    "The scan baseline file is not a readable scan-set/v1 scan.",
     retry=RetryClass.CONFIGURATION_REPAIR,
     since=UNRELEASED,
 )
