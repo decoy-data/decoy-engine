@@ -8,7 +8,7 @@
 # Before the deploy job can succeed, Pages must be enabled in repo settings:
 #   Settings → Pages → Source: GitHub Actions
 #
-# This repo (louiskeep/decoy-engine) is public. Deploy stays off until the DOCS_DEPLOY
+# This repo (decoy-data/decoy-engine) is public. Deploy stays off until the DOCS_DEPLOY
 # variable is set to "true" and Pages is enabled; the build job uploads the HTML as an artifact.
 #
 # Item 50 Phase E in the cross-repo plan.
