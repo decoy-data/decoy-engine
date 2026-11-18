@@ -182,11 +182,12 @@ def test_size_of_an_s3_object_and_a_missing_key() -> None:  # AT-E1-11
             single_request=False,
         )
         client.create_bucket(Bucket="zz-bkt")
-        client.put_object(Bucket="zz-bkt", Key="o", Body=b"x" * 1234)
+        client.put_object(Bucket="zz-bkt", Key="o", Body=b"x" * (3 * MIB + 5))
         store = S3ObjectStore(
             S3Config(bucket="zz-bkt", region="us-east-1", access_key_id="k", secret_access_key="s")
         )
-        assert store.size("o") == 1234
+        # Longer than one read chunk, so a first-chunk length is not the object length.
+        assert store.size("o") == 3 * MIB + 5
         with pytest.raises(ConnectorError) as info:
             store.size("missing")
         assert info.value.kind == "not_found"
