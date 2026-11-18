@@ -21,10 +21,10 @@ Validation timing:
     and run_config_only_checks. Validation never mutates (per engine rule).
 
 Null propagation modes:
-  explicit_null  Output is None when any referenced column value is None or NaN.
-  sentinel       None/NaN column values are replaced with "" before evaluation;
+  explicit_null  Output is None when any referenced column value is missing (None, NaN, NaT or pd.NA).
+  sentinel       missing column values (None, NaN, NaT, pd.NA) are replaced with "" before evaluation;
                  the expression always runs.
-  default        None/NaN column values are coerced to 0; the expression always
+  default        missing column values (None, NaN, NaT, pd.NA) are coerced to 0; the expression always
                  runs.
 
 Bounds:
@@ -34,7 +34,10 @@ Bounds:
   that is not bool).
 
 Mask mode and gen mode both evaluate the same closed expression against the
-row context. Determinism is inherent: same row context -> same output, no RNG
+row context, narrowed to exactly the expression's compiled column references
+(`_get_column_refs`) and keyed by real column name: a caller's extra keys are never
+visible to the expression (a closed `names` scope, as simpleeval's `names` mapping and
+`expressions/_safe_eval.py` supply it). Determinism is inherent: same row context -> same output, no RNG
 involved. There is no code branching between mask and gen.
 
 In mask mode the row context is read from the live per-table frame. Cross-column
@@ -45,22 +48,27 @@ not its source value and not by lexicographic-sort accident. A referenced column
 that is never masked reads its (unchanged) source value. In generate mode the row
 context is built from already-generated sibling columns (declared-order sequential
 semantics, same as the statistical/condition_on pattern). Both modes call
-apply_derived with a complete row context dict.
+apply_derived, which reads only the referenced keys of the row context.
 
 Error handling:
-  Per-row evaluation errors (e.g. ZeroDivisionError, TypeError) are wrapped in
-  ValueError and re-raised with the column name and row index for diagnosability.
-  Callers pass these via the column= and row_index= keyword arguments.
+  A per-row evaluation failure raises ValueError whose text is exactly
+  `derived expression evaluation failed at column <name>, row <index>: <reason>`,
+  with the reason word looked up by exact exception type in `_FAILURE_REASONS`
+  (default "the expression could not be evaluated"). The cell value, the original message, its class
+  name and the reference name never reach the text, `args` or `__notes__`, and the
+  error is raised after the `except` block so neither `__cause__` nor `__context__`
+  links the value-bearing original (PEP 3134; `from None` alone keeps `__context__`).
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import CompiledExpression, compile_expr, evaluate
+from decoy_engine.internal.pandas_missing import is_null_cell
 from decoy_engine.plan._errors import PlanCompileError
 
 # Valid null_propagation values.
@@ -82,11 +90,11 @@ class DerivedConfig:
         compiled: The pre-compiled Lark expression (compiled once at parse time).
         bounds: Optional {min, max} dict to clip numeric output. None means
             no clipping.
-        null_propagation: How null/NaN input column values are handled.
+        null_propagation: How missing (None, NaN, NaT or pd.NA) input column values are handled.
             "explicit_null" (default): output is None if any referenced column
-            is None/NaN.
-            "sentinel": None/NaN is replaced with "" before evaluation.
-            "default": None/NaN is coerced to 0 before evaluation.
+            is missing.
+            "sentinel": a missing value is replaced with "" before evaluation.
+            "default": a missing value is coerced to 0 before evaluation.
     """
 
     expression: str
@@ -197,11 +205,8 @@ def _get_column_refs(compiled: CompiledExpression) -> frozenset[str]:
     return frozenset(refs)
 
 
-def _is_null(value: Any) -> bool:
-    """Return True when *value* is None or a float NaN."""
-    if value is None:
-        return True
-    return isinstance(value, float) and math.isnan(value)
+# One missing-cell rule with the masking kernels and formula (NaT and pd.NA count).
+_is_null = is_null_cell
 
 
 def _coerce_context(
@@ -213,7 +218,7 @@ def _coerce_context(
 
     Returns:
         A (possibly coerced) context dict, or None when explicit_null
-        mode has detected a null/NaN in any referenced column (signalling
+        mode has detected a missing cell in any referenced column (signalling
         that the output should be None).
     """
     if null_propagation == "explicit_null":
@@ -267,33 +272,72 @@ def apply_derived(
 
     Args:
         config: Parsed DerivedConfig with the compiled expression.
-        row_context: Mapping of column name to its value for this row.
+        row_context: Mapping of column name to its value for this row. Only the
+            expression's compiled references are read; other keys are ignored.
         column: Column name for diagnostics; included in error messages.
         row_index: Row position for diagnostics; included in error messages.
 
     Returns:
         The expression result, optionally clipped by bounds, or None when
         null_propagation is "explicit_null" and any referenced column is
-        None/NaN.
+        missing (None, NaN, NaT or pd.NA).
 
     Raises:
-        ValueError: Expression evaluation raised an error (e.g. ZeroDivisionError,
-            TypeError). The message names the column and row index so the operator
-            can locate the offending data without re-running.
+        ValueError: A referenced key is missing from `row_context` or evaluation
+            failed. The text names the output column, the row index and a reason
+            word only (see the module docstring); nothing is chained.
     """
     col_refs = _get_column_refs(config.compiled)
-    ctx = _coerce_context(row_context, col_refs, config.null_propagation)
-    if ctx is None:
-        # explicit_null mode: a referenced column was null/NaN.
-        return None
+    reason: str | None = None
     try:
+        visible = {ref: row_context[ref] for ref in col_refs}
+        ctx = _coerce_context(visible, col_refs, config.null_propagation)
+        if ctx is None:
+            # explicit_null mode: a referenced column was missing.
+            return None
         result = evaluate(config.compiled, ctx)
     except Exception as exc:
-        parts: list[str] = []
-        if column is not None:
-            parts.append(f"column {column!r}")
-        if row_index is not None:
-            parts.append(f"row {row_index}")
-        ctx_str = ", ".join(parts) if parts else "unknown column"
-        raise ValueError(f"derived expression evaluation failed at {ctx_str}: {exc}") from exc
+        reason = failure_reason(exc)
+    if reason is not None:
+        raise ValueError(
+            failure_text("derived expression", column=column, row_index=row_index, reason=reason)
+        )
     return _apply_bounds(result, config.bounds)
+
+
+# Exact-type table: a subclass or an unlisted type gets the default word, and the
+# exception's own name and message are never read (they can carry the cell value).
+_DEFAULT_FAILURE_REASON = "the expression could not be evaluated"
+_FAILURE_REASONS: dict[type[BaseException], str] = {
+    ZeroDivisionError: "division by zero",
+    TypeError: "an operand has an unsupported type",
+    ValueError: "an operand value is invalid",
+    OverflowError: "an operand value is invalid",
+    KeyError: "a referenced column is missing",
+    ValidationError: "an argument is not supported",
+}
+
+
+def failure_reason(exc: BaseException) -> str:
+    """The fixed reason word for an evaluation error, chosen by exact type only."""
+    return _FAILURE_REASONS.get(type(exc), _DEFAULT_FAILURE_REASON)
+
+
+def failure_text(
+    subject: str,
+    *,
+    column: str | None,
+    row_index: int | None,
+    reason: str,
+    table: str | None = None,
+) -> str:
+    """The one per-row failure text: subject, then table, output column, row index and a reason."""
+    parts: list[str] = []
+    if table is not None:
+        parts.append(f"table {table!r}")
+    if column is not None:
+        parts.append(f"column {column!r}")
+    if row_index is not None:
+        parts.append(f"row {row_index}")
+    where = ", ".join(parts) if parts else "unknown column"
+    return f"{subject} evaluation failed at {where}: {reason}"

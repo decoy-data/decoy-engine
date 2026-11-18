@@ -87,6 +87,10 @@ from decoy_engine.errors import FpeUnencryptableError
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
+from decoy_engine.execution._strategies._ner_config import (
+    enforce_ner_model_version,
+    resolve_ner_config,
+)
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
 from decoy_engine.generation.pool._events import QualityWarning
@@ -262,7 +266,7 @@ def _text_mask_array(
         sub_floor_span_policy = str(sub_floor_raw) if sub_floor_raw is not None else None
         extra: dict[str, Any] = {key: cfg[key] for key in ("min_days", "max_days") if key in cfg}
 
-        ner_model, ner_entities = _text_mask_ner(cfg, plan)
+        ner_model, ner_entities = _text_mask_ner(cfg, plan, column)
 
         # Phase 5 (docs/plans/2026-09-08-p5-ner-batch-helper.md): collect the
         # batch's non-null cells and run ONE `iter_ner_spans_batch` call over them
@@ -317,44 +321,21 @@ def _text_mask_array(
         raise
 
 
-def _text_mask_ner(cfg: dict[str, Any], plan: ColumnSeed) -> tuple[str | None, list[str] | None]:
-    """Resolve NER config + enforce the compile-vs-runtime model-version pin
-    (same `ner_model_version_mismatch` code as text_redact, `strategy="text_mask"`).
+def _text_mask_ner(
+    cfg: dict[str, Any], plan: ColumnSeed, column: str | None
+) -> tuple[str | None, list[str] | None]:
+    """Resolve NER config + enforce the compile-vs-runtime model-version pin.
 
-    Follow-up (2026-10-25): text_redact's OOC kernel moved this exact logic to
-    the shared `_strategies/_ner_config` module (F6). This `text_mask` copy can
-    adopt it too (`resolve_ner_config` + `enforce_ner_model_version(...,
-    strategy="text_mask")`); kept separate for now to hold F6's stated scope to
-    the text_redact pair."""
-    ner_cfg = cfg.get("ner")
-    if not ner_cfg:
-        return None, None
-    from decoy_engine.detection.ner import DEFAULT_NER_MODEL
+    The pin check is the shared `enforce_ner_model_version`, so the whole-frame and out-of-core
+    routes raise the same text, and `resolve_ner_config` is the one config parse."""
+    ner_model, ner_entities = resolve_ner_config(cfg)
 
-    ner_model: str
-    ner_entities: list[str] | None = None
-    if isinstance(ner_cfg, dict):
-        ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-        raw_entities = ner_cfg.get("entities")
-        if isinstance(raw_entities, (list, tuple)) and raw_entities:
-            ner_entities = [str(e) for e in raw_entities]
-    else:
-        ner_model = DEFAULT_NER_MODEL
-
-    if plan.ner_model_version is not None:
-        from decoy_engine.detection.ner import installed_model_version
-
-        current_version = installed_model_version(ner_model)
-        if current_version is not None and current_version != plan.ner_model_version:
-            raise StrategyError(
-                code=reasons.runtime.NER_MODEL_VERSION_MISMATCH,
-                strategy="text_mask",
-                message=(
-                    f"NER model {ner_model!r} installed at {current_version!r} but the plan "
-                    f"was compiled against {plan.ner_model_version!r}; recompile to keep "
-                    "masked output reproducible."
-                ),
-            )
+    enforce_ner_model_version(
+        ner_model=ner_model,
+        plan_ner_model_version=plan.ner_model_version,
+        column=column,
+        strategy="text_mask",
+    )
     return ner_model, ner_entities
 
 

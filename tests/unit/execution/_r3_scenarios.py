@@ -28,6 +28,7 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.profile._readers import LazySource
+from tests._declared_schema import declare_rest
 from tests.unit.execution._r3_project import canon, project, project_table
 
 ENGINE_VERSION = "r3-baseline"
@@ -100,15 +101,17 @@ def single_table(tmp: Path, *, hash_column: bool = True) -> tuple[dict[str, Any]
         columns.append(_hash("h", "ns_h"))
     table = pa.table(data)
     cfg = PipelineConfig.model_validate(
-        {
-            "version": 2,
-            "global_settings": {"seed": 42},
-            "sources": {
-                "t": {"type": "file", "format": "parquet", "path": _write(tmp, table, "t")}
-            },
-            "tables": [{"name": "t", "columns": columns}],
-            "targets": {"t": _target(tmp, "t")},
-        }
+        declare_rest(
+            {
+                "version": 2,
+                "global_settings": {"seed": 42},
+                "sources": {
+                    "t": {"type": "file", "format": "parquet", "path": _write(tmp, table, "t")}
+                },
+                "tables": [{"name": "t", "columns": columns}],
+                "targets": {"t": _target(tmp, "t")},
+            }
+        )
     ).model_dump()
     return cfg, table
 
@@ -119,28 +122,30 @@ def two_tables(tmp: Path) -> tuple[dict[str, Any], dict[str, pa.Table]]:
         "b": pa.table({"k": pa.array([f"b{i}" for i in range(N)]), "w": pa.array(range(N))}),
     }
     cfg = PipelineConfig.model_validate(
-        {
-            "version": 2,
-            "global_settings": {"seed": 42},
-            "sources": {
-                n: {"type": "file", "format": "parquet", "path": _write(tmp, t, n)}
-                for n, t in tables.items()
-            },
-            "tables": [
-                {
-                    "name": "a",
-                    "columns": [_hash("k", "ns_a"), {"name": "v", "strategy": "passthrough"}],
+        declare_rest(
+            {
+                "version": 2,
+                "global_settings": {"seed": 42},
+                "sources": {
+                    n: {"type": "file", "format": "parquet", "path": _write(tmp, t, n)}
+                    for n, t in tables.items()
                 },
-                {
-                    "name": "b",
-                    "columns": [
-                        {"name": "k", "strategy": "redact"},
-                        {"name": "w", "strategy": "passthrough"},
-                    ],
-                },
-            ],
-            "targets": {n: _target(tmp, n) for n in tables},
-        }
+                "tables": [
+                    {
+                        "name": "a",
+                        "columns": [_hash("k", "ns_a"), {"name": "v", "strategy": "passthrough"}],
+                    },
+                    {
+                        "name": "b",
+                        "columns": [
+                            {"name": "k", "strategy": "redact"},
+                            {"name": "w", "strategy": "passthrough"},
+                        ],
+                    },
+                ],
+                "targets": {n: _target(tmp, n) for n in tables},
+            }
+        )
     ).model_dump()
     return cfg, tables
 
@@ -228,6 +233,7 @@ def fk_job(
             }
         ],
     }
+    declare_rest(cfg)
     if parent_transforms:
         # A no-op dedupe still marks the table transform-bearing, which declines out-of-core.
         cfg["tables"][0]["transforms"] = [{"op": "dedupe", "columns": ["id"]}]
@@ -248,6 +254,7 @@ def generate_plus_mask(tmp: Path) -> tuple[dict[str, Any], dict[str, pa.Table]]:
         },
     ]
     cfg["targets"]["extra"] = _target(tmp, "extra")
+    declare_rest(cfg)
     return cfg, tables
 
 
@@ -427,6 +434,7 @@ def seq_fk_loader(tmp: Path) -> Run:
             cfg,
             {},
             source_loader=lambda name: tables[name],
+            source_loader_schemas={n: t.schema for n, t in tables.items()},
             out_of_core_threshold_rows=1_000,
             **_ROW_ROUTING,
         )
@@ -462,7 +470,16 @@ def ff_fk_transforms_declined_fidelity_byte_routing(tmp: Path) -> Run:
 
 def ooc_fk_forced_loader(tmp: Path) -> Run:
     cfg, tables = fk_job(tmp)
-    return Run(_go(cfg, {}, source_loader=lambda name: tables[name], execution_mode="out_of_core"))
+    schemas = {n: t.schema for n, t in tables.items()}
+    return Run(
+        _go(
+            cfg,
+            {},
+            source_loader=lambda name: tables[name],
+            source_loader_schemas=schemas,
+            execution_mode="out_of_core",
+        )
+    )
 
 
 def ooc_fk_forced(tmp: Path) -> Run:
@@ -576,44 +593,47 @@ def snapshot(run: Run) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class TraceSink:
-    """A `TransactionalSink` that records the order of every call and can fail on the Nth write."""
+def traced_engine_sink(
+    inner: ParquetTransactionalSink, *, fail_on_write: int | None = None
+) -> ParquetTransactionalSink:
+    """The engine's own sink with every call recorded in order, and an optional failure on the
+    Nth write. It patches the instance, not the class: the post-scan gate reads staged output
+    only from the exact engine sink class (a wrapper or subclass is a foreign producer: it keeps
+    its route and the gate is deferred), and this trace is of the bounded routes. `sink.calls` is the log."""
+    sink = inner
+    calls: list[str] = []
+    writes = [0]
+    real = {name: getattr(inner, name) for name in ("write", "write_batches", "commit", "abort")}
 
-    def __init__(
-        self, inner: ParquetTransactionalSink, *, fail_on_write: int | None = None
-    ) -> None:
-        self.inner = inner
-        self.calls: list[str] = []
-        self.fail_on_write = fail_on_write
-        self._writes = 0
-
-    def _maybe_fail(self, what: str) -> None:
-        self._writes += 1
-        if self.fail_on_write is not None and self._writes == self.fail_on_write:
+    def fail(what: str) -> None:
+        writes[0] += 1
+        if fail_on_write is not None and writes[0] == fail_on_write:
             raise OSError(f"injected sink failure on {what}")
 
-    def write(self, table: str, data: pa.Table) -> None:
-        self.calls.append(f"write:{table}")
-        self._maybe_fail(table)
-        self.inner.write(table, data)
+    def write(table: str, data: pa.Table) -> None:
+        calls.append(f"write:{table}")
+        fail(table)
+        real["write"](table, data)
 
-    def write_batches(self, table: str, batches: Any, *, schema: pa.Schema) -> None:
-        self.calls.append(f"write_batches:{table}")
-        self._maybe_fail(table)
-        self.inner.write_batches(table, batches, schema=schema)
+    def write_batches(table: str, batches: Any, *, schema: pa.Schema) -> None:
+        calls.append(f"write_batches:{table}")
+        fail(table)
+        real["write_batches"](table, batches, schema=schema)
 
-    def commit(self) -> None:
-        self.calls.append("commit")
-        self.inner.commit()
+    def commit() -> None:
+        calls.append("commit")
+        real["commit"]()
 
-    def abort(self) -> None:
-        self.calls.append("abort")
-        self.inner.abort()
+    def abort() -> None:
+        calls.append("abort")
+        real["abort"]()
 
-    def __getattr__(self, name: str) -> Any:
-        if name == "spill_parent":
-            return self.__dict__["inner"].spill_parent
-        raise AttributeError(name)
+    sink.calls = calls  # type: ignore[attr-defined]
+    sink.write = write  # type: ignore[method-assign]
+    sink.write_batches = write_batches  # type: ignore[method-assign]
+    sink.commit = commit  # type: ignore[method-assign]
+    sink.abort = abort  # type: ignore[method-assign]
+    return sink
 
 
 def _exc(exc: BaseException | None) -> dict[str, Any] | None:
@@ -628,9 +648,11 @@ def _exc(exc: BaseException | None) -> dict[str, Any] | None:
 
 
 @contextlib.contextmanager
-def _traced(tmp: Path, *, fail_on_write: int | None = None) -> Iterator[tuple[TraceSink, Path]]:
+def _traced(
+    tmp: Path, *, fail_on_write: int | None = None
+) -> Iterator[tuple[ParquetTransactionalSink, Path]]:
     out = tmp / "sink_out"
-    yield TraceSink(ParquetTransactionalSink(out), fail_on_write=fail_on_write), out
+    yield traced_engine_sink(ParquetTransactionalSink(out), fail_on_write=fail_on_write), out
 
 
 def _attempt(call: Callable[[], Any]) -> tuple[Any, BaseException | None]:
@@ -642,13 +664,13 @@ def _attempt(call: Callable[[], Any]) -> tuple[Any, BaseException | None]:
 
 def _trace(
     exc: BaseException | None,
-    sink: TraceSink | None = None,
+    sink: ParquetTransactionalSink | None = None,
     out: Path | None = None,
     loader_calls: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "exception": _exc(exc),
-        "sink_calls": list(sink.calls) if sink is not None else None,
+        "sink_calls": list(sink.calls) if sink is not None else None,  # type: ignore[attr-defined]
         "sink_dir_exists": out.exists() if out is not None else None,
         "published_files": sorted(p.name for p in out.glob("*")) if out and out.exists() else [],
         "source_loader_calls": loader_calls,
@@ -664,8 +686,16 @@ def f_reject_before_read(tmp: Path) -> dict[str, Any]:
         return tables[name]
 
     with _traced(tmp) as (sink, out):
+        schemas = {n: t.schema for n, t in tables.items()}
         _, exc = _attempt(
-            lambda: _go(cfg, {}, source_loader=loader, sink=sink, full_frame_reject_rows=10)
+            lambda: _go(
+                cfg,
+                {},
+                source_loader=loader,
+                source_loader_schemas=schemas,
+                sink=sink,
+                full_frame_reject_rows=10,
+            )
         )
         return _trace(exc, sink, out, calls)
 

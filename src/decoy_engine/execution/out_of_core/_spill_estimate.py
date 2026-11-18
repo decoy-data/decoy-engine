@@ -42,9 +42,10 @@ default). So every column prices at `max(source_width, strategy_output_width)`
 -- the masked width can only be >= the source, never smaller for sizing
 purposes. `strategy_output_width` reads the column's config:
 
-  - hash: the digest hex width -- the `truncate` provider-config param if a
-    positive int, else HASH_DIGEST_HEX_BYTES (64).
-  - redact: `len(redact_with)` (the replacement token; default "REDACTED").
+  - hash and redact: the output width the strategy handler declares
+    (`output_string_width`, UTF-8 bytes: the digest hex capped by `truncate`, the
+    UTF-8 length of `redact_with`). A declaration of None (a `redact_with` that is
+    not text) takes the unknown-width ceiling.
   - passthrough / truncate / fpe (format-preserving or shrinking): source
     width -- these never widen a value, so `max(source, 0)` keeps the source.
   - any OTHER strategy whose output width is not cleanly derivable from config
@@ -139,7 +140,7 @@ backstop -- the estimate does not need to be exact, only conservative.
 
 TEMP-ROOT LOW: `default_ooc_temp_root()` reads `tempfile.gettempdir()` once at
 call time; a job that later re-points `TMPDIR` between this preflight and the
-runner's `mkdtemp` could check a different mount than it spills to. In
+runner's protected scratch directory could check a different mount than it spills to. In
 practice `run_out_of_core_route` reads the same `default_ooc_temp_root()` for
 its runtime budget, so both agree unless the environment mutates underneath
 them mid-dispatch -- documented, not defended against.
@@ -157,6 +158,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess
+from decoy_engine.execution import _strategies
 from decoy_engine.execution._mem_estimate import _FIXED_WIDTH_DTYPE_BYTES, is_fixed_width_dtype
 from decoy_engine.execution.out_of_core._budget import (
     DiskSpillPreflight,
@@ -173,7 +175,6 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "DISK_SAFETY_MARGIN",
-    "HASH_DIGEST_HEX_BYTES",
     "SPILL_OVERHEAD",
     "UNKNOWN_WIDTH_CEILING_BYTES",
     "OocDiskPrediction",
@@ -202,16 +203,6 @@ SPILL_OVERHEAD = 2.0
 # width (a 500-byte notes column priced at a 12-byte minimum was the exact
 # under-prediction the reviewers blocked).
 UNKNOWN_WIDTH_CEILING_BYTES = 256
-
-# `derive(...).hex()` is a 32-byte HMAC-SHA256 digest -> 64 hex chars
-# (`determinism/_derive.py::derive`, `kernel/_scalar.py::hash_array`). This is
-# the hash strategy's default masked-value width; a positive `truncate` param
-# shortens it.
-HASH_DIGEST_HEX_BYTES = 64
-
-# The redact strategy's default replacement token when `redact_with` is unset
-# (`execution/_strategies/_redact.py::_DEFAULT_REDACT_WITH`).
-_DEFAULT_REDACT_WITH = "REDACTED"
 
 # FK join key framing: `fk_join_key` tags each key `\x00STR:{len}:{value}` and
 # `fk_join_key_tuple` length-prefixes each component (`execution/_fk_keys.py`),
@@ -333,6 +324,13 @@ def _provider_config_and_strategy(
     return (strategy if isinstance(strategy, str) else None), {**flat, **nested}
 
 
+def _declared_output_width(strategy: str | None, params: dict[str, Any]) -> int | None:
+    """The UTF-8 byte width the strategy handler declares for its output cells (hash, redact),
+    from the same config shape `run` reads; None when it declares none or the config makes it
+    unknown. Spill stages bytes, so the handler's byte width is the right unit."""
+    return _strategies.output_declaration(strategy, tuple(params.items())).string_width
+
+
 def _strategy_output_width_bytes(strategy: str | None, params: dict[str, Any]) -> float:
     """The strategy's characteristic MASKED output width, or 0 for a
     source-preserving/shrinking strategy (the caller takes `max(source, this)`).
@@ -340,14 +338,9 @@ def _strategy_output_width_bytes(strategy: str | None, params: dict[str, Any]) -
     See the module docstring's "MASKED-SIDE WIDTHS" section for the mapping and
     why an unmapped strategy takes the conservative ceiling.
     """
-    if strategy == "hash":
-        truncate = params.get("truncate")
-        if isinstance(truncate, int) and truncate > 0:
-            return float(truncate)
-        return float(HASH_DIGEST_HEX_BYTES)
-    if strategy == "redact":
-        token = params.get("redact_with", _DEFAULT_REDACT_WITH)
-        return float(len(str(token))) if token is not None else 0.0
+    declared = _declared_output_width(strategy, params)
+    if declared is not None:
+        return float(declared)
     if strategy == "categorical":
         # The output is one declared category label; the widest one is the exact
         # upper bound (a label may legitimately exceed the free-text ceiling).
@@ -518,8 +511,8 @@ def predict_ooc_disk_bytes(
 
 def default_ooc_temp_root() -> Path:
     """Where the out-of-core runner's scratch directory lands absent an
-    explicit `temp_dir` (`run_fk_out_of_core`'s own `tempfile.mkdtemp` default,
-    which draws from the same `tempfile.gettempdir()` root). Single source of
+    explicit `temp_dir` (`run_fk_out_of_core`'s own default, a `protected_scratch_dir`
+    under the same `tempfile.gettempdir()` root). Single source of
     truth so this module's preflight and `_pipeline_route_exec.run_out_of_core_
     route`'s runtime-budget threading check the SAME filesystem -- two guards
     silently checking two different mounts could disagree on whether disk is

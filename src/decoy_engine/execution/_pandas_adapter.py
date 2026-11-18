@@ -434,6 +434,7 @@ class PandasExecutionAdapter:
         plan: Plan,
         source_loader: Callable[[str], pa.Table],
         *,
+        config: Mapping[str, object],
         registry: ProviderRegistry,
         pool_cache: PoolCache | None = None,
         relationship_graph: RelationshipGraph,
@@ -463,6 +464,7 @@ class PandasExecutionAdapter:
             self,
             plan,
             source_loader,
+            config=config,
             registry=registry,
             pool_cache=pool_cache,
             relationship_graph=relationship_graph,
@@ -579,10 +581,10 @@ class PandasExecutionAdapter:
                 # dtype for an all-null resolved column (see
                 # `_fk_keys.fk_all_null_array`'s docstring).
                 child_frame[c] = fk_all_null_array(len(safe_ints), child_frame[c].dtype)
+            elif safe_ints is not None:
+                child_frame[c] = fk_nullable_int_array(safe_ints, table=node.table, column=c)
             else:
-                child_frame[c] = (
-                    fk_nullable_int_array(safe_ints) if safe_ints is not None else values
-                )
+                child_frame[c] = values
         # S2: emit one cascaded RowError per child row whose key was excluded
         # from the parent map (parent key row-errored). The masked cell is
         # already None (set above), so even a downstream bug in quarantine

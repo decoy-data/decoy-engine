@@ -35,6 +35,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution.physical._context import SeamContext
 from decoy_engine.execution.physical._plan import PhysicalPlan, SynthesisStage
@@ -49,7 +50,7 @@ from decoy_engine.execution.physical._shadow_generation import require_pure_gene
 from decoy_engine.execution.physical._shadow_snapshot import capture_shadow_snapshot
 from decoy_engine.execution.physical._types import DriverId, ExecutionScope
 from decoy_engine.execution.physical.drivers._synthesis import SynthesisStageAdapter
-from decoy_engine.plan import compile_plan
+from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan._types import Plan
 from decoy_engine.profile import Profile
 from tests.physical._shadow_helpers import (
@@ -73,6 +74,7 @@ def _generate_config(
     seed: int = 20260916,
     columns: list[dict[str, Any]] | None = None,
     table_name: str = "people",
+    bypass_parse: bool = False,
 ) -> dict[str, Any]:
     """A minimal admitted pure-generate config: one generate table, sequence
     + categorical columns only, no sources/relationships/namespaces/subset/
@@ -86,11 +88,19 @@ def _generate_config(
             {
                 "name": table_name,
                 "row_count": row_count,
-                "generate_columns": columns if columns is not None else _DEFAULT_COLUMNS,
+                "generate_columns": _DEFAULT_COLUMNS
+                if bypass_parse or columns is None
+                else columns,
             }
         ],
     }
-    return PipelineConfig.model_validate(raw).model_dump()
+    dumped = PipelineConfig.model_validate(raw).model_dump()
+    if bypass_parse:
+        # The config layer refuses malformed leaf knobs, but the malformed and sweep tests feed
+        # them straight to the executors (a hand-built Plan can carry them), so they are spliced
+        # in after parsing. Only those callers set the flag; every other caller must parse.
+        dumped["tables"][0]["generate_columns"] = [{"pooled": None, **c} for c in columns or ()]
+    return dumped
 
 
 def _empty_profile() -> Profile:
@@ -408,8 +418,6 @@ def test_positive_cross_run_determinism() -> None:
     [
         [{"name": "id", "type": "sequence", "start": "abc"}],
         [{"name": "id", "type": "sequence", "start": [1, 2]}],
-        [{"name": "id", "type": "sequence", "start": float("inf")}],
-        [{"name": "id", "type": "sequence", "start": 1, "prefix": "\ud800"}],
         [{"name": "id", "type": "sequence", "start": 1, "null_probability": "abc"}],
         [{"name": "tier", "type": "categorical", "categories": ["A", "B"], "weights": [1]}],
         [{"name": "tier", "type": "categorical", "categories": [1, "a", {"x": 1}]}],
@@ -417,22 +425,43 @@ def test_positive_cross_run_determinism() -> None:
     ids=[
         "sequence-start-non-numeric-string",
         "sequence-start-list",
-        "sequence-start-infinite",
-        "sequence-prefix-surrogate",
         "sequence-null-probability-non-numeric",
         "categorical-weights-length-mismatch",
         "categorical-mixed-category-types",
     ],
 )
+@pytest.mark.usefixtures("lenient_generate_checks")
 def test_malformed_leaf_knob_is_identical_rejection(columns: list[dict[str, Any]]) -> None:
-    config = _generate_config(columns=columns)
+    config = _generate_config(columns=columns, bypass_parse=True)
     diff = run_generation_shadow_and_oracle(config)
     assert_generation_failures_match(diff)
 
 
+@pytest.mark.parametrize(
+    "columns",
+    [
+        [{"name": "id", "type": "sequence", "start": float("inf")}],
+        [{"name": "id", "type": "sequence", "start": 1, "prefix": "\ud800"}],
+    ],
+    ids=["sequence-start-infinite", "sequence-prefix-surrogate"],
+)
+@pytest.mark.usefixtures("lenient_generate_checks")
+def test_a_leaf_knob_json_cannot_hold_is_refused_before_either_route_runs(
+    columns: list[dict[str, Any]],
+) -> None:
+    """Infinity and an unpaired surrogate never reach generation: plan compile refuses them,
+    so the shadow and the oracle have nothing to reject differently."""
+    config = _generate_config(columns=columns, bypass_parse=True)
+    with pytest.raises(PlanCompileError) as caught:
+        run_generation_shadow_and_oracle(config)
+    assert caught.value.code == reasons.plan.CONFIG_VALUE_NOT_JSON
+
+
+# NaN, Infinity and surrogates are refused at compile (above), so the sweeps draw only values a
+# config can carry past the hash.
 _GARBAGE_LEAF_VALUES = st.one_of(
     st.text(min_size=0, max_size=6),
-    st.floats(allow_nan=True, allow_infinity=True, width=32),
+    st.floats(allow_nan=False, allow_infinity=False, width=32),
     st.integers(min_value=-1000, max_value=1000),
     st.lists(st.integers(min_value=-5, max_value=5), max_size=3),
     st.none(),
@@ -443,7 +472,7 @@ _GARBAGE_LEAF_VALUES = st.one_of(
 # generation, so it is not a knob this differential sweep can exercise.
 _START_GARBAGE_VALUES = st.one_of(
     st.text(min_size=0, max_size=6),
-    st.floats(allow_nan=True, allow_infinity=True, width=32),
+    st.floats(allow_nan=False, allow_infinity=False, width=32),
     st.integers(min_value=-1000, max_value=1000),
     st.lists(st.integers(min_value=-5, max_value=5), max_size=3),
 )
@@ -476,7 +505,8 @@ def test_bounded_sequence_knob_sweep_is_success_or_identical_rejection(
                 "step": step,
                 "pad_length": pad_length,
             }
-        ]
+        ],
+        bypass_parse=True,
     )
     _assert_success_or_matching_failure(config)
 
@@ -495,7 +525,8 @@ def test_bounded_categorical_knob_sweep_is_success_or_identical_rejection(
                 "weights": weights,
                 "null_probability": null_probability,
             }
-        ]
+        ],
+        bypass_parse=True,
     )
     _assert_success_or_matching_failure(config)
 

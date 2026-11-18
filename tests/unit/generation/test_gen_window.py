@@ -571,3 +571,54 @@ def test_overflowing_span_still_refused_when_dataclass_replaced() -> None:
     )
     with pytest.raises(GenerationAdmissionError):
         _verdict(_stat_col(), spec)
+
+
+@pytest.mark.parametrize("count", [2.5, 5e-324, 1e308])
+def test_pinned_spec_round_trip_keeps_a_v1_fractional_count(count: float) -> None:
+    from decoy_engine.generation.statistical import spec_to_dict
+
+    spec = _spec(
+        "datetime",
+        {"year_bins": [{"year": 2000, "count": count}], "min": "2000-01-01", "max": "2001-01-01"},
+    )
+    assert spec.datetime_buckets is not None
+    again = spec_from_dict(spec_to_dict(spec))
+    assert again.datetime_buckets == spec.datetime_buckets
+
+
+def test_v2_stored_count_stays_strict_integer() -> None:
+    from decoy_engine.contracts.distribution_snapshot import (
+        SCHEMA_VERSION_V2,
+        decode_datetime_buckets,
+    )
+
+    with pytest.raises(ValueError):
+        decode_datetime_buckets(
+            SCHEMA_VERSION_V2,
+            {"year_bins": [{"start_year": 2000, "end_year": 2000, "count": 2.5}]},
+        )
+
+
+@pytest.mark.parametrize(
+    ("stats", "secret"),
+    [
+        (
+            {"year_bins": [{"year": 9999, "count": 5}], "min": "2000-01-01", "max": "2001-01-01"},
+            "9999",
+        ),
+        (
+            {
+                "year_bins": [{"year": 2000, "count": 5}],
+                "min": "2031-07-09T00:00:00",
+                "max": "2000-03-04T00:00:00",
+            },
+            "2031-07-09",
+        ),
+    ],
+)
+def test_admission_errors_carry_no_stored_values(stats: dict[str, Any], secret: str) -> None:
+    with pytest.raises(GenerationAdmissionError) as exc:
+        _verdict(_stat_col(), _spec("datetime", stats))
+    assert secret not in str(exc.value)
+    assert all(secret not in str(a) for a in exc.value.args)
+    assert secret not in str(getattr(exc.value, "message", ""))

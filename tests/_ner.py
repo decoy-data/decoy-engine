@@ -33,3 +33,17 @@ _skip_without_ner = pytest.mark.skipif(should_skip_ner(), reason=SKIP_REASON)
 def needs_ner(obj: Any) -> Any:
     """Select the test under the `ner` marker and skip it where the model is unavailable."""
     return pytest.mark.ner(_skip_without_ner(obj))
+
+
+def needs_model(name: str) -> Any:
+    """Like `needs_ner` for a model other than the default: skip where it is not installed.
+
+    DECOY_REQUIRE_NER=1 (ner-gate installs every pinned wheel) turns the skip into a run.
+    """
+    absent = not REQUIRE_NER and not (spacy_installed() and model_installed(name))
+    skip = pytest.mark.skipif(absent, reason=f"spacy or {name} not installed (ner extra)")
+
+    def mark(obj: Any) -> Any:
+        return pytest.mark.ner(skip(obj))
+
+    return mark

@@ -1,4 +1,4 @@
-"""Shared NER config resolution + model-version enforcement for text_redact.
+"""Shared NER config resolution + model-version enforcement for text_redact and text_mask.
 
 De-duplication (2026-10-25): the full-frame `TextRedactHandler`
 (`_text_redact.py`) and the out-of-core Group (b) kernel
@@ -15,11 +15,10 @@ over a batch) stay independent, because each is the other's differential oracle.
 Only this config/version plumbing is shared; the span logic is not.
 
 `strategy` is a parameter rather than hard-coded because the same two steps also
-appear in the `text_mask` handlers (`_text_mask.py` /
-`out_of_core/_mask_group_c.py`), which raise the identical
-`ner_model_version_mismatch` code under `strategy="text_mask"`. Those sites can
-adopt this module without a behavior change; this slice wires the text_redact
-pair only (its stated scope).
+appear in the `text_mask` handlers (`_text_mask.py` and `out_of_core/_mask_group_c.py`), which
+raise the identical `ner_model_version_mismatch` code under `strategy="text_mask"`. The
+text_redact pair and both text_mask routes call `enforce_ner_model_version`, so the message is
+one text; the one raise of the code lives here.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
-from decoy_engine.detection.ner import NER_ENTITY_MAP
+from decoy_engine.detection.ner import NER_ENTITY_MAP, resolve_column_ner
 from decoy_engine.execution._adapter import StrategyOption, option
 from decoy_engine.execution._errors import StrategyError
 
@@ -37,7 +36,7 @@ if TYPE_CHECKING:
 
 # The NER options text_redact and text_mask both accept; one copy so the two cannot drift.
 NER_WIZARD_OPTIONS: tuple[StrategyOption, ...] = (
-    option("ner_model", "str", "en_core_web_sm", location="provider_config.ner"),
+    option("ner_model", "str", "en_core_web_md", location="provider_config.ner"),
     option(
         "ner_entities",
         "str_list",
@@ -58,20 +57,7 @@ def resolve_ner_config(cfg: Mapping[str, Any]) -> tuple[str | None, list[str] | 
     `entities` resolves to `None` (all mapped entities), matching the handlers'
     long-standing fail-safe (never "find nothing").
     """
-    ner_cfg = cfg.get("ner")
-    if not ner_cfg:
-        return None, None
-    from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-    ner_entities: list[str] | None = None
-    if isinstance(ner_cfg, dict):
-        ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-        raw_entities = ner_cfg.get("entities")
-        if isinstance(raw_entities, (list, tuple)) and raw_entities:
-            ner_entities = [str(e) for e in raw_entities]
-    else:
-        ner_model = DEFAULT_NER_MODEL
-    return ner_model, ner_entities
+    return resolve_column_ner(cfg.get("ner"))
 
 
 def enforce_ner_model_version(

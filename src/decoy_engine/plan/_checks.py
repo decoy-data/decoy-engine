@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
@@ -259,17 +260,15 @@ def check_composite_columns_length_match(profile: Profile) -> None:
     """Every relationship's parent.columns and each child.columns must
     have the same length.
 
-    The Profile-layer `Relationship` dataclass enforces this at construction
-    time; this check exists at the planner layer too so a Profile that was
-    hand-constructed via dict (e.g. through deserialization without going
-    through `Relationship.__post_init__`) gets caught here.
+    `Relationship.__post_init__` enforces this at construction; this check also
+    catches a Profile deserialized without it. The rule is `relationship_shape_error`.
 
     Compile-check ownership table row #5.
     """
     for rel in profile.relationships:
-        parent_len = len(rel.parent_columns)
-        child_len = len(rel.child_columns)
-        if parent_len != child_len:
+        pair = {"table": rel.parent_table, "columns": rel.parent_columns}
+        kid = {"table": rel.child_table, "columns": rel.child_columns}
+        if relationship_shape_error({"parent": pair, "children": [kid]}) is not None:
             raise PlanCompileError(
                 code=reasons.plan.COMPOSITE_COLUMNS_LENGTH_MISMATCH,
                 path=(
@@ -279,7 +278,7 @@ def check_composite_columns_length_match(profile: Profile) -> None:
                 message=(
                     f"Relationship {rel.parent_table}.{rel.parent_columns} -> "
                     f"{rel.child_table}.{rel.child_columns}: parent columns length "
-                    f"{parent_len} != child columns length {child_len}."
+                    f"{len(rel.parent_columns)} != child columns length {len(rel.child_columns)}."
                 ),
             )
 
@@ -332,7 +331,7 @@ def check_statistical_columns(
     case (a `faker`/`sequence`/... column carrying a stray `high_cardinality`
     key) is caught here instead.
     """
-    from decoy_engine.generation.statistical import load_spec, spec_to_dict
+    from decoy_engine.generation.statistical import check_degenerate, load_spec, spec_to_dict
     from decoy_engine.generation.statistical._spec import StatisticalSpecError
     from decoy_engine.plan._generation import resolve_pinned_snapshot
 
@@ -343,7 +342,6 @@ def check_statistical_columns(
         if not isinstance(table_entry, dict):
             continue
         table_name = table_entry.get("name", "?")
-        seen: list[str] = []
         for col_entry in table_entry.get("generate_columns", []) or []:
             if not isinstance(col_entry, dict):
                 continue
@@ -381,38 +379,23 @@ def check_statistical_columns(
                         dp_verified=dp_verified,
                         snapshot_digest=read.sha256 if read is not None else None,
                     )
+                    check_degenerate(spec)
                 except StatisticalSpecError as exc:
                     raise PlanCompileError(
                         code=exc.code,
                         path=f"tables.{table_name}.generate_columns.{col_name}",
                         message=exc.message,
                     ) from exc
-                if spec.condition_on is not None and spec.condition_on not in seen:
-                    raise PlanCompileError(
-                        code=reasons.plan.STATISTICAL_CONDITION_COLUMN_UNAVAILABLE,
-                        path=f"tables.{table_name}.generate_columns.{col_name}.condition_on",
-                        message=(
-                            f"statistical column {col_name!r} conditions on "
-                            f"{spec.condition_on!r}, which is not declared earlier in "
-                            f"table {table_name!r}'s generate_columns. Sequential "
-                            f"conditional sampling needs the parent first."
-                        ),
-                    )
+                # condition_on ordering is checked by plan/checks/_generate_columns.py.
                 column_specs.append((table_name, col_name, snapshot_file, spec_to_dict(spec)))
-            seen.append(str(col_name))
     return column_specs
 
 
 def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> None:
-    """Shared body: reject `strategy` columns whose `ner` config cannot run here.
+    """Shared body of rows #13 and #30: reject `strategy` columns whose `ner` cannot run here.
 
-    Extracted for TX-2 (2026-07-20) so `check_text_redact_ner_available` and
-    `check_text_mask_ner_available` (row #13 / row #30) stay byte-identical in
-    shape without duplicating the walk. NER is an optional capability (the
-    `ner` extra plus a separately-downloaded spaCy model); a column that opts
-    in while either piece is missing is guaranteed dead at run. Config +
-    installed packages only (no model load, no profile): safe for config-only
-    callers (decoy validate).
+    A column that opts in while spaCy or its model is missing is dead at run. Config and
+    installed packages only (no model load, no profile): safe for `decoy validate`.
     """
     from decoy_engine.detection import ner  # module import keeps the legacy-file LOC flat
 
@@ -430,18 +413,19 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
             ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
             if not ner_cfg:
                 continue
-            model = ner.DEFAULT_NER_MODEL
-            if isinstance(ner_cfg, dict) and ner_cfg.get("model"):
-                model = str(ner_cfg["model"])
             col_name = col_entry.get("name", "?")
+            refusal = None
             try:
-                ner.ensure_ner_available(model)
+                model = str(ner.resolve_column_ner(ner_cfg)[0])
+                ner.ensure_ner_available(model, ner.NerSurface(strategy))
             except ner.NerUnavailableError as exc:
+                refusal = exc
+            if refusal is not None:  # raised outside the handler: no cause, no context
                 raise PlanCompileError(
-                    code=exc.code,
+                    code=refusal.code,
                     path=f"tables.{table_name}.columns.{col_name}.provider_config.ner",
-                    message=exc.message,
-                ) from exc
+                    message=refusal.message,
+                )
 
 
 def check_text_redact_ner_available(config: dict[str, Any]) -> None:
