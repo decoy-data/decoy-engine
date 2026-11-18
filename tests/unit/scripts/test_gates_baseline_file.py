@@ -86,7 +86,7 @@ def test_default_selection_is_labelled_not_the_full_suite(tmp_path: Path) -> Non
     clone = seeded_clone(tmp_path)
     venv, _log = recording_venv(tmp_path)
     _rc, out = run_gates(clone, venv, "--steps", "tests")
-    assert "SELECTION ONLY (changed vs origin/main, 1 file(s)); this is NOT the full suite" in out
+    assert "SELECTION ONLY (changed vs origin/main, 1 file(s) + always-on pins," in out
 
 
 @pytest.mark.parametrize(
@@ -426,9 +426,8 @@ def test_a_baseline_from_another_run_mode_is_refused_before_running(
     clone = seeded_clone(tmp_path)
     venv, log = recording_venv(tmp_path)
     extra: dict[str, object] = {field: value}
-    if field == "order":  # a self-consistent ordered baseline, so only the mode differs
-        seconds = {"tests/a.py": 3.0}
-        extra = {"order_seconds": seconds, "order": report_module().order_label(seconds)}
+    if field == "order":  # a label that is not the hash of the map it came with
+        extra = {"order_seconds": {"tests/a.py": 3.0}, "order": "file-seconds:deadbeef"}
         value = extra["order"]
     stored = _stored(tmp_path, _origin_main(clone), **extra)
     rc, out = _compare(clone, venv, stored)
@@ -438,7 +437,8 @@ def test_a_baseline_from_another_run_mode_is_refused_before_running(
     assert pytest_calls(log) == []
 
 
-def test_a_baseline_ordered_by_a_map_is_refused_until_gates_can_order(tmp_path: Path) -> None:
+def test_a_baseline_ordered_by_a_map_is_compared_in_that_order(tmp_path: Path) -> None:
+    """A candidate orders by the baseline's own order_seconds, so its mode matches (AT-8)."""
     clone = seeded_clone(tmp_path)
     venv, _log = recording_venv(tmp_path)
     seconds = {"tests/a.py": 3.0}
@@ -447,7 +447,7 @@ def test_a_baseline_ordered_by_a_map_is_refused_until_gates_can_order(tmp_path: 
         order=report_module().order_label(seconds),
     )  # fmt: skip
     rc, out = _compare(clone, venv, stored, FAKE_FAIL="tests/a.py::test_one")
-    assert rc == 2 and "run mode differs in order" in out, out
+    assert rc == 0, out
 
 
 @pytest.mark.parametrize(
@@ -703,7 +703,7 @@ def test_a_baseline_whose_order_label_does_not_match_its_map_is_refused(
     venv, _log = recording_venv(tmp_path)
     stored = _stored(tmp_path, _origin_main(clone), order=order, order_seconds=order_seconds)
     rc, out = _compare(clone, venv, stored, FAKE_FAIL="tests/a.py::test_one")
-    assert rc == 2 and "order does not match its order_seconds" in out, out
+    assert rc == 2 and "run mode differs in order" in out, out
 
 
 @pytest.mark.parametrize(
@@ -735,6 +735,9 @@ _ALLOWED_PY_ARGS = (
     ("--version",),
     ("]",),  # `[ -x "$BIN/python" ]` existence test
     ("$ROOT/scripts/dev/_gates_report.py",),
+    (
+        "$ROOT/scripts/dev/_select_tests.py",
+    ),  # picks test files from imports; never reads the baseline
     ('${junit[@]+"${junit[@]}"}',),  # args for the `bash -c` wrapper, built by gates.sh itself
 )
 

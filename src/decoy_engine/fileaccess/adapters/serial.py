@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import yaml
 
 from decoy_engine.fileaccess._errors import guarded
-from decoy_engine.fileaccess._types import FileHandle, OutputTxn
+from decoy_engine.fileaccess._types import FileHandle, StageDir
 
 
 def _strict(handle: FileHandle) -> bool:
@@ -36,12 +37,37 @@ def yaml_safe_load(handle: FileHandle) -> Any:
         return guarded(handle.display, _strict(handle), yaml.safe_load, fh)
 
 
-def write_text(txn: OutputTxn, component: str, text: str, encoding: str = "utf-8") -> None:
+def write_text(txn: StageDir, component: str, text: str, encoding: str = "utf-8") -> None:
     """Write `text` as a new file of the stage."""
     with os.fdopen(txn.create_file(component), "wb") as fh:
         fh.write(text.encode(encoding))
 
 
-def write_bytes(txn: OutputTxn, component: str, data: bytes) -> None:
+def write_bytes(txn: StageDir, component: str, data: bytes) -> None:
     with os.fdopen(txn.create_file(component), "wb") as fh:
         fh.write(data)
+
+
+def write_durable(fd: int, data: bytes) -> None:
+    """Write every byte to a stage descriptor, fsync it, close it; any failure is raised.
+
+    The raw descriptor (not a buffered handle) so a short write is retried and a write, fsync
+    or close error reaches the caller instead of being lost in a buffer flush (POSIX; the
+    durable-rename sequence of SQLite and PostgreSQL)."""
+    failed = True
+    try:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError(errno.EIO, os.strerror(errno.EIO))
+            view = view[written:]
+        os.fsync(fd)
+        failed = False
+    finally:
+        if failed:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    os.close(fd)

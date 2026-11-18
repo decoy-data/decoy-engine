@@ -27,6 +27,7 @@ from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
 )
+from decoy_engine.publication import PublicationFailed
 from decoy_engine.relationships._graph import OrphanPolicy
 from tests.perf_fixtures.fk_relational import build_fk_relational
 
@@ -73,6 +74,7 @@ def test_file_sink_commit_value_parity(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=graph,
         namespace_registry=fx.namespace_registry,
@@ -117,6 +119,7 @@ def test_file_sink_abort_atomicity(tmp_path: Path) -> None:
         adapter.run_sequential(
             fx.plan,
             _loader(fx.sources),
+            config={},
             registry=fx.registry,
             relationship_graph=graph,
             namespace_registry=fx.namespace_registry,
@@ -130,7 +133,7 @@ def test_file_sink_abort_atomicity(tmp_path: Path) -> None:
 
     # The staging directory must be cleaned up (lives in tmp_path as a sibling
     # of target because target.parent == tmp_path).
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == [], f"staging dir not cleaned up after abort: {staging_dirs}"
 
 
@@ -147,7 +150,7 @@ def test_file_sink_abort_with_no_writes_is_safe(tmp_path: Path) -> None:
     sink.abort()  # must not raise
 
     assert not target.exists()
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == []
 
 
@@ -190,6 +193,7 @@ def test_three_method_sink_without_write_batches_is_transactional(tmp_path: Path
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -216,6 +220,7 @@ def test_callable_sink_back_compat(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -232,11 +237,14 @@ def test_callable_sink_back_compat(tmp_path: Path) -> None:
 
 def test_commit_failure_publishes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If os.replace raises during commit, nothing is published to the target
-    directory and abort() cleans up staging afterward.
+    directory and the stage is gone.
 
     With the old per-file rename loop, a failure on the Nth rename leaves the
     first N-1 files already in the target (partial publish). With a single
-    directory rename, either the whole set lands or nothing does.
+    directory rename, either the whole set lands or nothing does. Since F22 the
+    commit is `publish_unit`: the failure is `PublicationFailed` (errno only, no
+    OS text) and the stage is removed on that exit (plan 4.1 E12), so a later
+    abort() has nothing left to clean.
     """
     target = tmp_path / "out"
     sink = ParquetTransactionalSink(target)
@@ -248,8 +256,10 @@ def test_commit_failure_publishes_nothing(tmp_path: Path, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(os, "replace", _fail_replace)
 
-    with pytest.raises(OSError, match="simulated commit failure"):
+    with pytest.raises(PublicationFailed) as info:
         sink.commit()
+    assert info.value.code == "publication_failed"
+    assert "simulated" not in str(info.value)
 
     # Target must not exist after a failed commit -- not even an empty directory.
     # (The old per-file commit created the target dir before the rename loop,
@@ -257,12 +267,11 @@ def test_commit_failure_publishes_nothing(tmp_path: Path, monkeypatch: pytest.Mo
     # never touches the target path until the one successful rename.)
     assert not target.exists(), "target must not exist after a failed commit"
 
-    # Staging directory must still be present so abort() can clean it up.
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
-    assert staging_dirs, "staging dir must still exist so abort() can clean it"
+    # The failed exit already removed the stage; abort() is still safe.
+    assert list(tmp_path.glob("._decoy_publication_pending_*")) == []
 
     sink.abort()
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == [], f"staging not cleaned up after abort: {staging_dirs}"
 
 
@@ -303,6 +312,7 @@ def test_run_sequential_abort_error_does_not_mask_original(tmp_path: Path) -> No
         adapter.run_sequential(
             fx.plan,
             _loader(fx.sources),
+            config={},
             registry=fx.registry,
             relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
             namespace_registry=fx.namespace_registry,
@@ -326,7 +336,7 @@ def test_write_rejects_path_traversal_table_name(tmp_path: Path) -> None:
         sink.write("../escape", data)
 
     # No staging directories must have been created on a rejected write.
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == [], f"staging created on rejected write: {staging_dirs}"
 
 
@@ -378,7 +388,7 @@ def test_write_batches_abort_after_partial_stream_publishes_nothing(tmp_path: Pa
 
     sink.abort()
     assert not target.exists()
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == [], f"staging not cleaned up after abort: {staging_dirs}"
 
 
@@ -409,7 +419,7 @@ def test_write_batches_rejects_path_traversal_table_name(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="not a single path component"):
         sink.write_batches("a/b", iter([]), schema=schema)
 
-    staging_dirs = list(tmp_path.glob("_decoy_stage_*"))
+    staging_dirs = list(tmp_path.glob("._decoy_publication_pending_*"))
     assert staging_dirs == [], f"staging created on rejected write_batches: {staging_dirs}"
 
 

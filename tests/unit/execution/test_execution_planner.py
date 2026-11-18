@@ -49,7 +49,7 @@ def _base_config(tmp_path, tables: list[dict], sources: dict[str, str]) -> dict:
             "version": 2,
             "global_settings": {"seed": 42},
             "sources": {
-                name: {"type": "file", "format": "csv", "path": path}
+                name: {"type": "file", "format": "csv", "has_header": True, "path": path}
                 for name, path in sources.items()
             },
             "tables": tables,
@@ -158,8 +158,8 @@ def _fk_job(tmp_path) -> tuple[dict, dict[str, pa.Table]]:
             "version": 2,
             "global_settings": {"seed": 42},
             "sources": {
-                "customers": {"type": "file", "format": "csv", "path": cpath},
-                "orders": {"type": "file", "format": "csv", "path": opath},
+                "customers": {"type": "file", "format": "csv", "has_header": True, "path": cpath},
+                "orders": {"type": "file", "format": "csv", "has_header": True, "path": opath},
             },
             "tables": [
                 {
@@ -499,7 +499,12 @@ def _date_shift_no_format_job(tmp_path) -> tuple[dict, dict[str, pa.Table]]:
     path = _write_csv(tmp_path, "ds", df)
     cfg = _base_config(
         tmp_path,
-        tables=[{"name": "ds", "columns": [{"name": "dt", "strategy": "date_shift"}]}],
+        tables=[
+            {
+                "name": "ds",
+                "columns": [{"name": "dt", "strategy": "date_shift", "namespace": "dt_ns"}],
+            }
+        ],
         sources={"ds": path},
     )
     return cfg, {"ds": pa.Table.from_pandas(df, preserve_index=False)}

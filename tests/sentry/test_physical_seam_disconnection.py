@@ -52,6 +52,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
+
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 REPO_ROOT = ENGINE_ROOT.parents[1]
 
@@ -63,6 +65,9 @@ REPO_ROOT = ENGINE_ROOT.parents[1]
 # never got added here.
 GUARDED_MODULES: tuple[str, ...] = (
     "execution/_pipeline.py",
+    "execution/pipeline/_subset_stage.py",
+    # PS-7: the post-scan gate core checks outputs before commit; no physical import.
+    "execution/pipeline/_post_scan.py",
     "execution/_pipeline_routing.py",
     "execution/_pipeline_routing_signals.py",
     "execution/_pipeline_chunk_route.py",
@@ -86,6 +91,16 @@ GUARDED_MODULES: tuple[str, ...] = (
     # B7 (independent multi-table dispatch): another routing executor, it calls
     # `run_auto_chunk` per table and must not import `execution.physical` either.
     "execution/_pipeline_multi_table.py",
+    # RUN-STREAM E1a: the strict stream preflight is routing code and must not import the seam.
+    "execution/pipeline/_stream.py",
+    # RUN-STREAM E3: the route summary only reads recorded metrics; no physical import.
+    "execution/pipeline/_route_summary.py",
+    # RUN-STREAM E5: the resident-fallback pre-pass reads config, profile and plan owners
+    # only; no physical import.
+    "execution/pipeline/_lazy_input.py",
+    # The routing facts the run context and the pre-pass share: declaration, profile, plan and
+    # graph owners only; no physical import.
+    "execution/pipeline/_routing_facts.py",
     # B6a (incremental output sink): the streamed lane's row-group assembly and publish
     # session sit between the dispatcher lane and the caller's sink; no physical import.
     "execution/_chunked_output_sink.py",
@@ -98,6 +113,7 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/_pandas_adapter.py",
     "execution/_sequential.py",
     "execution/_chunked.py",
+    "execution/chunked/_progress.py",
     "execution/_adapter.py",
     "execution/_substrate.py",
     "execution/_runner.py",
@@ -214,10 +230,6 @@ def _git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout
-
-
-# The retired package name, spelled in two parts so the residual sentry has no literal to flag.
-_RETIRED = "sto" + "rm"
 
 
 def _only_these_line_changes(base: str, path: str, allowed: dict[str, str]) -> bool:
@@ -341,6 +353,13 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # config resolver, and nothing under `execution.physical`.
             "src/decoy_engine/execution/_throughput_calibration.py",
             "src/decoy_engine/execution/_job_estimate.py",
+            # F24 lifecycle estimate: phase arithmetic and bounded sample reads behind
+            # `estimate_job`. `_lifecycle.py` imports `_mem_estimate` and `_arrow_types` only;
+            # `_lifecycle_inputs.py` imports the profile readers, `_mem_estimate*` and
+            # `execution._strategies` (the handlers' output declarations) only.
+            # Neither imports anything under `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_lifecycle.py",
+            "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",
@@ -385,6 +404,33 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_transforms_table.py",
             "src/decoy_engine/execution/out_of_core/_runner.py",
             "src/decoy_engine/execution/out_of_core/_preflight.py",
+            # RUN-STREAM E1b: the host CPU probe (new sub-package `execution/pipeline/`), the
+            # conservative budget export and the run-scoped DuckDB thread cap. None imports
+            # `execution.physical`.
+            "src/decoy_engine/execution/out_of_core/__init__.py",
+            "src/decoy_engine/execution/pipeline/_cgroup.py",
+            "src/decoy_engine/execution/pipeline/_host.py",
+            # SCAN-ML M5: the guard-free core of native `run_mask_chunked` that `run_pipeline`'s
+            # auto-chunk lane calls (new private sub-package). Neither imports `execution.physical`.
+            "src/decoy_engine/execution/native/chunked/__init__.py",
+            "src/decoy_engine/execution/native/chunked/_core.py",
+            # SUB-RUN E2: the subset stage imports the public `decoy_engine.subset` surface only.
+            "src/decoy_engine/execution/pipeline/_subset_stage.py",
+            # SAMPLE SE2: the sample's exact/approximate column label reads config and the
+            # strategy vocabulary only.
+            "src/decoy_engine/execution/pipeline/_sample.py",
+            # PS-7: the post-scan gate core, not yet wired; imports nothing from
+            # `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_post_scan.py",
+            # RUN-STREAM E3: `route_summary` reads recorded quality_metrics blocks and imports
+            # nothing from `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_route_summary.py",
+            # RUN-STREAM E5: the resident-fallback pre-pass decides from config, profile
+            # and plan owners and imports nothing from `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_lazy_input.py",
+            # The shared routing facts (declaration, profile, plan, graph) import nothing from
+            # `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_routing_facts.py",
             # Dcomp-OOC (composite FK strict parity): the out-of-core joiners raise the one
             # orphan FAIL error producer (`_fk_resolve.orphan_fk_violation_error`) directly.
             # Both import nothing from `execution.physical`.
@@ -473,6 +519,10 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # The deleted execution/polars/ tree itself is carved out of the filter below.
             "src/decoy_engine/execution/__init__.py",
             "src/decoy_engine/execution/_chunked.py",
+            # The chunked entries' progress helper (new sub-package); it is in GUARDED_MODULES,
+            # so it imports nothing from `execution.physical`.
+            "src/decoy_engine/execution/chunked/__init__.py",
+            "src/decoy_engine/execution/chunked/_progress.py",
             "src/decoy_engine/execution/_chunked_adapter_gate.py",
             "src/decoy_engine/execution/_planner.py",
             "src/decoy_engine/execution/_strategies/_top_code.py",
@@ -516,6 +566,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/native/protocol/__init__.py",
             "src/decoy_engine/execution/native/protocol/providers_base.py",
             "src/decoy_engine/execution/native/protocol/providers_gen.py",
+            "src/decoy_engine/execution/native/protocol/providers_gen_unique.py",
             "src/decoy_engine/execution/native/protocol/providers_mask.py",
             "src/decoy_engine/execution/out_of_core/_mask_group_b.py",
             # Slice C5b-i (position-keyed non-deterministic Faker, 2026-10-05): the oracle Faker
@@ -544,7 +595,12 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # C8-iii-d: positional draws under `when:` key on the full-table row. The nested handler
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
-            "src/decoy_engine/execution/_strategies/_nested.py",
+            "src/decoy_engine/execution/_strategies/nested/_handler.py",
+            # Package marker for the nested handler move: a one-line re-export, no physical work.
+            "src/decoy_engine/execution/_strategies/nested/__init__.py",
+            # Nested leaf dtype and child-output rules, split from the handler for its size cap;
+            # pure value shaping on already-read cells, no physical read or write.
+            "src/decoy_engine/execution/_strategies/nested/_leaves.py",
             "src/decoy_engine/execution/_strategies/_windowed_date.py",
             # Cross-column dependency PR1: joint_mask reads its key_by driver from the pre-mask
             # source snapshot (ctx.group_anchor_snapshots), and derived gains a docstring note for
@@ -697,6 +753,12 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # `_pipeline_generate_mask.py` the split call site, `_pipeline_finalize.py` the
             # split's evidence stamp. None imports `execution.physical`.
             "src/decoy_engine/execution/_pipeline_multi_table.py",
+            # RUN-STREAM E1a: the strict `execution_mode="stream"` preflight (new sub-package
+            # `execution/pipeline/`) and its threading through the routing, lane and sink modules
+            # listed here. Routing code that reads config, the plan and source footers; it imports
+            # nothing from `execution.physical` (GUARDED_MODULES covers `_stream.py`).
+            "src/decoy_engine/execution/pipeline/__init__.py",
+            "src/decoy_engine/execution/pipeline/_stream.py",
             # B7 also corrects the module docstring of `_pipeline_chunk_route.py`, which said
             # auto-chunk routing was single-table only (a docstring-only edit).
             "src/decoy_engine/execution/_pipeline_chunk_route.py",
@@ -713,6 +775,8 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_isolated_common.py",
             # The driver removes staging on a self-reported failure and scrubs in-process error text.
             "src/decoy_engine/execution/_isolated_run.py",
+            # SUB-RUN E2: `probe_peak_bytes` refuses a subset config; no `execution.physical` import.
+            "src/decoy_engine/execution/_probe.py",
             # F29: `_governor.py` reroutes on the typed route-ineligibility reason identity carried in
             # `IsolatedRunResult.reason`, never on error text. No `execution.physical` import.
             "src/decoy_engine/execution/_governor.py",
@@ -791,7 +855,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # bucket_perturb date_format guard: the oracle handler and the nested handler validate the
             # format before any early return, and the out-of-core kernel validates before its autodetect
             # check. All three call the shared rule in `transforms/bucket_perturb.py` and import nothing
-            # from `execution.physical`. (`_strategies/_nested.py` is permitted above.)
+            # from `execution.physical`. (`_strategies/nested/_handler.py` is permitted above.)
             "src/decoy_engine/execution/_strategies/_bucket_perturb.py",
             "src/decoy_engine/execution/out_of_core/_mask_group_c.py",
             # D1a (out-of-core hash on the compiled companion): `_hash_native.py` (eligibility + the

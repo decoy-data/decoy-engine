@@ -18,6 +18,7 @@ import pytest
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6b_support as b6b
 from tests.unit.execution.test_b6a_output import _LATE_NULL_CHUNKS, _late_typed_job
@@ -197,6 +198,16 @@ def _spy_mkdtemp(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str | None, Any]
         return real(suffix, prefix, dir)
 
     monkeypatch.setattr(tempfile, "mkdtemp", spy)
+    # The POSIX ambient arm makes stage directories through `make_stage_dir_at`, not `mkdtemp`.
+    from decoy_engine.fileaccess import _local
+
+    real_stage = _local._make_stage_dir
+
+    def stage_spy(parent: Path, prefix: str, **kwargs: Any) -> Path:
+        log.append((prefix, str(parent)))
+        return real_stage(parent, prefix, **kwargs)
+
+    monkeypatch.setattr(_local, "_make_stage_dir", stage_spy)
     return log
 
 
@@ -224,7 +235,7 @@ def test_a_nested_target_spills_under_its_own_spill_parent_not_tmpdir(
     holds = _holds(log)
     assert holds and all(Path(d) == target.parent for d in holds), holds
     assert not any(p.name.startswith("_decoy_hold_") for p in target.parent.iterdir())
-    assert [p.name for p in target.iterdir()] == [f"{support.TABLE}.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, f"{support.TABLE}.parquet"]
     b6b.b6a.assert_streamed_equals(sink, expected)
     assert list(locked.iterdir()) == []
 

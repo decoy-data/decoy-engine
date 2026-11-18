@@ -35,6 +35,7 @@ from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source, resolv
 from decoy_engine.profile._readers import CsvFileSource, build_profile_source
 from decoy_engine.profile._source import profile_source
 from decoy_engine.validation_result import CODES
+from tests._declared_schema import declare_rest
 
 BASE_FRAMES = Path(__file__).parent / "fixtures" / "csv_reader_base_frames.json"
 
@@ -252,7 +253,9 @@ def test_dtype_other_than_none_or_str_is_a_type_error(tmp_path: Path) -> None:
 def test_resolve_csv_dialect_defaults_and_explicit_keys() -> None:
     from decoy_engine.config import FileSource
 
-    plain = FileSource.model_validate({"type": "file", "format": "csv", "path": "a.csv"})
+    plain = FileSource.model_validate(
+        {"type": "file", "format": "csv", "path": "a.csv", "has_header": True}
+    )
     assert resolve_csv_dialect(plain.model_dump()) == CsvDialect(
         plain.has_header, plain.column_names, plain.delimiter
     )
@@ -277,26 +280,29 @@ def _headerless_config(path: Path, table: str, delimiter: str = ",") -> dict[str
     }
     if delimiter != ",":
         source["delimiter"] = delimiter
-    return {"sources": {table: source}}
+    return declare_rest({"sources": {table: source}})
 
 
 def test_profile_source_resolves_the_dialect_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from decoy_engine.profile import _readers
+    from decoy_engine.profile import _lazy_build
 
     path = tmp_path / "t.tsv"
     path.write_bytes(b"1\tAda\n2\tGrace\n")
     calls: list[dict[str, Any]] = []
-    real = _readers.resolve_csv_dialect
+    seen_kwargs: list[dict[str, Any]] = []
+    real = _lazy_build.resolve_csv_dialect
 
-    def spy(descriptor: Any) -> CsvDialect:
+    def spy(descriptor: Any, **kwargs: Any) -> CsvDialect:
         calls.append(dict(descriptor))
-        return real(descriptor)
+        seen_kwargs.append(kwargs)
+        return real(descriptor, **kwargs)
 
-    monkeypatch.setattr(_readers, "resolve_csv_dialect", spy)
+    monkeypatch.setattr(_lazy_build, "resolve_csv_dialect", spy)
     profile = profile_source(_headerless_config(path, "events", "\t"), seed=1)
     assert len(calls) == 1
+    assert seen_kwargs == [{"table": "events"}]
     assert [c.name for c in profile.tables[0].columns] == ["id", "name"]
 
 
@@ -409,4 +415,82 @@ def test_signature_keyword_only_tail() -> None:
         "chunksize",
         "file_access",
         "field_key",
+        "columns",
     ]
+
+
+# -- column projection ----------------------------------------------------------------------
+
+
+def _projected(tmp_path: Any, text: str, dialect: CsvDialect, **kw: Any) -> Any:
+    path = tmp_path / "p.csv"
+    path.write_text(text)
+    return read_csv_source(path, dialect, table="t", dtype=str, **kw)
+
+
+_HEADERLESS = CsvDialect(has_header=False, column_names=["a", "b", "c"])
+
+
+@pytest.mark.parametrize(
+    ("text", "dialect"),
+    [("a,b,c\n1,2,3\n4,5,6\n", CsvDialect()), ("1,2,3\n4,5,6\n", _HEADERLESS)],
+)
+def test_projection_returns_exactly_the_requested_order(
+    tmp_path: Any, text: str, dialect: CsvDialect
+) -> None:
+    whole = _projected(tmp_path, text, dialect, columns=["c", "a"])
+    assert list(whole.columns) == ["c", "a"]
+    assert whole.to_dict("list") == {"c": ["3", "6"], "a": ["1", "4"]}
+    chunks = list(_projected(tmp_path, text, dialect, columns=["c", "a"], chunksize=1))
+    assert [list(c.columns) for c in chunks] == [["c", "a"], ["c", "a"]]
+    empty = _projected(tmp_path, text, dialect, columns=["c", "a"], nrows=0)
+    assert list(empty.columns) == ["c", "a"] and len(empty) == 0
+
+
+@pytest.mark.parametrize(
+    ("text", "dialect"),
+    [("a,b,c\n1,2,3\n", CsvDialect()), ("1,2,3\n", _HEADERLESS)],
+)
+def test_projection_refuses_unknown_and_repeated_names_without_quoting_them(
+    tmp_path: Any, text: str, dialect: CsvDialect
+) -> None:
+    for bad in (["zz_secret_name"], ["a", "a"], []):
+        with pytest.raises(ValueError) as info:
+            _projected(tmp_path, text, dialect, columns=bad)
+        assert "zz_secret_name" not in str(info.value)
+
+
+class _SpyChunks:
+    """A chunk iterator that records `close()`, like the pandas reader that owns the file."""
+
+    def __init__(self) -> None:
+        self.closed = 0
+        self._frames = iter([pd.DataFrame({"a": ["1"], "b": ["2"]})] * 3)
+
+    def __iter__(self) -> _SpyChunks:
+        return self
+
+    def __next__(self) -> pd.DataFrame:
+        return next(self._frames)
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def test_shaped_closes_the_inner_iterator_when_closed_early() -> None:
+    spy = _SpyChunks()
+    shaped = _csv_reader._shaped(spy, ["b", "a"])  # spy stays referenced: no refcount close
+    assert list(next(shaped).columns) == ["b", "a"]
+    shaped.close()
+    assert spy.closed == 1
+
+
+def test_shaped_closes_the_inner_iterator_on_exhaustion_and_on_error() -> None:
+    spy = _SpyChunks()
+    assert len(list(_csv_reader._shaped(spy, ["a", "b"]))) == 3
+    assert spy.closed == 1
+
+    bad = _SpyChunks()
+    with pytest.raises(ValueError):
+        list(_csv_reader._shaped(bad, ["zz"]))
+    assert bad.closed == 1

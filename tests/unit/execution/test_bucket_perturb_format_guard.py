@@ -19,7 +19,7 @@ import pytest
 
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.execution.out_of_core import run_fk_out_of_core
 from decoy_engine.execution.out_of_core._mask import mask_column, masked_output_type
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
@@ -289,7 +289,9 @@ class TestOutOfCoreRunner:
         plan, sources, graph = _fk_job(fmt, values)
         sink = _SpySink()
         with pytest.raises(StrategyError) as exc:
-            run_fk_out_of_core(plan, sources, registry=_REG, relationship_graph=graph, sink=sink)  # type: ignore[arg-type]
+            run_fk_out_of_core(
+                plan, sources, config={}, registry=_REG, relationship_graph=graph, sink=sink
+            )  # type: ignore[arg-type]
         assert exc.value.code == CODE
         assert sink.writes == []
         assert not sink.committed
@@ -299,7 +301,9 @@ class TestOutOfCoreRunner:
         plan, sources, graph = _fk_job("mixed", ["2024-01-15", "2024-03-02"], parent_fmt="%Y-%m-%d")
         sink = _SpySink()
         with pytest.raises(StrategyError) as exc:
-            run_fk_out_of_core(plan, sources, registry=_REG, relationship_graph=graph, sink=sink)  # type: ignore[arg-type]
+            run_fk_out_of_core(
+                plan, sources, config={}, registry=_REG, relationship_graph=graph, sink=sink
+            )  # type: ignore[arg-type]
         assert exc.value.code == CODE
         assert sink.writes == []
         assert not sink.committed

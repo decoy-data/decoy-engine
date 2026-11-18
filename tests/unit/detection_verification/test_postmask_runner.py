@@ -19,7 +19,7 @@ from decoy_engine.verification.postmask import (
 
 class TestSchemaVersion:
     def test_schema_version_constant(self):
-        assert SCHEMA_VERSION == "post-scan-integrity/v2"
+        assert SCHEMA_VERSION == "post-scan-integrity/v3"
 
 
 class TestRunPostMask:
@@ -152,6 +152,7 @@ class TestRunPostMask:
                     "children": [
                         {"table": "orders", "columns": ["user_id"]},
                     ],
+                    "orphan_policy": "preserve",
                 }
             ],
         }
@@ -181,16 +182,18 @@ class TestRunPostMask:
                     "children": [
                         {"table": "orders", "columns": ["user_id"]},
                     ],
+                    "orphan_policy": "preserve",
                 }
             ],
         }
+        clean = pd.DataFrame({"user_id": [1, 2, 2, 3, 3]})
         report = run_post_mask(
-            source_frames={"users": users, "orders": orders},
+            source_frames={"users": users, "orders": clean},
             output_frames={"users": users, "orders": orders},
             config=config,
         )
         finding = report["fk_preservation"][0]
-        # 2 of 5 child rows orphaned = 40% orphan rate -> fail
+        # 2 of 5 child rows orphaned by the run -> fail
         assert finding["orphan_count"] == 2
         assert finding["total_child_rows"] == 5
         assert finding["orphan_rate"] == 0.4

@@ -37,6 +37,23 @@ join intact.
 If two unrelated columns must NOT collide, give them different namespaces. The
 engine rejects ambiguous namespace bindings at config time.
 
+### Generate-only relationships need no namespace
+
+A relationship whose parent and child tables are both generate tables (tables
+with `generate_columns`) masks nothing, so it needs no `namespace`. The engine
+derives a private label from the parent table and key columns. The label is not
+a declared namespace, is not bound to any column, and does not appear in the
+plan or the seed envelope. The generated rows are the same as for the same
+config without the `relationships:` block.
+
+A relationship with a mask table on either side still needs a namespace, and
+the engine refuses it with `namespace_missing`. A relationship that names a
+table not listed under `tables:` is refused as before.
+
+A config with a non-empty `relationships:` block runs on the full-frame route,
+including a generate-only one. The chunked route and shadow generation decline
+such a config, and the run reports the full-frame route.
+
 ## Orphans
 
 An orphan is a child row whose key has no matching parent. The `orphan_policy`
@@ -53,6 +70,28 @@ on the relationship decides what happens:
 
 Every relationship must name one of these four policies; the config is rejected
 if a relationship omits it.
+
+## Checked before anything is published
+
+Whenever relationships are declared, or `post_scan.integrity` is true, the post-scan gate
+compares the declared keys of the output with those of the inputs before the run commits. A
+primary key that gained duplicates or nulls, or a foreign key that gained orphans the inputs did
+not already have, blocks the run: nothing is published and the error carries the report.
+Orphans the inputs already held do not block.
+
+The gate reads the output in batches. On a streamed route it reads the sink's staged files back
+one row group at a time, so the check does not need the whole output in memory. With
+`post_scan.integrity: true` and regex detectors the column suite runs the same way, and a finding
+of severity `fail` withholds the run as a failed key check does. A model detector, or
+`post_scan.ner_findings: fail`, needs the values resident: those runs stay on the resident route
+with the reason `route.post_scan_models_resident`, and `execution_mode: stream` refuses them.
+
+A sink the engine cannot read back (anything but its own staged Parquet sink) keeps its route and
+receives the output when only relationships are declared; the gate is then deferred and the result
+carries `quality_metrics["post_scan_gate_deferred"]`. An explicit `post_scan.integrity: true` is
+never deferred: with such a sink, or with a transform-bearing table on a staged commit, the run is
+refused (`runtime.post_scan_integrity_sink_unreadable`,
+`runtime.post_scan_integrity_transforms_unsupported`) before anything is published.
 
 ## Row errors and referential integrity
 
@@ -117,6 +156,11 @@ The engine builds an ordering over the tables so each parent is masked before
 its children, then runs them in that order. You do not order the tables
 yourself; declaring the relationship is enough.
 
+When the parent table is generated, its key must be provably unique, or `decoy validate`
+and `decoy run` refuse the config with `plan.relationship_parent_not_unique`. Any of these
+shows it: `row_count` of at most 1, a `sequence` column with a non-zero `step`, `unique: true`
+on a key column, or a `unique_together` entry that lists exactly the key columns.
+
 See [recipes](recipes.md) recipe (b) for a full folder-masking config, and
 [determinism](determinism.md) for what "byte-stable across runs" depends on.
 
@@ -130,12 +174,18 @@ plus every `order`/`order_item` that belongs to them, nothing orphaned."
 seed, close it over the SAME `relationships` graph declared above, then write
 the filtered Parquet. Masking runs unchanged on the subsetted output.
 
-Run `decoy_engine.subset.run_subset` (or `decoy subset`) first and point the
-masking run's `sources:` at its output. A pipeline run does not apply a
-`subset:` block yet: it refuses a config that sets one with
-`config.subset_run_unsupported` until the pipeline runs subsetting itself
-(SUB-RUN). `plan_subset` and `run_subset` read the same block and are
-unaffected.
+A pipeline run (`run_pipeline`, and `run_pipeline_isolated` and
+`run_job_with_governor` through it) applies a `subset:` block itself: it selects the
+closed rows from the sources first, stages the survivors, then masks and generates only
+those rows. Resident tables and lazy Parquet or CSV sources both work; `subset_request="skip"`
+runs the full sources. Tables no seed reaches pass through whole. For the kept rows the
+masked values match the full run for value-keyed strategies; `shuffle`, ordinal-keyed faker
+and categorical, windowed and grouped strategies and cardinality-driven ones (MATCH, SCALE,
+UNIQUE pools) give valid but different values. Quarantine row positions number the subset
+rows. `quality_metrics["subset"]` records the counts and a fingerprint. The chunked
+entries, `compile_plan` called directly, `probe_peak_bytes` and a `source_loader` run refuse
+a subset config with `config.subset_run_unsupported`. `decoy subset`, `plan_subset` and
+`run_subset` are unchanged and still need Parquet paths.
 
 ### How the closure works
 

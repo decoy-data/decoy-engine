@@ -20,6 +20,7 @@ from decoy_engine.errors import ValidationError
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.plan import plan_from_yaml, plan_to_yaml
 from decoy_engine.plan._serialize import _plan_from_dict
+from tests._declared_schema import declare_rest
 from tests.unit.execution import _c8_iii_c_support as sup
 
 CODE = "when_outside_closed_grammar"
@@ -122,6 +123,7 @@ def test_run_sequential_rejects_before_any_sink_write_or_handler_call(tmp_path: 
         adapter.run_sequential(
             bad,
             lambda name: job.sources[name],
+            config={},
             sink=lambda name, table: writes.append(name),
             **_sequential_kwargs(job),
         )
@@ -169,6 +171,7 @@ def test_run_sequential_rejects_a_bad_seed_for_a_table_it_never_loads(tmp_path: 
         adapter.run_sequential(
             bad,
             lambda name: job.sources[name],
+            config={},
             sink=lambda name, table: writes.append(name),
             **_sequential_kwargs(job),
         )
@@ -262,7 +265,7 @@ def _fk_plan(tmp_path: Path) -> Any:
         }
     from decoy_engine.config import PipelineConfig
 
-    cfg = PipelineConfig.model_validate(cfg).model_dump()
+    cfg = PipelineConfig.model_validate(declare_rest(cfg)).model_dump()
     return sup.compile_job(cfg)[0]
 
 

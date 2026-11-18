@@ -20,7 +20,7 @@ finding R2).
 
 Determinism (Codex round-2/3 spec B): both the pool build and the selection
 draw are keyed off the SAME per-column ``GenDeriveContext`` root
-(``strategy_config_fingerprint``-derived, so rename-invariant per R3.10) via
+(``strategy_config_fingerprint``-derived, so identity-scoped per column) via
 two disjoint HMAC label domains, ``"faker_pool_build"`` and
 ``"faker_pool_selection"``. Build seeds a FRESH ``make_faker(locale)``
 instance once (mirrors ``providers_v2/_faker_adapter.py:224``); selection
@@ -39,9 +39,10 @@ import numpy as np
 from faker import VERSION as _FAKER_VERSION
 from faker import Faker
 
+from decoy_engine.determinism import seed_bytes_to_int
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
-from decoy_engine.generation.pool._sampler import PoolSampler, _seed_bytes_to_int
+from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array
 from decoy_engine.generators.derivation import GenDeriveContext
 from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
@@ -236,6 +237,17 @@ _BUILD_FAMILY = "faker_pool_build"
 _SELECTION_FAMILY = "faker_pool_selection"
 
 
+def pool_opted_out(col: Mapping[str, Any]) -> bool:
+    """Whether a column opted out of pooling: the one reader of the column's `pooled` key.
+
+    Only an explicit `pooled: false` opts out; absent, null and `true` leave admission to
+    `pool_eligible`. `unique: true` also opts out: a pool holds about 10,000 values and draws
+    from them with replacement, so it cannot promise distinct values. Every admission site
+    passes this as `opted_out`, so a further opt-out reason is added here once.
+    """
+    return col.get("pooled") is False or col.get("unique") is True
+
+
 def pool_eligible(faker_type: str, requested_locale: Any, n: int, *, opted_out: bool) -> bool:
     """Cheap, instance-independent gate: should `_faker` attempt pooling?
 
@@ -299,7 +311,7 @@ def try_pool(
     """
     faker_type = col.get("faker_type", "word")
     requested_locale = col.get("locale") or instance_default_locale
-    if not pool_eligible(faker_type, requested_locale, n, opted_out=col.get("pooled") is False):
+    if not pool_eligible(faker_type, requested_locale, n, opted_out=pool_opted_out(col)):
         return None
     gen_ctx = GenDeriveContext.for_column(
         derive_key=derive_key, column_config=col, fallback_seed=seed
@@ -445,7 +457,7 @@ class PooledSelector:
     def __init__(self, values: Any, selection_seed: bytes) -> None:
         try:
             self._values = values
-            self._rng = np.random.default_rng(_seed_bytes_to_int(selection_seed))
+            self._rng = np.random.default_rng(seed_bytes_to_int(selection_seed))
         except BaseException:
             del selection_seed
             raise
@@ -548,5 +560,6 @@ __all__ = [
     "build_pool_values",
     "open_pooled_selector",
     "pool_eligible",
+    "pool_opted_out",
     "try_pool",
 ]

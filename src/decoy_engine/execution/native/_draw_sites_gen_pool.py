@@ -30,7 +30,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.faker_pool_build",
         family="faker_seed_instance",
-        call_site="generation/_faker_pool.py:176",
+        call_site="generation/_faker_pool.py::build_pool_values",
         entropy_root="job_seed",
         seed_derivation=(
             'build_seed = GenDeriveContext.for_column(...).family_bytes("faker_pool_build")[:8]; '
@@ -59,7 +59,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="gen.faker_pool_selection",
         family="numpy_pcg64",
-        call_site="generation/_faker_pool.py:192",
+        call_site="generation/_faker_pool.py::PooledSelector.__init__",
         entropy_root="job_seed",
         seed_derivation=(
             "selection_seed = GenDeriveContext.for_column(...).family_bytes("
@@ -82,7 +82,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
             "job_seed directly, so two pooled columns with different config never "
             "collapse onto one selection stream."
         ),
-        mirror_call_sites=("generation/pool/_sampler.py:136",),
+        mirror_call_sites=("generation/pool/_sampler.py::_derive_pool_indices#2",),
     ),
     # -- Masking: non-deterministic reuse Faker selection (position-keyed) ----
     # Not a generation site; it sits beside the pool sites because it is the same pool-backed
@@ -90,7 +90,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
     DrawSite(
         draw_site_id="mask.faker_nondeterministic",
         family="source_keyed_hmac",
-        call_site="execution/_strategies/_faker.py:123",
+        call_site="execution/_strategies/_faker.py::FakerStrategyHandler.run#1",
         entropy_root="job_seed",
         seed_derivation=(
             "derive_index(job_seed, selection_namespace, encode_int(row_offset + i), "
@@ -111,7 +111,7 @@ GEN_POOL_DRAW_SITES: tuple[DrawSite, ...] = (
             "draw. Keyed on job_seed, not mask_key, because it generates rather than "
             "re-identifies; see the inventory doc."
         ),
-        mirror_call_sites=("execution/native/_operator_step.py:148",),
+        mirror_call_sites=("execution/native/_operator_step.py::sample_faker_array_positional",),
     ),
 )
 

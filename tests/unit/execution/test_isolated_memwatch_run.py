@@ -114,6 +114,7 @@ class TestLifecycle:
         assert not Path(f"/proc/{pids[0]}").exists()
         assert _sampler_threads() == []
 
+    @pytest.mark.serial
     def test_timeout_keeps_main_text_and_outcome_and_never_flags(self, tmp_path, monkeypatch):
         _install(tmp_path, monkeypatch, "hang_worker", _HANGING)
         # An 8 MiB cap is far below a live interpreter's VmData, so the last sample is
@@ -159,6 +160,27 @@ class TestLifecycle:
         assert result.error == "MemoryError: x"
         assert result.memory_evidence is not None
         assert result.memory_evidence.suspected_memory_pressure is False
+
+    @pytest.mark.serial
+    def test_self_reported_crash_at_the_cap_carries_the_pressure_flag(self, tmp_path, monkeypatch):
+        # Native code that hits the cap can surface exhaustion as an unrelated exception type
+        # (an Arrow cancellation arrives in Python as KeyboardInterrupt). The worker reports it
+        # as `crashed` with exit 0, so only the driver's samples can say the child sat at its cap.
+        worker = (
+            "import json, sys, time\n"
+            "from pathlib import Path\n"
+            "time.sleep(0.3)\n"
+            "p = Path(sys.argv[1]).parent / 'result.json'\n"
+            "p.write_text(json.dumps({'outcome': 'crashed', 'peak_rss_mb': 3.0,"
+            " 'error': 'KeyboardInterrupt'}))\n"
+        )
+        _install(tmp_path, monkeypatch, "interrupt_worker", worker)
+        # Cap below any live interpreter, so every sample is within the margin of the cap.
+        result = _run(mem_cap_bytes=8 * _MIB)
+        assert result.outcome == "crashed"
+        assert result.error == "KeyboardInterrupt"
+        assert result.memory_evidence is not None
+        assert result.memory_evidence.suspected_memory_pressure is True
 
     def test_thread_start_failure_leaves_the_run_unaffected(self, tmp_path, monkeypatch):
         _install(tmp_path, monkeypatch, "silent_worker", _SILENT)
@@ -298,6 +320,7 @@ _CAP = 1024 * _MIB
 
 
 @pytest.mark.parametrize("kind", ["data", "as"])
+@pytest.mark.serial
 class TestRealChild:
     def _drive(self, tmp_path, monkeypatch, kind, target):
         _install(tmp_path, monkeypatch, "memchild_worker", _CHILD)
@@ -350,6 +373,7 @@ class TestHandshakeCleanup:
         assert hs.error == "child never sent READY"
         assert not any(_fd_open(fd) for fd in fds)
 
+    @pytest.mark.serial
     def test_a_child_that_never_reports_is_killed_and_the_channel_released(
         self, tmp_path, monkeypatch
     ):

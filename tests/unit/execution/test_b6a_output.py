@@ -18,6 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution import ExecutionError
+from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_matrix as matrix
 from tests.unit.execution import _auto_chunk_strategies as strategies
 from tests.unit.execution import _auto_chunk_support as support
@@ -51,7 +52,7 @@ def _check_case(cfg: dict[str, Any], src: pa.Table, tmp_path: Path, **extra: Any
     b6a.assert_streamed_equals(sink, expected)
     published = (target / f"{support.TABLE}.parquet").read_bytes()
     assert published == b6a.parquet_bytes(expected, tmp_path / "reference.parquet")
-    assert sorted(p.name for p in target.iterdir()) == [f"{support.TABLE}.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, f"{support.TABLE}.parquet"]
 
 
 # ---------------------------------------------------------------------------
@@ -343,10 +344,10 @@ def test_a_column_null_in_every_chunk_stays_null_typed_as_in_the_reference(
 def test_a_later_chunk_with_a_disagreeing_non_null_type_is_a_schema_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
     cfg, src = _late_typed_job(tmp_path)
-    real = _chunked_entry.run_mask_chunked
+    real = _native_core.mask_chunked
 
     def drifting(config: Any, chunks: Any, **kwargs: Any) -> Any:
         for index, chunk in enumerate(real(config, chunks, **kwargs)):
@@ -358,7 +359,7 @@ def test_a_later_chunk_with_a_disagreeing_non_null_type_is_a_schema_mismatch(
                 )
             yield chunk
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", drifting)
+    monkeypatch.setattr(_native_core, "mask_chunked", drifting)
     sink, target = b6a.real_sink(tmp_path)
     with pytest.raises(ExecutionError) as err:
         b6a.run_streamed(cfg, src, sink)
@@ -497,10 +498,10 @@ def test_a_passthrough_column_typed_null_never_holds_the_stream_back(
 def test_a_later_chunk_with_different_column_names_is_a_schema_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native.chunked import _core as _native_core
 
     cfg, src = _native_job(tmp_path, 160)
-    real = _chunked_entry.run_mask_chunked
+    real = _native_core.mask_chunked
 
     def renaming(config: Any, chunks: Any, **kwargs: Any) -> Any:
         for index, chunk in enumerate(real(config, chunks, **kwargs)):
@@ -508,7 +509,7 @@ def test_a_later_chunk_with_different_column_names_is_a_schema_mismatch(
                 chunk = chunk.rename_columns(["r", "z", "other"])
             yield chunk
 
-    monkeypatch.setattr(_chunked_entry, "run_mask_chunked", renaming)
+    monkeypatch.setattr(_native_core, "mask_chunked", renaming)
     sink, target = b6a.real_sink(tmp_path)
     with pytest.raises(ExecutionError) as err:
         b6a.run_streamed(cfg, src, sink)
