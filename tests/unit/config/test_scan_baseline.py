@@ -169,9 +169,14 @@ def test_the_error_is_value_free() -> None:
 BASELINE_PTR = {"path": ".decoy/library/x.json", "schema": SCAN_SET_SCHEMA}
 
 
+DIGEST = "3f1c" + "0" * 56 + "e9ab"
+
+
 @pytest.mark.parametrize("mode", ["warn", "fail"])
 def test_d_t1_on_drift_accepts_warn_and_fail(mode: str) -> None:
-    cfg = PipelineConfig.model_validate(_raw(scan_baseline={**BASELINE_PTR, "on_drift": mode}))
+    cfg = PipelineConfig.model_validate(
+        _raw(scan_baseline={**BASELINE_PTR, "on_drift": mode, "sha256": DIGEST})
+    )
     assert cfg.model_dump()["scan_baseline"]["on_drift"] == mode
     again = PipelineConfig.model_validate(cfg.model_dump())
     assert again.model_dump() == cfg.model_dump()
@@ -193,3 +198,75 @@ def test_d_t1_absent_on_drift_keeps_the_old_dump() -> None:
 def test_d_t1_an_explicit_null_on_drift_means_no_check_and_is_not_dumped() -> None:
     cfg = PipelineConfig.model_validate(_raw(scan_baseline={**BASELINE_PTR, "on_drift": None}))
     assert cfg.model_dump()["scan_baseline"] == BASELINE_PTR
+
+
+# F15 E2: `sha256` binds the baseline bytes; `on_drift: fail` needs it (F15-T6).
+def _block(**extra: Any) -> dict[str, Any]:
+    return _raw(scan_baseline={**BASELINE_PTR, **extra})
+
+
+def test_f15_t6_a_lowercase_digest_is_accepted_and_round_trips() -> None:
+    cfg = PipelineConfig.model_validate(_block(sha256=DIGEST))
+    assert cfg.model_dump()["scan_baseline"] == {**BASELINE_PTR, "sha256": DIGEST}
+    assert PipelineConfig.model_validate(cfg.model_dump()).model_dump() == cfg.model_dump()
+    assert json.loads(cfg.model_dump_json(by_alias=True))["scan_baseline"]["sha256"] == DIGEST
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        DIGEST.upper(),
+        DIGEST[:-1],
+        DIGEST + "0",
+        DIGEST + "\n",
+        "g" * 64,
+        "",
+        True,
+        7,
+        int("1" * 64),
+    ],
+)
+def test_f15_t6_a_malformed_digest_is_refused(bad: object) -> None:
+    with pytest.raises(ValidationError):
+        PipelineConfig.model_validate(_block(sha256=bad))
+
+
+def test_f15_t6_fail_without_a_digest_is_refused_naming_the_field_and_no_value() -> None:
+    with pytest.raises(ValidationError) as caught:
+        PipelineConfig.model_validate(_block(on_drift="fail"))
+    errors = caught.value.errors()
+    assert [e["type"] for e in errors] == ["scan_baseline_unbound"]
+    assert errors[0]["loc"] == ("scan_baseline",)
+    assert "scan_baseline.sha256" in errors[0]["msg"]
+    assert ".decoy/library/x.json" not in str(caught.value)
+
+
+def test_f15_t6_the_unbound_code_is_registered_pending() -> None:
+    spec = reasons.REASONS[("config", "scan_baseline_unbound")]
+    assert str(reasons.config.SCAN_BASELINE_UNBOUND) == "scan_baseline_unbound"
+    assert spec.since == reasons.UNRELEASED
+
+
+def test_f15_t6_warn_without_a_digest_is_accepted() -> None:
+    cfg = PipelineConfig.model_validate(_block(on_drift="warn"))
+    assert "sha256" not in cfg.model_dump()["scan_baseline"]
+
+
+def test_f15_t6_a_digest_without_on_drift_is_accepted_and_kept() -> None:
+    cfg = PipelineConfig.model_validate(_block(sha256=DIGEST))
+    assert cfg.model_dump()["scan_baseline"]["sha256"] == DIGEST
+    assert "on_drift" not in cfg.model_dump()["scan_baseline"]
+
+
+def test_f15_t6_an_explicit_null_digest_is_not_dumped() -> None:
+    cfg = PipelineConfig.model_validate(_block(on_drift="warn", sha256=None))
+    assert "sha256" not in cfg.model_dump()["scan_baseline"]
+
+
+def test_f15_t6_the_schema_snapshot_holds_the_key() -> None:
+    snapshot = json.loads(
+        (
+            FIXTURES.parent / "snapshots" / "frozen_schemas" / "pipeline-config.schema.json"
+        ).read_text()
+    )
+    assert "sha256" in snapshot["$defs"]["ScanBaselineConfig"]["properties"]

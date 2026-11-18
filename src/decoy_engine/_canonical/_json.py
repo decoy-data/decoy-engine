@@ -15,8 +15,9 @@ bytes depend on the machine; every other non-JSON type is refused. An unpaired s
 string or an object key is refused before encoding: the ASCII form would otherwise escape it and
 the UTF-8 form would crash on it with codec text.
 
-``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity and
-an over-long integer, and names the defect as a closed token, never as input text.
+``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity
+(including a literal that overflows to infinity, such as ``1e999``) and an over-long integer, and
+names the defect as a closed token, never as input text.
 ``strict_json_read`` is the same reader with bounds (bytes, depth) and a number-lexeme mode for the
 nested strategy; ``strict_json_write`` writes such a tree back without changing a number.
 
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
@@ -284,6 +286,14 @@ def strict_json_read(
         number = float(text)
         return number if json.dumps(number) == text else JsonNumber(number, text)
 
+    def finite(text: str) -> float:
+        # A literal such as `1e999` reads as infinity without passing through `parse_constant`.
+        number = float(text)
+        if not math.isfinite(number):
+            found.append("non_finite")
+        return number
+
+    refuse_overflow = non_finite == "refuse" and not keep_lexemes
     parsed: Any = None
     malformed = False
     too_big = False
@@ -312,7 +322,7 @@ def strict_json_read(
                     object_pairs_hook=pairs,
                     parse_constant=constant,
                     parse_int=integer if lexemes or not keep_lexemes else None,
-                    parse_float=real if lexemes else None,
+                    parse_float=real if lexemes else (finite if refuse_overflow else None),
                 )
     except (UnicodeError, ValueError):
         malformed = True
