@@ -38,8 +38,8 @@ from functools import lru_cache
 from pathlib import Path
 
 import pytest
-from decoy_engine.fileaccess._osflags import POSIX_NAME
 
+from decoy_engine.fileaccess._osflags import POSIX_NAME
 from tests.sentry.fa.rules import load_registry
 from tests.sentry.fa.scan import Site, scan_tree
 

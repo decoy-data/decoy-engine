@@ -15,7 +15,9 @@ from decoy_engine.fileaccess import _osflags
 
 MODES = ("RDONLY", "WRONLY", "RDWR")
 NOT_FLAGS = frozenset({"WINDOWS", "POSIX_NAME", "DIR_FD"})
-EXPORTED = sorted(n for n in vars(_osflags) if n.isupper() and n not in NOT_FLAGS)
+EXPORTED = sorted(
+    n for n in vars(_osflags) if n.isupper() and not n.startswith("_") and n not in NOT_FLAGS
+)
 
 
 def test_posix_name_maps_every_exported_flag() -> None:

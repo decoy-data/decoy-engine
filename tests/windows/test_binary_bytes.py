@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 import pyarrow as pa
 
 from decoy_engine.fileaccess import _local
+from decoy_engine.fileaccess._types import OutputTxn
 from decoy_engine.fileaccess.adapters import arrow, serial
 from decoy_engine.fileaccess.adapters import polars as polars_adapter
 
@@ -58,7 +60,9 @@ def test_arrow_and_polars_tables_round_trip_the_bytes(tmp_path: Path) -> None:
     table = pa.table({"b": pa.array([PAYLOAD], type=pa.binary())})
     arrow.write_table(table, stage, "a.parquet")
     polars_adapter.write_parquet(
-        pl.DataFrame({"b": pl.Series([PAYLOAD], dtype=pl.Binary)}), stage, "p.parquet"
+        pl.DataFrame({"b": pl.Series([PAYLOAD], dtype=pl.Binary)}),
+        cast("OutputTxn", stage),  # a stage has everything the writer reads: create_file, display
+        "p.parquet",
     )
     for name in ("a.parquet", "p.parquet"):
         with arrow.staged_parquet(stage.open_file(name)) as parquet:

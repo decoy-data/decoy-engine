@@ -36,7 +36,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
-from decoy_engine.fileaccess import _openat2
+from decoy_engine.fileaccess import _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
@@ -72,8 +72,9 @@ T = TypeVar("T")
 # Denial key for a bad name given straight to a creator; it names the capability, never the name.
 _CREATOR_KEY = "fileaccess.stage"
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+_NOFOLLOW = _osflags.NOFOLLOW | _osflags.CLOEXEC
+_DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _NOFOLLOW
+_FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW
 
 
 def _call(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -94,7 +95,7 @@ def _born_mode(parent_fd: int, name: str) -> int:
     repair falls back to owner-only (narrower, never wider)."""
     if sys.platform != "linux":
         return stat.S_IFDIR | 0o700
-    fd = _call(os.open, name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent_fd)
+    fd = _call(os.open, name, _osflags.PATH | _NOFOLLOW, dir_fd=parent_fd)
     try:
         born = os.fstat(fd).st_mode
     finally:
@@ -304,9 +305,7 @@ class _StageDir:
 
     def open_file(self, component: str) -> int:
         self._check(component)
-        return _call(
-            os.open, component, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self._fd
-        )
+        return _call(os.open, component, _osflags.RDONLY | _NOFOLLOW, dir_fd=self._fd)
 
     def create_dir(self, component: str) -> _StageDir:
         self._check(component)
@@ -483,7 +482,7 @@ class RootedOutputDir:
                 if create:
                     child = make_parent_dir_at(fd, part)
                 else:
-                    child = _openat2._confined_open(fd, part, os.O_RDONLY | os.O_DIRECTORY)
+                    child = _openat2._confined_open(fd, part, _osflags.RDONLY | _osflags.DIRECTORY)
                 if chain is None:
                     _close(fd)
                 else:
@@ -566,7 +565,9 @@ class RootedOutputDir:
         parent = child = -1
         try:
             parent = self._open_parent(create=False)
-            child = _openat2._confined_open(parent, self._leaf, os.O_RDONLY | os.O_DIRECTORY)
+            child = _openat2._confined_open(
+                parent, self._leaf, _osflags.RDONLY | _osflags.DIRECTORY
+            )
         except FileNotFoundError:
             return True
         except OSError:
