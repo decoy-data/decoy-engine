@@ -619,6 +619,8 @@ def test_a_prefix_entry_does_not_exempt_a_longer_key(repo: Path) -> None:
         "owner 2026-11-17",
         "owner 2026-1-17 enough text here",
         "cam 2026-11-17 enough text here",
+        "owner 2026-99-99 enough text here",
+        "owner 2026-02-30 enough text here",
     ],
 )
 def test_a_bad_decision_is_refused(repo: Path, decision: str) -> None:

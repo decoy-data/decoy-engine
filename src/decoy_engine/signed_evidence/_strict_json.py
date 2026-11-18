@@ -10,10 +10,9 @@ its profile options, maps its tokens to the frozen wire tokens and walks the res
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from decoy_engine._canonical import STRICT_JSON_TOKENS, strict_json_loads
+from decoy_engine._canonical import STRICT_JSON_TOKENS, strict_json_read
 from decoy_engine._canonical import StrictJsonError as _OwnerError
 from decoy_engine.reasons import ReasonCode
 from decoy_engine.reasons import evidence as ev
@@ -34,6 +33,8 @@ OWNER_TOKEN_MAP: dict[str, ReasonCode] = {
     "float": ev.FLOAT_NOT_ALLOWED,
     "out_of_range": ev.INTEGER_OUT_OF_DOMAIN,
     "not_json": ev.NOT_JSON,
+    "oversized": ev.TOO_LARGE,
+    "too_deep": ev.TOO_DEEP,
 }
 
 if set(OWNER_TOKEN_MAP) != set(STRICT_JSON_TOKENS):
@@ -41,23 +42,9 @@ if set(OWNER_TOKEN_MAP) != set(STRICT_JSON_TOKENS):
 
 StrictJsonError = SignedEvidenceError
 
-_TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[\[\]{}]', re.DOTALL)
-_SURROGATE = re.compile("[\ud800-\udfff]")
-
-
-def _check_depth(text: str) -> None:
-    depth = 0
-    for m in _TOKEN.finditer(text):
-        c = m.group(0)[0]
-        if c in "[{":
-            depth += 1
-            if depth > MAX_DEPTH:
-                raise SignedEvidenceError(ev.TOO_DEEP)
-        elif c in "]}":
-            depth = max(0, depth - 1)
-
 
 def _walk(root: Any) -> None:
+    """The profile's own limits: a node count and the JSON safe-integer range."""
     nodes = 0
     stack = [root]
     while stack:
@@ -66,10 +53,7 @@ def _walk(root: Any) -> None:
         if nodes > MAX_NODES:
             raise SignedEvidenceError(ev.TOO_MANY_NODES)
         if isinstance(node, dict):
-            for key, value in node.items():
-                if _SURROGATE.search(key):
-                    raise SignedEvidenceError(ev.INVALID_UNICODE)
-                stack.append(value)
+            stack.extend(node.values())
         elif isinstance(node, bool):
             continue
         elif isinstance(node, int):
@@ -77,30 +61,32 @@ def _walk(root: Any) -> None:
                 raise SignedEvidenceError(ev.INTEGER_OUT_OF_DOMAIN)
         elif isinstance(node, list):
             stack.extend(node)
-        elif isinstance(node, str) and _SURROGATE.search(node):
-            raise SignedEvidenceError(ev.INVALID_UNICODE)
 
 
 def parse_strict(data: bytes | bytearray | memoryview, *, max_bytes: int = MAX_BYTES) -> Any:
     raw = bytes(data)
     if len(raw) > max_bytes:
         raise SignedEvidenceError(ev.TOO_LARGE)
+    # The owner reader names a BOM or bad UTF-8 only as not_json; the wire keeps them apart.
     if raw.startswith(b"\xef\xbb\xbf"):
         raise SignedEvidenceError(ev.BOM)
-    text = ""
     undecodable = False
     try:
-        text = raw.decode("utf-8", errors="strict")
+        raw.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         undecodable = True
     if undecodable:
         raise SignedEvidenceError(ev.NOT_UTF8)
-    _check_depth(text)
     owner_token: str | None = None
     value: Any = None
     try:
-        value = strict_json_loads(
-            text, max_int_digits=MAX_INT_DIGITS, forbid_float=True, forbid_negative_zero=True
+        value = strict_json_read(
+            raw,
+            max_bytes=max_bytes,
+            max_depth=MAX_DEPTH,
+            max_int_digits=MAX_INT_DIGITS,
+            forbid_float=True,
+            forbid_negative_zero=True,
         )
     except _OwnerError as exc:
         owner_token = exc.token

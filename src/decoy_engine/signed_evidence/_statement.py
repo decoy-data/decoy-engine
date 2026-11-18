@@ -25,6 +25,9 @@ from decoy_engine.reasons import evidence as ev
 from . import _strict_json as sj
 from ._canonical import canonical_bytes
 from ._errors import SignedEvidenceError
+from ._patterns import DIGEST as _DIGEST
+from ._patterns import ID as _ID
+from ._patterns import MEDIA as _MEDIA
 from ._time import parse_utc
 
 SCHEMA_ID = "decoy.evidence.statement/v1"
@@ -42,15 +45,12 @@ SEVERITIES = ("info", "warning", "error")
 DISPOSITIONS = ("INCLUDED", "WITHHELD", "UNAVAILABLE")
 LEGACY_SCHEMA_VERSIONS = frozenset({"r3.1", "cli-local-1"})
 
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 _FP_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}\Z")
 _ALGO = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}\Z")
 _ENGINE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
 _METHOD = re.compile(r"^[a-z][a-z0-9_.-]{0,63}\Z")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
 _BIG = re.compile(r"^[1-9][0-9]{0,29}\Z")
 _DECIMAL = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?\Z")
 

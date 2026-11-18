@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 if sys.version_info >= (3, 11):
@@ -70,6 +71,17 @@ def parse_registry(text: str) -> tuple[dict[str, str], list[str]]:
     return out, findings
 
 
+def _decision_ok(decision: object) -> bool:
+    """A dated owner decision: the whole string matches and the date is a real calendar day."""
+    if not isinstance(decision, str) or not DECISION.fullmatch(decision):
+        return False
+    try:
+        date.fromisoformat(decision.split(" ", 2)[1])
+    except ValueError:
+        return False
+    return True
+
+
 def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
     """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
 
@@ -87,7 +99,7 @@ def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
                 findings.append(f"{sid}: approved_growth row has no key")
             elif _GLOB_CHARS & set(key):
                 findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
-            elif not isinstance(decision, str) or not DECISION.match(decision):
+            elif not _decision_ok(decision):
                 findings.append(
                     f"{sid}: approved_growth for {key} needs a decision "
                     "'owner YYYY-MM-DD <text of 10+ chars>'"

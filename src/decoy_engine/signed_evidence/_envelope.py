@@ -19,6 +19,7 @@ from decoy_engine.reasons import evidence as ev
 
 from . import _strict_json as sj
 from ._errors import SignedEvidenceError
+from ._patterns import ID as _ID
 
 ALG = "ES256"
 TYP = "application/vnd.decoy.evidence-signature.v1+jws"
@@ -29,7 +30,6 @@ SIGNATURE_BYTES = 64
 MAX_ENVELOPE_BYTES = 16 * 1024
 _MAX_PROTECTED_BYTES = 2048
 _B64URL = re.compile(r"^[A-Za-z0-9_-]*\Z")
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 # Members that change who is trusted or how bytes are interpreted; never accepted from a header.
 _FORBIDDEN = frozenset(
     {"jwk", "jku", "x5u", "x5c", "x5t", "x5t#S256", "b64", "zip", "epk", "enc", "iv", "tag"}

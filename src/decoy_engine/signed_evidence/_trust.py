@@ -29,13 +29,13 @@ from decoy_engine.reasons import evidence as ev
 
 from . import _strict_json as sj
 from ._errors import SignedEvidenceError
+from ._patterns import DIGEST as _DIGEST
+from ._patterns import ID as _ID
 from ._time import parse_utc
 
 SCHEMA_ID = "decoy.trust-policy/v1"
 MAX_KEYS = 1000
 MAX_POLICY_BYTES = 1024 * 1024
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 _B64URL = re.compile(r"^[A-Za-z0-9_-]{1,100}\Z")
 _KEY_MEMBERS = (
     "tenant",

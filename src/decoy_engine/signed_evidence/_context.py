@@ -6,7 +6,6 @@ signature for one job therefore cannot be replayed as evidence for another (plan
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -15,11 +14,10 @@ from decoy_engine.reasons import evidence as ev
 
 from ._catalog import RequiredCatalog
 from ._errors import SignedEvidenceError
+from ._patterns import DIGEST as _DIGEST
+from ._patterns import ID as _ID
+from ._patterns import MEDIA as _MEDIA
 from ._trust import TrustPolicy
-
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
 
 
 class Purpose(Enum):

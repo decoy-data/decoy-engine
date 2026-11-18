@@ -209,6 +209,8 @@ def _verify(
     """The one verification core both entries call."""
     if not isinstance(statement, (bytes, bytearray, memoryview)):
         raise SignedEvidenceError(ev.INPUT_INVALID)
+    if signature is not None and not isinstance(signature, (bytes, bytearray, memoryview)):
+        raise SignedEvidenceError(ev.INPUT_INVALID)  # a str is not signature bytes
     statement = bytes(statement)
     if signature is not None:
         signature = bytes(signature)

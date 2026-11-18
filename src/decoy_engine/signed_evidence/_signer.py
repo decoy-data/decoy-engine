@@ -10,7 +10,6 @@ arithmetic, nonce generation or ASN.1 parsing is implemented here.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -26,8 +25,8 @@ from joserfc.jwk import ECKey
 from decoy_engine.reasons import evidence as ev
 
 from ._errors import SignedEvidenceError
+from ._patterns import ID as _ID
 
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _P256_ORDER = int("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", 16)
 
 

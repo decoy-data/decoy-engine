@@ -19,13 +19,13 @@ from decoy_engine.reasons import evidence as ev
 from . import _strict_json as sj
 from ._canonical import canonical_bytes
 from ._errors import SignedEvidenceError
+from ._patterns import ID as _ID
+from ._patterns import MEDIA as _MEDIA
 
 SCHEMA_ID = "decoy.required-catalog/v1"
 MAX_REQUIREMENTS = 256
-_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}\Z")
-_MEDIA = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\Z")
 _REQ_KEYS = (
     "check_id",
     "scope",

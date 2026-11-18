@@ -37,16 +37,16 @@ from . import _strict_json as sj
 from ._catalog import RequiredCatalog
 from ._context import ExpectedArtifact, Purpose, VerificationContext
 from ._errors import SignedEvidenceError
+from ._patterns import ID as _ID
+from ._patterns import ID_PATTERN as _ID_PATTERN
+from ._patterns import MEDIA as _MEDIA
+from ._patterns import MEDIA_PATTERN as _MEDIA_PATTERN
 from ._trust import TrustPolicy, _pin_verdict
 
 MAX_EXPECTATIONS_BYTES = sj.MAX_BYTES
 
-_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
 _SHA_PATTERN = r"[0-9a-f]{64}"
-_MEDIA_PATTERN = r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}"
-_ID = re.compile(_ID_PATTERN)
 _SHA = re.compile(_SHA_PATTERN)
-_MEDIA = re.compile(_MEDIA_PATTERN)
 
 
 @dataclass(frozen=True, slots=True)

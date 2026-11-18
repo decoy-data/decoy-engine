@@ -429,3 +429,15 @@ def test_the_platform_guard_runs_before_any_open(bundle, monkeypatch) -> None:  
         context=f.context(policy, purpose=Purpose.RELEASE_GATE),
     )
     assert result.artifacts is ArtifactStatus.NOT_EVALUATED
+
+
+def test_a_str_signature_is_input_invalid_not_a_type_error(bundle) -> None:  # type: ignore[no-untyped-def]
+    root, signed, _, policy = bundle
+    with pytest.raises(SignedEvidenceError) as caught:
+        verify_signed_evidence(
+            statement=signed.statement,
+            signature="not bytes",  # type: ignore[arg-type]
+            artifact_root=root / "artifacts",
+            context=f.context(policy),
+        )
+    assert caught.value.code == "INPUT_INVALID"
