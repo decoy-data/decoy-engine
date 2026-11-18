@@ -12,7 +12,7 @@ import decoy_engine.anonymize.search as search
 import decoy_engine.quality as quality
 from decoy_engine.execution._strategies import strategy_catalog
 
-from ._captured import CATALOG_AT_BASE, ENGINE_ALL_AT_BASE
+from ._captured import CATALOG_AT_BASE, ENGINE_ALL_AT_BASE, QUALITY_LAZY_AT_BASE
 
 
 def _run(code: str) -> str:
@@ -47,26 +47,5 @@ def test_engine_api_and_catalog_unchanged() -> None:
 
 
 def test_quality_lazy_exports_unchanged() -> None:
-    """Captured at bc711b6c: the new names are reached through the sub-package only."""
-    lazy = quality._LAZY_EXPORTS
-    assert sorted(lazy) == [
-        "DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION",
-        "QUALITY_DIAGNOSTIC_SCHEMA_VERSION",
-        "QUALITY_FIDELITY_SCHEMA_VERSION",
-        "QUALITY_POLICY_SCHEMA_VERSION",
-        "QUALITY_REPORT_SCHEMA_VERSION",
-        "QUALITY_SHAPE_FIDELITY_SCHEMA_VERSION",
-        "SYNTH_REPORT_SCHEMA_VERSION",
-        "apply_quality_policy",
-        "assemble_quality_report",
-        "assemble_synth_report",
-        "compute_attack_metrics",
-        "compute_dcr",
-        "compute_diagnostic",
-        "compute_distribution_snapshot",
-        "compute_fidelity",
-        "compute_new_row_synthesis",
-        "compute_quality_report",
-        "compute_shape_fidelity",
-        "score_to_grade",
-    ]
+    """Captured at 2c869dce: the new names are reached through the sub-package only."""
+    assert tuple(sorted(quality._LAZY_EXPORTS)) == QUALITY_LAZY_AT_BASE
