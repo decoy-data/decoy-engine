@@ -10,6 +10,8 @@ docs/records/2026-11-18-f01-e0-spike.md.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -396,24 +398,46 @@ def test_cell_g_insert_returns_the_affected_row_count(pg, rw, tmp_path):
 BLACKHOLE = "192.0.2.1"  # TEST-NET-1, never routed
 
 
-def _attach_blackhole(ext_dir, dsn_text: str, box: dict, interrupt_after: float | None):
+def _attach_blackhole(ext_dir, dsn_text: str, box: dict):
     conn = duckdb.connect(config={"extension_directory": str(ext_dir)})
     conn.execute("LOAD postgres")
     start = time.monotonic()
-    timer = None
-    if interrupt_after is not None:
-        timer = threading.Timer(interrupt_after, conn.interrupt)
-        timer.start()
     try:
         conn.execute(f"ATTACH {_lit(dsn_text)} AS bh (TYPE postgres, READ_ONLY)")
         box["error"] = "attached"
     except Exception as exc:
         box["error"] = type(exc).__name__
     finally:
-        if timer is not None:
-            timer.cancel()
         box["elapsed"] = time.monotonic() - start
         conn.close()
+
+
+_INTERRUPT_CHILD = """
+import sys, threading, duckdb
+c = duckdb.connect(config={"extension_directory": sys.argv[1]})
+c.execute("LOAD postgres")
+threading.Timer(2.0, c.interrupt).start()
+try:
+    c.execute("ATTACH '" + sys.argv[2] + "' AS bh (TYPE postgres, READ_ONLY)")
+except Exception as exc:
+    print(type(exc).__name__)
+"""
+
+
+def _interrupt_attach_blackhole(ext_dir, dsn_text: str) -> dict:
+    # A blocked connect cannot be stopped from inside the process, so a child is killed instead.
+    start = time.monotonic()
+    try:
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", "-c", _INTERRUPT_CHILD, str(ext_dir), dsn_text],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        return {"error": done.stdout.strip() or "attached", "elapsed": time.monotonic() - start}
+    except subprocess.TimeoutExpired:
+        return {"error": "no_return_in_12s", "elapsed": 12.0}
 
 
 @pytest.mark.serial
@@ -423,14 +447,12 @@ def test_cell_h_a_connect_timeout_mechanism_bounds_a_blackhole_connection(
     base = f"host={BLACKHOLE} port=5432 user=postgres password=pw dbname=postgres"
     results: dict[str, dict] = {}
 
-    def attempt(name, dsn_text, *, interrupt_after=None, env=None):
+    def attempt(name, dsn_text, *, env=None):
         monkeypatch.delenv("PGCONNECT_TIMEOUT", raising=False)
         for k, v in (env or {}).items():
             monkeypatch.setenv(k, v)
         box: dict = {}
-        t = threading.Thread(
-            target=_attach_blackhole, args=(ext_dir, dsn_text, box, interrupt_after), daemon=True
-        )
+        t = threading.Thread(target=_attach_blackhole, args=(ext_dir, dsn_text, box), daemon=True)
         t.start()
         t.join(20)
         results[name] = box or {"error": "no_return_in_20s", "elapsed": 20.0}
@@ -438,10 +460,12 @@ def test_cell_h_a_connect_timeout_mechanism_bounds_a_blackhole_connection(
 
     attempt("dsn_connect_timeout", base + " connect_timeout=2")
     attempt("env_pgconnect_timeout", base, env={"PGCONNECT_TIMEOUT": "2"})
-    attempt("wall_clock_interrupt", base, interrupt_after=2.0)
+    results["wall_clock_interrupt"] = _interrupt_attach_blackhole(ext_dir, base)
     bounded = {}
     for name, box in results.items():
-        bounded[name] = box["error"] not in ("attached", "no_return_in_20s") and box["elapsed"] < 8
+        bounded[name] = (
+            not box["error"].startswith(("attached", "no_return")) and box["elapsed"] < 8
+        )
         _note(record_property, f"cell_h_{name}", f"{box['error']} {box['elapsed']:.1f}s")
     assert bounded["dsn_connect_timeout"], results
     assert any(bounded.values()), results
