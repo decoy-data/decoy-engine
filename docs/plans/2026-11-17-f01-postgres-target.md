@@ -1,4 +1,4 @@
-Status: plan (revision 5, 2026-11-18)
+Status: plan (revision 6, 2026-11-18)
 
 # F01: PostgreSQL application-ready write target and the type-mapping report (roadmap row 86)
 
@@ -19,8 +19,8 @@ Re-anchor (2026-11-18, after the history rewrite; old SHAs map through the rewri
 `sha-map.tsv`): engine `origin/main` `84cc7d798`, CLI `origin/main` `9023c606`. Codex round 3 gave
 GO on `6bfc358a4`. Since then 64b E1 MERGED (engine #624, `9180a7985`): `_postgres_session.py`
 and `postgres_catalog.py` exist, and the citations below now point at the merged names
-(`quote_ident` and `sql_literal`, not `_q` and `_lit`; the `Deadline` class and
-`raise_for_interrupt` for the deadline and interrupt mapping; `POSTGRES_SOURCE_USAGE_CODES` derived
+(`quote_ident` and `sql_literal`, not `_q` and `_lit`; `raise_for_interrupt` for interrupt
+mapping; `POSTGRES_SOURCE_USAGE_CODES` derived
 from the registry). 64b E1 added no session sentry, so AT-E4's sentry is new. 64b E2
 (`POSTGRES_DSN_V1`), E3, C1 and C2 are not merged; F01 E1 still waits on 64b E2. F22 b2 (#622)
 moved `publish_unit` and `publish_tables`. No design changes.
@@ -56,7 +56,7 @@ The approach (one in-place transaction) stands. Every finding is applied in plac
 | M2 trigger state | Restore by `tgenabled` (`O`, `D`, `R`, `A`); AT-E8 cells for `R`, `A`, `D` | 4.4 step 9, AT-E8 |
 | M3 unusual sequences | Non-owned `nextval` defaults, shared sequences, negative increment and out-of-range restart detected through `pg_attrdef` and `pg_depend`; coded refusal; cells | 4.3, 4.4 step 10, AT-E5, AT-E9 |
 | M4 `--resume` | Refused with a Postgres target in V1, matching 64b; test | 4.8, AT-C10, Q19 |
-| M5 bookkeeping creation race and privileges | One global advisory key around `decoy_meta` creation; privilege check covers `SELECT`, `INSERT`, `UPDATE` on an existing publications table and `REFERENCES` on non-target lookup tables | 4.3, 4.4 step 3, AT-E5 |
+| M5 bookkeeping creation race and privileges | One global advisory key around `decoy_meta` creation; privilege check covers `SELECT`, `INSERT`, `UPDATE` on an existing publications table. Revision 5 removed the lookup-table privilege check | 4.3, 4.4 step 3, AT-E5 |
 | LOW | Two-int advisory key from SHA-256 in Python (no `hashtext`); `NOT VALID` foreign keys re-created as they were; partial-index and check text kept out of errors and logs with a marker literal in AT-E14; `pg_debug_show_queries` forced off; `duckdb_databases().path` holds the DSN and is never read; AT-C7 adds `report fidelity --config` and every other non-run target reader | 4.4, AT-E8, AT-E14, AT-C7 |
 
 Nothing was left unapplied.
@@ -70,6 +70,21 @@ Nothing was left unapplied.
 | V2-LOG sibling citation | `plan/cli-db-src` cited as the engine branch `origin/plan/cli-db-src` at `59343ebd` | header, Rules consulted |
 | Codex on `1a4e5076` (orchestrator, round cap): schema `USAGE` missing | Both schema-present cases also need `USAGE` on `decoy_meta`; AT-E5 adds two refusing cells (schema `CREATE` without `USAGE`; table rights without schema `USAGE`); the pre-mortem line names every case | 3, 11 AT-E5, pre-mortem |
 
+## Revision 6 (Dennis round 2 on revision 5)
+
+| Finding | Fix | Where |
+|---|---|---|
+| V1: kept lookup FKs can queue one deferred trigger per row, defer failure to `COMMIT`, and take conflicting row locks | Step 1 makes every constraint immediate. Step 8 loads at most 1,000,000 rows per statement and sums affected counts. A load failure after `lock_timeout_s` maps to `target_busy`. Tests cover a deferred lookup-FK violation and a multi-million-row load with bounded backend memory | 4.4 steps 1 and 8; 4.4.3; 5.3; AT-E9 |
+| Wait windows drift or overrun their budgets | Each wait is `min(budget, time left in the current window)`. Every window starts at the trigger time. The single reopen follows the same rule | 4.4.2; AT-E17 cell 5 |
+| SIGINT recording starts after the first trigger | On the main thread, `run_supervised` installs the record-only handler at entry, keeps it through reconcile, treats a recorded press as the trigger, and restores it in `finally` | 4.4.2; AT-E18 cell 7 |
+| An overrun control call leaves a session eligible for reuse | The first overrun marks the control session dead. The next required call uses the one allowed reopen | 4.4.2; AT-E17 cell 5 |
+| The existing deadline arm calls `conn.interrupt()` | `Deadline` gains the named `arm_expiry_only` entry point on its existing timer core. The publish uses only that entry point, which sets `expired` and never calls `conn.interrupt()` | 3; 4.4.1; 4.4.2; AT-E17 |
+| AT-E18 cell 4 claims server cleanup and process exit that its proxy cannot prove | The cell proves only that the supervisor stops waiting. The CLI fallback is `os._exit` after flushing and closing the run `ExitStack`, and only on the CLI path | 4.4.2; 7; AT-E18 cell 4; 17 |
+| Sequence ownership is missing from inspection | Inspection checks ownership of every sequence that the publish will restart | 4.3; AT-E5 |
+| The write-session open lacks a hard open budget | `write_open_budget_s` bounds the worker open and ends `target_unreachable` before `begin` | 1.1 item 9; 4.3; 4.4.1; 4.4.2; AT-E18 |
+
+Slice sizes remain E3a about 360 source lines, E3b about 580, and E3c about 250. None grows.
+
 ## Revision 5 (Dennis review of revision 4 at `1cd21fb44`: GO-WITH-FIXES, 4 HIGH, 5 MEDIUM, 3 LOW)
 
 The core design stands (per-statement `SET LOCAL` bounds, same-role cancel without superuser,
@@ -79,7 +94,7 @@ terminate). Each finding and where it is fixed:
 | # | Finding | Fix | Where |
 |---|---|---|---|
 | 1 | HIGH: dropping a target-to-lookup FK takes `ACCESS EXCLUSIVE` on the lookup table | Only FKs with both ends in target tables are dropped; FKs to lookup tables stay and the server checks each row (`target_load_failed`); no lookup lock in `lock_tables` | 4.4 steps 4, 6, 8; 5.3; 7; AT-E9 lookup cells and mutation; 15 |
-| 2 | HIGH: `SHARE ROW EXCLUSIVE` on a lookup needs more than `REFERENCES` | The lookup lock is gone (finding 1); inspection asks no right on lookup tables; a `REFERENCES`-only role cell | 4.3; 5.3; 7; AT-E5; AT-E9 |
+| 2 | HIGH: `SHARE ROW EXCLUSIVE` on a lookup needs more than `REFERENCES` | The lookup table lock is gone (finding 1); inspection asks no right on lookup tables. Revision 6 strengthens the cell to a role with no application privilege on the lookup table | 4.3; 5.3; 7; AT-E5; AT-E9 |
 | 3 | HIGH: item 9 does not hold while the supervisor blocks in DuckDB calls, on a dead network, per-address connect or DNS | Every control call on its own daemon thread under a hard budget (`control_call_s`, `control_open_budget_s`, `reconcile_budget_s`); item 9 written from those budgets; keepalives and `tcp_user_timeout` through S2's one helper; the worker owns the write connection and the supervisor never closes it; a TCP-proxy subprocess cell | 1.1 item 9; 4.3; 4.4 intro; 4.4.1; 4.4.2; AT-E18 cell 4; 12 E1 |
 | 4 | HIGH: a second Ctrl-C can escape with exit 130 while `COMMIT` may have landed | `stop` set first inside `try`/`finally`; further SIGINT deferred on the main thread for the bounded sequence; undecided while committing is `target_commit_unknown` (exit 3), never 130 | 4.4.2; 4.4.3 row 1; 7; AT-E17 cells 1 and 8; AT-E18 cell 3 |
 | 5 | MEDIUM: the write ATTACH defaults to REPEATABLE READ, so step 1's snapshot predates the locks | `ISOLATION_LEVEL 'READ COMMITTED'` on the write ATTACH; triggers disabled and restored by name from the capture, not `DISABLE TRIGGER USER`; AT-E12 trigger-added-while-waiting cell; AT-E0 cell e3.5 records the option | 4.4 intro, steps 5, 6, 9; AT-E0; AT-E4; AT-E12 |
@@ -110,7 +125,7 @@ and j passed, so the one-transaction design stands and Q15 (psycopg) is not trig
 | The deadline no longer relies on `interrupt()`. Three layers bound every step: server-side `SET LOCAL statement_timeout` and `lock_timeout` per step (primary); a control session that sends a guarded `pg_cancel_backend`, then `pg_terminate_backend`, at the deadline or on Ctrl-C; and a supervisor that stops waiting for a worker that still does not return. `COMMIT` is never sent after a trigger | 1.1 item 9, 4.4.1, 4.4.2 |
 | Connect bound: S2's `with_connect_timeout` and `connect_timeout_s` (`origin/plan/capped-worker-fixes`), one copy, on the write, control and reconcile sessions. `PGCONNECT_TIMEOUT` rejected (process-global, S2 2.3). F01's own `connect_timeout_s=15` field is dropped. E1 orders after S2 | 3, 4.3, 4.4.1, 12 |
 | The write session leaves `pg_statement_timeout_millis` and `pg_idle_in_transaction_timeout_millis` unset: when set, the extension issues a plain session `SET statement_timeout` on scan connections (`postgres_scanner.cpp`), which would override the per-step `SET LOCAL` | 4.4.1, AT-E4 |
-| Lock waits happen only in lock steps: `lock_tables` also takes `SHARE ROW EXCLUSIVE` on each non-target lookup table a target FK points at; the old step 10 is split into `check_sequences` (range check, no conflicting lock) and `sequences` (the restart, whose only wait is a sequence lock). Thirteen steps | 4.4 steps 4, 10, 11 |
+| Lock waits were moved into named steps. Revision 5 removed the planned lookup-table lock. Revision 6 recognizes lookup-row waits during `load`. The old step 10 is split into `check_sequences` and `sequences`. Thirteen steps | 4.4 steps 4, 8, 10, 11 |
 | Reason-code mapping for every timeout and cancel, value-free (no error text read), and the state of the half-done transaction in each case | 4.4.3 |
 | Failure rows for the control session (cannot connect, lost, pid reused, cancel races commit, cancel between statements) and the abandoned worker | 7 |
 | AT-E0 cell e becomes a strict recording cell (interrupt does not cancel); new cell e3 proves the new mechanism; #667 needs both before it merges as the spike record. AT-E9 deadline cells rewritten; new AT-E17 for the control session and supervisor | 8.1 |
@@ -179,7 +194,8 @@ and j passed, so the one-transaction design stands and Q15 (psycopg) is not trig
 9. **Bounded.** The supervisor (4.4.2) never makes a blocking call itself: every DuckDB call
    it needs runs on its own daemon thread under a hard wait budget, so its schedule depends only
    on its clock. `publish_target` returns or raises (a) within `control_open_budget_s` when the
-   control session cannot be opened, before anything is written; (b) within
+   control session cannot be opened, or within `write_open_budget_s` when the write session
+   cannot be opened, before anything is written; (b) within
    `deadline_s + 2 * cancel_grace_s + 2` seconds of its start, or `2 * cancel_grace_s + 2`
    seconds after the first Ctrl-C, when `COMMIT` has not been sent; (c) within a further
    `commit_grace_s + reconcile_budget_s` when a trigger finds `COMMIT` in flight. This holds
@@ -218,7 +234,8 @@ and j passed, so the one-transaction design stands and Q15 (psycopg) is not trig
 
 Searches run 2026-11-17: the web (DuckDB, PostgreSQL and pgloader documentation), both
 repositories, the vault (`qmd search "F01 postgres target"`, also in `decoy-engine-archive`: no
-hit there; one V2 proposal in the wiki, `12-database-writeback.md`).
+hit there; one V2 proposal in the wiki, `12-database-writeback.md`). Revision 6 rechecked the
+official PostgreSQL 14.4.4, `SET CONSTRAINTS`, and explicit-locking documentation on 2026-11-18.
 
 | Source | Pattern | Taken |
 |---|---|---|
@@ -232,6 +249,9 @@ hit there; one V2 proposal in the wiki, `12-database-writeback.md`).
 | git `update-ref <ref> <new> <old>` (DELIV 3, the `LATEST` compare-and-swap) | Write last with the expected old state | The publish refuses when the bookkeeping row differs from what the read-only inspection saw (`delivery_pointer_moved`) |
 | pg_dump (search path set to `pg_catalog` since CVE-2018-1058) | Catalog definition text is captured and executed with an empty search path so every name is schema-qualified | Capture and re-create both run under `SET LOCAL search_path = pg_catalog` in the locked transaction (H5) |
 | PostgreSQL docs, "Populating a Database" (14.4) | Run `ANALYZE` after a bulk load | `ANALYZE` of the target tables after commit; a failure is a warning (Q14) |
+| PostgreSQL docs, "Populating a Database" 14.4.4 | Loading many rows with foreign keys can queue one trigger event per row and overflow memory; drop and restore FKs for a bulk load when possible | Target-to-target FKs are dropped. Lookup FKs must stay, so step 1 makes them immediate and step 8 limits each insert to 1,000,000 rows. AT-E9 measures backend memory on more than 3,000,000 rows |
+| PostgreSQL `SET CONSTRAINTS` docs | Immediate constraints are checked at the end of each statement; deferred constraints wait until commit | Step 1 runs `SET CONSTRAINTS ALL IMMEDIATE`. Each bounded insert flushes its lookup-FK checks before the next batch, and a violation belongs to `load` |
+| PostgreSQL explicit-locking docs, row-level modes | `FOR KEY SHARE` blocks delete, key-changing update and `SELECT FOR UPDATE`, but not plain reads or non-key updates | Section 5.3 states the exact lookup-row effects. A conflicting lock that reaches `lock_timeout_s` maps to `target_busy` |
 | In-repo: 64b's `connectors/_postgres_session.py` (`open_connection` `:177`, `load_postgres_extension` `:211`, `attach_read_only` `:235`) and the constant catalog SQL in `connectors/postgres_catalog.py:34` | Offline extension load, DuckDB connection with auto-install off, constant catalog SQL, coded value-free errors | Reused: F01 adds `open_write_session` beside 64b's `open_read_session` |
 
 Bounding a running statement (revision 4, searches run 2026-11-18: PostgreSQL, libpq, psycopg
@@ -269,7 +289,7 @@ the ordered publish steps and reconcile. Everything else is reuse.
 |---|---|---|
 | DuckDB connection with offline extension load, identifier rule | `open_read_session`, `validate_identifier`, `quote_ident`, `sql_literal` in `connectors/_postgres_session.py` (64b E1, merged #624) | `src/decoy_engine/connectors/_postgres_session.py:253`, `:98`, `:106`, `:111` |
 | Connect bound for every session | `with_connect_timeout`, `connect_timeout_s` in `_postgres_session.py` (capped-worker S2, not merged yet; F01 E1 waits for it) and S2's single ATTACH site | `origin/plan/capped-worker-fixes` plan 2.4, 2.6 |
-| Deadline flag and interrupt mapping | `Deadline` (its `expired` event is the supervisor's deadline signal) and `raise_for_interrupt` | `src/decoy_engine/connectors/_postgres_session.py:116`, `:141` |
+| Deadline timer and interrupt mapping | `Deadline` gains `arm_expiry_only` beside its interrupting read-side arm, on the same timer core; `raise_for_interrupt` maps the result | `src/decoy_engine/connectors/_postgres_session.py:116`, `:141` |
 | Coded value-free error | `PostgresSnapshotError` (the target error subclasses it, so the existing CLI arm and code owner hold) | `src/decoy_engine/connectors/_postgres_session.py:59` |
 | Type classes of the source side | `_PLAIN_TYPES`, `_classify` (the type map reads the same lists) | `src/decoy_engine/connectors/postgres_snapshot.py:119`, `:210` |
 | Secret reference and `postgres-dsn-v1` | `prepare_secret`, `POSTGRES_DSN_V1` (64b E2, not merged yet; a `SecretRequirement` beside the existing ones) | `src/decoy_engine/secret_providers/_preflight.py:259`, `_requirements.py:42` |
@@ -340,7 +360,8 @@ No secret is read and no connection is opened at compile time (64b Q4 holds).
   `lock_timeout_s=30`, `idle_in_transaction_timeout_s=60`, `cancel_grace_s=10`,
   `commit_grace_s=30`, `control_call_s=5`. No connect field: every session's connect bound is
   S2's `connect_timeout_s(deadline_s)` (10 s at the default deadline). Derived, not fields:
-  `control_open_budget_s = connect_timeout_s(deadline_s) + control_call_s` and
+  `control_open_budget_s = connect_timeout_s(deadline_s) + control_call_s`,
+  `write_open_budget_s = connect_timeout_s(deadline_s) + control_call_s`, and
   `reconcile_budget_s = control_open_budget_s + 3 * control_call_s + lock_timeout_s`.
 - `TargetRelation(schema_name, table)`, validated by `validate_identifier`.
 - `read_target(config, relations) -> TargetCatalog`. One read-only session (64b
@@ -354,7 +375,7 @@ No secret is read and no connection is opened at compile time (64b Q4 holds).
   keys (`pg_get_constraintdef`, `convalidated`, both ends), the names and definitions of other
   constraints and of indexes (for the digest only), user triggers and `tgenabled`, sequences
   (owned through `pg_depend`, and every `nextval` default through `pg_attrdef`, with increment,
-  minimum and maximum), privileges, the server version number, the bookkeeping row for the
+  minimum, maximum and current-role ownership), privileges, the server version number, the bookkeeping row for the
   target schema (or its absence) and a structure digest over all of it. It also reads the
   server fingerprint (SHA-256 of `current_database()`, `pg_postmaster_start_time()` and
   `inet_server_port()`, never shown). It refuses (connector namespace, location `schema.table`
@@ -370,7 +391,7 @@ No secret is read and no connection is opened at compile time (64b Q4 holds).
     on a sequence the column does not own, one sequence feeds more than one column, or an owned
     sequence has a negative increment;
   - `target_privilege_missing`: no `TRUNCATE` or `INSERT` on a target table; not the owner (or
-    a member of the owning role); or the bookkeeping rights for the case found: schema `decoy_meta` absent
+    a member of the owning role) of a target table or each sequence the publish restarts; or the bookkeeping rights for the case found: schema `decoy_meta` absent
     and no `CREATE` on the database (the role then owns the schema it creates); schema present
     and table `decoy_meta.publications` absent and no `USAGE` plus `CREATE` on schema
     `decoy_meta`; table present without `USAGE` on schema `decoy_meta` and `SELECT`, `INSERT`
@@ -414,8 +435,8 @@ zero or less the statement does not start and the publish ends `deadline_exceede
 Steps, in order; each has a fixed name used for the error location, the failure-code registry
 (4.4.3) and the test fault seam:
 
-1. `begin`: `BEGIN`; `SET LOCAL search_path = pg_catalog`, `lock_timeout`,
-   `idle_in_transaction_session_timeout`, and on servers 14 and later
+1. `begin`: `BEGIN`; `SET CONSTRAINTS ALL IMMEDIATE`; `SET LOCAL search_path = pg_catalog`,
+   `lock_timeout`, `idle_in_transaction_session_timeout`, and on servers 14 and later
    `client_connection_check_interval = 10s`; capture `pg_current_xact_id()` and
    `pg_backend_pid()` (ids, not data) for reconcile and for the control session's guard
    (4.4.2). Reading `pg_current_xact_id()` assigns the transaction id, so `backend_xid` is set
@@ -432,8 +453,8 @@ Steps, in order; each has a fixed name used for the error location, the failure-
    back, `operation_conflict` with `publication_operation_conflict`. Row differs from
    `catalog.marker`: roll back, `refused` with `delivery_pointer_moved`.
 4. `lock_tables`: `LOCK TABLE ... IN ACCESS EXCLUSIVE MODE` on every target table, in sorted
-   order. No lock is taken on any non-target table: foreign keys to lookup tables stay in place
-   (step 6), so the publish never blocks a reader or writer of a lookup table.
+   order. No table lock is taken on a non-target table. Kept lookup FKs take row-level
+   `FOR KEY SHARE` locks as step 8 checks rows.
 5. `capture`: `capture_structure` under the locks and `search_path = pg_catalog`, read under
    READ COMMITTED after the locks, so it sees every change committed before them; a digest
    different from `catalog` is `target_changed`. The definitions and the trigger names used in
@@ -448,11 +469,14 @@ Steps, in order; each has a fixed name used for the error location, the failure-
    identity columns declared `ALWAYS` become `BY DEFAULT` so the load can write them. Indexes
    and primary key, unique, exclusion, check and not-null constraints stay (H6).
 7. `truncate`: one `TRUNCATE` of every target table.
-8. `load`: per table, `INSERT INTO <pg>.<schema>.<table> (<columns except generated>) SELECT
-   <same columns> FROM read_parquet(<staged path>)`; the affected-row count of the `INSERT` is
-   compared with the Parquet footer. A failure (a unique, exclusion, check or not-null
-   violation, or a masked row that breaks a kept foreign key to a lookup table) or a count
-   difference is `target_load_failed` at `schema.table`.
+8. `load`: per table, run bounded `INSERT INTO <pg>.<schema>.<table> (<columns except
+   generated>) SELECT <same columns> FROM read_parquet(<staged path>)` statements. Each
+   statement selects at most 1,000,000 rows by a half-open `file_row_number` range. If that
+   metadata is unavailable, each statement selects one Parquet row group and refuses a row
+   group above 1,000,000 rows before writing. Sum the affected-row counts and compare the sum
+   with the Parquet footer. `SET CONSTRAINTS ALL IMMEDIATE` makes a deferred lookup FK fail in
+   this step, not in `commit`. A load statement that fails after at least `lock_timeout_s` is `target_busy`.
+   Any earlier constraint, type or count failure is `target_load_failed` at `schema.table`.
 9. `restore`: re-create every dropped foreign key from its captured definition text (a `NOT
    VALID` key as `NOT VALID`, a validated key validated; `DEFERRABLE` kept); a failure is
    `target_constraint_failed` at `schema.table.constraint`. Restore each captured user trigger
@@ -506,11 +530,11 @@ the deadline cannot rest on it. Each part of the write path has its own bound:
 
 | Part | Primary bound | Backstop |
 |---|---|---|
-| Write session connect and `ATTACH` (worker) | libpq `connect_timeout` from S2's helper (per address) | the supervisor stops waiting at the deadline; a hung DNS lookup or a multi-host DSN cannot hold it (item 9) |
+| Write session connect and `ATTACH` (worker) | libpq `connect_timeout` from S2's helper (per address) | a hard wait of `write_open_budget_s` on its own thread; overrun is `target_unreachable` before `begin` |
 | Control session open and reopen (supervisor) | the same libpq bounds through `open_read_session` | a hard wait of `control_open_budget_s` on its own thread |
 | Each control statement (cancel, terminate, probe, `pg_xact_status`) | its session's `statement_timeout` (`control_call_s`) | a hard wait of `control_call_s` on its own thread |
-| Any statement of steps 1 to 12, including the `COPY` behind `INSERT ... SELECT FROM read_parquet` | server `statement_timeout` set by `SET LOCAL` before the statement: min(`statement_timeout_s`, remaining deadline) | control-session cancel, then terminate; then the supervisor stops waiting |
-| A lock wait (steps 2, 3, 4, 11) | `lock_timeout` set at `begin` | `statement_timeout` |
+| Any statement of steps 1 to 12, including each bounded `INSERT ... SELECT FROM read_parquet` | server `statement_timeout` set by `SET LOCAL` before the statement: min(`statement_timeout_s`, remaining deadline) | control-session cancel, then terminate; then the supervisor stops waiting |
+| A lock wait (steps 2, 3, 4, 8, 11) | `lock_timeout` set at `begin` | `statement_timeout` |
 | A dead network while the client waits on the server | TCP keepalives (`keepalives=1`, `keepalives_idle=30`, `keepalives_interval=10`, `keepalives_count=3`) and `tcp_user_timeout=60000` (Linux; libpq ignores it where the socket option is missing) appended by S2's helper on every session; libpq has no read timeout of its own | the supervisor stops waiting |
 | The client stalls between statements (SIGSTOP, a hung host) | server `idle_in_transaction_session_timeout` ends the session (M1) | none needed: `COMMIT` is never sent after `stop` |
 | The client dies during a long statement | server `client_connection_check_interval` (14 and later) | `statement_timeout` |
@@ -534,7 +558,7 @@ New private module `connectors/_postgres_control.py` (reusable by the read side,
 the supervisor uses the control session; the worker never does.
 
 - `ControlSession`: a read-only session from `open_read_session` (S2 helper, its own
-  `statement_timeout_s = control_call_s`), opened before the worker starts. Autocommit only:
+  `statement_timeout_s = control_call_s`), opened by `run_supervised` before the worker starts. Autocommit only:
   it never runs `BEGIN`, and each call is one statement, so each `pg_stat_activity` read is a
   fresh snapshot. If it cannot be opened within `control_open_budget_s` the publish stops with
   `target_unreachable` and `open_write_session` is never called: the cancel path exists before
@@ -551,16 +575,26 @@ the supervisor uses the control session; the worker never does.
 - Every control call (open, reopen, cancel, terminate, probe, status) runs on its own daemon
   thread with a hard wait budget (`control_open_budget_s` for an open, `control_call_s` for a
   statement). The thread body catches `BaseException` and keeps only the type name. A call that
-  overruns is treated as failed and its thread is abandoned; the supervisor never blocks on it.
-- `run_supervised(steps, deadline, control) -> result`: the worker runs the steps; the
-  calling thread waits on it in 0.25 s slices, so it sees `KeyboardInterrupt` (on Windows too,
-  where a plain wait is not interruptible) and `deadline.expired` (the shared `Deadline` timer,
-  armed at publish start). On the first trigger, inside `try`/`finally`, it sets `stop` (a
-  `threading.Event`) before anything else, so even an exception between the trigger and the
-  lock leaves `stop` set. When it runs on the main thread it then installs a SIGINT handler that
-  only records further Ctrl-C presses, and restores the previous handler when the bounded
-  sequence ends: a second Ctrl-C cannot escape mid-sequence. Then, under the supervisor lock, it
-  reads `committing`:
+  overruns is treated as failed and its thread is abandoned. The first overrun marks that
+  control session dead. The next required control call uses the single allowed reopen. A
+  reopened session is never reopened again. The supervisor never blocks on an abandoned call.
+- `run_supervised(steps, deadline_s, open_control) -> result`: the worker runs the steps; the
+  calling thread waits on it in at most 0.25 s slices. At entry, when it runs on the main
+  thread, it installs a SIGINT handler that only records a press. The handler stays installed
+  through control open, write open, the worker, and reconcile. A recorded press is the Ctrl-C
+  trigger. `run_supervised` restores the previous handler in `finally` for every return and
+  error. The publish calls `Deadline.arm_expiry_only`, which uses the existing timer core only
+  to set `expired`. It never calls the interrupting arm or `conn.interrupt()`.
+- On the first trigger, it records `trigger_at` and sets `stop` before anything else. Thus, an
+  exception between the trigger and the lock still leaves `stop` set. Every wait is
+  `min(the wait budget, time left in the current window)`. Window ends are calculated from
+  `trigger_at`, never from the end of a prior call: cancel ends at `trigger_at +
+  cancel_grace_s`; terminate ends at `trigger_at + 2 * cancel_grace_s`; commit wait ends at
+  `trigger_at + commit_grace_s`; reconcile ends at `trigger_at + commit_grace_s +
+  reconcile_budget_s`. If reconcile starts after a commit error with no earlier trigger, its
+  window starts at reconcile entry and ends after `reconcile_budget_s`. A later Ctrl-C records
+  the trigger but cannot restart or extend that reconcile window. Then, under the supervisor
+  lock, it reads `committing`:
   - `committing` not set: `cancel` once per second until the worker returns or
     `cancel_grace_s` passes; then `terminate` once and wait up to `cancel_grace_s` more; then
     stop waiting (the worker is a daemon and is abandoned, its connection left referenced and
@@ -569,16 +603,25 @@ the supervisor uses the control session; the worker never does.
   - `committing` set: never cancel. Wait `commit_grace_s` for the worker; if it returns, use
     its result; else reconcile. The result is `published`, `publication_commit_not_visible` or
     `target_commit_unknown`, never `KeyboardInterrupt`.
-  - The control session fails during a trigger: reopen it once under `control_open_budget_s`;
-    if that fails, keep waiting on the schedule. The server `statement_timeout` (at most the
-    remaining deadline) still ends the statement.
+  - The control session fails or is marked dead during a trigger: the next required call
+    reopens it once. That reopen waits for `min(control_open_budget_s, time left in the current
+    window)`. If it fails, keep waiting on the same trigger-anchored schedule. The server
+    `statement_timeout` still ends the statement.
+
+The worker's write-session open also runs under supervision. If it does not finish within
+`write_open_budget_s`, `run_supervised` sets `stop`, abandons that daemon thread, and returns
+`target_unreachable`. No `begin` statement has run. A late open closes its connection without
+starting a transaction.
 
 After the trigger the result is `deadline_exceeded` (deadline) or `KeyboardInterrupt` (Ctrl-C,
 exit 130), mapped through the existing `raise_for_interrupt`, unless reconcile decided it. An
 abandoned worker leaves one daemon thread and one DuckDB connection in the process until the
 blocked call returns or the process exits; the server ends the transaction by its own timeouts.
-AT-E18 cell 4 proves a plain interpreter exit is not held by it. A long-lived host process (the
-platform) keeps that thread; the guide and `docs/postgres-target.md` say so.
+AT-E18 cell 4 proves only that the supervisor stops waiting when a userspace proxy keeps
+acknowledging the client socket. It does not prove server cleanup or plain interpreter exit.
+A long-lived host process (the platform) keeps an abandoned thread. On the CLI path only, if
+normal interpreter shutdown is held by that thread, flush user-visible output and server-admin
+logs, close the run `ExitStack`, then call `os._exit` with the already selected exit code.
 
 #### 4.4.3 Reason codes and the half-done transaction
 
@@ -591,11 +634,12 @@ match wins:
 | 1 | Trigger or failure while `committing` | reconcile: `published`, `publication_commit_not_visible` or `target_commit_unknown` (exit 3, also after a Ctrl-C) | committed or aborted, read from `pg_xact_status` |
 | 2 | Ctrl-C trigger | `KeyboardInterrupt` (exit 130) | the cancelled statement leaves it aborted; the worker sends `ROLLBACK` and closes; after a terminate or an abandoned worker the server aborts it when the backend ends or a server timeout passes. Never committed |
 | 3 | Deadline trigger, or a statement not started because the remaining deadline is zero or less | `deadline_exceeded` | as row 2 |
-| 4 | Control session not opened within its budget, or the write session connect fails, before `begin` | `target_unreachable` | none started |
+| 4 | Control session or write session not opened within its open budget, before `begin` | `target_unreachable` | none started |
 | 5 | A step fails and the probe cannot reach the server, or our `pid` is gone and we did not terminate it (connection lost, idle-in-transaction timeout, an administrator's terminate) | `target_unreachable` | aborted by the server when the backend ended |
-| 6 | A statement fails after running at least its applied `statement_timeout` (the per-statement cap, with the deadline not yet passed) | `deadline_exceeded` at the step | the server cancelled it; the worker rolls back |
-| 7 | A step marked "privilege re-check" fails and the probe finds a right or an ownership missing | `target_privilege_missing` at the step's location | aborted; the worker rolls back |
-| 8 | Any other step failure | the step's code in the registry below | aborted; the worker rolls back |
+| 6 | The failing `load` statement ran for at least `lock_timeout_s` | `target_busy` at `schema.table` | a lookup-row lock wait can have reached the lock timeout; the worker rolls back |
+| 7 | A statement fails after running at least its applied `statement_timeout` (the per-statement cap, with the deadline not yet passed) | `deadline_exceeded` at the step | the server cancelled it; the worker rolls back |
+| 8 | A step marked "privilege re-check" fails and the probe finds a right or an ownership missing | `target_privilege_missing` at the step's location | aborted; the worker rolls back |
+| 9 | Any other step failure | the step's code in the registry below | aborted; the worker rolls back |
 
 Failure-code registry: one table in `postgres_target_publish.py`, keyed by step name, the only
 source of a step's code (AT-E9 asserts the code for an injected fault at each step).
@@ -776,11 +820,13 @@ adds no set, no literal list and no CLI arm.
 - FK cycle between target tables: handled, because no FK exists during the load.
 - FK from a non-target table to a target table: `target_external_reference` at inspection.
 - FK from a target table to a non-target table (a lookup table not in the pipeline): kept in
-  place during the load (revision 5); the server checks each loaded row against the untouched
-  lookup table, a violation is `target_load_failed` at `schema.table`, rolled back. No lock
-  above the row-level `FOR KEY SHARE` of the check is taken on the lookup table and no right on
-  it is needed (the check runs as the lookup table's owner), so application reads and writes of
-  the lookup table continue during the publish.
+  place during the load. `SET CONSTRAINTS ALL IMMEDIATE` makes the server check each bounded
+  insert rather than queue deferred checks until commit. A violation is `target_load_failed`
+  at `schema.table`, rolled back. The check takes a row-level `FOR KEY SHARE` lock. Plain reads
+  and non-key updates continue. A delete or referenced-key update waits behind that lock. An
+  application `SELECT FOR UPDATE` can make the load wait. A load failure after
+  `lock_timeout_s` is `target_busy`. No lookup-table privilege is required because PostgreSQL
+  checks the FK through its internal trigger.
 - `NOT VALID` FK between target tables: re-created `NOT VALID`, not validated (as it was). A
   kept `NOT VALID` FK to a lookup table still checks new rows, as PostgreSQL does for any insert.
 - Deferrable FKs: re-created with their `DEFERRABLE` clause intact (constraint definition text).
@@ -847,7 +893,7 @@ adds no set, no literal list and no CLI arm.
 | Target relation missing, partitioned, with a rule, FORCE RLS | inspection refusal, exit 1, before any row read | untouched | AT-E5, AT-C8 |
 | Non-target table references a target table | `target_external_reference`, exit 1 | untouched | AT-E5 |
 | Non-owned `nextval` default, shared sequence, negative increment | `target_sequence_unsupported`, exit 1 | untouched | AT-E5 |
-| Missing TRUNCATE, INSERT, ownership, or the `CREATE` or table rights for the bookkeeping case found | `target_privilege_missing`, exit 1 | untouched | AT-E5 |
+| Missing TRUNCATE, INSERT, target-table ownership, sequence ownership, or the bookkeeping right for the case found | `target_privilege_missing`, exit 1 | untouched | AT-E5 |
 | Target is the source database | `target_same_database` (or compile `target_is_source`), exit 1, before any source row | untouched | AT-E7, AT-E2 |
 | Lossy or unsupported type, missing or extra column | `target_type_blocked` / `target_column_mismatch`, exit 1, report shows the rows | untouched | AT-E3, AT-E6 |
 | Guard fails (length, enum, null, range, sub-microsecond, non-integral) | `value_guard_failed` at `table.column`, exit 1 | untouched | AT-E6 |
@@ -858,7 +904,9 @@ adds no set, no literal list and no CLI arm.
 | Masked rows break a unique, exclusion, check or not-null constraint, or row count differs | `target_load_failed` at `schema.table`, rolled back, exit 3 | old contents | AT-E9 |
 | Masked rows break a FK between target tables | `target_constraint_failed` at the constraint, rolled back, exit 3 | old contents | AT-E9 |
 | Masked rows break a kept FK to a lookup table | `target_load_failed` at `schema.table`, rolled back, exit 3 | old contents | AT-E9 |
-| An application reads or writes a lookup table during the publish | not blocked; no lock is taken on it | n/a | AT-E9 |
+| An application reads or updates a non-key lookup column during the publish | continues; the FK check takes only `FOR KEY SHARE` on referenced rows | n/a | AT-E9 |
+| An application deletes or changes a referenced lookup key during the load | waits behind the FK check; it continues after commit or rollback | n/a | AT-E9 |
+| An application holds `SELECT FOR UPDATE` on a referenced lookup row | the load waits and then returns `target_busy` at `lock_timeout_s` | old contents | AT-E9 |
 | A right or an ownership is revoked between inspection and a step | probe re-check, `target_privilege_missing` at the step, rolled back, exit 3 | old contents | AT-E9 |
 | A trigger is added while `lock_writer` waits | `capture` (READ COMMITTED, after the locks) sees it, `target_changed`, rolled back; the new trigger is still enabled | old contents | AT-E12 |
 | Restart value above a sequence maximum | `target_sequence_failed`, rolled back, exit 3 | old contents, old sequence state | AT-E9 |
@@ -871,12 +919,13 @@ adds no set, no literal list and no CLI arm.
 | A step runs past its per-step cap with deadline left | server `statement_timeout`, rollback, `deadline_exceeded` at the step, exit 3 | old contents | AT-E9 |
 | Lock wait on a target table or an owned sequence | `lock_timeout` in `lock_tables` or `sequences`, `target_busy`, exit 3 | old contents | AT-E9 |
 | Ctrl-C before commit | supervisor cancels through the control session, rollback, exit 130, scratch removed | old contents | AT-E18, AT-C5 |
-| Ctrl-C or deadline while `COMMIT` is in flight, including a second Ctrl-C | no cancel; further SIGINT deferred; wait `commit_grace_s`, then reconcile; undecided is `target_commit_unknown`, exit 3, never 130 | new or old, reported correctly | AT-E18 |
+| Ctrl-C or deadline while `COMMIT` is in flight, including a second Ctrl-C | no cancel; the whole-call handler records SIGINT; wait `commit_grace_s`, then reconcile; undecided is `target_commit_unknown`, exit 3, never 130 | new or old, reported correctly | AT-E18 |
 | A second Ctrl-C during the cancel sequence | recorded only; the sequence runs to its end, then one `KeyboardInterrupt` | old contents | AT-E17 |
 | A control call (cancel, terminate, probe, reopen, status) blocks on a dead network or DNS | its own thread overruns its budget and is abandoned; the supervisor keeps its schedule | old contents, or reconcile's answer | AT-E17, AT-E18 |
-| Network stops forwarding mid-load (both directions) | keepalives and `tcp_user_timeout` end the client socket where they can; else the supervisor stops waiting; the process exits; the server ends the transaction by its timeouts | old contents | AT-E18 |
+| A userspace proxy keeps ACKing but stops forwarding mid-load | the supervisor stops waiting on schedule; this cell does not prove process exit or server cleanup | server outcome checked separately after the proxy releases | AT-E18 |
 | Control session cannot connect at publish start | `target_unreachable` within `control_open_budget_s`, exit 3; `open_write_session` never called | untouched, no lock taken | AT-E17 |
-| Control session lost during the publish, then a trigger | reopened once under the connect bound; if that fails, server `statement_timeout` ends the statement; `deadline_exceeded` | old contents | AT-E17 |
+| Write session open does not return | `target_unreachable` within `write_open_budget_s`, exit 3; a late open closes without `BEGIN` | untouched, no lock taken | AT-E18 |
+| Control session lost during the publish, then a trigger | the next required call reopens once within the current trigger-anchored window; if it fails, server `statement_timeout` ends the statement | old contents | AT-E17 |
 | Our pid reused by another backend, or our transaction already ended, when a cancel is sent | the `backend_xid` guard matches no row; nothing is signalled | unchanged by the cancel | AT-E17 |
 | Cancel arrives between two statements (no effect) | `stop` is checked before each step and re-sent each second during the grace | old contents | AT-E17 |
 | Worker blocked and deaf to cancel and terminate (network dead) | supervisor stops waiting after `2 * cancel_grace_s`, `deadline_exceeded` or 130; the abandoned worker can never send `COMMIT` | old contents (server aborts on its timeouts) | AT-E18 |
@@ -908,19 +957,19 @@ must turn its test red on the final slice head (class 9).
 | AT-E3 | `tests/unit/connectors/test_postgres_typemap.py`: one cell per row of 4.5 across all three steps, including the pandas-route rows (int64 to integer, float64 to bigint, `timestamp[ns]`), numeric without typmod and numeric(40, 2) as `unsupported`, float64 to real and `character(n)` as `lossy`, decimal scale change, generated column, and a DuckDB middle type that downgrades an otherwise exact pair; missing and extra columns; the document is canonical bytes, sorted, tagged `decoy-pg-type-map/v1`, and its schema snapshot matches | no module | drop the DuckDB step from the worst-class fold | E1 |
 | AT-E4 | `tests/sentry/test_postgres_session_choke_point.py` (new; 64b E1 merged no session sentry): in `connectors/`, `open_write_session` is called only from `postgres_target_publish.py`, and an `ATTACH` without `READ_ONLY` appears only in `_postgres_session.py`; seeded cells for each fail. Spy cell (a fake connection records executed text): the write session's `ATTACH` carries `connect_timeout=<connect_timeout_s(deadline_s)>`, the keepalive keywords and `tcp_user_timeout` (4.4.1) for both DSN forms and `ISOLATION_LEVEL 'READ COMMITTED'`, and the session never sets `pg_statement_timeout_millis` or `pg_idle_in_transaction_timeout_millis`. S2's `test_type_postgres_attach_has_one_site` stays green with the write mode added. Existing snapshot and 64b tests pass unchanged (negative control) | no write session | call `open_write_session` from `postgres_target.py`; set `pg_statement_timeout_millis` on the write session (spy cell red); drop the isolation option (spy cell red) | E1 |
 | AT-E16 | `tests/connectors/test_postgres_typemap_roundtrip.py` (pg): for every `exact` row of 4.5, a Parquet value goes through `open_write_session` `INSERT` into a column of that PostgreSQL type in a rolled-back transaction and is read back by libpq equal to the source | no write session | map `timestamp[us, tz]` as `exact` to `timestamp without time zone` | E1 |
-| AT-E5 | `tests/connectors/test_postgres_target_inspect.py` (pg): server version faked below 13 (catalog stub cell), missing relation, partitioned table, inheritance child, rule, FORCE RLS, external FK, non-owned `nextval` default, shared sequence, negative increment, a role without TRUNCATE, a non-owner role, and the three bookkeeping cases (schema `decoy_meta` absent and no database `CREATE`; schema present, table absent and no `CREATE` on the schema while the role has database `CREATE`; schema present, table absent, schema `CREATE` granted but no schema `USAGE`; table present without `UPDATE`; table present with table rights but no schema `USAGE`) all refuse with their codes; a role that holds only `REFERENCES` (no `UPDATE`, `DELETE`, `TRUNCATE` or `MAINTAIN`) on a lookup table that a target FK points at passes inspection (the inspection asks no right on lookup tables), `target_privilege_missing` for the three; each bookkeeping case also has a passing cell with the right granted; `pg_stat_user_tables` counters, `pg_namespace` and the catalog digest are unchanged afterwards | no `read_target` | skip the external-reference query | E2 |
+| AT-E5 | `tests/connectors/test_postgres_target_inspect.py` (pg): server version faked below 13 (catalog stub cell), missing relation, partitioned table, inheritance child, rule, FORCE RLS, external FK, non-owned `nextval` default, shared sequence, negative increment, a role that owns the target table but not its owned sequence, a role without TRUNCATE, a non-owner role, and the three bookkeeping cases (schema `decoy_meta` absent and no database `CREATE`; schema present, table absent and no `CREATE` on the schema while the role has database `CREATE`; schema present, table absent, schema `CREATE` granted but no schema `USAGE`; table present without `UPDATE`; table present with table rights but no schema `USAGE`) all refuse with their codes. A role that holds no application privilege on a lookup table that a target FK points at passes inspection because FK checks use an internal trigger. Each sequence and bookkeeping refusal has a passing cell with ownership or the required right granted. `pg_stat_user_tables` counters, `pg_namespace` and the catalog digest are unchanged afterwards | no `read_target` | skip the external-reference query; skip the sequence-owner check | E2 |
 | AT-E6 | `tests/connectors/test_postgres_target_plan.py` (pg): over-length varchar, unknown enum label, null into NOT NULL, numeric overflow, an int64 above the integer range, a float64 `1.5` into bigint, and a `timestamp[ns]` with a nanosecond part each refuse with `value_guard_failed` at `schema.table.column`; a blocked type refuses with `target_type_blocked`; no target write session opens (spy) | no `plan_target` | drop the sub-microsecond guard | E2 |
 | AT-E15 | `tests/unit/publication/test_pg_publication_row.py`: the bookkeeping row reader refuses a missing or unknown `format`, `"op\n"` as operation id, uppercase hex, a 63-character `result_id` and a bool in a text column; the writer's row round-trips; schema snapshot | no reader | read `format` with `startswith` | E2 |
 | AT-E7 | `tests/connectors/test_postgres_target_pipeline.py` (pg): a pipeline whose source and target references name the same database refuses `target_same_database` from `open_postgres_target`, and a spy on `stage_postgres_sources` and on the snapshot shows no call; a second database on the same server passes (negative control) | no probe | run the fingerprint compare after `stage_postgres_sources` || E3c |
 | AT-E8 | `tests/connectors/test_postgres_target_publish.py` (pg): three tables with an FK chain, a `NOT VALID` FK, a deferrable FK, a serial key, an `ALWAYS` identity, a stored generated column, an enum, a partial index, an expression index, a unique, a check, and triggers in states `O` (audit), `D`, `R` and `A`. After publish: Arrow readback equals the staged Parquet for every non-generated column; generated values match the server's recomputation; FK definitions and `convalidated` equal the pre-run values exactly; index and other constraint OIDs are unchanged (never dropped); every trigger's `tgenabled` equals its pre-run value; the audit table is empty; identity kinds are unchanged; an `INSERT` with default keys succeeds on every table; `ANALYZE` ran; an injected `ANALYZE` failure still returns `published` | no publish | skip `sequences` (the default-key insert hits a duplicate key) || E3b |
-| AT-E9 | same file (pg, timing cells `serial`): a fault injected at each of the thirteen steps (test seam), including `write_marker` and `commit`, asserting the code the failure-code registry (4.4.3) names for that step; a right revoked through a second session while the seam holds `truncate`, `load` and `sequences` (ownership): `target_privilege_missing` at the step; a masked child row that breaks an FK between target tables (`target_constraint_failed`) and one that breaks a kept FK to a lookup table (`target_load_failed`); a duplicate key against a kept unique index; a value the server refuses in `load`; a restart value above a `smallint` sequence maximum (`target_sequence_failed` from `check_sequences`); deadline cells: a `deadline_s=3` publish whose `load` is slowed server-side (a fault-seam `BEFORE INSERT` trigger that sleeps) ends `deadline_exceeded` within 3 s plus 5 s, and the same with the control session's cancel disabled by the seam (the server `statement_timeout` alone ends it); a per-statement cap cell (`statement_timeout_s=2`, deadline 600 s, slowed `load`): `deadline_exceeded` at `load` within 2 s plus 5 s, and the same on the second of two `load` statements (the cap is set before every statement, not once per step); lock cells: a peer transaction that called `nextval` on an owned sequence gives `target_busy` within `lock_timeout_s` plus 3 s; lookup cells: while a peer holds an open transaction that ran `SELECT` on the lookup table and another peer holds an open `UPDATE` of a non-key column of a lookup row, the publish succeeds, and a third peer's `SELECT` of the lookup table during `load` returns within 1 s; a role holding only `REFERENCES` on the lookup table publishes; a server-side `pg_terminate_backend` before `COMMIT` (`target_unreachable`). After every deadline and lock cell `pg_locks` holds no lock of our pid within the bound. Each leaves the catalog digest, the row digests of every target table, `last_value` and `is_called` of every owned sequence read from the sequence relation itself (`SELECT last_value, is_called FROM <schema>.<sequence>`, both quoted through the identifier rule; `pg_sequences` has no `is_called`), and the bookkeeping row equal to their pre-run values, with the expected code | no publish | reset sequences with `setval` instead of `RESTART WITH`; drop the per-step `SET LOCAL statement_timeout` (the per-step cap cell and the cancel-disabled deadline cell red); also drop the FKs to lookup tables in `drop_foreign_keys` (the lookup cells red: the drop waits on the peer's lock, and the third peer's read blocks); `SET LOCAL statement_timeout` once per step instead of per statement (second-statement cap cell red); map every step failure to one code (registry cells red) || E3b |
+| AT-E9 | same file (pg, timing cells `serial`): inject a fault at each of the thirteen steps and assert the failure-code registry result. Revoke a right while `truncate`, `load` and `sequences` are held and expect `target_privilege_missing`. Constraint cells cover a broken target-to-target FK (`target_constraint_failed`), a kept lookup FK (`target_load_failed`), and a `DEFERRABLE INITIALLY DEFERRED` lookup FK whose bad row fails during `load`, not `commit`. A duplicate key, a server-refused value and a sequence overflow get their registered codes. A load of more than 3,000,000 rows into a table with a lookup FK uses multiple statements of at most 1,000,000 rows, sums their affected counts, and succeeds. A test-only statement on the same writer backend records `sum(total_bytes)` from `pg_backend_memory_contexts` after each batch. Later samples must stay within 64 MiB of the first sample, so memory does not grow with the total row count. The PostgreSQL 16 test role gets `pg_read_all_stats` only in this cell. Deadline cells cover the whole deadline, the server-only bound, and the second bounded load statement. Lock cells cover an owned sequence lock and `SELECT FOR UPDATE` on a referenced lookup row. Both fail `target_busy` within `lock_timeout_s` plus 3 s. Plain lookup `SELECT` and non-key `UPDATE` continue during load. A server-side terminate before `COMMIT` gives `target_unreachable`. After every deadline and lock cell, our pid holds no lock within the bound. Each failure leaves every catalog, row, sequence and bookkeeping digest equal to its pre-run value | no publish | reset sequences with `setval`; remove `SET CONSTRAINTS ALL IMMEDIATE` (the deferred-FK cell reaches commit); remove the 1,000,000-row predicate (the statement-count and memory cells fail); map a load statement that reaches the lock timeout to `target_load_failed`; drop lookup FKs; set the statement cap once per step; map every step to one code | E3b |
 | AT-E10 | same file (pg): during a publish a reader runs, in a loop under READ COMMITTED, one statement returning the counts of all three tables; every observed triple is the old triple or the new triple. Recording cell: a REPEATABLE READ transaction that took its snapshot before the commit and reads after it sees empty tables (asserted, so a change in PostgreSQL behaviour is noticed) | no publish | `TRUNCATE` and `COMMIT` before the load || E3b |
 | AT-E11 | same file (pg): a subprocess publisher is SIGKILLed after the first table loads; within 5 s the target equals the pre-run state, its locks are gone and no `decoy_meta` row changed. A second publisher is SIGSTOPped inside the transaction with `idle_in_transaction_timeout_s=2`; its locks are gone within 2 s plus 3 s slack | no publish | omit `idle_in_transaction_session_timeout` || E3b |
 | AT-E12 | same file (pg): retry with the same operation and result returns `already_committed` with no write (`n_tup_ins` unchanged); same operation, other result: `publication_operation_conflict`; a bookkeeping row changed after `read_target`: `delivery_pointer_moved`; an index added after `read_target`, and one added by a hook that runs between `check_marker` and `lock_tables`: `target_changed`; a second publisher holding the advisory lock and an application transaction holding a row lock: `target_busy` within `lock_timeout_s + 2` s; two first publishes into two schemas with `decoy_meta` absent both succeed (global creation key). A trigger created on a target table by a peer while our `lock_writer` waits behind a second publisher's advisory lock: `target_changed` from `capture`, the target unchanged, and the new trigger's `tgenabled` still `O` afterwards. Every refusal leaves the target unchanged | no publish | capture the structure before `lock_tables`; drop `ISOLATION_LEVEL 'READ COMMITTED'` from the write `ATTACH` (trigger cell red: the capture misses the trigger); use `DISABLE TRIGGER USER` (trigger cell red when the capture is also stale) || E3b |
 | AT-E13 | same file (pg): the commit wrapper raises after a real `COMMIT` (`pg_xact_status` committed: `published`); raises instead of committing (aborted: `publication_commit_not_visible`, target unchanged); raises while the backend is held in progress (terminated through the guarded `terminate` of `_postgres_control.py`, then aborted: `publication_commit_not_visible`); raises and the reconcile connection times out against a blackhole address within `connect_timeout_s + 2` s (`target_commit_unknown`); the commit is attempted exactly once in every case | no reconcile | reconcile by reading the bookkeeping row || E3b |
 | AT-E14 | same file (pg): a DSN with a marker password, a wrong host, a staged row carrying a marker string that breaks a unique constraint, a partial-index predicate and a check constraint that each contain a marker literal and fail during the run: the markers are absent from the error `str`, `repr`, formatted traceback with chains, every log record captured at DEBUG, the receipt and the type-map document; `pg_debug_show_queries` reads `false` on the session; every raised error has `__cause__` and `__context__` `None`; a `threading.excepthook` spy records nothing from any worker or control thread; two more marker-password cases: a worker abandoned while its connect hangs (seam), then failing later with the DSN-bearing connect error, and a control-session reopen that fails with it: the marker is absent from every channel above and the spy | no publish | raise `PostgresTargetError` inside the `except` block in one step; let the worker thread body re-raise (excepthook spy red) || E3b |
-| AT-E17 | `tests/connectors/test_postgres_control.py` (pg, `serial`). Drives `run_supervised` with raw step lists (test-built statements on a read-write session) so it needs no publish code; fault seams hold a statement, block a control call, lift the server bound or make the worker ignore cancels: (1) Ctrl-C (`_thread.interrupt_main` from a timer) during a held statement raises `KeyboardInterrupt` within `cancel_grace_s` plus 2 s, our pid holds no lock; a second Ctrl-C sent during the cancel sequence is recorded, not raised, and exactly one `KeyboardInterrupt` follows the sequence; (2) the control session cannot be opened (seam blocks the open forever): `target_unreachable` within `control_open_budget_s` plus 1 s; spies show the write-session opener never called and no SQL sent on any write session; (3) the seam lifts the server `statement_timeout` (so only the control path can end the statement), a peer terminates the control session, then the deadline passes: the supervisor reopens it and the cancel ends the statement, `deadline_exceeded`; with the reopen also blocked and the server bound restored, the server `statement_timeout` ends it, `deadline_exceeded` within the item 9 bound; (4) pid-reuse guard: `cancel` and `terminate` with our pid and a wrong xid signal nothing (a peer `pg_sleep` on that pid keeps running), and after our transaction ends they match no row; (5) each control call blocked by a seam (cancel, terminate, probe, status) overruns its `control_call_s` budget and the supervisor still returns on its schedule; (6) a cancel landing between statements: `stop` makes the next statement not start, `deadline_exceeded`; (7) a peer terminates our backend between steps (as `idle_in_transaction_session_timeout` would): the probe finds the pid gone, `target_unreachable`; (8) `stop` is set first: an exception injected between the trigger and the supervisor lock still leaves `stop` set, and the worker's next statement does not start; (9) sentry cell: `pg_cancel_backend` and `pg_terminate_backend` appear in `src/` only in `_postgres_control.py`, and only the supervisor's code path calls `ControlSession` (no call from the worker body), with seeded cells that fail | no control module | drop the `backend_xid` condition (cell 4 red); open the control session after the write session (cell 2 red: the opener spy is called); call a control statement inline on the supervisor thread (cell 5 red: the schedule slips); set `stop` after taking the lock (cell 8 red); restore the default SIGINT handler during the sequence (cell 1 red: a second `KeyboardInterrupt` escapes) | E3a |
-| AT-E18 | `tests/connectors/test_postgres_target_supervised.py` (pg, `serial`), the publish under the supervisor: (1) Ctrl-C during a slowed `load` raises `KeyboardInterrupt` within `cancel_grace_s` plus 2 s, the target digests are unchanged and `pg_locks` holds no lock of our pid; (2) commit race: a trigger while the seam holds `COMMIT` sends no cancel or terminate (spy on the control session), and the result comes from reconcile (`published` when the seam releases the commit; `target_commit_unknown` when reconcile's calls are blocked, within `commit_grace_s + reconcile_budget_s` plus 2 s); (3) two Ctrl-C presses while the seam holds `COMMIT`: the result is `published`, `publication_commit_not_visible` or `target_commit_unknown`, never `KeyboardInterrupt`, and the second press is recorded; (4) dead network, subprocess cell: the publisher runs in a child process whose write and control sessions go through a test TCP proxy; the proxy stops forwarding in both directions mid-`load`; the child's `publish_target` returns `deadline_exceeded` within the item 9 bound and the child process exits (plain interpreter exit, no `os._exit`) within the bound plus 10 s; an admin session straight to the server sees our locks gone within `statement_timeout` of the cut and the target unchanged; (5) a worker that ignores cancel and terminate (seam blocks in Python): `publish_target` returns `deadline_exceeded` within `deadline_s + 2 * cancel_grace_s + 2`; the seam then releases the worker, which rolls back and never sends `COMMIT` (target digests and bookkeeping row unchanged 5 s later); (6) the write `ATTACH` carries `ISOLATION_LEVEL 'READ COMMITTED'` and the keepalive keywords (spy) | no supervised publish | skip the `stop` check before `COMMIT` (cell 5 red: the released worker commits); cancel without checking `committing` (cell 2 red); let a Ctrl-C during commit raise `KeyboardInterrupt` (cell 3 red); drop the keepalive keywords and the supervisor's call threads (cell 4 red: the child does not return in the bound) | E3b |
+| AT-E17 | `tests/connectors/test_postgres_control.py` (pg, `serial`). Drives `run_supervised` with raw step lists and fault seams: (1) Ctrl-C during a held statement triggers cancellation; a second press is recorded, not raised, and exactly one `KeyboardInterrupt` follows. (2) A blocked initial control open gives `target_unreachable` within `control_open_budget_s`, with no write open or SQL. (3) After the server bound is lifted and a peer kills the control session, the deadline causes one reopen and cancellation. If reopen blocks, the server bound ends the statement on schedule. (4) Wrong-xid and ended-transaction signals match no backend. (5) For blocked cancel, terminate, probe and status calls, the first overrun marks the session dead, the next required call uses the single reopen, and no later call reopens. Each wait equals `min(budget, time left in its trigger-anchored window)`. The reopen cannot extend the cancel, terminate or reconcile window. (6) A cancel between statements stops the next statement. (7) A peer terminate gives `target_unreachable`. (8) An exception after the trigger still leaves `stop` set. (9) Sentries restrict backend signals to `_postgres_control.py`, restrict `ControlSession` to the supervisor, and permit only `Deadline.arm_expiry_only` on the publish path. A spy proves that this arm sets `expired` without calling `conn.interrupt()` | no control module | drop the xid guard; open control after write; reuse a timed-out session; start a reopen window after the failed call; call control inline; set `stop` after the lock; call the interrupting deadline arm | E3a |
+| AT-E18 | `tests/connectors/test_postgres_target_supervised.py` (pg, `serial`), the publish under the supervisor: (1) Ctrl-C during a slowed `load` raises `KeyboardInterrupt` within the bound, with unchanged digests and no lock from our pid. (2) A trigger during `COMMIT` sends no backend signal and uses reconcile. (3) Two Ctrl-C presses during `COMMIT` never raise `KeyboardInterrupt`; the second is recorded. (4) A userspace TCP proxy keeps ACKing client traffic but stops forwarding during `load`. `publish_target` returns `deadline_exceeded` within the item 9 bound. The cell asserts only that the supervisor stops waiting. It does not assert child-process exit, server cleanup or target state until the proxy releases. A separate CLI seam holds an abandoned daemon at shutdown and proves the CLI flushes output and logs, closes its run `ExitStack`, then uses `os._exit` with the selected code. (5) A worker that ignores cancel and terminate returns on schedule, then rolls back without commit when released. (6) The write `ATTACH` carries READ COMMITTED and keepalives. (7) With no prior deadline or Ctrl-C trigger, hold reconcile after a commit error, press Ctrl-C, and prove the entry-installed handler records it as the trigger. The result comes from reconcile, never an escaping `KeyboardInterrupt`, the press does not extend the original reconcile window, and the old handler is restored. (8) A blocked write-session open gives `target_unreachable` within `write_open_budget_s`; a late open closes without `BEGIN`, and no target SQL or lock exists | no supervised publish | skip the stop check before commit; signal while committing; install the SIGINT handler only after a trigger; restart the reconcile window on Ctrl-C; omit the write-open budget; claim normal interpreter shutdown for an abandoned daemon | E3b |
 
 ### 8.2 CLI
 
@@ -946,7 +995,7 @@ package root is at its fan-out cap and gets no new module):
 |---|---|---|---|
 | `src/decoy_engine/config/_targets.py` | changed (`PostgresTarget`, union, identity arm) | Config models | `S3Target`, `GCSTarget` |
 | `src/decoy_engine/plan/checks/_postgres_targets.py` | new | Plan compile and checks: `plan/checks/_<topic>.py` | 64b `plan/checks/_postgres_sources.py` |
-| `src/decoy_engine/connectors/_postgres_session.py` | changed (adds `open_write_session`; module created by 64b E1, merged #624) | Connectors (private helper of the package) | `postgres_snapshot.py` |
+| `src/decoy_engine/connectors/_postgres_session.py` | changed (adds `open_write_session` and `Deadline.arm_expiry_only`; module created by 64b E1, merged #624) | Connectors (private helper of the package) | `postgres_snapshot.py` |
 | `src/decoy_engine/connectors/postgres_catalog.py` | changed (adds `server_fingerprint`; module created by 64b E1, merged #624) | Connectors | `postgres_snapshot.py` |
 | `src/decoy_engine/connectors/postgres_typemap.py` | new | Connectors: `connectors/<name>.py` | `postgres_snapshot.py` |
 | `src/decoy_engine/connectors/postgres_target_catalog.py` | new (catalog SQL, `capture_structure`, bookkeeping row declaration) | Connectors | `postgres_catalog.py` |
@@ -1031,9 +1080,10 @@ CLI (flat `src/decoy/cli/` gets no new file):
 Engine: 6 new modules (`postgres_typemap.py` about 330, `postgres_target_catalog.py` about 420,
 `postgres_target.py` about 330, `postgres_target_publish.py` about 580 (step table, failure-code
 registry, worker body, reconcile), `_postgres_control.py` about 360 (control session, guarded
-signals, per-call budget threads, supervisor, SIGINT deferral), `execution/pipeline/_postgres_target.py`
-about 170), 7 changed modules (about 240 lines, including `open_write_session` about 60, the S2
-helper's keepalive keywords about 15 and `server_fingerprint` about 30), 12 new test files
+signals, per-call budget threads, supervisor, whole-call SIGINT recording), `execution/pipeline/_postgres_target.py`
+about 170), 7 changed modules (about 240 lines, including `open_write_session` about 60,
+`Deadline.arm_expiry_only` in the existing timer core, the S2 helper's keepalive keywords about
+15 and `server_fingerprint` about 30), 12 new test files
 (about 2,400 lines), one doc page. New public names: the sixteen in section 6.
 
 CLI: 1 new module (about 220), 5 changed modules (about 110), one test folder (about 750 lines),
@@ -1054,7 +1104,7 @@ listed separately.
 | E0 | engine | Spike (PR #667): `test_postgres_write_spike.py` with raw DuckDB calls, `pg-gate` file list row, a record of each cell's result in `docs/records/2026-11-18-f01-e0-spike.md`. Revision 4 adds to the open PR: cell e as a strict recording cell, cell e3 (five sub-cells, e3.5 added in revision 5), the record's verdict updated to the new mechanism. No product code | R1 (test only; result gates E1) | 0 | ~300 plus ~150 | AT-E0 | 64b E1 merged (lane, extension in CI) | `pg-gate` green with zero skips on the final head (cell e no longer red); the cell-a and e3 mutations run on CI and are recorded; if e3 fails, E1 does not start and the deadline design goes back to the planner |
 | E1 | engine | `open_write_session` in 64b's `_postgres_session.py`, its ATTACH built through S2's single site and helper with `ISOLATION_LEVEL 'READ COMMITTED'`; S2's helper extended in place with the keepalive and `tcp_user_timeout` keywords (S2's AT-B2 expected strings updated); `PostgresTarget` and the identity arm; `plan/checks/_postgres_targets.py`; `postgres_typemap.py` with the three-step fold and the report document; config and connector codes with outcomes (`since=UNRELEASED`); `DELIVERABLE_TARGET_TYPES` token; engine target writer dispatch refusal (`target_postgres.unsupported_command`); choke-point sentry; `pg-gate` file list; changelog fragment | R2 (shared connector code, config union, codes) | ~620 | ~650 | AT-E1, AT-E2, AT-E3, AT-E4, AT-E16 | E0 (#667) merged with e3 green; capped-worker S2 merged; 64b E1 and E2 merged; DELIV E1a (merged) | config serializer and shared connector module: full suite once on the slice head, diffed against the saved main baseline; `pg-gate` green |
 | E2 | engine | Read-only half: `postgres_target_catalog.py` (catalog SQL, `capture_structure`, digest, sequence and privilege checks, bookkeeping row declaration and strict reader with its snapshot), `postgres_target.py` (`read_target`, `plan_target`, value guards); changelog fragment | R2 (data handling, secrets) | ~760 | ~550 | AT-E5, AT-E6, AT-E15 | E1 | T1 plus `pg-gate`; mutations on the reader and the guards |
-| E3a | engine | Control and supervision: `_postgres_control.py` (control session, guarded cancel and terminate, probe with the privilege re-check query, per-call budget threads, `run_supervised` with `stop`, `committing`, SIGINT deferral); file-access and physical-seam registry rows; `pg-gate` file list; changelog fragment `changelog.d/f01-e3a.md`. 1 production module plus registries | R2 (concurrency, signals to database backends, value leaks) | ~360 | ~550 | AT-E17 | E2 | sentry registries and CI lane list (test config trigger): full suite once on the slice head against the saved baseline; `pg-gate` green; every AT-E17 mutation re-run on the final head |
+| E3a | engine | Control and supervision: `_postgres_control.py` (control session, guarded cancel and terminate, probe with the privilege re-check query, per-call budget threads, `run_supervised` with `stop`, `committing`, whole-call SIGINT recording); `_postgres_session.py` adds `Deadline.arm_expiry_only` on the existing timer core; file-access and physical-seam registry rows; `pg-gate` file list; changelog fragment `changelog.d/f01-e3a.md`. 2 production modules plus registries | R2 (concurrency, signals to database backends, value leaks) | ~360 | ~550 | AT-E17 | E2 | sentry registries and CI lane list (test config trigger): full suite once on the slice head against the saved baseline; `pg-gate` green; every AT-E17 mutation re-run on the final head |
 | E3b | engine | Write path: `postgres_target_publish.py` (thirteen steps, per-statement `SET LOCAL` bounds, failure-code registry, worker body, rollback, `pg_xact_status` reconcile, `ANALYZE`); `pg-gate` file list; changelog fragment `changelog.d/f01-e3b.md`. 1 production module | R2 (destructive database write, publication, value leaks) | ~580 | ~1,250 | AT-E8, AT-E9, AT-E10, AT-E11, AT-E12, AT-E13, AT-E14, AT-E18 | E3a | CI lane list (test config trigger): full suite once on the slice head against the saved baseline; `pg-gate` green; every E3b mutation in section 8 re-run on the final head |
 | E3c | engine | Pipeline and public surface: `server_fingerprint`; `execution/pipeline/_postgres_target.py`; `connectors/__init__.py` and `decoy_engine/__init__.py` exports and frozen-surface rows; `docs/postgres-target.md` (the abandoned-worker note of 4.4.2; `pg-gate` runs on Linux only; `tcp_user_timeout` is Linux only, keepalives elsewhere; on Windows an abandoned worker can hold a staged Parquet file open, so scratch removal tolerates it), `docs/index.md`; changelog fragment `changelog.d/f01-e3c.md` | R2 (frozen surface, source-before-target ordering) | ~250 plus docs | ~200 | AT-E7 | E3b | frozen surface: full suite once on the slice head against the saved baseline; `pg-gate` green |
 | REL | engine | Engine release 0.29.0 through the daily release train; the release commit stamps the new codes, `REGISTRY_VERSION` and the manifests | R1 | small | none | release checks | E3c; 0.28.0 (64b) cut | release train rules |
@@ -1119,10 +1169,10 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
 - Loading with unique indexes in place is slower than drop and re-create on very large tables:
   accepted for V1 (H6); index dropping is a V2-LOG speed-up.
 - Large loads fill WAL inside one transaction. Documented capacity note in the guide.
-- The masked data breaks a target FK to an untouched lookup table. The FK stays in place
-  during the load (revision 5), so the run fails with `target_load_failed` at that table and
-  rolls back; the guide tells the user to add
-  the lookup table to the pipeline as passthrough.
+- The masked data breaks a target FK to an untouched lookup table. Step 1 makes the constraint
+  immediate, so the bounded insert fails in `load` with `target_load_failed` and rolls back.
+  If the check waits at least `lock_timeout_s`, it fails `target_busy`. The guide tells the user
+  to add the lookup table to the pipeline as passthrough.
 - A builder reads the PostgreSQL error message to classify a failure "more precisely": AT-E14
   plants values in a unique violation, a partial index and a check and fails on any leak; the
   reviewer checks that only exception type names are read.
@@ -1172,7 +1222,7 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
 | Q13 | Which engine release carries the engine half | 0.29.0, the release after 64b's 0.28.0, or the first release cut after E3c merges |
 | Q14 | `ANALYZE` after the publish | Yes, after commit; a failure is a warning, never a failed run |
 | Q15 | If E0 shows DuckDB cannot hold every step in one PostgreSQL transaction | E1 does not start. Switching to psycopg 3 is an **owner decision**: it adds a dependency (supply-chain approval), re-costs E3 (a different session, cursor and error model) and re-derives the type map (the middle DuckDB step goes away and psycopg adaptation replaces it). The plan is amended only after that decision; no silent fallback. Revision 4: not triggered. E0 cells a, b, d, f, g, i and j hold the one-transaction design; only the deadline assumption (cell e) failed, and it is replaced with in-repo mechanisms that need no new dependency (4.4.1, 4.4.2). If cell e3 fails, the deadline design returns to the planner before this question is reopened |
-| Q16 | Timeouts | Statement 3600 s capped per statement by the remaining deadline (server `SET LOCAL statement_timeout`), whole publish 21600 s, lock wait 30 s, idle in transaction 60 s, connect S2's `connect_timeout_s(deadline_s)` (10 s) on every session, cancel grace 10 s (cancel, then terminate, then stop waiting), commit grace 30 s, control-session statements 5 s; no config override in V1 |
+| Q16 | Timeouts | Statement 3600 s capped per statement by the remaining deadline, whole publish 21600 s, lock wait 30 s, idle in transaction 60 s, libpq connect 10 s, control and write open budgets 15 s, cancel grace 10 s, commit grace 30 s, control statements 5 s. Every post-trigger wait is capped by its trigger-anchored window. No config override in V1 |
 | Q17 | Minimum target server | PostgreSQL 13 (`pg_current_xact_id` and `pg_xact_status` with `xid8`); refused below. `client_connection_check_interval` is set only on 14 and later |
 | Q18 | Drop and re-create indexes for load speed? | No in V1 (H6 ruling): only foreign keys are dropped; indexes and primary key, unique and exclusion constraints stay in place. Index dropping is a V2-LOG speed-up |
 | Q19 | `--resume` with a Postgres target | Refused in V1, exit 1, matching 64b; the same landing rule as 64b (whichever of F01 C1 and the F23 `--resume` CLI half lands second adds the refusal and test) |
@@ -1188,10 +1238,10 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
   rejected (S2 2.3). If S2's AT-B3 user-value cell fails (the extension keeps the first
   `connect_timeout`), S2's fallback applies to F01 unchanged.
 - Q20 (read-side deadline) is open for the owner.
-- Process exit with an abandoned worker (revision 5): AT-E18 cell 4 checks that a plain
-  interpreter exit is not held by a worker blocked in the extension. If it is held on some
-  platform, the E3b builder stops and reports; the fallback is that the CLI ends with
-  `os._exit` after its run `ExitStack` has closed (C2), a CLI-only change.
+- Process exit with an abandoned worker: AT-E18 cell 4 proves only that the supervisor stops
+  waiting. The CLI-only shutdown cell proves the fallback. The CLI flushes output and logs,
+  closes its run `ExitStack`, and then calls `os._exit` with the selected code. The platform
+  does not use this fallback.
 - S2's AT-B2 expected strings gain the keepalive suffix in E1. If S2 has not merged when E1
   starts, the keepalive keywords go into S2 instead, and E1 only uses them.
 - Whether the CLI install policy needs a row for anything new: nothing new is installed beyond
