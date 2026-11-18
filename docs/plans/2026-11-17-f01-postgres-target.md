@@ -6,14 +6,24 @@ Roadmap row 86: PostgreSQL application-ready write target (staging, constraint, 
 sequence restore, atomic publish) and the type-mapping report. Owner 2026-11-06: in CLI V1. The
 row comes after the Phase 2 rows and F22 (row 59). In practice it builds on three plans: F22
 publication (receipts, `result_id`, outcome tokens, merged), DELIV (row 61: the CLI delivery sink
-and its `SinkStage` protocol) and CLI-DB-SRC (row 64b, engine branch `origin/plan/cli-db-src` at `59343ebd`: the shared
+and its `SinkStage` protocol) and CLI-DB-SRC (row 64b, engine branch `origin/plan/cli-db-src` at `6adca7e7b` (was `59343ebd` before the rewrite): the shared
 `connectors/_postgres_session.py`, the Postgres secret reference, registry-derived exit classes,
 the `pg-gate` CI lane and `decoy setup --postgres`).
 
-Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1, R2), `development-loop.md` (PLAN: proportion, guarantee, size, design notes, choke point, placement, established solutions; REMEDIATE), `destructive-operations.md` (truncate and overwrite of a database target), `data-and-migrations.md`, `security.md`, `config-secrets-and-supply-chain.md` (secret sourcing, redaction, no new dependency), `cross-cutting-concerns.md` (choke points), `architecture.md` (layout, fan-out, layers), `api-and-compatibility.md` (additive union member, frozen surfaces), `testing.md` (test depth T0 to T4, escalation triggers), `observability-and-resilience.md` (timeouts, reconcile), `reuse-first.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md` (classes 1 to 11); engine and CLI `CODEMAP.md` "Where Things Go"; CLI `docs/ROADMAP.md` rows 59, 61, 62, 64b, 85 and 86; engine plans `2026-10-29-f22-atomic-idempotent-publication.md` (database adapter contract, its line 124), `2026-10-30-f22-publication-replan.md` (rev 11), `plan/deliv:2026-11-12-deliv.md` (rev 3.5) and `plan/cli-db-src:2026-11-17-cli-db-src.md` (engine branch `origin/plan/cli-db-src`, head `59343ebd`); vault notes `10_Projects/decoy/v2/duckdb/12-database-writeback.md` (earlier V2 proposal, superseded here) and the MASTER F01 section. Code read from `origin/main` on 2026-11-17 (engine `902968682`, tag `v0.27.0`; CLI `5b49510`, pin `decoy-engine==0.27.0`).
+Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R1, R2), `development-loop.md` (PLAN: proportion, guarantee, size, design notes, choke point, placement, established solutions; REMEDIATE), `destructive-operations.md` (truncate and overwrite of a database target), `data-and-migrations.md`, `security.md`, `config-secrets-and-supply-chain.md` (secret sourcing, redaction, no new dependency), `cross-cutting-concerns.md` (choke points), `architecture.md` (layout, fan-out, layers), `api-and-compatibility.md` (additive union member, frozen surfaces), `testing.md` (test depth T0 to T4, escalation triggers), `observability-and-resilience.md` (timeouts, reconcile), `reuse-first.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md` (classes 1 to 11); engine and CLI `CODEMAP.md` "Where Things Go"; CLI `docs/ROADMAP.md` rows 59, 61, 62, 64b, 85 and 86; engine plans `2026-10-29-f22-atomic-idempotent-publication.md` (database adapter contract, its line 124), `2026-10-30-f22-publication-replan.md` (rev 11), `plan/deliv:2026-11-12-deliv.md` (rev 3.5) and `plan/cli-db-src:2026-11-17-cli-db-src.md` (engine branch `origin/plan/cli-db-src`, head `6adca7e7b`); vault notes `10_Projects/decoy/v2/duckdb/12-database-writeback.md` (earlier V2 proposal, superseded here) and the MASTER F01 section. Code read from `origin/main` on 2026-11-17 (engine `902968682`, tag `v0.27.0`; CLI `5b49510`, pin `decoy-engine==0.27.0`).
 
 Anchors: a path with no prefix is in decoy-engine; a path with the prefix `C:` is in the CLI
 repository (decoy).
+
+Re-anchor (2026-11-18, after the history rewrite; old SHAs map through the rewrite's
+`sha-map.tsv`): engine `origin/main` `84cc7d798`, CLI `origin/main` `9023c606`. Codex round 3 gave
+GO on `6bfc358a4`. Since then 64b E1 MERGED (engine #624, `9180a7985`): `_postgres_session.py`
+and `postgres_catalog.py` exist, and the citations below now point at the merged names
+(`quote_ident` and `sql_literal`, not `_q` and `_lit`; the `Deadline` class and
+`raise_for_interrupt` for the deadline and interrupt mapping; `POSTGRES_SOURCE_USAGE_CODES` derived
+from the registry). 64b E1 added no session sentry, so AT-E4's sentry is new. 64b E2
+(`POSTGRES_DSN_V1`), E3, C1 and C2 are not merged; F01 E1 still waits on 64b E2. F22 b2 (#622)
+moved `publish_unit` and `publish_tables`. No design changes.
 
 Risk: R2 overall (data handling, a destructive write to a database, credentials, value leaks).
 The destructive write is the product doing what the user configured at run time, not a
@@ -163,7 +173,7 @@ hit there; one V2 proposal in the wiki, `12-database-writeback.md`).
 | git `update-ref <ref> <new> <old>` (DELIV 3, the `LATEST` compare-and-swap) | Write last with the expected old state | The publish refuses when the bookkeeping row differs from what the read-only inspection saw (`delivery_pointer_moved`) |
 | pg_dump (search path set to `pg_catalog` since CVE-2018-1058) | Catalog definition text is captured and executed with an empty search path so every name is schema-qualified | Capture and re-create both run under `SET LOCAL search_path = pg_catalog` in the locked transaction (H5) |
 | PostgreSQL docs, "Populating a Database" (14.4) | Run `ANALYZE` after a bulk load | `ANALYZE` of the target tables after commit; a failure is a warning (Q14) |
-| In-repo: `postgres_snapshot` (`src/decoy_engine/connectors/postgres_snapshot.py:217`, `:246`, `:271`) and 64b's `connectors/_postgres_session.py` | Offline extension load, DuckDB connection with auto-install off, constant catalog SQL, coded value-free errors | Reused: F01 adds `open_write_session` beside 64b's `open_read_session` |
+| In-repo: 64b's `connectors/_postgres_session.py` (`open_connection` `:177`, `load_postgres_extension` `:211`, `attach_read_only` `:235`) and the constant catalog SQL in `connectors/postgres_catalog.py:34` | Offline extension load, DuckDB connection with auto-install off, constant catalog SQL, coded value-free errors | Reused: F01 adds `open_write_session` beside 64b's `open_read_session` |
 
 Rejected: a staging schema plus `ALTER SCHEMA ... RENAME` swap (the V2 proposal in the wiki and
 dbt's table swap). It needs every index, constraint, sequence, trigger, grant and owner rebuilt
@@ -178,12 +188,12 @@ the ordered publish steps and reconcile. Everything else is reuse.
 
 | Need | Existing mechanism (reused, not copied) | Anchor |
 |---|---|---|
-| DuckDB connection with offline extension load, identifier rule | `open_read_session`, `validate_identifier`, `_q`, `_lit` in `connectors/_postgres_session.py` (64b E1 moves them out of the snapshot module) | `src/decoy_engine/connectors/postgres_snapshot.py:74`, `:136`, `:204`, `:217`, `:246` (origin today) |
-| Coded value-free error | `PostgresSnapshotError` (the target error subclasses it, so the existing CLI arm and code owner hold) | `src/decoy_engine/connectors/postgres_snapshot.py:116` |
-| Type classes of the source side | `_PLAIN_TYPES`, `_classify` (the type map reads the same lists) | `src/decoy_engine/connectors/postgres_snapshot.py:92`, `:285` |
-| Secret reference and `postgres-dsn-v1` | `prepare_secret`, `POSTGRES_DSN_V1` (64b E1) | `src/decoy_engine/secret_providers/_requirements.py:42` |
-| Catalog reads of a source | `connectors/postgres_catalog.py` (64b E1); F01 E3 adds the public `server_fingerprint` beside `relation_columns` | 64b plan 4.3 step 4 |
-| Exit class of connector codes | Registry outcome per spec (`CONFIGURATION` or `EXECUTION`) and the set 64b derives from the registry at import | 64b plan 4.3 "Exit classification" |
+| DuckDB connection with offline extension load, identifier rule | `open_read_session`, `validate_identifier`, `quote_ident`, `sql_literal` in `connectors/_postgres_session.py` (64b E1, merged #624) | `src/decoy_engine/connectors/_postgres_session.py:253`, `:98`, `:106`, `:111` |
+| Coded value-free error | `PostgresSnapshotError` (the target error subclasses it, so the existing CLI arm and code owner hold) | `src/decoy_engine/connectors/_postgres_session.py:59` |
+| Type classes of the source side | `_PLAIN_TYPES`, `_classify` (the type map reads the same lists) | `src/decoy_engine/connectors/postgres_snapshot.py:119`, `:210` |
+| Secret reference and `postgres-dsn-v1` | `prepare_secret`, `POSTGRES_DSN_V1` (64b E2, not merged yet; a `SecretRequirement` beside the existing ones) | `src/decoy_engine/secret_providers/_preflight.py:259`, `_requirements.py:42` |
+| Catalog reads of a source | `connectors/postgres_catalog.py` (64b E1, merged #624); F01 E3 adds the public `server_fingerprint` beside `relation_columns` | `src/decoy_engine/connectors/postgres_catalog.py:95` |
+| Exit class of connector codes | Registry outcome per spec (`CONFIGURATION` or `EXECUTION`) and the set 64b derives from the registry at import (`POSTGRES_SOURCE_USAGE_CODES`) | `src/decoy_engine/connectors/postgres_snapshot.py:93`, `:104` |
 | Result identity of the staged Parquet | `Artifact`, `compute_result_id` | `src/decoy_engine/publication/_descriptor.py:122`, `:224` |
 | Receipt and outcome tokens | `CommitReceipt`, `Outcome`, `raise_for_outcome`, `PublicationRefused` | `src/decoy_engine/publication/_types.py:58`, `:128`, `:223` |
 | Publication reason codes | `publication_operation_conflict`, `publication_commit_not_visible`, `publication_target_occupied`, `delivery_pointer_moved` | `src/decoy_engine/reasons/decoy/_core.py:213`, `:220`, `:227`; `src/decoy_engine/reasons/decoy/_delivery.py:37` |
@@ -194,7 +204,7 @@ the ordered publish steps and reconcile. Everything else is reuse.
 | CLI delivery sink and stage protocol | `DeliverySink`, `SinkStage` (`abort`, `deliver(decision, before_visible)`), `PublishedOutput`, `PreVisible` (DELIV C2a) | DELIV plan 4.6 |
 | CLI exception-to-exit map | `exit_code_for` and 64b's registry-derived arm for `PostgresSnapshotError` | `C:src/decoy/cli/exit_codes.py:163` |
 | `--resume` refusal for Postgres endpoints | 64b's flag refusal (Q13 of that plan), extended to targets | 64b plan 4.4 |
-| Postgres CI lane, fixtures, zero-skip guard | `pg-gate` job, `pg_dsn`, `ext_dir`, `PgAdmin`, `DECOY_REQUIRE_PG`, `junit_ran.py` (64b E1) | `tests/connectors/conftest.py:52` |
+| Postgres CI lane, fixtures, zero-skip guard | `pg-gate` job, `pg_dsn`, `ext_dir`, `PgAdmin`, `DECOY_REQUIRE_PG`, `junit_ran.py` (64b E1, merged #624) | `tests/connectors/conftest.py:74`, `:87`, `:101`; `.github/workflows/ci.yml:388` |
 | Extension install | `decoy setup --postgres` (64b C2) | 64b plan 4.4 |
 
 No second copy of the connection setup, the identifier rule, the secret resolution, the result
@@ -374,8 +384,8 @@ Reconcile after `commit` raises (H1): a new read-only session, opened under
 
 The engine never retries a commit.
 
-Deadline: a timer interrupts DuckDB at `deadline_s`, as the snapshot does
-(`src/decoy_engine/connectors/postgres_snapshot.py:470`); E0 cell e proves the server query is
+Deadline: a timer interrupts DuckDB at `deadline_s` through the shared `Deadline` class
+(`src/decoy_engine/connectors/_postgres_session.py:116`, mapped by `raise_for_interrupt` `:141`); E0 cell e proves the server query is
 cancelled; the transaction rolls back; `deadline_exceeded`. A client that stops responding
 inside the transaction (SIGSTOP, a hung host) releases its locks after
 `idle_in_transaction_timeout_s` (M1).
@@ -505,7 +515,7 @@ adds no set, no literal list and no CLI arm.
   `publication_commit_not_visible`, `publication_target_occupied`.
 - 4: a post-scan block withholds the run (DELIV 4.2 step 4); the target is not opened for write.
 - 5: capacity refusal from the gate, before any target write.
-- 130: Ctrl-C before the commit (rolled back, `src/decoy_engine/connectors/postgres_snapshot.py:470` interrupt pattern).
+- 130: Ctrl-C before the commit (rolled back, the `raise_for_interrupt` mapping in `src/decoy_engine/connectors/_postgres_session.py:141`).
 
 ### 5.2 Routes
 
@@ -522,7 +532,7 @@ adds no set, no literal list and no CLI arm.
   CLI I/O choke point `_require_local_io_endpoints` (`C:src/decoy/cli/run/_execute.py:238`)
   with `target_postgres.unsupported_command`, exit 1. Engine callers that pass a Postgres target
   descriptor to a file writer meet the refusal in the engine target writer dispatch (E1).
-- `publish_tables` and `publish_unit` (`src/decoy_engine/publication/_publish.py:199`, `:338`):
+- `publish_unit` and `publish_tables` (`src/decoy_engine/publication/_publish.py:221`, `:419`):
   never reached for a Postgres target; the CLI stage calls the handle instead.
 
 ### 5.3 FK shapes
@@ -557,7 +567,7 @@ adds no set, no literal list and no CLI arm.
 - Run folder records (RESULT document, run record): built from the declared config; outputs as
   `postgres:<schema>.<table>`.
 - Engine log lines: `postgres_target step=<name> code=<code> location=<loc>` and
-  `postgres_target published relations=<n>`; nothing else (`src/decoy_engine/connectors/postgres_snapshot.py:522` style).
+  `postgres_target published relations=<n>`; nothing else (`src/decoy_engine/connectors/postgres_snapshot.py:408` style).
 - Receipt (`CommitReceipt`): outcome, operation id, reason code, `result_id`, artifact
   summaries (role, size, rows, digest); no path in the receipt.
 - The target database: `decoy_meta.publications` row (4.6).
@@ -644,7 +654,7 @@ must turn its test red on the final slice head (class 9).
 | AT-E1 | `tests/unit/config/test_postgres_target.py`: a `type: postgres` target parses; missing `mode`, `mode: append`, extra keys, empty strings, a bool and an int in each string field are refused with input hidden; `connection_ref` is a locator field; two tables on one `(ref, schema, table)` hit the duplicate-destination refusal | no variant | drop the postgres arm of `_target_identity` | E1 |
 | AT-E2 | `tests/unit/plan/test_postgres_target_check.py`: identifier cells including `"ok\n"`, two refs, two schemas, a postgres plus a file target, `best_effort`, target ref equal to a source ref, `vault://x` are each refused with their code and location; the text never holds the ref | no check | replace `fullmatch` with `match` and `$` in `validate_identifier` | E1 |
 | AT-E3 | `tests/unit/connectors/test_postgres_typemap.py`: one cell per row of 4.5 across all three steps, including the pandas-route rows (int64 to integer, float64 to bigint, `timestamp[ns]`), numeric without typmod and numeric(40, 2) as `unsupported`, float64 to real and `character(n)` as `lossy`, decimal scale change, generated column, and a DuckDB middle type that downgrades an otherwise exact pair; missing and extra columns; the document is canonical bytes, sorted, tagged `decoy-pg-type-map/v1`, and its schema snapshot matches | no module | drop the DuckDB step from the worst-class fold | E1 |
-| AT-E4 | `tests/sentry/test_postgres_session_choke_point.py` (extends 64b's session sentry): in `connectors/`, `open_write_session` is called only from `postgres_target_publish.py`, and an `ATTACH` without `READ_ONLY` appears only in `_postgres_session.py`; seeded cells for each fail. Existing snapshot and 64b tests pass unchanged (negative control) | no write session | call `open_write_session` from `postgres_target.py` | E1 |
+| AT-E4 | `tests/sentry/test_postgres_session_choke_point.py` (new; 64b E1 merged no session sentry): in `connectors/`, `open_write_session` is called only from `postgres_target_publish.py`, and an `ATTACH` without `READ_ONLY` appears only in `_postgres_session.py`; seeded cells for each fail. Existing snapshot and 64b tests pass unchanged (negative control) | no write session | call `open_write_session` from `postgres_target.py` | E1 |
 | AT-E16 | `tests/connectors/test_postgres_typemap_roundtrip.py` (pg): for every `exact` row of 4.5, a Parquet value goes through `open_write_session` `INSERT` into a column of that PostgreSQL type in a rolled-back transaction and is read back by libpq equal to the source | no write session | map `timestamp[us, tz]` as `exact` to `timestamp without time zone` | E1 |
 | AT-E5 | `tests/connectors/test_postgres_target_inspect.py` (pg): server version faked below 13 (catalog stub cell), missing relation, partitioned table, inheritance child, rule, FORCE RLS, external FK, non-owned `nextval` default, shared sequence, negative increment, a role without TRUNCATE, a non-owner role, no `REFERENCES` on a lookup table, and the three bookkeeping cases (schema `decoy_meta` absent and no database `CREATE`; schema present, table absent and no `CREATE` on the schema while the role has database `CREATE`; schema present, table absent, schema `CREATE` granted but no schema `USAGE`; table present without `UPDATE`; table present with table rights but no schema `USAGE`) all refuse with their codes, `target_privilege_missing` for the three; each bookkeeping case also has a passing cell with the right granted; `pg_stat_user_tables` counters, `pg_namespace` and the catalog digest are unchanged afterwards | no `read_target` | skip the external-reference query | E2 |
 | AT-E6 | `tests/connectors/test_postgres_target_plan.py` (pg): over-length varchar, unknown enum label, null into NOT NULL, numeric overflow, an int64 above the integer range, a float64 `1.5` into bigint, and a `timestamp[ns]` with a nanosecond part each refuse with `value_guard_failed` at `schema.table.column`; a blocked type refuses with `target_type_blocked`; no target write session opens (spy) | no `plan_target` | drop the sub-microsecond guard | E2 |
@@ -682,8 +692,8 @@ package root is at its fan-out cap and gets no new module):
 |---|---|---|---|
 | `src/decoy_engine/config/_targets.py` | changed (`PostgresTarget`, union, identity arm) | Config models | `S3Target`, `GCSTarget` |
 | `src/decoy_engine/plan/checks/_postgres_targets.py` | new | Plan compile and checks: `plan/checks/_<topic>.py` | 64b `plan/checks/_postgres_sources.py` |
-| `src/decoy_engine/connectors/_postgres_session.py` | changed (adds `open_write_session`; module created by 64b E1) | Connectors (private helper of the package) | `postgres_snapshot.py` |
-| `src/decoy_engine/connectors/postgres_catalog.py` | changed (adds `server_fingerprint`; module created by 64b E1) | Connectors | `postgres_snapshot.py` |
+| `src/decoy_engine/connectors/_postgres_session.py` | changed (adds `open_write_session`; module created by 64b E1, merged #624) | Connectors (private helper of the package) | `postgres_snapshot.py` |
+| `src/decoy_engine/connectors/postgres_catalog.py` | changed (adds `server_fingerprint`; module created by 64b E1, merged #624) | Connectors | `postgres_snapshot.py` |
 | `src/decoy_engine/connectors/postgres_typemap.py` | new | Connectors: `connectors/<name>.py` | `postgres_snapshot.py` |
 | `src/decoy_engine/connectors/postgres_target_catalog.py` | new (catalog SQL, `capture_structure`, bookkeeping row declaration) | Connectors | `postgres_catalog.py` |
 | `src/decoy_engine/connectors/postgres_target.py` | new (config, error, `read_target`, `plan_target`, guards) | Connectors | `postgres_snapshot.py` |
@@ -695,7 +705,7 @@ package root is at its fan-out cap and gets no new module):
 | `src/decoy_engine/__init__.py` | changed (exports, frozen-surface rows) | Public API | facade list |
 | `tests/connectors/test_postgres_write_spike.py`, `test_postgres_typemap_roundtrip.py`, `test_postgres_target_inspect.py`, `test_postgres_target_plan.py`, `test_postgres_target_pipeline.py`, `test_postgres_target_publish.py` | new | `tests/connectors/` (listed exception) | snapshot suites |
 | `tests/unit/config/test_postgres_target.py`, `tests/unit/plan/test_postgres_target_check.py`, `tests/unit/connectors/test_postgres_typemap.py`, `tests/unit/publication/test_pg_publication_row.py` | new | Unit tests mirroring `src/` | owning package tests |
-| `tests/sentry/test_postgres_session_choke_point.py` | changed or new (extends 64b's session sentry) | Sentry test | 64b sentry |
+| `tests/sentry/test_postgres_session_choke_point.py` | new (64b E1 merged no session sentry) | Sentry test | `tests/sentry/test_file_access_boundary.py` |
 | `.github/workflows/ci.yml` (`pg-gate` file list), `tests/sentry/file_access_modules.toml`, `tests/sentry/file_access_registry.toml`, physical-seam allowlist | changed (new marked files; one exact `(path, name)` row per new module) | CI lane registries; sentry registries | existing rows |
 | `docs/postgres-target.md`, `docs/index.md`, `changelog.d/f01-e1.md`, `changelog.d/f01-e2.md`, `changelog.d/f01-e3.md` | new or changed | Feature docs; changelog fragments | `docs/publication.md`, 64b `docs/postgres-source.md` |
 
@@ -797,7 +807,7 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
 | 5 | Normalized guard scanners | AT-E4 scans source text for `open_write_session` calls and `ATTACH` without `READ_ONLY`, with seeded cells for single and double quotes and an f-string; deliberate evasion is V2-LOG |
 | 6 | No private-module imports | the CLI imports only `decoy_engine` public names and the `decoy.cli.io` facade; `_postgres_session` is imported only inside `connectors` |
 | 7 | No hidden CI failures | `pg-gate` from 64b (no `continue-on-error`, `junit_ran.py`); the new marked files join its file list, so the scope guard fails if one is left out |
-| 8 | One input, one trust class per entry point | user-chosen relation names go through the identifier rule; staged Parquet paths are program-built and never user input; SQL literals for paths go through `_lit`; definition text comes only from the target's own catalog |
+| 8 | One input, one trust class per entry point | user-chosen relation names go through the identifier rule; staged Parquet paths are program-built and never user input; SQL literals for paths go through `sql_literal`; definition text comes only from the target's own catalog |
 | 9 | Mutations on the final head | every slice reruns its section 8 mutations after its last change and records the head |
 | 10 | Allowlisted helpers are still checked | new modules get exact `(path, name)` rows in the file-access and physical-seam registries; their callers stay checked |
 | 11 | No raised caps | no cap, pin ceiling, ratchet or baseline is raised; a module near its size cap is split |
@@ -847,8 +857,8 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
   end to end.
 - DELIV C2a slips: C1 cannot merge without the `SinkStage` protocol. The engine half still ships
   in 0.29.0 and the CLI half waits; no interim CLI path is built.
-- 64b E1 changes the session module's names during review: E0 and E1 start only after 64b E1
-  merges and use what merged.
+- 64b E1 changes the session module's names during review: resolved. 64b E1 merged (#624) and
+  this plan cites the merged names. E0 can start; E1 waits on 64b E2 for `POSTGRES_DSN_V1`.
 - `decoy_meta` is absent and the role has no `CREATE` on the database (or it is present and the
   role lacks `USAGE`, or `CREATE` on it when the table is absent): refused at inspection, and the
   guide gives the DBA the statements to create the schema and table once and grant the rights.
@@ -888,6 +898,7 @@ Commit subjects follow Conventional Commits with the final line `cam` and no oth
 - The exact `Placer` call DELIV C2a lands for non-file kinds. C1 follows what C2a merges; if C2a
   keeps the placer file-only, C1 adds the postgres arm inside `_delivery.py` (already in its
   touch list) and nothing outside it.
-- The final names 64b E1 merges for the session and catalog modules; F01 uses what merged.
+- The final names 64b E1 merges for the session and catalog modules: settled by #624 (see the
+  re-anchor note at the top).
 - The platform surface for Postgres targets: out of scope (platform parked); the engine names
   are public so it can reuse them.
