@@ -226,36 +226,36 @@ def test_at_e2_11_plain_strings_are_never_parsed(
 
 
 class _Probe(_walk.Levels):
-    """Records the most keys the pass-1 state ever held and every key it was asked to store."""
+    """Records the most keys the pass-1 state ever held (`widest`) and every key it was asked to store."""
 
-    peak = 0
+    widest = 0
     stored: list[str] = []
 
     def add(self, level: Any, key: str) -> None:
         super().add(level, key)
-        type(self).peak = max(type(self).peak, self.key_total)
+        type(self).widest = max(type(self).widest, self.key_total)
         type(self).stored.append(key)
 
 
 def test_at_e2_12_a_map_of_maps_keeps_bounded_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _Probe.peak, _Probe.stored = 0, []
+    _Probe.widest, _Probe.stored = 0, []
     monkeypatch.setattr(_walk, "Levels", _Probe)
     cell = {f"outer_{o:03d}": {f"inner_{i:03d}": 1 for i in range(100)} for o in range(100)}
     text = json.dumps(cell)
     obs = observation(scan_cells(tmp_path, [text] * 100))
     assert set(by_path(obs)) == {"$.*", "$.*.*"}
     assert obs.map_collapsed == 2
-    assert 0 < _Probe.peak <= SCAN_MAX_PATHS * (SCAN_MAP_KEYS + 1)
+    assert 0 < _Probe.widest <= SCAN_MAX_PATHS * (SCAN_MAP_KEYS + 1)
     # Two levels exist, each held to its key limit as it was read: no end-of-pass collapse.
-    assert _Probe.peak <= 2 * (SCAN_MAP_KEYS + 1)
+    assert _Probe.widest <= 2 * (SCAN_MAP_KEYS + 1)
 
 
 def test_at_e2_12_a_key_that_fails_a_rule_is_never_stored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _Probe.peak, _Probe.stored = 0, []
+    _Probe.widest, _Probe.stored = 0, []
     monkeypatch.setattr(_walk, "Levels", _Probe)
     cell = {"alice@example.com": 1, "name\n": 2, "123": 3, "GB82WEST12345698765432": 4, "ok": 5}
     scan_cells(tmp_path, dumps([cell] * 3))
