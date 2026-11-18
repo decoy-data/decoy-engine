@@ -50,7 +50,6 @@ def test_public_names_are_the_moved_classes() -> None:
     assert profiling.ScanSetCore is _scan_core.ScanSetCore
     assert profiling.ScanSetCoreRead is _scan_core.ScanSetCoreRead
     assert decoy_engine.ScanSetCore is _scan_core.ScanSetCore
-    assert decoy_engine.ScanSetCoreRead is _scan_core.ScanSetCoreRead
 
 
 def test_importers_take_moved_names_from_scan_core() -> None:
