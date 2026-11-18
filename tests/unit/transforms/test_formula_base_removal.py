@@ -26,10 +26,10 @@ _ROOT = Path(__file__).resolve().parents[3]
 _PKG = Path(decoy_engine.__file__).resolve().parent
 
 
-@pytest.mark.parametrize("name", ["decoy_engine.internal.base", "decoy_engine.transforms.base"])
-def test_base_modules_do_not_import(name: str) -> None:
+@pytest.mark.parametrize("sub", ["internal.base", "transforms.base"])
+def test_base_modules_do_not_import(sub: str) -> None:
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(name)
+        importlib.import_module(f"{decoy_engine.__name__}.{sub}")
 
 
 def test_transforms_all_is_empty() -> None:
@@ -40,7 +40,7 @@ def test_transforms_all_is_empty() -> None:
 def test_pyproject_has_no_internal_base_entry() -> None:
     text = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "internal/base" not in text
-    assert "decoy_engine.internal.base" not in text
+    assert "internal.base" not in text
 
 
 def test_formula_strategy_is_a_plain_class() -> None:
