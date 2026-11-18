@@ -240,7 +240,7 @@ def test_sub_floor_warning_parity(tmp_path: Path, policy: str, batch_size_rows: 
     (w,) = handled
     assert w.column == "s" and w.provider == "text_mask"
     assert w.detail["policy"] == policy
-    assert w.detail["by_detector"] == {"us_zip": 4} and w.detail["total"] == 4
+    assert w.detail["by_detector"] == "us_zip=4" and w.detail["total"] == 4
 
 
 def test_two_text_mask_columns_isolate_their_warnings(tmp_path: Path) -> None:
@@ -267,7 +267,7 @@ def test_two_text_mask_columns_isolate_their_warnings(tmp_path: Path) -> None:
         for w in run.shadow.warnings
         if w.code == "text_mask_sub_floor_span_handled"
     }
-    assert by_col == {"a": {"us_zip": 2}, "b": {"us_zip": 1}}
+    assert by_col == {"a": "us_zip=2", "b": "us_zip=1"}
 
 
 # ---------------------------------------------------------------------------

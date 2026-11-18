@@ -63,8 +63,9 @@ _FORMULA = str(reasons.config.GENERATE_FORMULA_INVALID)
 UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 
 Problem = tuple[tuple[str | int, ...], str]
-# A check may add fixed, value-free hint text after the code's summary.
-Found = Problem | tuple[tuple[str | int, ...], str, str]
+# A problem whose message adds value-free text (names, or a fixed hint) to the code's summary.
+NamedProblem = tuple[tuple[str | int, ...], str, str]
+Found = Problem | NamedProblem
 ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
 Check = Callable[[Any, Mapping[str, Any]], Sequence[Found]]
 
@@ -510,11 +511,8 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Found]:
     return found
 
 
-_Loc = tuple[str | int, ...]
-
-
 def problem_details(
-    problems: Sequence[tuple[_Loc, str] | tuple[_Loc, str, str] | ContextProblem],
+    problems: Sequence[Problem | ContextProblem | NamedProblem],
     templates: Mapping[str, str] | None = None,
 ) -> list[InitErrorDetails]:
     """Pydantic line errors for ``problems``: fixed text per code, no input kept.

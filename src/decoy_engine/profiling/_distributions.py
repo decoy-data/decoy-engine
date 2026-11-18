@@ -8,6 +8,8 @@ Self-contained; imported back into profiler.py via _build_distribution.
 from __future__ import annotations
 
 import math
+from decimal import Decimal
+from typing import Final
 
 import numpy as np
 import pandas as pd
@@ -22,6 +24,14 @@ from decoy_engine.profiling.types import Distribution
 # (HC-5 D4): this is a profiler-chart display concern, not the fit source of
 # truth, so it is not imported from there even though the value matches.
 _PROFILE_CATEGORICAL_DISTINCT_CAP = 30
+# A categorical share is rounded to 0.1 percent, so the true share is within this many percent
+# of it. A plain profile document reads it as the margin when it bounds a label's row count.
+SHARE_ROUNDING_MARGIN: Final = Decimal("0.05")
+# The categorical chart keeps this many labels and sums the rest under `OTHER_LABEL`.
+CATEGORICAL_TOP_LABELS: Final = 10
+OTHER_LABEL: Final = "other"
+# The four length buckets a free-text distribution is labelled with, in order.
+FREETEXT_BUCKET_LABELS: Final = ("<20", "20-50", "50-100", ">100")
 
 
 def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
@@ -86,13 +96,13 @@ def _distribution_categorical(non_null: pd.Series, total_rows: int) -> Distribut
     if total_rows == 0 or len(non_null) == 0:
         return None
     vc = non_null.value_counts()
-    top = vc.head(10)
-    other = int(vc.iloc[10:].sum()) if len(vc) > 10 else 0
+    top = vc.head(CATEGORICAL_TOP_LABELS)
+    other = int(vc.iloc[CATEGORICAL_TOP_LABELS:].sum()) if len(vc) > CATEGORICAL_TOP_LABELS else 0
     data = [round(float(c) / total_rows * 100, 1) for c in top.values]
     labels = [str(v) for v in top.index]
     if other > 0:
         data.append(round(other / total_rows * 100, 1))
-        labels.append("other")
+        labels.append(OTHER_LABEL)
     return Distribution(kind="categorical", data=data, labels=labels)
 
 
@@ -116,16 +126,16 @@ def _distribution_freetext(non_null: pd.Series) -> Distribution | None:
     if len(non_null) == 0:
         return None
     lens = non_null.astype(str).str.len()
-    buckets = [
-        ("<20", int((lens < 20).sum())),
-        ("20-50", int(((lens >= 20) & (lens < 50)).sum())),
-        ("50-100", int(((lens >= 50) & (lens < 100)).sum())),
-        (">100", int((lens >= 100).sum())),
+    counts = [
+        int((lens < 20).sum()),
+        int(((lens >= 20) & (lens < 50)).sum()),
+        int(((lens >= 50) & (lens < 100)).sum()),
+        int((lens >= 100).sum()),
     ]
     return Distribution(
         kind="freetext",
-        data=[float(c) for c in [b[1] for b in buckets]],
-        labels=[b[0] for b in buckets],
+        data=[float(c) for c in counts],
+        labels=list(FREETEXT_BUCKET_LABELS),
         min=str(int(lens.min())),
         max=str(int(lens.max())),
         mean=round(float(lens.mean()), 1),

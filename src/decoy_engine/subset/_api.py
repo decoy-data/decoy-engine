@@ -348,12 +348,20 @@ def _require_json_literals(request: SubsetRequest) -> None:
     )
 
 
+_REMOTE_SOURCE_TYPES = frozenset({"s3", "gcs", "sftp"})
+
+
 def subset_inputs_from_config(
     config: dict[str, Any],
+    *,
+    local_copies: Mapping[str, str] | None = None,
 ) -> tuple[
     dict[str, SubsetSource], tuple[PlanRelationship, ...], tuple[SeedSpec, ...], FanOutPolicy
 ]:
-    """Adapt a validated `PipelineConfig` dump (with a `subset:` block) to `run_subset` kwargs."""
+    """Adapt a validated `PipelineConfig` dump (with a `subset:` block) to `run_subset` kwargs.
+
+    A source of type `s3`, `gcs` or `sftp` is accepted only when `local_copies` names a local
+    path for its table; the caller owns fetching and removing that copy."""
     if config.get("subset") is None:
         raise SubsetConfigError(
             code=reasons.config.SUBSET_CONFIG_MISSING,
@@ -362,13 +370,17 @@ def subset_inputs_from_config(
 
     sources: dict[str, SubsetSource] = {}
     for name, src in config.get("sources", {}).items():
-        if src.get("type") != "file":
+        kind = src.get("type")
+        if kind == "file":
+            sources[name] = SubsetSource(path=src["path"], format=src["format"])
+        elif kind in _REMOTE_SOURCE_TYPES and name in (local_copies or {}):
+            sources[name] = SubsetSource(path=(local_copies or {})[name], format=src["format"])
+        else:
             raise SubsetConfigError(
                 code=reasons.config.SUBSET_SOURCE_TYPE_UNSUPPORTED,
-                message=f"table {name!r}: subsetting only supports local file sources "
-                f"(got type={src.get('type')!r}); DB / cloud sources are deferred (GATE-1 #2)",
+                message=f"table {name!r}: subsetting reads local files; a remote source "
+                "needs a local copy from the caller",
             )
-        sources[name] = SubsetSource(path=src["path"], format=src["format"])
 
     # The block was checked above, so the request is never None. Relationships stay unfiltered:
     # the generate-table filter belongs to the run path, and standalone subsetting refuses an

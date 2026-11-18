@@ -786,7 +786,7 @@ def test_text_mask_sub_floor_warning_parity_resident_route() -> None:
         oracle_w = next(w for w in oracle_ws if w.column == column)
         ooc_w = next(w for w in ooc_ws if w.column == column)
         assert ooc_w.detail == oracle_w.detail
-        assert ooc_w.detail["by_detector"] == {"us_zip": 3}
+        assert ooc_w.detail["by_detector"] == "us_zip=3"
         assert ooc_w.detail["policy"] == "redact"
 
 
