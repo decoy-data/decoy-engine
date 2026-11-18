@@ -121,9 +121,23 @@ RLIMIT_KINDS: dict[str, int] = {"as": resource.RLIMIT_AS, "data": resource.RLIMI
 # reads ARROW_DEFAULT_MEMORY_POOL at import) -- driver-side via subprocess
 # `env=`, never worker-side `os.environ[...] = ...` after the interpreter is
 # already running (per Sprint 1a acceptance addition in the spec's §12).
+#
+# The three BLAS thread knobs stop numpy's bundled OpenBLAS from starting one
+# worker thread per host core when the child imports numpy. Each of those
+# threads maps a private buffer plus an 8 MiB stack, about 40 MiB of VmData
+# per core, all of it charged to RLIMIT_DATA and none of it used: the engine
+# does no BLAS work and sizes its own parallelism (`native_threads`). Measured
+# on a 26-core host, the worker module import alone reached 1.5 GiB VmData with
+# the pool and 0.5 GiB without it. The cap is applied after the imports, so a
+# cap below that import baseline left the child already over its limit, and the
+# next allocation died with SIGSEGV. OMP_NUM_THREADS covers OpenMP builds of
+# OpenBLAS, MKL_NUM_THREADS covers MKL builds of numpy.
 CAPPED_ENV: dict[str, str] = {
     "ARROW_DEFAULT_MEMORY_POOL": "system",
     "MALLOC_ARENA_MAX": "2",
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
 }
 
 # Same three under-cap failure shapes fk_memory_probe documents evidence for
