@@ -269,3 +269,97 @@ def test_the_seed_form_scanner_sees_an_import_or_a_call(source: str) -> None:
 
 def test_the_owner_file_is_the_only_one_exempt() -> None:
     assert (Path(scan.SRC) / OWNER).is_file()
+
+
+# ----- the JCS form and the signed-evidence strict reader (F33 E1a, AT-E3) -------------------
+
+JCS_OWNER = "_canonical/_jcs.py"
+_LOADERS = ("loads", "load")
+
+
+def rfc8785_import_names(tree: ast.Module) -> list[str]:
+    """Every spelling that imports ``rfc8785``: ``import rfc8785 [as r]`` or ``from rfc8785 import x``."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [a.name for a in node.names if a.name.split(".")[0] == "rfc8785"]
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "rfc8785":
+            found.append(node.module or "")
+    return found
+
+
+def json_read_sites(tree: ast.Module) -> list[str]:
+    """Calls to ``json.loads`` / ``json.load`` (any alias) and any ``object_pairs_hook`` keyword."""
+    modules: set[str] = set()
+    loaders: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update((a.asname or a.name) for a in node.names if a.name == "json")
+        elif isinstance(node, ast.ImportFrom) and node.module == "json":
+            loaders.update((a.asname or a.name) for a in node.names if a.name in _LOADERS)
+    owner = scan._enclosing(tree)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        hit = any(kw.arg == "object_pairs_hook" for kw in node.keywords)
+        if isinstance(func, ast.Name):
+            hit = hit or func.id in loaders
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            hit = hit or (func.value.id in modules and func.attr in _LOADERS)
+        if hit:
+            found.append(owner.get(id(node), "") or "<module>")
+    return found
+
+
+def test_rfc8785_is_imported_only_by_the_jcs_owner() -> None:
+    importers = {
+        path.relative_to(scan.SRC).as_posix()
+        for path, tree in scan.ModuleIndex().trees.items()
+        if rfc8785_import_names(tree)
+    }
+    assert importers == {JCS_OWNER}, f"a second rfc8785 importer: {sorted(importers)}"
+
+
+def test_no_signed_evidence_module_reads_json_itself() -> None:
+    """The strict reader is the engine's one owner; the profile only sets its options."""
+    bad = {
+        (path.relative_to(scan.SRC).as_posix(), site)
+        for path, tree in scan.ModuleIndex().trees.items()
+        if path.relative_to(scan.SRC).as_posix().startswith("signed_evidence/")
+        for site in json_read_sites(tree)
+    }
+    assert not bad, f"signed_evidence must call strict_json_loads, not json: {sorted(bad)}"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import json\ndef f(x):\n    return json.loads(x)\n",
+        "import json as j\ndef f(x):\n    return j.loads(x)\n",
+        "from json import loads as l\ndef f(x):\n    return l(x)\n",
+        "import json as j\ndef f(fh):\n    return j.load(fh)\n",
+        "from json import load\ndef f(fh):\n    return load(fh)\n",
+        "def f(x, decode, hook):\n    return decode(x, object_pairs_hook=hook)\n",
+    ],
+)
+def test_the_json_read_scanner_hits_each_seeded_alias(source: str) -> None:
+    assert json_read_sites(ast.parse(source)), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import rfc8785\n",
+        "import rfc8785 as r\n",
+        "from rfc8785 import dumps\n",
+        "from rfc8785 import dumps as d\n",
+    ],
+)
+def test_the_rfc8785_scanner_hits_each_seeded_spelling(source: str) -> None:
+    assert rfc8785_import_names(ast.parse(source)), source
+
+
+def test_the_jcs_owner_file_exists() -> None:
+    assert (Path(scan.SRC) / JCS_OWNER).is_file()

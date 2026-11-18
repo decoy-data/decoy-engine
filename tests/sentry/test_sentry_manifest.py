@@ -83,6 +83,7 @@ SENTRIES = (
     "tests/sentry/test_secret_material_census.py",
     "tests/sentry/test_secret_provider_semgrep.py",
     "tests/sentry/test_sentry_manifest.py",
+    "tests/sentry/test_signed_evidence_file_access.py",
     "tests/sentry/test_source_hygiene.py",
     "tests/sentry/test_staging_writer_choke_point.py",
     "tests/sentry/test_strict_json_single_parser.py",

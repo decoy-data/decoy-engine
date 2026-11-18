@@ -1,6 +1,8 @@
 # Binds each sentry id to exactly one baseline file under tests/sentry/baselines/.
 # scripts/dev/ratchet_check.py compares every baseline with its merge-base copy and fails
-# when keys are added. A new sentry adds its row here in the slice that introduces it.
+# when keys are added. An entry may list `approved_growth` rows (exact key plus a dated owner
+# decision, `owner YYYY-MM-DD <text>`); only a listed key may be added without failing.
+# A new sentry adds its row here in the slice that introduces it.
 # Engine has no plan-format baseline yet; the F29 reason baseline is frozen by
 # tests/sentry/test_reason_baseline_frozen.py and stays outside this registry.
 
@@ -19,6 +21,11 @@ baseline = "tests/sentry/baselines/f29-consumer-inventory.json"
 [[sentry]]
 id = "secret-material-census"
 baseline = "tests/sentry/baselines/secret-material-census.json"
+approved_growth = [
+  { key = "decoy_engine/signed_evidence/_jws.py::SigningInputSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+  { key = "decoy_engine/signed_evidence/_signer.py::LocalEs256Signer.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+  { key = "decoy_engine/signed_evidence/_signer.py::ResolvedSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+]
 
 [[sentry]]
 id = "module-size"

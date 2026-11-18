@@ -13,6 +13,7 @@ resolution, valid only while the descriptor stays open.
 
 from __future__ import annotations
 
+import errno
 import io
 import os
 import stat as stat_mod
@@ -26,6 +27,7 @@ from decoy_engine.fileaccess import _openat2
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._types import (
     Access,
+    DenialKind,
     FileAccessUnavailable,
     FileHandle,
     FileRequest,
@@ -132,6 +134,17 @@ class FdHandle:
         self.close()
 
 
+def _kind_for_errno(err: int | None, *, rel: str, want: str) -> DenialKind:
+    """The closed denial kind for the errno of a failed confined open (no path, no text)."""
+    if err == errno.ENOENT:
+        return "absent"
+    if err in (errno.ELOOP, errno.EXDEV):
+        return "link"
+    if err == errno.ENOTDIR:
+        return "link" if want == "file" or "/" in rel else "not_regular"
+    return "unreadable"
+
+
 def open_checked(
     dir_fd: int,
     rel: str,
@@ -141,13 +154,15 @@ def open_checked(
     deny_inodes: frozenset[tuple[int, int]],
 ) -> int:
     """`openat2` confined beneath `dir_fd`, then `fstat`: a regular file (or a directory
-    when `want` is `dir`), not a denylisted inode. Every failure is the one denial."""
+    when `want` is `dir`), not a denylisted inode. Every failure is the one denial; its
+    optional `kind` is computed here from the errno or the `fstat` already in hand."""
     flags = _READ_FLAGS | (os.O_DIRECTORY if want == "dir" else 0)
     fd = -1
+    kind: DenialKind = "unreadable"
     try:
         fd = _openat2._confined_open(dir_fd, rel, flags)
-    except OSError:
-        pass
+    except OSError as exc:
+        kind = _kind_for_errno(exc.errno, rel=rel, want=want)
     ok = False
     if fd >= 0:
         try:
@@ -159,6 +174,8 @@ def open_checked(
                 or (want == "any" and stat_mod.S_ISDIR(st.st_mode))
             )
             ok = kind_ok and (st.st_dev, st.st_ino) not in deny_inodes
+            if not kind_ok:
+                kind = "not_regular"
         except OSError:
             ok = False
         if ok:
@@ -166,7 +183,7 @@ def open_checked(
         else:
             _close_quietly(fd)
     if not ok:
-        raise deny(field_key) from None
+        raise deny(field_key, kind=kind) from None
     return fd
 
 
