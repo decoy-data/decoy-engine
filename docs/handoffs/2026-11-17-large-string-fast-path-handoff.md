@@ -2,7 +2,8 @@
 
 Status: ready to build. Written 2026-11-17. One engine slice, one PR.
 
-Rules consulted: 00-universal, performance, testing, development-loop, documentation
+Rules consulted: 00-universal, risk-and-exceptions, development-loop, performance, testing,
+architecture, cross-cutting-concerns, proportionality, documentation
 
 ## Read first
 
@@ -10,7 +11,8 @@ Rules consulted: 00-universal, performance, testing, development-loop, documenta
   It holds the design, the reasons each edge case stays byte-identical, the rejected options and the
   acceptance list. This handoff says how to build it; the plan says why.
 - Roadmap row **24zy LARGE-STRING-FAST** in the CLI repo `docs/ROADMAP.md`.
-- Code: `src/decoy_engine/kernel/_scalar.py` (`redact_array` at `:82`, `truncate_array` at `:155`).
+- Code: `src/decoy_engine/_arrow_types.py` and `src/decoy_engine/kernel/_scalar.py`
+  (`redact_array` at `:82`, `truncate_array` at `:155`).
 - Tests: `tests/unit/kernel/test_scalar_vectorized_parity.py`.
 
 ## The problem in three lines
@@ -22,17 +24,20 @@ about 10 times worse for a whole 2M-row job (numbers and host in the plan).
 
 ## The fix
 
-In both dispatchers, right after `combine_chunks()` and before the `v.type == pa.string()` check:
+Add `narrow_text(array)` beside `is_text` in `src/decoy_engine/_arrow_types.py`. It returns a
+`string` array unchanged, safely casts `large_string` to `string`, and rejects non-text input. In
+both dispatchers, call that helper after `combine_chunks()` and inside the existing `try`:
 
 ```python
-if pa.types.is_large_string(v.type):
-    # Same UTF-8 values with 32-bit offsets; past 2 GiB the cast raises and the reference runs.
-    v = v.cast(pa.string())
+if is_text(v.type):
+    v = narrow_text(v)
+    v.validate(full=True)
+    ...
 ```
 
-It sits inside the existing `try`, so any cast failure (over 2 GiB of text) lands on the reference,
-exactly as today. Do not touch `_redact_array_reference` or `_truncate_array_reference`; they are
-frozen oracles.
+The helper is the one owner of offset-width normalization. Its call sits inside the guards' existing
+`try`, so an over-2-GiB cast failure lands on the reference exactly as today. Do not touch
+`_redact_array_reference` or `_truncate_array_reference`; they are frozen oracles.
 
 ## Steps
 
@@ -44,19 +49,24 @@ frozen oracles.
      (truncate matrix, redact sweep, sliced, multi-chunk, all-null, empty, empty chunks, Unicode,
      invalid UTF-8, cast-raises fallback).
    - Add the small end-to-end `run_pipeline` test (string file vs `large_string` file, same output,
-     no reference calls).
-3. Make the two-line change in each dispatcher. Update both docstrings and the test module docstring:
+     no reference calls), and assert route evidence says `chunked`.
+   - Add the central-mechanism guard: wrap `_scalar.narrow_text`, call both dispatchers with
+     `large_string`, and assert one helper call from each.
+3. In `tests/unit/test_arrow_types.py`, unit-test `narrow_text`: `string` identity, `large_string`
+   values/nulls/slices, and non-text rejection. Simulate the over-2-GiB failure by monkeypatching
+   `_scalar.narrow_text` to raise `pa.ArrowInvalid`; PyArrow extension methods are not the test seam.
+4. Add the helper and call it from both dispatchers. Update both docstrings and the test module docstring:
    `large_string` is now admitted by a cast; the fallback list no longer names it.
-4. Mark the deferred note at the top of `docs/plans/2026-09-21-phase5-native-operator-expansion.md`
+5. Mark the deferred note at the top of `docs/plans/2026-09-21-phase5-native-operator-expansion.md`
    as done, pointing at this slice.
-5. Measure: run `docs/plans/large-string-evidence/kernel_bench.py` and `run_probe.py` before and
+6. Measure: run `docs/plans/large-string-evidence/kernel_bench.py` and `run_probe.py` before and
    after on the same host. Put both tables, the host and the pyarrow version in the PR description.
-6. Gates: `scripts/dev/gates.sh tests/unit/kernel tests/native` then the full suite with
+7. Gates: `scripts/dev/gates.sh tests/unit/kernel tests/native` then the full suite with
    `GATES_WORKERS=4 scripts/dev/gates.sh --keep-going --steps tests tests`.
-7. Changelog: add `changelog.d/large-string-fast-path.md` with a `### Changed` entry (speed only, no
+8. Changelog: add `changelog.d/large-string-fast-path.md` with a `### Changed` entry (speed only, no
    output change). The fragment check requires one because `src/` changes under a `perf` or `fix`
    commit.
-8. Open the PR; after merge, update row 24zy in the CLI repo roadmap to MERGED with the PR number and
+9. Open the PR; after merge, update row 24zy in the CLI repo roadmap to MERGED with the PR number and
    merge commit, and add it to `RECENTLY-SHIPPED.md`.
 
 ## Gotchas
@@ -70,6 +80,9 @@ frozen oracles.
   wall-clock assertion, and the plan keeps speed as a by-hand check.
 - **Don't widen scope.** `string_view`, dictionary strings, `hash_array`, the native admission rules
   and the pandas handlers are non-goals in the plan.
+- **Caller proof.** Native scalar, out-of-core and native auto-chunk all reach these guards directly.
+  Pandas handlers also call them, but pandas conversion may already normalize `large_string` to
+  `string`; do not require a storage width that the pandas route does not preserve.
 - **Evidence scripts** live under `docs/plans/large-string-evidence/`. They are not tests and are not
   collected by pytest; run them with `python -I`. `source_types.py` needs `polars`, which is in the
   engine venv.

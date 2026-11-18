@@ -2,10 +2,12 @@
 
 Status: plan
 
-Rules consulted: 00-universal, performance, testing, proportionality, documentation; engine
-CLAUDE.md (established methodology, comments explain why).
+Rules consulted: 00-universal, risk-and-exceptions, development-loop, performance, testing,
+architecture, cross-cutting-concerns, proportionality, documentation; engine CLAUDE.md
+(established methodology, comments explain why).
 
-Base: engine main `11ceb73`. Roadmap row 24zy (CLI repo `docs/ROADMAP.md`). One slice, engine
+Base reviewed against engine `origin/main` `9a2b3e8`. Roadmap row 24zy (CLI repo
+`docs/ROADMAP.md`). One slice, engine
 only. No public API, config, registry or output change.
 
 ## Goal
@@ -16,7 +18,8 @@ same column stored as `string`, with byte-identical output.
 Guarantee: for every input the fast path accepts today, output is unchanged. For a `large_string`
 array (or chunked array of one) whose values fit in 32-bit offsets, `redact_array` and
 `truncate_array` return exactly what `_redact_array_reference` and `_truncate_array_reference`
-return (same values, Arrow type `string`, null mask and container), without the per-row loop.
+return (same values, null mask, container and Arrow type), without the per-row loop. Truncate output
+is `string`; redact output is `string` when populated and `null` when empty or all-null.
 
 Non-goals: `string_view`, dictionary-encoded strings, `hash_array` (always per row in Python; the
 native hash kernel already admits `large_utf8`), the pandas oracle handlers, the native admission
@@ -47,10 +50,13 @@ through pyarrow, including the CLI's plain `decoy run` and the RUN-STREAM lazy s
   frozen per-row reference (`_redact_array_reference` `:65`, `_truncate_array_reference` `:120`),
   which round-trips every value through `to_pylist()` and Python.
 - Callers that hand these kernels Arrow arrays straight from the source: the out-of-core route
-  (`execution/out_of_core/_mask.py:216`, `:221`), the native scalar kernels
-  (`execution/native/_kernels_scalar.py:98`, `:141`) and, through `run_mask_chunked`, the
-  auto-chunk lane. The pandas handlers (`_strategies/_redact.py:59`, `_strategies/_truncate.py:115`)
-  convert through pandas first and usually arrive as `string`.
+  (`execution/out_of_core/_mask.py:216`, `:221`) and native scalar wrappers
+  (`execution/native/_kernels_scalar.py:98`, `:141`). The auto-chunk dispatcher reaches those native
+  wrappers through `execution.native.run_mask_chunked`. This is the route that produced the measured
+  100M-row gap, so changing the shared guards closes that gap. The pandas handlers also call the same
+  kernels (`_strategies/_redact.py:59`, `_strategies/_truncate.py:115`); they reach the new branch when
+  their pandas column converts to `large_string`, while an Arrow-to-pandas round trip may already have
+  normalized it to `string`.
 - `tests/unit/kernel/test_scalar_vectorized_parity.py` pins today's behavior: `large_string`
   is in the dtype sweeps (`:221`) and in the route-spy cases that must take the reference
   (`:387`, `:432`).
@@ -100,19 +106,23 @@ source against about 1.4 s (`redact`) and 3.6 s (`truncate`) for `string`.
 
 ## Design
 
-Normalize at the top of the guard, inside the existing `try`:
+Add `narrow_text(array)` to `src/decoy_engine/_arrow_types.py`, the existing owner of the
+`string`/`large_string` equivalence rule. It returns `string` unchanged, safely casts
+`large_string` to `string`, and raises for any other type. Both guards call it at the top of their
+existing `try` after `combine_chunks()`:
 
 ```python
 v = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
-if pa.types.is_large_string(v.type):
-    # Same UTF-8 values with 32-bit offsets; past 2 GiB the cast raises and the reference runs.
-    v = v.cast(pa.string())
-if v.type == pa.string():
+if is_text(v.type):
+    v = narrow_text(v)
     v.validate(full=True)
     ...
 ```
 
-Apply it in both `redact_array` and `truncate_array`. Everything after it is unchanged.
+Everything after normalization is unchanged. `_arrow_types.py` is a bottom leaf, so importing its
+public helper into `kernel/_scalar.py` respects the layer contract. No other kernel has the same
+string-only fast-path guard: these are the only two `v.type == pa.string()` guards under
+`src/decoy_engine/kernel`.
 
 Why this is safe:
 
@@ -136,9 +146,6 @@ Why this is safe:
 5. **Frozen references stay frozen.** Only the guard changes; `_redact_array_reference` and
    `_truncate_array_reference` are not touched.
 
-Use `pa.types.is_large_string` directly. `_arrow_types.is_text` answers a different question (is
-this text at all) and would also admit `string`, which needs no cast.
-
 Rejected:
 - **Run the compute functions on `large_string` and cast the result.** pyarrow's `utf8_*` and
   `if_else` accept `large_string`, but the output would then need its own cast back to `string`,
@@ -152,7 +159,9 @@ Rejected:
 
 ## Tests (land the assertions first, red, then the fix)
 
-All in `tests/unit/kernel/test_scalar_vectorized_parity.py`:
+The scalar parity and route-spy cases live in
+`tests/unit/kernel/test_scalar_vectorized_parity.py`; helper and route tests stay with their owning
+modules:
 
 1. Move the `large_string` cases out of `test_route_spy_redact_excluded_inputs_take_reference`
    (`:387`) and `test_route_spy_truncate_excluded_inputs_take_reference` (`:432`) into the
@@ -163,18 +172,24 @@ All in `tests/unit/kernel/test_scalar_vectorized_parity.py`:
    multi-chunk chunked arrays, all-null, empty and empty-chunk inputs, the Unicode NFC, NFD and NUL
    case, and invalid UTF-8 bytes (built with `pa.Array.from_buffers` on `large_string`) that must
    still raise like the reference.
-3. Over-2-GiB fallback: monkeypatch `pa.Array.cast` to raise `pa.ArrowInvalid` for this one call and
-   assert the reference runs and output matches. Do not build a real 2 GiB array in unit tests.
+3. Unit-test `narrow_text` for identity on `string`, value/null/slice parity on `large_string`, and
+   rejection of a non-text array. For the over-2-GiB fallback seam, monkeypatch
+   `_scalar.narrow_text` to raise `pa.ArrowInvalid`, then assert each dispatcher calls its reference
+   exactly once and matches today's result. Do not build a real 2 GiB array in unit tests.
 4. End to end (`tests/unit/execution/`, small): `run_pipeline` over a Parquet file written with
    `large_string` columns, `redact` and `truncate`, output equal to the same run over a `string` file,
-   and the reference spy shows no calls.
+   and the reference spy shows no calls. Assert route evidence says `chunked` so this proves the
+   measured native auto-chunk lane, rather than a pandas decline.
+5. Add a central-mechanism guard test that wraps `_scalar.narrow_text`, calls both dispatchers with
+   `large_string`, and asserts the helper was called once by each. Mutating either guard back to an
+   inline cast or omitting normalization makes it red.
 
 Speed is checked once, by hand, with `large-string-evidence/kernel_bench.py` before and after; no
 timing assertion goes into CI.
 
 ## Acceptance
 
-- [ ] Tests 1 to 4 pass; the full `tests/unit/kernel` and `tests/native` suites pass unchanged.
+- [ ] Tests 1 to 5 pass; the full `tests/unit/kernel` and `tests/native` suites pass unchanged.
 - [ ] `kernel_bench.py` shows `large_string` within 1.5 times the `string` time for all three calls,
   recorded in the PR description with host and versions.
 - [ ] `run_probe.py` shows zero reference calls for the `large_string` cells.
@@ -182,9 +197,29 @@ timing assertion goes into CI.
   cast; the 2026-09-21 plan's deferred note is marked done.
 - [ ] `_scalar.py` stays under the module size ceiling (235 lines today).
 
+## Placement
+
+| Change | Location | CODEMAP placement | Existing neighbor |
+|---|---|---|---|
+| Shared text narrowing rule | `src/decoy_engine/_arrow_types.py` | Shared Arrow type rules | `is_text` |
+| Guard calls | `src/decoy_engine/kernel/_scalar.py` | Pure Arrow masking kernels | `redact_array`, `truncate_array` |
+| Parity and guard tests | `tests/unit/kernel/test_scalar_vectorized_parity.py` and `tests/unit/test_arrow_types.py` | Unit tests mirror source ownership | Existing scalar/type predicate tests |
+| Route proof | Existing file under `tests/unit/execution/` beside auto-chunk route tests | Execution route tests | Existing `run_pipeline` auto-chunk tests |
+
+## Slices
+
+One slice, one PR: the `narrow_text` helper, both dispatcher guards, the tests and the changelog fragment. About 30 production lines.
+
+## Pre-mortem
+
+- The cast hides a real difference: a value that differs only in offset width. Arrow defines none, and the differential harness compares every case byte for byte against the reference.
+- A caller hands the kernel a type the plan did not list (for example `string_view`). `narrow_text` leaves it alone, so it keeps today's reference path; a test pins that.
+- The flipped route-spy tests are deleted instead of moved, so the slow path could come back unseen. The handoff says move, and the gate checks the diff.
+- Timing varies by machine. The 1.5 times check is manual evidence in the PR, never a CI assertion.
+
 ## Risk
 
-Low. One added branch in a guard that is already total and non-raising: any failure in it lands on
+R1. One added branch in a guard that is already total and non-raising: any failure in it lands on
 the reference, which is today's behavior. No output change, so no golden or snapshot update.
 
 ## Evidence files
