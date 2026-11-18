@@ -39,6 +39,14 @@ def _vault_mapping_as_manifest_keys(path: Path, mask_key: bytes) -> dict[str, st
     return {f"{ns}\x1f{masked}": source for (ns, masked), source in mapping.items()}
 
 
+def _newer_minor(data: dict) -> dict:
+    newer = json.loads(json.dumps(data))
+    nested = next(f["nested"] for f in newer["tables"][0]["fields"] if f["nested"])
+    nested["added_member"] = 1
+    nested["paths"][0]["kinds"].append("decimal")
+    return newer
+
+
 def test_manifest_exists() -> None:
     assert MANIFEST.exists(), (
         f"{MANIFEST} is missing. Run `python {HERE.name}/regenerate.py` to mint the baseline."
@@ -84,6 +92,25 @@ def test_corpus_artifact_round_trips(artifact: dict) -> None:
             assert spec.parent_first == rec["parent_first"], ctx
             assert (spec.joint is not None) == rec["has_joint"], ctx
             assert spec.stats, ctx  # the sampler needs non-empty stats
+    elif artifact["kind"] == "scan_set":
+        # The write model accepts the record and the one reader returns its paths; a newer
+        # minor (an added member, a kind token this reader does not know) still reads.
+        from decoy_engine.profiling import ScanSetCore, read_scan_set
+
+        data = json.loads((HERE / artifact["path"]).read_text(encoding="utf-8"))
+        ScanSetCore.model_validate(data)
+        for doc in (data, _newer_minor(data)):
+            got = {
+                (p["path"], p["present_count"])
+                for table in read_scan_set(doc)["tables"]
+                for f in table["fields"]
+                if f["nested"]
+                for p in f["nested"]["paths"]
+            }
+            assert got == {tuple(x) for x in artifact["expected_paths"]}, (
+                f"{artifact['tag']} no longer reads back to its recorded paths "
+                f"(compatibility-contract section 3.1/3.2)."
+            )
     else:  # pragma: no cover - guards against an unrecorded artifact kind
         pytest.fail(f"no round-trip check implemented for artifact kind {artifact['kind']!r}")
 

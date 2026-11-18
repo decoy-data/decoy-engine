@@ -61,6 +61,31 @@
           "has_joint": true
         }
       ]
+    },
+    {
+      "tag": "scan-set/v1",
+      "kind": "scan_set",
+      "synthetic": true,
+      "produced_by_engine_version": "0.27.0",
+      "path": "scan-set-v1__synthetic.json",
+      "expected_paths": [
+        [
+          "$.items",
+          3
+        ],
+        [
+          "$.items[*].sku",
+          3
+        ],
+        [
+          "$.user",
+          3
+        ],
+        [
+          "$.user.email",
+          3
+        ]
+      ]
     }
   ]
 }

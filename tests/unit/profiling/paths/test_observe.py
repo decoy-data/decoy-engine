@@ -295,3 +295,105 @@ def test_python_dict_and_list_cells_are_walked_without_a_parse(
     assert (objs["$.b"].present_count, objs["$.b"].null_count) == (2, 1)
     assert found["objs"].cells_sampled == 2
     assert {p.path for p in found["lists"].paths} == {"$[*]"}
+
+
+# -- review fixes: fold of dropped keys, the share half of rule 3, rule 1b, list values ---------
+
+
+def test_fold_inner_fields_of_name_keyed_records_keep_their_paths_and_hits(tmp_path: Path) -> None:
+    names = ["Maria", "Ahmed", "Chen", "Olga", "Pedro", "Aiko", "Lars", "Nia", "Omar", "Tess"]
+    cells = [
+        {
+            f"{n}{i}": {
+                "email": f"{n.lower()}{i}@example.com",
+                "city": "Springfield",
+                "tier": "gold",
+                "note": "x",
+            }
+        }
+        for i, n in enumerate(names * 2)
+    ]
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    found = by_path(obs)
+    assert "$.*" in found and "$.*.email" in found
+    assert found["$.*.email"].detector_hits == ["email"]
+    assert {"$.*.city", "$.*.tier", "$.*.note"} <= set(found)
+    assert found["$.*.email"].present_count == 20
+
+
+def test_fold_id_keyed_records_keep_the_ssn_hit(tmp_path: Path) -> None:
+    cells = [
+        {f"emp_{i:03d}": {"ssn": f"{101 + i}-45-{6700 + i}", "role": "clerk"}} for i in range(20)
+    ]
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert found["$.*.ssn"].detector_hits == ["ssn"]
+
+
+def test_fold_keeps_a_level_under_a_kept_key_apart_from_the_folded_ones(tmp_path: Path) -> None:
+    cells = [{"stable": {"a_key": 1}, f"Name{i}": {"b_key": 2}} for i in range(20)]
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert {"$.stable.a_key", "$.*.b_key"} <= set(found)
+    assert "$.stable.b_key" not in found
+
+
+def test_rule_3_share_a_key_in_two_of_thirty_cells_collapses(tmp_path: Path) -> None:
+    cells: list[dict[str, Any]] = [{"common": 1} for _ in range(30)]
+    cells[0]["rare"] = 1
+    cells[1]["rare"] = 1
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert set(by_path(obs)) == {"$.common", "$.*"}
+    assert obs.key_suspect_collapsed == 2
+
+
+def test_rule_3_count_a_key_in_one_of_five_cells_collapses(tmp_path: Path) -> None:
+    cells: list[dict[str, Any]] = [{"common": 1} for _ in range(5)]
+    cells[0]["single"] = 1
+    obs = observation(scan_cells(tmp_path, dumps(cells)))
+    assert set(by_path(obs)) == {"$.common", "$.*"}
+
+
+@pytest.mark.parametrize("key", ["acct_12345", "d20240102", "zip90210", "p5551234567"])
+def test_rule_1b_a_key_with_a_run_of_four_digits_is_a_wildcard(tmp_path: Path, key: str) -> None:
+    obs = observation(scan_cells(tmp_path, dumps([{key: 1, "status": 2}] * 5)))
+    assert set(by_path(obs)) == {"$.status", "$.*"}
+    assert key not in str(obs)
+
+
+@pytest.mark.parametrize("key", ["line1", "v2", "sha256", "col_123", "a1b2c3"])
+def test_rule_1b_short_digit_runs_keep_their_name(tmp_path: Path, key: str) -> None:
+    obs = observation(scan_cells(tmp_path, dumps([{key: 1, "status": 2}] * 5)))
+    assert f"$.{key}" in by_path(obs)
+
+
+def test_numpy_arrays_from_parquet_are_walked_as_arrays() -> None:
+    import numpy as np
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "lst": [np.array([1, 2]), np.array([3]), np.array([4, 5, 6])],
+            "st": [{"a": np.array(["x", "y"])}, {"a": np.array(["z"])}, {"a": np.array(["w"])}],
+        }
+    )
+    found = paths.observe_frame(frame)
+    assert set(found) == {"lst", "st"}
+    lst = {p.path: p for p in found["lst"].paths}
+    assert list(lst["$[*]"].kinds) == ["integer"]
+    st = {p.path: p for p in found["st"].paths}
+    assert list(st["$.a"].kinds) == ["array"] and list(st["$.a[*]"].kinds) == ["string"]
+
+
+def test_a_parquet_list_column_is_observed_through_a_scan(tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    import pandas as pd
+
+    path = tmp_path / "t.parquet"
+    pd.DataFrame(
+        {"tags": [["a", "b"], ["c"], ["d", "e"]], "row": [{"k": 1}, {"k": 2}, {"k": 3}]}
+    ).to_parquet(path)
+    source = {"type": "file", "format": "parquet", "path": str(path)}
+    from decoy_engine.profiling import scan_sources
+
+    obs = scan_sources({"t": source}).tables[0].nested
+    assert {p.path for p in obs["tags"].paths} == {"$[*]"}
+    assert {p.path for p in obs["row"].paths} == {"$.k"}

@@ -1,0 +1,107 @@
+{
+  "scan_schema": "scan-set/v1",
+  "engine_version": "0.27.0",
+  "scanned_at": "2026-11-18T00:00:00+00:00",
+  "tables": [
+    {
+      "name": "events",
+      "descriptor": {
+        "type": "file",
+        "format": "csv",
+        "path": "events.csv",
+        "has_header": true
+      },
+      "row_count": 3,
+      "row_count_exact": true,
+      "sample_strategy": "head",
+      "sample_row_cap": 10000,
+      "fields": [
+        {
+          "name": "id",
+          "dtype": "int64",
+          "null_count": 0,
+          "null_rate": 0.0,
+          "distinct_count": 3,
+          "pii_score": 0.0,
+          "pii_candidate": false,
+          "detector_hits": [],
+          "leading_zero_count": null,
+          "model_hits": [],
+          "nested": null
+        },
+        {
+          "name": "payload",
+          "dtype": "object",
+          "null_count": 0,
+          "null_rate": 0.0,
+          "distinct_count": 3,
+          "pii_score": 0.0,
+          "pii_candidate": false,
+          "detector_hits": [],
+          "leading_zero_count": null,
+          "model_hits": [],
+          "nested": {
+            "cells_sampled": 3,
+            "cells_parsed": 3,
+            "cells_malformed": 0,
+            "cells_oversized": 0,
+            "cells_scalar": 0,
+            "depth_truncated_cells": 0,
+            "arrays_truncated": 0,
+            "key_suspect_collapsed": 0,
+            "map_collapsed": 0,
+            "paths_truncated": false,
+            "paths": [
+              {
+                "path": "$.items",
+                "present_count": 3,
+                "null_count": 0,
+                "kinds": [
+                  "array"
+                ],
+                "detector_hits": []
+              },
+              {
+                "path": "$.items[*].sku",
+                "present_count": 3,
+                "null_count": 1,
+                "kinds": [
+                  "string"
+                ],
+                "detector_hits": []
+              },
+              {
+                "path": "$.user",
+                "present_count": 3,
+                "null_count": 0,
+                "kinds": [
+                  "object"
+                ],
+                "detector_hits": []
+              },
+              {
+                "path": "$.user.email",
+                "present_count": 3,
+                "null_count": 0,
+                "kinds": [
+                  "string"
+                ],
+                "detector_hits": [
+                  "email"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "key_candidates": [
+        "id"
+      ],
+      "warnings": [],
+      "reid_risk_score": null,
+      "quasi_identifier_groups": []
+    }
+  ],
+  "relationships": [],
+  "detectors": []
+}
