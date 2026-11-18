@@ -39,13 +39,11 @@ from decoy_engine.generation.kinds._parametric import (
     parametric_values,
 )
 from decoy_engine.generation.kinds._provider import (
-    COMPOSITE_BACKEND,
     draw_path,
     provider_generate,
 )
 
 __all__ = [
-    "COMPOSITE_BACKEND",
     "MAX_LOOKUP_ENTRIES",
     "ConstantStream",
     "LookupList",

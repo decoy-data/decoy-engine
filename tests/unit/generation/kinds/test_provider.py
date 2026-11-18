@@ -33,6 +33,7 @@ from decoy_engine.generation import synthesize
 from decoy_engine.generation._admission import ADMISSION_MATRIX, classify_plan
 from decoy_engine.generation._numeric_typing import READER_KEYS
 from decoy_engine.generation._pinned_compile import REJECTED_TYPES
+from decoy_engine.generation.composite import CompositeError
 from decoy_engine.generation.kinds import provider_generate
 from decoy_engine.generation.pool._errors import GenerationError, PoolCapacityError
 from decoy_engine.generators.derivation import GenDeriveContext, with_table
@@ -123,6 +124,11 @@ def test_the_provider_option_validates_its_keys() -> None:
 
 
 @pytest.mark.parametrize("name", SCALARS)
+def test_every_identifier_has_a_checksum_validator() -> None:
+    native = {p for p in SCALARS if REGISTRY.get_capabilities(p).backend_type == "decoy_native"}
+    assert set(VALIDATORS) == native
+
+
 def test_every_scalar_provider_generates_valid_values(name: str, big: pa.Table) -> None:
     values = big.column(name).to_pylist()
     assert len(values) == ROWS and all(v is not None for v in values)
@@ -273,6 +279,7 @@ ERRORS = [
     lambda: DeterminismError(code="x", message=SENTINEL),
     lambda: PoolCapacityError(code="x", message=SENTINEL),
     lambda: GenerationError(code="x", message=SENTINEL),
+    lambda: CompositeError(code="x", message=SENTINEL),
 ]
 
 
@@ -290,7 +297,6 @@ def _assert_fixed_failure(info: pytest.ExceptionInfo[GenerationError], caplog: A
     assert exc.__cause__ is None and exc.__context__ is None
 
 
-@pytest.mark.parametrize("make", ERRORS)
 def _patch_targets() -> list[tuple[str, Any, str]]:
     from decoy_engine.generation.pool._builder import PoolBuilder
     from decoy_engine.providers_v2._faker_adapter import FakerAdapter

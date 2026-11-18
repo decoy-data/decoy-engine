@@ -44,7 +44,11 @@ from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array
-from decoy_engine.generators.derivation import GenDeriveContext
+from decoy_engine.generators.derivation import (
+    POOL_BUILD_FAMILY,
+    POOL_SELECTION_FAMILY,
+    GenDeriveContext,
+)
 from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
 
 # Codex round-2 spec C, ROUND-3 confirmed: an IMMUTABLE closed allowlist, not
@@ -233,8 +237,6 @@ N_THRESHOLD = 50_000
 # GenDeriveContext.family_bytes labels (Codex round-2/3 spec B). Frozen wire
 # format: changing either string reseeds every pooled column that ships
 # today, which is a SEED_PROTOCOL_VERSION-worthy break, not a casual rename.
-_BUILD_FAMILY = "faker_pool_build"
-_SELECTION_FAMILY = "faker_pool_selection"
 
 
 def pool_opted_out(col: Mapping[str, Any]) -> bool:
@@ -431,8 +433,8 @@ def _build_and_sample_returning_pool(
 
 
 def _pool_seeds(gen_ctx: GenDeriveContext) -> tuple[bytes, bytes]:
-    build_seed = gen_ctx.family_bytes(_BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(_SELECTION_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8]
+    selection_seed = gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8]
     if build_seed == selection_seed:
         # Astronomically unlikely for distinct HMAC labels; a real collision
         # here means family_bytes stopped being label-disjoint, which would
@@ -525,8 +527,8 @@ def build_and_sample(
     `tests/unit/generation/test_faker_pool_seam_characterization.py` for the
     pre-extraction byte-identical proof.
     """
-    build_seed = gen_ctx.family_bytes(_BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(_SELECTION_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8]
+    selection_seed = gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8]
     if build_seed == selection_seed:
         # Astronomically unlikely for distinct HMAC labels; a real collision
         # here means family_bytes stopped being label-disjoint, which would

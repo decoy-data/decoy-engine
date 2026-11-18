@@ -29,7 +29,8 @@ def check_provider_column(
     knows it; ``None`` leaves such a column to the run-time check
     (``check_faker_default_locale``).
     """
-    from decoy_engine.generation.kinds import COMPOSITE_BACKEND, draw_path
+    from decoy_engine.generation.composite import COMPOSITE_BACKEND
+    from decoy_engine.generation.kinds import draw_path
     from decoy_engine.plan.checks._generate_columns import _refusal
     from decoy_engine.providers_v2 import get_default_registry
 

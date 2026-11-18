@@ -20,20 +20,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import reasons
-from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext
+from decoy_engine.generators.derivation import (
+    POOL_BUILD_FAMILY,
+    POOL_SELECTION_FAMILY,
+    TABLE_KEY,
+    GenDeriveContext,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
 
-__all__ = ["COMPOSITE_BACKEND", "draw_path", "provider_generate"]
-
-COMPOSITE_BACKEND = "composite"
+__all__ = ["draw_path", "provider_generate"]
 
 DrawPath = Literal["pool", "keyed", "batch"]
 
-# The pool labels the faker pool bridge uses, so the two bridges stay one pattern.
-_POOL_BUILD = "faker_pool_build"
-_POOL_SELECTION = "faker_pool_selection"
 # A provider column is the registry-backed sibling of a faker column and draws from its family.
 _VALUE_FAMILY = "faker"
 
@@ -115,14 +115,14 @@ def _draw(
         pool = PoolBuilder(registry).build(
             provider,
             size=DEFAULT_POOL_SIZE,
-            job_seed=gen_ctx.family_bytes(_POOL_BUILD)[:8],
+            job_seed=gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8],
             locale=locale,
         )
         sampled = PoolSampler().sample(
             pool,
             n,
             mode=CardinalityMode.REUSE,
-            seed=gen_ctx.family_bytes(_POOL_SELECTION)[:8],
+            seed=gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8],
             deterministic=False,
         )
         return list(sampled.tolist())
@@ -144,7 +144,7 @@ def _draw(
             locale=locale,
             deterministic=False,
             namespace=namespace,
-            seed=gen_ctx.family_bytes(_POOL_BUILD)[:8],
+            seed=gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8],
         )
         return list(adapter.generate_batch(provider, spec=spec, count=n))
     raise ProviderError(code=reasons.provider.CAPABILITY_VIOLATION)

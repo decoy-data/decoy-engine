@@ -24,6 +24,7 @@ from typing import Any, NoReturn, Protocol, runtime_checkable
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._errors import CompositeError
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
@@ -75,7 +76,7 @@ def composite_capability(provider: str) -> CapabilityMatrix:
         )
     return CapabilityMatrix(
         provider=provider,
-        backend_type="composite",
+        backend_type=COMPOSITE_BACKEND,
         backend_version="composite/v1",
         supports_deterministic=False,
         supports_uniqueness=True,
@@ -94,7 +95,7 @@ def composite_capability(provider: str) -> CapabilityMatrix:
 class CompositeAdapter:
     """Thin BackendAdapter wrapper letting a composite register in the registry."""
 
-    backend_type: str = "composite"
+    backend_type: str = COMPOSITE_BACKEND
     backend_version: str = "composite/v1"
 
     def __init__(self, composite_name: str) -> None:

@@ -217,6 +217,9 @@ def strategy_config_fingerprint(
 #            `null_probability` is not in the fingerprint, so a shared family would hand the mask
 #            and the value the same uniforms.
 GEN_FAMILIES = ("py", "np", "faker", "faker_unique", "unique_pair", "dist")
+# The two extra `family_bytes` labels of a pooled column: the pool build and its row selection.
+POOL_BUILD_FAMILY = "faker_pool_build"
+POOL_SELECTION_FAMILY = "faker_pool_selection"
 
 
 def _gen_hmac(key: bytes, label: bytes, *, extra: bytes = b"") -> bytes:
