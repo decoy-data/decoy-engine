@@ -2,7 +2,8 @@
 semantics (language reference, "The import system", "Naming and binding") and compares
 statements with ``ast.dump``. Manifest (JSON): ``old``; ``new`` in execution order, with
 ``old`` when kept; ``map`` {moved name: defining path}; ``importers``; ``docstring_prose``;
-``tests``; optional ``frozen_partners``. Paths are repo paths, never dotted module names.
+``tests``; optional ``frozen_partners`` and ``facades`` (package ``__init__`` files that may only
+add re-exports of moved names from their owners). Paths are repo paths, never dotted names.
 A def is inert when undecorated and its definition-time expressions call nothing and read
 only builtins the module does not rebind. Problems start with a rule tag and carry paths,
 lines, statement kinds and names, never source text.
@@ -174,19 +175,64 @@ def _canon(text: str, rename: Callable[[tuple], tuple]) -> str:
     return ast.dump(tree)
 
 
+def _reexports(text: str, own: dict[str, str]) -> tuple[str, set[str]]:
+    """Dump of ``text`` without its owner re-exports of moved names, and the names dropped."""
+    tree, names = ast.parse(text), set()
+    for stmt in list(tree.body):
+        keys = _keys(stmt) if isinstance(stmt, ast.ImportFrom) else []
+        if keys and all(
+            not k[0] and k[2] in own and k[1] == module_name(own[k[2]]) and k[3] in (None, k[2])
+            for k in keys
+        ):
+            tree.body.remove(stmt)
+            names |= {k[2] for k in keys}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and [ast.dump(t) for t in stmt.targets] == [
+            ast.dump(ast.Name("__all__", ast.Store()))
+        ]:
+            if isinstance(stmt.value, ast.List | ast.Tuple):
+                stmt.value.elts = [
+                    e
+                    for e in stmt.value.elts
+                    if not (isinstance(e, ast.Constant) and e.value in names)
+                ]
+    return ast.dump(tree), names
+
+
+def _facades(
+    manifest: dict, read_base: Reader, read_head: Reader
+) -> tuple[list[str], dict[str, set[str]]]:
+    """Rule 5f: a facade changes only by adding owner re-exports of moved names to its body and ``__all__``."""
+    out, exported = [], {}
+    for path in manifest.get("facades", []):
+        before, after = read_base(path), read_head(path)
+        if None in (before, after) or not path.endswith("__init__.py"):
+            out.append(f"5: {path}: facade is not a package __init__ present at base and head")
+            continue
+        stripped, names = _reexports(after, manifest["map"])
+        if stripped != _reexports(before, manifest["map"])[0]:
+            out.append(
+                f"5: {path}: facade changes beyond re-exporting moved names from their owners"
+            )
+        exported[module_name(path)] = names
+    return out, exported
+
+
 def _importers(manifest: dict, read_base: Reader, read_head: Reader, files: Files) -> list[str]:
     """Rule 5: importers change only by map rewrites, reach no moved name via the old path."""
     old, own, listed = module_name(manifest["old"]), manifest["map"], set(manifest["importers"])
     mods = {old, *map(module_name, own.values())}
+    out, exported = _facades(manifest, read_base, read_head)
 
     def rename(key: tuple) -> tuple:
-        moved = not key[0] and key[2] in own and key[1] == module_name(own[key[2]])
+        owner = key[2] in own and key[1] == module_name(own[key[2]])
+        moved = not key[0] and (owner or key[2] in exported.get(key[1], ()))
         return (key[0], old if moved else key[1], *key[2:])
 
     def keys(text: str | None) -> Counter:
         return Counter(k for n in ast.walk(ast.parse(text or "")) for k in _keys(n))
 
-    out, skip = [], {manifest["old"], *manifest["new"]}
+    skip = {manifest["old"], *manifest["new"], *manifest.get("facades", [])}
     for path in sorted(p for p in {*files, *listed} - skip if p.endswith(".py")):
         before, after = read_base(path), read_head(path)
         ns = list(ast.walk(ast.parse(after or "")))
@@ -203,7 +249,7 @@ def _importers(manifest: dict, read_base: Reader, read_head: Reader, files: File
             changed = (keys(before) - keys(after)) + (keys(after) - keys(before))
             if any({k[1], k[2], f"{k[1]}.{k[2]}"} & mods for k in changed):
                 out.append(f"5: {path}: changes imports of a moved module and is not in importers")
-    touched = {manifest["old"], *manifest["new"], *listed, *manifest.get("frozen_partners", [])}
+    touched = {*skip, *listed, *manifest.get("frozen_partners", [])}
     return out + [f"6: {len(touched)} production files; the bound is 10"] * (len(touched) > 10)
 
 

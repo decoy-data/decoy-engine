@@ -50,6 +50,9 @@
   "importers": [
     "src/decoy_engine/profiling/profiler.py"
   ],
+  "facades": [
+    "src/decoy_engine/detection/__init__.py"
+  ],
   "docstring_prose": false,
   "tests": [
     "tests/unit/detection_verification/test_detectors_split_pins.py",
@@ -61,6 +64,8 @@
     "tests/unit/detection_verification/test_iter_spans.py",
     "tests/unit/test_scan_detectors.py",
     "tests/unit/test_clinical_detectors.py",
-    "tests/unit/test_scan_format_detection.py"
+    "tests/unit/test_scan_format_detection.py",
+    "tests/unit/test_check_pure_move.py",
+    "tests/unit/test_public_api.py"
   ]
 }
