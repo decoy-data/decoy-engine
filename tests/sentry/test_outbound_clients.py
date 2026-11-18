@@ -529,3 +529,79 @@ def test_raise_check_seeded_cases(case: str) -> None:
 
 def test_s3_connector_is_checked_for_literal_errors() -> None:
     assert "decoy_engine/connectors/s3.py" in LITERAL_FILES
+
+
+# ----- AT-E2-10: hashlib and hmac local receivers (OQ-10 option b) ---------------------
+
+
+def scan_counts(text: str) -> tuple[list[Finding], int]:
+    """Findings and the ``seen`` count for one seeded module."""
+    index = ProjectIndex("decoy_engine")
+    scanner = _ModuleScan("<seeded>/x.py", "seeded", ast.parse(text), index, gcs_name_set())
+    return scanner.run(), scanner.seen
+
+
+HASHER_OK = {
+    "sha256": "import hashlib\ndef f(b):\n    h = hashlib.sha256()\n    h.update(b)\n",
+    "hashlib_new": "import hashlib\ndef f(b):\n    h = hashlib.new('md5')\n    h.update(b)\n",
+    "hmac_new": (
+        "import hashlib, hmac\ndef f(k, d, b):\n"
+        "    m = hmac.new(k, d, hashlib.sha256)\n    m.update(b)\n"
+    ),
+    "from_import": "from hashlib import sha256\ndef f(b):\n    h = sha256()\n    h.update(b)\n",
+    "two_updates": (
+        "import hashlib\ndef f(a, b):\n    h = hashlib.sha256()\n    h.update(a)\n    h.update(b)\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(HASHER_OK))
+def test_local_hasher_update_is_counted_and_not_a_finding(case: str) -> None:
+    findings, seen = scan_counts(HASHER_OK[case])
+    assert findings == []
+    assert seen == (2 if case == "two_updates" else 1)
+
+
+HASHER_FINDINGS = {
+    "rebound_after": (
+        "import hashlib\ndef f(b, other):\n    h = hashlib.sha256()\n    h = other\n"
+        "    h.update(b)\n"
+    ),
+    "bound_twice_from_hashlib": (
+        "import hashlib\ndef f(b):\n    h = hashlib.sha256()\n    h = hashlib.sha1()\n"
+        "    h.update(b)\n"
+    ),
+    "other_call": "def f(b, make):\n    h = make()\n    h.update(b)\n",
+    "outer_function": (
+        "import hashlib\ndef outer():\n    h = hashlib.sha256()\n    def inner(b):\n"
+        "        h.update(b)\n    return inner\n"
+    ),
+    "attribute_receiver": "def f(self, b):\n    self.h.update(b)\n",
+    "blob_update": "def f(blob):\n    blob.update()\n",
+    "named_h_parameter": "def f(h, b):\n    h.update(b)\n",
+    "parameter_then_hasher": (
+        "import hashlib\ndef f(h, b):\n    h = hashlib.sha256()\n    h.update(b)\n"
+    ),
+    "global_name": (
+        "import hashlib\ndef f(b):\n    global h\n    h = hashlib.sha256()\n    h.update(b)\n"
+    ),
+    "module_level": "import hashlib\nh = hashlib.sha256()\nh.update(b'')\n",
+    "lambda_parameter": (
+        "import hashlib\ndef f():\n    h = hashlib.sha256()\n    return lambda h: h.update(1)\n"
+    ),
+    "hashlib_not_imported": "def f(b, hashlib):\n    h = hashlib.sha256()\n    h.update(b)\n",
+}
+
+
+@pytest.mark.parametrize("case", sorted(HASHER_FINDINGS))
+def test_other_update_receivers_stay_findings(case: str) -> None:
+    findings, seen = scan_counts(HASHER_FINDINGS[case])
+    assert [(f.rule, f.method) for f in findings] == [("AT-C10", "update")], case
+    assert seen == 1
+
+
+def test_real_tree_seen_is_147_and_no_baseline_row_is_added(tree_scan: Scan) -> None:
+    assert tree_scan.seen == 147
+    keys = {f.key for f in tree_scan.findings if f.rule == "AT-C10"}
+    assert keys == set(load_baseline())
+    assert len(keys) == 137

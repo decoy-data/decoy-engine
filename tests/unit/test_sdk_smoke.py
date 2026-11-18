@@ -235,3 +235,33 @@ class TestConnectorConfig:
         assert "properties" in schema
         assert "bucket" in schema["properties"]
         assert schema["properties"]["bucket"].get("description") == "S3 bucket name"
+
+
+class TestSdkOneDotOne:
+    """F02-E2: the additive `WriteResult.sha256` field bumps the minor version (AT-E2-6, AT-E2-8)."""
+
+    def test_frozen_surface_map_and_contract_name_the_change(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        page = (root / "docs" / "frozen-surfaces.md").read_text(encoding="utf-8")
+        assert "`WriteResult.sha256`" in page
+        assert '`SDK_VERSION` is `"1.1"`' in page
+        contract = (root / "docs" / "compatibility-contract.md").read_text(encoding="utf-8")
+        assert "`WriteResult.sha256`" in contract
+        assert sdk.SDK_VERSION == "1.1"
+
+    def test_version_docstring_states_the_minor_on_additive_rule(self):
+        import ast
+        from pathlib import Path
+
+        src = Path(sdk.__file__).read_text(encoding="utf-8")
+        body = ast.parse(src).body
+        index = next(
+            i
+            for i, n in enumerate(body)
+            if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "SDK_VERSION"
+        )
+        doc = body[index + 1].value.value  # type: ignore[attr-defined]
+        assert "major on a breaking change" in doc and "minor on an additive one" in doc
+        assert "Bumped on breaking changes" not in doc

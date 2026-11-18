@@ -201,7 +201,7 @@ def _versions(**kw: object) -> Versions:
 
 def test_versions_from_live_constants() -> None:
     v = _versions()
-    assert v.sdk == SDK_VERSION == "1.0"
+    assert v.sdk == SDK_VERSION == "1.1"
     assert v.engine == decoy_engine.__version__ and v.registry == REGISTRY_VERSION
     assert v.seed_protocol == SEED_PROTOCOL_VERSION
     assert PlatformFamily.of("linux") is PlatformFamily.LINUX
