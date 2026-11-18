@@ -5,11 +5,12 @@ that tests a strategy against `"nested"` and then reads those keys itself would 
 form 82-E3b adds, and skip a plan refusal for it. Every such module must call `nested_children`
 from `decoy_engine._nested_json`, which is the only reader.
 
-The scan is per module. A module is a reader when it has a `"nested"` literal in a comparison
+A module is in scope when it has a `"nested"` literal in a comparison
 (`==`, `!=`, `in`, `not in`) or as a dict key (`"nested"` or a prefixed key such as
-`"scalar:nested"`), and a child read: `.get("strategy")`,
-`["strategy"]`, `.get("strategy_config")` or `["strategy_config"]`. A reader must import and call
-`nested_children`. Registries that name `"nested"` in a set or table without reading the child
+`"scalar:nested"`). In scope, a child read is `.get("strategy")` or `["strategy"]` off a provider
+config, or `.get("strategy_config")` or `["strategy_config"]`. Enforcement is per read: every direct read is flagged, also in a module that calls
+`nested_children` elsewhere. A module that reads the child must go through `nested_children`
+for all of it. Registries that name `"nested"` in a set or table without reading the child
 (for example `validators/_leak_check.py`) have no comparison or key, so the shape does not match
 them. Deliberate evasion (`getattr`, a key built at run time) is not modelled.
 """
@@ -25,7 +26,7 @@ from tests.sentry._call_resolution import resolved_calls
 from tests.sentry.defects import _defect_scan as scan
 
 OWNER = "_nested_json/_rules.py"
-CHILD_KEYS = ("strategy", "strategy_config")
+PROVIDER_CONFIG_NAMES = frozenset({"pc", "cfg", "config", "provider_cfg", "pcfg", "pconf"})
 # The seven modules that read a nested child at the slice base; each must call the choke point.
 READERS = (
     "execution/_column_access.py",
@@ -66,28 +67,48 @@ def _names_nested(tree: ast.AST) -> bool:
     return False
 
 
-def _reads_child(tree: ast.AST) -> bool:
+def _receiver(node: ast.AST) -> str:
+    """The last name of the object a key is read from: `pc` for `pc.get(..)`, else ''."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _is_provider_config(receiver: str) -> bool:
+    return receiver in PROVIDER_CONFIG_NAMES or "provider_config" in receiver
+
+
+def direct_child_reads(tree: ast.AST) -> list[int]:
+    """Lines that read a nested child key straight off a provider config.
+
+    `strategy_config` is a child key whatever it is read from. `strategy` is also the column's
+    own key (`col_entry.get("strategy")`), so it counts only when read from a provider-config
+    looking name (`pc`, `cfg`, `provider_config`, ...). Per read, not per module: a module that
+    also calls `nested_children` is still flagged for each direct read it keeps.
+    """
+    lines: list[int] = []
     for node in ast.walk(tree):
+        key: object = None
+        receiver = ""
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"
             and node.args
             and isinstance(node.args[0], ast.Constant)
-            and node.args[0].value in CHILD_KEYS
         ):
-            return True
-        if (
-            isinstance(node, ast.Subscript)
-            and isinstance(node.slice, ast.Constant)
-            and node.slice.value in CHILD_KEYS
-        ):
-            return True
-    return False
+            key, receiver = node.args[0].value, _receiver(node.func.value)
+        elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            key, receiver = node.slice.value, _receiver(node.value)
+        if key == "strategy_config" or (key == "strategy" and _is_provider_config(receiver)):
+            lines.append(node.lineno)
+    return lines
 
 
 def is_reader(tree: ast.AST) -> bool:
-    return _names_nested(tree) and _reads_child(tree)
+    return _names_nested(tree) and bool(direct_child_reads(tree))
 
 
 def uses_choke_point(tree: ast.AST) -> bool:
@@ -99,7 +120,8 @@ def uses_choke_point(tree: ast.AST) -> bool:
 
 
 def unmigrated(tree: ast.AST) -> bool:
-    return is_reader(tree) and not uses_choke_point(tree)
+    """A module that names `nested` and still reads a child key itself."""
+    return is_reader(tree)
 
 
 def _files() -> list[Path]:
