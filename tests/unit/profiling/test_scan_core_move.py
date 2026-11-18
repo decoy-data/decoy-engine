@@ -10,6 +10,7 @@ import decoy_engine
 from decoy_engine import profiling
 
 _ROOT = Path(__file__).resolve().parents[3]
+# Taken on the base of 82-E2a; 82-E2b regenerated it with the additive `FieldCore.nested` only.
 _SNAPSHOT = _ROOT / "tests" / "fixtures" / "f07" / "scan-set-core-schema.json"
 
 # Importer file -> the moved names it must take from `_scan_core`.

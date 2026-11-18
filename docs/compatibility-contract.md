@@ -275,6 +275,14 @@ the guard cannot recognise (a person name, an address) is the stated limit. The 
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
 
+Additive within `/v1` (F07 82-E2b): each field of a new record carries `nested`, `null` for a column that is not JSON
+(or when the scan ran with `nested_paths=False`) and otherwise a `NestedCore`: cell outcome counts, the bounds that
+fired and `paths`, each with `path`, `present_count`, `null_count`, closed `kinds` and `detector_hits`. A path is a
+count of cells, never a value; a key is written as a name only when it passes the key rule (identifier shape, no
+detector hit, at least 2 cells and a tenth of its parent's cells) and is `*` otherwise. `NestedCore` and
+`PathObservationCore` refuse unknown fields on write; the read model ignores added fields and reads a kind token it
+does not know as a string. A record written before this change has no `nested` member and still validates.
+
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
 refused, scores floats (bool and strings refused), drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The

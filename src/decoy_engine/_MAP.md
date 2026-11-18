@@ -25,7 +25,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `transforms/` | Transform implementations the strategy handlers reuse (fpe, text_mask, code_set, derived, joint_mask, geo_generalize, group_key, windowed_date) |
 | `expressions/` | Closed-grammar parsers (`derived`, `when`) and the `formula` safe-eval |
 | `detection/` | PII detectors, patterns, validators, NER, name hints |
-| `profiling/` | Column profiler, classification, sentinels, recommendations, ML model pack, eval, `scan-diff/v1` and the bound baseline (`scan_diff.py`, `scan_set_read.py`, `bound_baseline.py`) |
+| `profiling/` | Column profiler, classification, sentinels, recommendations, ML model pack, eval, path observation in `profiling/paths/`, `scan-diff/v1` and the bound baseline (`scan_diff.py`, `scan_set_read.py`, `bound_baseline.py`) |
 | `verification/` | Post-mask integrity checks |
 | `profile/` | Source profiling, readers (CSV, Parquet, fixed-width), fixed-width writer |
 | `io/` | Bounded source readers shared by CLI and platform: CSV record framer, Parquet/CSV byte-budget chunk cutter (`ChunkBudget`) |

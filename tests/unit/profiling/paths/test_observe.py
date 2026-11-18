@@ -48,7 +48,7 @@ def test_at_e2_1_paths_use_wildcards_with_exact_counts(tmp_path: Path) -> None:
 def test_at_e2_4_a_level_over_the_key_limit_collapses(
     tmp_path: Path, keys: int, collapsed: bool
 ) -> None:
-    cell = {f"k{n:03d}": 1 for n in range(keys)}
+    cell = {f"field_{n:03d}": 1 for n in range(keys)}
     scan = scan_cells(tmp_path, dumps([cell] * 3))
     obs = observation(scan)
     found = by_path(obs)
@@ -112,17 +112,17 @@ def test_at_e2_5_cell_count_bound_holds_for_a_full_read(tmp_path: Path) -> None:
 
 def test_at_e2_5_path_cap_and_map_collapse_in_one_column(tmp_path: Path) -> None:
     groups = 12
-    cell: dict[str, Any] = {"m": {f"i{n:03d}": 1 for n in range(100)}}
-    cell.update({f"g{g:02d}": {f"h{n:02d}": 1 for n in range(22)} for g in range(groups)})
+    cell: dict[str, Any] = {"m": {f"inner_{n:03d}": 1 for n in range(100)}}
+    cell.update({f"grp_{g:02d}": {f"leaf_{n:02d}": 1 for n in range(22)} for g in range(groups)})
     scan = scan_cells(tmp_path, dumps([cell] * 3))
     obs = observation(scan)
     found = by_path(obs)
     assert obs.paths_truncated and len(found) == SCAN_MAX_PATHS
     assert obs.map_collapsed == 1
-    assert "$.m.*" in found and not any(p.startswith("$.m.i") for p in found)
+    assert "$.m.*" in found and not any(p.startswith("$.m.inner") for p in found)
     assert ref("NESTED_PATHS_TRUNCATED") in warning_codes(scan)
     # Without the 12th group the same column fits: the 100 collapsed keys took no path slot.
-    del cell["g11"]
+    del cell["grp_11"]
     fits = observation(scan_cells(tmp_path, dumps([cell] * 3)))
     assert not fits.paths_truncated and len(fits.paths) < SCAN_MAX_PATHS
 
@@ -242,7 +242,7 @@ def test_at_e2_12_a_map_of_maps_keeps_bounded_state(
 ) -> None:
     _Probe.peak, _Probe.stored = 0, []
     monkeypatch.setattr(_walk, "Levels", _Probe)
-    cell = {f"o{o:03d}": {f"i{i:03d}": 1 for i in range(100)} for o in range(100)}
+    cell = {f"outer_{o:03d}": {f"inner_{i:03d}": 1 for i in range(100)} for o in range(100)}
     text = json.dumps(cell)
     obs = observation(scan_cells(tmp_path, [text] * 100))
     assert set(by_path(obs)) == {"$.*", "$.*.*"}
