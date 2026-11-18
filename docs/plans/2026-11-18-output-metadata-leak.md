@@ -1,4 +1,4 @@
-Status: plan (revision 1, 2026-11-18; not yet reviewed)
+Status: plan (revision 2, 2026-11-18; Dennis round 1 GO-WITH-FIXES addressed; Codex review next)
 
 # OUTPUT-METADATA-LEAK: source Parquet metadata reaches masked output (1.0 leak row)
 
@@ -11,6 +11,23 @@ The owner decided on 2026-11-18 that F38 (dataset metadata preserve and redact) 
 Anchors: a path with no prefix is in decoy-engine (under `src/decoy_engine/` for source, the repo root for `tests/` and `docs/`); a path with the prefix `C:` is in the CLI repository (decoy). Engine `origin/main` `ad36687a6`; CLI `origin/main` `920ea13c`.
 
 Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-exceptions.md` (R2: privacy logic and an output-format change), `development-loop.md` (PLAN: guarantee, non-goals, size, design notes, choke point, placement, established solutions, acceptance tests first), `bugfix.md` (fail-before proof, root cause), `security.md` (sensitive data out of artifacts, secure default), `cross-cutting-concerns.md` (one choke point plus a guard that walks the syntax tree, a seeded bypass, a shrink-only allowlist), `api-and-compatibility.md` (output bytes change, public additions, room for an opt-in later), `architecture.md` (placement against CODEMAP), `reuse-first.md`, `testing.md` (T0 to T2, mutations, strict xfail for known reds), `proportionality.md`, `scope-discipline.md`, `documentation.md`, `workspace-and-vcs.md` (commit messages), `catalogs/recurring-defects.md`.
+
+Revision 2 changes (Dennis round 1: 0 blocker, 2 high, 7 medium, 5 low):
+
+| Finding | Change | Where |
+|---|---|---|
+| H1 | Each CE cell names its publishing entry and reads the committed file; the helper checks that the engine wrote the file; "stream without a sink" moved to AT-E2 | 8.1, 8.3 |
+| H2 | AT-S1 detects `COPY ... TO` in `execute()` SQL, resolving module constants and f-string parts; sites re-counted (7 COPY statements in 3 modules); baseline keyed by module and function; watch set copies the CLI set and adds `sink_parquet`, `write_metadata`, DuckDB relation `write_parquet`, each with a seeded cell | 5.3, 8.2 |
+| M1 | Pandas blob closed: `creator` pinned to the running pyarrow, `pandas_version` PEP 440 public form, `pandas_type` a closed enum; forged-member cells | 4.2, AT-M4 |
+| M2 | AT-S2 inverted: every schema-metadata argument is `None`, a literal or a direct `sanitized_schema_metadata(...)` call; 4.3 narrowed to the ten explicit copy sites | 4.3, 8.3 |
+| M3 | CLI helper declared as a `[[mirror]]` in `C:ci/vendored.toml` | 8.4, 9 |
+| M4 | Order section against `plan/freeze-batch` revision 2 (`24b1da552`); Breaking fragment class | 12.1, 6 |
+| M5 | AT-M3 is a dtype matrix plus a file-level byte cell; mutation "from_arrays instead of cast" | 8.2 |
+| M6 | Subset is a published `TARGET_OUTPUT` with its own baseline category, guarded by CE-9; 5.6 corrected | 5.3, 5.6 |
+| M7 | Canaries for the range-index name, key names, forged `creator` and `pandas_version` | 8.1 |
+| L1 to L5 | All 11 catalog classes named; physical-seam wording; cloud and DB delivery stated; light facade import; plain changelog text | 13, 3, 1.2, 10, 6 |
+
+Owner questions Q1 to Q6 were answered on 2026-11-18 with the recommended answers (section 15).
 
 Risk: R2 overall (privacy logic on every output file; output bytes change for sources that carry metadata). E0 is R1 (tests and a record only). E1 is R2. E2 is R1 (in-memory schema hygiene behind the E1 guarantee). C1 is R2 (CLI output bytes). Approver: Cam (owner) for the plan and the owner questions. Plan gate: Dennis then Codex. Slice review: Codex for E0 and E2; Dennis then Codex for E1 and C1.
 
@@ -29,11 +46,12 @@ Risk: R2 overall (privacy logic on every output file; output bytes change for so
 
 - F38 itself (an opt-in preserve or redact policy). 1.x.
 - A Decoy provenance key in output files (owner Q3, recommended no).
-- Field-level metadata and `df.attrs` on in-memory results returned to a Python caller (`RunResult` tables, SDK DataFrames). The caller already holds the source. E2 removes schema-level carriers in memory as hygiene; the guarantee is about files.
+- Field-level metadata and `df.attrs` on in-memory results returned to a Python caller (`RunResult` tables, SDK DataFrames), including `attrs` that `Table.from_pandas` writes into the pandas blob of an in-memory table (Q5, decided). The caller already holds the source. E2 cleans the ten explicit copy sites in memory as hygiene; the guarantee is about files.
 - Intermediate files that Decoy never publishes: scratch spill, the isolated child's source handoff, declared-cast staging, the out-of-core key stage, vault segments inside the encrypted vault. The sentry lists each by name with a reason (owner Q4).
 - Registered Arrow extension types (for example `arrow.uuid`, `arrow.opaque`). Their parameters are type information and stay. An unregistered extension arrives as storage type plus `ARROW:extension:*` field metadata, which is stripped (canary cell CE-7).
 - A stale pandas blob on masked columns (the source `pandas_type` on a column whose type masking changed). A correctness item for ROUTE-OUTPUT-CONTRACT, not a leak; recorded as a follow-up.
 - Platform writers (parked with the platform).
+- Cloud and database delivery. No CLI or engine route writes a Parquet target to object storage or a database today; `_targets.py` writes local files only. A later cloud or database writer must go through the `_targets.py` writers (CC-6 and G-ONE-TARGET-WRITE fail otherwise).
 - CSV and fixed-width outputs: they have no key/value metadata (investigation at `ad36687a6`; cells CE-10 and CC-5 keep that true).
 
 ## 2. Established solutions
@@ -58,7 +76,7 @@ Remaining custom code: about 130 lines (the sanitizer and the pandas-blob filter
 - The file-access sentry resolver (`tests/sentry/fa/`, `tests/sentry/_call_resolution.py`) to resolve Parquet sink calls through aliases and re-exports.
 - Test kit `tests/unit/execution/_transform_testkit.py` (`fk_config`, `fk_tables`, `single_table_config`) for the route cells.
 - CLI G-ONE-TARGET-WRITE (`C:tests/sentry/io_policy/test_target_writes.py`, shared scanner `C:tests/sentry/io_policy/_calls.py`): it already pins every table write to `C:src/decoy/cli/io/_targets.py`; C1 extends it instead of adding a second walker.
-- Physical-seam diff gate (`tests/sentry/test_physical_seam_disconnection.py`): every execution file E1 and E2 touch is already in its permitted set at `ad36687a6`. The builder confirms; a missing one gets a reasoned line in the permitted set (an allowlist entry, not a cap).
+- Physical-seam diff gate (`tests/sentry/test_physical_seam_disconnection.py`): every execution file E1 and E2 touch is already in its permitted set at `ad36687a6`. The builder confirms. If one is missing, it is added through the standard permitted-set process (one reasoned line, reviewed at the gate). That is the normal allowlist path for a changed file, not a cap or baseline raise.
 
 ## 4. Behaviour
 
@@ -82,18 +100,18 @@ Parsed with `strict_json_loads`. Anything that is not a JSON object, or fails a 
 
 | Member | Rule |
 |---|---|
-| `columns` | kept. Each entry keeps only `name`, `field_name`, `pandas_type`, `numpy_type`, `metadata`. `field_name` must name a field of the output schema, else the entry is dropped. `name` is set equal to `field_name`. `pandas_type` and `numpy_type` must be strings of at most 64 characters that fullmatch `[A-Za-z0-9_\[\], :/.()-]+`, else the entry is dropped. `metadata` keeps only `timezone` (string, must equal the Arrow field type's tz), `num_categories` (int, not bool), `ordered` (bool), `precision` and `scale` (int, not bool), `encoding` (`"UTF-8"`); otherwise `null` |
+| `columns` | kept. Each entry keeps only `name`, `field_name`, `pandas_type`, `numpy_type`, `metadata`. `field_name` must name a field of the output schema, else the entry is dropped. `name` is set equal to `field_name`. `pandas_type` must be a member of a closed enum: the logical type names that pyarrow's `pandas_compat` writes at the pinned pyarrow (`bool`, the int, uint and float widths, `datetime`, `datetimetz`, `date`, `time`, `bytes`, `unicode`, `decimal`, `categorical`, `object`, `empty`) or `list[<member>]`. The enum is derived in a test from pyarrow's own mapping, so a pin bump that adds a name fails that test instead of dropping entries without notice. `numpy_type` must be a string of at most 64 characters that fullmatches `[A-Za-z0-9_\[\], :/.()-]+`. Otherwise the entry is dropped. `metadata` keeps only `timezone` (string, must equal the Arrow field type's tz), `num_categories` (int, not bool), `ordered` (bool), `precision` and `scale` (int, not bool), `encoding` (`"UTF-8"`); otherwise `null` |
 | `index_columns` | keeps string entries that name a field of the output schema; drops every range-index object (its `name` is user text and its `stop` is a source row count) |
 | `column_indexes` | replaced with pyarrow's default single entry (`name` null, `field_name` null, `pandas_type` `"unicode"`, `numpy_type` `"object"`, `metadata` `{"encoding": "UTF-8"}`) |
-| `creator` | kept only as `{"library": "pyarrow", "version": <version string>}` |
-| `pandas_version` | kept if it fullmatches a version pattern, else dropped |
+| `creator` | always written as `{"library": "pyarrow", "version": pyarrow.__version__}` of the running process; the source's value is never copied |
+| `pandas_version` | kept only if it is at most 32 characters and fullmatches a PEP 440 public version with no local segment (`[0-9]+(\.[0-9]+)*((a\|b\|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?`), else dropped |
 | `attributes` and any other member | dropped |
 
 The JSON is re-encoded the way pyarrow writes it (`json.dumps` with default separators, members in pyarrow's order). A blob that pyarrow wrote for a frame with no `attrs`, no column-index name and `preserve_index=False` comes out byte-identical. AT-M3 pins that.
 
 ### 4.3 Carriers in memory (E2)
 
-The six out-of-core builders copy `source_schema.metadata` or `batch.schema.metadata` into a new schema. `execution/_transforms_table.py:120` keeps every non-pandas source key. `execution/_faker_degenerate_pin.py:214` passes the rest of the source metadata through. E2 routes each through `sanitized_schema_metadata(...)`, so in-memory tables built by the engine carry no custom schema key and no `attributes`. Field metadata in memory stays as it is (passthrough columns are the source field by contract, `docs/compatibility-contract.md` line 852); the writers strip it.
+Scope: the ten explicit copy sites of section 5.1, and no more (Q5). The six out-of-core builders copy `source_schema.metadata` or `batch.schema.metadata` into a new schema. `execution/_transforms_table.py:120` keeps every non-pandas source key. `execution/_faker_degenerate_pin.py:214` passes the rest of the source metadata through. E2 routes each through `sanitized_schema_metadata(...)`, so in-memory tables built by the engine carry no custom schema key and no `attributes`. Field metadata in memory stays as it is (passthrough columns are the source field by contract, `docs/compatibility-contract.md` line 852); the writers strip it.
 
 ### 4.4 Errors and logs
 
@@ -131,9 +149,17 @@ Engine output writers (each goes through the choke point after E1):
 - `StagedParquetWriter.write` (`execution/_transactional_sink.py:222`): resident results staged by the reference sink, and the isolated route's child writes (`execution/_isolated_common.py:476`).
 - `StagedParquetWriter.write_batches` (`execution/_transactional_sink.py:271`): out-of-core (`execution/out_of_core/_emit.py:105`, `:127`), stream mode with a sink, the chunked output sink (`execution/_chunked_output_sink.py:597`), streamed generation (`generation/_streamed.py:525`).
 - `publication/_publish.py:448` (F22 `publish_unit`).
-- `subset/_materialize.py:69` (Polars `write_parquet`): a Polars frame read with `scan_parquet` carries no Arrow key/value metadata. Listed in the sentry baseline with that reason and proven by cell CE-9. If CE-9 is red on the base, E1 routes it through `write_output_table(frame.to_arrow(), ...)` instead.
+- `subset/_materialize.py:69` (`polars_adapter.write_parquet`, which is `fileaccess/adapters/polars.py:36`): a published output (`FileRole.TARGET_OUTPUT`, `subset.output_dir`). A Polars frame read with `scan_parquet` carries no Arrow key/value metadata, so it is not routed through the Arrow output writers. It has its own baseline category, `published-polars` ("published; Polars writes no source metadata"), separate from the intermediate rows, and cell CE-9 guards it. A Polars pin bump re-runs CE-9 (it is in the pin bump's T1 set through `tests/security/`). If CE-9 is red on the base, E1 routes it through `write_output_table(frame.to_arrow(), ...)` and the category row is deleted.
 
-Intermediate writers (listed in the sentry baseline with reasons, not sanitized): `vault.py:363` (encrypted segment buffer), `execution/_isolated_commit.py:165` (source handoff to the isolated child), `execution/out_of_core/_stage.py` (masked-key stage), `declared_casting/_stream.py:168` and `:179` (typed source staging), `execution/native/_pool_quality.py` (scratch), DuckDB `COPY ... (FORMAT PARQUET)` in `execution/out_of_core/_relation.py:521` and `execution/out_of_core/_multi_parent.py:154` (scratch), `connectors/postgres_snapshot.py:375` (source snapshot).
+Intermediate writers (baseline category `intermediate`, keyed by module and function, with a reason; not sanitized): `vault.py:363` (encrypted segment buffer), `execution/_isolated_commit.py:165` (source handoff to the isolated child), `execution/out_of_core/_stage.py` (masked-key stage), `declared_casting/_stream.py:168` and `:179` (typed source staging), `execution/native/_pool_quality.py` (scratch), `connectors/postgres_snapshot.py` `_export_relation` (source snapshot, `COPY` at line 332, called from `snapshot_tables_to_parquet` at line 375).
+
+DuckDB `COPY ... TO` statements at `ad36687a6` (7 in 3 modules; all scratch or source, none published). The format comes from the module constant `PRIVATE_COPY = "FORMAT PARQUET, USE_TMP_FILE false"` (`execution/out_of_core/_duckdb.py:27`), imported as `_PRIVATE_COPY` and placed in f-strings:
+
+| Module | Function | Lines |
+|---|---|---|
+| `execution/out_of_core/_relation.py` | `_build_relation` | 521, 525-530, 537-543 |
+| `execution/out_of_core/_multi_parent.py` | `merge_parent_relations` | 154, 158-162, 168-174 |
+| `connectors/postgres_snapshot.py` | `_export_relation` | 332-333 (format written inline) |
 
 CLI writers: `C:src/decoy/cli/io/_targets.py` `_write_table` (DataFrame `to_parquet` at line 407, `pq.write_table` at line 409) and `write_chunked_output` (`ParquetWriter` at line 537); `write_private_table` (unmask, detokenize) shares `_write_table`. `C:src/decoy/api.py:268` writes the caller's own DataFrame into a private spool as a source: input side, not an output.
 
@@ -156,7 +182,8 @@ Route matrix for the canary (E0): full_frame, sequential, stream without a sink,
 
 - Engine output Parquet files (all routes in 5.3).
 - CLI target Parquet files (`decoy run`, `decoy run --chunked`, `decoy unmask`, `decoy detokenize`, subset outputs).
-- In-memory tables returned by the engine (schema level, E2).
+- Subset output Parquet files (`subset/_materialize.py:69`, published, Polars).
+- In-memory tables returned by the engine (schema level, the ten copy sites only, E2).
 - Not changed: CSV, fixed width, run results, `--json`, logs, progress events, reports, the vault file format.
 
 ## 6. Frozen contracts
@@ -164,7 +191,7 @@ Route matrix for the canary (E0): full_frame, sequential, stream without a sink,
 | Surface | Before | After | Where recorded |
 |---|---|---|---|
 | Output Parquet key/value metadata | route-dependent; out-of-core copies the source's | allow-list v1: `b"pandas"` sanitized, nothing else; no field metadata | new row in `docs/frozen-surfaces.md`; `docs/security/output-metadata.md` (new) |
-| Output bytes | | change only for sources with custom metadata, `attrs`, field metadata, a column-index name or a range index; masked values unchanged | changelog fragment (Changed, security) |
+| Output bytes | | change only for sources with custom metadata, `attrs`, field metadata, a column-index name or a range index; masked values unchanged | `Breaking:` changelog fragment and a shape-changelog entry (the freeze batch's class for output-byte changes, so `check_shape_changelog.py` passes at REL-GATE G3). Plain text: "Out-of-core output files written from pandas-made sources change bytes: the source's pandas metadata is replaced by a cleaned copy, and custom keys and field metadata are removed." |
 | Route metadata difference in `docs/compatibility-contract.md` (lines 820-856) | full-frame carries pandas metadata, chunked none, passthrough field metadata kept | field metadata gone on every route; the schema metadata difference narrows to "sanitized pandas blob or none" | E1 updates those paragraphs |
 | Public API | | adds `output_schema`, `output_table` (additive) | `src/decoy_engine/__init__.py`; public boundary sentry |
 | CLI | | Parquet target bytes as above; no flag, exit code or `--json` change | `C:CHANGELOG.md` |
@@ -198,13 +225,24 @@ Each test is written first and fails on the slice base for the stated reason, th
 Helper `tests/security/_metadata_canary.py`:
 
 - `canary_sources(tmp_path)`: writes parent and child Parquet sources with one canary per carrier: `DCY-CANARY-SCHEMA` (schema key `table_comment`), `DCY-CANARY-ATTRS` (`df.attrs`, so both `attributes` and `PANDAS_ATTRS`), `DCY-CANARY-FIELD` (field metadata on every column, including the unconfigured passthrough `n`, the masked `note` and the FK `parent_id`), `DCY-CANARY-COLIDX` (`df.columns.name`), `DCY-CANARY-NESTED` (child-field metadata in a struct column, on routes that admit structs), `DCY-CANARY-EXT` (`ARROW:extension:name` on a storage column).
-- `canaries_in(path) -> set[str]`: the canaries found in (1) the raw file bytes, (2) every footer key/value value, (3) the schema and every field (recursive) of `pa.ipc.read_schema` over the base64-decoded `ARROW:schema`, (4) the parsed pandas blob.
+- More canaries (M7): `DCY-CANARY-RIDX` (a named RangeIndex, written with `preserve_index=None` so pyarrow stores it as a range-index object); `DCY-CANARY-SKEY` and `DCY-CANARY-FKEY` as the key names of a schema-metadata entry and of a field-metadata entry; `DCY-CANARY-CREATOR` and `DCY-CANARY-PDVER` as forged `creator.library`, `creator.version` and `pandas_version` members of the pandas blob.
+- `canaries_in(path) -> set[str]`: the canaries found in (1) the raw file bytes, (2) every footer key and value, (3) the schema and every field (recursive), keys and values, of `pa.ipc.read_schema` over the base64-decoded `ARROW:schema`, (4) the parsed pandas blob.
+- `assert_engine_wrote(path, run_start)`: the file is the committed output the entry under test reports (the `CommitReceipt` path, `TransactionalSink.committed_table_path`, the `publish_tables` result, or the subset `output_dir` listing), its mtime is after `run_start`, and the test never wrote to that path. A cell whose route publishes no file fails this check instead of passing on an empty set.
+
+Each CE cell names its publishing entry and reads the file that entry committed:
+
+| Entry | Used by |
+|---|---|
+| `run_pipeline(..., sink=TransactionalSink)` (`execution/_pipeline.py:115`), file from `committed_table_path` | CE-1 to CE-8 except the cells below |
+| `publish_tables` (`publication/_publish.py:419`, write at `:448`) | the F22 cell of CE-6 |
+| the isolated stage commit (`execution/_isolated_commit.py:112`, `TARGET_OUTPUT` `output_dir`) | the isolated cell of CE-6 |
+| `materialize_subset` `output_dir` (`subset/_materialize.py:32`) | CE-9 |
 
 | Id | Test | Red on base because | Mutation that must turn it red | Slice |
 |---|---|---|---|---|
 | AT-C0 | `tests/security/test_metadata_canary_helper.py`: the helper finds each canary in a file written with it, including a field-metadata canary that is absent from the raw bytes | new helper | drop the `ARROW:schema` decode step (the field cell then misses the canary) | E0 |
 | CE-1 | `tests/security/test_output_metadata_canary.py::test_route[out_of_core_fk]` (`fk_config`, `execution_mode="out_of_core"`): `canaries_in(output) == set()` for both tables | the investigator's repro: SCHEMA and ATTRS found | revert `output_parquet_writer` to the raw adapter | E0 (strict xfail), E1 flips |
-| CE-2 | same test, `full_frame`, `sequential`, `stream` without a sink | unknown, settled by E0 | as CE-1 for any cell red on the base | E0 |
+| CE-2 | same test, `full_frame`, `sequential` (each through `run_pipeline(sink=TransactionalSink)`) | unknown, settled by E0 | as CE-1 for any cell red on the base | E0 |
 | CE-3 | same test, `stream` with a `TransactionalSink` | unknown (field metadata through `_chunked_output_sink.py:386`) | as CE-1 | E0 |
 | CE-4 | same test, auto-chunk native dispatcher (companion lane) | unknown (passthrough is "the source column exactly") | as CE-1 | E0 |
 | CE-5 | same test, resident with a transform op | `_transforms_table.py:120` keeps custom keys | as CE-1 | E0 |
@@ -222,11 +260,11 @@ E0 rule: every cell red on the base is marked `pytest.mark.xfail(strict=True, re
 |---|---|---|---|---|
 | AT-M1 | `tests/unit/safe_output/test_file_metadata.py::test_fields_stripped_recursively` (struct, list, map, dictionary value fields; `PARQUET:field_id`) | no function | strip top-level fields only | E1 |
 | AT-M2 | `::test_only_allowed_schema_keys` (custom key, `PANDAS_ATTRS`, non-UTF-8 key bytes) | no function | add `b"PANDAS_ATTRS"` to `_ALLOWED_SCHEMA_KEYS` | E1 |
-| AT-M3 | `::test_pandas_blob_sanitized` (`attributes` gone, column-index name gone) and `::test_clean_blob_identical`: for a frame with no `attrs`, `sanitized_schema_metadata(Table.from_pandas(df, preserve_index=False).schema.metadata)` equals the input bytes | no function | keep `attributes`; or re-encode with other separators (the identity cell turns red) | E1 |
-| AT-M4 | `::test_bad_blob_dropped` (not JSON, a JSON list, NaN, a 1 MiB string, wrong member types, a bool where an int is required, a type string ending in `"\n"`) | no function | raise instead of dropping; or match with `re.match` (the newline cell turns red) | E1 |
+| AT-M3 | `::test_pandas_blob_sanitized` (`attributes` gone, column-index name gone) and `::test_clean_blob_identical[dtype]` over a dtype matrix: categorical, tz-aware datetime, decimal, nullable `Int64`, `string[pyarrow]`, non-ns datetime (`datetime64[ms]`), bool, and non-ASCII column names. For a frame with no `attrs`, `sanitized_schema_metadata(Table.from_pandas(df, preserve_index=False).schema.metadata)` equals the input bytes, and a round trip through `read_pandas` gives the same dtypes. File-level cell `::test_clean_file_identical`: `StagedParquetWriter.write` output bytes equal raw `pq.write_table` bytes for the same clean table | no function | keep `attributes`; re-encode with other separators (identity cells turn red); build the output table with `pa.Table.from_arrays(table.columns, schema=...)` instead of `cast` (keeps nested child field metadata; the nested cell of AT-M1 and the file-level cell turn red) | E1 |
+| AT-M4 | `::test_bad_blob_dropped` (not JSON, a JSON list, NaN, a 1 MiB string, wrong member types, a bool where an int is required, a type string ending in `"\n"`, a forged `creator` (`{"library": "x", "version": "<canary>"}`), a forged `pandas_type` outside the enum, a `pandas_version` with a local segment or over 32 characters) | no function | raise instead of dropping; match with `re.match` (the newline cell turns red); copy the source `creator` (the forged-creator cell turns red); replace the enum with the free pattern (the forged-type cell turns red) | E1 |
 | AT-M5 | `::test_blob_entries_follow_output_schema` (unknown `field_name`, range index, `name` differing from `field_name`) | no function | keep range-index objects | E1 |
 | AT-M6 | `tests/fileaccess/test_output_writers.py`: `output_parquet_writer` with a dirty schema and dirty batches writes a clean footer; `write_output_table` likewise; a clean table passes through without a copy (same buffer addresses) | no output writers | sanitize the batches but build the writer from the raw schema | E1 |
-| AT-S1 | `tests/sentry/defects/test_output_metadata_choke_point.py`: walks `src/decoy_engine` with the file-access resolver. Every Parquet sink (`pyarrow.parquet.write_table`, `ParquetWriter`, `write_to_dataset`, the adapter `write_table` and `parquet_writer`, Polars `write_parquet`, `DataFrame.to_parquet`, DuckDB `COPY` with `FORMAT PARQUET`) is inside an output writer of `fileaccess/adapters/arrow.py`, or is a row of `tests/sentry/baselines/parquet-intermediate-writers.json` (module, function, reason; shrink-only through `scripts/dev/ratchet_check.py`). Covered spellings: direct attribute call, `from pyarrow.parquet import write_table as w`, module alias, adapter call through `arrow_adapter`. Seeded cells for each spelling fail | no sentry | switch `StagedParquetWriter.write` back to `arrow_adapter.write_table` | E1 |
+| AT-S1 | `tests/sentry/defects/test_output_metadata_choke_point.py`: walks `src/decoy_engine` with the file-access resolver. Watch set: the full CLI G-ONE-TARGET-WRITE Parquet set (`pyarrow.parquet.write_table`, `ParquetWriter`, `write_to_dataset`; `pyarrow.dataset.write_dataset`), plus `pyarrow.parquet.write_metadata`, `DataFrame.to_parquet`, Polars `DataFrame.write_parquet` and `LazyFrame.sink_parquet`, the Arrow and Polars adapter writers, DuckDB relation `.write_parquet`, and `execute()` / `sql()` calls whose SQL contains `COPY ... TO`. The SQL check joins string literals and f-string constant parts and resolves a `Name` or imported name bound to a module-level string constant (so `_PRIVATE_COPY` from `out_of_core/_duckdb.py:27` is seen). Every hit is inside an output writer of `fileaccess/adapters/arrow.py`, or matches a row of `tests/sentry/baselines/parquet-intermediate-writers.json` keyed by (module, function) with a category (`intermediate` or `published-polars`) and a reason, and a count per key. The baseline is shrink-only through `scripts/dev/ratchet_check.py`. At `ad36687a6` the COPY hits are the 7 statements in 3 functions of 5.3. Covered spellings, each with one seeded cell that fails: direct attribute call, `from pyarrow.parquet import write_table as w`, module alias, adapter call through `arrow_adapter`, `write_dataset`, `write_metadata`, `sink_parquet`, DuckDB `relation.write_parquet`, COPY in a plain literal, COPY with the format in an imported constant, COPY split across f-string parts. The output writers themselves must call `output_schema` or `output_table` (seeded cell removes the call) | no sentry | switch `StagedParquetWriter.write` back to `arrow_adapter.write_table` | E1 |
 | AT-E1 | E0's CE cells for engine routes lose their xfail markers and pass | leak | revert `_publish.py:448` to the raw adapter (the F22 cell of CE-6 turns red) | E1 |
 | AT-P1 | `tests/sentry/test_public_import_boundary.py` and `tests/sentry/test_ga_stub_exports.py` list `output_schema` and `output_table` | not exported | drop one export | E1 |
 
@@ -234,14 +272,14 @@ E0 rule: every cell red on the base is marked `pytest.mark.xfail(strict=True, re
 
 | Id | Test | Red because | Mutation that must turn it red | Slice |
 |---|---|---|---|---|
-| AT-S2 | `tests/sentry/defects/test_metadata_carrier.py`: AST walk of `src/decoy_engine`. A `metadata=` keyword of `pa.schema`, `pa.record_batch` or `pa.Table.from_arrays`, or the argument of `replace_schema_metadata` or `with_metadata`, whose value reads a `.metadata` attribute must be wrapped in `sanitized_schema_metadata`. Seeded cell fails | the ten sites in 5.1 | restore `metadata=source_schema.metadata` at `_rewrite_pass.py:377` | E2 |
-| AT-E2 | `tests/security/test_output_metadata_canary.py::test_in_memory[out_of_core_fk, resident_transforms]`: the returned tables' schema metadata holds no canary | carriers | restore the `_transforms_table.py:120` line | E2 |
+| AT-S2 | `tests/sentry/defects/test_metadata_carrier.py`: AST walk of `src/decoy_engine`. Every schema-metadata argument (the `metadata=` keyword or second positional of `pa.schema`, `pa.record_batch`, `pa.RecordBatch.from_arrays`, `pa.Table.from_arrays`, `pa.Table.from_batches` schema built inline, and the argument of `replace_schema_metadata` and `Schema.with_metadata`) must be `None`, a literal, or a direct `sanitized_schema_metadata(...)` call. A local name (`meta` at `_transforms_table.py:120-122`, the merged dict at `_faker_degenerate_pin.py:214`) fails. Field-level `metadata=` on `pa.field` is out of scope (Q5). Seeded cells: a direct `.metadata` read, a local variable, a dict merge | the ten sites in 5.1 | restore `metadata=source_schema.metadata` at `_rewrite_pass.py:377`; restore `meta` at `_transforms_table.py:122` | E2 |
+| AT-E2 | `tests/security/test_output_metadata_canary.py::test_in_memory[out_of_core_fk, resident_transforms, stream_no_sink]`: the returned tables' schema metadata holds no schema-key, attrs-member or creator canary (stream without a sink publishes no file, so it is checked here) | carriers | restore the `_transforms_table.py:120` line | E2 |
 
 ### 8.4 CLI (C1)
 
 | Id | Test | Red because | Mutation that must turn it red | Slice |
 |---|---|---|---|---|
-| CC-1 | `C:tests/e2e/cli_fmt/test_output_metadata_canary.py`: `decoy run` (plain) on canary sources; no canary in the Parquet targets (same decode as AT-C0; the helper is vendored and pinned in `C:ci/vendored.toml`) | `pq.write_table(data)` keeps the table schema | drop `output_table` in `_write_table` | C1 |
+| CC-1 | `C:tests/e2e/cli_fmt/test_output_metadata_canary.py`: `decoy run` (plain) on canary sources; no canary in the Parquet targets (same decode as AT-C0; the helper is a `[[mirror]]` of the engine's `tests/security/_metadata_canary.py` in `C:ci/vendored.toml`, header naming the engine path and the differences: import paths only) | `pq.write_table(data)` keeps the table schema | drop `output_table` in `_write_table` | C1 |
 | CC-2 | same file, DataFrame write path (`write_private_table` through `decoy unmask`): no `PANDAS_ATTRS`, no `attributes` | `to_parquet` writes `attrs` | restore `data.to_parquet` | C1 |
 | CC-3 | same file, `decoy run --chunked`: no canary | the first chunk's schema is used as is | build `ParquetWriter` from `first.schema` | C1 |
 | CC-4 | same file, out-of-core FK pipeline through the CLI | engine and CLI both | none extra (covered by E1 and CC-1) | C1 |
@@ -274,7 +312,7 @@ CLI (rows of `C:CODEMAP.md` "Where Things Go"):
 | File | New or changed | CODEMAP row | Sits beside |
 |---|---|---|---|
 | `C:src/decoy/cli/io/_targets.py` | changed (about +15) | Source readers and target writers: `src/decoy/cli/io/` | |
-| `C:tests/e2e/cli_fmt/test_output_metadata_canary.py`, `C:tests/e2e/cli_fmt/_metadata_canary.py` (vendored) | new | `tests/e2e/cli_fmt/` | the existing cli_fmt e2e tests |
+| `C:tests/e2e/cli_fmt/test_output_metadata_canary.py`, `C:tests/e2e/cli_fmt/_metadata_canary.py` (a `[[mirror]]` entry: the CLI has no `tests/security/`, and a `[[vendored]]` entry needs the same path in both repos) | new | `tests/e2e/cli_fmt/` | the existing cli_fmt e2e tests |
 | `C:tests/sentry/io_policy/test_target_writes.py` | changed | `tests/sentry/io_policy/` | |
 | `C:CHANGELOG.md`, `C:ci/vendored.toml` | changed | | |
 
@@ -290,6 +328,7 @@ CLI (rows of `C:CODEMAP.md` "Where Things Go"):
 - Why separate output writer functions and not a flag: house style (no flag arguments that switch behavior). `write_output_table` and `write_table` are two named entry points on one core (defect class 8).
 - F38 seam: `_ALLOWED_SCHEMA_KEYS` is the one registry, and `output_schema` and `output_table` are the one entry. F38 adds `*, policy: MetadataPolicy = STRIP` and a preserve policy built from the run config, threaded to the output writers. Nothing is pre-built now.
 - Logs: none added.
+- Facade import (L4): `decoy_engine/__init__.py` and `safe_output/__init__.py` import only `pyarrow` and `strict_json_loads` for the new names; `_file_metadata.py` imports nothing from `execution`, `fileaccess` or `publication`. The import-linter contracts and `tests/sentry/test_public_import_boundary.py` catch a cycle; the builder runs `python -X importtime -c "import decoy_engine"` before and after and reports the delta.
 
 ## 11. Size
 
@@ -308,10 +347,19 @@ New public names: `output_schema`, `output_table` (engine). No product file grow
 |---|---|---|---|---|---|---|
 | E0 | engine | canary helper, route matrix with strict xfail on red cells, record of the matrix | R1 (tests only) | AT-C0, CE-1 to CE-10 | none | T0 on the new files; one Linux VM run plus the companion lane for CE-4; Codex review |
 | E1 | engine | `safe_output/_file_metadata.py`, output writers, three call sites, public exports, choke-point sentry and baseline, flip of the engine CE cells, docs, fragment | R2 | AT-M1 to AT-M6, AT-S1, AT-E1, AT-P1 | E0 | T1 impact set (safe_output, fileaccess, publication, transactional sink, out_of_core, chunked, security, sentry) on the head, plus T2: each named mutation. Frozen-contract trigger: one saved-baseline full suite via `decoy-vm-t3` on the merge head. Dennis then Codex |
-| E2 | engine | eight carrier sites through `sanitized_schema_metadata`, carrier sentry, in-memory cells | R1 | AT-S2, AT-E2 | E1 | T1 (out_of_core, transforms, faker pin, parity suites unchanged) plus the physical-seam sentry; Codex |
+| E2 | engine | ten carrier sites through `sanitized_schema_metadata`, carrier sentry, in-memory cells | R1 | AT-S2, AT-E2 | E1 | T1 (out_of_core, transforms, faker pin, parity suites unchanged) plus the physical-seam sentry; Codex |
 | C1 | CLI | `_targets.py` through `output_table` and `output_schema`, CLI canary e2e, sentry rule, changelog | R2 | CC-1 to CC-6 | the engine release that carries E1, and the CLI repin to it | T1 (`tests/e2e/cli_fmt/`, io_policy sentries, unmask e2e) plus T2 on the head; Dennis then Codex |
 
-Order: E0 now. E1 starts when E0's record exists (the record may add sites to 5.3; it cannot move the choke point). E2 after E1. C1 after the next daily engine release that carries E1; target before the D-4 engine freeze ahead of 2026-12-04. The row closes only when C1 merges.
+Order: E0 now. E1 starts when E0's record exists (the record may add sites to 5.3; it cannot move the choke point). E2 after E1. C1 after the engine release that carries E1; target before the D-4 engine freeze ahead of 2026-12-04. The row closes only when C1 merges.
+
+### 12.1 Order against the freeze batch
+
+Against `plan/freeze-batch` revision 2 (`24b1da552`, `docs/plans/2026-11-18-freeze-batch.md`):
+
+- E1 rebases after freeze X0 merges (X0 changes the frozen-surface map and contract section 1; E1 adds a row to the same map).
+- E1 rides the same engine release as freeze O1 and O3, so the output-byte changes reach users in one release with one set of Breaking fragments.
+- C1 lands after freeze O2, which changes the same two `_targets.py` write functions (`_write_table`, `write_chunked_output`), and rebases on it. C1 uses the single CLI repin to that engine release; it adds no second repin.
+- If the freeze release goes first without E1, E1 takes the next daily release and C1 waits for its repin; nothing in this plan blocks the freeze batch.
 
 ## 13. Recurring-defect class check
 
@@ -321,6 +369,20 @@ Order: E0 now. E1 starts when E0's record exists (the record may add sites to 5.
 - Anchored validation: every string check in 4.2 uses `re.fullmatch`; AT-M4 has a trailing-newline cell.
 - Allowlisted helpers are still checked: the output writers are the allowed sites in AT-S1, and their own bodies must call `output_schema` or `output_table` (a seeded cell removes the call).
 - Value exposure (F31 class): metadata text never enters an error or log line.
+
+Catalog `catalogs/recurring-defects.md`, all 11 classes:
+
+1. Anchored validation: `re.fullmatch` in 4.2; AT-M4 newline cell.
+2. Strict wire and stored types: the pandas blob is parsed with `strict_json_loads` into a closed member set with typed values.
+3. No exception context: the sanitizer raises nothing; no new exception.
+4. Versioned read models: the pandas blob is read with its own closed rules; a blob from an unknown pyarrow writes a fresh `creator`; the enum is derived from the pinned pyarrow.
+5. Normalized guard scanners: AT-S1 and AT-S2 resolve aliases, re-exports, module constants and f-string parts; one seeded cell per spelling.
+6. No reaching into private modules: the CLI imports `decoy_engine.output_table` and `output_schema`, never `safe_output._file_metadata`.
+7. No hidden CI failures: strict xfail on E0 red cells; the sentries fail, never skip.
+8. One input, one trust class per entry point: two named output writers instead of a flag on `write_table`.
+9. Mutations on the final head: every named mutation re-runs on the slice's last head.
+10. Allowlisted helpers are still checked: the output writers must call the sanitizer (AT-S1 seeded cell).
+11. No raised caps: the intermediate baseline is new and shrink-only; no cap, ratchet or allowlist grows.
 
 ### 13.1 Plan defect catalog classes
 
@@ -346,9 +408,9 @@ Order: E0 now. E1 starts when E0's record exists (the record may add sites to 5.
 - "The CLI kept writing the engine's in-memory table as is." Guard: C1 and CC-6. Until C1 ships, E2 removes the schema-level carriers, so the CLI path can still leak field metadata. The row stays open until C1 merges.
 - "F38 needs to break the API." The seam is a keyword-only argument with the strip default: additive.
 
-## 15. Owner questions (taken on the recommended answer; owner to confirm)
+## 15. Owner questions (decided 2026-11-18: owner took every recommended answer)
 
-| Id | Question | Recommended |
+| Id | Question | Decided (recommended answer) |
 |---|---|---|
 | Q1 | Keep a sanitized `b"pandas"` blob (closed member set, `attributes` and column-index names dropped) instead of dropping the key entirely? | Yes. Pandas readers keep nullable-int and categorical dtypes, and clean-source resident output bytes do not change |
 | Q2 | Strip all field-level metadata, including `PARQUET:field_id`? | Yes. Field ids and comments come from the source; F38 can preserve them on request |
