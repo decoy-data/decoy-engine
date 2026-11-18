@@ -105,6 +105,7 @@ def _pass_two(
         if fault is not None:
             continue
         tally.cell = index
+        levels.cell = index
         deep, arrays = _walk.walk(tree, levels.settle, tally.record)
         too_deep += deep
         long_arrays += arrays

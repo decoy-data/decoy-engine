@@ -449,6 +449,7 @@ def assert_every_named_segment_is_earned(obs: Any) -> None:
     from decoy_engine._canonical import SCAN_KEY_APPEARANCE
 
     present = {p.path: p.present_count for p in obs.paths}
+    kinds = {p.path: list(p.kinds) for p in obs.paths}
     for path in present:
         parts = _SEGMENT.findall(path[1:])
         for i, part in enumerate(parts):
@@ -458,7 +459,8 @@ def assert_every_named_segment_is_earned(obs: Any) -> None:
             above = "$" + "".join(parts[:i])
             parent = obs.cells_parsed if above == "$" else present[above]
             assert present[here] >= 2, (path, present[here])
-            assert present[here] / parent >= SCAN_KEY_APPEARANCE, (path, present[here], parent)
+            if above == "$" or kinds[above] == ["object"]:  # a mixed parent counts non-objects too
+                assert present[here] / parent >= SCAN_KEY_APPEARANCE, (path, present[here], parent)
 
 
 def _repro_a() -> list[dict[str, Any]]:
@@ -479,7 +481,7 @@ def test_a_late_collapse_judges_the_wildcard_level_on_all_its_cells(tmp_path: Pa
     obs = observation(scan_cells(tmp_path, dumps(_repro_a())))
     found = by_path(obs)
     assert "$.m.*.zorblax" not in found and "$.m.*.id" in found
-    assert found["$.m.*.id"].present_count == 1020
+    assert found["$.m.*.id"].present_count == 1017
     assert_every_named_segment_is_earned(obs)
 
 
