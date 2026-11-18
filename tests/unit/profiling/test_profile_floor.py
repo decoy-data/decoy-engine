@@ -526,33 +526,65 @@ def test_at3_the_null_marker_is_not_a_word_in_the_free_text_sample() -> None:
     assert out["mode_value"] is None
 
 
-def _numeric_entry(top_counts: list[int], rows: int) -> dict[str, Any]:
-    tops = [_top(str(100 + i), c) for i, c in enumerate(top_counts)]
-    return {
+def _numeric_entry(
+    top_counts: list[int],
+    rows: int,
+    sentinel: tuple[str, int] | None = None,
+    null_count: Any = 0,
+    last_text: str | None = None,
+) -> dict[str, Any]:
+    texts = [str(100 + i) for i in range(len(top_counts))]
+    if last_text is not None:
+        texts[-1] = last_text
+    tops = [_top(t, c) for t, c in zip(texts, top_counts, strict=True)]
+    entry = {
         "name": "n",
         **_SAFE,
         "inferred_type": "integer",
         "row_count": rows,
-        "null_count": 0,
+        "null_count": null_count,
         "mean_value": "123.4",
         "top_values": tops,
         "distribution": {"kind": "numeric", "data": [1.0], "labels": ["a"], "mean": 123.4},
     }
+    if sentinel is not None:
+        note = "-1 - common 'unknown / no parent' sentinel"
+        flag = {
+            "kind": "numeric_sentinel",
+            "value": sentinel[0],
+            "count": sentinel[1],
+            "note": note,
+        }
+        entry["sentinels"] = [flag]
+    return entry
 
 
 @pytest.mark.parametrize(
-    ("top_counts", "rows", "kept"),
+    ("top_counts", "rows", "sentinel", "kept"),
     [
-        ([20, 20, 20, 20, 17], 100, False),  # 3 rows outside the released values
-        ([20, 20, 20, 20, 11], 100, False),  # 9 rows outside
-        ([20, 20, 20, 20, 10], 100, True),  # 10 rows outside
-        ([20, 20, 20, 20, 20], 100, True),  # none outside
-        ([20, 20, 20, 20, 5], 100, True),  # the 5-row value is not released, 14 rows outside
+        ([20, 20, 20, 20, 17], 100, None, False),  # 3 rows outside the released values
+        ([20, 20, 20, 20, 11], 100, None, False),  # 9 rows outside
+        ([20, 20, 20, 20, 10], 100, None, True),  # 10 rows outside
+        ([20, 20, 20, 20, 20], 100, None, True),  # none outside
+        ([20, 20, 20, 20, 5], 100, None, True),  # the 5-row value is not released, 14 outside
+        ([20, 20], 50, ("-1", 9), False),  # a kept -1 flag covers 9 rows; 1 row is left
+        ([20, 20], 49, ("-1", 9), True),  # the flag covers the rest
+        ([20, 20], 60, ("-1", 10), True),  # 10 rows left: nothing a reader can isolate
+        ([20, 20, 12], 52, ("-1", 12), True),  # -1 is also a top value: its rows count once
+        ([20, 20, 12], 53, ("-1", 12), False),  # and one row is left outside both
     ],
 )
 def test_the_mean_is_withheld_when_one_to_k_minus_one_rows_sit_outside_the_top_values(
-    top_counts: list[int], rows: int, kept: bool
+    top_counts: list[int], rows: int, sentinel: tuple[str, int] | None, kept: bool
 ) -> None:
-    out = redact_profile_dict({"fields": [_numeric_entry(top_counts, rows)]})["fields"][0]
+    entry = _numeric_entry(top_counts, rows, sentinel, last_text="-1" if rows in (52, 53) else None)
+    out = redact_profile_dict({"fields": [entry]})["fields"][0]
     assert (out["mean_value"] == "123.4") is kept
     assert (out["distribution"]["mean"] == 123.4) is kept
+
+
+@pytest.mark.parametrize("null_count", [True, False, "0", 0.0, None, -1], ids=repr)
+def test_an_ill_typed_null_count_withholds_the_mean(null_count: Any) -> None:
+    entry = _numeric_entry([20, 20, 20, 20, 20], 100, None, null_count)
+    out = redact_profile_dict({"fields": [entry]})["fields"][0]
+    assert out["mean_value"] is None and out["distribution"]["mean"] is None

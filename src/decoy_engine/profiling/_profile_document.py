@@ -39,11 +39,8 @@ from decoy_engine.profiling._value_redaction import (
     stamp_value_policy,
 )
 from decoy_engine.profiling.sentinels import is_table_sentinel
-from decoy_engine.profiling.types import ColumnProfile
+from decoy_engine.profiling.types import NULL_CELL_TEXT, ColumnProfile
 
-_NULL_TEXT: Final = (
-    "(null)"  # what the profiler writes for a null cell, so a cell can read the same
-)
 _DECADE_LABEL: Final = re.compile(r"(\d{4})s(?:-(\d{4})s)?")
 _Range = tuple[int, int, int | float]
 
@@ -144,6 +141,23 @@ class _Evidence:
     uncovered: int | None
 
 
+def _numeric_sentinels(field: Mapping[str, Any]) -> dict[str, int]:
+    """Row count by value text for each numeric sentinel flag `sentinels.py` keeps as table text."""
+    flags = field.get("sentinels")
+    out: dict[str, int] = {}
+    for flag in flags if isinstance(flags, list) else ():
+        if not isinstance(flag, Mapping):
+            continue
+        kind, value, note, count = (flag.get(k) for k in ("kind", "value", "note", "count"))
+        if (
+            kind == "numeric_sentinel"
+            and is_table_sentinel(kind, value, note, count)
+            and _count(count) is not None
+        ):
+            out[value] = max(out.get(value, 0), count)
+    return out
+
+
 def _evidence(field: Mapping[str, Any]) -> _Evidence:
     rows, nulls = _count(field.get("row_count")), _count(field.get("null_count"))
     proven: dict[str, int] = {}
@@ -155,7 +169,7 @@ def _evidence(field: Mapping[str, Any]) -> _Evidence:
             if isinstance(top, Mapping)
             else (None, None)
         )
-        if isinstance(value, str) and count is not None and value not in (REDACTED, _NULL_TEXT):
+        if isinstance(value, str) and count is not None and value not in (REDACTED, NULL_CELL_TEXT):
             proven[value] = max(proven.get(value, 0), count)
             if count >= MIN_RELEASE_COUNT:
                 kept_texts.add(value)
@@ -167,13 +181,19 @@ def _evidence(field: Mapping[str, Any]) -> _Evidence:
         kept_texts |= {
             label
             for label, kept in zip(labels, labels_kept, strict=True)
-            if kept and isinstance(label, str) and label not in (REDACTED, _NULL_TEXT, OTHER_LABEL)
+            if kept
+            and isinstance(label, str)
+            and label not in (REDACTED, NULL_CELL_TEXT, OTHER_LABEL)
         }
     exempt = field.get("inferred_type") == "boolean"
     decades = _folded_decades(dist) if dist.get("kind") == "date" else None
     non_null = None if rows is None or nulls is None or nulls > rows else rows - nulls
     free_text = not exempt and labels_read_as_sentences(kept_texts)
-    released = 0 if free_text else sum(c for c in proven.values() if c >= MIN_RELEASE_COUNT)
+    held = {} if free_text else {t: c for t, c in proven.items() if c >= MIN_RELEASE_COUNT}
+    # A kept numeric sentinel flag also names a value and its row count, so it covers rows too.
+    for text, count in _numeric_sentinels(field).items():
+        held[text] = max(held.get(text, 0), count)
+    released = sum(held.values())
     return _Evidence(
         non_null=non_null,
         proven=proven,

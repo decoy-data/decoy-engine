@@ -459,6 +459,9 @@ def test_a_deeply_nested_document_is_copied_without_recursion() -> None:
         REDACTED
     ]  # an unflagged column denies an off-shape signal, as a flagged one does
     assert _depth(trail) == 5000
+    raw = redact_profile_dict(doc, include_values=True)["fields"][0]["detection_trail"]
+    assert raw is not trail
+    assert _depth(raw) == 5000
 
 
 @pytest.mark.parametrize(
