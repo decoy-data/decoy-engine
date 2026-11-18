@@ -217,6 +217,10 @@ One slice, one PR: the `narrow_text` helper, both dispatcher guards, the tests a
 - The flipped route-spy tests are deleted instead of moved, so the slow path could come back unseen. The handoff says move, and the gate checks the diff.
 - Timing varies by machine. The 1.5 times check is manual evidence in the PR, never a CI assertion.
 
+## Frozen contracts
+
+None change. Output bytes, digests, reason codes, record shapes and the frozen references `_redact_array_reference` and `_truncate_array_reference` stay as they are. No golden or snapshot update. The PR still carries the compatibility contract section 9 checklist.
+
 ## Risk
 
 R1. One added branch in a guard that is already total and non-raising: any failure in it lands on
