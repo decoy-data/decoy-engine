@@ -177,6 +177,21 @@ def test_a_second_drop_joins_the_one_transform_in_source_order(starter: StarterC
     _compile(both.config)
 
 
+def test_several_emptied_tables_name_the_same_table_in_any_decision_order(
+    starter: StarterConfig,
+) -> None:
+    tables = [t["name"] for t in starter.config["tables"]]
+    assert len(tables) >= 2
+    every = [
+        ReviewDecision(t, c["name"], V.DROP) for t in tables for c in _table(starter, t)["columns"]
+    ]
+    named = {
+        _refusal(lambda order=order: apply_review(starter, order)).table
+        for order in (every, list(reversed(every)))
+    }
+    assert named == {sorted(tables)[0]}
+
+
 def test_dropping_every_column_is_refused_but_all_but_one_passes(starter: StarterConfig) -> None:
     names = [c["name"] for c in _table(starter, "orders")["columns"]]
     every = [ReviewDecision("orders", n, V.DROP) for n in names]
@@ -404,6 +419,9 @@ def test_property_random_decision_sets(
     if emptied:
         err = _refusal(lambda: apply_review(base, decisions))
         assert err.identity == "pre_scan.review_empty_table"
+        # Several emptied tables: the error names the same one whatever the decision order.
+        again = _refusal(lambda: apply_review(base, list(reversed(decisions))))
+        assert again.identity == err.identity and again.table == err.table
         return
     result = apply_review(base, decisions)
     parse_pipeline_config(result.config)

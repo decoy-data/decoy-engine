@@ -36,12 +36,12 @@ from decoy_engine.execution import StrategyInfo, StrategyOption, strategy_catalo
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.profiling import (
+    StarterConfig,
     build_entry,
     check_starter_config,
     declared_key_namespaces,
     swap_placeholder_namespaces,
 )
-from decoy_engine.profiling._starter_config import StarterConfig
 from decoy_engine.reasons import ReasonCode
 
 __all__ = [
@@ -285,8 +285,8 @@ def apply_review(
             entry = {**entry, "namespace": key[0]}
         columns[index] = entry
         notes.pop(slot, None)
-    for table_name, names in dropped.items():
-        _drop(tables[table_name], names)
+    for table_name in sorted(dropped):
+        _drop(tables[table_name], dropped[table_name])
     problems = _validation_problems(config, file_access, base_dir)
     if problems:
         raise ReviewEntryError(f"the reviewed config fails validation ({problems})")
