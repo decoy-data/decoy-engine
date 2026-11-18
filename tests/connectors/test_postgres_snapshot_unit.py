@@ -573,6 +573,7 @@ def _assert_no_dsn_text(err, caplog, port):
     assert err.__cause__ is None and err.__context__ is None
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("form", ["kv", "uri"])
 @pytest.mark.parametrize("user_value", [False, True])
 def test_silent_host_fails_as_source_unreachable_before_the_deadline(
