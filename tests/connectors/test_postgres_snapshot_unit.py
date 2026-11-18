@@ -544,8 +544,20 @@ def silent_port():
             conn.close()
 
 
-def _bounded_snapshot(ext, tmp_path, dsn, deadline_s=6, join_s=15):
-    """Run the snapshot in a daemon thread: libpq blocks in C, where no timeout can preempt it."""
+def _bounded_snapshot(ext, tmp_path, dsn, monkeypatch, deadline_s=6, join_s=15):
+    """Run the snapshot in a daemon thread: libpq blocks in C, where no timeout can preempt it.
+
+    Elapsed time starts when the session deadline is armed, which is right before ATTACH, so
+    slow DuckDB setup does not count.
+    """
+    marks: dict = {}
+    real_arm = session.Deadline.arm
+
+    def arm(self, conn):
+        marks["armed"] = time.monotonic()
+        real_arm(self, conn)
+
+    monkeypatch.setattr(session.Deadline, "arm", arm)
     cfg = _cfg(ext, tmp_path, dsn=dsn).model_copy(update={"deadline_s": deadline_s})
     box: dict = {}
 
@@ -554,13 +566,14 @@ def _bounded_snapshot(ext, tmp_path, dsn, deadline_s=6, join_s=15):
             snapshot_tables_to_parquet(cfg, [_sel()], tmp_path / "dest")
         except BaseException as exc:
             box["err"] = exc
+        box["ended"] = time.monotonic()
 
     t0 = time.monotonic()
     worker = threading.Thread(target=target, daemon=True)
     worker.start()
     worker.join(join_s)
     assert not worker.is_alive(), "connect did not return"
-    return box.get("err"), time.monotonic() - t0
+    return box.get("err"), box["ended"] - marks.get("armed", t0)
 
 
 _LEAK_NEEDLES = ("PW_SECRET", "127.0.0.1", "user=u", "u:", "dbname", "connect_timeout")
@@ -577,14 +590,14 @@ def _assert_no_dsn_text(err, caplog, port):
 @pytest.mark.parametrize("form", ["kv", "uri"])
 @pytest.mark.parametrize("user_value", [False, True])
 def test_silent_host_fails_as_source_unreachable_before_the_deadline(
-    ext_dir, tmp_path, caplog, silent_port, form, user_value
+    ext_dir, tmp_path, caplog, silent_port, form, user_value, monkeypatch
 ):
     caplog.set_level("DEBUG")
     base, suffix = _FORMS[form]
     dsn = base.format(port=silent_port)
     if user_value:
         dsn += suffix.format(n=600)
-    err, elapsed = _bounded_snapshot(ext_dir, tmp_path, dsn)
+    err, elapsed = _bounded_snapshot(ext_dir, tmp_path, dsn, monkeypatch)
     assert isinstance(err, PostgresSnapshotError)
     assert err.code == "source_unreachable"
     assert elapsed < 6
@@ -606,7 +619,7 @@ def test_attach_carries_the_connect_timeout_once_after_the_users_text(fake_pg, t
 
 @pytest.mark.parametrize("form", ["kv", "uri"])
 def test_a_rejected_dsn_stays_rejected_and_value_free(
-    ext_dir, tmp_path, caplog, closing_port, form
+    ext_dir, tmp_path, caplog, closing_port, form, monkeypatch
 ):
     caplog.set_level("DEBUG")
     dsn = (
@@ -614,7 +627,7 @@ def test_a_rejected_dsn_stays_rejected_and_value_free(
         if form == "kv"
         else f"postgresql://u:PW_SECRET@127.0.0.1:{closing_port}/d?sslmode=bogus"
     )
-    err, _ = _bounded_snapshot(ext_dir, tmp_path, dsn)
+    err, _ = _bounded_snapshot(ext_dir, tmp_path, dsn, monkeypatch)
     assert isinstance(err, PostgresSnapshotError)
     assert err.code == "source_unreachable"
     _assert_no_dsn_text(err, caplog, closing_port)

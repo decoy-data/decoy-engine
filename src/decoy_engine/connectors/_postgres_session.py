@@ -240,10 +240,11 @@ def load_postgres_extension(
 
 
 def connect_timeout_s(deadline_s: int) -> int:
-    """The libpq connect timeout for a session deadline: under it by 2 s, never below 2 s.
+    """The libpq connect timeout for a session deadline: 2 s under it, capped at 10 s, floor 2 s.
 
-    The 2 s floor matches older libpq releases. The gap keeps a connect failure clear of the
-    deadline timer.
+    The floor matches older libpq releases. Deadlines of 1 to 4 s therefore get 2 s, which is
+    not under a 1 or 2 s deadline. From 4 s up, the 2 s gap keeps a connect failure clear of
+    the deadline timer.
     """
     return max(2, min(PG_CONNECT_TIMEOUT_S, deadline_s - 2))
 

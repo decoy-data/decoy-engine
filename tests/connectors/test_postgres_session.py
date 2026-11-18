@@ -79,7 +79,7 @@ def test_require_pg_turns_a_skip_into_a_failure(pg_policy):
 @pytest.mark.parametrize(
     ("deadline_s", "want"), [(1, 2), (3, 2), (4, 2), (6, 4), (12, 10), (3600, 10)]
 )
-def test_connect_timeout_s_stays_under_the_deadline(deadline_s, want):
+def test_connect_timeout_s_is_two_under_the_deadline_with_a_two_second_floor(deadline_s, want):
     assert session.connect_timeout_s(deadline_s) == want
 
 
