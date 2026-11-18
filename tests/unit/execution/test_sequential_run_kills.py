@@ -33,6 +33,7 @@ from decoy_engine.execution import ExecutionError, PandasExecutionAdapter
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.relationships._graph import OrphanPolicy
+from tests._declared_schema import declare_rest
 from tests.perf_fixtures.fk_relational import build_fk_relational
 
 _AGE = ["10", "20", "30", "40", "50", "badX"]
@@ -58,6 +59,7 @@ def compile_job(config: dict[str, Any]):
         check_orphan_fk_policy_completeness,
     )
 
+    declare_rest(config)
     job_seed = _normalize_job_seed_int(config)
     profile = profile_source(config, seed=job_seed)
     plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
@@ -156,7 +158,7 @@ def _fk_bucketize_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> d
     }
     if quarantine is not None:
         cfg["quarantine"] = quarantine
-    return cfg
+    return declare_rest(cfg)
 
 
 def _fk_key_error_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> dict[str, Any]:
@@ -214,7 +216,7 @@ def _fk_key_error_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> d
     }
     if quarantine is not None:
         cfg["quarantine"] = quarantine
-    return cfg
+    return declare_rest(cfg)
 
 
 # ===========================================================================
@@ -233,6 +235,7 @@ def test_quarantine_covers_row_error_filters_and_records(tmp_path: Path) -> None
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -280,6 +283,7 @@ def test_no_quarantine_fails_loud_before_any_output(tmp_path: Path) -> None:
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -304,6 +308,7 @@ def test_trigger_present_but_not_matching_still_fails_loud(tmp_path: Path) -> No
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -327,6 +332,7 @@ def test_missing_enabled_key_defaults_to_disabled(tmp_path: Path) -> None:
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -344,6 +350,7 @@ def test_enabled_triggers_without_output_path_refuses_to_run(tmp_path: Path) -> 
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -369,6 +376,7 @@ def test_quarantine_enabled_but_no_triggers_runs_clean() -> None:
     seq = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -391,6 +399,7 @@ def test_quarantine_with_transactional_sink_commits_and_publishes(tmp_path: Path
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -422,6 +431,7 @@ def test_sink_aborts_and_publishes_nothing_on_fail_loud(tmp_path: Path) -> None:
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -444,6 +454,7 @@ def test_key_error_cascades_to_child_and_is_recorded(tmp_path: Path) -> None:
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -483,55 +494,61 @@ def _multi_table_quarantine_config(tmp_path: Path, qpath: str) -> dict[str, Any]
             "note": pa.array(["1", "2", "3", "4", "5", "badY"], type=pa.string()),
         }
     )
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "seq-kills-multi", "seed": 42},
-        "sources": {
-            "parent": {
-                "type": "file",
-                "path": _write_source(tmp_path, parent, "parent"),
-                "format": "parquet",
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "seq-kills-multi", "seed": 42},
+            "sources": {
+                "parent": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, parent, "parent"),
+                    "format": "parquet",
+                },
+                "child": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, child, "child"),
+                    "format": "parquet",
+                },
             },
-            "child": {
-                "type": "file",
-                "path": _write_source(tmp_path, child, "child"),
-                "format": "parquet",
+            "targets": {
+                "parent": {
+                    "type": "file",
+                    "path": str(tmp_path / "p.out.parquet"),
+                    "format": "parquet",
+                },
+                "child": {
+                    "type": "file",
+                    "path": str(tmp_path / "c.out.parquet"),
+                    "format": "parquet",
+                },
             },
-        },
-        "targets": {
-            "parent": {
-                "type": "file",
-                "path": str(tmp_path / "p.out.parquet"),
-                "format": "parquet",
-            },
-            "child": {"type": "file", "path": str(tmp_path / "c.out.parquet"), "format": "parquet"},
-        },
-        "tables": [
-            {
-                "name": "parent",
-                "columns": [
-                    _faker_col("id", "parent_ns"),
-                    {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
-                ],
-            },
-            {
-                "name": "child",
-                "columns": [
-                    _faker_col("parent_id", "parent_ns"),
-                    {"name": "note", "strategy": "bucketize", "provider_config": {"width": 10}},
-                ],
-            },
-        ],
-        "relationships": [
-            {
-                "parent": {"table": "parent", "columns": ["id"]},
-                "children": [{"table": "child", "columns": ["parent_id"]}],
-                "orphan_policy": "preserve",
-                "namespace": "parent_ns",
-            }
-        ],
-        "quarantine": {"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
-    }
+            "tables": [
+                {
+                    "name": "parent",
+                    "columns": [
+                        _faker_col("id", "parent_ns"),
+                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    ],
+                },
+                {
+                    "name": "child",
+                    "columns": [
+                        _faker_col("parent_id", "parent_ns"),
+                        {"name": "note", "strategy": "bucketize", "provider_config": {"width": 10}},
+                    ],
+                },
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "child", "columns": ["parent_id"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "parent_ns",
+                }
+            ],
+            "quarantine": {"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
+        }
+    )
 
 
 def test_multi_table_quarantine_keeps_both_tables_entries(tmp_path: Path) -> None:
@@ -542,6 +559,7 @@ def test_multi_table_quarantine_keeps_both_tables_entries(tmp_path: Path) -> Non
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -584,6 +602,7 @@ def test_byte_parity_with_full_frame(policy) -> None:
     seq = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=graph,
         namespace_registry=fx.namespace_registry,
@@ -600,6 +619,7 @@ def test_fail_policy_aborts(tmp_path: Path) -> None:
         adapter.run_sequential(
             fx.plan,
             _loader(fx.sources),
+            config={},
             registry=fx.registry,
             relationship_graph=fx.graph(OrphanPolicy.FAIL),
             namespace_registry=fx.namespace_registry,
@@ -624,6 +644,7 @@ def test_callable_sink_streams_each_table_once(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -659,6 +680,7 @@ def test_keyed_mask_differs_from_unkeyed(tmp_path: Path) -> None:
     unkeyed = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=graph,
         namespace_registry=fx.namespace_registry,
@@ -666,6 +688,7 @@ def test_keyed_mask_differs_from_unkeyed(tmp_path: Path) -> None:
     keyed = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=graph,
         namespace_registry=fx.namespace_registry,
@@ -693,35 +716,41 @@ def _group_by_config(tmp_path: Path) -> dict[str, Any]:
             "patient_id": pa.array(["p1", "p1", "p2", "p2"], type=pa.string()),
         }
     )
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "seq-kills-groupby", "seed": 7},
-        "sources": {
-            "t": {"type": "file", "path": _write_source(tmp_path, src, "t"), "format": "parquet"}
-        },
-        "targets": {
-            "t": {"type": "file", "path": str(tmp_path / "t.out.parquet"), "format": "parquet"}
-        },
-        "tables": [
-            {
-                "name": "t",
-                "columns": [
-                    {
-                        "name": "d",
-                        "strategy": "date_shift",
-                        "provider_config": {
-                            "min_days": -100,
-                            "max_days": 100,
-                            "date_format": "%Y-%m-%d",
-                            "group_by": "patient_id",
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "seq-kills-groupby", "seed": 7},
+            "sources": {
+                "t": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, src, "t"),
+                    "format": "parquet",
+                }
+            },
+            "targets": {
+                "t": {"type": "file", "path": str(tmp_path / "t.out.parquet"), "format": "parquet"}
+            },
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
+                        {
+                            "name": "d",
+                            "strategy": "date_shift",
+                            "provider_config": {
+                                "min_days": -100,
+                                "max_days": 100,
+                                "date_format": "%Y-%m-%d",
+                                "group_by": "patient_id",
+                            },
+                            "namespace": "dates",
                         },
-                        "namespace": "dates",
-                    },
-                    {"name": "patient_id", "strategy": "hash", "namespace": "pid"},
-                ],
-            }
-        ],
-    }
+                        {"name": "patient_id", "strategy": "hash", "namespace": "pid"},
+                    ],
+                }
+            ],
+        }
+    )
 
 
 def test_group_by_anchor_uses_pre_mask_snapshot(tmp_path: Path) -> None:
@@ -735,6 +764,7 @@ def test_group_by_anchor_uses_pre_mask_snapshot(tmp_path: Path) -> None:
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -767,6 +797,7 @@ def test_result_reports_conversion_and_timings(tmp_path: Path) -> None:
     res = adapter.run_sequential(
         fx.plan,
         _loader(fx.sources),
+        config={},
         registry=fx.registry,
         relationship_graph=fx.graph(OrphanPolicy.PRESERVE),
         namespace_registry=fx.namespace_registry,
@@ -806,42 +837,48 @@ def _clean_fk_config(tmp_path: Path) -> dict[str, Any]:
             "parent_id": pa.array(_IDS, type=pa.string()),
         }
     )
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "seq-kills-clean-fk", "seed": 42},
-        "sources": {
-            "parent": {
-                "type": "file",
-                "path": _write_source(tmp_path, parent, "parent"),
-                "format": "parquet",
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "seq-kills-clean-fk", "seed": 42},
+            "sources": {
+                "parent": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, parent, "parent"),
+                    "format": "parquet",
+                },
+                "child": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, child, "child"),
+                    "format": "parquet",
+                },
             },
-            "child": {
-                "type": "file",
-                "path": _write_source(tmp_path, child, "child"),
-                "format": "parquet",
+            "targets": {
+                "parent": {
+                    "type": "file",
+                    "path": str(tmp_path / "p.out.parquet"),
+                    "format": "parquet",
+                },
+                "child": {
+                    "type": "file",
+                    "path": str(tmp_path / "c.out.parquet"),
+                    "format": "parquet",
+                },
             },
-        },
-        "targets": {
-            "parent": {
-                "type": "file",
-                "path": str(tmp_path / "p.out.parquet"),
-                "format": "parquet",
-            },
-            "child": {"type": "file", "path": str(tmp_path / "c.out.parquet"), "format": "parquet"},
-        },
-        "tables": [
-            {"name": "parent", "columns": [_faker_col("id", "parent_ns")]},
-            {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},
-        ],
-        "relationships": [
-            {
-                "parent": {"table": "parent", "columns": ["id"]},
-                "children": [{"table": "child", "columns": ["parent_id"]}],
-                "orphan_policy": "preserve",
-                "namespace": "parent_ns",
-            }
-        ],
-    }
+            "tables": [
+                {"name": "parent", "columns": [_faker_col("id", "parent_ns")]},
+                {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "child", "columns": ["parent_id"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "parent_ns",
+                }
+            ],
+        }
+    )
 
 
 def test_clean_fk_child_ri_matches_full_frame(tmp_path: Path) -> None:
@@ -855,6 +892,7 @@ def test_clean_fk_child_ri_matches_full_frame(tmp_path: Path) -> None:
     seq = adapter.run_sequential(
         plan,
         _loader(sources),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -884,47 +922,49 @@ def _self_fk_config(tmp_path: Path, qpath: str) -> dict[str, Any]:
             "manager_id": pa.array(manager_ids, type=pa.string()),
         }
     )
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "seq-kills-selfref", "seed": 42},
-        "sources": {
-            "employees": {
-                "type": "file",
-                "path": _write_source(tmp_path, employees, "employees"),
-                "format": "parquet",
-            }
-        },
-        "targets": {
-            "employees": {
-                "type": "file",
-                "path": str(tmp_path / "e.out.parquet"),
-                "format": "parquet",
-            }
-        },
-        "tables": [
-            {
-                "name": "employees",
-                "columns": [
-                    {
-                        "name": "id",
-                        "strategy": "date_shift",
-                        "provider_config": {"min_days": 1, "max_days": 30},
-                        "namespace": "employee_ns",
-                    },
-                    _faker_col("manager_id", "employee_ns"),
-                ],
-            }
-        ],
-        "relationships": [
-            {
-                "parent": {"table": "employees", "columns": ["id"]},
-                "children": [{"table": "employees", "columns": ["manager_id"]}],
-                "orphan_policy": "preserve",
-                "namespace": "employee_ns",
-            }
-        ],
-        "quarantine": {"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
-    }
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "seq-kills-selfref", "seed": 42},
+            "sources": {
+                "employees": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, employees, "employees"),
+                    "format": "parquet",
+                }
+            },
+            "targets": {
+                "employees": {
+                    "type": "file",
+                    "path": str(tmp_path / "e.out.parquet"),
+                    "format": "parquet",
+                }
+            },
+            "tables": [
+                {
+                    "name": "employees",
+                    "columns": [
+                        {
+                            "name": "id",
+                            "strategy": "date_shift",
+                            "provider_config": {"min_days": 1, "max_days": 30},
+                            "namespace": "employee_ns",
+                        },
+                        _faker_col("manager_id", "employee_ns"),
+                    ],
+                }
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "employees", "columns": ["id"]},
+                    "children": [{"table": "employees", "columns": ["manager_id"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "employee_ns",
+                }
+            ],
+            "quarantine": {"enabled": True, "output_path": qpath, "triggers": ["format_error"]},
+        }
+    )
 
 
 def test_self_ref_fk_key_error_cascades(tmp_path: Path) -> None:
@@ -935,6 +975,7 @@ def test_self_ref_fk_key_error_cascades(tmp_path: Path) -> None:
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -977,60 +1018,62 @@ def _diamond_config(tmp_path: Path) -> dict[str, Any]:
             "pb_id": pa.array(_IDS, type=pa.string()),
         }
     )
-    return {
-        "version": 2,
-        "global_settings": {"job_name": "seq-kills-diamond", "seed": 42},
-        "sources": {
-            "parent": {
-                "type": "file",
-                "path": _write_source(tmp_path, parent, "parent"),
-                "format": "parquet",
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"job_name": "seq-kills-diamond", "seed": 42},
+            "sources": {
+                "parent": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, parent, "parent"),
+                    "format": "parquet",
+                },
+                "child_a": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, child_a, "child_a"),
+                    "format": "parquet",
+                },
+                "child_b": {
+                    "type": "file",
+                    "path": _write_source(tmp_path, child_b, "child_b"),
+                    "format": "parquet",
+                },
             },
-            "child_a": {
-                "type": "file",
-                "path": _write_source(tmp_path, child_a, "child_a"),
-                "format": "parquet",
+            "targets": {
+                "parent": {
+                    "type": "file",
+                    "path": str(tmp_path / "p.out.parquet"),
+                    "format": "parquet",
+                },
+                "child_a": {
+                    "type": "file",
+                    "path": str(tmp_path / "a.out.parquet"),
+                    "format": "parquet",
+                },
+                "child_b": {
+                    "type": "file",
+                    "path": str(tmp_path / "b.out.parquet"),
+                    "format": "parquet",
+                },
             },
-            "child_b": {
-                "type": "file",
-                "path": _write_source(tmp_path, child_b, "child_b"),
-                "format": "parquet",
-            },
-        },
-        "targets": {
-            "parent": {
-                "type": "file",
-                "path": str(tmp_path / "p.out.parquet"),
-                "format": "parquet",
-            },
-            "child_a": {
-                "type": "file",
-                "path": str(tmp_path / "a.out.parquet"),
-                "format": "parquet",
-            },
-            "child_b": {
-                "type": "file",
-                "path": str(tmp_path / "b.out.parquet"),
-                "format": "parquet",
-            },
-        },
-        "tables": [
-            {"name": "parent", "columns": [_faker_col("id", "parent_ns")]},
-            {"name": "child_a", "columns": [_faker_col("pa_id", "parent_ns")]},
-            {"name": "child_b", "columns": [_faker_col("pb_id", "parent_ns")]},
-        ],
-        "relationships": [
-            {
-                "parent": {"table": "parent", "columns": ["id"]},
-                "children": [
-                    {"table": "child_a", "columns": ["pa_id"]},
-                    {"table": "child_b", "columns": ["pb_id"]},
-                ],
-                "orphan_policy": "preserve",
-                "namespace": "parent_ns",
-            }
-        ],
-    }
+            "tables": [
+                {"name": "parent", "columns": [_faker_col("id", "parent_ns")]},
+                {"name": "child_a", "columns": [_faker_col("pa_id", "parent_ns")]},
+                {"name": "child_b", "columns": [_faker_col("pb_id", "parent_ns")]},
+            ],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [
+                        {"table": "child_a", "columns": ["pa_id"]},
+                        {"table": "child_b", "columns": ["pb_id"]},
+                    ],
+                    "orphan_policy": "preserve",
+                    "namespace": "parent_ns",
+                }
+            ],
+        }
+    )
 
 
 def test_diamond_second_child_ri_matches_full_frame(tmp_path: Path) -> None:
@@ -1044,6 +1087,7 @@ def test_diamond_second_child_ri_matches_full_frame(tmp_path: Path) -> None:
     seq = adapter.run_sequential(
         plan,
         _loader(sources),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -1124,6 +1168,7 @@ def test_row_error_count_accumulates_same_key(tmp_path: Path) -> None:
     res = PandasExecutionAdapter().run_sequential(
         plan,
         _loader(_sources(config)),
+        config={},
         registry=registry,
         relationship_graph=graph,
         namespace_registry=ns,
@@ -1170,6 +1215,7 @@ def test_sink_quarantine_preexisting_file_refuses_to_publish(tmp_path: Path) -> 
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -1194,6 +1240,7 @@ def test_sink_quarantine_alias_committed_table_refuses(tmp_path: Path) -> None:
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,
@@ -1221,6 +1268,7 @@ def test_sink_post_commit_publish_failure_does_not_abort(tmp_path: Path) -> None
         PandasExecutionAdapter().run_sequential(
             plan,
             _loader(_sources(config)),
+            config={},
             registry=registry,
             relationship_graph=graph,
             namespace_registry=ns,

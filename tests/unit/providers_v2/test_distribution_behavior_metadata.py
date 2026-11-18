@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pytest
 
-from decoy_engine.execution._distribution_behavior import (
+from decoy_engine.contracts.distribution_behavior import (
     distribution_behavior_for,
 )
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -36,7 +36,7 @@ class TestPerStrategyLabel:
             ("hash", "preserves_cardinality_only"),
             ("fpe", "preserves_cardinality_only"),
             ("tokenize", "preserves_cardinality_only"),
-            ("group_key", "preserves_cardinality_only"),
+            ("group_key", "destroys_frequency"),
             ("faker", "destroys_frequency"),
             ("grouped_series", "destroys_frequency"),
             ("bucketize", "coarsens"),
@@ -64,7 +64,7 @@ class TestPerStrategyLabel:
         """Drift guard (finding #9): the per-value golden above must pin every
         statically-resolved entry of _STATIC_BEHAVIOR. `categorical` is excluded
         because the function resolves it dynamically before the static lookup."""
-        from decoy_engine.execution._distribution_behavior import _STATIC_BEHAVIOR
+        from decoy_engine.contracts.distribution_behavior import _STATIC_BEHAVIOR
 
         pinned = {
             "passthrough",
@@ -170,7 +170,7 @@ class TestCoverage:
         assert unlabelled == [], (
             f"Strategies missing distribution_behavior: {unlabelled}. "
             "Add an entry to _STATIC_BEHAVIOR in "
-            "_distribution_behavior.py or handle the dynamic case "
+            "contracts/distribution_behavior.py or handle the dynamic case "
             "in distribution_behavior_for()."
         )
 

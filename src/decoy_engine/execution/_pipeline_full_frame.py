@@ -28,10 +28,12 @@ from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._stitch import stitch_generate_mask_outputs
 from decoy_engine.execution._transforms_admission import stamp_out_of_core_declined
+from decoy_engine.execution.pipeline._post_scan import active_gate
 from decoy_engine.generation.pool import PoolCache
 
 if TYPE_CHECKING:
     from decoy_engine.execution._pipeline_context import PipelineRunContext, RouteDecision
+    from decoy_engine.profile import LazySource
 
 __all__ = ["run_full_frame_route"]
 
@@ -69,26 +71,41 @@ def _raise_if_source_value_unrepresentable(
             continue
         fk_cols = fk_columns_for_table(edges, table)
         for name in tbl.column_names:
+            # The pandas/Arrow error quotes the cell: name the column only, and keep it out of
+            # the rendered chain (the caller is inside its own handler for `exc`).
             try:
                 to_pandas_fk_safe(tbl.select([name]), fk_cols & {name})
+                continue
             except Exception as again:
-                if type(again) is type(exc) and str(again) == str(exc):
-                    raise ExecutionError(
-                        code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
-                        message=(
-                            f"table {table!r} column {name!r} holds a value pandas "
-                            f"cannot represent ({type(exc).__name__}: {exc}). The "
-                            "full-frame pandas route converts every column to pandas; "
-                            "the default native (Rust) route keeps columns in Arrow "
-                            "and does not hit this limit."
-                        ),
-                    ) from exc
+                if type(again) is not type(exc) or str(again) != str(exc):
+                    continue
+            raise ExecutionError(
+                code=reasons.runtime.FULL_FRAME_VALUE_UNREPRESENTABLE,
+                message=(
+                    f"table {table!r} column {name!r} holds a value pandas cannot represent. "
+                    "The full-frame pandas route converts every column to pandas; the default "
+                    "native (Rust) route keeps columns in Arrow and does not hit this limit."
+                ),
+            ) from None
 
 
-def _render_and_seal(cast_run: Any, result: ExecutionResult) -> ExecutionResult:
-    """F06 for a lane that returns a finished result: render its outputs, then seal last."""
-    outputs, _, _ = cast_run.post_mask(result.outputs, {})
-    result = dataclasses.replace(result, outputs=outputs)
+def _render_and_seal(
+    cast_run: Any,
+    result: ExecutionResult,
+    *,
+    sources: Mapping[str, pa.Table | LazySource],
+    table_kinds: Mapping[str, str],
+) -> ExecutionResult:
+    """F06 for a lane that returns a finished result: render its outputs, judge them, then seal
+    last. The gate speaks after the render and before the seal, so a block leaves no sealed
+    artifact; with no cast run it judges the outputs as they are."""
+    if cast_run is not None:
+        outputs, _, _ = cast_run.post_mask(result.outputs, {})
+        result = dataclasses.replace(result, outputs=outputs)
+    if (gate := active_gate()) is not None:
+        gate.run_resident(result.outputs, sources, table_kinds)
+    if cast_run is None:
+        return result
     result.quality_metrics["declared_casting"], token = cast_run.finish()
     return dataclasses.replace(result, quarantine_access=token)
 
@@ -98,9 +115,11 @@ def run_full_frame_route(
     decision: RouteDecision,
     *,
     pregenerated: dict[str, pa.Table] | None = None,
+    pregenerated_warnings: tuple[Any, ...] = (),
 ) -> ExecutionResult:
     """`pregenerated` hands over generate outputs a prior route already built (the mixed
-    route's runtime decline), so generation is never run twice.
+    route's runtime decline), so generation is never run twice; `pregenerated_warnings` hands
+    over the warnings that generation raised.
 
     A job with declared columns applies the F06 boundary here (pre-mask cast, post-mask format);
     any failure aborts the protected-quarantine session so no partial artifact survives."""
@@ -110,7 +129,13 @@ def run_full_frame_route(
     declared_route_guard("full_frame", plan=ctx.plan, raise_on_decline=False)
     cast_run = open_cast_run(ctx.plan, ctx.quarantine_runtime)
     try:
-        return _run_full_frame(ctx, decision, pregenerated=pregenerated, cast_run=cast_run)
+        return _run_full_frame(
+            ctx,
+            decision,
+            pregenerated=pregenerated,
+            pregenerated_warnings=pregenerated_warnings,
+            cast_run=cast_run,
+        )
     except BaseException as failure:
         if cast_run is not None:
             cast_run.abort(failure)
@@ -122,6 +147,7 @@ def _run_full_frame(
     decision: RouteDecision,
     *,
     pregenerated: dict[str, pa.Table] | None,
+    pregenerated_warnings: tuple[Any, ...],
     cast_run: Any,
 ) -> ExecutionResult:
     # TB-1: only full_frame / auto-chunk below needs every source resident, and a loader-backed
@@ -146,9 +172,9 @@ def _run_full_frame(
         ctx=ctx, decision=decision, caller_sources=caller_sources, pool_cache=pool_cache
     )
     if unified_slice_result is not None:
-        if cast_run is not None:
-            unified_slice_result = _render_and_seal(cast_run, unified_slice_result)
-        return unified_slice_result
+        return _render_and_seal(
+            cast_run, unified_slice_result, sources=caller_sources, table_kinds=ctx.table_kinds
+        )
 
     publish = ctx.publish
     with publish:
@@ -196,7 +222,9 @@ def _run_full_frame(
                 now_iso=ctx.now_iso,
                 publish=publish,
                 pregenerated=pregenerated,
+                pregenerated_warnings=pregenerated_warnings,
                 cast_run=cast_run,
+                stream=decision.stream,
             )
         except _ingest_conversion_errors() as exc:
             _raise_if_source_value_unrepresentable(resident_sources, ctx.graph, exc)
@@ -268,7 +296,7 @@ def _run_full_frame(
             outputs=outputs,
             timings=step.mask_timings,
             boundary_conversion_ms=step.mask_conversion_ms,
-            warnings=step.mask_warnings,
+            warnings=(*step.generate_warnings, *step.mask_warnings),
             quality_metrics=quality_metrics,
             table_kinds=ctx.table_kinds,
             row_errors=step.mask_row_errors,
@@ -292,13 +320,14 @@ def _run_full_frame(
             post_validation_sample_size=ctx.post_validation_sample_size,
             post_validation_enforce=ctx.post_validation_enforce,
         )
-        _pipeline_finalize.compute_post_scan_integrity(
-            result, config=ctx.config, sources=step.sources
-        )
+        # Before the cast run seals and before the commit: a block commits nothing. An executor
+        # called outside `execute_route` has no bound gate.
+        if (gate := active_gate()) is not None:
+            gate.run_resident(outputs, step.sources, ctx.table_kinds)
         if cast_run is not None:
             # Seal only once nothing failure-capable remains but the publish itself; a failure
             # from here on still discards the sealed artifact through cast_run.abort().
             result.quality_metrics["declared_casting"], quarantine_token = cast_run.finish()
             result = dataclasses.replace(result, quarantine_access=quarantine_token)
-        publish.commit()  # B6a: the run's last action; inert unless this run streamed
-        return result
+        receipt = publish.commit()  # B6a: the run's last action; inert unless this run streamed
+        return dataclasses.replace(result, publication_receipt=receipt)

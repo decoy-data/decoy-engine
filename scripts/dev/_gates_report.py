@@ -19,6 +19,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(
@@ -80,19 +81,39 @@ def _suites_of(roots: list[ET.Element]) -> list[ET.Element]:
     return [s for r in roots for s in ([r] if r.tag == "testsuite" else list(r.iter("testsuite")))]
 
 
+@dataclass(frozen=True)
+class JunitTotals:
+    tests: int
+    failures: int
+    errors: int
+    skipped: int
+
+    @property
+    def passed(self) -> int:
+        return self.tests - self.failures - self.errors - self.skipped
+
+
+def junit_totals(paths: list[Path]) -> JunitTotals:
+    """Summed counts of JUnit files (bare `testsuite` or wrapped `testsuites` roots).
+
+    The one place that adds the counts up: the gate reporter and scripts/dev/junit_ran.py both
+    call it. A missing file raises OSError and bad XML raises ParseError."""
+    suites = _suites_of([ET.parse(x).getroot() for x in paths])  # noqa: S314 -- pytest JUnit output this run wrote
+    total = {
+        k: sum(int(s.get(k, 0)) for s in suites) for k in ("tests", "failures", "errors", "skipped")
+    }
+    return JunitTotals(**total)
+
+
 def _counts(out: Path, label: str, name: str) -> str:
-    roots = _roots(out, label, name)
-    if not roots:
+    xmls = _xmls(out, label, name)
+    if not xmls:
         # ruff and mypy both end with a "Found N error(s)" line when they fail.
         log = out / f"{label}-{name}.log"
         found = _FOUND.findall(log.read_text(errors="replace")) if log.exists() else []
         return f"errors={found[-1]}" if found else ""
-    suites = _suites_of(roots)
-    total = {
-        k: sum(int(s.get(k, 0)) for s in suites) for k in ("tests", "failures", "errors", "skipped")
-    }
-    passed = total["tests"] - total["failures"] - total["errors"] - total["skipped"]
-    return f"passed={passed} failed={total['failures']} errors={total['errors']} skipped={total['skipped']}"
+    t = junit_totals(xmls)
+    return f"passed={t.passed} failed={t.failures} errors={t.errors} skipped={t.skipped}"
 
 
 def collected(out: Path, label: str) -> int:
@@ -412,7 +433,23 @@ def main(out: Path, whole: bool = False) -> int:
     return 0
 
 
+def failing_files(out: Path) -> list[str]:
+    """Test files holding a failing branch test, in first-seen order (no node ids, no params).
+
+    The baseline reruns whole files, not node ids: a node id main lacks makes pytest abort the
+    whole run ("not found"), which would read a shared failure as branch-only."""
+    files: list[str] = []
+    for tid in failing_ids(out, "branch", "tests"):
+        path = tid.split("::", 1)[0]
+        if path.endswith(".py") and path not in files:
+            files.append(path)
+    return files
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--failing-files"]:
+        print("\n".join(failing_files(Path(sys.argv[2]))))
+        sys.exit(0)
     if sys.argv[1:2] == ["--verdict"]:
         print("\n".join(branch_only_steps(Path(sys.argv[2]))))
         sys.exit(0)

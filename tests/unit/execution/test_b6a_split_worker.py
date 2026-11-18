@@ -15,13 +15,14 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.errors import PipelineValidationError, RowErrorsFailedError
 from decoy_engine.execution import (
     ExecutionError,
     _isolated_worker,
     run_pipeline,
     run_pipeline_isolated,
 )
+from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6a_support as b6a
 from tests.unit.execution import _multi_table_support as mt
@@ -64,7 +65,7 @@ def test_two_dispatched_tables_stream_in_config_order_with_per_table_evidence(
         assert (target / f"{name}.parquet").read_bytes() == b6a.parquet_bytes(
             expected.outputs[name], tmp_path / f"ref_{name}.parquet"
         )
-    assert sorted(p.name for p in target.iterdir()) == ["a.parquet", "b.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, "a.parquet", "b.parquet"]
     tables = {t["table"]: t for t in result.quality_metrics["auto_chunk"]["tables"]}
     assert set(tables) == {"a", "b"}
     for entry in tables.values():
@@ -154,6 +155,13 @@ def test_a_split_with_a_resident_group_or_extra_frame_stays_resident(
     kind: str, tmp_path: Path
 ) -> None:
     cfg, sources, reason = _sibling_job(kind, tmp_path)
+    if kind == "extra_resident_frame":
+        # The declaration gate (CONFIG-EXPLICIT E2c) refuses a supplied table the config does
+        # not declare, on every route, before any split decision.
+        with pytest.raises(PipelineValidationError) as refused:
+            _run(cfg, sources, b6a.RecordingSink())
+        assert refused.value.code == "source_file.undeclared_table"
+        return
     expected = _reference(cfg, sources)
     sink = b6a.RecordingSink()
     result = _run(cfg, sources, sink)
@@ -287,7 +295,7 @@ def test_run_pipeline_isolated_returns_equal_outputs_and_publishes_the_same_byte
     assert pq.read_table(tmp_path / "pub_streamed" / "t.parquet").num_rows == _WORKER_ROWS
 
 
-@pytest.mark.parametrize("kind", ["full_frame_small", "extra_resident_frame"])
+@pytest.mark.parametrize("kind", ["full_frame_small"])
 def test_the_split_executor_refuses_a_sink_it_cannot_honor_before_masking(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

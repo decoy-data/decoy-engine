@@ -14,7 +14,7 @@ Everything here must be JSON-serializable via dataclasses.asdict.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
@@ -190,8 +190,12 @@ class ColumnProfile:
 
     # Run metadata
     engine_version: str = "0.1.0"
-    generated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
-        """JSON-ready dict. Use this when persisting or sending over the wire."""
+        """The raw JSON-ready dict, cell values included.
+
+        For a document a person saves, commits or reads, use `profile_document`, which removes
+        the values of value-sensitive columns unless `include_values=True`.
+        """
         return asdict(self)

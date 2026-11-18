@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -14,6 +14,7 @@ __all__ = [
     "BUNDLE_MISSING_OUTPUT_COLUMNS",
     "CARDINALITY_TARGET_EXCEEDS_POOL",
     "CATEGORICAL_CATEGORIES_NOT_LIST",
+    "CPU_DETECTION_FAILED",
     "DETERMINISTIC_MODE_UNSUPPORTED_CARDINALITY",
     "DETERMINISTIC_REQUIRES_SOURCE_AND_NAMESPACE",
     "EXACT_INT_NULL_MASK_MISMATCH",
@@ -24,6 +25,7 @@ __all__ = [
     "FPE__CHECKSUM_INVALID_SOURCE",
     "FPE__UNENCRYPTABLE_DOMAIN",
     "FPE__UNENCRYPTABLE_LENGTH",
+    "GENERATE_FORMULA_EVALUATION_FAILED",
     "GENERATION_BUDGET_EXCEEDED",
     "GENERATION_COLUMN_UNBOUNDED",
     "GENERATION_NOT_CLASS_A",
@@ -37,6 +39,7 @@ __all__ = [
     "INDEX_BATCH_TYPE_MISMATCH",
     "INVALID_SEED_LENGTH",
     "KEYED_STRATEGY_REQUIRES_SECRET",
+    "KEY_VERSION_INVALID",
     "MASK_KEY_DERIVATION_FAILED",
     "MASK_KEY_REQUIRED",
     "MISSING_MASK_SECRET",
@@ -77,6 +80,7 @@ __all__ = [
     "POOL_EXCEEDS_CACHE_BUDGET",
     "POOL_QUALITY_THRESHOLD_EXCEEDED",
     "POOL_TOO_SMALL_FOR_SOURCE",
+    "PROBE_FAILED",
     "PROVIDER_NOT_POOLABLE",
     "RAW_HEX_BATCH_LENGTH_MISMATCH",
     "RAW_HEX_BATCH_TYPE_MISMATCH",
@@ -99,6 +103,7 @@ __all__ = [
     "SOURCE_LENGTH_MISMATCH",
     "SOURCE_REQUIRED_FOR_CARDINALITY_MODE",
     "SPLIT_SINK_NEEDS_ALL_DISPATCHED",
+    "STREAMING_UNAVAILABLE",
     "TIMEZONE_NAIVE_DATETIME",
     "TRANSFORM_SOURCE_MISSING",
     "UNDECLARED_OUTPUT_COLUMNS",
@@ -218,8 +223,17 @@ SEQUENTIAL_TEXT_MASK_INPUT_TYPE_DRIFT = _d(
 SEQUENTIAL_TEXT_REDACT_INPUT_TYPE_DRIFT = _d(
     "sequential_text_redact_input_type_drift", "Sequential text redact input type drift."
 )
+CPU_DETECTION_FAILED = _d(
+    "cpu_detection_failed",
+    "CPU limit detection failed.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.21.0",
+)
 SPLIT_SINK_NEEDS_ALL_DISPATCHED = _d(
     "split_sink_needs_all_dispatched", "Split sink needs all dispatched."
+)
+STREAMING_UNAVAILABLE = _d(
+    "streaming_unavailable", "No streaming route applies to this job.", since="1.18.0"
 )
 TRANSFORM_SOURCE_MISSING = _d("transform_source_missing", "Transform source missing.")
 UNDECLARED_OUTPUT_COLUMNS = _d("undeclared_output_columns", "Undeclared output columns.")
@@ -300,6 +314,14 @@ TIMEZONE_NAIVE_DATETIME = _d("timezone_naive_datetime", "Timezone naive datetime
 UNIQUENESS_IMPOSSIBLE = _d("uniqueness_impossible", "Uniqueness impossible.")
 UNKNOWN_CARDINALITY_MODE = _d("unknown_cardinality_mode", "Unknown cardinality mode.")
 
+GENERATE_FORMULA_EVALUATION_FAILED = _d(
+    "generate_formula_evaluation_failed",
+    "A generate formula could not be evaluated for a row.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.26.0",
+)
+
 _d = _catalog.runtime("GenerationUnboundedError")
 
 GENERATION_COLUMN_UNBOUNDED = _d("generation_column_unbounded", "Generation column unbounded.")
@@ -350,6 +372,15 @@ BAD_SECRET_REF = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
+)
+
+KEY_VERSION_INVALID = _d(
+    "key_version_invalid",
+    "The key version label is not valid.",
+    phases=(Phase.RESOLVE,),
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("MissingMaskSecret")
@@ -405,6 +436,17 @@ _d = _catalog.runtime("PoolQualityError")
 
 POOL_QUALITY_THRESHOLD_EXCEEDED = _d(
     "pool_quality.threshold_exceeded", "Pool quality threshold exceeded."
+)
+
+_d = _catalog.runtime("ProbeError")
+
+PROBE_FAILED = _d(
+    "probe_failed",
+    "The synthetic probe could not run.",
+    phases=(Phase.RESOLVE,),
+    outcome=Outcome.EXECUTION,
+    retry=RetryClass.UNKNOWN,
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("RowExceedsMaxRowBytes")

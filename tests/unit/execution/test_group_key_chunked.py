@@ -31,6 +31,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_fk import CHUNK_SAFE_STRATEGIES
 from decoy_engine.execution._chunked_group_key import (
@@ -48,6 +49,7 @@ from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships import RelationshipGraph
 from decoy_engine.transforms.group_key import GroupKeyConfig, apply_group_key
+from tests._declared_schema import declared_schema
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 
 _ENGINE_VERSION = "p4-slice2-group-key-test"
@@ -72,12 +74,24 @@ def _config(
     extra_tables: list[dict] | None = None,
 ) -> dict:
     tables = [{"name": table, "columns": columns}]
-    sources = {table: {"type": "file", "format": "csv", "path": str(tmp_path / f"{table}.csv")}}
+    sources = {
+        table: {
+            "type": "file",
+            "format": "csv",
+            "has_header": True,
+            "path": str(tmp_path / f"{table}.csv"),
+        }
+    }
     targets = {table: {"type": "file", "format": "csv", "path": str(tmp_path / f"{table}_out.csv")}}
     for extra in extra_tables or []:
         tables.append(extra)
         name = extra["name"]
-        sources[name] = {"type": "file", "format": "csv", "path": str(tmp_path / f"{name}.csv")}
+        sources[name] = {
+            "type": "file",
+            "format": "csv",
+            "has_header": True,
+            "path": str(tmp_path / f"{name}.csv"),
+        }
         targets[name] = {"type": "file", "format": "csv", "path": str(tmp_path / f"{name}_out.csv")}
     cfg: dict = {
         "version": 2,
@@ -320,7 +334,11 @@ class TestIntNullGroupBy:
         chunked = pa.concat_tables(
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 3), table="people", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 3),
+                    table="people",
+                    source_schema=declared_schema(cfg, "people"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         ).combine_chunks()
@@ -381,7 +399,11 @@ class TestNullSentinelPerDtype:
         chunked = pa.concat_tables(
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 4), table="people", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 4),
+                    table="people",
+                    source_schema=declared_schema(cfg, "people"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         ).combine_chunks()
@@ -468,8 +490,8 @@ class TestCacheCollisionFloatSignedZero:
         sources = {"people": table}
 
         with mock.patch(
-            "decoy_engine.execution._chunked.run_mask_pipeline_chunked",
-            wraps=run_mask_pipeline_chunked,
+            "decoy_engine.execution._chunked_oracle._mask_pipeline_chunked",
+            wraps=_chunked_oracle._mask_pipeline_chunked,
         ) as spy:
             result = run_pipeline(
                 cfg,
@@ -503,6 +525,7 @@ class TestCacheCollisionFloatSignedZero:
                     cfg,
                     _pa_chunks(table, 3),
                     table="people",
+                    source_schema=declared_schema(cfg, "people"),
                     engine_version=_ENGINE_VERSION,
                 )
             )
@@ -545,8 +568,8 @@ class TestTextRedactMaskedGroupByRoutesToOracle:
     def test_auto_route_falls_back_to_oracle(self, tmp_path, text_redact_pc) -> None:
         cfg, sources = self._cfg(tmp_path, text_redact_pc)
         with mock.patch(
-            "decoy_engine.execution._chunked.run_mask_pipeline_chunked",
-            wraps=run_mask_pipeline_chunked,
+            "decoy_engine.execution._chunked_oracle._mask_pipeline_chunked",
+            wraps=_chunked_oracle._mask_pipeline_chunked,
         ) as spy:
             result = run_pipeline(
                 cfg,
@@ -598,8 +621,8 @@ class TestCacheCollisionDecimalSignedZero:
         sources = {"people": table}
 
         with mock.patch(
-            "decoy_engine.execution._chunked.run_mask_pipeline_chunked",
-            wraps=run_mask_pipeline_chunked,
+            "decoy_engine.execution._chunked_oracle._mask_pipeline_chunked",
+            wraps=_chunked_oracle._mask_pipeline_chunked,
         ) as spy:
             result = run_pipeline(
                 cfg,
@@ -636,6 +659,7 @@ class TestCacheCollisionDecimalSignedZero:
                     cfg,
                     _pa_chunks(table, 2),
                     table="people",
+                    source_schema=declared_schema(cfg, "people"),
                     engine_version=_ENGINE_VERSION,
                 )
             )
@@ -913,7 +937,11 @@ class TestOrderingRegressions:
         with pytest.raises(PlanCompileError) as exc2:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 2), table="people", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 2),
+                    table="people",
+                    source_schema=declared_schema(cfg, "people"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc2.value.code == "chunked_group_key_group_by_dtype_unsupported"
@@ -1421,6 +1449,7 @@ class TestFkExclusion:
                     cfg_with_fk,
                     _pa_chunks(table, 7),
                     table="customers",
+                    source_schema=declared_schema(cfg_with_fk, "customers"),
                     engine_version=_ENGINE_VERSION,
                 )
             )
@@ -1519,7 +1548,11 @@ class TestWhenRejection:
         with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 2), table="people", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 2),
+                    table="people",
+                    source_schema=declared_schema(cfg, "people"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "chunked_group_key_when_not_supported"
@@ -1620,7 +1653,11 @@ class TestOutputDtypeInvariance:
         cfg = _config(tmp_path, columns)
         chunks = list(
             run_mask_pipeline_chunked(
-                cfg, _pa_chunks(table, 3), table="people", engine_version=_ENGINE_VERSION
+                cfg,
+                _pa_chunks(table, 3),
+                table="people",
+                source_schema=declared_schema(cfg, "people"),
+                engine_version=_ENGINE_VERSION,
             )
         )
         assert len(chunks) == 3

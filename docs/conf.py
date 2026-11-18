@@ -22,8 +22,8 @@ from __future__ import annotations
 
 # ── Project metadata ─────────────────────────────────────────────────────
 project = "decoy-engine"
-author = "louiskeep"
-copyright = "2026, louiskeep"
+author = "Decoy"
+copyright = "2026, Decoy"
 
 # Pull the version from the package itself so a release bump in
 # pyproject.toml shows up in the docs without a parallel edit here.
@@ -141,7 +141,7 @@ html_static_path = ["_static"]
 html_show_sourcelink = False  # the GitHub-link button below replaces this
 
 html_theme_options = {
-    "source_repository": "https://github.com/louiskeep/decoy-engine/",
+    "source_repository": "https://github.com/decoy-data/decoy-engine/",
     "source_branch": "main",
     "source_directory": "docs/",
     # Keep accent colors aligned with the CLI's semantic-token palette
@@ -182,6 +182,11 @@ nitpick_ignore = [
     ("py:class", "faker.Faker"),
     ("py:class", "numpy.random.Generator"),
     ("py:class", "numpy.ndarray"),
+    # numpy.dtype and numpy.float64 come from the np.ndarray[Any,
+    # np.dtype[np.float64]] annotations in quality.snapshot; the numpy
+    # inventory does not list them as py:class.
+    ("py:class", "numpy.dtype"),
+    ("py:class", "numpy.float64"),
     ("py:class", "pydantic.BaseModel"),
     ("py:obj", "pydantic.BaseModel"),
     ("py:class", "pydantic.SecretStr"),
@@ -210,6 +215,7 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.ReasonRef"),
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
+    ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),
@@ -217,6 +223,11 @@ nitpick_ignore = [
     ("py:class", "FrozenValue"),
     ("py:class", "CodeSetConfig"),
     ("py:class", "encrypted"),
+    # Literal aliases (detection.types, profiling.scan_set) that autoapi
+    # renders as classes; their defining pages register no class target.
+    ("py:class", "DetectorSource"),
+    ("py:class", "decoy_engine.detection.types.DetectorSource"),
+    ("py:class", "Strategy"),
     # CI-E1: third-party names the intersphinx inventories do not index as
     # classes (polars lists members, duckdb ships no inventory).
     ("py:class", "polars.LazyFrame"),
@@ -239,6 +250,8 @@ nitpick_ignore = [
     ("py:class", "StrategyDefault"),
     ("py:class", "ExpectedField"),
     ("py:class", "ReleasePhase"),
+    ("py:class", "Version"),
+    ("py:class", "PutResult"),
     ("py:class", "ProgressEvent"),
     ("py:class", "decoy_engine.progress.ProgressEvent"),
     ("py:obj", "DecoyError"),
@@ -412,9 +425,12 @@ exclude_patterns = [
     "archive/**",
     "backlog/**",
     "plans/**",
+    "records/**",
     "superpowers/**",
     "decisions/**",
     "v2/**",
     "review-notes/**",
+    # The QA checklist is a working doc for QA passes, not product reference.
+    "qa/**",
     "remediation-source.md",
 ]

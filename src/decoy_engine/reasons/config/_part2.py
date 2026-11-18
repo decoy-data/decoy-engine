@@ -3,10 +3,209 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
-__all__ = ["VARIABLE_UNKNOWN_SCOPE", "VARIABLE_UNRESOLVED"]
+__all__ = [
+    "CANONICAL_JSON_INVALID_STRING",
+    "CONFIG_VALUE_NOT_JSON",
+    "DECLARED_TABLE_DROPPED",
+    "ENV_FLAG_INVALID",
+    "GENERATE_COLUMN_DUPLICATE",
+    "GENERATE_FORMULA_INVALID",
+    "GENERATE_OPTION_RANGE",
+    "GENERATE_OPTION_TYPE",
+    "GENERATE_OPTION_UNKNOWN",
+    "GENERATE_OPTION_VALUE_UNKNOWN",
+    "GENERATE_OUTPUT_TYPE_UNSUPPORTED",
+    "GENERATE_UNIQUE_CONFLICT",
+    "GENERATE_UNIQUE_DOMAIN_TOO_SMALL",
+    "GENERATE_UNIQUE_UNSUPPORTED",
+    "GENERATE_WEIGHTS_INVALID",
+    "LOADER_TABLE_UNDECLARED",
+    "NAMESPACE_PLACEHOLDER_UNSET",
+    "PIPELINE_NAME_INVALID",
+    "POLICY_BLOCK_INVALID",
+    "POLICY_COLUMN_PARTIAL",
+    "POLICY_FIELD_UNDECIDED",
+    "POLICY_PROHIBITED",
+    "POLICY_RULE_CONFLICT",
+    "POLICY_SELECTOR_INVALID",
+    "POLICY_SELECTOR_UNMATCHED",
+    "POLICY_UNKNOWN_CLASSIFICATION",
+    "POLICY_UNKNOWN_STRATEGY",
+    "TARGET_SHARED_DESTINATION",
+    "VARIABLE_UNKNOWN_SCOPE",
+    "VARIABLE_UNRESOLVED",
+]
 
 _d = _catalog.config("decoy_engine.validation_result")
 
 VARIABLE_UNKNOWN_SCOPE = _d("variable.unknown_scope", "Variable unknown scope.")
 VARIABLE_UNRESOLVED = _d("variable.unresolved", "Variable unresolved.")
+
+# Summaries double as the refusal text the config layer shows, so they never name a value.
+_d = _catalog.config("CanonicalJsonError")
+
+CANONICAL_JSON_INVALID_STRING = _d(
+    "canonical_json_invalid_string",
+    "Canonical JSON strings must contain only Unicode scalar values.",
+    since="1.27.0",
+)
+CONFIG_VALUE_NOT_JSON = _d(
+    "config_value_not_json",
+    "A config value has a type JSON cannot hold; quote it as a string.",
+    since="1.27.0",
+)
+
+_d = _catalog.config("PipelineValidationError")
+TARGET_SHARED_DESTINATION = _d(
+    "target_shared_destination",
+    "Two or more targets write to one destination. Give each table its own target.",
+    since="1.28.0",
+)
+GENERATE_COLUMN_DUPLICATE = _d(
+    "generate_column_duplicate",
+    "Two generate columns in one table have the same name.",
+    since="1.13.0",
+)
+GENERATE_FORMULA_INVALID = _d(
+    "generate_formula_invalid",
+    "Generate column formula is not a valid expression.",
+    since="1.13.0",
+)
+GENERATE_OPTION_RANGE = _d(
+    "generate_option_range",
+    "Generate column option is outside its allowed range.",
+    since="1.13.0",
+)
+GENERATE_OPTION_TYPE = _d(
+    "generate_option_type",
+    "Generate column option has the wrong type.",
+    since="1.13.0",
+)
+GENERATE_OPTION_UNKNOWN = _d(
+    "generate_option_unknown",
+    "Generate column option is not known for this column type.",
+    since="1.13.0",
+)
+GENERATE_OPTION_VALUE_UNKNOWN = _d(
+    "generate_option_value_unknown",
+    "Generate column option value is not one of the allowed choices.",
+    since="1.13.0",
+)
+GENERATE_OUTPUT_TYPE_UNSUPPORTED = _d(
+    "generate_output_type_unsupported",
+    "Generate column type or target cannot carry the requested output type.",
+    since="1.23.0",
+)
+GENERATE_UNIQUE_CONFLICT = _d(
+    "generate_unique_conflict",
+    "Generate column unique cannot be combined with another option on the same column.",
+    since="1.17.0",
+)
+GENERATE_UNIQUE_DOMAIN_TOO_SMALL = _d(
+    "generate_unique_domain_too_small",
+    "Generate column unique needs more distinct values than its domain holds.",
+    since="1.17.0",
+)
+GENERATE_UNIQUE_UNSUPPORTED = _d(
+    "generate_unique_unsupported",
+    "Generate column type does not support unique.",
+    since="1.17.0",
+)
+GENERATE_WEIGHTS_INVALID = _d(
+    "generate_weights_invalid",
+    "Generate column weights must be non-negative numbers with a positive total.",
+    since="1.13.0",
+)
+PIPELINE_NAME_INVALID = _d(
+    "pipeline_name_invalid",
+    "Pipeline name must be 1 to 64 letters, digits, dot, dash or underscore, start with a letter or "
+    "digit, not end in a dot and not be a Windows device name.",
+    since="1.12.0",
+)
+
+# The variable name is a fixed engine constant; the refusal text never carries the value read.
+_d = _catalog.config("EnvFlagError")
+
+ENV_FLAG_INVALID = _d(
+    "env_flag_invalid",
+    "An environment flag has a value outside the accepted spellings.",
+    since="1.27.0",
+)
+
+# A table whose strategies sit under `tables:` must reach the plan. The two refusals below keep a
+# declared table from being echoed unmasked; texts name the table (a config key), never a value.
+_d = _catalog.config("ConfigError")
+
+LOADER_TABLE_UNDECLARED = _d(
+    "loader_table_undeclared",
+    "A table masked through a source loader needs a sources entry; without one the run would "
+    "pass its rows through unmasked.",
+    since="1.27.0",
+)
+DECLARED_TABLE_DROPPED = _d(
+    "declared_table_dropped",
+    "A table declared under tables has no work in the compiled plan; the run would pass its "
+    "rows through unmasked.",
+    since="1.27.0",
+)
+
+# The placeholder a starter pipeline writes where a declared relationship named no namespace.
+# The text never carries the submitted value; the error location names the field.
+NAMESPACE_PLACEHOLDER_UNSET = _d(
+    "namespace_placeholder_unset",
+    "A namespace still holds the placeholder a starter pipeline writes; set a real namespace.",
+    since="1.27.0",
+)
+
+# Pipeline `policy` block refusals. Summaries name no config value; the error text adds rule ids
+# and `table.column` names only.
+_d = _catalog.config("PipelineValidationError")
+
+POLICY_SELECTOR_INVALID = _d(
+    "policy_selector_invalid",
+    "A policy selector is empty, has an unknown key or holds a value outside the grammar.",
+    since=UNRELEASED,
+)
+POLICY_UNKNOWN_CLASSIFICATION = _d(
+    "policy_unknown_classification",
+    "A classification is not one the engine knows.",
+    since=UNRELEASED,
+)
+POLICY_UNKNOWN_STRATEGY = _d(
+    "policy_unknown_strategy",
+    "A policy names a masking strategy the engine does not know.",
+    since=UNRELEASED,
+)
+POLICY_SELECTOR_UNMATCHED = _d(
+    "policy_selector_unmatched",
+    "A policy rule selects no mask column.",
+    since=UNRELEASED,
+)
+POLICY_RULE_CONFLICT = _d(
+    "policy_rule_conflict",
+    "Two policy sources decide one column differently at the same precedence level.",
+    since=UNRELEASED,
+)
+POLICY_FIELD_UNDECIDED = _d(
+    "policy_field_undecided",
+    "No policy level decides a mask column.",
+    since=UNRELEASED,
+)
+POLICY_COLUMN_PARTIAL = _d(
+    "policy_column_partial",
+    "A column without a strategy sets keys that only a strategy can use.",
+    since=UNRELEASED,
+)
+POLICY_BLOCK_INVALID = _d(
+    "policy_block_invalid",
+    "The policy block has a duplicate id, a prohibition without exactly one of forbid and "
+    "require, or a value JSON cannot carry.",
+    since=UNRELEASED,
+)
+POLICY_PROHIBITED = _d(
+    "policy_prohibited",
+    "A mask column's decided strategy breaks a policy prohibition.",
+    since=UNRELEASED,
+)

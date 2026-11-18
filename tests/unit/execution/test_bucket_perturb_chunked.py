@@ -55,6 +55,7 @@ from decoy_engine.execution._chunked_bucket_perturb import (
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.plan import PlanCompileError
 from decoy_engine.providers_v2 import get_default_registry
+from tests._declared_schema import declared_schema
 
 _ENGINE_VERSION = "p4-slice5-bucket-perturb-test"
 _LOW_THRESHOLD = 10
@@ -74,7 +75,14 @@ def _config(
     seed: int = _SEED,
 ) -> dict:
     tables = [{"name": table, "columns": columns}]
-    sources = {table: {"type": "file", "format": "csv", "path": str(tmp_path / f"{table}.csv")}}
+    sources = {
+        table: {
+            "type": "file",
+            "format": "csv",
+            "has_header": True,
+            "path": str(tmp_path / f"{table}.csv"),
+        }
+    }
     targets = {table: {"type": "file", "format": "csv", "path": str(tmp_path / f"{table}_out.csv")}}
     cfg: dict = {
         "version": 2,
@@ -102,6 +110,24 @@ def _write_csv_stub(tmp_path: Path, name: str, table: pa.Table) -> None:
         pd.DataFrame({c: [] for c in table.column_names}).to_csv(
             tmp_path / f"{name}.csv", index=False
         )
+
+
+def _strip_namespace(plan: Any, table: str, column: str) -> Any:
+    """`plan` with one column's namespace removed.
+
+    Plan compile refuses a namespace-less config, so the chunked admission guard (a backstop
+    for hand-built plans) is reached only through a plan edited after compile.
+    """
+    from dataclasses import replace
+
+    def seed_for(t: str, c: str, seed: Any) -> Any:
+        return replace(seed, namespace=None) if (t, c) == (table, column) else seed
+
+    tables = tuple(
+        (t, replace(ts, per_column=tuple((c, seed_for(t, c, cs)) for c, cs in ts.per_column)))
+        for t, ts in plan.seed_envelope.per_table
+    )
+    return replace(plan, seed_envelope=replace(plan.seed_envelope, per_table=tables))
 
 
 def _bucket_perturb_col(
@@ -199,7 +225,11 @@ class TestByteParity:
         cfg = _config(tmp_path, columns)
         out = list(
             run_mask_pipeline_chunked(
-                cfg, _pa_chunks(table, 1), table="records", engine_version=_ENGINE_VERSION
+                cfg,
+                _pa_chunks(table, 1),
+                table="records",
+                source_schema=declared_schema(cfg, "records"),
+                engine_version=_ENGINE_VERSION,
             )
         )
         combined = concat_masked_chunks(out, table="records")
@@ -356,11 +386,14 @@ class TestOutOfCoreSharedShapeParity:
         # this relationship, so the chunked route admits it.
         cfg_parent_only = {k: v for k, v in cfg.items() if k != "relationships"}
         cfg_parent_only["tables"] = [t for t in cfg["tables"] if t["name"] == "parent"]
+        # The gate needs a tables entry for every source, so the child source goes too.
+        cfg_parent_only["sources"] = {"parent": cfg["sources"]["parent"]}
         chunked_out = list(
             run_mask_pipeline_chunked(
                 cfg_parent_only,
                 _pa_chunks(parent, 3),
                 table="parent",
+                source_schema=declared_schema(cfg_parent_only, "parent"),
                 engine_version=_ENGINE_VERSION,
             )
         )
@@ -389,7 +422,13 @@ class TestEmptyChunkParity:
         cfg = _config(tmp_path, columns)
         chunks = [table.slice(0, 0), table.slice(0, 2), table.slice(2, 2)]
         out = list(
-            run_mask_pipeline_chunked(cfg, chunks, table="records", engine_version=_ENGINE_VERSION)
+            run_mask_pipeline_chunked(
+                cfg,
+                chunks,
+                table="records",
+                source_schema=declared_schema(cfg, "records"),
+                engine_version=_ENGINE_VERSION,
+            )
         )
         assert len(out) == 3
         empty_chunk_type = out[0].schema.field("d").type
@@ -406,7 +445,11 @@ class TestEmptyChunkParity:
         empty = pa.table({"d": pa.array([], type=pa.string())})
         out = list(
             run_mask_pipeline_chunked(
-                cfg, [empty, empty], table="records", engine_version=_ENGINE_VERSION
+                cfg,
+                [empty, empty],
+                table="records",
+                source_schema=declared_schema(cfg, "records"),
+                engine_version=_ENGINE_VERSION,
             )
         )
         for chunk in out:
@@ -473,7 +516,11 @@ class TestAdmissionBoundary:
         with pytest.raises(PlanCompileError) as chunked:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, [table], table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    [table],
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert chunked.value.code == "bucket_perturb_date_format_unsupported"
@@ -490,7 +537,11 @@ class TestAdmissionBoundary:
         with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 1), table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 1),
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "chunked_bucket_perturb_when_not_supported"
@@ -526,7 +577,11 @@ class TestAdmissionBoundary:
         with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, _pa_chunks(table, 1), table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    _pa_chunks(table, 1),
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
@@ -540,7 +595,11 @@ class TestAdmissionBoundary:
         with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, [chunk1, chunk2], table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    [chunk1, chunk2],
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "chunked_bucket_perturb_source_dtype_unsupported"
@@ -686,43 +745,71 @@ class TestAdmissionBoundary:
         columns = [_bucket_perturb_col("d", namespace=None)]
         cfg = _config(tmp_path, columns)
         table = pa.table({"d": pa.array(["2024-01-15"], type=pa.string())})
-        with pytest.raises(StrategyError) as exc:
+        with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, [table], table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    [table],
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "bucket_perturb_requires_namespace"
         _write_csv_stub(tmp_path, "records", table)
-        with pytest.raises(StrategyError) as exc2:
+        with pytest.raises(PlanCompileError) as exc2:
             run_pipeline(
                 cfg, sources={"records": table}, engine_version=_ENGINE_VERSION, auto_chunk=False
             )
         assert exc2.value.code == "bucket_perturb_requires_namespace"
+        assert exc2.value.path == exc.value.path
 
     def test_namespace_less_config_raises_on_zero_chunk_input(self, tmp_path) -> None:
         # A namespace-less bucket_perturb config with a ZERO-chunk input must
-        # fail closed like the oracle: the data-independent namespace check runs
-        # before the empty-input return, so the misconfig is caught even when no
-        # chunk is ever dispatched (it would otherwise return empty silently).
-        # A namespace-less redact column ordered BEFORE the bucket_perturb one
-        # (redact needs no namespace) proves the check SKIPS non-bucket_perturb
-        # nodes with `continue`, not `break`: a `break` would stop at the redact
-        # node and miss the offending bucket_perturb column after it.
+        # fail closed: the plan compiler refuses it before the empty-input return,
+        # so the misconfig is caught even when no chunk is ever dispatched.
         columns = [
             {"name": "aaa", "strategy": "redact", "provider_config": {"redact_with": "X"}},
             _bucket_perturb_col("dcol", namespace=None),
         ]
         cfg = _config(tmp_path, columns)
-        with pytest.raises(StrategyError) as exc:
+        with pytest.raises(PlanCompileError) as exc:
             list(
                 run_mask_pipeline_chunked(
-                    cfg, iter(()), table="records", engine_version=_ENGINE_VERSION
+                    cfg,
+                    iter(()),
+                    table="records",
+                    source_schema=declared_schema(cfg, "records"),
+                    engine_version=_ENGINE_VERSION,
                 )
             )
         assert exc.value.code == "bucket_perturb_requires_namespace"
-        assert exc.value.strategy == "bucket_perturb"  # pins the coded strategy field
-        assert "dcol" in exc.value.message  # pins the offending column name (not "aaa")
+        assert exc.value.path.endswith("dcol.namespace")  # the offending column, not "aaa"
+
+    def test_admission_guard_backstops_a_plan_edited_after_compile(self, tmp_path) -> None:
+        # The guard runs before the empty-input return and still skips non-bucket_perturb
+        # nodes with `continue`, not `break`: a namespace-less redact column ordered BEFORE
+        # the bucket_perturb one must not stop the scan.
+        from decoy_engine.execution._chunked_profile import first_chunk_profile
+        from decoy_engine.plan import compile_plan
+        from decoy_engine.relationships import RelationshipGraph
+
+        columns = [
+            {"name": "aaa", "strategy": "redact", "provider_config": {"redact_with": "X"}},
+            _bucket_perturb_col("dcol", namespace="bp"),
+        ]
+        cfg = _config(tmp_path, columns)
+        table = pa.table({"aaa": pa.array(["x"]), "dcol": pa.array(["2024-01-15"])})
+        profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        reg, graph = get_default_registry(), RelationshipGraph(edges=(), ordering=())
+        reject_bucket_perturb_missing_namespace(plan, reg, graph, table="records")
+        edited = _strip_namespace(plan, "records", "dcol")
+        with pytest.raises(StrategyError) as exc:
+            reject_bucket_perturb_missing_namespace(edited, reg, graph, table="records")
+        assert exc.value.code == "bucket_perturb_requires_namespace"
+        assert exc.value.strategy == "bucket_perturb"
+        assert "dcol" in exc.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -906,8 +993,18 @@ class TestRegistryLoadBearing:
             "version": 2,
             "global_settings": {"seed": _SEED},
             "sources": {
-                "a": {"type": "file", "format": "csv", "path": str(tmp_path / "a.csv")},
-                "b": {"type": "file", "format": "csv", "path": str(tmp_path / "b.csv")},
+                "a": {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(tmp_path / "a.csv"),
+                },
+                "b": {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(tmp_path / "b.csv"),
+                },
             },
             "targets": {
                 "a": {"type": "file", "format": "csv", "path": str(tmp_path / "a_out.csv")},
@@ -915,17 +1012,21 @@ class TestRegistryLoadBearing:
             },
             "tables": [
                 {"name": "a", "columns": [_bucket_perturb_col("d", namespace="bp")]},
-                {"name": "b", "columns": [_bucket_perturb_col("e", namespace=None)]},
+                {"name": "b", "columns": [_bucket_perturb_col("e", namespace="bp")]},
             ],
         }
         cfg = _validated_dump(cfg)
         profile = profile_source(cfg, seed=_SEED)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = _strip_namespace(
+            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION), "b", "e"
+        )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         # table "a"'s bucket_perturb has a namespace; table "b"'s missing
         # namespace must NOT surface here.
         reject_bucket_perturb_missing_namespace(plan, reg, graph, table="a")  # must not raise
+        with pytest.raises(StrategyError):
+            reject_bucket_perturb_missing_namespace(plan, reg, graph, table="b")
 
 
 # ---------------------------------------------------------------------------
@@ -942,7 +1043,11 @@ class TestAdmissionSurfaces:
         cfg = _config(tmp_path, columns)
         out = list(
             run_mask_pipeline_chunked(
-                cfg, _pa_chunks(table, 2), table="records", engine_version=_ENGINE_VERSION
+                cfg,
+                _pa_chunks(table, 2),
+                table="records",
+                source_schema=declared_schema(cfg, "records"),
+                engine_version=_ENGINE_VERSION,
             )
         )
         assert sum(c.num_rows for c in out) == 5

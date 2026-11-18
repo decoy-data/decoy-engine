@@ -56,17 +56,16 @@ key is split into per-field subkeys.
 
 ### Keyed masking: mask_key, not job_seed
 
-`job_seed` (above) drives reproducibility for *generation* and for the
-no-secret fallback path. Every re-identification-protecting *masking*
+`job_seed` (above) drives reproducibility for *generation*. Every re-identification-protecting *masking*
 derivation (`fpe`, `hash`, `date_shift`, `code_set`, `joint_mask`,
 deterministic `faker`/`categorical`/composites, and the token vault's
 encryption key) instead draws from a separate value, `mask_key`, sourced
 through a `KeyProvider`. Configure it with `global_settings.mask_secret_ref`
 (`env:NAME` or `file:/PATH`, resolved to a >=32-byte secret) or a
-programmatic `run(key_provider=...)`. With no provider configured, `mask_key`
-falls back to `job_seed` so pre-KeyProvider output stays byte-identical; at
-GA a keyed plan with no resolved secret hard-errors instead of silently
-keying off the seed. See [security/key-derivation](security/key-derivation.md)
+programmatic `run(key_provider=...)`. There is no `job_seed` fallback in any
+release phase: a keyed plan with no admitted secret of at least 32 bytes is
+refused with `keyed_strategy_requires_secret` before any source is read. A plan
+with no keyed strategy never uses `mask_key`. See [security/key-derivation](security/key-derivation.md)
 for the full model.
 
 ## What is deterministic
@@ -87,6 +86,10 @@ for the full model.
 - Non-deterministic `categorical`: seeded by the job seed and the row's position
   in the frame being masked, so the same seed and input give the same output. It
   is keyed by position, not by source value, so it does not preserve joins.
+- Non-deterministic `shuffle` (the default when `deterministic` is not set): the
+  permutation is drawn from the mask key with the job seed and the table and column
+  names bound in, so the same config, seed and secret give the same output. It needs no namespace,
+  and the same column in two tables gets two different permutations.
 - Strategies that are deterministic by construction: `bucketize` (same value,
   same bucket), `redact` and `text_redact` (pure function of input and config),
   `truncate`, `formula` (deterministic by its expression).
@@ -96,8 +99,6 @@ for the full model.
 
 ## What is NOT deterministic
 
-- Non-deterministic `shuffle`. It can run in a non-deterministic mode that draws
-  from an unseeded RNG; two runs differ. This is opt-in and is not the keyed path.
 - Profiling without a seed. `profile_source` falls back to OS entropy for
   reservoir sampling if no seed is passed and none is set in
   `global_settings.seed`; on tables larger than the sample cap this makes the
@@ -119,8 +120,8 @@ that the engine rejects rather than silently mis-keying.
 
 ## FPE key and tweak model
 
-FPE uses a single AES-256 key per `(job_seed, namespace)`, derived as
-`derive(job_seed, namespace, b"ff1-key/v1")`. This is a single-key/varying-tweak
+FPE uses a single AES-256 key per `(mask_key, namespace)`, derived as
+`derive(mask_key, namespace, b"ff1-key/v1")`. This is a single-key/varying-tweak
 key model (one key, varying tweak per column). The underlying primitive is
 NIST SP 800-38G FF1 (Algorithms 5/6, AES-256 via the `cryptography` package),
 which replaced the engine's earlier home-rolled 8-round HMAC-SHA256 Feistel
@@ -212,7 +213,7 @@ output.
 ## Deterministic shuffle and column names
 
 The `shuffle` strategy binds the column name into its derivation source:
-`derive(job_seed, namespace, column_name.encode("utf-8"))`. This ensures that
+`derive(mask_key, namespace, column_name.encode("utf-8"))`. This ensures that
 two shuffle columns in the same namespace draw distinct permutations. Without
 the column-name binding, both columns would share one permutation and their
 values would permute in lockstep, re-linking records across columns that masking
@@ -236,7 +237,9 @@ correctness defects (F2 and F3 in `docs/remediation-source.md`):
 The v6 rewrite replaces `synthetic_column_seed` with
 `GenDeriveContext` (`generators/derivation.py`). One full-32-byte column
 root is resolved per column (keyed path: full `derive_key("gen:" +
-fingerprint)`, no truncation). Per-RNG-family and per-row sub-keys are
+fingerprint + ":" + identity)`, no truncation; identity is the table name plus
+the column name, so renaming a column or moving it to another table re-keys it).
+Per-RNG-family and per-row sub-keys are
 derived from that root via `_gen_hmac`, which mixes `SEED_PROTOCOL_VERSION`
 into its HMAC input (mirroring the mask-path envelope in
 `determinism/_derive.py`). The three RNG families (`py`, `np`, `faker`)

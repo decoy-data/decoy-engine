@@ -363,7 +363,15 @@ _MASK: dict[str, _Ortho] = {
         False,
         False,
         row_error_modes=("format_error", "mask_error"),
-        warning_codes=("nested_cell_json_parse_error", "nested_jsonpath_path_overlap"),
+        warning_codes=(
+            "nested_cell_json_parse_error",
+            "nested_jsonpath_path_overlap",
+            "nested_cell_oversized",
+            "nested_cell_too_deep",
+            "nested_cell_duplicate_key",
+            "nested_cell_number_out_of_range",
+            "nested_child_non_finite",
+        ),
         uncertain=True,
         notes=(
             "Delegates to a config-resolved child handler: its effective surface "
@@ -412,6 +420,39 @@ _GEN_ONLY: dict[str, _Ortho] = {
         True,
         gen=True,
         notes="Per-row reseed from col_seed + row index; partition-safe when the global index is preserved.",
+    ),
+    "constant": _Ortho(
+        True,
+        False,
+        False,
+        False,
+        True,
+        gen=True,
+        notes="The one configured value for every row; no draw.",
+    ),
+    "lookup": _Ortho(
+        False,
+        True,
+        False,
+        False,
+        False,
+        gen=True,
+        notes=(
+            "One python Random choices call over the pinned lookup list; the value type comes "
+            "from the file. Resident route only, non-partitionable like categorical generation."
+        ),
+    ),
+    "distribution": _Ortho(
+        False,
+        True,
+        False,
+        False,
+        True,
+        gen=True,
+        notes=(
+            "One persistent numpy Generator (dist family) advanced in row order; prefix-stable, "
+            "so the batch layout does not change values."
+        ),
     ),
 }
 

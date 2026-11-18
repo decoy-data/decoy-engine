@@ -8,11 +8,15 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 |---|---|
 | `__init__.py` | Public API (`__all__` is the contract) |
 | `config/` | `PipelineConfig` and the source/target/table/relationship models |
+| `config/policy/` | The pipeline `policy` block: selector grammar, 5-level precedence, pure expansion, prohibitions and the `policy-expansion/v1` explanation (F16; wired into `PipelineConfig` in slice E3) |
 | `plan/` | `compile_plan` -> frozen `Plan`, seed envelope, plan-time checks |
 | `execution/` | `run_pipeline` spine, routes (full-frame oracle, unified slice, chunked dispatcher, sequential and out-of-core FK), strategy handlers, native companion bridge, transactional sink, capacity |
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
+| `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form); `_strict_spec.py` holds the strict persisted-reader specs the publication descriptor and the resume records share |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
-| `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome` |
+| `publication/` | F22 output publication: the `decoy-publication/v1` descriptor codec and `result_id` (`_descriptor.py`), request and receipt types (`_types.py`), judge and bind (`_publish.py`), the sink state table (`_sink_state.py`); vault ordering arrives in a later slice |
+| `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome`, `_project.py` (`project_tables`, the per-table projection) |
+| `records/` | The local record library's engine side: `decoy-record/v1` envelope, `build`/`encode`/`decode`, the kind registry, canonical form and ids, the `decoy-library-export/v1` codec, the `decoy-job-log/v1` header and reader (no filesystem access) |
 | `reason_adapter.py` | `reason_from_exception`, `reasons_from_report`, the per-run failure scope |
 | `generation/` | The generation core (resident and streamed), pinned generation, pools |
 | `generators/` | `ColumnGenerator` (formula and cardinality bounds the V2 core reuses) |
@@ -25,20 +29,22 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `profile/` | Source profiling, readers (CSV, Parquet, fixed-width), fixed-width writer |
 | `io/` | Bounded source readers shared by CLI and platform: CSV record framer, Parquet/CSV byte-budget chunk cutter (`ChunkBudget`) |
 | `quality/` | Fidelity report, distribution snapshot, DP fit |
-| `anonymize/` | Anonymity enforcement, library only (reached by import): `microaggregation/` (MDAV group means for numeric quasi-identifiers) |
+| `anonymize/` | Anonymity enforcement: `type_family` (value identity), `hierarchies/` (generalization hierarchies, `check_hierarchy`, the level-vector `Lattice`) and `search/` (least-loss node under privacy models with record suppression, `apply_search`); library only, reached by import; and `microaggregation/` (MDAV group means for numeric quasi-identifiers) |
 | `validators/` | Job-level validators (`validators:` block) |
+| `support/` | Pseudonymised support-bundle types (F32): closed `SupportBundle` dataclasses with no free-text field, `Label` ordinal names and `Version` checked types, with the central `reasons.ReasonRef` registry-checked. Reads `execution`, `profile` and `reasons`; nothing in the engine imports it |
 | `quarantine.py` | Quarantine-row routing (`quarantine:` block) |
 | `contracts/` | Versioned engine-owned contracts consumed by CLI/platform: `declared_casting.py` (F06 per-column parse/sentinel/policy/output contract), `_declared_base.py`, `_declared_formats.py` (the closed format shapes) |
 | `declared_casting/` | F06 casting boundary: `_catalog.py` (the only format registry + capability manifest), `_numeric.py`/`_date.py`/`_cobol.py` kernels, `_boundary.py` (`DeclaredCastRun`: pre-mask cast, post-mask format), `_counts.py`, `_eligibility.py` (`evaluate_declared_casting`, `declared_route_guard`), `_quarantine_protocol.py`, `_quarantine_local.py` (Fernet reference sink) |
 | `validation/`, `validation_result.py` | `validate_config` and the validation wire shape |
 | `relationships/` | Relationship graph, namespace registry, orphan policy |
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
+| `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
 | `determinism/`, `keyprovider.py`, `_reference_date.py` | Seed protocol, key derivation, reference-date anchoring |
 | `vault.py`, `unmask.py` | Token vault write and unmask |
-| `connectors/`, `sdk.py` | Connector SDK and in-tree file connectors (S3, GCS, SFTP, Postgres snapshot) |
+| `connectors/`, `sdk.py` | Connector SDK and in-tree file connectors (S3, GCS, SFTP, Postgres snapshot) and the conditional-write object store |
 | `data_discovery.py` | Read-only SQL over output (DuckDB) |
 | `context.py`, `instrumentation/` | Caller context and `Logger` protocol; opt-in timing collector |
 | `errors.py` | Engine exception types |

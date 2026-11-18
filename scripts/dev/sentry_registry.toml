@@ -21,14 +21,6 @@ id = "secret-material-census"
 baseline = "tests/sentry/baselines/secret-material-census.json"
 
 [[sentry]]
-id = "file-access-registry"
-baseline = "tests/sentry/baselines/file-access-registry.json"
-
-[[sentry]]
-id = "file-access-modules"
-baseline = "tests/sentry/baselines/file-access-modules.json"
-
-[[sentry]]
 id = "module-size"
 baseline = "tests/sentry/baselines/module-size.json"
 
@@ -43,6 +35,10 @@ baseline = "tests/sentry/baselines/exception-hierarchy.json"
 [[sentry]]
 id = "file-access-entry-seams"
 baseline = "tests/sentry/baselines/file-access-entry-seams.json"
+
+[[sentry]]
+id = "post-scan-route-exempt"
+baseline = "tests/sentry/baselines/post-scan-route-exempt.json"
 
 [[sentry]]
 id = "locator-waivers"
@@ -95,3 +91,63 @@ baseline = "tests/sentry/baselines/reason-policy-single-source.json"
 [[sentry]]
 id = "reason-unchecked-helpers"
 baseline = "tests/sentry/baselines/reason-unchecked-helpers.json"
+
+[[sentry]]
+id = "exception-context"
+baseline = "tests/sentry/baselines/exception-context.json"
+
+[[sentry]]
+id = "validation-name-messages"
+baseline = "tests/sentry/baselines/validation-name-messages.json"
+
+[[sentry]]
+id = "package-fanout"
+baseline = "tests/sentry/baselines/package-fanout.json"
+
+[[sentry]]
+id = "import-layers"
+baseline = "tests/sentry/baselines/import-layers.json"
+
+[[sentry]]
+id = "table-kind-truth-tests"
+baseline = "tests/sentry/baselines/table-kind-truth-tests.json"
+
+[[sentry]]
+id = "post-scan-blocking"
+baseline = "tests/sentry/baselines/post-scan-blocking.json"
+
+[[sentry]]
+id = "post-scan-pass-through"
+baseline = "tests/sentry/baselines/post-scan-pass-through.json"
+
+[[sentry]]
+id = "post-scan-key-core"
+baseline = "tests/sentry/baselines/post-scan-key-core.json"
+
+[[sentry]]
+id = "post-scan-reason-identity"
+baseline = "tests/sentry/baselines/post-scan-reason-identity.json"
+
+[[sentry]]
+id = "post-scan-gate-applies"
+baseline = "tests/sentry/baselines/post-scan-gate-applies.json"
+
+[[sentry]]
+id = "post-scan-commit"
+baseline = "tests/sentry/baselines/post-scan-commit.json"
+
+[[sentry]]
+id = "post-scan-model-predicate"
+baseline = "tests/sentry/baselines/post-scan-model-predicate.json"
+
+[[sentry]]
+id = "post-scan-readability"
+baseline = "tests/sentry/baselines/post-scan-readability.json"
+
+[[sentry]]
+id = "post-scan-route-coverage"
+baseline = "tests/sentry/baselines/post-scan-route-coverage.json"
+
+[[sentry]]
+id = "strategy-docs-agree"
+baseline = "tests/sentry/baselines/strategy-docs-agree.json"

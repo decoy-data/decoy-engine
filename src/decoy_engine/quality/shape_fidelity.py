@@ -53,7 +53,10 @@ Out of scope:
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+from decoy_engine.contracts.distribution_snapshot import with_year_weights
 
 QUALITY_SHAPE_FIDELITY_SCHEMA_VERSION = "quality-shape-fidelity/v1"
 
@@ -74,8 +77,8 @@ def compute_shape_fidelity(
     Returns:
         Dict matching schema `quality-shape-fidelity/v1`.
     """
-    src_cols = source_snapshot.get("columns", {})
-    out_cols = output_snapshot.get("columns", {})
+    src_cols = with_year_weights(source_snapshot)
+    out_cols = with_year_weights(output_snapshot)
     shared_columns = sorted(set(src_cols.keys()) & set(out_cols.keys()))
 
     column_results: list[dict[str, Any]] = []
@@ -170,9 +173,15 @@ def _column_shape_similarity(
         out_counts.append(int(out_stats.get("other_count", 0)))
         return _shape_tvd(src_counts, out_counts, label="freq_vector_sorted_tvd")
     if src_kind == "datetime":
-        src_counts = [int(b["count"]) for b in src_stats.get("year_bins", [])]
-        out_counts = [int(b["count"]) for b in out_stats.get("year_bins", [])]
-        return _shape_tvd(src_counts, out_counts, label="year_bins_sorted_tvd")
+        if src_stats.get("year_weights") is None or out_stats.get("year_weights") is None:
+            return {"shape_similarity": None, "method": "malformed_year_bins", "comparable": False}
+        # Milli-rows keep a range's fractional per-year share through `_shape_tvd`'s int(); the
+        # scale cancels in the normalization, so one-year buckets score exactly as before.
+        src_milli = _milli_rows(src_stats["year_weights"])
+        out_milli = _milli_rows(out_stats["year_weights"])
+        if src_milli is None or out_milli is None:
+            return {"shape_similarity": None, "method": "malformed_year_bins", "comparable": False}
+        return _shape_tvd(src_milli, out_milli, label="year_bins_sorted_tvd")
     if src_kind == "freetext":
         return _shape_tvd(
             src_stats.get("length_bin_counts", []),
@@ -184,6 +193,14 @@ def _column_shape_similarity(
         "method": f"unknown_kind:{src_kind}",
         "comparable": False,
     }
+
+
+def _milli_rows(weights: dict[Any, int | float]) -> list[int] | None:
+    """Per-year weights as integer milli-rows, or ``None`` when one is too large to scale."""
+    scaled = [w * 1000 for w in weights.values()]
+    if not all(isinstance(v, int) or math.isfinite(v) for v in scaled):
+        return None
+    return [round(v) for v in scaled]
 
 
 def _joint_shape_similarity(

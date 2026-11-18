@@ -7,26 +7,34 @@ exactly on every strategy it recognises. Unrecognised strategies default to keye
 
 from __future__ import annotations
 
+import ast
+import inspect
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution._technique_class import TECHNIQUE_CLASS_BY_STRATEGY
+from decoy_engine.keyprovider import KeyedStrategyRequiresSecret
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile import profile_source
 from decoy_engine.secret_providers import (
+    admit_mask_key,
     secret_requirements_for_config,
     secret_requirements_for_plan,
 )
 from decoy_engine.secret_providers._requirements import (
     ALWAYS_KEYED_STRATEGIES,
     KNOWN_UNKEYED_STRATEGIES,
+    MASK_ROOT,
     column_is_keyed,
 )
+from tests.sentry._call_resolution import resolved_calls
 
 # Strategies whose columns compile with only a name + strategy (no extra required config).
 SIMPLE = [
@@ -50,7 +58,14 @@ def _compile(_unused, columns):
         {
             "version": 2,
             "global_settings": {"seed": 1},
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(_DIR / "t.csv")}},
+            "sources": {
+                "t": {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(_DIR / "t.csv"),
+                }
+            },
             "tables": [{"name": "t", "columns": columns}],
             "targets": {"t": {"type": "file", "format": "csv", "path": str(_DIR / "o.csv")}},
         }
@@ -117,3 +132,157 @@ def test_generate_tables_do_not_require_a_secret():
         {"name": "g", "generate_columns": [{"name": "n", "type": "int"}], "columns": []}
     ]
     assert secret_requirements_for_config(cfg) == ()
+
+
+# --- date_shift classification (roadmap row 24zb, E1) -------------------------------------------
+
+
+def _raw(columns, **table_extra):
+    return {"tables": [{"name": "t", "columns": columns, **table_extra}]}
+
+
+_DATE = {"name": "d", "strategy": "date_shift", "namespace": "ns"}
+_KEYED_DATE_SHAPES = {
+    "plain": _raw([_DATE]),
+    "group_by": _raw([{**_DATE, "provider_config": {"group_by": "pid"}}]),
+    "preserve_values": _raw([{**_DATE, "provider_config": {"preserve_values": ["1900-01-01"]}}]),
+    "deterministic_false": _raw([{**_DATE, "deterministic": False}]),
+    "when": _raw([{**_DATE, "when": "d is not null"}]),
+    "nested_child": _raw(
+        [
+            {
+                "name": "d",
+                "strategy": "nested",
+                "namespace": "ns",
+                "provider_config": {"target": "$.d", "strategy": "date_shift"},
+            }
+        ]
+    ),
+    "text_mask_date_detector": _raw(
+        [
+            {
+                "name": "d",
+                "strategy": "text_mask",
+                "namespace": "ns",
+                "provider_config": {
+                    "detectors": ["iso_date", "us_date", "eu_date"],
+                    "per_detector_strategy": {"iso_date": "date_shift"},
+                },
+            }
+        ]
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_KEYED_DATE_SHAPES))
+def test_every_date_shift_shape_needs_the_mask_secret(shape):
+    cfg = _KEYED_DATE_SHAPES[shape]
+    assert secret_requirements_for_config(cfg) == (MASK_ROOT,)
+    with pytest.raises(KeyedStrategyRequiresSecret) as info:
+        admit_mask_key(cfg)
+    assert info.value.code == "keyed_strategy_requires_secret"
+
+
+def test_mask_columns_beside_generate_columns_are_not_skipped():
+    """A raw table dict that holds both kinds must not hide a keyed mask column. Validated input
+    cannot have this shape; the public classifiers take raw dicts, so they walk it anyway."""
+    cfg = _raw([_DATE], generate_columns=[{"name": "n", "type": "int"}])
+    assert secret_requirements_for_config(cfg) == (MASK_ROOT,)
+
+
+def _reads_mask_key(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "mask_key":
+            return True
+        if isinstance(node, ast.keyword) and node.arg == "mask_key":
+            return True
+        if isinstance(node, ast.Name) and node.id == "mask_key":
+            return True
+    return False
+
+
+def _handler_modules_reading_mask_key() -> list[tuple[str, Path]]:
+    out = []
+    for name, handler in sorted(SCALAR_HANDLERS.items()):
+        src = inspect.getsourcefile(type(handler))
+        assert src is not None, name
+        if _reads_mask_key(ast.parse(Path(src).read_text(encoding="utf-8"))):
+            out.append((name, Path(src)))
+    return out
+
+
+def test_handlers_that_read_mask_key_are_classified_keyed():
+    """A handler that derives from `ctx.mask_key` is keyed work. Default-unkeyed is allowed only
+    when the handler advertises the `deterministic` option and both the deterministic and the
+    vault shape classify keyed (faker, categorical)."""
+    readers = _handler_modules_reading_mask_key()
+    assert readers, "the walk found no handler that reads mask_key; the scan is broken"
+    assert "date_shift" in {name for name, _ in readers}
+    bad = []
+    for name, _src in readers:
+
+        def keyed(det: bool, vault: bool, name: str = name) -> bool:
+            return column_is_keyed(name, deterministic=det, vault=vault, provider_config={})
+
+        if keyed(False, False):
+            continue
+        option_names = {o.name for o in SCALAR_HANDLERS[name].wizard_options}
+        if not ("deterministic" in option_names and keyed(True, False) and keyed(False, True)):
+            bad.append(name)
+    assert not bad, (
+        f"handlers read mask_key but classify unkeyed with no conditional shape: {sorted(bad)}. "
+        "Move the strategy to ALWAYS_KEYED_STRATEGIES."
+    )
+
+
+def test_every_always_keyed_handler_is_refused_without_a_secret():
+    names = sorted(ALWAYS_KEYED_STRATEGIES & set(SCALAR_HANDLERS))
+    assert "date_shift" in names
+    for name in names:
+        cfg = _raw([{"name": "c", "strategy": name, "namespace": "ns"}])
+        with pytest.raises(KeyedStrategyRequiresSecret) as info:
+            admit_mask_key(cfg)
+        assert info.value.code == "keyed_strategy_requires_secret", name
+
+
+def _unguarded_contexts(source: str) -> list[int]:
+    """Lines of `StrategyContext(...)` calls (any local spelling, via the shared resolver) whose
+    `mask_key=` is not a call of `require_mask_key`."""
+    bad = []
+    for node in resolved_calls(ast.parse(source), "StrategyContext"):
+        value = {k.arg: k.value for k in node.keywords}.get("mask_key")
+        ok = isinstance(value, ast.Call) and (
+            getattr(value.func, "id", None) == "require_mask_key"
+            or getattr(value.func, "attr", None) == "require_mask_key"
+        )
+        if not ok:
+            bad.append(node.lineno)
+    return bad
+
+
+def test_context_scan_flags_every_spelling():
+    """Seeded failing cases, so the scan cannot go blind to an alias or a re-binding."""
+    plain = "StrategyContext(mask_key=job_seed)\n"
+    aliased = "from m import StrategyContext as SC\nSC(mask_key=job_seed)\n"
+    rebound = "from m import StrategyContext\nmake = StrategyContext\nmake()\n"
+    attr = "import m\nm.StrategyContext(job_seed=1)\n"
+    for src in (plain, aliased, rebound, attr):
+        assert _unguarded_contexts(src), src
+    ok = "SC = StrategyContext\nSC(mask_key=require_mask_key(plan, kp))\n"
+    assert _unguarded_contexts(ok) == []
+
+
+def test_every_strategy_context_gets_its_mask_key_from_require_mask_key():
+    """`StrategyContext.__post_init__` falls back to `job_seed` for an empty mask_key, so a
+    construction that leaves the keyword out would run keyed work off the visible seed."""
+    root = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
+    total = 0
+    bad = []
+    for path in sorted(root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "StrategyContext" not in text:
+            continue
+        total += len(resolved_calls(ast.parse(text), "StrategyContext"))
+        bad += [f"{path.relative_to(root).as_posix()}:{n}" for n in _unguarded_contexts(text)]
+    assert total >= 2, "the walk found fewer StrategyContext constructions than exist"
+    assert not bad, f"StrategyContext built without mask_key=require_mask_key(...): {bad}"

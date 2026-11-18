@@ -8,7 +8,24 @@ column against the snapshot, `sample_column` draws deterministic
 synthetic values from it.
 """
 
-from decoy_engine.generation.statistical._sample import sample_column
+from decoy_engine.generation.statistical._cell_format import (
+    CellFormat,
+    add_cell_format,
+    cell_format_arrow_type,
+    cell_format_member_ok,
+    learn_cell_format,
+    scrub_cell_format,
+)
+from decoy_engine.generation.statistical._degenerate import check_degenerate, degenerate_finding
+from decoy_engine.generation.statistical._fanout import (
+    FanoutSpec,
+    add_fanout,
+    fanout_spec_from_snapshot,
+    fitted_reference_values,
+)
+from decoy_engine.generation.statistical._numeric_shape import add_numeric_shape
+from decoy_engine.generation.statistical._sample import conditional_fallback_counts, sample_column
+from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
 from decoy_engine.generation.statistical._spec import (
     StatisticalSpec,
     StatisticalSpecError,
@@ -18,10 +35,25 @@ from decoy_engine.generation.statistical._spec import (
 )
 
 __all__ = [
+    "CellFormat",
+    "FanoutSpec",
     "StatisticalSpec",
     "StatisticalSpecError",
+    "add_cell_format",
+    "add_fanout",
+    "add_numeric_shape",
+    "cell_format_arrow_type",
+    "cell_format_member_ok",
+    "check_degenerate",
+    "conditional_fallback_counts",
+    "degenerate_finding",
+    "fanout_spec_from_snapshot",
+    "fitted_reference_values",
+    "learn_cell_format",
     "load_spec",
+    "parse_snapshot_json",
     "sample_column",
+    "scrub_cell_format",
     "spec_from_dict",
     "spec_to_dict",
 ]

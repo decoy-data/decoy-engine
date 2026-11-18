@@ -26,7 +26,14 @@ from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.providers_v2 import get_default_registry
-from tests.native._b8_support import FORCE, FORCE_REASON, Run, identical, run_pair
+from tests._declared_schema import chunked_entry_kwargs
+from tests.native._b8_support import (
+    FORCE,
+    FORCE_REASON,
+    Run,
+    identical,
+    run_pair,
+)
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
     NEEDS_COMPANION,
@@ -206,6 +213,7 @@ def test_1a_numeric_reference_is_rejected_on_both_chunked_entries(
                 table=TABLE,
                 engine_version=ENGINE_VERSION,
                 key_provider=key_provider(),
+                **chunked_entry_kwargs(run, cfg, TABLE),
             )
         )
     assert info.value.code == code
@@ -276,7 +284,12 @@ def test_1b_later_chunk_numeric_drift_is_rejected_before_it_runs(
 
     with pytest.raises(PlanCompileError) as info:
         for _ in run(
-            cfg, stream(), table=TABLE, engine_version=ENGINE_VERSION, key_provider=key_provider()
+            cfg,
+            stream(),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+            **chunked_entry_kwargs(run, cfg, TABLE),
         ):
             pass
     assert info.value.code == code
@@ -394,6 +407,7 @@ def test_4_numeric_source_faker_with_when_declines_via_the_schema_guard(entry: s
                 table=TABLE,
                 engine_version=ENGINE_VERSION,
                 key_provider=key_provider(),
+                **chunked_entry_kwargs(run, cfg, TABLE),
             )
         )
     assert info.value.code == FAKER_WHEN_CODE
@@ -432,3 +446,32 @@ def test_6_positional_without_when_is_byte_identical(
     whole = _full_frame(make_config(columns), source, tmp_path)
     got = pa.concat_tables(native.out).combine_chunks()
     assert_values_match_full_frame(got, whole)
+
+
+# ---------------------------------------------------------------------------
+# DUP-DEFECTS A15: the guard admits `large_string` like `string` (parquet iter_batches keeps it).
+# ---------------------------------------------------------------------------
+
+
+def _guard(*names: str) -> Any:
+    from decoy_engine.execution._chunked_when_guard import (
+        PositionalWhenGuard,
+        _PositionalWhenColumn,
+    )
+
+    return PositionalWhenGuard((_PositionalWhenColumn("c", CAT_WHEN_CODE, names),))
+
+
+@pytest.mark.parametrize("typ", [pa.string(), pa.large_string()], ids=str)
+def test_e3_guard_accepts_large_string_targets_and_references(typ: pa.DataType) -> None:
+    schema = pa.schema([("c", typ), ("keep", typ)])
+    _guard("c", "keep").check_schema(schema, table=TABLE)
+
+
+def test_e3_guard_still_refuses_an_int64_reference_with_the_same_code_and_text() -> None:
+    schema = pa.schema([("c", pa.string()), ("keep", pa.int64())])
+    with pytest.raises(PlanCompileError) as info:
+        _guard("c", "keep").check_schema(schema, table=TABLE, chunk_index=2)
+    assert info.value.code == CAT_WHEN_CODE
+    assert "chunk 2 has 'keep' typed int64" in str(info.value)
+    assert "is a string; chunk" in str(info.value)

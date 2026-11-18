@@ -79,3 +79,13 @@ class RecordingFileAccess:
 
     def allows_subprocess(self) -> bool:
         return self.inner.allows_subprocess()
+
+
+def fd_path(fd: int) -> str:
+    """The path a directory descriptor names, to place a `dir_fd`-relative creation. The one copy
+    for every recorder; `/proc` on Linux, `F_GETPATH` on macOS."""
+    if os.path.isdir("/proc/self/fd"):
+        return os.readlink(f"/proc/self/fd/{fd}")
+    import fcntl
+
+    return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0"))  # type: ignore[attr-defined]
