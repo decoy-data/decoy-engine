@@ -396,3 +396,43 @@ def test_a_parquet_list_column_is_observed_from_its_frame(tmp_path: Path) -> Non
     found = paths.observe_frame(pd.read_parquet(path))
     assert {p.path for p in found["tags"].paths} == {"$[*]"}
     assert {p.path for p in found["row"].paths} == {"$.k"}
+
+
+def test_fold_counts_a_key_once_per_cell_not_once_per_folded_sibling(tmp_path: Path) -> None:
+    cell = {"Maria": {"x": 1}, "Bob": {"x": 2}}
+    found = by_path(observation(scan_cells(tmp_path, dumps([cell]))))
+    assert set(found) == {"$.*", "$.*.*"}
+
+
+def test_fold_names_the_inner_key_when_it_repeats_across_enough_cells(tmp_path: Path) -> None:
+    cells = [{f"Maria{i}": {"x": 1}, f"Bob{i}": {"x": 2}} for i in range(5)]
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert "$.*.x" in found and found["$.*.x"].present_count == 5
+
+
+def test_fold_share_uses_distinct_cells_as_the_denominator(tmp_path: Path) -> None:
+    # `x` sits in 2 of 30 cells (under 10%). Summed sibling cells would read 2 of 5 and keep it.
+    cells: list[dict[str, Any]] = [{f"Name{i}": {"y": 1}} for i in range(28)]
+    cells += [{"Maria": {"x": 1}, "Bob": {"x": 2}}, {"Ann": {"x": 3}, "Cy": {"x": 4}}]
+    found = by_path(observation(scan_cells(tmp_path, dumps(cells))))
+    assert "$.*.x" not in found and "$.*.y" in found
+
+
+def test_an_array_cell_is_cut_to_the_item_cap_before_it_is_converted() -> None:
+    import numpy as np
+    import pandas as pd
+
+    from decoy_engine._canonical import SCAN_ARRAY_ITEMS
+
+    converted: list[int] = []
+
+    class Spy(np.ndarray):
+        def tolist(self) -> Any:
+            converted.append(len(self))
+            return super().tolist()
+
+    cells = [np.arange(SCAN_ARRAY_ITEMS * 50).view(Spy) for _ in range(3)]
+    obs = paths.observe_column(pd.Series(cells, dtype=object))
+    assert obs is not None and obs.arrays_truncated == 3
+    assert converted and max(converted) <= SCAN_ARRAY_ITEMS
+    assert {p.path for p in obs.paths} == {"$[*]"}
