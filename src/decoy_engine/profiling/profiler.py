@@ -41,6 +41,7 @@ from decoy_engine.profiling._distributions import _build_distribution
 from decoy_engine.profiling._k_anonymity import _compute_k_anonymity
 from decoy_engine.profiling.sentinels import detect_sentinels
 from decoy_engine.profiling.types import (
+    NULL_CELL_TEXT,
     ColumnProfile,
     FieldStats,
     TopValue,
@@ -97,7 +98,7 @@ def _top_values(series: pd.Series, total_rows: int, n: int = 5) -> list[TopValue
     for val, cnt in vc.items():
         out.append(
             TopValue(
-                value="(null)" if _is_null_like(val) else str(val),
+                value=NULL_CELL_TEXT if _is_null_like(val) else str(val),
                 count=int(cnt),
                 pct=round(cnt / total_rows * 100, 1) if total_rows > 0 else 0.0,
             )
