@@ -163,6 +163,7 @@ def test_cell_a_commit_publishes_every_statement_together(pg, peer, rw, tmp_path
 # ----- (b) closing the connection mid-transaction aborts it and releases its locks --------------
 
 
+@pytest.mark.serial
 def test_cell_b_close_mid_transaction_aborts_and_releases_locks(pg, peer, rw):
     s = pg.schema
     _seed_table(pg)
@@ -237,6 +238,7 @@ def test_cell_d_pg_clear_cache_shows_changed_catalog(pg, rw, record_property):
 # ----- (e) interrupt() cancels the server query -------------------------------------------------
 
 
+@pytest.mark.serial
 @pytest.mark.parametrize("path", ["query", "execute", "execute_in_transaction", "lock_wait"])
 def test_cell_e_interrupt_cancels_the_server_query(pg, peer, rw, path, record_property):
     s = pg.schema
@@ -290,6 +292,7 @@ def test_cell_e_interrupt_cancels_the_server_query(pg, peer, rw, path, record_pr
             holder.close()
 
 
+@pytest.mark.serial
 def test_cell_e2_cancelling_the_backend_from_a_second_session_stops_the_statement(
     pg, peer, rw, record_property
 ):
@@ -413,6 +416,7 @@ def _attach_blackhole(ext_dir, dsn_text: str, box: dict, interrupt_after: float 
         conn.close()
 
 
+@pytest.mark.serial
 def test_cell_h_a_connect_timeout_mechanism_bounds_a_blackhole_connection(
     ext_dir, monkeypatch, record_property
 ):
