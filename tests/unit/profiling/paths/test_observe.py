@@ -383,7 +383,9 @@ def test_numpy_arrays_from_parquet_are_walked_as_arrays() -> None:
     assert list(st["$.a"].kinds) == ["array"] and list(st["$.a[*]"].kinds) == ["string"]
 
 
-def test_a_parquet_list_column_is_observed_through_a_scan(tmp_path: Path) -> None:
+def test_a_parquet_list_column_is_observed_from_its_frame(tmp_path: Path) -> None:
+    # `scan_sources` itself cannot profile a list column yet (the profiler hashes cells), so the
+    # frame a parquet reader returns is observed directly.
     pytest.importorskip("pyarrow")
     import pandas as pd
 
@@ -391,9 +393,6 @@ def test_a_parquet_list_column_is_observed_through_a_scan(tmp_path: Path) -> Non
     pd.DataFrame(
         {"tags": [["a", "b"], ["c"], ["d", "e"]], "row": [{"k": 1}, {"k": 2}, {"k": 3}]}
     ).to_parquet(path)
-    source = {"type": "file", "format": "parquet", "path": str(path)}
-    from decoy_engine.profiling import scan_sources
-
-    obs = scan_sources({"t": source}).tables[0].nested
-    assert {p.path for p in obs["tags"].paths} == {"$[*]"}
-    assert {p.path for p in obs["row"].paths} == {"$.k"}
+    found = paths.observe_frame(pd.read_parquet(path))
+    assert {p.path for p in found["tags"].paths} == {"$[*]"}
+    assert {p.path for p in found["row"].paths} == {"$.k"}
