@@ -10,6 +10,10 @@ How a value is drawn follows from the provider's capability row, never from a na
   ordinal as the source value, the same pattern masking uses for a positional column;
 - a non-poolable Faker provider asks the adapter for one seeded batch.
 
+The registry declares no output type, and some providers return an int or a date. Every value
+leaves this module as text, like a faker column's, so the plan-time typing can claim one type
+for the whole `provider` kind and a formula that reads the column sees what the plan said.
+
 Every failure inside a draw is caught at one site and re-raised after the `except` block closes,
 so the new error has no cause and no context. Adapter and pool messages can quote a provider
 name or a value, so they are never forwarded.
@@ -85,7 +89,7 @@ def provider_generate(
                 f"At table {col.get(TABLE_KEY)!r}, column {col.get('name')!r}."
             ),
         )
-    return values
+    return [v if v is None or isinstance(v, str) else str(v) for v in values]
 
 
 def _draw(
@@ -96,11 +100,11 @@ def _draw(
     locale: str,
 ) -> list[Any]:
     from decoy_engine.generation.pool import (
+        DEFAULT_POOL_SIZE,
         CardinalityMode,
         PoolBuilder,
         PoolSampler,
     )
-    from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
     from decoy_engine.providers_v2 import ProviderError, ProviderSpec
 
     provider = str(col.get("provider"))

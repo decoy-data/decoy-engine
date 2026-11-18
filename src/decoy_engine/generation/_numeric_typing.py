@@ -231,7 +231,8 @@ def _generated_type(
 ) -> pa.DataType | None:
     """The type of the values a column's generator makes, through its reference root.
 
-    A sequence or faker root is its candidate type while it is in *numeric*, else text.
+    A sequence or faker root is its candidate type while it is in *numeric*, else text. A provider
+    root is always text: its draw module turns every value into text.
     """
     from decoy_engine.generation._admission import _categorical_type
 
@@ -242,7 +243,7 @@ def _generated_type(
     if col is None:
         return None
     kind = col.get("type")
-    if kind in ("sequence", "faker"):
+    if kind in ("sequence", "faker", "provider"):
         return pa.string()
     if kind == "categorical":
         return _categorical_type(dict(col))[0]

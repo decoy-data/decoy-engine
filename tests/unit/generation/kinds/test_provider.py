@@ -142,6 +142,16 @@ def test_every_scalar_provider_generates_valid_values(name: str, big: pa.Table) 
     assert len(set(map(str, values))) > 1
 
 
+def test_every_provider_value_is_text_as_the_typing_claims(big: pa.Table) -> None:
+    from decoy_engine.generation._numeric_typing import _generated_type
+
+    cols = {("t", p): prov(p) for p in SCALARS}
+    for p in SCALARS:
+        assert _generated_type(cols, {}, {}, set(), ("t", p)) == pa.string(), p
+        assert big.schema.field(p).type == pa.string(), p
+        assert all(isinstance(v, str) for v in big.column(p).to_pylist()), p
+
+
 # ---- determinism and committed digests -------------------------------------------------------
 
 

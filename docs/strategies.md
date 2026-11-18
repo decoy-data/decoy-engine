@@ -1815,7 +1815,8 @@ the assembled output tables, not on individual columns mid-run.
 ### provider
 
 Draws each row from a scalar provider in the masking provider registry, by the same name and
-through the same adapter.
+through the same adapter. Every value is text, including the providers that return a number or
+a date (`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
 
 ```yaml
 - name: npi

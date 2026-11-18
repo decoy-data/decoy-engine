@@ -83,11 +83,16 @@ _EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "distribution": [
         {"name": "col", "type": "distribution", "family": "uniform", "low": 10, "high": 100}
     ],
+    "provider": [{"name": "col", "type": "provider", "provider": "random_int_range"}],
 }
 _EXTRA_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "faker_float": [{"name": "col", "type": "faker", "faker_type": "pyfloat"}],
     "categorical_float": [{"name": "col", "type": "categorical", "categories": [1.5, 2.5]}],
     "categorical_text": [{"name": "col", "type": "categorical", "categories": ["u", "v"]}],
+    # Registry providers return an int or a date from some adapters; the draw module makes every
+    # value text, so a formula reads text whichever provider the column names.
+    "provider_date": [{"name": "col", "type": "provider", "provider": "person_dob"}],
+    "provider_identifier": [{"name": "col", "type": "provider", "provider": "synthetic_npi"}],
     "grouped_series": [
         {"name": "grp", "type": "categorical", "categories": ["g1", "g2"]},
         seq("ord"),
@@ -110,7 +115,6 @@ _EXEMPT = {
     "windowed_date": "dates are text on every route",
     "statistical": "snapshot-driven, keeps the binding as before",
     "lookup": "catalog values, keeps the binding as before",
-    "provider": "registry provider values are text, keeps the binding as before",
     "reference": "covered by its own cell below",
 }
 
@@ -119,6 +123,17 @@ def test_every_generate_type_has_an_example_or_a_reason() -> None:
     types = set(get_args(GenerateColumnConfig.model_fields["type"].annotation))
     covered = set(_EXAMPLES) | {"grouped_series"} | set(_EXEMPT)
     assert types <= covered, sorted(types - covered)
+
+
+def test_a_provider_column_is_planned_as_text_and_a_text_formula_runs_on_it() -> None:
+    cols = [
+        {"name": "x", "type": "provider", "provider": "random_int_range", "null_probability": 0.3},
+        fml("y", "'ORD-' + x", ["x"]),
+    ]
+    table = compile_and_generate(cfg(cols, rows=40))["t"]
+    assert table.schema.field("x").type == pa.string()
+    for x, y in zip(table.column("x").to_pylist(), table.column("y").to_pylist(), strict=True):
+        assert (y is None) if x is None else (y == "ORD-" + x)
 
 
 def _check_fidelity(cols: list[dict[str, Any]], null_p: float, tables: list[dict] | None = None):

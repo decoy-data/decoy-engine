@@ -11,3 +11,5 @@ Each synthetic identifier now reads one locale constant for both its capability 
 New reason codes (all unreleased): `plan/generate_provider_unknown`, `plan/generate_provider_unsupported`, `plan/generate_provider_field_required`, `plan/generate_provider_field_unexpected`, `plan/generate_provider_locale_unsupported`, `plan/generate_faker_type_is_domain_provider`, `plan/pinned_provider_unsupported` and `runtime/generation_provider_failed`. The registry version and manifests change at the release.
 
 The support bundle `StrategyKind` enum gains `provider`, so a bundle can name a provider generate column.
+
+A `provider` column always yields text, even for providers whose adapter returns an int or a date, so formulas and derived columns see the type the plan reports.
