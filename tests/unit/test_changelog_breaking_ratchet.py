@@ -517,3 +517,11 @@ def test_the_pins_catch_an_entry_filed_under_an_old_release() -> None:
     actual = {v: _digest(s) for v, s in _releases(mutated)[1:]}
     pinned = json.loads(PINS.read_text(encoding="utf-8"))
     assert actual[old_version] != pinned[old_version]
+
+
+def test_editing_the_link_footer_moves_no_pin() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    edited = text.rstrip("\n") + "\n[0.0.1]: https://example.invalid/moved\n"
+    before = {v: _digest(s) for v, s in _releases(text)}
+    after = {v: _digest(s) for v, s in _releases(edited)}
+    assert before == after
