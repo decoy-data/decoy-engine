@@ -25,8 +25,11 @@ Lifecycle (F24): next to the execute-phase `peak_bytes`, `lifecycle_peak_bytes` 
 of the ingest, execute and write phase peaks for a caller that reads every file source whole,
 holds inputs and outputs, and writes the last target. `limiting_phase` names it. Advisory like
 the rest: the `--chunked` CLI path and lazy handoff are over-predicted, subset jobs are not
-priced, generate and mixed jobs get no lifecycle yet, and vault maps, post-scan baselines and
-quarantine frames are not priced. A file that changes between the estimate and the run only
+priced, and vault maps, post-scan baselines and quarantine frames are not priced. A generate-only
+or mixed job gets the lifecycle fields too (generated tables: no ingest, the resident generated
+bytes and the largest unique working set in execute, the Arrow outputs in write), while its
+`peak_bytes` keeps its value: None for generate-only, and a mixed job stays `priceable=False`.
+A file that changes between the estimate and the run only
 makes the estimate stale. A sample taken from the head of a file under-prices a file whose later
 rows are wider.
 
@@ -179,28 +182,43 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
         post_scan_resident=post_scan_resident_for(config),
     )
 
-    # A mixed job's generated volume is not priced; refuse rather than under-price.
-    if has_generate and has_mask:
-        return JobEstimate(
-            route,
-            priceable=False,
-            notes=("mixed mask+generate job: generated volume is not priced",),
-        )
+    path = route if route in _PEAK_PATHS else "full_frame"
 
-    # Generate-only: runtime is row/provider-bound; peak from generation is not
-    # priced here (v1 scopes byte-pricing to mask tables), so priceable=True with
-    # peak_bytes=None is intentional.
+    # Generate-only: runtime is row/provider-bound. The execute-phase `peak_bytes` is not priced
+    # (v1 scopes it to mask tables), so priceable=True with peak_bytes=None is intentional; the
+    # lifecycle fields are filled.
     if has_generate and not has_mask:
         rows, declared = _generation_rows(config)
         if not declared:
             return JobEstimate(route, priceable=False, notes=("generate row count undeclared",))
-        return JobEstimate(route, priceable=True, runtime=estimate_generation_runtime_band(rows))
+        life = _lifecycle_stage(None, config, path, plan, generated=True)
+        return JobEstimate(
+            route,
+            priceable=True,
+            runtime=estimate_generation_runtime_band(rows),
+            notes=life.notes,
+            lifecycle_peak_bytes=life.peak_bytes,
+            limiting_phase=life.limiting_phase,
+            phase_bytes=life.phase_bytes,
+        )
 
     mask_tables = [t for t in profile.tables if table_kinds.get(t.name) == "mask"]
     # Widths come from a bounded sample of each source. A failed sample falls back to the
     # profile-only specs, where a variable-width column is unpriceable (the honest limit the
     # engine's own byte-estimate router has).
     sampled, specs = _sample_stage(config, mask_tables)
+    # A mixed job's `peak_bytes` and runtime are not priced (refuse rather than under-price); its
+    # lifecycle holds the mask route's terms plus the generated tables.
+    if has_generate:
+        life = _lifecycle_stage(sampled, config, path, plan, generated=True)
+        return JobEstimate(
+            route,
+            priceable=False,
+            notes=("mixed mask+generate job: generated volume is not priced", *life.notes),
+            lifecycle_peak_bytes=life.peak_bytes,
+            limiting_phase=life.limiting_phase,
+            phase_bytes=life.phase_bytes,
+        )
     raw = raw_data_bytes(specs)
     if not raw.is_priceable:
         cols = ", ".join(f"{table}.{column}" for table, column in raw.unpriceable_columns[:3])
@@ -213,7 +231,6 @@ def _estimate(config_dump: dict[str, Any], base_dir: Path | str) -> JobEstimate:
             ),
         )
 
-    path = route if route in _PEAK_PATHS else "full_frame"
     peak = estimate_peak_bytes(specs, path)  # type: ignore[arg-type]
     runtime = estimate_mask_runtime_band(raw.priceable_bytes, route)
     notes: tuple[str, ...] = ()
@@ -257,24 +274,35 @@ class _LifecycleFields:
 
 
 def _lifecycle_stage(
-    sampled: Any, config: dict[str, Any], path: str, plan: Any
+    sampled: Any, config: dict[str, Any], path: str, plan: Any, *, generated: bool = False
 ) -> _LifecycleFields:
-    """The lifecycle fields for a mask job, or defaults plus a note. Never raises."""
-    from decoy_engine.execution.pipeline import _lifecycle, _lifecycle_inputs
+    """The lifecycle fields, or defaults plus a note. Never raises. `sampled` is None for a
+    generate-only job; `generated` adds the generate tables of a generate or mixed job."""
+    from decoy_engine.execution.pipeline import _lifecycle, _lifecycle_generate, _lifecycle_inputs
 
-    if sampled.tables is None:
+    if sampled is not None and sampled.tables is None:
         return _LifecycleFields(notes=sampled.notes)
     try:
-        attached = _lifecycle_inputs.attach_targets(sampled.tables, config)
-        if attached.tables is None:
-            return _LifecycleFields(notes=attached.notes)
-        outputs = _lifecycle_inputs.attach_outputs(attached.tables, plan)
-        if outputs.tables is None:
-            return _LifecycleFields(notes=outputs.notes)
+        mask: tuple[Any, ...] = ()
+        estimated = False
+        if sampled is not None:
+            attached = _lifecycle_inputs.attach_targets(sampled.tables, config)
+            if attached.tables is None:
+                return _LifecycleFields(notes=attached.notes)
+            outputs = _lifecycle_inputs.attach_outputs(attached.tables, plan)
+            if outputs.tables is None:
+                return _LifecycleFields(notes=outputs.notes)
+            mask = outputs.tables
+            estimated = any(not t.rows_exact for t in attached.tables)
+        extra = None
+        if generated:
+            made = _lifecycle_generate.generated_inputs(config)
+            if made.inputs is None:
+                return _LifecycleFields(notes=made.notes)
+            extra = made.inputs
         result = _lifecycle.lifecycle_peak(
-            _lifecycle.PhaseInputs(path=path, tables=outputs.tables)  # type: ignore[arg-type]
+            _lifecycle.PhaseInputs(path=path, tables=mask, generated=extra)  # type: ignore[arg-type]
         )
-        estimated = any(not t.rows_exact for t in attached.tables)
     except Exception as exc:
         return _LifecycleFields(notes=(_lifecycle.NOTE_FAILED.format(error=type(exc).__name__),))
     return _LifecycleFields(

@@ -22,7 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from decoy_engine import reasons, write_fixed_width
-from decoy_engine.config import PipelineConfig, PipelineConfigError
+from decoy_engine.config import PipelineConfig, PipelineConfigError, parse_pipeline_config
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, check_required_strategy_settings
 from decoy_engine.profile import profile_source
@@ -224,6 +224,31 @@ def test_baseline_path_is_set_only_when_given(sources: dict[str, dict[str, Any]]
     given = _build(sources, baseline_path=".decoy/library/x.json").config
     assert given["scan_baseline"] == {"path": ".decoy/library/x.json", "schema": "scan-set/v1"}
     assert "scan_baseline" not in _build(sources).config
+
+
+def test_f15_t10_baseline_sha256_writes_a_bound_block_that_validates(
+    sources: dict[str, dict[str, Any]],
+) -> None:
+    digest = "ab" * 32
+    config = _build(sources, baseline_path=".decoy/library/x.json", baseline_sha256=digest).config
+    assert config["scan_baseline"] == {
+        "path": ".decoy/library/x.json",
+        "schema": "scan-set/v1",
+        "sha256": digest,
+    }
+    config["scan_baseline"]["on_drift"] = "fail"
+    parse_pipeline_config(config)
+
+
+@pytest.mark.parametrize("bad", ["AB" * 32, "ab" * 31, "xy" * 32, "ab" * 32 + "\n"])
+def test_f15_t10_a_non_hex_digest_is_refused(sources: dict[str, dict[str, Any]], bad: str) -> None:
+    with pytest.raises(PipelineConfigError):
+        _build(sources, baseline_path="x.json", baseline_sha256=bad)
+
+
+def test_f15_t10_a_digest_without_a_path_is_refused(sources: dict[str, dict[str, Any]]) -> None:
+    with pytest.raises(ValueError, match="needs baseline_path"):
+        _build(sources, baseline_sha256="ab" * 32)
 
 
 def test_seed_goes_to_global_settings(sources: dict[str, dict[str, Any]]) -> None:

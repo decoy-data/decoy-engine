@@ -350,8 +350,12 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # `_lifecycle_inputs.py` imports the profile readers, `_mem_estimate*` and
             # `execution._strategies` (the handlers' output declarations) only.
             # Neither imports anything under `execution.physical`.
+            # 84-E2: `_lifecycle_generate.py` prices the generate and mixed terms; it imports
+            # `decoy_engine.generation`, `_lifecycle` and `_lifecycle_inputs`, nothing under
+            # `execution.physical`.
             "src/decoy_engine/execution/pipeline/_lifecycle.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
+            "src/decoy_engine/execution/pipeline/_lifecycle_generate.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",
