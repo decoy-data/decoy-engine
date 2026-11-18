@@ -461,7 +461,8 @@ def generated_lifecycle_terms(
     Python object, otherwise each column is its Arrow buffers. The unique working set is the
     largest one-column draw of any table, since columns and tables draw one after another.
     """
-    tables = [t for t in (config.get("tables") or []) if t.get("generate_columns")]
+    generate_names = {c.table for c in admission.columns}
+    tables = [t for t in (config.get("tables") or []) if t.get("name") in generate_names]
     raw = {(t["name"], c["name"]): c for t in tables for c in t["generate_columns"]}
     legacy = not admission.eligible
     forms: dict[tuple[str, str], tuple[pa.DataType, float]] = {}

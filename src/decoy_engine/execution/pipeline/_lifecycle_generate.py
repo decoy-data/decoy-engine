@@ -20,7 +20,8 @@ import pyarrow as pa
 from decoy_engine import generation
 from decoy_engine.execution._mem_estimate import ColumnSizeSpec
 from decoy_engine.execution._mem_estimate_arrow import Declared, Fixed, Sampled, classify_column
-from decoy_engine.execution._mem_estimate_schema import table_size_spec_from_generate_table
+from decoy_engine.execution._mem_estimate_schema import generate_dict_column_width_bytes
+from decoy_engine.execution._pipeline_context import classify_table_kinds
 from decoy_engine.execution.pipeline import _lifecycle as lc
 from decoy_engine.execution.pipeline import _lifecycle_inputs as li
 
@@ -33,18 +34,14 @@ class Generated:
     notes: tuple[str, ...] = ()
 
 
-def _declared_widths(config: Mapping[str, Any]) -> dict[tuple[str, str], float]:
+def _declared_widths(generate_tables: list[Mapping[str, Any]]) -> dict[tuple[str, str], float]:
     """The declared text width of each generate column that has one, by `(table, column)`."""
-    from decoy_engine.config._tables import TableConfig
-
     widths: dict[tuple[str, str], float] = {}
-    for t in config.get("tables") or []:
-        if not t.get("generate_columns"):
-            continue
-        spec = table_size_spec_from_generate_table(TableConfig.model_validate(t))
-        for col in spec.columns:
-            if col.string_width_bytes is not None and not col.unpriceable:
-                widths[(spec.name, col.name)] = col.string_width_bytes
+    for t in generate_tables:
+        for col in t["generate_columns"]:
+            width = generate_dict_column_width_bytes(str(col.get("type")), col)
+            if width is not None:
+                widths[(t["name"], col["name"])] = width
     return widths
 
 
@@ -64,13 +61,15 @@ def _column_inputs(name: str, arrow_type: pa.DataType, width: float) -> lc.Colum
 
 def generated_inputs(config: Mapping[str, Any]) -> Generated:
     """The generate tables of `config` as lifecycle inputs, or a note naming why not."""
-    terms = generation.generated_lifecycle_terms(dict(config), _declared_widths(config))
+    kinds = classify_table_kinds(dict(config))
+    generate_tables = [
+        t for t in config.get("tables") or [] if kinds.get(t.get("name")) == "generate"
+    ]
+    terms = generation.generated_lifecycle_terms(dict(config), _declared_widths(generate_tables))
     if terms.unpriced:
         return Generated(None, (lc.NOTE_GENERATE_WIDTH.format(column=terms.unpriced[0]),))
     tables: list[lc.TableInputs] = []
-    for t in config.get("tables") or []:
-        if not t.get("generate_columns"):
-            continue
+    for t in generate_tables:
         columns = tuple(
             _column_inputs(c.column, c.arrow_type, c.width)
             for c in terms.columns
