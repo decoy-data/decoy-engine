@@ -153,6 +153,23 @@ register_secret_provider(VaultKV2Provider(client_from_env()))
   context never render their settings and cannot be pickled. `client_from_env` honors `VAULT_ADDR`, `VAULT_TOKEN`,
   `VAULT_NAMESPACE`, `VAULT_CACERT`, `VAULT_CLIENT_CERT`, `VAULT_CLIENT_KEY`, and **rejects**
   `VAULT_SKIP_VERIFY` (disabling TLS verification needs `insecure_skip_tls_verify=True` in code).
+- Frozen at build: address, token, namespace, CA bundle path, client certificate and proxies.
+  A client with an empty address is refused at build. `verify=True` is resolved once, the way
+  `requests` does it, from `REQUESTS_CA_BUNDLE`, then `CURL_CA_BUNDLE`; the frozen value is the
+  path, not the file's bytes. Proxies are the client's own when it was built with `proxies`, else
+  the process environment's for the address at build (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`).
+  The read runs on a `requests.Session` with `trust_env` off, so a variable, `~/.netrc` or
+  `VAULT_TOKEN` set after build changes nothing. Build the provider per run.
+- Token file: with `VAULT_TOKEN` unset, `client_from_env` reads `~/.vault-token` (the file
+  `vault login` writes) once, as its last step, and passes the token on explicitly. The text is
+  stripped. A missing or empty file is an empty token: no token header is sent, which keeps the
+  Vault Agent auto-auth proxy pattern working. An unreadable file or one that is not UTF-8 raises
+  `VaultClientConfigError` with fixed text. Nothing reads the file at resolve. hvac opens the file
+  from `HOME`; `tests/sentry/file_access_modules.toml` lists it. A `VAULT_TOKEN` set in the
+  process (not in the mapping you pass) stops the file read, because hvac would return it.
+- Redirects: a cross-host redirect forwards the token header (requests drops only
+  `Authorization`). This is not changed here; keep the Vault address on a host that does not
+  redirect.
 - One provider round trip: the KV v2 read returns data and metadata together and the returned
   version must equal the pinned one.
 - Static KV v2 values only. A response carrying a lease, renewable flag, wrap info or auth data
@@ -229,6 +246,34 @@ register_secret_provider(aws_provider_from_env())
 Google Secret Manager and Azure Key Vault have no native adapter. Use each vendor's Secrets Store
 CSI driver provider, which renders the secret to an owner-only file (mode `0400`), and point
 `file:` at it. The engine reads the file through its owner-only check.
+
+## Shared adapter rules
+
+Every adapter (Vault, AWS and any later one) follows these rules. The contract kit in
+`tests/secret_providers/adapters/_contract.py` checks them for each adapter, and
+`tests/sentry/defects/test_secret_adapter_kit.py` fails a provider module that has no harness in
+the kit, whose harness injects other failure codes than the module's error map holds, or that is
+missing from the semgrep consumer rule or the file-access list.
+
+1. Errors carry no value. A failure maps to a registered reason by exception class (and a fixed
+   code or status), never by message text. The error is raised after the `except` block closes,
+   so it has no cause or context, and the provider deletes any response from its frame first. A
+   traceback render with locals holds no secret, token or vendor text.
+2. SDK DEBUG logging shows no body and no credential. With every SDK logger at DEBUG, a good and
+   a failed read log no secret value, token or credential header. Where an SDK logs a body, the
+   adapter filters that exact logger.
+3. Values are frozen at build: the endpoint, the credentials and the CA bundle path, and the
+   proxies where the adapter switches the HTTP library's environment lookup off. Changing a
+   variable or file afterwards does not change a read. Frozen tokens expire, so build the provider
+   per run.
+4. Provider and context are immutable, print as `<redacted>` and cannot be pickled.
+5. The version is pinned. `describe` makes no call. The one read checks that the response names
+   the pinned version.
+6. The SDK import is lazy. Each file the SDK opens from the operator's environment is declared in
+   `tests/sentry/file_access_modules.toml`. Execution modules never import a provider.
+7. Required SDK cells never skip. The CI job `secret-provider-sdks` installs every adapter SDK and
+   semgrep and sets `DECOY_REQUIRE_PROVIDER_SDKS=1`; `tests/_require_no_skips.py` then fails the
+   run on any skip, at collection or at run time, except the live Vault test.
 
 ## Consumers
 

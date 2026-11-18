@@ -28,6 +28,7 @@ from decoy_engine.secret_providers import (  # noqa: E402
     ResolvedSecret,
     SecretBuffer,
     SecretCachePolicy,
+    SecretProviderConfigError,
     SecretProviderUnavailable,
     default_cache,
     parse_ref,
@@ -103,6 +104,7 @@ def _read_with(client: Any, monkeypatch, recorder: _Recorder | None = None) -> _
 
 def test_every_routing_and_tls_setting_reaches_the_read(monkeypatch):
     recorder = _read_with(client_from_env(FULL_ENV), monkeypatch)
+    session = recorder.built[0].pop("session")
     assert recorder.built == [
         {
             "url": "https://v.example:8200",
@@ -110,15 +112,18 @@ def test_every_routing_and_tls_setting_reaches_the_read(monkeypatch):
             "namespace": "team-a",
             "verify": "/etc/ca.pem",
             "cert": ("/etc/c.pem", "/etc/c.key"),
+            "proxies": {},
         }
     ]
+    assert session.trust_env is False  # F13 SR-3: the read consults no environment
     assert recorder.closed == 1
 
 
 def test_defaults_and_the_insecure_override_reach_the_read(monkeypatch):
     default = _read_with(client_from_env({"VAULT_ADDR": "https://v.example:8200"}), monkeypatch)
-    assert default.built[0]["verify"] is True and default.built[0]["cert"] is None
-    assert default.built[0]["namespace"] is None and default.built[0]["token"] is None
+    # Explicit falsy values, never None: None would let hvac fall back to the environment.
+    assert default.built[0]["verify"] is True and default.built[0]["cert"] == ()
+    assert default.built[0]["namespace"] is None and default.built[0]["token"] == ""
     monkeypatch.undo()
     insecure = client_from_env(
         {"VAULT_ADDR": "https://v.example:8200"}, insecure_skip_tls_verify=True
@@ -146,12 +151,13 @@ def _bare(**tls: Any) -> Any:
 def test_tls_settings_are_normalised_without_dropping_any(tls, verify, cert, monkeypatch):
     built = _read_with(_bare(**tls), monkeypatch).built[0]
     assert built["verify"] == verify and type(built["verify"]) is type(verify)
-    assert built["cert"] == cert
+    assert built["cert"] == (() if cert is None else cert)
 
 
-def test_a_client_without_settings_routes_with_none(monkeypatch):
-    built = _read_with(SimpleNamespace(), monkeypatch).built[0]
-    assert built == {"url": None, "token": None, "namespace": None, "verify": True, "cert": None}
+def test_a_client_without_an_address_is_refused_at_build():
+    # F13 SR-3: an empty address would let hvac fall back to VAULT_ADDR at each read.
+    with pytest.raises(SecretProviderConfigError):
+        VaultKV2Provider(SimpleNamespace())
 
 
 def test_an_unusable_client_cert_fails_closed_instead_of_being_dropped(monkeypatch):

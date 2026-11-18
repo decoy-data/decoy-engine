@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 HIDE_HVAC = "import sys\nsys.modules['hvac'] = None\n"
@@ -59,3 +60,13 @@ def test_an_allowlisted_id_still_skips_in_the_lane(tmp_path: Path) -> None:
     result = _run(tmp_path, ALLOWED, enforce=True)
     assert result.returncode == 0, result.stdout[-1500:]
     assert "1 skipped" in result.stdout
+
+
+def test_the_sdk_lane_sets_the_variable_and_installs_semgrep_and_every_sdk_extra() -> None:
+    lane = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"][
+        "secret-provider-sdks"
+    ]
+    assert str(lane["env"]["DECOY_REQUIRE_PROVIDER_SDKS"]) == "1"
+    text = " ".join(f"{step.get('run', '')} {step.get('with', '')}" for step in lane["steps"])
+    for needle in ("semgrep", "hashicorp-vault", "cloud", "tests/secret_providers"):
+        assert needle in text, needle

@@ -250,20 +250,20 @@ def test_an_unreadable_token_file_is_a_fixed_refusal(home, monkeypatch) -> None:
         return real_open(file, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", denied)
-    _assert_fixed_refusal()
+    _assert_fixed_refusal(home)
 
 
 def test_a_token_file_that_is_not_utf8_is_a_fixed_refusal(home) -> None:
     (home / ".vault-token").write_bytes(b"\xff\xfe\x80s.token")
-    _assert_fixed_refusal()
+    _assert_fixed_refusal(home)
 
 
-def _assert_fixed_refusal() -> None:
+def _assert_fixed_refusal(home) -> None:
     with pytest.raises(VaultClientConfigError) as info:
         client_from_env(ENV)
     exc = info.value
     assert exc.__cause__ is None and exc.__context__ is None
-    assert TOKEN not in str(exc) + repr(exc) and "/" not in str(exc)
+    assert TOKEN not in str(exc) + repr(exc) and str(home) not in str(exc) + repr(exc)
 
 
 def _entries() -> list[dict]:

@@ -16,6 +16,14 @@ import pytest
 from tests._dp_cert import is_certified_dp_env, should_skip_dp
 from tests._lenient_checks import LENIENT_CHECK_TARGETS, lifted_check
 
+# Fails a skipped test in the secret-provider SDK lane (DECOY_REQUIRE_PROVIDER_SDKS=1). Inert
+# without the variable.
+from tests._require_no_skips import (  # noqa: F401
+    pytest_collectreport,
+    pytest_runtest_logreport,
+    pytest_sessionfinish,
+)
+
 # Registers the xdist-worker report scrubber (a lone surrogate in a captured log would otherwise
 # abort a parallel run with an INTERNALERROR). Inert outside an xdist worker.
 from tests._xdist_safe_reports import pytest_report_to_serializable  # noqa: F401
