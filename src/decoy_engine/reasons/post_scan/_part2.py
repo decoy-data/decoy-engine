@@ -16,6 +16,7 @@ __all__ = [
     "PRIMARY_KEY_DUPLICATES_INTRODUCED",
     "PRIMARY_KEY_NULLS_INTRODUCED",
     "REVIEW_CONFLICT",
+    "REVIEW_INTEGRITY_OFF",
 ]
 
 _d = _catalog.post_scan("decoy_engine.verification.postmask._keys")
@@ -97,4 +98,8 @@ DISMISS_REFUSED = _review(
 REVIEW_CONFLICT = _review(
     "review_conflict",
     "Decisions for findings on one column propose different entries.",
+)
+REVIEW_INTEGRITY_OFF = _review(
+    "review_integrity_off",
+    "A dismissal needs the post-scan integrity checks turned on in the config.",
 )

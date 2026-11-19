@@ -24,6 +24,7 @@ from decoy_engine.validation.finding_review import (
     FindingDecision,
     ReviewConflictError,
     ReviewDismissRefusedError,
+    ReviewIntegrityOffError,
     finding_edits,
 )
 from decoy_engine.validation.starter_review import (
@@ -35,6 +36,7 @@ from decoy_engine.validation.starter_review import (
     ReviewVerdict,
     column_entry,
 )
+from tests._ner import needs_ner
 
 V = ReviewVerdict
 CANARY = "CANARY-e2-91bc"
@@ -44,6 +46,20 @@ MODEL = ModelRef("en_core_web_md", "3.7.1")
 def _config(**extra: Any) -> dict[str, Any]:
     return {
         "version": 2,
+        "global_settings": {"seed": 1},
+        "sources": {
+            "customers": {
+                "type": "file",
+                "format": "csv",
+                "path": "customers.csv",
+                "has_header": True,
+            },
+            "orders": {"type": "file", "format": "csv", "path": "orders.csv", "has_header": True},
+        },
+        "targets": {
+            "customers": {"type": "file", "format": "csv", "path": "customers.masked.csv"},
+            "orders": {"type": "file", "format": "csv", "path": "orders.masked.csv"},
+        },
         "tables": [
             {
                 "name": "customers",
@@ -148,6 +164,7 @@ def test_edit_uses_the_catalog_writer_and_refuses_what_it_refuses() -> None:
     )
 
 
+@needs_ner
 def test_a_ner_confirm_builds_text_redact_from_the_model_and_entity() -> None:
     row = _row(
         "notes", "person_name", source="ner", model={"id": MODEL.id, "version": MODEL.version}
@@ -168,11 +185,66 @@ def test_reject_dismisses_a_warning_with_every_field() -> None:
         "model_version": None,
         "strategy": "passthrough",
     }
-    block = finding_edits(_config(), _report(EMAIL), [_decision(EMAIL, V.REJECT)])
-    assert block == (ConfigEdit(("post_scan",), "append_block", {"dismissed": [dismissal]}),)
     config = _config(post_scan={"integrity": True})
     inside = finding_edits(config, _report(EMAIL), [_decision(EMAIL, V.REJECT)])
     assert inside == (ConfigEdit(("post_scan", "dismissed"), "append", dismissal),)
+
+
+def test_the_dismissal_field_set_is_the_configs_own() -> None:
+    from decoy_engine.config import Dismissal
+
+    config = _config(post_scan={"integrity": True})
+    (edit,) = finding_edits(config, _report(EMAIL), [_decision(EMAIL, V.REJECT)])
+    assert set(edit.value) == set(Dismissal.model_fields)
+
+
+@pytest.mark.parametrize("post_scan", [None, {}, {"integrity": False}, {"dismissed": []}])
+def test_a_dismissal_without_integrity_is_refused_and_writes_nothing(
+    post_scan: dict[str, Any] | None,
+) -> None:
+    config = _config() if post_scan is None else _config(post_scan=post_scan)
+    before = copy.deepcopy(config)
+    err = _refusal(lambda: finding_edits(config, _report(EMAIL), [_decision(EMAIL, V.REJECT)]))
+    assert isinstance(err, ReviewIntegrityOffError)
+    assert err.identity == "post_scan.review_integrity_off"
+    assert config == before
+
+
+def test_confirm_and_skip_need_no_integrity() -> None:
+    assert finding_edits(_config(), _report(EMAIL), [_decision(EMAIL, V.SKIP)]) == ()
+    assert finding_edits(_config(), _report(EMAIL), [_decision(EMAIL, V.CONFIRM)])
+
+
+def test_an_address_finding_on_redact_at_a_low_identity_rate_is_not_dismissible() -> None:
+    # The scanner treats this warning as source-identity evidence and never lowers it, so the
+    # review must refuse it too (the probe carries the configured strategy).
+    row = _row(
+        "notes",
+        "address",
+        severity="warning",
+        source_identity_rate=0.02,
+        source_compared=True,
+    )
+    config = _config(post_scan={"integrity": True})
+    err = _refusal(lambda: finding_edits(config, _report(row), [_decision(row, V.REJECT)]))
+    assert err.identity == "post_scan.dismiss_refused"
+
+
+def test_an_edit_that_leaves_the_config_invalid_is_refused_by_code() -> None:
+    config = _config()
+    config["tables"][0]["columns"].append({"name": "x", "strategy": "hash"})
+    row = _row("email", "email")
+    err = _refusal(lambda: finding_edits(config, _report(row), [_decision(row, V.CONFIRM)]))
+    assert isinstance(err, ReviewEntryError)
+    assert "fails validation" in str(err)
+
+
+def test_a_report_with_two_rows_of_one_identity_is_refused() -> None:
+    twin = _row("email", "email", match_rate=0.5)
+    err = _refusal(
+        lambda: finding_edits(_config(), _report(EMAIL, twin), [_decision(EMAIL, V.SKIP)])
+    )
+    assert isinstance(err, ReviewEntryError)
 
 
 def test_a_promoted_ner_finding_can_be_dismissed_with_its_model() -> None:
@@ -484,7 +556,7 @@ def test_a_join_safe_edit_on_a_key_keeps_the_relationship_namespace() -> None:
 
 
 def test_the_inputs_are_not_changed() -> None:
-    config, report = _config(), _report(EMAIL)
+    config, report = _config(post_scan={"integrity": True}), _report(EMAIL)
     before = copy.deepcopy((config, report))
     finding_edits(config, report, [_decision(EMAIL, V.REJECT)])
     assert (config, report) == before

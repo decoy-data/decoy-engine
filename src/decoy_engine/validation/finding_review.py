@@ -13,11 +13,13 @@ subclass that names a table or column, never a value (see `starter_review`).
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 from decoy_engine import reasons
+from decoy_engine.config import Dismissal
 from decoy_engine.detection.types import DETECTOR_ORDER, DetectorSource, ModelRef
 from decoy_engine.profiling import declared_key_namespaces, detector_entry
 from decoy_engine.validation.starter_review import (
@@ -30,6 +32,7 @@ from decoy_engine.validation.starter_review import (
     ReviewVerdict,
     _edited_entry,
     _index_of,
+    _validation_problems,
     column_entry,
     pin_key_entry,
 )
@@ -38,14 +41,15 @@ from decoy_engine.verification.postmask import (
     SCHEMA_VERSION,
     ResidualPIIFinding,
     Severity,
-    is_source_identity_finding,
 )
+from decoy_engine.verification.postmask.residual_pii import dismissible
 
 __all__ = [
     "ConfigEdit",
     "FindingDecision",
     "ReviewConflictError",
     "ReviewDismissRefusedError",
+    "ReviewIntegrityOffError",
     "finding_edits",
 ]
 
@@ -57,6 +61,12 @@ class ReviewDismissRefusedError(ReviewInputError):
     """The finding cannot be dismissed: a failed mask check or source-identity evidence."""
 
     code = reasons.post_scan.DISMISS_REFUSED
+
+
+class ReviewIntegrityOffError(ReviewInputError):
+    """A dismissal needs `post_scan.integrity: true`, and the config does not have it."""
+
+    code = reasons.post_scan.REVIEW_INTEGRITY_OFF
 
 
 class ReviewConflictError(ReviewInputError):
@@ -129,6 +139,7 @@ def finding_edits(
     replacements: list[tuple[int, int, ConfigEdit]] = []
     dismissals: list[dict[str, Any]] = []
     existing = _existing_dismissals(config)
+    rejected: list[FindingDecision] = []
     for (table_name, column), group in sorted(groups.items()):
         table = tables[table_name]
         index = _index_of(table, column)
@@ -147,6 +158,7 @@ def finding_edits(
         for decision, row in group:
             if decision.verdict is not ReviewVerdict.REJECT:
                 continue
+            rejected.append(decision)
             if strategy == now and row.get("configured_strategy") != now:
                 # The finding was raised under another strategy than the column has now, and this
                 # review does not change it: a dismissal would bind a strategy nobody reviewed.
@@ -160,7 +172,40 @@ def finding_edits(
                 dismissals.append(dismissal)
     edits = [edit for _, _, edit in sorted(replacements, key=lambda r: r[:2])]
     dismissals.sort(key=lambda d: tuple(str(d[k]) for k in sorted(d)))
-    return tuple(edits) + _dismissal_edits(config, dismissals)
+    if dismissals and not _integrity_on(config):
+        raise ReviewIntegrityOffError(
+            "a dismissal needs post_scan.integrity: true in the config",
+            table=rejected[0].table,
+            column=rejected[0].column,
+        )
+    result = tuple(edits) + _dismissal_edits(dismissals)
+    _check_applied(config, result)
+    return result
+
+
+def _integrity_on(config: Mapping[str, Any]) -> bool:
+    block = config.get("post_scan")
+    return isinstance(block, Mapping) and block.get("integrity") is True
+
+
+def _check_applied(config: Mapping[str, Any], edits: Sequence[ConfigEdit]) -> None:
+    """Apply `edits` to a copy and refuse, by code and location, when the result is invalid."""
+    applied = copy.deepcopy(dict(config))
+    for edit in edits:
+        parent: Any = applied
+        for step in edit.path[:-1]:
+            parent = parent[step]
+        last = edit.path[-1]
+        if edit.op == "replace":
+            parent[last] = copy.deepcopy(dict(edit.value))
+        elif edit.op == "append":
+            target = parent.setdefault(last, []) if isinstance(parent, dict) else parent[last]
+            target.append(copy.deepcopy(dict(edit.value)))
+        else:
+            parent[last] = copy.deepcopy(dict(edit.value))
+    problems = _validation_problems(applied, None, None)
+    if problems:
+        raise ReviewEntryError(f"the edited config fails validation ({problems})")
 
 
 def _identity(decision: FindingDecision) -> _Identity:
@@ -199,6 +244,8 @@ def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]
             None if model is None else model["id"],
             None if model is None else model["version"],
         )
+        if identity in rows:
+            raise _malformed()
         rows[identity] = row
     return rows
 
@@ -333,30 +380,33 @@ def _dismissal(
     if row.get("dismissed") is True:
         return None
     severity = row["severity"]
+    promoted = decision.source == "ner" and row.get("promoted") is True
+    # A promoted NER finding reads `fail` in the report but was a warning when the scanner looked
+    # at it, so it is judged as that warning.
     probe = ResidualPIIFinding(
         table=decision.table,
         column=decision.column,
         detector_id=decision.detector_id,
         match_rate=None,
-        severity=severity,
+        severity="warning" if severity == "warning" or promoted else severity,
+        configured_strategy=row.get("configured_strategy"),
         source=decision.source,
         source_identity_rate=row.get("source_identity_rate"),
     )
-    promoted = decision.source == "ner" and row.get("promoted") is True
-    if not (severity == "warning" or promoted) or is_source_identity_finding(probe):
+    if not dismissible(probe):
         raise ReviewDismissRefusedError(
             "this finding cannot be dismissed", table=decision.table, column=decision.column
         )
     model = decision.model
-    return {
-        "table": decision.table,
-        "column": decision.column,
-        "detector_id": decision.detector_id,
-        "source": decision.source,
-        "model_id": None if model is None else model.id,
-        "model_version": None if model is None else model.version,
-        "strategy": strategy,
-    }
+    return Dismissal(
+        table=decision.table,
+        column=decision.column,
+        detector_id=decision.detector_id,
+        source=decision.source,
+        model_id=None if model is None else model.id,
+        model_version=None if model is None else model.version,
+        strategy=strategy,
+    ).model_dump()
 
 
 def _existing_dismissals(config: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -366,11 +416,6 @@ def _existing_dismissals(config: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [{f: d.get(f) for f in fields} for d in (listed or ()) if isinstance(d, Mapping)]
 
 
-def _dismissal_edits(
-    config: Mapping[str, Any], dismissals: list[dict[str, Any]]
-) -> tuple[ConfigEdit, ...]:
-    if not dismissals:
-        return ()
-    if isinstance(config.get("post_scan"), Mapping):
-        return tuple(ConfigEdit(("post_scan", "dismissed"), "append", d) for d in dismissals)
-    return (ConfigEdit(("post_scan",), "append_block", {"dismissed": dismissals}),)
+def _dismissal_edits(dismissals: list[dict[str, Any]]) -> tuple[ConfigEdit, ...]:
+    """One append per dismissal; the caller has checked that `post_scan.integrity` is true."""
+    return tuple(ConfigEdit(("post_scan", "dismissed"), "append", d) for d in dismissals)
