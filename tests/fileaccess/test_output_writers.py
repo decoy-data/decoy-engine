@@ -37,7 +37,7 @@ def _stage(tmp_path: Path) -> Iterator[tuple[object, Path]]:
     out = fileaccess.capture().output_dir(
         FileRequest(FileRole.TARGET_OUTPUT, "write", str(tmp_path / "out"), "targets.path")
     )
-    txn = out.begin("dir", "exclusive", label="writers")
+    txn = out.begin("dir", "exclusive", label="publication")
     try:
         yield txn, Path(txn.local_stage_path())
     finally:

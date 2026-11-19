@@ -6,10 +6,10 @@ Each cell publishes through the entry named in the plan (a `ParquetTransactional
 the named route ran, and reads only files that result binds (the commit receipt, the sink's
 committed paths, `output_paths`, the isolated commit dir).
 
-Two tests per route. `test_leak_set_on_base` pins the exact canary set the base leaks, so any
-change to a cell's leak (a partial fix) fails it until the pin is updated. `test_route_is_clean`
-is the guarantee: a strict xfail on `LeakFoundError` (route-evidence failures stay plain failures and are
-never hidden by the xfail). E1 deletes the pin test and the markers.
+`test_route_is_clean` is the guarantee: no canary in any file the route's entry committed. E0
+marked the red cells strict xfail and pinned each leak set; E1 fixed them at the output writers and
+removed the markers and the pins. A failure of the route evidence (the wrong route ran) is a plain
+assertion failure.
 """
 
 from __future__ import annotations
@@ -371,42 +371,29 @@ def _subset_route(tmp_path: Path) -> list[Path]:
     return [Path(p) for _, p in result.output_paths]
 
 
-SEVEN = "ATTRS COLIDX CREATOR PANDAS_ATTRS PDVER RIDX SCHEMA SKEY"
 OOC = "override_out_of_core"
 FULL = "override_full_frame"
 
-# route id -> (route, the exact canaries the base leaks; "" when it is green on the base).
-# `stream` on lazy sources runs as the out-of-core route, and says so in its evidence.
-ROUTES: dict[str, tuple[Route, str]] = {
-    "out_of_core_fk": (_fk_route("out_of_core", OOC, lazy=True, sink=True), SEVEN),
-    "full_frame": (_fk_route("full_frame", FULL, lazy=False, sink=False), "ATTRS"),
-    "sequential": (_fk_route("sequential", "pure_mask_fk", lazy=False, sink=True), "ATTRS"),
-    "stream_with_sink": (_fk_route("stream", OOC, ran="out_of_core", lazy=True, sink=True), SEVEN),
-    "auto_chunk_native": (_chunked_route(), "FIELD FKEY"),
-    "resident_transforms": (_transforms_route, "ATTRS"),
-    "generate_and_mask": (_generate_mask_route, "ATTRS"),
-    "isolated": (_isolated_route, "ATTRS"),
-    "publish_unit": (_publish_unit_route, SEVEN + " FIELD FKEY NESTED"),
-    "extension_full_frame": (
-        _fk_route("full_frame", FULL, lazy=False, sink=False, extension=True),
-        "ATTRS",
-    ),
-    "extension_out_of_core": (
-        _fk_route("out_of_core", OOC, lazy=True, sink=True, extension=True),
-        SEVEN,
-    ),
-    "zero_rows_stream": (
-        _fk_route("stream", OOC, ran="out_of_core", lazy=True, sink=True, rows=0),
-        SEVEN,
-    ),
-    "zero_rows_out_of_core": (_fk_route("out_of_core", OOC, lazy=True, sink=True, rows=0), SEVEN),
-    "declared_casting": (
-        _fk_route("out_of_core", OOC, lazy=True, sink=True, declared=True),
-        SEVEN,
-    ),
-    "multi_parent_fk": (_multi_parent_route, SEVEN),
-    "composite_fk": (_composite_route, SEVEN),
-    "subset": (_subset_route, ""),
+# route id -> route. `stream` on lazy sources runs as the out-of-core route, and says so in its
+# evidence.
+ROUTES: dict[str, Route] = {
+    "out_of_core_fk": _fk_route("out_of_core", OOC, lazy=True, sink=True),
+    "full_frame": _fk_route("full_frame", FULL, lazy=False, sink=False),
+    "sequential": _fk_route("sequential", "pure_mask_fk", lazy=False, sink=True),
+    "stream_with_sink": _fk_route("stream", OOC, ran="out_of_core", lazy=True, sink=True),
+    "auto_chunk_native": _chunked_route(),
+    "resident_transforms": _transforms_route,
+    "generate_and_mask": _generate_mask_route,
+    "isolated": _isolated_route,
+    "publish_unit": _publish_unit_route,
+    "extension_full_frame": _fk_route("full_frame", FULL, lazy=False, sink=False, extension=True),
+    "extension_out_of_core": _fk_route("out_of_core", OOC, lazy=True, sink=True, extension=True),
+    "zero_rows_stream": _fk_route("stream", OOC, ran="out_of_core", lazy=True, sink=True, rows=0),
+    "zero_rows_out_of_core": _fk_route("out_of_core", OOC, lazy=True, sink=True, rows=0),
+    "declared_casting": _fk_route("out_of_core", OOC, lazy=True, sink=True, declared=True),
+    "multi_parent_fk": _multi_parent_route,
+    "composite_fk": _composite_route,
+    "subset": _subset_route,
 }
 
 
@@ -419,33 +406,14 @@ def _marks(route_id: str) -> list[Any]:
     return [NEEDS_COMPANION] if route_id in COMPANION_ROUTES else []
 
 
-def _clean_param(route_id: str) -> Any:
-    marks = _marks(route_id)
-    if ROUTES[route_id][1]:
-        marks.append(
-            pytest.mark.xfail(strict=True, raises=LeakFoundError, reason="OUTPUT-METADATA-LEAK")
-        )
-    return pytest.param(route_id, id=route_id, marks=marks)
-
-
 def _leaks(route_id: str, tmp_path: Path) -> set[str]:
     found: set[str] = set()
-    for path in ROUTES[route_id][0](tmp_path):
+    for path in ROUTES[route_id](tmp_path):
         found |= mc.canaries_in(path)
     return found
 
 
-@pytest.mark.parametrize(
-    "route_id",
-    [pytest.param(r, id=r, marks=_marks(r)) for r in ROUTES if ROUTES[r][1]],
-)
-def test_leak_set_on_base(route_id: str, tmp_path: Path) -> None:
-    expected = {c.removeprefix("DCY-CANARY-") for c in ROUTES[route_id][1].split()}
-    got = {c.removeprefix("DCY-CANARY-") for c in _leaks(route_id, tmp_path)}
-    assert got == expected
-
-
-@pytest.mark.parametrize("route_id", [_clean_param(r) for r in ROUTES])
+@pytest.mark.parametrize("route_id", [pytest.param(r, id=r, marks=_marks(r)) for r in ROUTES])
 def test_route_is_clean(route_id: str, tmp_path: Path) -> None:
     found = _leaks(route_id, tmp_path)
     if found:

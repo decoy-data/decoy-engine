@@ -853,6 +853,15 @@ No `SEED_PROTOCOL_VERSION` change.
   dispatcher's contract (passthrough columns are the source column exactly, string-output
   columns are `string`, no schema metadata) and may differ from the full-frame and
   unified-slice routes. Converging those routes is roadmap item ROUTE-OUTPUT-CONTRACT.
+  Output Parquet key/value metadata (OUTPUT-METADATA-LEAK, 2026-11-19): on every route, a
+  published Parquet file carries no field metadata at any depth (this ends "passthrough
+  field metadata kept") and one schema key at most, `b"pandas"`, rebuilt from the output schema
+  (see `docs/security/output-metadata.md`). The schema metadata difference between routes
+  narrows to "a sanitized pandas blob or none". Output bytes change only for a source with
+  custom metadata, `attrs`, field metadata, a column-index name or a range index; masked
+  values, column names, Arrow types, nullability and row-group layout do not change. The
+  public names `output_schema` and `output_table` are additive. In-memory results returned
+  to a caller are outside this promise.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now

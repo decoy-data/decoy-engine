@@ -80,6 +80,9 @@ SCALAR_PREDICATES = frozenset(
         "is_uint8",
         "is_unicode",
         "is_unsigned_integer",
+        "is_integer_value",
+        "is_float_value",
+        "is_boolean_value",
     ]
 )
 
@@ -95,7 +98,7 @@ NESTED: dict[str, Callable[[], pa.DataType]] = {
     "dense_union": lambda: pa.union([_fld("a", pa.int64()), _fld("b", pa.string())], "dense"),
     "sparse_union": lambda: pa.union([_fld("a", pa.int64()), _fld("b", pa.string())], "sparse"),
     "dictionary_value": lambda: pa.dictionary(pa.int8(), pa.struct([_fld("c", pa.int64())])),
-    "deep": lambda: pa.list_(_fld("item", pa.struct([_fld("c", pa.list_(_fld("x", pa.int8())))]))),
+    "run_end_encoded": lambda: pa.run_end_encoded(pa.int32(), pa.struct([_fld("c", pa.int64())])),
 }
 
 
@@ -224,7 +227,7 @@ def test_clean_blob_identical(dtype: str) -> None:
     buf = io.BytesIO()
     pq.write_table(output_table(table), buf)
     back = pq.read_table(pa.BufferReader(buf.getvalue()))
-    assert list(back.to_pandas().dtypes) == list(frame.dtypes)
+    assert list(back.to_pandas().dtypes) == list(table.to_pandas().dtypes)
 
 
 def test_stored_index_column_is_kept_and_identical() -> None:
@@ -310,10 +313,10 @@ SHAPE_FORGERIES: dict[str, bytes] = {
     "json_list": b'["DCY-CANARY"]',
     "nan": b'{"index_columns": NaN, "creator": "DCY-CANARY"}',
     "not_utf8": b"\xff\xfe DCY-CANARY",
-    "huge_string": b'{"columns": "' + b"x" * (1 << 20) + b'"}',
     "duplicate_keys": b'{"columns": [], "columns": "DCY-CANARY"}',
 }
 WRONG_TYPES: dict[str, bytes] = {
+    "huge_columns_string": json.dumps({**json.loads(CLEAN), "columns": "x" * (1 << 20)}).encode(),
     "columns_not_list": json.dumps({**json.loads(CLEAN), "columns": "DCY-CANARY"}).encode(),
     "columns_entries_not_objects": json.dumps(
         {**json.loads(CLEAN), "columns": ["DCY-CANARY", 3]}

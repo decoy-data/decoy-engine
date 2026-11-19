@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 import pyarrow as pa
 import pytest
+
 from decoy_engine._pandas_meta import (
     COLUMN_INDEX_ENTRY,
     PLAIN_PAIRS,

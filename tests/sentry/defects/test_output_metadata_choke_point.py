@@ -88,17 +88,13 @@ def _imports(tree: ast.Module, mod: str, is_pkg: bool) -> dict[str, str]:
             base = scan.resolve_from(mod, is_pkg, node)
             for a in node.names:
                 out[a.asname or a.name] = f"{base}.{a.name}" if base else a.name
-    grew = True
-    while grew:
-        grew = False
+    for _ in range(3):  # a re-binding of a re-binding; bounded so a self-referencing name ends
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
                 target, chain = node.targets[0], scan.attr_chain(node.value)
                 if isinstance(target, ast.Name) and chain and chain[0] in out:
-                    resolved = ".".join([out[chain[0]], *chain[1:]])
-                    if out.get(target.id) != resolved:
-                        out[target.id] = resolved
-                        grew = True
+                    if target.id != chain[0]:
+                        out[target.id] = ".".join([out[chain[0]], *chain[1:]])
     return out
 
 
@@ -124,11 +120,25 @@ def _text(node: ast.AST, mod: str, imports: dict[str, str], consts: dict[str, st
     return ""
 
 
+def _own_constants(tree: ast.Module, mod: str) -> dict[str, str]:
+    """Module-level `NAME = "text"` bindings of this module, keyed like the project table."""
+    return {
+        f"{mod}.{node.targets[0].id}": node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+
+
 def hits_in(source: str, rel: str, consts: dict[str, str]) -> list[Hit]:
     """Every Parquet-writing call in one module, with its enclosing qualified function."""
     tree = ast.parse(source)
     mod = rel.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
     imports = _imports(tree, mod, rel.endswith("__init__.py"))
+    consts = {**consts, **_own_constants(tree, mod)}
     owner = scan._enclosing(tree)
     found: list[Hit] = []
     for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):

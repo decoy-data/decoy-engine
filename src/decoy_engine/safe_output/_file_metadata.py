@@ -1,0 +1,202 @@
+"""The one rule for the key/value metadata of a published Parquet file.
+
+A masked output must not carry text from the source file that masking never looked at. The rule
+is a rebuild, not a scan: `output_schema` builds a metadata-free schema (every field at every
+nesting depth) and attaches only the keys of `_ALLOWED_SCHEMA_KEYS`. The registry holds one key,
+`b"pandas"`, and its value is rebuilt, never copied. Every member comes from the output schema,
+the running pyarrow and pandas versions or the descriptor registry; the source blob only helps
+choose among registry pairs that are all correct for the output Arrow type, so it cannot carry
+free text or a number into the output. A blob that is not a JSON object is dropped.
+
+`output_table` applies the rule to a table and `attach_output_metadata` to a schema that is built
+elsewhere; the output writers of `fileaccess/adapters/arrow.py` call them, so a published file is
+written from the sanitized schema whatever the batches carry.
+"""
+
+from __future__ import annotations
+
+import importlib.metadata
+import json
+import re
+from collections.abc import Callable, Mapping
+from functools import lru_cache
+from typing import Any, Final
+
+import pyarrow as pa
+
+from decoy_engine._canonical import StrictJsonError, strict_json_loads
+from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_metadata, pairs_for
+
+__all__ = [
+    "HANDLED_PREDICATES",
+    "attach_output_metadata",
+    "output_schema",
+    "output_table",
+    "sanitized_schema_metadata",
+]
+
+_PANDAS: Final = b"pandas"
+_GENERATED_INDEX: Final = re.compile(r"__index_level_\d+__")
+
+
+# -- fields and types ----------------------------------------------------------------------------
+
+
+def _field(field: pa.Field) -> pa.Field:
+    return pa.field(field.name, _type(field.type), nullable=field.nullable)
+
+
+def _children(t: pa.DataType) -> list[pa.Field]:
+    return [_field(t.field(i)) for i in range(t.num_fields)]
+
+
+_RULES: Final[tuple[tuple[str, Callable[[Any], pa.DataType]], ...]] = (
+    ("is_struct", lambda t: pa.struct(_children(t))),
+    ("is_list", lambda t: pa.list_(_field(t.value_field))),
+    ("is_large_list", lambda t: pa.large_list(_field(t.value_field))),
+    ("is_fixed_size_list", lambda t: pa.list_(_field(t.value_field), t.list_size)),
+    ("is_list_view", lambda t: pa.list_view(_field(t.value_field))),
+    ("is_large_list_view", lambda t: pa.large_list_view(_field(t.value_field))),
+    (
+        "is_map",
+        lambda t: pa.map_(_field(t.key_field), _field(t.item_field), keys_sorted=t.keys_sorted),
+    ),
+    ("is_union", lambda t: pa.union(_children(t), t.mode, list(t.type_codes))),
+    ("is_dictionary", lambda t: pa.dictionary(t.index_type, _type(t.value_type), t.ordered)),
+    ("is_run_end_encoded", lambda t: pa.run_end_encoded(t.run_end_type, _type(t.value_type))),
+)
+_REBUILDERS: tuple[tuple[Callable[[pa.DataType], bool], Callable[[Any], pa.DataType]], ...] = tuple(
+    (getattr(pa.types, name), rebuild) for name, rebuild in _RULES
+)
+
+# The predicates `_REBUILDERS` handles; `tests/unit/safe_output/test_file_metadata.py` checks them
+# against every `pa.types.is_*` predicate at the pin, so a new nested type turns it red.
+HANDLED_PREDICATES: Final = frozenset(name for name, _ in _RULES)
+
+
+def _type(t: pa.DataType) -> pa.DataType:
+    for matches, rebuild in _REBUILDERS:
+        if matches(t):
+            return rebuild(t)
+    if pa.types.is_nested(t):
+        # A code defect, not a data condition: a new nested type must be handled, never skipped.
+        raise TypeError(f"output metadata: unhandled nested Arrow type {type(t).__name__}")
+    return t
+
+
+# -- the pandas blob -----------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _pandas_version() -> str | None:
+    try:
+        return importlib.metadata.version("pandas")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _source_pairs(columns: object) -> dict[str, tuple[str, str]]:
+    """The `(pandas_type, numpy_type)` the source names per field; a choice among registry pairs."""
+    chosen: dict[str, tuple[str, str]] = {}
+    if not isinstance(columns, list):
+        return chosen
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name, kind, numpy = (
+            entry.get("field_name"),
+            entry.get("pandas_type"),
+            entry.get("numpy_type"),
+        )
+        if isinstance(name, str) and isinstance(kind, str) and isinstance(numpy, str):
+            chosen.setdefault(name, (kind, numpy))
+    return chosen
+
+
+def _sanitize_pandas_blob(raw: bytes, for_schema: pa.Schema) -> bytes | None:
+    try:
+        source = strict_json_loads(raw, max_int_digits=None)
+    except (StrictJsonError, RecursionError):
+        return None
+    version = _pandas_version()
+    if not isinstance(source, dict) or version is None:
+        return None
+    names = set(for_schema.names)
+    stored = source.get("index_columns")
+    index_columns = (
+        [c for c in stored if isinstance(c, str) and c in names] if isinstance(stored, list) else []
+    )
+    chosen = _source_pairs(source.get("columns"))
+    columns: list[dict[str, Any]] = []
+    for field in for_schema:
+        pairs = pairs_for(field.type)
+        if not pairs:
+            continue
+        pair = chosen.get(field.name)
+        kind, numpy = pair if pair in pairs else pairs[0]
+        generated = field.name in index_columns and _GENERATED_INDEX.fullmatch(field.name)
+        columns.append(
+            {
+                "name": None if generated else field.name,
+                "field_name": field.name,
+                "pandas_type": kind,
+                "numpy_type": numpy,
+                "metadata": column_metadata(field.type),
+            }
+        )
+    blob = {
+        "index_columns": index_columns,
+        "column_indexes": [dict(COLUMN_INDEX_ENTRY)] if index_columns else [],
+        "columns": columns,
+        "attributes": {},
+        "creator": {"library": "pyarrow", "version": pa.__version__},
+        "pandas_version": version,
+    }
+    return json.dumps(blob).encode()
+
+
+# -- the rule ------------------------------------------------------------------------------------
+
+# The one registry of schema-level keys an output file may carry. F38 (opt-in metadata preserve)
+# adds a policy argument to `output_schema` and `output_table`; nothing else changes here.
+_ALLOWED_SCHEMA_KEYS: Final[Mapping[bytes, Callable[[bytes, pa.Schema], bytes | None]]] = {
+    _PANDAS: _sanitize_pandas_blob,
+}
+
+
+def sanitized_schema_metadata(
+    meta: Mapping[bytes, bytes] | None, *, for_schema: pa.Schema
+) -> dict[bytes, bytes] | None:
+    """The schema metadata an output file may carry, or `None` when nothing remains.
+
+    `for_schema` is the final output schema: a sanitizer reads field names and Arrow types from
+    it, never from `meta`. Call only through `output_schema` and `attach_output_metadata`.
+    """
+    kept: dict[bytes, bytes] = {}
+    for key, sanitize in _ALLOWED_SCHEMA_KEYS.items():
+        raw = (meta or {}).get(key)
+        cleaned = sanitize(raw, for_schema) if raw is not None else None
+        if cleaned is not None:
+            kept[key] = cleaned
+    return kept or None
+
+
+def attach_output_metadata(schema: pa.Schema, meta: Mapping[bytes, bytes] | None) -> pa.Schema:
+    """`schema` with its schema metadata replaced by the sanitized form of `meta`.
+
+    Field metadata is left as it is: this is the entry for in-memory tables, where a passthrough
+    column is the source field by contract. The writers strip field metadata."""
+    kept = sanitized_schema_metadata(meta, for_schema=schema)
+    return schema.with_metadata(kept) if kept else schema.remove_metadata()
+
+
+def output_schema(schema: pa.Schema) -> pa.Schema:
+    """`schema` with no field metadata at any depth and only the allowed schema keys."""
+    return attach_output_metadata(pa.schema([_field(f) for f in schema]), schema.metadata)
+
+
+def output_table(table: pa.Table) -> pa.Table:
+    """`table` under `output_schema`. The types are equal, so the cast copies no buffers, and a
+    table that already conforms is returned as is."""
+    target = output_schema(table.schema)
+    return table if table.schema.equals(target, check_metadata=True) else table.cast(target)
