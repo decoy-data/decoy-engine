@@ -187,11 +187,15 @@ def test_at0a_quoted_field_open_across_two_window_edges(env: Env, kind: str) -> 
 # ---------------------------------------------------------------- AT-0c
 
 
+Tamper = Callable[[int, bytes], bytes]
+
+
 class _CountingS3:
     """A fake S3 client that counts every request and the bytes returned."""
 
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes, tamper: Tamper | None = None) -> None:
         self._data = data
+        self._tamper = tamper
         self.requests = 0
         self.bytes_read = 0
 
@@ -206,6 +210,8 @@ class _CountingS3:
         match = re.match(r"bytes=(\d+)-(\d+)", Range)
         assert match
         chunk = self._data[int(match[1]) : int(match[2]) + 1]
+        if self._tamper:
+            chunk = self._tamper(self.requests - 1, chunk)
         self.bytes_read += len(chunk)
         return {"Body": io.BytesIO(chunk)}
 
@@ -218,12 +224,14 @@ class _Counts:
         self.bytes_read = 0
 
 
-def _stub(env: Env, kind: str, data: bytes) -> tuple[ProfileSource, _Counts]:
+def _stub(
+    env: Env, kind: str, data: bytes, tamper: Tamper | None = None
+) -> tuple[ProfileSource, _Counts]:
     from decoy_engine.profile import _cloud_readers
 
     counts = _Counts()
     if kind == "s3":
-        client = _CountingS3(data)
+        client = _CountingS3(data, tamper)
         env.monkeypatch.setattr(_cloud_readers._clients, "s3_client", lambda **_kw: client)
         source = build_profile_source({"type": "s3", "format": "csv", "bucket": BUCKET, "key": "k"})
         counts = client  # type: ignore[assignment]
@@ -237,6 +245,8 @@ def _stub(env: Env, kind: str, data: bytes) -> tuple[ProfileSource, _Counts]:
         ) -> bytes:
             counts.requests += 1
             chunk = super().download_as_bytes(start, end)
+            if tamper:
+                chunk = tamper(counts.requests, chunk)
             counts.bytes_read += len(chunk)
             return chunk
 
@@ -257,6 +267,30 @@ def test_at0c_giant_row_stays_within_the_request_and_byte_bound(env: Env, kind: 
     assert len(source.sample_frame(4)) == 4
     assert counts.requests <= math.ceil(math.log2(len(data) / MIB)) + 2
     assert counts.bytes_read <= len(data)
+
+
+# Ranged responses that break the byte count. The index counts ranged reads from 1; the S3 fake
+# counts its size lookup as request 1, so it passes `requests - 1`.
+TAMPERS: dict[str, Tamper] = {
+    "short_first_window": lambda i, b: b[:-1] if i <= 1 else b,
+    "empty_first_window": lambda i, b: b"" if i <= 1 else b,
+    "short_later_window": lambda i, b: b[:-1] if i > 1 else b,
+    "empty_after_valid_prefix": lambda i, b: b"" if i > 1 else b,
+}
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("tamper", sorted(TAMPERS))
+@pytest.mark.parametrize("kind", ["s3", "gcs"])
+def test_at0c_a_short_ranged_response_is_source_changed(env: Env, kind: str, tamper: str) -> None:
+    from decoy_engine.sdk import PermanentError
+
+    data = b"a,b\n1," + b"x" * (3 * MIB) + b"\n" + b"".join(b"%d,y\n" % i for i in range(2, 7))
+    source, _ = _stub(env, kind, data, TAMPERS[tamper])
+    with pytest.raises(PermanentError) as info:
+        source.sample_frame(4)
+    assert info.value.kind == "source_changed"
+    assert "x" * 20 not in str(info.value)
 
 
 @pytest.mark.parametrize("kind", ["s3", "gcs"])

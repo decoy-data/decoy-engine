@@ -147,7 +147,11 @@ def _csv_sample_from_window(
 
 
 def _csv_rows_from_ranges(
-    size: int, fetch: Callable[[int, int], bytes], n: int, lexeme_columns: Any = None
+    size: int,
+    fetch: Callable[[int, int], bytes],
+    n: int,
+    provider: str,
+    lexeme_columns: Any = None,
 ) -> pd.DataFrame:
     """The first `n` data rows of a CSV object, fewer only when the object has fewer.
 
@@ -156,13 +160,18 @@ def _csv_rows_from_ranges(
     `n + 1` rows or the buffer is the whole object. One row past `n` proves the `n`-th row
     was complete. A `ParserError` on a prefix may be a quoted field cut open at the last
     newline, so it fetches again; on the whole object it is raised as `to_frame` would.
+    A ranged response shorter than asked means the object shrank or the store misbehaved;
+    it raises `source_changed` rather than looping or returning a short frame.
     """
     buffer = b""
     window = _CSV_SAMPLE_WINDOW_BYTES
     while True:
         end = min(len(buffer) + window, size)
         if end > len(buffer):
-            buffer += fetch(len(buffer), end - 1)
+            chunk = fetch(len(buffer), end - 1)
+            if len(chunk) != end - len(buffer):
+                raise _clients.source_changed(provider)
+            buffer += chunk
         whole = len(buffer) >= size
         try:
             frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
@@ -291,6 +300,7 @@ class S3CsvSource:
             size,
             lambda start, end: _s3_range(client, self._bucket, self._key, start, end),
             sample_rows,
+            "S3",
             self._descriptor.get(LEXEME_KEY),
         )
 
@@ -409,7 +419,7 @@ class GcsCsvSource:
         return _with_gcs_reads(
             self._descriptor,
             lambda size, fetch: _csv_rows_from_ranges(
-                size, fetch, sample_rows, self._descriptor.get(LEXEME_KEY)
+                size, fetch, sample_rows, "GCS", self._descriptor.get(LEXEME_KEY)
             ),
         )
 
