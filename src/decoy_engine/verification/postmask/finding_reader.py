@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Mapping
-from typing import Any, get_args
+from typing import Any, NamedTuple, get_args
 
 from decoy_engine.detection.types import DETECTOR_ORDER
 from decoy_engine.verification.postmask.types import (
@@ -21,7 +21,7 @@ from decoy_engine.verification.postmask.types import (
     Severity,
 )
 
-__all__ = ["V3_ADDED_FIELDS", "read_residual_finding"]
+__all__ = ["V3_ADDED_FIELDS", "VerdictRow", "project_for_verdict", "read_residual_finding"]
 
 # The fields v3 added to the writer. A v2 row lacks them and reads their defaults.
 V3_ADDED_FIELDS: tuple[str, ...] = ("source", "model", "band", "dismissed", "promoted")
@@ -93,6 +93,9 @@ def read_residual_finding(raw: object, *, version: str) -> dict[str, Any] | None
         return None
     current = version == SCHEMA_VERSION
     row: dict[str, Any] = dict(raw)
+    if not current and any(name in row for name in V3_ADDED_FIELDS):
+        # A v2 report predates these fields; a row that carries one is not a v2 row.
+        return None
     for name, field in _FIELDS.items():
         if name in row:
             continue
@@ -105,3 +108,36 @@ def read_residual_finding(raw: object, *, version: str) -> dict[str, Any] | None
         # `None` is the classifier finding's marker, which only v3 reports carry.
         return None
     return row
+
+
+class VerdictRow(NamedTuple):
+    """What the post-scan verdict reads of one report row. A field the row lacks reads as None."""
+
+    severity: object
+    source: object
+    table: object
+    column: object
+    detector_id: object
+
+
+_ABSENT = VerdictRow(None, None, None, None, None)
+
+
+def project_for_verdict(raw: object, *, version: object) -> VerdictRow:
+    """The verdict's view of one finding row: tolerant of a malformed row, exact about versions.
+
+    The run gate must withhold outputs on a row the strict reader would refuse, so this never
+    refuses: an absent or mistyped field reads as None and the caller blocks on it. It applies the
+    same version rule as `read_residual_finding`: a v2 report predates `V3_ADDED_FIELDS`, so a
+    v2 row's `source` is `regex` whatever the row says.
+    """
+    if not isinstance(raw, Mapping):
+        return _ABSENT
+    v2 = version == "post-scan-integrity/v2"
+    return VerdictRow(
+        severity=raw.get("severity"),
+        source=_FIELDS["source"].default if v2 else raw.get("source"),
+        table=raw.get("table"),
+        column=raw.get("column"),
+        detector_id=raw.get("detector_id"),
+    )
