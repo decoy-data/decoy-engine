@@ -27,6 +27,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.verification.postmask import V3_ADDED_FIELDS
 from tests._ner import needs_ner
 from tests.unit.detection_verification import _scanml_m4_support as s
 
@@ -49,15 +50,28 @@ def _codes(report: dict[str, Any], mode: str) -> list[str]:
 
 
 def _row(severity: Any, source: str | None, table: str = "t", column: str = "notes") -> Any:
+    """A complete v3 finding row: the verdict blocks on a row the strict reader refuses.
+
+    `source=None` stands for a row written before model detectors (no `source` key): it reads as
+    `regex`, so the row carries the explicit default.
+    """
     row: dict[str, Any] = {
         "table": table,
         "column": column,
         "detector_id": "person_name" if source == "ner" else "email",
+        "match_rate": 0.5,
         "severity": severity,
+        "configured_strategy": None,
+        "sample_match_count": 1,
         "message": "value-free",
+        "source_identity_rate": None,
+        "source_compared": False,
+        "source": source or "regex",
+        "model": None,
+        "band": None,
+        "dismissed": False,
+        "promoted": False,
     }
-    if source is not None:
-        row["source"] = source
     if source in ("ner", "classifier"):
         row["model"] = {"id": _NER[0], "version": _NER[1]}
     return row
@@ -98,7 +112,10 @@ def test_d_a_classifier_row_never_blocks(severity: str, mode: str) -> None:
 
 @pytest.mark.parametrize("tag", ["post-scan-integrity/v2", "post-scan-integrity/v3"])
 def test_the_verdict_reader_accepts_v2_and_v3_reports(tag: str) -> None:
-    rep = {**_report(_row("info", None)), "schema_version": tag}
+    row = _row("info", None)
+    if tag.endswith("v2"):
+        row = {k: v for k, v in row.items() if k not in V3_ADDED_FIELDS}
+    rep = {**_report(row), "schema_version": tag}
     verdict = _verdict(rep, "warn")
     assert (verdict.blocking, verdict.codes) == (False, ())
 

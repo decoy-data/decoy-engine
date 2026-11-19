@@ -54,8 +54,18 @@ def residual(severity: str, table: str = "t", column: str = "c", detector: str =
         "table": table,
         "column": column,
         "detector_id": detector,
+        "match_rate": 0.5,
         "severity": severity,
+        "configured_strategy": None,
+        "sample_match_count": 1,
         "message": f"leaked {CANARY}",
+        "source_identity_rate": None,
+        "source_compared": False,
+        "source": "regex",
+        "model": None,
+        "band": None,
+        "dismissed": False,
+        "promoted": False,
     }
 
 

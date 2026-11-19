@@ -122,3 +122,30 @@ def test_the_projection_names_the_location_fields() -> None:
     row = project_for_verdict({**_BASE, "source": "ner"}, version=V3)
     assert (row.table, row.column, row.detector_id, row.source) == ("t", "c", "email", "ner")
     assert project_for_verdict({**_BASE, "source": "ner"}, version=V2).source == "regex"
+
+
+def _warning_report(version: str, row: dict[str, Any]) -> dict[str, Any]:
+    return {"schema_version": version, "residual_pii": [row]}
+
+
+@pytest.mark.parametrize("ner_findings", ["warn", "fail"])
+@pytest.mark.parametrize("missing", _FIELDS)
+def test_a_v3_warning_row_missing_a_field_blocks(missing: str, ner_findings: str) -> None:
+    row = {k: v for k, v in {**_v3(), "severity": "warning"}.items() if k != missing}
+    verdict = post_scan_verdict(_warning_report(V3, row), ner_findings=ner_findings)
+    assert verdict.blocking
+
+
+@pytest.mark.parametrize("ner_findings", ["warn", "fail"])
+@pytest.mark.parametrize("field", V3_ADDED_FIELDS)
+def test_a_v2_warning_row_with_a_v3_field_blocks(field: str, ner_findings: str) -> None:
+    row = {**_BASE, "severity": "warning", field: _v3()[field]}
+    assert post_scan_verdict(_warning_report(V2, row), ner_findings=ner_findings).blocking
+
+
+@pytest.mark.parametrize("ner_findings", ["warn", "fail"])
+def test_a_valid_warning_row_does_not_block(ner_findings: str) -> None:
+    v2 = _warning_report(V2, {**_BASE, "severity": "warning"})
+    v3 = _warning_report(V3, {**_v3(), "severity": "warning"})
+    assert not post_scan_verdict(v2, ner_findings=ner_findings).blocking
+    assert not post_scan_verdict(v3, ner_findings=ner_findings).blocking

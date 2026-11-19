@@ -118,18 +118,23 @@ class VerdictRow(NamedTuple):
     table: object
     column: object
     detector_id: object
+    valid: bool = True  # False: the strict reader refuses the row (only judged when asked)
 
 
-_ABSENT = VerdictRow(None, None, None, None, None)
+_ABSENT = VerdictRow(None, None, None, None, None, valid=False)
 
 
-def project_for_verdict(raw: object, *, version: object) -> VerdictRow:
+def project_for_verdict(raw: object, *, version: object, residual: bool = False) -> VerdictRow:
     """The verdict's view of one finding row: tolerant of a malformed row, exact about versions.
 
     The run gate must withhold outputs on a row the strict reader would refuse, so this never
     refuses: an absent or mistyped field reads as None and the caller blocks on it. It applies the
     same version rule as `read_residual_finding`: a v2 report predates `V3_ADDED_FIELDS`, so a
     v2 row's `source` is `regex` whatever the row says.
+
+    With `residual=True` the row is also run through `read_residual_finding`, and `valid` says
+    whether the strict reader accepts it: a row it refuses is not a finding the verdict can trust,
+    so the caller blocks on it. The tolerant fields stay filled in, for the location text only.
     """
     if not isinstance(raw, Mapping):
         return _ABSENT
@@ -140,4 +145,10 @@ def project_for_verdict(raw: object, *, version: object) -> VerdictRow:
         table=raw.get("table"),
         column=raw.get("column"),
         detector_id=raw.get("detector_id"),
+        valid=(
+            True
+            if not residual
+            else isinstance(version, str)
+            and read_residual_finding(raw, version=version) is not None
+        ),
     )
