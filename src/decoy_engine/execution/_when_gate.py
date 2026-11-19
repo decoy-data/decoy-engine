@@ -26,10 +26,13 @@ that contract.
 from __future__ import annotations
 
 import logging
+import math
+import operator
 import warnings
-from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
@@ -42,8 +45,15 @@ from decoy_engine.execution._gated_string_guard import (
 )
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.expressions._when_parser import (
+    Compare,
+    InList,
+    Not,
+    Scalar,
+    WhenExpr,
     parse_when,
     parse_when_cached,
+    when_column_refs,
+    when_literals_by_ref,
 )
 
 _log = logging.getLogger(__name__)
@@ -112,6 +122,208 @@ def _require_closed_grammar(expression: object, strategy: str, column: str | Non
     )
 
 
+# The integers a float64 holds exactly. A value or integer literal outside it is compared as a
+# Python int, so no route rounds it.
+_EXACT_FLOAT_INT = 2**53
+
+
+def _exact_column(col: pd.Series, literals: Sequence[Scalar]) -> pd.Series:
+    """One referenced column as the evaluator reads it.
+
+    An integer column (a NumPy integer or a pandas nullable `Int`/`UInt`) is compared as Python
+    integers when a value or an integer literal could not be handled exactly as float64; a blank is `NaN`, never `pd.NA`. Otherwise a nullable integer column becomes
+    float64 with `NaN`, which is exact in range. Every other column is returned as is.
+    """
+    if not pd.api.types.is_integer_dtype(col.dtype):
+        return col
+    wide = any(
+        isinstance(x, int) and abs(x) > _EXACT_FLOAT_INT
+        for x in literals
+        if not isinstance(x, bool)
+    )
+    if not wide and len(col):
+        low, high = col.min(), col.max()  # blanks are skipped; all blank gives `pd.NA`
+        # Python ints: NumPy would compare a uint64 with a negative bound through float64.
+        wide = low is not pd.NA and (int(low) < -_EXACT_FLOAT_INT or int(high) > _EXACT_FLOAT_INT)
+    if wide:
+        values = col.to_numpy(dtype=object, na_value=np.nan)
+        return pd.Series(values, index=col.index, name=col.name, dtype=object)
+    if isinstance(col.dtype, np.dtype):
+        return col
+    return pd.Series(col.to_numpy(dtype=np.float64, na_value=np.nan), index=col.index)
+
+
+def when_eval_frame(
+    frame: pd.DataFrame, refs: Sequence[str], literals: Mapping[str, Sequence[Scalar]]
+) -> pd.DataFrame:
+    """The frame a predicate is evaluated on, built after ingestion on every route.
+
+    One rule for every ingestion dtype: a blank is `NaN` (so `!=`, `not in` and a `not` around a
+    comparison select it, and nothing else does), and integers compare exactly. Only the columns
+    the predicate reads are copied.
+    """
+    data: dict[str, pd.Series] = {}
+    for name in refs:
+        if name not in frame.columns:
+            continue
+        col = frame[name]
+        if not isinstance(col, pd.Series):
+            # Duplicate column labels give a DataFrame. The whole frame goes back unchanged, so
+            # pandas evaluates (or refuses) it exactly as it did before the exact-integer frame;
+            # the config gate already rejects duplicate names, so this is a defensive path.
+            return frame
+        data[name] = _exact_column(col, literals.get(name, ()))
+    return pd.DataFrame(data, index=frame.index)
+
+
+_FLIP = {"<": ">", ">": "<", "<=": ">=", ">=": "<=", "==": "==", "!=": "!="}
+_CMP = {
+    "==": operator.eq,
+    "!=": operator.ne,
+    "<": operator.lt,
+    "<=": operator.le,
+    ">": operator.gt,
+    ">=": operator.ge,
+}
+
+
+def _is_number(x: object) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _is_wide(col: pd.Series) -> bool:
+    if not len(col):
+        return False
+    low, high = col.min(), col.max()  # blanks are skipped; all blank gives `pd.NA`
+    return low is not pd.NA and (int(low) < -_EXACT_FLOAT_INT or int(high) > _EXACT_FLOAT_INT)
+
+
+def _normalized_bound(op: str, x: int | float) -> tuple[str, int] | bool:
+    """`v <op> x` for an integer `v` as `v <op2> B` on integers, or a constant for a non-blank `v`.
+
+    A float bound is rounded toward the side that keeps the same integers (`v > 18.5` is
+    `v >= 19`, `v <= 18.5` is `v <= 18`); a non-integral `==` is never true and `!=` always is. A
+    bound beyond what a narrow column can hold decides every row the same way.
+    """
+    if isinstance(x, float) and not x.is_integer():
+        floor = math.floor(x)
+        if op == "==":
+            return False
+        if op == "!=":
+            return True
+        return (">=", floor + 1) if op in (">", ">=") else ("<=", floor)
+    bound = int(x)
+    if bound > _EXACT_FLOAT_INT:  # above every narrow value
+        return op in ("<", "<=", "!=")
+    if bound < -_EXACT_FLOAT_INT:
+        return op in (">", ">=", "!=")
+    return op, bound
+
+
+def _numeric_literals_only(node: WhenExpr, ints: set[str]) -> bool:
+    """False when an integer column meets a string or bool literal: pandas reads that predicate."""
+    if isinstance(node, (Compare, InList)):
+        values = node.values if isinstance(node, InList) else (node.value,)
+        return node.ref not in ints or all(_is_number(x) for x in values)
+    if isinstance(node, Not):
+        return _numeric_literals_only(node.operand, ints)
+    return all(_numeric_literals_only(o, ints) for o in node.operands)
+
+
+def _pandas_eval(pdf: pd.DataFrame, expression: str, engine: str) -> Any:
+    """The one pandas evaluation: the engine is pinned and both scopes are empty."""
+    return pdf.eval(expression, engine=engine, local_dict={}, global_dict={})
+
+
+def _int_leaf(col: pd.Series, node: Compare | InList, wide_col: bool) -> np.ndarray:
+    """One comparison or membership test on an integer column, exact, as a plain bool array.
+
+    A blank is `NaN`-style: only `!=` and `not in` select it. In-range columns are compared as
+    integers where they are (nullable arrays through their own mask, no float64 copy); a column
+    or an integer literal beyond 2**53 is compared as Python integers.
+    """
+    values = node.values if isinstance(node, InList) else (node.value,)
+    nums = [x for x in values if isinstance(x, (int, float))]
+    if isinstance(node, InList):
+        op, null_out = ("in", node.negated)
+    else:
+        op = _FLIP[node.op] if node.literal_first else node.op
+        null_out = op == "!="
+    wide = wide_col or any(isinstance(x, int) and abs(x) > _EXACT_FLOAT_INT for x in nums)
+    if wide:
+        obj = pd.Series(col.to_numpy(dtype=object, na_value=np.nan), index=col.index, dtype=object)
+        if isinstance(node, InList):
+            hit = obj.isin(list(values)).to_numpy(dtype=bool)
+            return ~hit if node.negated else hit
+        return np.asarray(_CMP[op](obj, node.value), dtype=bool)
+    nullable = not isinstance(col.dtype, np.dtype)
+    blank = col.isna().to_numpy() if nullable else None
+    if isinstance(node, InList):
+        wanted = [int(x) for x in nums if float(x).is_integer() and abs(x) <= _EXACT_FLOAT_INT]
+        if nullable:
+            hit = col.isin(wanted).to_numpy(dtype=bool)
+        else:
+            hit = np.isin(col.to_numpy(), np.asarray(wanted, dtype=np.int64))
+        return ~hit if node.negated else hit
+    bound = _normalized_bound(op, nums[0])
+    if isinstance(bound, bool):
+        out = np.full(len(col), bound, dtype=bool)
+        if blank is not None:
+            out[blank] = null_out
+        return out
+    op2, number = bound
+    if nullable:
+        return np.asarray(_CMP[op2](col, number).to_numpy(dtype=bool, na_value=null_out))
+    data = col.to_numpy()
+    if data.dtype == np.uint64:
+        data = data.astype(np.int64)
+    return np.asarray(_CMP[op2](data, number), dtype=bool)
+
+
+def _exact_int_mask(pdf: pd.DataFrame, ast: WhenExpr, strategy_leaf: Any) -> pd.Series | None:
+    """The predicate's mask with every integer-column comparison done exactly, or None.
+
+    None means "use the pandas evaluator on the whole predicate": no integer column is read, a
+    column label repeats, or an integer column meets a string or bool literal.
+    """
+    refs = when_column_refs(ast)
+    ints = {
+        c
+        for c in refs
+        if c in pdf.columns
+        and isinstance(pdf[c], pd.Series)
+        and pd.api.types.is_integer_dtype(pdf[c].dtype)
+    }
+    if not ints or any(c in pdf.columns and not isinstance(pdf[c], pd.Series) for c in refs):
+        return None
+    if not _numeric_literals_only(ast, ints):
+        return None
+    wide = {c: _is_wide(pdf[c]) for c in ints}
+
+    def walk(node: WhenExpr) -> pd.Series:
+        if isinstance(node, (Compare, InList)):
+            if node.ref in ints:
+                return pd.Series(_int_leaf(pdf[node.ref], node, wide[node.ref]), index=pdf.index)
+            return strategy_leaf(node)
+        if isinstance(node, Not):
+            return ~walk(node.operand)
+        parts = [walk(o) for o in node.operands]
+        out = parts[0]
+        for nxt in parts[1:]:
+            out = (out & nxt) if node.op == "and" else (out | nxt)
+        return out
+
+    return walk(ast)
+
+
+def _leaf_text(node: Compare | InList) -> str:
+    if isinstance(node, InList):
+        return f"{node.ref} {'not in' if node.negated else 'in'} {list(node.values)!r}"
+    if node.literal_first:
+        return f"{node.value!r} {node.op} {node.ref}"
+    return f"{node.ref} {node.op} {node.value!r}"
+
+
 def _eval_predicate(
     pdf: pd.DataFrame,
     expression: str,
@@ -144,12 +356,24 @@ def _eval_predicate(
         # unmonitored RuntimeWarning.
         with warnings.catch_warnings(record=True) as _caught:
             warnings.simplefilter("always", RuntimeWarning)
-            mask = pdf.eval(
-                expression,
-                engine="numexpr",
-                local_dict={},
-                global_dict={},
+            ast = parse_when_cached(expression)
+            source = pdf
+            # A column that is not an integer is read by the pandas evaluator, one comparison at
+            # a time, under the same empty scopes and the same closed grammar.
+            mask = _exact_int_mask(
+                source,
+                ast,
+                lambda leaf: _pandas_eval(source, _leaf_text(leaf), "numexpr"),
             )
+            if mask is None:
+                pdf = when_eval_frame(source, when_column_refs(ast), when_literals_by_ref(ast))
+                # numexpr has no object arithmetic: exact integers use pandas' own Python engine.
+                exact = any(
+                    pdf[c].dtype == object and pd.api.types.is_integer_dtype(source[c].dtype)
+                    for c in pdf.columns
+                    if c in source.columns and isinstance(pdf[c], pd.Series)
+                )
+                mask = _pandas_eval(pdf, expression, "python" if exact else "numexpr")
         for _w in _caught:
             if issubclass(_w.category, RuntimeWarning):
                 _log.warning(

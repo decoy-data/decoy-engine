@@ -296,6 +296,23 @@ def when_column_refs(ast: WhenExpr) -> tuple[str, ...]:
     return tuple(sorted(found))
 
 
+def when_literals_by_ref(ast: WhenExpr) -> dict[str, tuple[Scalar, ...]]:
+    """The literals each referenced column is compared with, in source order per column."""
+    found: dict[str, list[Scalar]] = {}
+    stack: list[WhenExpr] = [ast]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Compare):
+            found.setdefault(node.ref, []).append(node.value)
+        elif isinstance(node, InList):
+            found.setdefault(node.ref, []).extend(node.values)
+        elif isinstance(node, Not):
+            stack.append(node.operand)
+        else:
+            stack.extend(node.operands)
+    return {ref: tuple(values) for ref, values in found.items()}
+
+
 __all__ = [
     "RESERVED_NAMES",
     "WHEN_OUTSIDE_GRAMMAR_CODE",
@@ -309,4 +326,5 @@ __all__ = [
     "validate_envelope_when",
     "validate_plan_when",
     "when_column_refs",
+    "when_literals_by_ref",
 ]

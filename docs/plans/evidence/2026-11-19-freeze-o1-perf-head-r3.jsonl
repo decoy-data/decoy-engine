@@ -1,0 +1,9 @@
+{"route": "full_frame", "cls": "plain", "rows": 10000000, "variant": "float_literal", "rss_before_mb": 594, "peak_rss_mb": 2141, "wall_s": 14.12, "eval_s": 0.135, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "plain", "rows": 10000000, "variant": "object_literal", "rss_before_mb": 596, "peak_rss_mb": 1255, "wall_s": 2.35, "eval_s": 1.352, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "fk", "rows": 10000000, "variant": "float_literal", "rss_before_mb": 615, "peak_rss_mb": 3126, "wall_s": 108.33, "eval_s": 0.128, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "fk", "rows": 10000000, "variant": "object_literal", "rss_before_mb": 615, "peak_rss_mb": 2383, "wall_s": 83.68, "eval_s": 1.305, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "declared", "rows": 10000000, "variant": "float_literal", "rss_before_mb": 1476, "peak_rss_mb": 2612, "wall_s": 61.4, "eval_s": 0.264, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "declared", "rows": 10000000, "variant": "object_literal", "rss_before_mb": 1476, "peak_rss_mb": 1969, "wall_s": 44.74, "eval_s": 1.523, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "anchor", "rows": 10000000, "variant": "float_literal", "rss_before_mb": 786, "peak_rss_mb": 3518, "wall_s": 234.26, "eval_s": 0.129, "frame_s": 0.0, "eval_calls": 1}
+{"route": "full_frame", "cls": "anchor", "rows": 10000000, "variant": "object_literal", "rss_before_mb": 729, "peak_rss_mb": 3515, "wall_s": 215.47, "eval_s": 1.515, "frame_s": 0.0, "eval_calls": 1}
+{"route": "unified", "cls": "plain", "rows": 10000000, "variant": "numexpr", "rss_before_mb": 594, "peak_rss_mb": 2534, "wall_s": 20.11, "eval_s": 0.366, "frame_s": 0.0, "eval_calls": 2}
