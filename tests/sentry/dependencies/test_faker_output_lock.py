@@ -1,4 +1,4 @@
-"""Sentry: Faker output may not move unseen (FAKER-MIGRATE, AT-L1 to AT-L13).
+"""Sentry: Faker output may not move unseen (FAKER-MIGRATE, AT-L1 to AT-L18).
 
 `scripts/faker-determinism/output_lock.json` records, for every Faker locale, digests of what the
 engine's two Faker surfaces return under a frozen clock. These cells re-run the workers and diff
@@ -110,7 +110,7 @@ def _stub(tmp_path: Path, body: str) -> str:
 def _minimal_lock() -> dict[str, Any]:
     digest = "a" * 64
     return {
-        "lock_version": 1,
+        "lock_version": 2,
         "faker_version": "40.23.0",
         "codec_version": 1,
         "samples": 8,
@@ -130,6 +130,16 @@ def _minimal_lock() -> dict[str, Any]:
                     "person_email": {"batch": "raises:AdapterError/KeyError", "calendar": True}
                 },
                 "raw": {"dob_anchored": {"draws": digest, "calendar": False}},
+                "argumented": {
+                    "date_between.date_objects": {
+                        "arguments": {
+                            "args": [],
+                            "kwargs": {"start_date": {"date": "2000-01-01"}, "end_date": "today"},
+                        },
+                        "draws": digest,
+                        "calendar": False,
+                    }
+                },
             }
         },
     }
@@ -198,7 +208,11 @@ def test_lock_is_closed_and_strict() -> None:
     assert output_lock.check_lock_shape(_minimal_lock()) == []
 
 
-@pytest.mark.parametrize("path", _leaf_paths(_minimal_lock()), ids=lambda p: ".".join(map(str, p)))
+# Argument descriptors accept several scalar types by design; AT-L18 tests them on their own.
+_STORED_FIELDS = [p for p in _leaf_paths(_minimal_lock()) if "arguments" not in p]
+
+
+@pytest.mark.parametrize("path", _STORED_FIELDS, ids=lambda p: ".".join(map(str, p)))
 def test_every_stored_field_refuses_wrong_types(path: tuple[Any, ...]) -> None:
     good = _minimal_lock()
     for wrong in _WRONG_TYPES:
@@ -347,6 +361,7 @@ def _fake_runner(by_seed: dict[int, str], seen: list[tuple[str, int]] | None = N
                 "reflected": {"passport_gender": cell},
                 "adapter": {},
                 "raw": {},
+                "argumented": {},
             }
         }
 
@@ -652,3 +667,223 @@ def test_raw_shapes_are_in_the_capture(small_baseline: dict[str, Any]) -> None:
     assert set(small_baseline["en_US"]["raw"]) == want
     assert set(small_baseline["pt_BR"]["raw"]) == {"dob_anchored"}
     assert small_baseline["en_US"]["raw"] == _load_lock()["locales"]["en_US"]["raw"]
+
+
+# --- argument-bearing calls (AT-L16 to AT-L18) -------------------------------------------------
+
+_ARG_STUBS = {
+    # (a) the counterexample: output moves only when `start_date` is supplied.
+    "date_between_start_date": (
+        "import functools\n"
+        "from faker.providers.date_time import Provider as P\n"
+        "_orig = P.date_between\n"
+        "@functools.wraps(_orig)\n"
+        "def _w(self, *a, **k):\n"
+        "    out = _orig(self, *a, **k)\n"
+        "    return out.replace(year=out.year - 1) if 'start_date' in k else out\n"
+        "P.date_between = _w\n"
+    ),
+    # (b) output moves only when a bound is a date object.
+    "date_between_date_object": (
+        "import datetime, functools\n"
+        "from faker.providers.date_time import Provider as P\n"
+        "_orig = P.date_between\n"
+        "@functools.wraps(_orig)\n"
+        "def _w(self, *a, **k):\n"
+        "    out = _orig(self, *a, **k)\n"
+        "    objs = [v for v in (*a, *k.values()) if isinstance(v, datetime.date)]\n"
+        "    return out.replace(year=out.year - 1) if objs else out\n"
+        "P.date_between = _w\n"
+    ),
+    # (c) anchored date of birth moves only for a non-default age bound.
+    "anchored_dob_age_bounds": (
+        "import datetime, functools\n"
+        "import _engine_access as a\n"
+        "_orig = a.anchored_date_of_birth\n"
+        "@functools.wraps(_orig)\n"
+        "def _w(fake, tzinfo=None, minimum_age=0, maximum_age=115):\n"
+        "    out = _orig(fake, tzinfo, minimum_age, maximum_age)\n"
+        "    if (minimum_age, maximum_age) == (0, 115):\n"
+        "        return out\n"
+        "    return out + datetime.timedelta(days=1)\n"
+        "a.anchored_date_of_birth = _w\n"
+    ),
+}
+_ARG_EXPECTED_CHANGED = {
+    "date_between_start_date": {
+        "date_between.relative",
+        "date_between.absolute_strings",
+        "date_between.date_objects",
+        "date_between.equal_boundary",
+    },
+    "date_between_date_object": {"date_between.date_objects", "date_between.equal_boundary"},
+    "anchored_dob_age_bounds": {
+        "date_of_birth.adult_range",
+        "date_of_birth.equal_age_boundary",
+        "date_of_birth.adult_positional",
+    },
+}
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("name", sorted(_ARG_STUBS))
+def test_argument_only_changes_are_locked(
+    name: str, small_baseline: dict[str, Any], tmp_path: Path
+) -> None:
+    diff = _small_diff(small_baseline, _stub(tmp_path, _ARG_STUBS[name]))
+    moved = {
+        n.split(" argumented ", 1)[1].split(" ", 1)[0]
+        for n in diff["changed"]
+        if " argumented " in n
+    }
+    assert {m for m in moved} == _ARG_EXPECTED_CHANGED[name]
+    # No call without the argument moved: the reflected cells stay green (the lock's old blind spot).
+    assert not [n for n in diff["changed"] if " reflected " in n]
+    assert "SECRET" not in _names(diff)
+
+
+def _formula_forwarding_methods(source: str) -> set[str]:
+    """Faker methods the formula scope exposes with caller-supplied arguments, from its AST.
+
+    A dict value `self.faker.<m>` binds the method itself; a lambda that takes `*args` or `**kwargs`
+    forwards them, to `self.faker.<m>` or to the anchored date-of-birth helper (keyed by its name)."""
+    import ast
+
+    tree = ast.parse(source)
+    scope = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_formula_scope"
+    )
+    table = next(
+        n.value
+        for n in ast.walk(scope)
+        if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)
+    )
+    out: set[str] = set()
+    for key, value in zip(table.keys, table.values, strict=True):
+        if isinstance(value, ast.Attribute) and ast.unparse(value.value) == "self.faker":
+            out.add(value.attr)
+        elif isinstance(value, ast.Lambda) and (value.args.vararg or value.args.kwarg):
+            calls = [ast.unparse(c.func) for c in ast.walk(value.body) if isinstance(c, ast.Call)]
+            if "anchored_date_of_birth" in calls and isinstance(key, ast.Constant):
+                out.add(str(key.value))
+            out.update(c.removeprefix("self.faker.") for c in calls if c.startswith("self.faker."))
+    return out
+
+
+_FORMULA_SOURCE = ROOT / "src" / "decoy_engine" / "generators" / "_formula.py"
+
+
+def test_every_argument_forwarding_formula_helper_has_grid_cases() -> None:
+    source = _FORMULA_SOURCE.read_text(encoding="utf-8")
+    assert _formula_forwarding_methods(source) == {m for m, _ in output_lock.grid_cells()}
+    # A new forwarding helper without a grid entry is caught (the seeded scratch copy).
+    seeded = source.replace(
+        '"date_between": self.faker.date_between,',
+        '"date_between": self.faker.date_between,\n'
+        '            "date_time_between": self.faker.date_time_between,',
+        1,
+    )
+    assert seeded != source
+    assert _formula_forwarding_methods(seeded) != {m for m, _ in output_lock.grid_cells()}
+
+
+# Faker-forwarding call families the lock covers: a call that spreads `**kwargs` into a callee
+# named like a provider. A file outside this table is a new family with no lock surface.
+_FORWARDING_FAMILIES = {
+    "generation/_column_streams.py": "reflected wrapper",
+    "generation/_faker_pool.py": "reflected wrapper",
+    "generation/_unique.py": "reflected wrapper",
+    "generation/synthesize.py": "reflected wrapper",
+    "generators/columns.py": "reflected wrapper",
+    "internal/faker_setup.py": "reflected wrapper and its address override",
+    "execution/native/_draw_site_providers_gen_pool.py": "reflected wrapper (native mirror)",
+    "execution/native/protocol/providers_gen.py": "reflected wrapper (native mirror)",
+    "providers_v2/_faker_adapter.py": "adapter",
+}
+
+
+def _forwarding_files(root: Path) -> set[str]:
+    import ast
+    import re
+
+    found: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and any(k.arg is None for k in node.keywords)
+                and re.search(r"(?i)faker|fake|provider|method", ast.unparse(node.func))
+            ):
+                found.add(path.relative_to(root).as_posix())
+    return found
+
+
+def test_a_new_faker_forwarding_family_is_reported(tmp_path: Path) -> None:
+    found = _forwarding_files(ROOT / "src" / "decoy_engine")
+    assert found <= set(_FORWARDING_FAMILIES), sorted(found - set(_FORWARDING_FAMILIES))
+    (tmp_path / "new.py").write_text("def f(provider, kw):\n    return provider(**kw)\n")
+    assert _forwarding_files(tmp_path) == {"new.py"}
+
+
+_EXPECTED_GRID = {
+    "date_between.relative": ([], {"start_date": "-30y", "end_date": "today"}),
+    "date_between.absolute_strings": ([], {"start_date": "2000-01-01", "end_date": "2000-12-31"}),
+    "date_between.date_objects": (
+        [],
+        {"start_date": {"date": "2000-01-01"}, "end_date": {"date": "2000-12-31"}},
+    ),
+    "date_between.equal_boundary": (
+        [],
+        {"start_date": {"date": "2000-01-01"}, "end_date": {"date": "2000-01-01"}},
+    ),
+    "future_date.relative": ([], {"end_date": "+30d"}),
+    "future_date.absolute_string": ([], {"end_date": "2030-01-01"}),
+    "future_date.date_object": ([], {"end_date": {"date": "2030-01-01"}}),
+    "past_date.relative": ([], {"start_date": "-30d"}),
+    "past_date.absolute_string": ([], {"start_date": "2000-01-01"}),
+    "past_date.date_object": ([], {"start_date": {"date": "2000-01-01"}}),
+    "date_of_birth.full_bounds": ([], {"minimum_age": 0, "maximum_age": 115}),
+    "date_of_birth.adult_range": ([], {"minimum_age": 18, "maximum_age": 65}),
+    "date_of_birth.equal_age_boundary": ([], {"minimum_age": 18, "maximum_age": 18}),
+    "date_of_birth.adult_positional": ([None, 18, 65], {}),
+}
+for _m in ("date_this_decade", "date_this_year", "date_this_month"):
+    for _case, _kw in (
+        ("before_only", (True, False)),
+        ("after_only", (False, True)),
+        ("both_sides", (True, True)),
+        ("neither_side", (False, False)),
+    ):
+        _EXPECTED_GRID[f"{_m}.{_case}"] = ([], {"before_today": _kw[0], "after_today": _kw[1]})
+
+
+def test_argument_grid_is_fixed_and_strict() -> None:
+    cells = {f"{m}.{c}": (a, k) for (m, c), (a, k) in output_lock.grid_cells().items()}
+    assert cells == _EXPECTED_GRID
+    methods = {m for m, _ in output_lock.grid_cells()}
+    assert all(any(m == x for x, _ in output_lock.grid_cells()) for m in methods)
+    # Decoding then re-encoding is byte-identical for every descriptor.
+    for args, kwargs in cells.values():
+        for d in (*args, *kwargs.values()):
+            again = output_lock.encode_descriptor(output_lock.decode_descriptor(d))
+            assert json.dumps(again, sort_keys=True) == json.dumps(d, sort_keys=True)
+    good = _minimal_lock()
+    assert output_lock.check_lock_shape(good) == []
+    path = ("locales", "en_US", "argumented", "date_between.date_objects", "arguments")
+    for bad in (
+        {"args": [], "kwargs": {"start_date": {"date": 1}}},
+        {"args": [], "kwargs": {"start_date": {"date": "2000-13-45"}}},
+        {"args": [], "kwargs": {"start_date": {"date": "2000-01-01\n"}}},
+        {"args": [], "kwargs": {"start_date": {"date": "2000-01-01", "x": 1}}},
+        {"args": [], "kwargs": {"start_date": {"when": "2000-01-01"}}},
+        {"args": [], "kwargs": {"start_date": 1.5}},
+        {"args": [], "kwargs": {"start_date": [1]}},
+        {"args": {}, "kwargs": {}},
+        {"args": [], "kwargs": []},
+        {"args": []},
+        {"args": [], "kwargs": {}, "extra": 1},
+    ):
+        broken = copy.deepcopy(good)
+        _set_at(broken, path, bad)
+        assert output_lock.check_lock_shape(broken), bad
