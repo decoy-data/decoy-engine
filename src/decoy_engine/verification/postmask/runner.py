@@ -18,14 +18,40 @@ hook catches that + writes a JobPostScanIntegrityReport with
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from typing import Any
+from decimal import Decimal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+import pyarrow as pa
 
-from decoy_engine.verification.postmask.fk_preservation import check_fk_preservation
-from decoy_engine.verification.postmask.policy_validation import check_policy_validation
-from decoy_engine.verification.postmask.residual_pii import check_residual_pii
+from decoy_engine import fileaccess
+from decoy_engine.detection.types import DetectorRun
+from decoy_engine.internal.memory_limit import parse_megabytes
+from decoy_engine.internal.pandas_missing import is_null_cell
+from decoy_engine.profiling import MEMORY_LIMIT, passes_through
+from decoy_engine.verification.postmask import _model_findings
+from decoy_engine.verification.postmask._blocked import severity_counts
+from decoy_engine.verification.postmask._column_facts import ColumnFacts, column_facts
+from decoy_engine.verification.postmask._keys import KeyResult
+from decoy_engine.verification.postmask._stream_input import TableBatches, from_table
+from decoy_engine.verification.postmask.distribution import (
+    DistributionInput,
+    check_distribution,
+    distribution_value_columns,
+    warn_only,
+)
+from decoy_engine.verification.postmask.fk_preservation import fk_findings
+
+# The runner keeps its check names: callers and tests patch them here to fail one check.
+from decoy_engine.verification.postmask.policy_validation import (
+    policy_findings as check_policy_validation,
+)
+from decoy_engine.verification.postmask.residual_pii import (
+    residual_pii_findings as check_residual_pii,
+)
 from decoy_engine.verification.postmask.types import (
     SCHEMA_VERSION,
     FKPreservationFinding,
@@ -34,12 +60,18 @@ from decoy_engine.verification.postmask.types import (
     ResidualPIIFinding,
 )
 
+if TYPE_CHECKING:
+    from decoy_engine.profiling.model_pack import DetectorSet
+
 
 def run_post_mask(
     source_frames: dict[str, pd.DataFrame],
     output_frames: dict[str, pd.DataFrame],
     *,
     config: dict[str, Any],
+    detectors: DetectorSet | None = None,
+    keys: Sequence[KeyResult] | None = None,
+    distribution: DistributionInput | None = None,
 ) -> dict[str, Any]:
     """Run all three post-mask check categories + assemble the report.
 
@@ -51,10 +83,21 @@ def run_post_mask(
             for all three checks.
         config: the validated pipeline config dict (from
             ``PipelineConfig.model_validate(yaml).model_dump()``).
-            Used to look up configured masks + relationships.
+            Used to look up configured masks + relationships, and the
+            ``post_scan`` dismissals and ``ner_findings`` mode.
+        detectors: the strictly loaded detector set (``load_detectors``).
+            ``None`` (the platform hook) runs the regex detectors only,
+            as before. With a set, each model it holds runs over every
+            output frame after the regex pass, each in its own
+            try/except, and the ``post_scan.detectors`` log lines are
+            written.
+        keys: the declared keys' facts (`check_keys`) when the caller has counted them; the
+            FK findings derive from these. None counts them here from the two frame dicts.
+        distribution: what the `post_scan.distribution` check reads; `None` runs no check and the
+            report has no `distribution` section.
 
     Returns:
-        A post-scan-integrity/v2 report dict. JSON-serializable (every
+        A post-scan-integrity/v3 report dict. JSON-serializable (every
         field is a primitive or list of dataclass-asdict'd findings).
         Caller persists this to JobPostScanIntegrityReport.report_json.
 
@@ -73,6 +116,143 @@ def run_post_mask(
     if not isinstance(config, dict):
         raise TypeError(f"run_post_mask: config must be a dict, got {type(config).__name__}")
 
+    with fileaccess.protected_scratch_dir(prefix="decoy-post-scan-columns-") as scratch:
+        return _assemble(
+            config,
+            lambda: _frame_tables(source_frames, output_frames),
+            lambda: fk_findings(config, source_frames, output_frames, keys),
+            scratch=scratch,
+            memory_limit=MEMORY_LIMIT,
+            tables_checked=tuple(str(name) for name in output_frames),
+            models=(output_frames, detectors) if detectors is not None else None,
+            distribution=distribution,
+        )
+
+
+def run_post_mask_tables(
+    source_tables: Mapping[str, TableBatches],
+    output_tables: Mapping[str, TableBatches],
+    *,
+    config: Mapping[str, Any],
+    keys: Sequence[KeyResult],
+    scratch: Path,
+    memory_limit: str,
+    distribution: DistributionInput | None = None,
+) -> dict[str, Any]:
+    """`run_post_mask` over tables the run holds as batches. The caller counted the declared keys
+    (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches. Regex
+    detectors only: a model ask keeps its run resident (`post_scan_resident_reason`)."""
+    if _megabytes(memory_limit) > _megabytes(MEMORY_LIMIT):
+        raise ValueError("run_post_mask_tables: memory_limit is above the post-scan cap")
+    return _assemble(
+        dict(config),
+        lambda: (dict(source_tables), dict(output_tables), {}),
+        lambda: fk_findings(config, {}, {}, keys),
+        scratch=scratch,
+        memory_limit=memory_limit,
+        tables_checked=tuple(str(name) for name in output_tables),
+        distribution=distribution,
+    )
+
+
+def _megabytes(limit: str) -> int:
+    limit_mb = parse_megabytes(limit)
+    if limit_mb is None:
+        raise ValueError("run_post_mask_tables: memory_limit must look like '512MB'")
+    if limit_mb == 0:
+        raise ValueError("run_post_mask_tables: memory_limit must be above zero")
+    return limit_mb
+
+
+def _native(series: pd.Series) -> pa.Array | None:
+    try:
+        return pa.array(series, from_pandas=True)
+    except Exception as exc:
+        if passes_through(exc):
+            raise
+        return None
+
+
+def _text(series: pd.Series) -> pa.Array:
+    return pa.array(
+        [None if is_null_cell(v) else _key(v) for v in series.tolist()], type=pa.string()
+    )
+
+
+def _key(value: object) -> str:
+    """Text that is equal for equal numbers whatever their type, as pandas `==` treats them: a
+    float 10001.0 and an int 10001 must not read as two values, or a leaked source value looks
+    changed."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(int(value))
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else repr(value)
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            return str(value)
+        if value == value.to_integral_value():
+            return str(int(value))
+        return format(value.normalize(), "f")
+    return str(value)
+
+
+def _frame_table(name: str, frame: pd.DataFrame, other: pd.DataFrame | None) -> TableBatches:
+    """`frame` as Arrow, column by column. A column Arrow will not take (mixed int and str,
+    Decimal with float, a set) is carried as the text of each value, which is all the detectors
+    read. The choice is made for the column on both sides at once: if either side needs the text,
+    both get it, so a source int and an output "1" still compare equal as they do in pandas."""
+    names = [str(c) for c in frame.columns]
+    other_at = (
+        {} if other is None else {str(c): n for n, c in reversed(list(enumerate(other.columns)))}
+    )
+    arrays = []
+    for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
+        paired = names[n] in other_at and other is not None
+        native = _native(series)
+        if paired and other is not None:
+            native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
+        arrays.append(native if native is not None else _text(series))
+    return from_table(name, pa.Table.from_arrays(arrays, names))
+
+
+def _frame_tables(
+    source_frames: dict[str, pd.DataFrame], output_frames: dict[str, pd.DataFrame]
+) -> tuple[dict[str, TableBatches], dict[str, TableBatches], dict[str, str]]:
+    """Both sides as tables. A name whose frame cannot be converted at all is left out of both
+    and recorded with the error's class name, so the other tables are still checked."""
+    src: dict[str, TableBatches] = {}
+    out: dict[str, TableBatches] = {}
+    failed: dict[str, str] = {}
+    for name, out_frame in output_frames.items():
+        try:
+            src_frame = source_frames.get(name)
+            out_table = _frame_table(name, out_frame, src_frame)
+            if src_frame is not None:
+                src[name] = _frame_table(name, src_frame, out_frame)
+            out[name] = out_table
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            src.pop(name, None)
+            failed[name] = type(exc).__name__
+    return src, out, failed
+
+
+def _assemble(
+    config: Mapping[str, Any],
+    get_tables: Callable[
+        [], tuple[dict[str, TableBatches], dict[str, TableBatches], dict[str, str]]
+    ],
+    get_fk: Callable[[], list[FKPreservationFinding]],
+    *,
+    scratch: Path,
+    memory_limit: str,
+    tables_checked: tuple[str, ...],
+    models: tuple[Mapping[str, pd.DataFrame], DetectorSet] | None = None,
+    distribution: DistributionInput | None = None,
+) -> dict[str, Any]:
     residual_pii: list[ResidualPIIFinding] = []
     fk_preservation: list[FKPreservationFinding] = []
     policy_validation: list[PolicyValidationFinding] = []
@@ -88,9 +268,25 @@ def run_post_mask(
     # report. The typed name (`{type(exc).__name__}`) is sufficient
     # for the operator to find the underlying error in the job log,
     # where the full exception text already lives at the catch site.
+    # A coded engine error (a file-access or lazy-source refusal) is not a check failure: it
+    # propagates unchanged through `passes_through`, the rule pre-scan applies too.
+    # One facts pass feeds both column checks. A table or column that fails is isolated: its
+    # error is recorded by class name and the other tables and columns are still checked.
+    source_tables, output_tables, failed = get_tables()
+    facts, suite_failed = _suite_facts(
+        source_tables,
+        output_tables,
+        scratch=scratch,
+        memory_limit=memory_limit,
+        distribution=distribution,
+    )
+    failed = {**failed, **suite_failed}
+
     try:
-        residual_pii = check_residual_pii(output_frames, config, source_frames=source_frames)
+        residual_pii = check_residual_pii(facts, config, failed)
     except Exception as exc:
+        if passes_through(exc):
+            raise
         residual_pii = [
             ResidualPIIFinding(
                 table="",
@@ -102,9 +298,20 @@ def run_post_mask(
             )
         ]
 
+    # Model passes sit outside the wrapper above: it would replace every regex finding with one
+    # error row, and hide that the error came from a model.
+    if models is not None:
+        frames, detectors = models
+        residual_pii = [*residual_pii, *_model_findings.model_findings(frames, config, detectors)]
+    residual_pii, stale = _model_findings.review(residual_pii, config)
+    if models is not None:
+        _model_findings.log_post_scan(frames, config, detectors, residual_pii, stale)
+
     try:
-        fk_preservation = check_fk_preservation(output_frames, config)
+        fk_preservation = get_fk()
     except Exception as exc:
+        if passes_through(exc):
+            raise
         fk_preservation = [
             FKPreservationFinding(
                 parent_table="",
@@ -120,8 +327,12 @@ def run_post_mask(
         ]
 
     try:
-        policy_validation = check_policy_validation(source_frames, output_frames, config)
+        policy_validation = check_policy_validation(
+            config, source_tables, output_tables, facts, failed
+        )
     except Exception as exc:
+        if passes_through(exc):
+            raise
         policy_validation = [
             PolicyValidationFinding(
                 table="",
@@ -132,21 +343,32 @@ def run_post_mask(
             )
         ]
 
+    # Rows are `warning` at most while the check is warn-only; a table it cannot read is a row too.
+    distribution_rows = (
+        warn_only(
+            check_distribution(
+                distribution,
+                output_tables,
+                facts,
+                failed,
+                scratch=scratch,
+                memory_limit=memory_limit,
+            )
+        )
+        if distribution is not None
+        else None
+    )
+
     # Tally severity counters for the FE summary line.
-    pass_count = 0
-    warning_count = 0
-    fail_count = 0
-    error_count = 0
-    for finding in (*residual_pii, *fk_preservation, *policy_validation):
-        sev = getattr(finding, "severity", "info")
-        if sev == "info":
-            pass_count += 1
-        elif sev == "warning":
-            warning_count += 1
-        elif sev == "fail":
-            fail_count += 1
-        elif sev == "error":
-            error_count += 1
+    pass_count, warning_count, fail_count, error_count = severity_counts(
+        getattr(finding, "severity", "info")
+        for finding in (
+            *residual_pii,
+            *fk_preservation,
+            *policy_validation,
+            *(distribution_rows or ()),
+        )
+    )
 
     # Dennis M23 fix (2026-06-01): stamp generated_at at report
     # construction so the JobPostScanIntegrityReport row column + the engine
@@ -165,8 +387,41 @@ def run_post_mask(
         error_count=error_count,
         pass_failed_with=pass_failed_with,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        detectors=models[1].runs() if models is not None else (DetectorRun("regex", None),),
+        tables_checked=tables_checked,
+        distribution=distribution_rows,
     )
     return _report_to_dict(report)
+
+
+def _suite_facts(
+    source_tables: Mapping[str, TableBatches],
+    output_tables: Mapping[str, TableBatches],
+    *,
+    scratch: Path,
+    memory_limit: str,
+    distribution: DistributionInput | None = None,
+) -> tuple[dict[str, dict[str, ColumnFacts]], dict[str, str]]:
+    """Facts for every output column, per output table, against its source when it has one, and
+    the class name of the error for each table whose facts could not be computed. Output null
+    counts and moments are tallied only for the columns a distribution check reads."""
+    facts: dict[str, dict[str, ColumnFacts]] = {}
+    failed: dict[str, str] = {}
+    for name, table in output_tables.items():
+        try:
+            facts[name] = column_facts(
+                source_tables.get(name),
+                table,
+                table.schema.names,
+                scratch=scratch,
+                memory_limit=memory_limit,
+                value_columns=distribution_value_columns(distribution, name),
+            )
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            failed[name] = type(exc).__name__
+    return facts, failed
 
 
 def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
@@ -176,7 +431,7 @@ def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
     level by hand so the field ordering matches the schema and so
     the platform persistence layer can rely on stable key names.
     """
-    return {
+    out: dict[str, Any] = {
         "schema_version": report.schema_version,
         "generated_at": report.generated_at,
         "residual_pii": [asdict(f) for f in report.residual_pii],
@@ -187,4 +442,10 @@ def _report_to_dict(report: PostMaskReport) -> dict[str, Any]:
         "fail_count": report.fail_count,
         "error_count": report.error_count,
         "pass_failed_with": report.pass_failed_with,
+        "detectors": [asdict(run) for run in report.detectors],
+        "tables_checked": list(report.tables_checked),
+        "config_sha256": report.config_sha256,
     }
+    if report.distribution is not None:
+        out["distribution"] = [f.as_dict() for f in report.distribution]
+    return out

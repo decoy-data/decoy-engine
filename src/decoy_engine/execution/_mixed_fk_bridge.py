@@ -51,8 +51,11 @@ from decoy_engine.execution._fk_keys import (
     lossless_fk_int_values,
     to_pandas_fk_safe,
 )
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, resolve_fk_keys
-from decoy_engine.execution.out_of_core._join import orphan_fk_warning
+from decoy_engine.execution._fk_resolve import (
+    orphan_fk_violation_error,
+    orphan_fk_warning,
+    resolve_fk_keys,
+)
 from decoy_engine.relationships._graph import OrphanPolicy
 
 if TYPE_CHECKING:
@@ -163,7 +166,9 @@ def _resolve_arrow(
         return FkResolution(column=resolved_arr.cast(pa.string()), warnings=warnings)
     # to_pylist (not the Arrow array): the write-back classifier recognises
     # Python ints exactly; an Arrow input would widen int32+null / uint64 to double.
-    column = _write_back_fk_column(child_table, child_column, resolved.to_pylist())
+    column = _write_back_fk_column(
+        edge.child_table, child_table, child_column, resolved.to_pylist()
+    )
     return FkResolution(column=column, warnings=warnings)
 
 
@@ -186,7 +191,7 @@ def _resolve_python(
         errored_parent_keys=None,
     )
     values: list[object] = [None if key is None else key[0] for key in masked_keys]
-    column = _write_back_fk_column(child_table, child_column, values)
+    column = _write_back_fk_column(edge.child_table, child_table, child_column, values)
     return FkResolution(column=column, warnings=tuple(warnings))
 
 
@@ -244,7 +249,7 @@ def _reject_remap(edge: RelationshipEdge) -> Callable[[list[_KeyTuple]], list[_K
 
 
 def _write_back_fk_column(
-    child_table: pa.Table, child_column: str, values: list[object]
+    table_name: str, child_table: pa.Table, child_column: str, values: list[object]
 ) -> pa.Array:
     """Materialize the resolved child FK column through the SAME pandas->Arrow
     write-back boundary `_pandas_adapter.py::_resolve_fk_node` uses: ingest the
@@ -261,7 +266,9 @@ def _write_back_fk_column(
     if safe_ints is not None and all(v is None for v in safe_ints):
         frame[child_column] = fk_all_null_array(len(safe_ints), frame[child_column].dtype)
     elif safe_ints is not None:
-        frame[child_column] = fk_nullable_int_array(safe_ints)
+        frame[child_column] = fk_nullable_int_array(
+            safe_ints, table=table_name, column=child_column
+        )
     else:
         frame[child_column] = values
     resolved = pa.Table.from_pandas(frame, preserve_index=False)

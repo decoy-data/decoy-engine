@@ -57,15 +57,22 @@ _INTEGER_TYPES = {
 }
 
 
-def arrow_type(model: C.DeclaredColumnContractV1) -> pa.DataType:
-    p = model.parse_format
-    if model.logical_type == "string":
+def arrow_type_for_spec(parse_format: Any) -> pa.DataType:
+    """The Arrow type a validated parse format yields (one mapping for declared and generated cells)."""
+    logical = type(parse_format).logical
+    if logical == "string":
         return pa.string()
-    if model.logical_type == "integer":
-        return _INTEGER_TYPES[(bool(p.signed), p.bit_width)]()
-    if model.logical_type in ("decimal", "currency"):
-        return pa.decimal128(p.precision, p.scale)
+    if logical == "integer":
+        return _INTEGER_TYPES[(bool(parse_format.signed), parse_format.bit_width)]()
+    if logical in ("decimal", "currency"):
+        return pa.decimal128(parse_format.precision, parse_format.scale)
+    if logical == "boolean":
+        return pa.bool_()
     return pa.date32()
+
+
+def arrow_type(model: C.DeclaredColumnContractV1) -> pa.DataType:
+    return arrow_type_for_spec(model.parse_format)
 
 
 @dataclass(frozen=True)
@@ -195,6 +202,16 @@ class DeclaredCastRun:
 
     def tables(self) -> frozenset[str]:
         return frozenset(self._tables)
+
+    def declared_columns(self, table: str) -> tuple[str, ...]:
+        """The columns of `table` this run casts (a re-read must carry them all)."""
+        return tuple(c.name for c in self._tables[table])
+
+    def quarantine_tables(self) -> frozenset[str]:
+        """Tables with at least one quarantine-policy column: the only ones whose cast drops rows."""
+        return frozenset(
+            t for t, cols in self._tables.items() if any(c.policy == "quarantine" for c in cols)
+        )
 
     def format_tables(self) -> frozenset[str]:
         """Tables with at least one output format, i.e. those that need a post-mask stage."""

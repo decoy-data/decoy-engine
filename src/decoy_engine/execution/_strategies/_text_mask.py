@@ -32,6 +32,7 @@ Config keys accepted via ``plan.provider_config``:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
@@ -39,11 +40,50 @@ import pandas as pd
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
 from decoy_engine.errors import FpeUnencryptableError
-from decoy_engine.execution._adapter import StrategyContext, provider_config_to_dict
+from decoy_engine.execution._adapter import (
+    StrategyContext,
+    StrategyOption,
+    option,
+    provider_config_to_dict,
+)
 from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._strategies._ner_config import (
+    NER_WIZARD_OPTIONS,
+    enforce_ner_model_version,
+    resolve_ner_config,
+)
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.text_mask import mask_cell
+
+# The note every route attaches to the sub-floor warning.
+_SUB_FLOOR_NOTE = (
+    "these spans' domain was below the FF1 minimum admissible "
+    "domain, or failed checksum validation, and could not be "
+    "FF1-encrypted; they were handled under the configured "
+    "sub_floor_span policy instead (non-reversible)."
+)
+
+
+def text_mask_sub_floor_warning(
+    notices: Mapping[str, int], *, policy: str | None, column: str
+) -> QualityWarning:
+    """The one aggregate `text_mask_sub_floor_span_handled` warning for `notices`.
+
+    Every route builds it here: `TextMaskHandler.run`, the native unified and chunked routes and
+    the out-of-core runners, so the warnings cannot drift. `by_detector` is `name=count` pairs
+    joined with ", " in name order, because `detail` holds scalars only."""
+    return QualityWarning(
+        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
+        provider="text_mask",
+        column=column,
+        detail={
+            "policy": policy,
+            "by_detector": ", ".join(f"{name}={count}" for name, count in sorted(notices.items())),
+            "total": sum(notices.values()),
+            "note": _SUB_FLOOR_NOTE,
+        },
+    )
 
 
 class TextMaskHandler:
@@ -56,6 +96,20 @@ class TextMaskHandler:
     """
 
     name: str = "text_mask"
+    namespace_required: bool = False
+    join_safe: bool = False
+    wizard_options: tuple[StrategyOption, ...] = (
+        option("token", "str", "[GONE]"),
+        option(
+            "unmatched_span_policy",
+            "str",
+            "replace_with_token",
+            # A wizard must not offer leaving unmatched text unmasked; hand-edited configs still can.
+            choices=("redact", "replace_with_token"),
+        ),
+        *NER_WIZARD_OPTIONS,
+    )
+    offer_in_wizard: bool = True
 
     def run(
         self,
@@ -97,37 +151,14 @@ class TextMaskHandler:
         # installed spaCy model no longer matches the version stamped at compile
         # (plan.ner_model_version). Runs before any iter_ner_spans call, so it
         # needs no spaCy pipeline; skipped when no version was stamped.
-        ner_cfg = cfg.get("ner")
-        ner_model: str | None = None
-        ner_entities: list[str] | None = None
-        if ner_cfg:
-            from decoy_engine.detection.ner import DEFAULT_NER_MODEL
+        ner_model, ner_entities = resolve_ner_config(cfg)
 
-            if isinstance(ner_cfg, dict):
-                ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-                raw_entities = ner_cfg.get("entities")
-                if isinstance(raw_entities, (list, tuple)) and raw_entities:
-                    ner_entities = [str(e) for e in raw_entities]
-            else:
-                ner_model = DEFAULT_NER_MODEL
-
-        if ner_model is not None and plan.ner_model_version is not None:
-            from decoy_engine.detection.ner import installed_model_version
-
-            current_version = installed_model_version(ner_model)
-            if current_version is not None and current_version != plan.ner_model_version:
-                raise StrategyError(
-                    code=reasons.runtime.NER_MODEL_VERSION_MISMATCH,
-                    strategy="text_mask",
-                    message=(
-                        f"column {column!r}: NER model {ner_model!r} is installed at "
-                        f"version {current_version!r} but the plan was compiled against "
-                        f"{plan.ner_model_version!r}. spaCy model updates change masking "
-                        f"output for the same config + seed; recompile the plan against the "
-                        f"installed model (or pin the model version) to keep masked output "
-                        f"reproducible."
-                    ),
-                )
+        enforce_ner_model_version(
+            ner_model=ner_model,
+            plan_ner_model_version=plan.ner_model_version,
+            column=column,
+            strategy="text_mask",
+        )
 
         # SEQ seam, after the NER guard so a NER column keeps its handler behavior. The RESOLVED
         # detectors go through unchanged: None means all, and () would mean none.
@@ -234,21 +265,8 @@ class TextMaskHandler:
             # channel counterpart, mirroring how the fpe strategy aggregates
             # `fpe_partial_plaintext_disclosure`).
             warnings.append(
-                QualityWarning(
-                    code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-                    provider="text_mask",
-                    column=column,
-                    detail={
-                        "policy": sub_floor_span_policy,
-                        "by_detector": dict(sub_floor_notices),
-                        "total": sum(sub_floor_notices.values()),
-                        "note": (
-                            "these spans' domain was below the FF1 minimum admissible "
-                            "domain, or failed checksum validation, and could not be "
-                            "FF1-encrypted; they were handled under the configured "
-                            "sub_floor_span policy instead (non-reversible)."
-                        ),
-                    },
+                text_mask_sub_floor_warning(
+                    sub_floor_notices, policy=sub_floor_span_policy, column=column
                 )
             )
         return df, warnings

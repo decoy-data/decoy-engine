@@ -10,6 +10,7 @@ New to Decoy? Start with the quickstart, then the recipes.
 - [Recipes](recipes.md): five runnable recipes (CSV, folder + FKs, generate, detect PII, CI).
 - [Strategy catalog](strategies.md): every mask and generation strategy.
 - [Free-text NER](guides/free-text-ner.md): activating spaCy person-name/location detection on `text_redact`.
+- [Unique generated columns](guides/generate-uniqueness.md): `unique`, `unique_together` and `pooled` on generate columns; the domain checks and refusal codes.
 - [Relationships](relationships.md): foreign-key and referential-integrity preservation.
 - [Declared parsing, casting and quarantine](declared-casting.md): per-column parse formats, sentinels, error policies and output formats.
 - [Determinism](determinism.md): the seed and key protocol; what is and is not deterministic.
@@ -23,12 +24,12 @@ New to Decoy? Start with the quickstart, then the recipes.
 These guides live at the repo root, outside the Sphinx source tree, so they
 link to GitHub rather than into the rendered API reference.
 
-- [README](https://github.com/louiskeep/decoy-engine/blob/main/README.md): what the engine is, install, quickstart, public API.
-- [CODEMAP](https://github.com/louiskeep/decoy-engine/blob/main/CODEMAP.md): directory map and "Where Do I Find" pointers.
-- [CLAUDE](https://github.com/louiskeep/decoy-engine/blob/main/CLAUDE.md): agent best-practice notes.
-- [AGENTS](https://github.com/louiskeep/decoy-engine/blob/main/AGENTS.md): reading order for coding agents.
-- [CONTRIBUTING](https://github.com/louiskeep/decoy-engine/blob/main/CONTRIBUTING.md): build, test, and PR conventions.
-- [SECURITY](https://github.com/louiskeep/decoy-engine/blob/main/SECURITY.md): security posture and reporting channel.
+- [README](https://github.com/decoy-data/decoy-engine/blob/main/README.md): what the engine is, install, quickstart, public API.
+- [CODEMAP](https://github.com/decoy-data/decoy-engine/blob/main/CODEMAP.md): directory map and "Where Do I Find" pointers.
+- [CLAUDE](https://github.com/decoy-data/decoy-engine/blob/main/CLAUDE.md): agent best-practice notes.
+- [AGENTS](https://github.com/decoy-data/decoy-engine/blob/main/AGENTS.md): reading order for coding agents.
+- [CONTRIBUTING](https://github.com/decoy-data/decoy-engine/blob/main/CONTRIBUTING.md): build, test, and PR conventions.
+- [SECURITY](https://github.com/decoy-data/decoy-engine/blob/main/SECURITY.md): security posture and reporting channel.
 
 ## Security
 
@@ -37,26 +38,30 @@ link to GitHub rather than into the rendered API reference.
 - [Key derivation](security/key-derivation.md): the KeyProvider / `mask_secret_ref` model and HKDF-SHA256 derivation contract.
 - [Secret providers](security/secret-providers.md): the versioned `secret-provider/v1` contract, before-read admission, per-algorithm validation, cache/lifetime bounds and the HashiCorp Vault KV v2 adapter.
 - [SQL surfaces](security/sql-surfaces.md): parameter-binding posture across in-tree connectors.
+- [Signed evidence and offline verification](security/signed-evidence.md): the detached ES256/JCS evidence profile, the trust and lifecycle model, required-check gating, pinned expectations, and what is not yet shipped.
 - [Token vault](security/token-vault.md): handling and threat model for the reversible token vault.
 - [Protected quarantine](security/protected-quarantine.md): the encrypted, finite-retention store for rows a declared contract rejects, and its portable access token.
 - [DE-01: NIST SP 800-38G FF1 adoption](security/de-01-ff1-adoption.md): the FPE cipher, conformance claim, key/tweak model, and documented leakage (equality, fixed points, unauthenticated reversal).
-- [DE-01 FPE remediation design](https://github.com/louiskeep/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md): the tech-lead decision brief behind the fail-closed FPE fix (removal of the covering-hash fallback). Excluded from the built docs site (`docs/conf.py`); linked here for discoverability.
-- [DE-02 KeyProvider design](https://github.com/louiskeep/decoy-engine/blob/main/docs/security/de-02-keyprovider-design.md): the tech-lead decision brief behind the current key-derivation model. Excluded from the built docs site (`docs/conf.py`); linked here for discoverability.
+- [DE-01 FPE remediation design](https://github.com/decoy-data/decoy-engine/blob/main/docs/security/de-01-fpe-remediation-design.md): the tech-lead decision brief behind the fail-closed FPE fix (removal of the covering-hash fallback). Excluded from the built docs site (`docs/conf.py`); linked here for discoverability.
+- [DE-02 KeyProvider design](https://github.com/decoy-data/decoy-engine/blob/main/docs/security/de-02-keyprovider-design.md): the tech-lead decision brief behind the current key-derivation model. Excluded from the built docs site (`docs/conf.py`); linked here for discoverability.
 
 ## Parity
 
-- [Pandas/Polars semantic differences](https://github.com/louiskeep/decoy-engine/blob/main/tests/parity/SEMANTIC_DIFFERENCES.md): accepted-divergence catalog.
+- [Pandas/Polars semantic differences](https://github.com/decoy-data/decoy-engine/blob/main/tests/parity/SEMANTIC_DIFFERENCES.md): accepted-divergence catalog.
 
 ## Methodology
 
-- [Methodology registry](methodology-registry.yaml): citations for non-trivial domain primitives (per the "use established methodology" rule in the [CLAUDE](https://github.com/louiskeep/decoy-engine/blob/main/CLAUDE.md) guide).
+- [Methodology registry](methodology-registry.yaml): citations for non-trivial domain primitives (per the "use established methodology" rule in the [CLAUDE](https://github.com/decoy-data/decoy-engine/blob/main/CLAUDE.md) guide).
 
 ## Reference
 
 - [Capability matrix](capability-matrix.md): what the engine can and cannot do, by strategy and route.
+- [Distribution integrity developer reference](distribution-integrity/index.md): snapshots, fidelity scoring, the quality report and policy, statistical generation, the differential-privacy fit and its certified stack, and where to extend each.
 - [Execution backends and route coverage](execution-backends.md): which backend (compiled Rust, Arrow, or Python) computes each masking strategy per route, and where a shape is declined with a caller-visible reason; generation is Python/NumPy by design.
 - [Reason codes and progress events](reasons.md): the versioned reason registry, retry classes, outcome categories and the version-1 progress event schema.
 - [Compatibility contract](compatibility-contract.md): the frozen public surface and what changing it means.
+- [Frozen surfaces](frozen-surfaces.md): each frozen surface with the code that owns it and the test that pins it.
+- [Output publication](publication.md): how output directories are created, staged and bound, and what the engine promises about them.
 - [Supported production matrix](native/supported-matrix.md): supported Python/OS/arch combinations for the core, the compiled native companion's prebuilt wheels, and the official production image.
 
 ## Development & planning
@@ -65,11 +70,12 @@ link to GitHub rather than into the rendered API reference.
 - [SBOM](sbom.md): generating the CycloneDX SBOM for the engine wheel.
 - [License policy](license-policy.md): allowed licenses, named exceptions, and how NOTICE is generated and checked.
 - Engine-scoped implementation plans, decision records, and the findings register live in `docs/plans/`, `docs/decisions/`, and `docs/remediation-source.md` (working docs, not guides).
+- The V1 QA checklist (expected behaviour and checks per engine area, no results) lives in `docs/qa/`; start at `docs/qa/README.md`.
 - Shipped-work history (sprint plans, review snapshots, superseded design discussions) is kept in `docs/archive/` for context; see `docs/archive/README.md`. None of it is current how-to guidance.
 
 ---
 
-This repo owns the engine-scoped durable docs (reference, `security/` and `decisions/` records, API reference) and its own `plans/` for engine work. The single cross-repo roadmap and the shipped log live in the CLI repo ([`decoy/docs/ROADMAP.md`](https://github.com/louiskeep/decoy/blob/main/docs/ROADMAP.md) and `decoy/docs/RECENTLY-SHIPPED.md`, moved from `decoy-platform` on 2026-11-05); the roadmap indexes engine plans too.
+This repo owns the engine-scoped durable docs (reference, `security/` and `decisions/` records, API reference) and its own `plans/` for engine work. The single cross-repo roadmap and the shipped log live in the CLI repo ([`decoy/docs/ROADMAP.md`](https://github.com/decoy-data/decoy/blob/main/docs/ROADMAP.md) and `decoy/docs/RECENTLY-SHIPPED.md`, moved from `decoy-platform` on 2026-11-05); the roadmap indexes engine plans too.
 
 ```{toctree}
 :hidden:
@@ -79,6 +85,7 @@ quickstart
 recipes
 strategies
 guides/free-text-ner
+guides/generate-uniqueness
 relationships
 determinism
 cli
@@ -92,8 +99,11 @@ acceptance-test-flight
 :caption: Reference
 
 capability-matrix
+distribution-integrity/index
 execution-backends
 compatibility-contract
+frozen-surfaces
+publication
 native/supported-matrix
 ```
 

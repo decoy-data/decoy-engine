@@ -21,14 +21,15 @@ import pyarrow.compute as pc
 
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
+from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution.out_of_core import _join as _join_ooc
-from decoy_engine.execution.out_of_core import _mask_group_c, _runner, _validate_batch
+from decoy_engine.execution.out_of_core import _runner, _validate_batch
 from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
@@ -36,7 +37,6 @@ from decoy_engine.execution.out_of_core._emit import (
     empty_output_table,
 )
 from decoy_engine.execution.out_of_core._hash_run import OocHashRun
-from decoy_engine.execution.out_of_core._join import orphan_fk_warning
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
 from decoy_engine.execution.out_of_core._memory_estimate import resolve_phase_memory_limits
 from decoy_engine.execution.out_of_core._relation import build_parent_key_relation_aligned
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from typing import TypeAlias
 
     from decoy_engine.execution.out_of_core._relation import ParentKeyRelation
+    from decoy_engine.fileaccess import ScratchArena
     from decoy_engine.generation.pool._events import QualityWarning
     from decoy_engine.plan._types import Plan
     from decoy_engine.relationships._graph import RelationshipEdge
@@ -69,8 +70,8 @@ def _stream_table(
     incoming_edges: tuple[RelationshipEdge, ...],
     outgoing_edges: tuple[RelationshipEdge, ...],
     parent_relations: dict[RelationshipEdge, ParentKeyRelation],
-    temp_dir: Path,
-    relation_dir: Path,
+    temp_dir: ScratchArena,
+    relation_dir: ScratchArena,
     staging_path: Path,
     memory_limit: str | None,
     batch_rows: int | None,
@@ -99,6 +100,9 @@ def _stream_table(
     (when not None) sizes the joiner/build DuckDB connections by their own
     phase-local liveness rather than one flat `memory_limit` (see
     `_memory_estimate.resolve_phase_memory_limits`).
+
+    `temp_dir` and `relation_dir` are this table's arena children for its joiners and its
+    relations. Callees not yet on the arena get a released path (transition arm (a)).
 
     `code_set_corpora` (default None): the shared corpus-provenance evidence
     sink, mutated in place like `outputs`/`warnings`. Each column's evidence
@@ -155,7 +159,7 @@ def _stream_table(
                         edge,
                         parent_relations[edge],
                         source_schema,
-                        temp_dir / f"edge_{idx}",
+                        Path(temp_dir.create_dir(f"edge_{idx}").local_path()),
                         joiner_memory_limit,
                         mask_key=mask_key,
                     )
@@ -237,7 +241,7 @@ def _stream_table(
                     fk_components=fk_components,
                     outgoing_edges=outgoing_edges,
                     parent_relations=parent_relations,
-                    relation_dir=relation_dir,
+                    relation_dir=Path(relation_dir.local_path()),
                     staging_path=staging_path,
                     memory_limit=sink_build_memory_limit,
                     batch_rows=batch_rows,
@@ -262,7 +266,7 @@ def _stream_table(
                         source_parent=raw,
                         masked_parent=table_out,
                         edge=edge,
-                        temp_dir=relation_dir,
+                        temp_dir=Path(relation_dir.local_path()),
                         memory_limit=resident_build_memory_limit,
                         batch_rows=batch_rows,
                     )
@@ -293,8 +297,10 @@ def _stream_table(
                         cfg = provider_config_to_dict(column_seed.provider_config)
                         policy = cfg.get("sub_floor_span")
                         warnings.append(
-                            _mask_group_c.text_mask_sub_floor_warning(
-                                column, str(policy) if policy is not None else None, by_detector
+                            text_mask_sub_floor_warning(
+                                by_detector,
+                                policy=str(policy) if policy is not None else None,
+                                column=column,
                             )
                         )
         finally:

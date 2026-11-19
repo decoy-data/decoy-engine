@@ -6,9 +6,9 @@ covered at the end.
 
 This page is a human-readable reading of the authoritative, test-enforced sources:
 the per-operator compute classification in
-[`records/2026-10-16-d-audit-compute-matrix.md`](records/2026-10-16-d-audit-compute-matrix.md)
+`docs/records/2026-10-16-d-audit-compute-matrix.md`
 (masking) and the generation compute audit (the
-[F-audit plan](https://github.com/louiskeep/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
+[F-audit plan](https://github.com/decoy-data/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
 The enumerated strategy/provider list is [`capability-matrix.md`](capability-matrix.md);
 install and wheel/ABI facts are [`native/supported-matrix.md`](native/supported-matrix.md).
 If this page and those sources ever disagree, the sources win: they are derived from
@@ -305,6 +305,15 @@ Two independent routing layers compose in `_pipeline_routing.py`, in a fixed dec
    typed to `PandasExecutionAdapter`), so it always constructs its own
    adapter regardless of the caller's `substrate` knob; the out-of-core
    route is likewise pandas-oracle-parity by construction.
+
+   `execution_mode="stream"` means "must stream" (RUN-STREAM E1a). `run_pipeline` translates it once to
+   `auto` plus an immutable `stream_required`, and `decide_route` hands that run to
+   `execution/pipeline/_stream.py` instead of the two layers. A preflight over config, plan and source
+   footers takes the chunked lane (one table) or the B7 split (several) when every mask table passes
+   `check_chunked_compatibility`, with the size threshold dropped and the Parquet row groups kept at
+   one per chunk. A job with FK edges whose tables all pass that gate runs as per-table lane units; one
+   the gate rejects takes the out-of-core route only when out-of-core accepts it and the FK dtype hazard
+   is clear. Anything else raises `runtime.streaming_unavailable` before the passed `sources` are read.
 2. S3 (engine-efficiencies P3) auto-chunk routing: reached only when (1)
    did NOT take the sequential early return -- every path into
    `decide_chunk_route` is either explicitly forced full_frame or was
@@ -487,6 +496,56 @@ The ineligible families run on the legacy whole-table synthesize path with disti
 whole-table synthesize. Resident and streamed materialization produce byte-identical output for
 admitted streamed generation shapes; this does not imply that every legacy whole-table
 statistical family streams.
+
+## Advisory job estimate and lifecycle peak
+
+`estimate_job` reports the route, `peak_bytes` and a runtime band before a job runs. It also
+reports the memory the whole job needs, in three fields on `JobEstimate`: `lifecycle_peak_bytes`,
+`limiting_phase` and `phase_bytes`. It is advice. It never raises, never refuses a job and never
+changes a route.
+
+The lifecycle peak is the largest of three phase peaks. Each phase peak is the sum of the memory
+that is live at the same time in that phase.
+
+- ingest: each source is read whole, one after the other, and every earlier table stays resident.
+  A CSV source is read as text into a pandas frame and then copied to Arrow. A fixed_width source
+  builds a list of row dicts first. A Parquet source holds its Arrow table and one row group.
+- execute: the measured route model (the same one that gives `peak_bytes`), plus the input tables
+  the caller still holds that the measurement did not. A strategy that turns numbers into
+  strings (`hash`, `redact`) is priced with the strings it writes.
+- write: every input and every output are resident, plus the largest copy a target needs (a pandas
+  frame for CSV, the coercion and list copies for fixed_width, nothing for Parquet).
+
+`limiting_phase` names the phase that sets the peak; a tie goes to the earlier phase.
+
+Generate-only and mixed jobs get the same fields. A generate table has no source, so it adds
+nothing to ingest. In execute it adds what a resident run holds for its columns, with the width of
+each text column included, and the largest working set of a unique column draw. A plan that runs
+the legacy whole-table path (any column that admission declines, such as a `unique` faker column)
+holds every cell as a Python object, and the estimate prices it that way. In write its Arrow
+output sits beside the mask outputs. A column with no width source (a `formula`, for example)
+leaves the lifecycle fields unset, with a note naming it. A generate-only job keeps
+`peak_bytes=None`, and a mixed job stays `priceable=False`.
+
+What the estimate assumes and does not price:
+
+- The caller holds every input and output until the last target is written (the CLI does). The
+  `--chunked` path and a lazy handoff hold less, so the estimate is higher than they need.
+- String widths come from the first 10,000 rows of each source. A file whose later rows are wider
+  is under-priced.
+- Row counts of a CSV source are estimated from the file size; the estimate says so in `notes`.
+- The vault maps, post-scan baseline tables and quarantine frames are live beside the route's working
+  set and are not priced. Subset jobs are not priced. Disk and scratch space are not priced.
+- `peak_bytes` stays the router's own model on input widths. A job whose strategies turn numbers
+  into strings has a lifecycle execute phase above `peak_bytes`.
+- The estimate prices the pandas form of a string output. The native unified slice can keep it in
+  Arrow, so the real run can be well below the estimate (several times, for string outputs).
+- A file that changes between the estimate and the run only makes the estimate stale.
+
+On the measured fixtures the estimate is never below the measured peak. It is also within 1.5
+times the measured peak for type-preserving numeric jobs and for jobs whose limiting phase is
+ingest or write, on the matching route with at least 1,000,000 rows. String-output jobs are
+checked against the lower bound only.
 
 ## Progress events
 

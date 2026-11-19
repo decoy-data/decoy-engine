@@ -18,7 +18,7 @@ labels: ['docs', 'maintenance']
 2. Play through the chosen tour stop by stop.
 3. For each stop, check whether:
    - The pinned line still contains what the description claims.
-   - The cross-references (other files, ADRs, guides, sibling tours, the published API site at <https://louiskeep.github.io/decoy-engine/>) still resolve.
+   - The cross-references (other files, ADRs, guides, sibling tours, the published API site at <https://decoy-data.github.io/decoy-engine/>) still resolve.
    - The narrative matches the current implementation — not just literally true at the line, but conceptually accurate about what the file does. The hardest-flow tour especially: are the substrate / boundary / eviction claims still accurate?
 4. Note every drift below.
 

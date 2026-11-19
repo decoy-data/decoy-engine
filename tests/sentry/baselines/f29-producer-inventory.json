@@ -317,9 +317,6 @@
   "execution/_fk_resolve.py::orphan_fk_violation_error::kw::'orphan_fk_violation'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/_fk_resolve.py::resolve_fk_keys::kw::'orphan_fk'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/_gated_string_guard.py::reject_gated_string_on_numeric::kw::'gated_string_output_on_numeric_unsupported'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
@@ -636,12 +633,6 @@
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/_strategies/_text_mask.py::TextMaskHandler.run::kw::'fpe_unencryptable_domain'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
-  "execution/_strategies/_text_mask.py::TextMaskHandler.run::kw::'ner_model_version_mismatch'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
-  "execution/_strategies/_text_mask.py::TextMaskHandler.run::kw::'text_mask_sub_floor_span_handled'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/_strategies/_text_redact.py::TextRedactHandler.run::kw::'ner_model_version_mismatch'": {
@@ -1064,9 +1055,6 @@
   "execution/native/_text_mask_route.py::text_mask_fail_closed_error::kw::'fpe_unencryptable_domain'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/native/_text_mask_route.py::text_mask_sub_floor_warning::kw::'text_mask_sub_floor_span_handled'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/native/_when_admission.py::::module_const::'when_predicate_not_native'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
@@ -1292,9 +1280,6 @@
   "execution/out_of_core/_join.py::mask_child_fk::kw::'out_of_core_remap_values_missing'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/out_of_core/_join.py::orphan_fk_warning::kw::'orphan_fk'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/out_of_core/_mask.py::_required_source_type::kw::'out_of_core_source_schema_required'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
@@ -1376,16 +1361,10 @@
   "execution/out_of_core/_mask_group_c.py::_text_mask_array::kw::'fpe_unencryptable_domain'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
-  "execution/out_of_core/_mask_group_c.py::_text_mask_ner::kw::'ner_model_version_mismatch'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
   "execution/out_of_core/_mask_group_c.py::group_c_array::kw::'out_of_core_strategy_unsupported'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/out_of_core/_mask_group_c.py::group_c_output_type::kw::'bucket_perturb_invalid_config'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
-  "execution/out_of_core/_mask_group_c.py::text_mask_sub_floor_warning::kw::'text_mask_sub_floor_span_handled'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/out_of_core/_memory_estimate.py::_per_instance_mib::kw::'out_of_core_concurrency_invalid'": {
@@ -1425,9 +1404,6 @@
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/out_of_core/_reorder_budget.py::phase3_head_fit::kw::'out_of_core_reorder_head_fit_invalid'": {
-   "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
-  },
-  "execution/out_of_core/_reorder_budget.py::require_disk::kw::'out_of_core_reorder_budget_too_small'": {
    "reason": "initial X0a inventory of tests/fixtures/f29/producer-inventory.json; existing entry, reviewed by its own sentry"
   },
   "execution/out_of_core/_reorder_budget.py::resolve_reorder_budgets::kw::'out_of_core_reorder_budget_too_small'": {

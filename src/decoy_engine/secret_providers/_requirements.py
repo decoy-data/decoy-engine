@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import base64
 import binascii
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import NestedChild, nested_children
 from decoy_engine._opaque import OpaqueBox
 from decoy_engine.keyprovider import MaskSecretError, SecretKeyProvider
 from decoy_engine.secret_providers._errors import (
@@ -207,6 +208,17 @@ KNOWN_UNKEYED_STRATEGIES = frozenset(
 )
 
 
+def _child_is_keyed(child: NestedChild) -> bool:
+    child_cfg = child.strategy_config
+    child_det = bool(child_cfg.get("deterministic")) if isinstance(child_cfg, dict) else False
+    return (
+        child.strategy == "nested"
+        or child.strategy in ALWAYS_KEYED_STRATEGIES
+        or child_det
+        or (child.strategy not in KNOWN_UNKEYED_STRATEGIES)
+    )
+
+
 def column_is_keyed(
     strategy: Any, *, deterministic: bool, vault: bool, provider_config: Mapping[str, Any]
 ) -> bool:
@@ -215,23 +227,29 @@ def column_is_keyed(
     if vault or deterministic or strategy in ALWAYS_KEYED_STRATEGIES:
         return True
     if strategy == "nested":
-        child = provider_config.get("strategy")
-        child_cfg = provider_config.get("strategy_config")
-        child_det = bool(child_cfg.get("deterministic")) if isinstance(child_cfg, dict) else False
         # nested-of-nested is not a shipped pattern; classify it keyed rather than exempt it.
-        return (
-            child == "nested"
-            or child in ALWAYS_KEYED_STRATEGIES
-            or child_det
-            or (child not in KNOWN_UNKEYED_STRATEGIES)
-        )
+        return any(_child_is_keyed(c) for c in nested_children(provider_config))
     return strategy not in KNOWN_UNKEYED_STRATEGIES
 
 
-def secret_requirements_for_config(config: Mapping[str, Any]) -> tuple[SecretRequirement, ...]:
-    """Keyed-ness from configuration alone: no schema, no rows, no profiling."""
+@dataclass(frozen=True)
+class KeyedColumn:
+    """One config column that needs the mask secret. Names only, never a value.
+
+    The walk reads the raw config before validation, so a missing name or strategy is ``None``
+    rather than dropped: dropping it would also drop the secret requirement it implies."""
+
+    table: str | None
+    column: str | None
+    strategy: str | None
+
+
+def _walk_keyed_columns(config: Mapping[str, Any]) -> Iterator[KeyedColumn]:
+    """The one config walk behind both public classifiers: tables then columns in config order,
+    ``column_is_keyed`` applied per column. A generate table holds no mask ``columns``; a raw dict
+    that holds both kinds is walked anyway, so invalid structure cannot hide a keyed column."""
     for table in config.get("tables") or []:
-        if not isinstance(table, dict) or table.get("generate_columns"):
+        if not isinstance(table, dict):
             continue
         for col in table.get("columns") or []:
             if not isinstance(col, dict):
@@ -243,7 +261,20 @@ def secret_requirements_for_config(config: Mapping[str, Any]) -> tuple[SecretReq
                 vault=bool(col.get("vault")),
                 provider_config=pcfg if isinstance(pcfg, dict) else {},
             ):
-                return (MASK_ROOT,)
+                yield KeyedColumn(table.get("name"), col.get("name"), col.get("strategy"))
+
+
+def keyed_columns_for_config(config: Mapping[str, Any]) -> tuple[KeyedColumn, ...]:
+    """Every column of the config that needs the mask secret, in config order. A composite
+    parent key is keyed with no single field, so it is not listed here (see
+    ``secret_requirements_for_config``)."""
+    return tuple(_walk_keyed_columns(config))
+
+
+def secret_requirements_for_config(config: Mapping[str, Any]) -> tuple[SecretRequirement, ...]:
+    """Keyed-ness from configuration alone: no schema, no rows, no profiling."""
+    if next(_walk_keyed_columns(config), None) is not None:
+        return (MASK_ROOT,)
     for rel in config.get("relationships") or []:
         parent = rel.get("parent") if isinstance(rel, dict) else None
         if not isinstance(parent, dict) or len(parent.get("columns") or []) > 1:

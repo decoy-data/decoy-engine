@@ -1,6 +1,6 @@
 # The exact modules a sink call may live in without a registry entry (plan D9). Being inside
-# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` (whose
-# ambient opens each carry their own registry entry), is judged call by call.
+# `decoy_engine/fileaccess/` grants nothing: every other file there, and `_local.py` and
+# `_local_chain.py` (whose ambient opens each carry their own registry entry), is judged call by call.
 
 # Rule 1: adapters hand a third-party library only a capability's descriptor or library path.
 adapter_modules = [
@@ -17,6 +17,17 @@ capability_modules = [
   "decoy_engine/fileaccess/_output.py",
   "decoy_engine/fileaccess/_preopened.py",
   "decoy_engine/fileaccess/_openat2.py",
+  "decoy_engine/fileaccess/_durable.py",
+]
+
+# Public functions in a capability module that take a held descriptor. They are the named creation
+# choke points (F25 S1a-0, plan 4.2): their `dir_fd` parameter counts as held, as for a private
+# helper. Their name parameter is still traced: each must validate it itself.
+capability_creators = [
+  "decoy_engine/fileaccess/_output.py::make_stage_dir_at",
+  "decoy_engine/fileaccess/_output.py::create_output_file_at",
+  "decoy_engine/fileaccess/_durable.py::discard_stage_at",
+  "decoy_engine/fileaccess/_durable.py::publish_exclusive_durable",
 ]
 
 # The only module that may construct `LocalFileAccess`.
@@ -32,19 +43,36 @@ ambient_only_modules = [
   # F29 commit evidence: called only from _isolated_run.py with its staging_dir, after the guard.
   "decoy_engine/execution/_isolated_reason.py",
   "decoy_engine/execution/_isolated_run.py",
-  "decoy_engine/execution/out_of_core/_scratch.py",
   # F06 local quarantine store: opens beneath the caller-given root only after the guard.
   "decoy_engine/declared_casting/_quarantine_local.py",
+  # F33 signed evidence: a caller-named evidence directory, opened once after the guard.
+  "decoy_engine/fileaccess/_ambient_tree.py",
 ]
 
 # Modules that must call `fileaccess.require_ambient`, the guard the ambient-only entries rely on.
 ambient_guards = [
   "decoy_engine/connectors/postgres_snapshot.py",
   "decoy_engine/execution/_isolated_run.py",
-  "decoy_engine/execution/out_of_core/_scratch.py",
   # F06 local quarantine store: opens beneath the caller-given root only after the guard.
   "decoy_engine/declared_casting/_quarantine_local.py",
+  # LIB L0.1 allocator: calls require_ambient for any caller path.
+  "decoy_engine/fileaccess/_protected_dir.py",
+  # F33 signed evidence: the one ambient open of a caller-named evidence directory.
+  "decoy_engine/fileaccess/_ambient_tree.py",
 ]
+
+# F25 plan 4.1. Exact, both ways: an unlisted module fails, and so does a listed module with no
+# such call. Each producer slice adds its modules when they start calling.
+# Modules that release a scratch arena path (`ScratchArena.local_path`, the one path release).
+# `scratch_native` membership is derived from the scanner (`tests/sentry/fa/rules.py`).
+scratch_path_release = [
+  "decoy_engine/declared_casting/_stream.py",
+  "decoy_engine/execution/out_of_core/_duckdb.py",
+  "decoy_engine/execution/out_of_core/_runner.py",
+  # Transitional (arm (a)): hands unconverted callees a released path; S2b-3 removes it.
+  "decoy_engine/execution/out_of_core/_rewrite_pass.py",
+]
+
 # Documented exception (owner decision 2026-10-31, A-4 x F13): file paths a third-party library
 # opens that come only from OPERATOR-set process environment, never from a job config or a caller
 # argument. The sink scan cannot see them (the library opens the file), so each entry names the

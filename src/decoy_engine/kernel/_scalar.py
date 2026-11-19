@@ -7,41 +7,10 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine._arrow_types import is_text, narrow_text
 from decoy_engine.determinism import derive
+from decoy_engine.internal.pandas_missing import is_null_cell as _is_missing
 from decoy_engine.kernel._canonicalize import canonicalize_derive_source
-
-
-def _is_missing(value: Any) -> bool:
-    """True for a value the masking kernels must treat as missing (null).
-
-    None and IEEE NaN both count, matching pandas ``isna()`` and the
-    ``pa.array(..., from_pandas=True)`` conversion the full-frame pandas path
-    runs BEFORE a value ever reaches these kernels (that conversion folds NaN
-    to null). The out-of-core route feeds raw Arrow values straight in, so a
-    float column carrying an actual NaN would otherwise be hashed / redacted /
-    stringified ("nan") here where the oracle emitted null. Only NaN-like
-    values are unequal to themselves, so ``value != value`` detects float,
-    numpy-float, and Decimal('NaN') alike without special-casing each type; a
-    non-comparable object simply is not missing.
-    """
-    if value is None:
-        return True
-    try:
-        return bool(value != value)
-    except Exception:
-        # `value != value` did not yield a plain bool. The reachable case is
-        # pandas `pd.NA`, whose `!=` returns `pd.NA` and whose `bool()` raises:
-        # the shipped fpe strategy treats it as missing (`source.isna()`), and on
-        # the raw-list path it would otherwise reach the cipher as `str(pd.NA) ==
-        # "<NA>"` and diverge (C6a Step 0, plan §3b). Defer to pandas.isna, which
-        # is the repo's own correct missing-value predicate, imported lazily so
-        # the Arrow hot path (None / float NaN, both handled above) never pays it.
-        try:
-            import pandas as pd
-
-            return bool(pd.isna(value))
-        except Exception:
-            return False
 
 
 def _array_to_pylist(values: pa.Array | pa.ChunkedArray | list[Any]) -> list[Any]:
@@ -119,19 +88,19 @@ def redact_array(
     """Replace every non-null value with ``redact_with``.
 
     Takes a vectorized Arrow fast path only for the shape every shipped
-    disguise actually uses -- a plain `pa.string()` array (or chunked array of
-    one) and a ``str`` `redact_with` -- and only once that array passes a full
-    UTF-8 validity check. Anything outside that closed guard (another dtype,
-    an encoded-null layout such as dictionary/REE/union, invalid UTF-8, a
-    non-Arrow list) falls back to `_redact_array_reference`, and any
-    unforeseen Arrow error while computing the fast path does too, so the
-    guard is total and non-raising: it either takes the fast path or produces
-    exactly what the reference would have.
+    disguise actually uses -- a `string` or `large_string` array (or chunked
+    array of one; `narrow_text` casts `large_string` to `string`) and a ``str``
+    `redact_with` -- and only once that array passes a full UTF-8 validity
+    check. Anything else (another dtype, an encoded-null layout such as
+    dictionary/REE/union, invalid UTF-8, a non-Arrow list, a failed cast or
+    other Arrow error) falls back to `_redact_array_reference`, so the guard is
+    total and non-raising: it takes the fast path or matches the reference.
     """
     if type(redact_with) is str and isinstance(values, (pa.Array, pa.ChunkedArray)):
         try:
             v = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
-            if v.type == pa.string():
+            if is_text(v.type):
+                v = narrow_text(v)
                 v.validate(full=True)
                 missing = pc.is_null(v)  # type: ignore[attr-defined, unused-ignore]
                 all_missing = pc.all(missing).as_py()  # type: ignore[attr-defined, unused-ignore]
@@ -194,20 +163,18 @@ def truncate_array(
     """Apply the truncate strategy to non-null values.
 
     Takes a vectorized Arrow fast path only for the shape every shipped
-    disguise actually uses -- a plain `pa.string()` array (or chunked array of
-    one), an in-range ``int`` `length`, ``keep`` in `("head", "tail")`, and a
-    ``str`` (or ``None``) `mask_char` -- and only once that array passes a
-    full UTF-8 validity check. Type checks are exact (`type(x) is ...`, not
-    `isinstance`) so a `bool` length or a numpy int, which would otherwise
-    pass an `isinstance(x, int)` check but mean something different, is
-    excluded rather than silently mishandled; `keep` and `mask_char` are
-    checked the same way so an unhashable `keep` (e.g. a list) cannot raise
-    while testing membership. Anything outside that closed guard -- another
-    dtype (including `large_string`), an out-of-range/non-int length, invalid
-    UTF-8, a non-Arrow list -- falls back to `_truncate_array_reference`, and
-    any unforeseen Arrow error while computing the fast path does too, so the
-    guard is total and non-raising: it either takes the fast path or produces
-    exactly what the reference would have.
+    disguise actually uses -- a `string` or `large_string` array (or chunked
+    array of one; `narrow_text` casts `large_string` to `string`), an in-range
+    ``int`` `length`, ``keep`` in `("head", "tail")`, and a ``str`` (or
+    ``None``) `mask_char` -- and only once that array passes a full UTF-8
+    validity check. Type checks are exact (`type(x) is ...`, not `isinstance`)
+    so a `bool` length or a numpy int is excluded rather than silently
+    mishandled; `keep` and `mask_char` are checked the same way so an
+    unhashable `keep` (e.g. a list) cannot raise while testing membership.
+    Anything else -- another dtype, an out-of-range/non-int length, invalid
+    UTF-8, a non-Arrow list, a failed cast or other Arrow error -- falls back
+    to `_truncate_array_reference`, so the guard is total and non-raising: it
+    takes the fast path or matches the reference.
     """
     if (
         type(length) is int
@@ -219,7 +186,8 @@ def truncate_array(
     ):
         try:
             v = values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
-            if v.type == pa.string():
+            if is_text(v.type):
+                v = narrow_text(v)
                 v.validate(full=True)
                 if mask_char is None:
                     if keep == "tail":

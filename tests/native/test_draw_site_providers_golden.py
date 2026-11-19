@@ -16,14 +16,14 @@ from typing import Any
 
 import pytest
 
-from decoy_engine.determinism import IdentityDomain
+from decoy_engine.determinism import IdentityDomain, derive, seed_bytes_to_int
 from decoy_engine.execution.native._determinism_protocol import (
     DrawSiteProtocolError,
     all_providers,
     provider_for,
     unit_float_from_bits53,
 )
-from decoy_engine.generators.derivation import GenDeriveContext
+from decoy_engine.generators.derivation import GenDeriveContext, with_table
 
 _MK = bytes.fromhex("0102030405060708")
 _JOB = bytes.fromhex("1122334455667788")
@@ -32,7 +32,9 @@ _NS = "col/demo"
 
 def _ctx() -> GenDeriveContext:
     cfg = {"name": "c", "type": "faker"}
-    return GenDeriveContext.for_column(derive_key=None, column_config=cfg, fallback_seed=42)
+    return GenDeriveContext.for_column(
+        derive_key=None, column_config=with_table(cfg, ""), fallback_seed=42
+    )
 
 
 class _FakeFaker:
@@ -50,6 +52,12 @@ class _FakeFaker:
 
 def _np(gen: Any) -> list[float]:
     return [round(float(x), 12) for x in gen.random(4)]
+
+
+def _joint_mask_stream(site: str) -> Any:
+    provider = provider_for(site)
+    source = provider.source("patients", "us_zip5_city_state", ("zip", "city", "state"))
+    return (source.hex(), seed_bytes_to_int(derive(_MK, _NS, source)[:8]))
 
 
 def _faker_run(site: str) -> Any:
@@ -83,6 +91,8 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
         provider_for("mask.joint_mask_keyed_row").hmac_key(_MK, _NS).hex(),
         provider_for("mask.joint_mask_keyed_row").row_index(_MK, _NS, "k", 13),
     ),
+    "mask.joint_mask_null_fallback": lambda: _joint_mask_stream("mask.joint_mask_null_fallback"),
+    "mask.joint_mask_gen_row": lambda: _joint_mask_stream("mask.joint_mask_gen_row"),
     "mask.text_mask_date_shift": lambda: provider_for("mask.text_mask_date_shift").shift_days(
         _MK, "2001-01-01", -30, 30
     ),
@@ -104,6 +114,9 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "gen.categorical": lambda: provider_for("gen.categorical").choices(
         _ctx(), ["a", "b", "c"], [0.5, 0.3, 0.2], 6
     ),
+    "gen.lookup": lambda: provider_for("gen.lookup").choices(
+        _ctx(), ["a", "b", "c"], [0.5, 0.3, 0.2], 6
+    ),
     "gen.reference": lambda: [
         provider_for("gen.reference").sample(_ctx(), [1, 2, 3, 4], 6, distribution=d, weights=w)
         for d, w in (("random", None), ("sequential", None), ("weighted", [4, 3, 2, 1]))
@@ -115,18 +128,35 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "gen.null_probability": lambda: [
         round(float(x), 12) for x in provider_for("gen.null_probability").null_floats(_ctx(), 4)
     ],
+    "gen.categorical_unique": lambda: provider_for("gen.categorical_unique").sample(
+        _ctx(), ["a", "b", "c", "d"], 6
+    ),
+    "gen.reference_unique": lambda: (
+        provider_for("gen.reference_unique").sample(_ctx(), [10, 20, 30, 40, 50], 4),
+        provider_for("gen.reference_unique").sample(
+            _ctx(), [10, 20, 30, 40, 50], 4, distribution="sequential"
+        ),
+    ),
+    "gen.unique_pair": lambda: provider_for("gen.unique_pair").picks(_ctx(), 12, 5),
+    "gen.faker_unique_retry": lambda: (
+        provider_for("gen.faker_unique_retry").retry_seed(_ctx(), 3, 1),
+        provider_for("gen.faker_unique_retry").retry_seed(_ctx(), 3, 2),
+    ),
     "gen.distribution_snapshot": lambda: _np(
         provider_for("gen.distribution_snapshot").col_generator(_ctx())
     ),
+    "gen.distribution": lambda: _np(provider_for("gen.distribution").col_generator(_ctx())),
     "gen.pool_deterministic": lambda: provider_for("gen.pool_deterministic").draw(
         _JOB, _NS, b"cfg", pool_size=17
     ),
     "gen.pool_nondeterministic": lambda: _np(
-        provider_for("gen.pool_nondeterministic").generator(b"\x00\x01\x02\x03")
+        provider_for("gen.pool_nondeterministic").generator(b"\x00\x00\x00\x00\x00\x01\x02\x03")
     ),
     "gen.composite_build_pool": lambda: (
-        _np(provider_for("gen.composite_build_pool").generator(b"\x09\x08")),
-        _np(provider_for("gen.composite_build_pool").generator(None)),
+        _np(
+            provider_for("gen.composite_build_pool").generator(b"\x00\x00\x00\x00\x00\x00\x09\x08")
+        ),
+        _np(provider_for("gen.composite_build_pool").generator(b"\x00" * 8)),
     ),
     "mask.faker": lambda: provider_for("mask.faker").draw(_MK, _NS, b"alice", pool_size=23),
     "gen.pool_build_faker": lambda: (
@@ -196,21 +226,27 @@ def test_unit_float_known_answers() -> None:
 
 
 _GOLDEN_OUTPUT: dict[str, str] = {
-    "gen.categorical": "96e246f7f3c04be5ad8641ad9e01fc9c78de67e2a6227e52d371a7ee93ca14e9",
+    "gen.lookup": "1dd8bbdc10126eeb340ce6d6442b7874d88f62dd14827ddde84919610b3b3090",
+    "gen.categorical": "1dd8bbdc10126eeb340ce6d6442b7874d88f62dd14827ddde84919610b3b3090",
+    "gen.categorical_unique": "2a6e1e385403950a3b2b1095120ff03996eb120a7a43d88835eadbf24c6f862f",
+    "gen.faker_unique_retry": "8120cf533ae61ba59a34796b5c426152a987f73e197cff99377ccd35f59da88c",
+    "gen.reference_unique": "91d4682e727cac0aea21c39e8e18839ce8337cbc9c5d8c9083417350b7ee5bd3",
+    "gen.unique_pair": "12bb5d6bf1cb5f88bf02cc27f901d636257733275fb353619fded1fd5c50a559",
     "gen.composite_build_pool": "e804c947fbca8cbce1e13b3f6c5860e7050f6434e2b1c37f4a0278d080f521ce",
-    "gen.derive_context": "20ec3a1cb72511b568bd093218c7489fb210bc14a0479f0219efcf80898cd6ae",
-    "gen.distribution_snapshot": "5daeda46ebb57fa45f1dbb2276be2f565e8a188faeaebb441c0aa089acb25b0d",
-    "gen.faker_per_row": "17d38be75697a9417e6418af8da9a533107bc496cfc85dd3fba44404e5593cb2",
-    "gen.faker_pool_build": "056a774aebaf733f270117a03dcfa6f79b53c8475a2bddec6cc5807fe31f719a",
-    "gen.faker_pool_selection": "a7c52332f2a0d24e3a0586faa1d7ad6a3857007098c89932eb6fa7e215de3876",
-    "gen.formula_per_row": "ec4bf4b74327f8b5bba95d65de52a58950b5266a33824c970aaf6b03936ddd69",
+    "gen.derive_context": "7846c03077346d8ac4b081666ff721c8a7a0c74cbfb6f92e5bf8e5cabd8249dc",
+    "gen.distribution": "da8c203a890d906561c0bae8871bfe163b9936f95da4ef0634a02360384e5e6d",
+    "gen.distribution_snapshot": "b73024fefa1fe793af5aee4905dc07f9d8d48930cb3f3854f04531e6579b20ad",
+    "gen.faker_per_row": "28982d28b19852f557cf5f8618643d7529b02a3fd1fb0b276ae761b5a4a28166",
+    "gen.faker_pool_build": "d8867409a8d2aae81b3d596c6dd91438e08bd5482c107a2def8da8711251d5c2",
+    "gen.faker_pool_selection": "f38e21d659af3f6081dac09a9bb5ddc88d72d4f1f5f036301e752672add958b3",
+    "gen.formula_per_row": "961648aa1de88dbf4543214f5fb383d57d4b7f92a2a1b91a9a9cbc50a3ec13d1",
     "gen.identifier_deterministic": "81a00a6fdfd16336fdc5364bf6eb4412dcd8b450fbab27ff544462b38d20902e",
     "gen.identifier_nondeterministic": "f45f9e4a39ae8d18062a4e51187b3ca9a58f706ce2380c2bb57bd2c86d5887b6",
-    "gen.null_probability": "5daeda46ebb57fa45f1dbb2276be2f565e8a188faeaebb441c0aa089acb25b0d",
+    "gen.null_probability": "b73024fefa1fe793af5aee4905dc07f9d8d48930cb3f3854f04531e6579b20ad",
     "gen.pool_build_faker": "5647a06090b261df876dbeb77d0318bcf2638877dc76093c6806fd69c117873f",
     "gen.pool_deterministic": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
     "gen.pool_nondeterministic": "7f41927c15f30adce869369f6503fa9ba3a706d26fa51625361defa621e3576e",
-    "gen.reference": "614decc84823bcc916d47f007076d5dedcc8edb1eb28270e5f484e708aadedd7",
+    "gen.reference": "d83f784327bb29c66e29f89c9504e3fa9ba5dcb4069e159c9376326cc3930628",
     "gen.statistical_per_row": "1253e9373e781b7500266caa55150e08e210bc8cd8cc70d89985e3600155e860",
     "mask.bucket_perturb": "237f537111d6747ea6ff642ca6ab18ff88f6936e45e993c52f4c2d42dc18eb9d",
     "mask.categorical_deterministic": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683",
@@ -225,6 +261,8 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.grouped_series_monotone_walk": "fb2192725ef26f254b1124356a13d36ece77d43e3051d4bbf1b889e99b3555c1",
     "mask.hash": "b931e4cddb5420a92e65ac3c8a1368bcf04c2d1724787ff94053377dd97fd2be",
     "mask.joint_mask_keyed_row": "0ca1fad82ed7cb5c6c40aeb27bfd029d82c3282152468d03f45cb82da746cf8d",
+    "mask.joint_mask_null_fallback": "e4c12e3f90322cbca92d7869b74b1dc2f3c1fe4dc1ac643b1de55d97e077136d",
+    "mask.joint_mask_gen_row": "c229b3842dcfa21d5ae28d89b2a15a6686a3295e6f220da57a1633fa4e906fb0",
     "mask.shuffle": "ec0fb76703bb6a80cc8ce607aefcca3941652855b79c73cad5d3b678235d0b57",
     "mask.text_mask_date_shift": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
     "mask.text_mask_faker": "eef779676d353b92d67b9797c6b3c3b020185d961487ae78af44ca7981ab8489",
@@ -232,4 +270,5 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.windowed_date": "e7155d227e2e065ea4ad6de21ddd5f12c08f5d6a9654351f208c5f6f7b2b612a",
 }
 
-_GOLDEN_REGISTRY = "84d747bd4d004f73a8035c620f3d83d392560bb4f2a8ecdaf4f8b826ce9817ff"
+# Re-captured for DUP-FREEZE E2: the two joint_mask stream providers join the registry.
+_GOLDEN_REGISTRY = "652033b853c8036c64a4cb96e081cc692f153ad7c7152616349b74c27c284317"

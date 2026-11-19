@@ -34,14 +34,10 @@ import textwrap
 
 import pytest
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 from tests._keyed_secret import THROWAWAY_SECRET
 
 pytestmark = pytest.mark.perf
-
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
 
 _CEILING_MIB = 512
 _MERGE_FAN_IN = 4
@@ -247,6 +243,7 @@ _WORKER_SCRIPT = textwrap.dedent(
             temp_disk_budget_bytes=big_disk_bytes,
             out_of_core_reorder_threshold_rows=0,
             key_provider=_KEY_PROVIDER,
+            config={},
         )
 
         child_out = pq.read_table(sink_target / "child.parquet")
@@ -281,7 +278,7 @@ def _run_worker(tmp_path, n_edges):
     worker_path.write_text(_WORKER_SCRIPT)
     work_dir = tmp_path / "work"
     work_dir.mkdir()
-    env = {**os.environ, **_CAPPED_ENV, "DECOY_PERF_WORKER_SECRET": THROWAWAY_SECRET.hex()}
+    env = {**os.environ, **CAPPED_ENV, "DECOY_PERF_WORKER_SECRET": THROWAWAY_SECRET.hex()}
     cmd = [
         sys.executable,
         str(worker_path),

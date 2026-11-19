@@ -35,19 +35,63 @@ ships the real binding).
 
 from __future__ import annotations
 
+from decoy_engine.config._delivery import DeliveryConfig
 from decoy_engine.config._errors import PipelineConfigError
 from decoy_engine.config._fixed_width import FixedWidthColumn, FixedWidthLayout
+from decoy_engine.config._generate_option_catalog import (
+    GenerateTypeOptions,
+    generate_option_catalog,
+)
+from decoy_engine.config._generate_options import refuse_unlisted_generate_families
+from decoy_engine.config._generate_type_checks import (
+    parse_output_type,
+    refuse_fixed_width_output_types,
+)
+from decoy_engine.config._generate_unique import (
+    UNIQUE_FAKER_ATTEMPTS,
+    declares_unique,
+    distinct_categories,
+    value_key,
+)
 from decoy_engine.config._global_settings import DpGenerateSettings, GlobalSettings
-from decoy_engine.config._namespaces import NamespaceConfig
+from decoy_engine.config._namespaces import (
+    NAMESPACE_PLACEHOLDER_PREFIX,
+    NamespaceConfig,
+    refuse_namespace_placeholder,
+)
 from decoy_engine.config._override import override_sources
+from decoy_engine.config._parse import (
+    parse_delivery_config,
+    parse_pipeline_config,
+    parse_relationship_config,
+)
 from decoy_engine.config._pipeline import PipelineConfig
-from decoy_engine.config._post_scan import PostScanConfig, post_scan_integrity_requested
+from decoy_engine.config._post_scan import (
+    NO_SINK_KIND,
+    Dismissal,
+    PostScanConfig,
+    post_scan_distribution_tolerance,
+    post_scan_gate_applies,
+    post_scan_integrity_requested,
+    post_scan_model_setting,
+    post_scan_ner_findings,
+    post_scan_output_readable,
+    post_scan_resident_reason,
+    post_scan_sink_kind,
+    post_scan_sink_refusal,
+)
+from decoy_engine.config._pre_scan import PreScanConfig
 from decoy_engine.config._relationships import (
     OrphanPolicyLiteral,
     RelationshipConfig,
     RelationshipEnd,
+    relationship_shape_error,
 )
+from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
 from decoy_engine.config._sources import (
+    FILE_SOURCE_PATH_FIELDS,
+    SOURCE_LOCATOR_FIELDS,
+    SOURCE_PATH_FIELDS,
     FileSource,
     GCSSource,
     S3Source,
@@ -59,12 +103,13 @@ from decoy_engine.config._subset import (
     SubsetPredicateConfig,
     SubsetSeedConfig,
 )
-from decoy_engine.config._tables import ColumnConfig, TableConfig
+from decoy_engine.config._tables import ColumnConfig, TableConfig, classify_table_kinds
 from decoy_engine.config._targets import (
     FileTarget,
     GCSTarget,
     S3Target,
     TargetDescriptor,
+    duplicate_target_groups,
 )
 from decoy_engine.config._transforms import (
     DedupeOp,
@@ -77,9 +122,17 @@ from decoy_engine.config._transforms import (
 )
 
 __all__ = [
+    "FILE_SOURCE_PATH_FIELDS",
+    "NAMESPACE_PLACEHOLDER_PREFIX",
+    "NO_SINK_KIND",
+    "SOURCE_LOCATOR_FIELDS",
+    "SOURCE_PATH_FIELDS",
+    "UNIQUE_FAKER_ATTEMPTS",
     "ColumnConfig",
     "DedupeOp",
+    "DeliveryConfig",
     "DeriveOp",
+    "Dismissal",
     "DpGenerateSettings",
     "DropColumnOp",
     "FileSource",
@@ -89,17 +142,21 @@ __all__ = [
     "FixedWidthLayout",
     "GCSSource",
     "GCSTarget",
+    "GenerateTypeOptions",
     "GlobalSettings",
     "LimitOp",
     "NamespaceConfig",
+    "OnDrift",
     "OrphanPolicyLiteral",
     "PipelineConfig",
     "PipelineConfigError",
     "PostScanConfig",
+    "PreScanConfig",
     "RelationshipConfig",
     "RelationshipEnd",
     "S3Source",
     "S3Target",
+    "ScanBaselineConfig",
     "SortOp",
     "SourceDescriptor",
     "SubsetBudgetConfig",
@@ -109,6 +166,28 @@ __all__ = [
     "TableConfig",
     "TargetDescriptor",
     "TransformOp",
+    "classify_table_kinds",
+    "declares_unique",
+    "distinct_categories",
+    "duplicate_target_groups",
+    "generate_option_catalog",
     "override_sources",
+    "parse_delivery_config",
+    "parse_output_type",
+    "parse_pipeline_config",
+    "parse_relationship_config",
+    "post_scan_distribution_tolerance",
+    "post_scan_gate_applies",
     "post_scan_integrity_requested",
+    "post_scan_model_setting",
+    "post_scan_ner_findings",
+    "post_scan_output_readable",
+    "post_scan_resident_reason",
+    "post_scan_sink_kind",
+    "post_scan_sink_refusal",
+    "refuse_fixed_width_output_types",
+    "refuse_namespace_placeholder",
+    "refuse_unlisted_generate_families",
+    "relationship_shape_error",
+    "value_key",
 ]

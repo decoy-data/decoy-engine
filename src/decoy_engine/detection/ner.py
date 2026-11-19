@@ -11,7 +11,7 @@ spans into the regular leftmost-longest overlap resolution.
 Optional dependency: spaCy ships in the `ner` extra
 (`pip install decoy-engine[ner]`); the language model is NOT
 pip-resolvable and is installed separately
-(`python -m spacy download en_core_web_sm`). Both absences raise typed
+(install the wheel pinned in `NER_MODEL_WHEELS`). Both absences raise typed
 errors naming the fix; the plan compiler's `text_redact_ner_available`
 check surfaces the same verdicts at validate time.
 
@@ -31,15 +31,57 @@ the text_redact contract (see _text_redact.py).
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
-from collections.abc import Collection, Sequence
-from typing import Any
+from collections.abc import Collection, Mapping, Sequence
+from enum import Enum
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, NamedTuple
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
+from decoy_engine.detection.types import validate_ner_model_name
 from decoy_engine.errors import DecoyError
 
 DEFAULT_NER_MODEL = "en_core_web_sm"
+# The version of DEFAULT_NER_MODEL that NER_MODEL_WHEELS pins and CI installs.
+DEFAULT_NER_MODEL_VERSION = "3.8.0"
+
+
+class NerModelWheel(NamedTuple):
+    """A model wheel pinned by URL and content hash, with the spaCy range it loads under."""
+
+    url: str
+    sha256: str
+    spacy_range: str
+
+
+# The wheel a deployment or CI job installs for each supported (model, version).
+# The model is not on PyPI, so `pip install` cannot resolve it; a URL alone would
+# trust whatever the host serves, hence the hash. `spacy_range` is the model's own
+# meta.json `spacy_version`: a spaCy outside it refuses to load the model.
+NER_MODEL_WHEELS: Mapping[tuple[str, str], NerModelWheel] = MappingProxyType(
+    {
+        ("en_core_web_sm", DEFAULT_NER_MODEL_VERSION): NerModelWheel(
+            url=(
+                "https://github.com/explosion/spacy-models/releases/download/"
+                "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+            ),
+            sha256="1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+            spacy_range=">=3.8.0,<3.9.0",
+        ),
+        ("en_core_web_md", "3.8.0"): NerModelWheel(
+            url=(
+                "https://github.com/explosion/spacy-models/releases/download/"
+                "en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl"
+            ),
+            sha256="5e6329fe3fecedb1d1a02c3ea2172ee0fede6cea6e4aefb6a02d832dba78a310",
+            spacy_range=">=3.8.0,<3.9.0",
+        ),
+    }
+)
+
 
 # spaCy entity label -> decoy detector id. The values join the regex
 # catalog's namespace, so [REDACTED:person_name] reads the same whether
@@ -60,6 +102,79 @@ NER_ENTITY_MAP: dict[str, str] = {
 }
 
 
+def resolve_ner_model(value: str | None) -> str:
+    """The model a config value names: the default when unset or empty, else a validated name."""
+    if value is None or value == "":
+        return DEFAULT_NER_MODEL
+    return validate_ner_model_name(value)
+
+
+def is_default_ner_model(name: str) -> bool:
+    """True when `name` is the default model, so a dump may omit it."""
+    return name == DEFAULT_NER_MODEL
+
+
+def resolve_column_ner(ner_value: object) -> tuple[str | None, list[str] | None]:
+    """Resolve a column's `provider_config.ner` into `(model, entities)`.
+
+    Falsy means NER is off, `(None, None)`. `true` selects the default model with every mapped
+    entity; a mapping names a model and an optional detector-id filter. An empty or non-list
+    `entities` resolves to `None` (all mapped entities), never "find nothing".
+    """
+    if not ner_value:
+        return None, None
+    if not isinstance(ner_value, dict):
+        return resolve_ner_model(None), None
+    model = resolve_ner_model(None if ner_value.get("model") is None else str(ner_value["model"]))
+    raw_entities = ner_value.get("entities")
+    entities = (
+        [str(e) for e in raw_entities]
+        if isinstance(raw_entities, (list, tuple)) and raw_entities
+        else None
+    )
+    return model, entities
+
+
+class NerSurface(str, Enum):
+    """A place a config asks for NER; the value is the plan-check strategy or scan phase name."""
+
+    PRE_SCAN = "pre_scan"
+    POST_SCAN = "post_scan"
+    TEXT_REDACT = "text_redact"
+    TEXT_MASK = "text_mask"
+
+    @property
+    def opt_out_key(self) -> str:
+        """The config key that names another model for this surface."""
+        if self in (NerSurface.PRE_SCAN, NerSurface.POST_SCAN):
+            return f"{self.value}.ner_model"
+        return "provider_config.ner.model"
+
+
+def _wheel_url(model: str) -> str | None:
+    urls = [
+        (version, wheel.url) for (name, version), wheel in NER_MODEL_WHEELS.items() if name == model
+    ]
+    return max(urls)[1] if urls else None
+
+
+def model_not_installed_message(model: str, surface: NerSurface | None = None) -> str:
+    """The one not-installed text: surface, refused model, its pinned wheel, the opt-out key.
+
+    Only the validated model name and constants enter it. Without a surface the column wording is
+    used, because the plan check has already refused with the exact surface before a run starts.
+    """
+    validate_ner_model_name(model)
+    where = surface.value if surface is not None else "text_redact or text_mask"
+    key = (surface or NerSurface.TEXT_REDACT).opt_out_key
+    url = _wheel_url(model)
+    how = f"install {url}" if url else "no pinned wheel; install it from a local wheel"
+    return (
+        f"{where} NER model {model!r} is not installed: {how}, "
+        f"or set {key} to an installed calibrated model."
+    )
+
+
 class NerUnavailableError(DecoyError):
     """spaCy or the requested model is not installed. Machine-readable code."""
 
@@ -69,13 +184,33 @@ class NerUnavailableError(DecoyError):
         super().__init__(f"[{code}] {message}")
 
 
+class NerModelNameError(NerUnavailableError):
+    """`ner_model` is not a plain package name. Carries no part of the rejected value."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=reasons.config.NER_MODEL_INVALID,
+            message="NER model must be a plain package name (lowercase letters, digits, _).",
+        )
+
+
 def spacy_installed() -> bool:
     return importlib.util.find_spec("spacy") is not None
 
 
-def model_installed(model: str = DEFAULT_NER_MODEL) -> bool:
-    """True when the model package is importable (cheap; no model load)."""
-    return importlib.util.find_spec(model) is not None
+def _distribution(model: str) -> importlib.metadata.Distribution | None:
+    try:
+        return importlib.metadata.distribution(model)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _model_meta_file(dist: importlib.metadata.Distribution, model: str) -> Path | None:
+    """The `meta.json` a spaCy model wheel installs inside its package, found from the dist's RECORD."""
+    for entry in dist.files or ():
+        if entry.parts == (model, "meta.json"):
+            return Path(str(dist.locate_file(entry)))
+    return None
 
 
 def installed_model_version(model: str = DEFAULT_NER_MODEL) -> str | None:
@@ -88,16 +223,63 @@ def installed_model_version(model: str = DEFAULT_NER_MODEL) -> str | None:
     byte-stability needs the version pinned and recorded, not just the
     model named.
     """
-    import importlib.metadata
+    dist = _distribution(model)
+    return (dist.version or None) if dist is not None else None
 
+
+def model_installed(model: str = DEFAULT_NER_MODEL) -> bool:
+    """True when `model` is an installed distribution that ships a spaCy `meta.json`.
+
+    A module that merely imports (`os`, `json`, `this`) is not a model, and nothing is imported
+    to decide: the answer comes from the distribution metadata alone.
+    """
+    dist = _distribution(model)
+    return dist is not None and bool(dist.version) and _model_meta_file(dist, model) is not None
+
+
+def _import_spacy() -> tuple[Any, str | None]:
+    """Import spaCy; on failure return the exception class name so the caller raises outside `except`."""
     try:
-        return importlib.metadata.version(model)
-    except importlib.metadata.PackageNotFoundError:
-        return None
+        import spacy
+    except (
+        Exception
+    ) as exc:  # a broken install fails at import with any error, not just ImportError
+        return None, type(exc).__name__
+    return spacy, None
 
 
-def ensure_ner_available(model: str = DEFAULT_NER_MODEL) -> None:
-    """Raise the typed error a config-only caller (decoy validate) needs."""
+def _spacy_incompatible(spacy: Any, model: str) -> bool:
+    """True when the installed spaCy is outside the range the installed model declares.
+
+    spaCy's own helpers read the model's meta.json (`spacy_version`) and compare it. An absent,
+    unreadable or unparseable range is not a refusal: spaCy then decides at load, as before.
+    """
+    import warnings
+
+    from spacy.util import get_model_meta, is_compatible_version
+
+    dist = _distribution(model)
+    meta_file = _model_meta_file(dist, model) if dist is not None else None
+    if meta_file is None:
+        return False
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # get_model_meta warns on this very mismatch
+            declared = get_model_meta(meta_file.parent).get("spacy_version")
+    except Exception:
+        return False
+    if not isinstance(declared, str) or not declared:
+        return False
+    return is_compatible_version(spacy.about.__version__, declared, prereleases=True) is False
+
+
+def ensure_ner_available(model: str | None = None, surface: NerSurface | None = None) -> None:
+    """Raise the typed error a config-only caller (decoy validate) needs.
+
+    The name check runs first, before any message that would carry the name is built. Nothing
+    but spaCy itself is imported: an installed model is recognised from its metadata.
+    """
+    model = resolve_ner_model(model)
     if not spacy_installed():
         raise NerUnavailableError(
             code=reasons.provider.NER_SPACY_NOT_INSTALLED,
@@ -109,9 +291,24 @@ def ensure_ner_available(model: str = DEFAULT_NER_MODEL) -> None:
     if not model_installed(model):
         raise NerUnavailableError(
             code=reasons.provider.NER_MODEL_NOT_INSTALLED,
+            message=model_not_installed_message(model, surface),
+        )
+    spacy, failure = _import_spacy()
+    if spacy is None:
+        raise NerUnavailableError(
+            code=reasons.provider.NER_SPACY_NOT_INSTALLED,
             message=(
-                f"text_redact `ner` model {model!r} is not installed: "
-                f"python -m spacy download {model}"
+                f"spaCy is installed but cannot be imported ({failure}): reinstall it with "
+                "pip install --force-reinstall 'decoy-engine[ner]'."
+            ),
+        )
+    if _spacy_incompatible(spacy, model):
+        raise NerUnavailableError(
+            code=reasons.provider.NER_MODEL_INCOMPATIBLE,
+            message=(
+                f"NER model {model!r} {installed_model_version(model)} was built for another "
+                f"spaCy minor than the installed spaCy {spacy.about.__version__}: "
+                "install the model wheel pinned for this spaCy."
             ),
         )
 
@@ -140,25 +337,34 @@ _NER_PIPE_BATCH_SIZE = 256
 # follow-up alongside sharing this config/version plumbing.)
 _NER_APPLY_WINDOW = 2048
 
-# One loaded pipeline per model name per process. Model load is ~1s. Handlers
+# One loaded pipeline per (model, installed version) per process. Model load is ~1s. Handlers
 # call iter_ner_spans_batch (nlp.pipe over a batch of cells); iter_ner_spans is
 # the single-cell path. The two reproduce the same per-doc span logic
 # independently (iter_ner_spans is kept as the batch helper's differential
-# oracle), so a change to one must be mirrored in the other.
-_PIPELINES: dict[str, Any] = {}
+# oracle), so a change to one must be mirrored in the other. Keyed by version so a model
+# upgrade inside a long-lived worker loads the new package instead of serving the old one.
+_PIPELINES: dict[tuple[str, str], Any] = {}
 
 
 def _pipeline(model: str) -> Any:
-    nlp = _PIPELINES.get(model)
+    validate_ner_model_name(model)
+    nlp = _PIPELINES.get((model, installed_model_version(model) or ""))
     if nlp is None:
         ensure_ner_available(model)
         import spacy
 
+        key = (model, installed_model_version(model) or "")
+
         # Only the NER component (and its tok2vec) runs; tagging/parsing
         # cost would be paid per cell for nothing.
         nlp = spacy.load(model, exclude=["tagger", "parser", "lemmatizer", "attribute_ruler"])
-        _PIPELINES[model] = nlp
+        _PIPELINES[key] = nlp
     return nlp
+
+
+def pipeline_version(model: str) -> str:
+    """The version of the pipeline that runs for `model`: its own `meta["version"]`, not the key."""
+    return str(_pipeline(model).meta["version"])
 
 
 def iter_ner_spans(

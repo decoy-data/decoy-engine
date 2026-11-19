@@ -1,6 +1,6 @@
 # decoy-engine-native
 
-Compiled Rust companion to [decoy-engine](https://github.com/louiskeep/decoy-engine). It ships the
+Compiled Rust companion to [decoy-engine](https://github.com/decoy-data/decoy-engine). It ships the
 `KeyedDerivationKernel`, the security-sensitive native masking kernel (HKDF-SHA256 then
 HMAC-SHA256 over the Arrow C Data Interface, reproducing the engine's shipped `hash` strategy byte
 for byte), and the deterministic-faker index kernel (one pool-index derivation per row, reproducing

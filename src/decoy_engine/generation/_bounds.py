@@ -16,14 +16,28 @@ exists to prevent.
 
 from __future__ import annotations
 
+import sys
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import pyarrow as pa
+
+from decoy_engine import reasons
+from decoy_engine._arrow_types import arrow_column_bytes
 from decoy_engine.generation._faker_pool import POOL_ELIGIBLE_LOCALE_PAIRS
+from decoy_engine.generation.kinds import (
+    constant_payload_bound,
+    output_payload_bound,
+    output_type_of,
+    parametric_payload_bound,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from faker import Faker
+
+    from decoy_engine.generation._admission import ColumnAdmission, PlanAdmission
 
 # CPython str object header + list pointer (execution._mem_estimate_dtypes).
 STR_OBJECT_OVERHEAD_BYTES = 57
@@ -187,6 +201,10 @@ def compute_payload_bounds(
             result = sequence_payload_bound(col, rows)
         elif kind == "categorical":
             result = categorical_payload_bound(col)
+        elif kind == "constant":
+            result = constant_payload_bound(col)
+        elif kind == "distribution":
+            result = parametric_payload_bound()
         elif kind == "faker":
             result = faker_payload_bound(col, provider_snapshot)
         elif kind == "reference":
@@ -204,6 +222,8 @@ def compute_payload_bounds(
             )
         else:
             result = _legacy_payload_bound(col)
+        if output_type_of(col) is not None:
+            result = output_payload_bound(result)
         out[key] = result
         return result
 
@@ -232,6 +252,45 @@ def faker_pool_bytes(pool_size: int, payload: int) -> int:
     return int(pool_size * (STR_OBJECT_OVERHEAD_BYTES + payload) * _POOL_SLACK) + _POOL_FIXED_BYTES
 
 
+# A set slot (hash + pointer, at CPython's load factor) beyond the str object it holds.
+_UNIQUE_SET_PER_ENTRY_EXTRA = 72
+# The int object and set slot `random.sample` keeps per selected position of a large population.
+_SAMPLE_PER_ROW_BYTES = 32 + _UNIQUE_SET_PER_ENTRY_EXTRA
+
+
+def unique_set_bytes(rows: int, payload: int) -> int:
+    """Working set of one unique column draw: the seen set plus the `random.sample` positions.
+
+    The seen set holds one string object per row (`payload` bytes wide); `random.sample` keeps
+    one selected position per row (a large population) or a list of the population (a small
+    one, never larger than the rows). Both are priced at `rows`, conservatively.
+    """
+    return rows * (payload + STR_OBJECT_OVERHEAD_BYTES + _UNIQUE_SET_PER_ENTRY_EXTRA) + (
+        rows * _SAMPLE_PER_ROW_BYTES
+    )
+
+
+def table_unique_peak(table: dict[str, Any], payload_of: Callable[[dict[str, Any]], int]) -> int:
+    """The largest one-column unique working set of a generate table, 0 when it has none.
+
+    Columns draw one after another and free their set before the next, so the table needs the
+    largest, never the sum. A `sequence` is distinct by construction and holds nothing. A pair
+    holds only sampled indices, priced with no payload. `payload_of` gives a column's value width
+    (0 when unknown, which keeps this a lower bound).
+    """
+    rows = int(table.get("row_count") or 0)
+    peak = unique_set_bytes(rows, 0) if table.get("unique_together") else 0
+    for col in table["generate_columns"]:
+        if col.get("unique") is True and col.get("type") != "sequence":
+            peak = max(peak, unique_set_bytes(rows, payload_of(col)))
+    return peak
+
+
+def _floor_payload(col: dict[str, Any]) -> int:
+    bound = faker_payload_bound(col) if col.get("type") == "faker" else None
+    return bound or 0
+
+
 def key_pool_bytes(parent_rows: int, key_payload: int) -> int:
     return parent_rows * (key_payload + STR_OBJECT_OVERHEAD_BYTES + _KEY_POOL_PER_KEY_EXTRA)
 
@@ -240,17 +299,268 @@ def legacy_table_bytes(rows: int, payloads: list[int]) -> int:
     return rows * sum(_LEGACY_COPIES * (p + STR_OBJECT_OVERHEAD_BYTES) + 16 for p in payloads)
 
 
+# One pointer per row in the Python list the legacy whole-table path builds for every column.
+_LEGACY_SLOT_BYTES = 8
+
+
+def _arrow_column_floor(arrow_type: pa.DataType, rows: int) -> int:
+    return arrow_column_bytes(arrow_type, rows, 0)
+
+
+def _resident_by_table(
+    config: dict[str, Any],
+    admission: PlanAdmission,
+    column_bytes: Callable[[ColumnAdmission, int], int],
+) -> dict[str, int]:
+    """Per generate table, the sum of `column_bytes(column, rows)` over its columns.
+
+    The one walk over the plan that the capacity floor and the lifecycle estimate share; they
+    differ only in how a column is priced.
+    """
+    rows_of = {
+        t["name"]: int(t.get("row_count") or 0)
+        for t in (config.get("tables") or [])
+        if t.get("generate_columns")
+    }
+    # Keyed by name: the legacy path stores columns in a dict, so a repeated name keeps one
+    # column alive, and counting each declaration would overstate the bytes.
+    priced: dict[tuple[str, str], int] = {}
+    for col in admission.columns:
+        priced[(col.table, col.column)] = column_bytes(col, rows_of.get(col.table, 0))
+    totals = dict.fromkeys(rows_of, 0)
+    for (table, _), nbytes in priced.items():
+        totals[table] += nbytes
+    return totals
+
+
+def _floor_by_table(config: dict[str, Any], admission: PlanAdmission) -> dict[str, int]:
+    """Per generate table, the bytes its columns must hold, from the routing the run uses.
+
+    A plan with any declined column runs every column through the legacy whole-table path, so
+    each is priced as a list slot; otherwise each column is priced from its declared Arrow type
+    (the buffers `pa.array` builds: fixed-width data, or the offsets of a variable-width column).
+    """
+
+    def floor(col: ColumnAdmission, rows: int) -> int:
+        if not admission.eligible or col.arrow_type is None:
+            return _LEGACY_SLOT_BYTES * rows
+        return _arrow_column_floor(col.arrow_type, rows)
+
+    floors = _resident_by_table(config, admission, floor)
+    for t in config.get("tables") or []:
+        if t.get("generate_columns"):
+            floors[t["name"]] += table_unique_peak(t, _floor_payload)
+    return floors
+
+
+def generation_floor_bytes(config: dict[str, Any], admission: PlanAdmission) -> int:
+    """A lower bound on the bytes a resident generate run must allocate; never an estimate.
+
+    Resident runs hold every table's Arrow output together, so the floors add. The legacy path
+    frees each table's list slots before the next table starts, so only the largest table's slots
+    count there. The sizing follows the Arrow columnar format: a fixed-width column is
+    `bit_width` bits per value and a variable-width column carries one int32 offset per value.
+    """
+    floors = _floor_by_table(config, admission).values()
+    return max(floors, default=0) if not admission.eligible else sum(floors)
+
+
+@dataclass(frozen=True)
+class FloorShortfall:
+    """A resident generate run that cannot fit; the message holds byte counts and a table name."""
+
+    needed_bytes: int
+    available_bytes: int
+    message: str
+
+
+def generation_floor_shortfall(
+    config: dict[str, Any], admission: PlanAdmission, available_bytes: int
+) -> FloorShortfall | None:
+    """The one floor decision `run_generation` and `estimate_job_capacity` both adapt."""
+    floor = generation_floor_bytes(config, admission)
+    if floor <= available_bytes:
+        return None
+    by_table = _floor_by_table(config, admission)
+    largest = max(by_table, key=lambda name: by_table[name])
+    return FloorShortfall(
+        needed_bytes=floor,
+        available_bytes=available_bytes,
+        message=(
+            f"resident generation needs at least {floor} bytes (largest table {largest!r}); "
+            f"{available_bytes} bytes of memory are available."
+        ),
+    )
+
+
+# A number held as a Python object in the legacy whole-table path: a list slot plus the object.
+_LEGACY_INT_CELL = _LEGACY_SLOT_BYTES + sys.getsizeof(1 << 20)
+_LEGACY_FLOAT_CELL = _LEGACY_SLOT_BYTES + sys.getsizeof(1.5)
+
+
+@dataclass(frozen=True)
+class GeneratedColumn:
+    """One generated column as the lifecycle writes it: its Arrow type and value width."""
+
+    table: str
+    column: str
+    arrow_type: pa.DataType
+    width: float
+
+
+@dataclass(frozen=True)
+class GeneratedTerms:
+    """The generate half of the lifecycle estimate. `unpriced` names every `table.column` with
+    no width source; when it is not empty the byte figures must not be used."""
+
+    resident_bytes: dict[str, int]
+    unique_peak_bytes: int
+    # What the run holds at its largest moment. On the eligible path every table's Arrow output is
+    # resident together beside the largest unique set. On the legacy path each table is converted
+    # to Arrow before the next starts, so a moment is the earlier tables' Arrow output plus the
+    # current table's Python objects plus the larger of its unique set and its Arrow buffers.
+    peak_bytes: int
+    legacy: bool
+    columns: tuple[GeneratedColumn, ...]
+    unpriced: tuple[str, ...]
+
+
+def _is_variable_width(arrow_type: pa.DataType) -> bool:
+    try:
+        arrow_type.bit_width  # noqa: B018 (variable-width types raise)
+    except ValueError:
+        return True
+    return False
+
+
+def _generated_form(col: ColumnAdmission, width: float | None) -> tuple[pa.DataType, float] | None:
+    """The Arrow type and value width a column is priced with, or `None` for no width source.
+
+    A declined column has no declared Arrow type: a `sequence` or `group_key` is an int64, and
+    anything else is text of the width the caller knows."""
+    if col.arrow_type is None:
+        if col.kind in ("sequence", "group_key"):
+            return pa.int64(), 0.0
+        return None if width is None else (pa.string(), width)
+    if _is_variable_width(col.arrow_type):
+        return None if width is None else (col.arrow_type, width)
+    return col.arrow_type, 0.0
+
+
+def _legacy_cell_bytes(arrow_type: pa.DataType, width: float) -> float:
+    if _is_variable_width(arrow_type):
+        return STR_OBJECT_OVERHEAD_BYTES + width
+    return _LEGACY_FLOAT_CELL if pa.types.is_floating(arrow_type) else _LEGACY_INT_CELL
+
+
+def generated_lifecycle_terms(
+    config: dict[str, Any],
+    admission: PlanAdmission,
+    spec_widths: Mapping[tuple[str, str], float],
+) -> GeneratedTerms:
+    """The bytes a resident generate run holds, with string columns priced by their payload.
+
+    `spec_widths` gives the declared width of a text column by `(table, column)`; a faker column
+    with none takes its provider's byte cap. The floor above prices no payload and stays a lower
+    bound; this prices it. A plan that runs the legacy whole-table path holds every cell as a
+    Python object, otherwise each column is its Arrow buffers. The unique working set is the
+    largest one-column draw of any table, since columns and tables draw one after another.
+    """
+    generate_names = {c.table for c in admission.columns}
+    tables = [t for t in (config.get("tables") or []) if t.get("name") in generate_names]
+    raw = {(t["name"], c["name"]): c for t in tables for c in t["generate_columns"]}
+    legacy = not admission.eligible
+    forms: dict[tuple[str, str], tuple[pa.DataType, float]] = {}
+    unpriced: list[str] = []
+    for col in admission.columns:
+        key = (col.table, col.column)
+        width = spec_widths.get(key)
+        if width is None and col.kind == "faker":
+            bound = faker_payload_bound(raw[key])
+            width = None if bound is None else float(bound)
+        form = _generated_form(col, width)
+        if form is None:
+            if f"{col.table}.{col.column}" not in unpriced:
+                unpriced.append(f"{col.table}.{col.column}")
+        else:
+            forms[key] = form
+
+    def cell(col: ColumnAdmission, rows: int) -> int:
+        form = forms.get((col.table, col.column))
+        if form is None:
+            return 0
+        if legacy:
+            return int(rows * _legacy_cell_bytes(*form))
+        return arrow_column_bytes(form[0], rows, form[1])
+
+    resident = _resident_by_table(config, admission, cell)
+
+    def payload_in(name: str) -> Callable[[dict[str, Any]], int]:
+        def payload(col: dict[str, Any]) -> int:
+            form = forms.get((name, col["name"]))
+            return 0 if form is None else int(form[1])
+
+        return payload
+
+    unique_of = {t["name"]: table_unique_peak(t, payload_in(t["name"])) for t in tables}
+    unique = max(unique_of.values(), default=0)
+
+    def arrow_cell(col: ColumnAdmission, rows: int) -> int:
+        form = forms.get((col.table, col.column))
+        return 0 if form is None else arrow_column_bytes(form[0], rows, form[1])
+
+    arrow_of = _resident_by_table(config, admission, arrow_cell)
+    if not legacy:
+        peak = sum(resident.values()) + unique
+    else:
+        from decoy_engine.generation.synthesize import generation_order
+
+        peak = sum(arrow_of.values())
+        earlier = 0
+        for name in (n for n, _parents in generation_order(config) if n in resident):
+            # The unique seen set lives inside one column's draw (`_unique.py`: "State is
+            # function-local"), so it is gone before `arrow_table(data)` (synthesize.py, the call
+            # after the column loop) builds the Arrow buffers while the lists are still live.
+            building = max(unique_of.get(name, 0), arrow_of[name])
+            peak = max(peak, earlier + resident[name] + building)
+            earlier += arrow_of[name]
+    columns = tuple(GeneratedColumn(t, c, *f) for (t, c), f in forms.items())
+    return GeneratedTerms(resident, unique, peak, legacy, columns, tuple(unpriced))
+
+
+def detected_memory_bytes() -> int | None:
+    """The whole memory ceiling (cgroup limit, else host RAM), or `None` when it cannot be read."""
+    from decoy_engine._execution_error import ExecutionError
+    from decoy_engine.execution.out_of_core import _budget
+
+    try:
+        return _budget.detect_effective_memory_bytes()
+    except ExecutionError as exc:
+        if exc.code != reasons.runtime.OUT_OF_CORE_MEMORY_DETECTION_FAILED:
+            raise
+        return None
+
+
 __all__ = [
     "FAKER_VALUE_CAPS",
     "STR_OBJECT_OVERHEAD_BYTES",
+    "FloorShortfall",
+    "GeneratedColumn",
+    "GeneratedTerms",
     "accumulator_bytes",
     "batch_buffer_bytes",
     "categorical_payload_bound",
     "compute_payload_bounds",
+    "detected_memory_bytes",
     "faker_payload_bound",
     "faker_pool_bytes",
+    "generated_lifecycle_terms",
+    "generation_floor_bytes",
+    "generation_floor_shortfall",
     "key_pool_bytes",
     "legacy_table_bytes",
     "sequence_payload_bound",
     "sink_buffer_bytes",
+    "table_unique_peak",
+    "unique_set_bytes",
 ]

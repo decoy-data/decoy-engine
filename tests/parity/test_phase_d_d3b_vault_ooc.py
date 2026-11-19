@@ -41,6 +41,7 @@ from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from decoy_engine.unmask import unmask_pipeline
 from decoy_engine.vault import VaultWriter, load_vault, vault_writer_for_config
+from tests._declared_schema import declare_rest
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 from tests.parity import _strict_compare as sc
 
@@ -117,24 +118,26 @@ def job(
         path = tmp / f"{name}.parquet"
         pq.write_table(table, path)
         src[name] = {"type": "file", "path": str(path), "format": "parquet"}
-    return {
-        "version": 2,
-        "global_settings": {"seed": 7},
-        "sources": src,
-        "targets": {
-            n: {"type": "file", "format": "parquet", "path": str(tmp / f"{n}.out.parquet")}
-            for n in tables
-        },
-        "tables": [{"name": n, "columns": cols} for n, cols in columns.items()],
-        "relationships": [
-            {
-                "parent": {"table": "parent", "columns": ["id"]},
-                "children": [{"table": "child", "columns": ["parent_id"]}],
-                "orphan_policy": orphan,
-                "namespace": "ns",
-            }
-        ],
-    }
+    return declare_rest(
+        {
+            "version": 2,
+            "global_settings": {"seed": 7},
+            "sources": src,
+            "targets": {
+                n: {"type": "file", "format": "parquet", "path": str(tmp / f"{n}.out.parquet")}
+                for n in tables
+            },
+            "tables": [{"name": n, "columns": cols} for n, cols in columns.items()],
+            "relationships": [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "child", "columns": ["parent_id"]}],
+                    "orphan_policy": orphan,
+                    "namespace": "ns",
+                }
+            ],
+        }
+    )
 
 
 def standard(
@@ -730,6 +733,7 @@ def test_all_null_vaulted_column_adds_no_entries(tmp_path: Path) -> None:
     only_empty = [_h("id", "ns"), _h("empty", "empty_ns", vault=True)]
     cfg, tables = standard(tmp_path, parent_vault=only_empty)
     cfg["tables"][1]["columns"] = [c for c in cfg["tables"][1]["columns"] if "vault" not in c]
+    declare_rest(cfg)
     ooc, writer = run(cfg, tables)
     assert mode(ooc)[0] == "out_of_core"
     assert writer._entries == set()
@@ -829,13 +833,6 @@ class TestNfcEnvelope:
 # ---------------------------------------------------------------------------
 
 
-def _sink_run(
-    tmp: Path, cfg: dict[str, Any], tables: dict[str, pa.Table], **kw: Any
-) -> tuple[Any, Any]:
-    sink = ParquetTransactionalSink(tmp / "sink_out")
-    return run(cfg, tables, sink=sink, **kw)
-
-
 def test_the_in_memory_driver_collects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fixed_disk(monkeypatch)
     cfg, tables = standard(tmp_path)
@@ -848,31 +845,17 @@ def test_the_in_memory_driver_collects(tmp_path: Path, monkeypatch: pytest.Monke
     assert_same_vault(writer, oracle_writer, tmp_path)
 
 
-def test_the_reorder_sink_driver_collects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fixed_disk(monkeypatch)
+def test_a_sink_with_a_vault_writer_is_refused_before_the_out_of_core_route(
+    tmp_path: Path,
+) -> None:
+    # B-6 B0: the sink drivers (batch and reorder) commit output inside the run, so a vault
+    # job never reaches them; the two sink-driver collection pins were deleted with it.
     cfg, tables = standard(tmp_path)
-    spy = DriverSpy(monkeypatch)
-    result, writer = _sink_run(tmp_path, cfg, tables, out_of_core_reorder_threshold_rows=1)
-    assert mode(result)[0] == "out_of_core"
-    assert spy.reorder == ["child"] and spy.reorder_joiners >= 1  # witness: the reorder driver ran
-    assert spy.batch == ["parent"]
-    monkeypatch.undo()
-    _, oracle_writer = run(cfg, tables, full=True)
-    assert_same_vault(writer, oracle_writer, tmp_path)
-    # The child's vaulted column came through the reorder driver, not the parent's.
-    assert any(ns == "memo_ns" for ns, _, _ in writer._entries)
-
-
-def test_the_sink_batch_driver_collects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fixed_disk(monkeypatch)
-    cfg, tables = standard(tmp_path)
-    spy = DriverSpy(monkeypatch)
-    result, writer = _sink_run(tmp_path, cfg, tables)  # default threshold: batch driver
-    assert mode(result)[0] == "out_of_core"
-    assert spy.reorder == [] and sorted(spy.batch) == ["child", "parent"]
-    monkeypatch.undo()
-    _, oracle_writer = run(cfg, tables, full=True)
-    assert_same_vault(writer, oracle_writer, tmp_path)
+    before = sorted(p.name for p in tmp_path.iterdir())
+    with pytest.raises(ExecutionError) as exc:
+        run(cfg, tables, sink=ParquetTransactionalSink(tmp_path / "sink_out"))
+    assert exc.value.code == "vault_requires_resident_output"
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
 # ---------------------------------------------------------------------------
@@ -920,10 +903,11 @@ def test_a_late_masking_failure_persists_no_vault(
     assert writer.write_calls == 0 and not path.exists()
 
 
-@pytest.mark.parametrize("driver", ["batch", "reorder"])
 def test_an_orphan_failure_persists_no_vault(
-    driver: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Resident batch driver only: the reorder driver needs a sink, which B-6 B0 refuses with
+    # a vault writer.
     fixed_disk(monkeypatch)
     cfg, tables = standard(tmp_path)
     tables["child"] = tables["child"].set_column(
@@ -931,13 +915,12 @@ def test_an_orphan_failure_persists_no_vault(
     )
     cfg = job(tmp_path, tables, {t["name"]: t["columns"] for t in cfg["tables"]}, orphan="fail")
     writer, path = counting_writer(cfg), tmp_path / "orphan.vault"
-    kw: dict[str, Any] = {"out_of_core_reorder_threshold_rows": 1} if driver == "reorder" else {}
     spy = DriverSpy(monkeypatch)
     with pytest.raises(ExecutionError):
-        _sink_run(tmp_path, cfg, tables, writer=writer, **kw)
+        run(cfg, tables, writer=writer)
         writer.write(path)
-    assert (spy.reorder == ["child"]) is (driver == "reorder")
-    assert writer.add_sizes  # the parent (and, for reorder, the child's mask step) had added
+    assert spy.reorder == []
+    assert writer.add_sizes  # the parent had added before the child's orphan failure
     assert writer.write_calls == 0 and not path.exists()
 
 
@@ -946,34 +929,7 @@ def test_an_orphan_failure_persists_no_vault(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("reorder", [False, True])
-def test_the_vault_hook_does_not_perturb_masked_output(
-    reorder: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fixed_disk(monkeypatch)
-    cfg, tables = standard(tmp_path)
-    kw: dict[str, Any] = {"out_of_core_reorder_threshold_rows": 1} if reorder else {}
-    with_vault, _ = _sink_run(tmp_path, cfg, tables, **kw)
-    got = {p.stem: pq.read_table(p) for p in sorted((tmp_path / "sink_out").glob("*.parquet"))}
-    shutil.rmtree(tmp_path / "sink_out")
-    baseline = run_pipeline(
-        cfg,
-        tables,
-        engine_version="d3b",
-        key_provider=THROWAWAY_KEY_PROVIDER,
-        execution_mode="out_of_core",
-        out_of_core_budget_bytes=BUDGET,
-        sink=ParquetTransactionalSink(tmp_path / "sink_out"),
-        **kw,
-    )
-    ref = {p.stem: pq.read_table(p) for p in sorted((tmp_path / "sink_out").glob("*.parquet"))}
-    assert mode(with_vault)[0] == mode(baseline)[0] == "out_of_core"
-    assert set(got) == set(ref) == {"parent", "child"}
-    for name in got:
-        report = sc.compare_strict(ref[name], got[name])
-        assert all(report.values()), (name, report)
-
-
+# The sink-path twin of this test was deleted with B-6 B0 (a sink refuses a vault writer).
 def test_resident_masked_output_is_identical_with_and_without_the_vault(tmp_path: Path) -> None:
     cfg, tables = standard(tmp_path)
     with_vault, _ = run(cfg, tables)
@@ -1039,10 +995,10 @@ def test_fpe_with_vault_is_still_a_config_reject(tmp_path: Path) -> None:
     assert exc.value.code == "vault_strategy_reversible"
 
 
-def test_an_unkeyed_vault_writer_is_still_rejected_on_the_ooc_route(tmp_path: Path) -> None:
+def test_a_vault_writer_on_another_key_is_rejected_on_the_ooc_route(tmp_path: Path) -> None:
     cfg, tables = standard(tmp_path)
     with pytest.raises(Exception) as exc:
-        run(cfg, tables, writer=VaultWriter(b"\x00" * 8))
+        run(cfg, tables, writer=VaultWriter(b"\x00" * 32))
     assert getattr(exc.value, "code", None) == "vault_key_mismatch"
 
 
@@ -1050,12 +1006,12 @@ def test_direct_callers_of_the_runner_get_the_same_vault_guards() -> None:
     # `run_fk_out_of_core` is public; callers that skip `run_pipeline` skip its DE-02 guard.
     from decoy_engine.execution.out_of_core._vault_collect import assert_vault_inputs
 
-    key = b"\x01" * 8
+    key = b"\x01" * 32
     assert_vault_inputs(None, None, key)  # no writer: nothing to guard
     assert_vault_inputs(VaultWriter(key), {"tables": []}, key)
     with pytest.raises(ExecutionError) as no_config:
         assert_vault_inputs(VaultWriter(key), None, key)
     assert no_config.value.code == "out_of_core_vault_config_required"
     with pytest.raises(Exception) as unkeyed:
-        assert_vault_inputs(VaultWriter(b"\x02" * 8), {"tables": []}, key)
+        assert_vault_inputs(VaultWriter(b"\x02" * 32), {"tables": []}, key)
     assert getattr(unkeyed.value, "code", None) == "vault_key_mismatch"

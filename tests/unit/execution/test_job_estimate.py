@@ -52,16 +52,15 @@ def test_numeric_mask_job_is_priceable(tmp_path: Path) -> None:
     assert 0 < est.runtime.low_seconds <= est.runtime.high_seconds
 
 
-def test_string_without_sample_is_unpriceable_not_a_raise(tmp_path: Path) -> None:
-    # A variable-width column with no resident sample cannot be priced pre-run
-    # (the profile carries no string-length stat) -- honest UNPRICEABLE.
+def test_a_string_mask_job_is_priced_from_a_bounded_sample(tmp_path: Path) -> None:
+    # A variable-width column is priced from a bounded sample of the file (F24 OQ-5).
     table = pa.table({"s": pa.array([f"v{i}" for i in range(200)], type=pa.string())})
     cfg = _single_table_config(tmp_path, table, {"name": "s", "strategy": "redact"})
     est = estimate_job(cfg, tmp_path)
-    assert est.route in _PATHS  # route is still reported honestly
-    assert est.priceable is False
-    assert est.peak_bytes is None and est.runtime is None
-    assert est.notes  # a reason is given
+    assert est.route in _PATHS
+    assert est.priceable is True
+    assert est.peak_bytes is not None
+    assert est.runtime is not None
 
 
 def _generate_config(tmp_path: Path, rows: int) -> dict:
@@ -127,7 +126,7 @@ def test_post_scan_integrity_is_forwarded_to_the_router(
     real = routing.decide_execution_route
 
     def spy(*args: Any, **kwargs: Any) -> Any:
-        seen.append(bool(kwargs.get("post_scan_integrity")))
+        seen.append(kwargs.get("post_scan_resident") is not None)
         return real(*args, **kwargs)
 
     monkeypatch.setattr(routing, "decide_execution_route", spy)
@@ -135,7 +134,10 @@ def test_post_scan_integrity_is_forwarded_to_the_router(
     cfg = _single_table_config(tmp_path, table, {"name": "n", "strategy": "redact"})
     estimate_job(cfg, tmp_path)
     estimate_job({**cfg, "post_scan": {"integrity": True}}, tmp_path)
-    assert seen == [False, True]
+    model_ask = {"integrity": True, "detectors": ["regex", "ner"], "ner_findings": "fail"}
+    estimate_job({**cfg, "post_scan": model_ask}, tmp_path)
+    # No post-scan and regex-only integrity stream; only a model ask is forwarded as resident.
+    assert seen == [False, False, True]
 
 
 def test_router_rejection_returns_unknown_unpriceable(

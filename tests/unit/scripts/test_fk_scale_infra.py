@@ -10,6 +10,7 @@ killed, hung or silent worker still yields a record.
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -19,6 +20,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
+
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
 _SCRIPTS = Path(__file__).resolve().parents[3] / "scripts" / "fk-scale"
 sys.path.insert(0, str(_SCRIPTS))
@@ -146,13 +149,14 @@ def _supervise(code: str, tmp_path: Path, **kw: object) -> sup.WorkerOutcome:
     body = code.replace("RESULT", repr(str(result)))
     return sup.run_worker(
         [sys.executable, "-c", body],
-        env={"PATH": "/usr/bin"},
+        env={"PATH": "/usr/bin", **CAPPED_ENV},
         result_path=result,
         timeout_s=kw.get("timeout_s"),
         rss_kill_mb=kw.get("rss_kill_mb"),
     )
 
 
+@pytest.mark.serial
 def test_supervisor_reports_a_killed_worker(tmp_path: Path) -> None:
     out = _supervise("import os,signal;os.kill(os.getpid(),signal.SIGKILL)", tmp_path)
     failure = sup.classify_failure(out)
@@ -191,6 +195,7 @@ def test_supervisor_nonzero_exit_after_a_good_result_still_fails(tmp_path: Path)
     assert failure is not None and failure["kind"] == "nonzero_exit_after_result"
 
 
+@pytest.mark.serial
 def test_supervisor_times_out_a_hung_worker(tmp_path: Path) -> None:
     out = _supervise("import time;time.sleep(60)", tmp_path, timeout_s=0.6)
     failure = sup.classify_failure(out)
@@ -214,6 +219,7 @@ def _worker(data_dir: Path, work_root: Path, *extra: str) -> tuple[int, dict]:
         [sys.executable, str(_SCRIPTS / "bench_worker_fk.py"), "--data-dir", str(data_dir),
          "--work-root", str(work_root), *extra],
         capture_output=True, text=True, timeout=300, check=False,
+        env={**os.environ, **CAPPED_ENV},
     )  # fmt: skip
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BENCH_JSON "))
     return proc.returncode, json.loads(line.removeprefix("BENCH_JSON "))
@@ -226,6 +232,7 @@ def small_chain(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return out
 
 
+@pytest.mark.serial
 def test_worker_emits_a_complete_record_at_small_n(small_chain: Path, tmp_path: Path) -> None:
     rc, rec = _worker(
         small_chain, tmp_path, "--budget-mb", "512", "--reorder", "100", "--rss-ceiling-mb", "4096"
@@ -266,6 +273,7 @@ def test_worker_reorder_off_and_forced_route_are_recorded(
     assert rec["reorder"]["threshold_rows"] == max(_COUNTS.values()) + 1
 
 
+@pytest.mark.serial
 def test_worker_forced_oom_is_not_a_silent_pass(small_chain: Path, tmp_path: Path) -> None:
     # A tight RLIMIT_DATA cap forces a resource failure on brk-based allocators; where
     # large allocations go through mmap (seen on some CI runners) the cap does not bite,
@@ -310,3 +318,46 @@ def test_error_record_reports_frames_without_message_or_source() -> None:
     assert any(f.endswith(":_thrower") for f in record["frames"])
     assert all(f.count(":") == 2 for f in record["frames"])
     assert secret not in json.dumps(record)
+
+
+_ARENA_VAR = next(k for k in CAPPED_ENV if k.startswith("MALLOC"))
+
+
+class _SpawnedError(Exception):
+    """Raised by the fake supervisor so the bench driver stops right after the spawn."""
+
+
+def _spawn_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mem_cap_mb: int | None):
+    import argparse
+
+    seen: dict[str, str] = {}
+
+    def fake_run_worker(cmd, *, env, **kwargs):
+        seen.update(env)
+        raise _SpawnedError
+
+    monkeypatch.setattr(bench_worker_fk, "run_worker", fake_run_worker)
+    args = argparse.Namespace(
+        data_dir=str(tmp_path), work_root=str(tmp_path), strategy="hash", reorder="on",
+        native_threads=1, force_ooc=False, budget_mb=0, mem_cap_mb=mem_cap_mb, rss_ceiling_mb=None,
+        keep=False,
+        timeout_s=1, rss_kill_mb=None,
+    )  # fmt: skip
+    with pytest.raises(_SpawnedError):
+        bench_worker_fk._one_run(args, 0)
+    return seen
+
+
+def test_a_capped_bench_run_gets_the_one_capped_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env = _spawn_env(monkeypatch, tmp_path, mem_cap_mb=512)
+    assert {k: env[k] for k in CAPPED_ENV} == CAPPED_ENV
+
+
+def test_an_uncapped_bench_run_keeps_its_own_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(_ARENA_VAR, raising=False)
+    env = _spawn_env(monkeypatch, tmp_path, mem_cap_mb=None)
+    assert _ARENA_VAR not in env

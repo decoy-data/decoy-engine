@@ -7,6 +7,25 @@ registry) can still derive its own exception from the engine base without an imp
 
 from __future__ import annotations
 
+from typing import Literal
+
+# Closed set of connector failure classes. Only `transient` is retried; the rest are permanent.
+ConnectorErrorKind = Literal[
+    "access_denied",
+    "not_found",
+    "precondition_failed",
+    "conflict",
+    "wrong_region",
+    "pointer_invalid",
+    "transient",
+    "credentials",
+    "rejected",
+    "source_changed",
+    "digest_mismatch",
+    "host_key_rejected",
+    "unexpected",
+]
+
 
 class DecoyError(Exception):
     """Base class for all decoy_engine exceptions."""

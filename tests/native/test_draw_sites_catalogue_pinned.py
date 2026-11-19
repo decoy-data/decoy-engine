@@ -19,7 +19,7 @@ def _digest(value: object) -> str:
 
 
 def test_catalogue_length_and_order_are_unchanged() -> None:
-    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 34
+    assert len(protocol.DRAW_SITES) == len(_ORDERED_IDS) == 42
     assert [site.draw_site_id for site in protocol.DRAW_SITES] == _ORDERED_IDS
 
 
@@ -46,7 +46,22 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
         assert protocol.draw_site_by_id(site.draw_site_id) is site
 
 
-_CATALOGUE_DIGEST = "63fe849ac714a1ea884189cd7959881c7aa7d524b8674117723de238a6e98fdd"
+# Re-pinned at the GEN-C1 main merge: carries the shuffle and derive_context re-pins plus the moved gen call sites.
+# Re-pinned 2026-11-09: gen.reference records the fitted fan-out shuffles on its stream.
+# Re-pinned 2026-11-09: gen.statistical_per_row records the fitted cell format draws.
+# Re-pinned for FK-FANOUT E2b: gen.reference call site and fingerprint source.
+# Re-pinned for GEN-NUM-SHAPE: gen.statistical_per_row call shape text.
+# Re-pinned for GEN-UNIQUE E2: four unique-draw sites, the moved synthesize.py call sites, and the shared attempt limit.
+# Re-pinned for GEN-TYPES E1: gen.distribution appended at the end of the catalogue.
+# Re-pinned for GEN-TYPES E3: gen.lookup appended after gen.distribution.
+# Re-pinned for B-6: mask.tokenize derives under the vault-scoped subkey (call site moved).
+# Re-pinned for DUP-FREEZE E2: two joint_mask stream sites after mask.joint_mask_keyed_row, and the
+# gen.composite_build_pool seed text names resolve_seed. MASK_STRATEGY_TO_SITE maps each strategy to
+# one site, so its digest does not move.
+# Re-pinned for row 24zb: mask.date_shift metadata (call site, seed text, notes) only.
+# Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
+# instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
+_CATALOGUE_DIGEST = "ccf929c0bd98033f05f6db766f04fbaea02be293d9964ab9a73a96c9bc9460f3"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -59,6 +74,8 @@ _ORDERED_IDS = [
     "mask.group_key",
     "mask.code_set",
     "mask.joint_mask_keyed_row",
+    "mask.joint_mask_null_fallback",
+    "mask.joint_mask_gen_row",
     "mask.text_mask_date_shift",
     "mask.text_mask_faker",
     "mask.grouped_series_monotone_walk",
@@ -73,6 +90,10 @@ _ORDERED_IDS = [
     "gen.pool_deterministic",
     "gen.pool_nondeterministic",
     "gen.composite_build_pool",
+    "gen.faker_unique_retry",
+    "gen.categorical_unique",
+    "gen.reference_unique",
+    "gen.unique_pair",
     "mask.faker",
     "gen.pool_build_faker",
     "gen.identifier_deterministic",
@@ -83,48 +104,59 @@ _ORDERED_IDS = [
     "gen.faker_pool_selection",
     "mask.faker_nondeterministic",
     "mask.tokenize",
+    "gen.distribution",
+    "gen.lookup",
 ]
 
 _ENTRY_DIGESTS = [
-    "a4ee43513bc22f1c60f32ee3188c4fbb6f6db3ab51f95563109516378dc97217",
-    "8dce6622cbd27e05cc798e8b209a715c78834c056613f6adefced790bc4dfe9b",
-    "5510ffc7064f973e74e379c616a9284a98d40733ce8d92ee9a678556c88a2efd",
-    "fe84b07488e2c883de51aa6f890ba06a6d0459fa055829d2821792907a45441d",
-    "82ce53eee4841d4d5233ad441ef1f1bc8b12083bf3f2a486edafe1a57ebb62a6",
-    "64ef8dd18d4b4d94c602d95b0565182b19d0b7635c02fadb8e6e2c1e107be284",
-    "4fe7d8d2827dee249187a798cb82ddacbb8bbf0c6138a8cc55b3d10253425119",
-    "acb11366c3ae3b8fa817660874102ad3a6f377c92ba35ed73cbc007b80056bb5",
-    "eb568e1842f6b938756adb3e6bb841b3633d04587dd9c8473a7312aa586d53ef",
-    "bddaa1d1f3acf2a49832f1742b8163425877c835b2db5e47e76a97500f6893bb",
-    "85be9f4b05fadf9b441f28ce151d9f820c48d99112fe21d799c4a759bc9f9bcd",
-    "474ab1f76ab596a309f6b3f4b6a1e4995555c6f07473a831af12862a22283a60",
-    "d30d45fdcacb74a57114f50fb09d3557bfe838db4afa0b1910f59816dc18b90b",
-    "f01f96cde92e4a13757bc0724ba4eda31b1178bbb420edb144e676a144444b3c",
-    "dc05e03d1c4fda601fce54688971507cd1bfc189aa10646062b315aa9f4913c9",
-    "b411c70c271961691308e0ea9318cce369107d1690f9b09d03046bb6aa436126",
-    "793bc8be484782aa773cbe6556785f5f02619893e768996dc515fa820e6881a7",
-    "0c45409c0a1dd96459b4ba69c4382899ffd0cebada23500d1b3491d13c76e4e3",
-    "d45ba5c6dc53660b4cf3baa43e2faff146d2e4f91e0acd7fd977f731f3b05fe7",
-    "d6e7cb8e9959f4ac1641affe43887f32a73edf5537d20bdf05680cdc3f4f0f01",
-    "fa2fd07097a3ed68edb71e46b40c43e0d697b50cf784b740b49c180bcae2e5d2",
-    "451e4aa4bcb7f23e437468f4e692768c4571e4defb8a081d879be0eb428a1308",
-    "648d1fb0b894493e6e8ad55de08b481dbbece29402ecb9ae3eb9cc54b995b211",
-    "00cc3c083188a7299b963006aa4a5981a1abc2f0aee6e91e7ef31fe69cd532d4",
-    "134293fc3c9833886daacbd285fdc21443e7524062191d2e9951e966994238ea",
-    "4448026c1f789d220610a85dbcb0c17d8ce04e4497d1cda09e0346f713f5d2ba",
-    "b9489ca4978756b4e41678489ce88c9f434a61526272c9cb639bbaddd282f944",
-    "73e3c42955d797409d090d70e5b1c66d05ad12bd67ee820bc0f93b00a9b48970",
-    "ca03675f3cdc12192cf9e6bb08acad38c41841b85f4b05bf36a97fd202a656d9",
-    "eeccee566ac297f0c47f8a3e8da4309688e3c6a307af233ad06158b3aedae08c",
-    "d4a795b3273175d0c76a88f69cd8e3d97326497538694faa60b0886b0868bb02",
-    "46b422be131d1e91c5ed2a6174d86f970429577b88e5da660ab3a4926171dab4",
-    "54e2253c7d6a1d4c6cef9434aa7f18cbefd978b2e651db9778dea3e81ee923cc",
-    "74b05a41097e9ccbfae3c63c74b2758557087333f1cfd1fe8796d070b0d050ea",
+    "e20e8ee9afc564f34870205cabb2d7ce4da58b391e4d8c5cc754a77eca2185bf",  # mask.shuffle
+    "46f06d1dbc4e5d0fbdb0eeac203fbdba6d6d157c9b4b46f0971f48d66a284e5a",  # mask.hash
+    "bd06bcb22c55f7423682660accf32079fce98bc13403eb3f1111aeabcc764b70",  # mask.categorical_deterministic
+    "9aa436b5ecf26021ee8649c0ea47eec71f92064699828e183046db70d0f66412",  # mask.categorical_nondeterministic
+    "1250c6e03f61cdc000a73f7f8f76088402fb6f5407e40d8a31e58052130bc571",  # mask.fpe
+    "28a6b8a9a742bab28c5bbcea40da447b80719c66f8961a1a24735b955559d0fc",  # mask.date_shift
+    "cf19b2a7dc1493488a94dbedc1b93847dfabd350632c42e444ca53da16a02292",  # mask.bucket_perturb
+    "be0d33334a0efdd646507ec6e9f691a8c268785af8764f079e1a84c6377c75de",  # mask.group_key
+    "33bb9e2c0f66453881e672d9e2923c811b778adc597d1974fbb10bee4263cd2d",  # mask.code_set
+    "dfa795f581a81ffc81d668aac8669215dd62c577df7cdf3be702a317b31ea758",  # mask.joint_mask_keyed_row
+    "71a6ecef1fb21899f869296e386b309004f2760a90ed24deb3c0b217c7385681",  # mask.joint_mask_null_fallback
+    "ded3f195ad06b5b96de97035e9386102fbcacd718b699a7a3a6256915a53d1e8",  # mask.joint_mask_gen_row
+    "707f1f95424d98e829d7a6257d344515d801f77f6b52a7733e300ebd445ac4d8",  # mask.text_mask_date_shift
+    "568b337638c888c7dfd5cc616c5924d9827319202d43382ea821a884efe401c4",  # mask.text_mask_faker
+    "2c7733e97f6e0dab2366a8d80b147025b26b19cf8c358fe51a0e815683476efc",  # mask.grouped_series_monotone_walk
+    "13fcb5fc47f3b985bcce484edec55922e9728bed9edd7e97db086ceca27d242f",  # mask.windowed_date
+    "b22ab37e973ad02b943c741bf53e598e9e213a56df6e184144ad95adeca516fd",  # gen.faker_per_row
+    "c26b56c364cecf593b15abddab6bb7a4ca9ada7a578b0748f714e4637cd4c7fa",  # gen.categorical
+    "83ea59b060a74b12e6c29c84f33178e809babeebdd3856deb5ff5257652061ce",  # gen.reference
+    "8b47094cdc123d559a1b924657ac2d84aa012ed0d92fe1a4030b763b04c55f1c",  # gen.formula_per_row
+    "8eee3a31f0bf72952a59e8528cecfda9a4d05e97b123e382b2cab08c76c1e1b9",  # gen.statistical_per_row
+    "c5a8c289a8a94d363e365084d2148580330cdccdc27d4144bc983f482ddaab17",  # gen.null_probability
+    "fc5e96755c56b1f7e9ce4aa51d224dd3f3b0902e7ba55255f6c877dec13e5d35",  # gen.distribution_snapshot
+    "ee9e6455a43a920d72e77cf6f7c843a86912152573ffde62a8652c98ec19d876",  # gen.pool_deterministic
+    "64a2a8b88ba7657a760d89c136230a79182a89ef1cfd99b088cd13fc5c69f9ac",  # gen.pool_nondeterministic
+    "5508629296e713d4cda31e2cefe194f311df6be2ae5a65347b28e87d7bdffe3f",  # gen.composite_build_pool
+    "1b7a80122a1415d8db205339ae13be155654245bd097b7b3dcd4d77f46890245",  # gen.faker_unique_retry
+    "931a64ec2c34e8a8fba15a40515bfd857eee935fd30dc23c5cc2f2db6c1c7694",  # gen.categorical_unique
+    "60d3a8236357b837990a978b3b84fa9681dfca409cf1896d13a3cc9e30d6079e",  # gen.reference_unique
+    "81257af1bd65184ee366d01bd5f28e89bb58d7c09ab47e0c0543776a945453ba",  # gen.unique_pair
+    "916ebf46efe090c9bffbef46663ff183797ad0adb588e13e0a560bc3a6e2fbed",  # mask.faker
+    "cb0c2d260f36b7d2f4e2d1f0755896e082e01822075e5073b6c76ceb08316b60",  # gen.pool_build_faker
+    "e5e15c7f6cf521636920a2d6c4141e63ff8a49bb8256385c4a5230c577376146",  # gen.identifier_deterministic
+    "c175f6bbb2e582aff8d45beee43466397a3c29ed6b0b5e8986d7863cf6909f57",  # gen.identifier_nondeterministic
+    "5e6fa8311c566b1ffeb9e2d8496d76ee0bb91b37827e074b587384b90b9c3328",  # gen.derive_context
+    "7f1198095c8c582ff3d9e340712005d1afa7d6d6198887418f8e33b93bfffa03",  # mask.formula
+    "ab83162c11f2c4dbe9ca55d9c2e90f288f472fb41eb843b9284c4fa4ad71d609",  # gen.faker_pool_build
+    "bc47a0a423b34fc0ebdc2dca30eadf3e9c47ad29713a63937844fe48d7d57d81",  # gen.faker_pool_selection
+    "e49b4f3e3eeb2f621368bb10b751a73087ba63f4d4b4794f0ed49418af92858f",  # mask.faker_nondeterministic
+    "abea5ec5c7f29142ce8bf7c344245c68fa73d17eed4cc3633a9129b6a4a74c2c",  # mask.tokenize
+    "448b2f19f340635c8e5ae9505271bcf521b1f1a1e08dd48c2392847d20b88cb5",  # gen.distribution
+    "853a020843acba06217afc3f99579ab0118fe54ca0b08b5316744425376a95c2",  # gen.lookup
 ]
 
 _MAP_DIGESTS = {
     "MASK_STRATEGY_TO_SITE": "e42b340fc017f0608c08ec988fb697bb52c84f5cbb657dfa99b9531cd56681e9",
-    "GEN_KIND_TO_SITE": "f5311cdfc5e5d172e6c63f12a15a79c1cb4480577f571d12fe391a94bbc6c1e1",
+    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution) and E3 (lookup).
+    "GEN_KIND_TO_SITE": "2174d2a884f6f011bb2aa63cd15507fe60ba168a9be1f30fd9ba24bf9f04f35d",
     "PROVIDER_IDENTIFIER_SITES": "19593ad7e4ac52025cdc024aa16bdb04ab776755b83e6f7c0e546210b6fc7cd6",
     "FAMILIES": "cbbf3f70f90b3995c7bb16f11bf1560ce135af11761cc6444aa41feaf659e811",
     "ENTROPY_ROOTS": "4f3fdb974258ed94e92188bd4dd456363696dba2d2a4a90a4f744c53879949f8",

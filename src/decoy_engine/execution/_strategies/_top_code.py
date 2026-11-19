@@ -51,7 +51,12 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
-from decoy_engine.execution._adapter import StrategyContext, provider_config_to_dict
+from decoy_engine.execution._adapter import (
+    StrategyContext,
+    StrategyOption,
+    option,
+    provider_config_to_dict,
+)
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
@@ -129,6 +134,15 @@ class TopCodeStrategyHandler:
     """Generalize the rare tail(s) of a numeric column into an aggregate label."""
 
     name: str = "top_code"
+    namespace_required: bool = False
+    join_safe: bool = False
+    wizard_options: tuple[StrategyOption, ...] = (
+        option("cap", "int", 89, required=True),
+        option("over_label", "str", "90+", required=True),
+        option("floor", "int", 40),
+        option("under_label", "str", "under 40"),
+    )
+    offer_in_wizard: bool = True
 
     def run(
         self,
@@ -225,29 +239,24 @@ class TopCodeStrategyHandler:
         over_positions = np.flatnonzero(over_mask.to_numpy())
         under_positions = np.flatnonzero(under_mask.to_numpy())
 
-        # The audit warning's row indices are LOCAL to this handler invocation
+        # The audit warning's counts are LOCAL to this handler invocation
         # (this frame). On the chunked route each chunk is a separate invocation,
-        # so the indices are chunk-local and the per-(code,column) warning
+        # so the counts are chunk-local and the per-(code,column) warning
         # dedup in _chunked.py collapses them -- the concatenated audit log
         # then under-reports generalized rows. The MASKED OUTPUT is unaffected
         # and correct (every tail cell is generalized); only this evidence
-        # sidecar is chunk-boundary-dependent. Tracked as a known limitation
+        # sidecar is chunk-boundary-dependent. The detail holds counts only: a
+        # per-row map is not a scalar and carries row positions. Tracked as a known limitation
         # shared with any warning-emitting chunk-safe strategy; see
         # docs/backlog/chunked-audit-evidence-row-indices.md.
         warnings: list[QualityWarning] = []
         if len(over_positions) or len(under_positions):
-            generalized: dict[str, str] = {}
-            for i in over_positions:
-                generalized[f"row_{int(i)}"] = "over"
-            for i in under_positions:
-                generalized[f"row_{int(i)}"] = "under"
             warnings.append(
                 QualityWarning(
                     code=reasons.warning.TOP_CODE_GENERALIZED,
                     provider="top_code",
                     column=column,
                     detail={
-                        "generalized": generalized,
                         "over_count": len(over_positions),
                         "under_count": len(under_positions),
                     },

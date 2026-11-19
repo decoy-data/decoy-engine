@@ -24,8 +24,11 @@ from collections import Counter
 from datetime import date, datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
+from decoy_engine.detection.detectors import PreparedValues, _series_str
+from decoy_engine.profiling._value_redaction import _conforms
 from decoy_engine.profiling.types import SentinelFlag
 
 # ── known sentinel values ─────────────────────────────────────────────────────
@@ -75,6 +78,46 @@ _STRING_SENTINELS: set[str] = {
 }
 
 
+# The two notes of a `date_out_of_range` flag; its `value` is `f"{count} value(s)"`.
+_DOB_RANGE_NOTE = "DOB values outside 1880-today"
+_DATE_RANGE_NOTE = "date values outside 1900-2100"
+
+
+def _numeric_text(f: float) -> str:
+    """The text a numeric sentinel's `value` holds for the table key `f`."""
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def _string_note(normalized: str) -> str:
+    """The note of a string sentinel; `normalized` is the table member."""
+    return f"placeholder string {normalized!r} - probably means missing data"
+
+
+def is_table_sentinel(kind: Any, value: Any, note: Any, count: Any) -> bool:
+    """True when a sentinel flag's `value` and `note` are the fixed table text for its `kind`.
+
+    The scanners write table text and counts only, never the raw cell, so a flag that matches
+    its table cannot hold a cell. A date out-of-range `value` must also equal what the flag's own
+    `count` produces. Anything else (a loaded or hand-edited flag) does not match.
+    """
+    if not (isinstance(kind, str) and isinstance(value, str) and isinstance(note, str)):
+        return False
+    if kind == "date_sentinel":
+        return any(value == d.isoformat() and note == n for d, n in _DATE_SENTINELS.items())
+    if kind == "numeric_sentinel":
+        return any(value == _numeric_text(f) and note == n for f, n in _NUMERIC_SENTINELS.items())
+    if kind == "string_sentinel":
+        return value in _STRING_SENTINELS and note == _string_note(value)
+    if kind == "date_out_of_range":
+        return (
+            _conforms(count, int)
+            and count >= 1
+            and value == f"{count} value(s)"
+            and note in (_DOB_RANGE_NOTE, _DATE_RANGE_NOTE)
+        )
+    return False
+
+
 # ── thresholds for "out of plausible range" date detection ────────────────────
 
 # DOB columns: age 0-120 expected, so birth year between (today.year - 120)
@@ -84,7 +127,7 @@ _REASONABLE_DOB_LOWER = date(1880, 1, 1)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$")
+_ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?\Z")
 
 
 def _to_date(v: Any) -> date | None:
@@ -139,7 +182,7 @@ def detect_sentinels(series: pd.Series, col_name: str) -> list[SentinelFlag]:
     # date-hinted columns (NOT pandas-coerce - pandas Timestamps reject the
     # 0001-01-01 / 9999-12-31 sentinels we care most about).
     else:
-        flags.extend(_scan_strings(non_null))
+        flags.extend(_scan_strings(_series_str(series)))
         if any(
             hint in (col_name or "").lower()
             for hint in ("date", "dob", "birth", "start", "end", "due")
@@ -147,6 +190,22 @@ def detect_sentinels(series: pd.Series, col_name: str) -> list[SentinelFlag]:
             flags.extend(_scan_dates(non_null, col_name))
 
     return flags
+
+
+def _distinct_with_counts(values: pd.Series) -> list[tuple[Any, int]]:
+    """Distinct values in first-appearance order with their cell counts.
+
+    The scanners below are pure functions of the value, so judging each distinct
+    value once and adding its count equals judging every cell, and keeps the
+    flag order (first appearance) the same.
+    """
+    try:
+        codes, uniques = pd.factorize(values)
+    except TypeError:
+        # Unhashable cells (dict / list from JSON-typed sources): judge each cell.
+        return [(v, 1) for v in values]
+    counts = np.bincount(codes, minlength=len(uniques))
+    return list(zip(uniques.tolist(), counts.tolist(), strict=True))
 
 
 # ── scanners (private) ────────────────────────────────────────────────────────
@@ -159,20 +218,20 @@ def _scan_dates(non_null: pd.Series, col_name: str) -> list[SentinelFlag]:
     is_dob_column = any(h in (col_name or "").lower() for h in ("dob", "birth"))
 
     counter: Counter[date] = Counter()
-    for v in non_null:
+    for v, n in _distinct_with_counts(non_null):
         d = _to_date(v)
         if d is None:
             continue
         # Known sentinel exact match.
         if d in _DATE_SENTINELS:
-            counter[d] += 1
+            counter[d] += n
             continue
         # Out-of-range date checks.
         if is_dob_column:
             if d > today or d < _REASONABLE_DOB_LOWER:
-                out_of_range_count += 1
+                out_of_range_count += n
         elif d.year < 1900 or d.year > 2100:
-            out_of_range_count += 1
+            out_of_range_count += n
 
     for d, count in counter.items():
         flags.append(
@@ -190,11 +249,7 @@ def _scan_dates(non_null: pd.Series, col_name: str) -> list[SentinelFlag]:
                 kind="date_out_of_range",
                 value=f"{out_of_range_count} value(s)",
                 count=out_of_range_count,
-                note=(
-                    "DOB values outside 1880-today"
-                    if is_dob_column
-                    else "date values outside 1900-2100"
-                ),
+                note=_DOB_RANGE_NOTE if is_dob_column else _DATE_RANGE_NOTE,
             )
         )
 
@@ -204,18 +259,18 @@ def _scan_dates(non_null: pd.Series, col_name: str) -> list[SentinelFlag]:
 def _scan_numerics(non_null: pd.Series) -> list[SentinelFlag]:
     flags: list[SentinelFlag] = []
     counter: Counter[float] = Counter()
-    for v in non_null:
+    for v, n in _distinct_with_counts(non_null):
         try:
             f = float(v)
         except (TypeError, ValueError):
             continue
         if f in _NUMERIC_SENTINELS:
-            counter[f] += 1
+            counter[f] += n
     for f, count in counter.items():
         flags.append(
             SentinelFlag(
                 kind="numeric_sentinel",
-                value=str(int(f)) if f.is_integer() else str(f),
+                value=_numeric_text(f),
                 count=count,
                 note=_NUMERIC_SENTINELS[f],
             )
@@ -223,20 +278,21 @@ def _scan_numerics(non_null: pd.Series) -> list[SentinelFlag]:
     return flags
 
 
-def _scan_strings(non_null: pd.Series) -> list[SentinelFlag]:
+def _scan_strings(values: PreparedValues) -> list[SentinelFlag]:
     flags: list[SentinelFlag] = []
     counter: Counter[str] = Counter()
-    for v in non_null.astype(str):
-        normalized = v.strip().lower()
+    # `uniques` is already stripped, so strip-then-lower gives the same key.
+    for v, n in zip(values.uniques.tolist(), values.counts.tolist(), strict=True):
+        normalized = v.lower()
         if normalized in _STRING_SENTINELS:
-            counter[normalized] += 1
+            counter[normalized] += n
     for normalized, count in counter.items():
         flags.append(
             SentinelFlag(
                 kind="string_sentinel",
                 value=normalized,
                 count=count,
-                note=f"placeholder string {normalized!r} - probably means missing data",
+                note=_string_note(normalized),
             )
         )
     return flags

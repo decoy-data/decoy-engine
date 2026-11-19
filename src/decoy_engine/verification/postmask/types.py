@@ -11,10 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from decoy_engine.detection.types import DetectorRun, DetectorSource, ModelRef
+from decoy_engine.verification.postmask.distribution import DistributionFinding
+
 # Bump when the report dict shape changes in a non-backward-compatible
 # way. The platform persists this on the JobPostScanIntegrityReport row so reads of
 # old rows can render correctly. Mirrors the Quality report's versioning.
-SCHEMA_VERSION = "post-scan-integrity/v2"
+SCHEMA_VERSION = "post-scan-integrity/v3"
+# Tags the verdict reader accepts: v2 reports (match_rate is always a number) stay readable.
+READABLE_SCHEMA_VERSIONS = frozenset({"post-scan-integrity/v2", SCHEMA_VERSION})
 
 
 Severity = Literal["info", "warning", "fail", "error"]
@@ -47,31 +52,35 @@ class ResidualPIIFinding:
     table: str
     column: str
     detector_id: str
-    match_rate: float
+    match_rate: float | None  # None only for a classifier finding, which has a band instead
     severity: Severity
     configured_strategy: str | None = None  # what the plan said to do (None = no policy)
     sample_match_count: int = 0  # how many rows still match
     message: str = ""
     # Source-comparison evidence (audit C1 fix). Additive with defaults
-    # so post-scan-integrity/v2 payload consumers are unaffected.
+    # so post-scan-integrity/v3 payload consumers are unaffected.
     # Positional out==src rate over comparable non-null rows; None when
     # the source was unavailable or the column was not comparable.
     source_identity_rate: float | None = None
     source_compared: bool = False  # True when the source comparison ran
+    # Model detectors (additive): which detector source found it, the model that ran, the
+    # classifier band, whether a `post_scan.dismissed` entry lowered it, and whether
+    # `ner_findings: fail` raised it from `warning`.
+    source: DetectorSource = "regex"
+    model: ModelRef | None = None
+    band: str | None = None
+    dismissed: bool = False
+    promoted: bool = False
 
 
 @dataclass(frozen=True)
 class FKPreservationFinding:
-    """A foreign key relationship whose post-mask values don't fully resolve.
+    """One declared FK edge, from the facts of its child key. Severity: ``fail`` when the run
+    introduced orphans; ``warning`` when every output orphan was in the source or the key carries
+    only warning codes; ``info`` when there is none; ``error`` when the key has no counts.
 
-    Severity rules:
-      - ``info``: 0 orphans (the check ran cleanly).
-      - ``warning``: orphan rate <= 1% (some FK churn; might be intentional
-        if the relationship was tagged orphan_policy: skip).
-      - ``fail``: orphan rate > 1% (significant FK breakage; downstream
-        joins will lose rows).
-      - ``error``: relationship graph could not be walked (engine error;
-        check the relationships config + the namespace registry).
+    ``parent_column`` and ``child_column`` join the names with ``", "``; the tuples hold them one by
+    one. ``source_orphan_count`` is None when the source side was not counted.
     """
 
     parent_table: str
@@ -84,6 +93,9 @@ class FKPreservationFinding:
     orphan_rate: float
     namespace: str | None = None
     message: str = ""
+    parent_columns: tuple[str, ...] = ()
+    child_columns: tuple[str, ...] = ()
+    source_orphan_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -146,3 +158,12 @@ class PostMaskReport:
     # at the moment it tallies counters; ISO-8601 string. Keep
     # optional so legacy payloads deserialize cleanly.
     generated_at: str | None = None
+    # The detector sources that ran, and every output table the residual-PII check read (clean
+    # tables included, so a reader never infers coverage from finding rows). `config_sha256` is
+    # the hash of the pipeline file's bytes, set by a caller that read one.
+    detectors: tuple[DetectorRun, ...] = ()
+    tables_checked: tuple[str, ...] = ()
+    config_sha256: str | None = None
+    # Present only when `post_scan.distribution` asked for the check; the section is omitted from
+    # the report otherwise, so a report without the check keeps its exact shape.
+    distribution: tuple[DistributionFinding, ...] | None = None

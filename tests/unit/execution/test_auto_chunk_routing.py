@@ -25,6 +25,8 @@ The load-bearing contract pinned here, in order of importance:
    entries chunked as full-frame.
 4. The P1 golden holds: a plain default small run stamps nothing
    (`quality_metrics == {}`).
+5. LARGE-STRING-FAST: a `large_string` Parquet source takes the same masking path as `string`
+   (same output, no per-row reference calls).
 """
 
 from __future__ import annotations
@@ -33,11 +35,14 @@ from typing import Any
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
-from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.errors import PipelineValidationError, RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
+from decoy_engine.kernel import _scalar
+from tests._declared_schema import declare_rest
 from tests.native._chunked_entry_support import force_oracle, forced_reason
 
 _ENGINE_VERSION = "p3-auto-chunk-test"
@@ -51,7 +56,7 @@ _CHUNK = 16
 
 
 def _validated_dump(cfg: dict) -> dict:
-    return PipelineConfig.model_validate(cfg).model_dump()
+    return PipelineConfig.model_validate(declare_rest(cfg)).model_dump()
 
 
 def _config(tmp_path, columns: list[dict], table: str = "accounts") -> dict:
@@ -59,7 +64,14 @@ def _config(tmp_path, columns: list[dict], table: str = "accounts") -> dict:
         {
             "version": 2,
             "global_settings": {"seed": 42},
-            "sources": {table: {"type": "file", "format": "csv", "path": str(tmp_path / "in.csv")}},
+            "sources": {
+                table: {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(tmp_path / "in.csv"),
+                }
+            },
             "tables": [{"name": table, "columns": columns}],
             "targets": {
                 table: {"type": "file", "format": "csv", "path": str(tmp_path / "out.csv")}
@@ -312,18 +324,18 @@ class TestByteIdentityMatrix:
 
 class TestRoutingMechanics:
     def test_eligible_job_routes_through_chunked_entrypoint(self, tmp_path, monkeypatch):
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         cfg, sources = _single_column_job(tmp_path, "hash")
         calls: list[dict[str, Any]] = []
-        real = _chunked.run_mask_pipeline_chunked
+        real = _chunked_oracle._mask_pipeline_chunked
 
         def spy(config, chunks, **kwargs):
             chunk_list = list(chunks)
             calls.append({"n_chunks": len(chunk_list), **kwargs})
             return real(config, chunk_list, **kwargs)
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", spy)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", spy)
         # Today's lane: the dispatcher lane (B2) runs `run_mask_chunked` instead, which
         # acceptance test 2 covers.
         auto, _forced = _run_pair(cfg, sources, monkeypatch, chunked_dispatcher_enabled=False)
@@ -381,12 +393,12 @@ class TestFailClosed:
         also nondeterministic across runs, so identity is asserted on the
         PATH (chunked entrypoint must never run) rather than on output
         bytes; the output is still checked to be a permutation."""
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         def bomb(*args, **kwargs):
             raise AssertionError("chunked entrypoint ran for a non-chunk-safe strategy")
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", bomb)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", bomb)
         df = pd.DataFrame({"val": [f"v{i}" for i in range(_ROWS)]})
         df.to_csv(tmp_path / "in.csv", index=False)
         cfg = _config(tmp_path, [{"name": "val", "strategy": "shuffle"}])
@@ -404,7 +416,12 @@ class TestFailClosed:
                 "version": 2,
                 "global_settings": {"seed": 42},
                 "sources": {
-                    name: {"type": "file", "format": "csv", "path": str(tmp_path / f"{name}.csv")}
+                    name: {
+                        "type": "file",
+                        "format": "csv",
+                        "has_header": True,
+                        "path": str(tmp_path / f"{name}.csv"),
+                    }
                     for name in ("a", "b")
                 },
                 "tables": [
@@ -481,7 +498,12 @@ class TestFailClosed:
                 "version": 2,
                 "global_settings": {"seed": 42},
                 "sources": {
-                    "accounts": {"type": "file", "format": "csv", "path": str(tmp_path / "in.csv")}
+                    "accounts": {
+                        "type": "file",
+                        "format": "csv",
+                        "has_header": True,
+                        "path": str(tmp_path / "in.csv"),
+                    }
                 },
                 "tables": [
                     {
@@ -536,11 +558,13 @@ class TestFailClosed:
                     "customers": {
                         "type": "file",
                         "format": "csv",
+                        "has_header": True,
                         "path": str(tmp_path / "customers.csv"),
                     },
                     "orders": {
                         "type": "file",
                         "format": "csv",
+                        "has_header": True,
                         "path": str(tmp_path / "orders.csv"),
                     },
                 },
@@ -695,9 +719,11 @@ class TestFailClosed:
         sources["extra"] = pa.Table.from_pandas(
             pd.DataFrame({"x": [1, 2, 3]}), preserve_index=False
         )
-        auto, forced = _run_pair(cfg, sources, monkeypatch, explain_plan=True)
-        _assert_full_frame_and_identical(auto, forced, "accounts", "extra")
-        assert auto.outputs["extra"].equals(forced.outputs["extra"])
+        # The declaration gate (CONFIG-EXPLICIT E2c) refuses a loaded table the config does not
+        # declare, so no route ever sees an extra frame.
+        with pytest.raises(PipelineValidationError) as refused:
+            _run_pair(cfg, sources, monkeypatch, explain_plan=True)
+        assert refused.value.code == "source_file.undeclared_table"
 
     def test_composite_provider_rejected_by_planner(self, tmp_path, monkeypatch):
         """A composite (coherent_with) provider that satisfies the per-column
@@ -1151,14 +1177,14 @@ class TestRoutedResultSurface:
 
 class TestKillSwitch:
     def test_auto_chunk_false_forces_full_frame_with_reason(self, tmp_path, monkeypatch):
-        from decoy_engine.execution import _chunked
+        from decoy_engine.execution import _chunked_oracle
 
         cfg, sources = _single_column_job(tmp_path, "hash")
 
         def bomb(*args, **kwargs):
             raise AssertionError("chunked entrypoint ran despite auto_chunk=False")
 
-        monkeypatch.setattr(_chunked, "run_mask_pipeline_chunked", bomb)
+        monkeypatch.setattr(_chunked_oracle, "_mask_pipeline_chunked", bomb)
         monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
         result = run_pipeline(
             cfg,
@@ -1280,3 +1306,84 @@ class TestKnobValidation:
             run_pipeline(cfg, sources=sources, engine_version=_ENGINE_VERSION, **{knob: value})
         assert exc.value.code == "invalid_execution_knob"
         assert knob in str(exc.value)
+
+
+# --------------------------------------------------------------------------
+# LARGE-STRING-FAST: large_string source takes the fast kernels
+# --------------------------------------------------------------------------
+
+_LS_ROWS = 60
+# Captured at import: a second `_run` in one test must wrap the real reference, not the first
+# run's spy (that would credit the second run's calls to the first run's list).
+_LS_REDACT_REFERENCE = _scalar._redact_array_reference
+_LS_TRUNCATE_REFERENCE = _scalar._truncate_array_reference
+
+
+def _large_string_config(path: Any) -> dict:
+    return PipelineConfig.model_validate(
+        declare_rest(
+            {
+                "version": 2,
+                "global_settings": {"seed": 42},
+                "sources": {"t": {"type": "file", "format": "parquet", "path": str(path)}},
+                "tables": [
+                    {
+                        "name": "t",
+                        "columns": [
+                            {"name": "secret", "strategy": "redact"},
+                            {
+                                "name": "zip",
+                                "strategy": "truncate",
+                                "provider_config": {"length": 3, "keep": "head"},
+                            },
+                        ],
+                    }
+                ],
+                "targets": {"t": {"type": "file", "format": "parquet", "path": "/dev/null"}},
+            }
+        )
+    ).model_dump()
+
+
+def _run_large_string(tmp_path: Any, typ: pa.DataType, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
+    values = pa.array([f"user{i}@example.com" if i % 7 else None for i in range(_LS_ROWS)])
+    path = tmp_path / f"{typ}.parquet"
+    pq.write_table(pa.table({"secret": values.cast(typ), "zip": values.cast(typ)}), path)
+    table = pq.read_table(path)
+    assert table.schema.field("secret").type == typ
+    calls: list[str] = []
+
+    def spy_r(*a: Any, **k: Any) -> pa.Array:
+        calls.append("redact")
+        return _LS_REDACT_REFERENCE(*a, **k)
+
+    def spy_t(*a: Any, **k: Any) -> pa.Array:
+        calls.append("truncate")
+        return _LS_TRUNCATE_REFERENCE(*a, **k)
+
+    monkeypatch.setattr(_scalar, "_redact_array_reference", spy_r)
+    monkeypatch.setattr(_scalar, "_truncate_array_reference", spy_t)
+    result = run_pipeline(
+        _large_string_config(path),
+        sources={"t": table},
+        engine_version="large-string-fast",
+        auto_chunk_threshold_rows=10,
+        chunk_size_rows=16,
+    )
+    return result, calls
+
+
+def test_large_string_source_matches_string_without_the_reference(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    small, small_calls = _run_large_string(tmp_path, pa.string(), monkeypatch)
+    large, large_calls = _run_large_string(tmp_path, pa.large_string(), monkeypatch)
+    assert small.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert large.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert small_calls == []
+    assert large_calls == []
+    for col in ("secret", "zip"):
+        assert (
+            large.outputs["t"].column(col).to_pylist() == small.outputs["t"].column(col).to_pylist()
+        )

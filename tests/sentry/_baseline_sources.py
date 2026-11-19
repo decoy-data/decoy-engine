@@ -39,13 +39,17 @@ class InCode:
     # tracked files, so the baseline stores a placeholder for it.
     masks: tuple[str, ...] = ()
 
-    def __call__(self) -> set[str]:
+    def _module(self) -> object:
         path = SENTRY / self.test_file
         spec = importlib.util.spec_from_file_location(f"_bl_{path.stem}", path)
         if spec is None or spec.loader is None:
             raise ImportError(path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        return mod
+
+    def __call__(self) -> set[str]:
+        mod = self._module()
         tokens = [getattr(mod, name) for name in self.masks]
         out = set()
         for k in getattr(mod, self.constant):
@@ -54,6 +58,10 @@ class InCode:
                 key = key.replace(token, "<removed-surface>")
             out.add(key)
         return out
+
+    def maxes(self) -> dict[str, int]:
+        """Integer values of the constant, keyed like ``__call__``: the live ``max`` per entry."""
+        return {_flat(k): int(v) for k, v in getattr(self._module(), self.constant).items()}
 
 
 in_code = InCode
@@ -88,12 +96,34 @@ def toml_keys(rel: str) -> Callable[[], set[str]]:
     return keys
 
 
+def import_layer_keys(rel: str, contract: str) -> Callable[[], set[str]]:
+    """``<contract>::<importer> -> <imported>`` for each ignore line of an import-linter config.
+
+    Layer membership is not keyed here: it is the exact snapshot in ``test_import_layers.py``.
+    """
+
+    def keys() -> set[str]:
+        path = SENTRY / "layout" / "_layout.py"
+        spec = importlib.util.spec_from_file_location("_bl_layout", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # dataclasses in the module look themselves up here
+        spec.loader.exec_module(mod)
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        return {f"{contract}::{key}" for key in mod.ignore_keys(text)}
+
+    return keys
+
+
 @dataclass(frozen=True)
 class Source:
     sentry_id: str
     where: str  # file the sentry reads, for the reason text
     keys: Callable[[], set[str]]
     note: str = ""
+    # Live numeric value per key, for a list whose entries are counts (recorded as ``max``).
+    maxes: Callable[[], dict[str, int]] | None = None
 
 
 F29 = "tests/fixtures/f29"
@@ -122,16 +152,24 @@ SOURCES: tuple[Source, ...] = (
         ),
     ),
     Source(
-        "file-access-registry",
-        "tests/sentry/file_access_registry.toml",
-        toml_keys("tests/sentry/file_access_registry.toml"),
-    ),
-    Source(
-        "file-access-modules",
-        "tests/sentry/file_access_modules.toml",
-        toml_keys("tests/sentry/file_access_modules.toml"),
+        "reason-unchecked-helpers",
+        "tests/sentry/baselines/reason-unchecked-helpers.json",
+        in_code("test_reason_registry.py", "UNCHECKED_HELPERS"),
     ),
     Source("module-size", "test_module_size.py", in_code("test_module_size.py", "ALLOWLIST")),
+    Source(
+        "package-fanout",
+        "layout/test_package_fanout.py",
+        in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST"),
+        maxes=in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST").maxes,
+    ),
+    Source(
+        "table-kind-truth-tests",
+        "test_table_kind_classifier.py",
+        in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE"),
+        maxes=in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE").maxes,
+    ),
+    Source("import-layers", ".importlinter", import_layer_keys(".importlinter", "layers")),
     Source(
         "public-import-boundary",
         "test_public_import_boundary.py",
@@ -143,9 +181,19 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_exception_hierarchy.py", "_ALLOWLIST"),
     ),
     Source(
+        "reason-policy-single-source",
+        "test_reason_policy_single_source.py",
+        in_code("test_reason_policy_single_source.py", "EXEMPT"),
+    ),
+    Source(
         "file-access-entry-seams",
         "test_file_access_entry_points.py",
         in_code("test_file_access_entry_points.py", "INTERNAL_SEAMS"),
+    ),
+    Source(
+        "post-scan-route-exempt",
+        "test_post_scan_route_guard.py",
+        in_code("test_post_scan_route_guard.py", "EXEMPT"),
     ),
     Source(
         "locator-waivers", "test_locator_hygiene.py", in_code("test_locator_hygiene.py", "WAIVERS")
@@ -176,7 +224,7 @@ SOURCES: tuple[Source, ...] = (
     Source(
         "wave-b-string-target-exempt",
         "test_engine_string_targets.py",
-        in_code("test_engine_string_targets.py", "EXEMPT", ("_REMOVED",)),
+        in_code("test_engine_string_targets.py", "EXEMPT"),
     ),
     Source(
         "wave-b-e0-test-files",
@@ -195,10 +243,123 @@ SOURCES: tuple[Source, ...] = (
         },
     ),
     Source(  # keys of the ratchet-schema baseline itself
+        "serial-resources",
+        "tests/sentry/baselines/serial-resources.json",
+        lambda: set(
+            json.loads((BASELINES / "serial-resources.json").read_text(encoding="utf-8"))["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "exception-context",
+        "tests/sentry/baselines/exception-context.json",
+        lambda: set(
+            json.loads((BASELINES / "exception-context.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "validation-name-messages",
+        "tests/sentry/baselines/validation-name-messages.json",
+        lambda: set(
+            json.loads((BASELINES / "validation-name-messages.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
         "gcs-call-kwargs",
         "tests/sentry/baselines/gcs-call-kwargs.json",
         lambda: set(
             json.loads((BASELINES / "gcs-call-kwargs.json").read_text(encoding="utf-8"))["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-blocking",
+        "tests/sentry/baselines/post-scan-blocking.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-blocking.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-pass-through",
+        "tests/sentry/baselines/post-scan-pass-through.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-pass-through.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-key-core",
+        "tests/sentry/baselines/post-scan-key-core.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-key-core.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-reason-identity",
+        "tests/sentry/baselines/post-scan-reason-identity.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-reason-identity.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-gate-applies",
+        "tests/sentry/baselines/post-scan-gate-applies.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-gate-applies.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-commit",
+        "tests/sentry/baselines/post-scan-commit.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-commit.json").read_text(encoding="utf-8"))["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-model-predicate",
+        "tests/sentry/baselines/post-scan-model-predicate.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-model-predicate.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
+        "post-scan-readability",
+        "tests/sentry/baselines/post-scan-readability.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-readability.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(
+        "post-scan-route-coverage",
+        "tests/sentry/baselines/post-scan-route-coverage.json",
+        lambda: set(
+            json.loads((BASELINES / "post-scan-route-coverage.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(
+        "strategy-docs-agree",
+        "tests/sentry/baselines/strategy-docs-agree.json",
+        lambda: set(
+            json.loads((BASELINES / "strategy-docs-agree.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
         ),
     ),
 )
@@ -213,9 +374,19 @@ NOT_A_LIST: dict[str, str] = {
     "reason-manifest-v1.json": "released reason manifest, frozen by the F29 registry tests",
     "reason-manifest-v1.4-f06.json": "released reason manifest, frozen by the F29 registry tests",
     "reason-manifest-v1.6-sub-stop.json": "released reason manifest, frozen by the F29 registry tests",
+    "reason-manifest-v1.7-lib-l0-1.json": "released reason manifest, frozen by the F29 registry tests",
+    "reason-manifest-v1.19-config-explicit-e2a.json": (
+        "released reason manifest, frozen by the F29 registry tests"
+    ),
+    "reason-manifest-v1.15-config-explicit-e1.json": (
+        "released reason manifest, frozen by the F29 registry tests"
+    ),
+    "reason-manifest-v1.8-scanml-m1.json": "released reason manifest, frozen by the F29 registry tests",
     "reason-registry-release.json": "released reason registry, frozen by the F29 registry tests",
     "consumer-contract.json": "F29 consumer contract, compared whole by test_reason_registry",
     "openapi.json": "generated schema used as a negative fixture in a residual-surface test",
+    "file_access_registry.toml": "file access registry, allowed to grow; guarded by its Count header",
+    "file_access_modules.toml": "file access module list, allowed to grow with new access modules",
 }
 
 
@@ -232,7 +403,9 @@ def write_initial() -> None:
         if path.exists():
             raise SystemExit(f"{path} exists; baselines only shrink after the first inventory")
         reason = f"initial X0a inventory of {src.where}; existing entry, reviewed by its own sentry"
-        entries = {k: {"reason": reason} for k in sorted(src.keys())}
+        entries: dict[str, dict[str, object]] = {k: {"reason": reason} for k in sorted(src.keys())}
+        for k, value in (src.maxes() if src.maxes else {}).items():
+            entries[k]["max"] = value
         doc = {"sentry_id": src.sentry_id, "created_in": CREATED_IN, "entries": entries}
         path.write_text(json.dumps(doc, indent=1, sort_keys=False) + "\n", encoding="utf-8")
         rows.append(

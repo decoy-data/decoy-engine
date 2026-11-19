@@ -34,7 +34,13 @@ ENGINE_VERSION = "f13-accept"
 GOOD_SECRET = b"f13-throwaway-secret-0123456789ab"  # 33 bytes
 
 
-def keyed_config(tmp_path: Any, *, mask_secret_ref: str | None = None, seed: int = 7) -> dict:
+def keyed_config(
+    tmp_path: Any,
+    *,
+    mask_secret_ref: str | None = None,
+    seed: int = 7,
+    strategy: str = "hash",
+) -> dict:
     gs: dict = {"seed": seed}
     if mask_secret_ref is not None:
         gs["mask_secret_ref"] = mask_secret_ref
@@ -42,9 +48,19 @@ def keyed_config(tmp_path: Any, *, mask_secret_ref: str | None = None, seed: int
         {
             "version": 2,
             "global_settings": gs,
-            "sources": {"t": {"type": "file", "format": "csv", "path": str(tmp_path / "t.csv")}},
+            "sources": {
+                "t": {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": str(tmp_path / "t.csv"),
+                }
+            },
             "tables": [
-                {"name": "t", "columns": [{"name": "email", "strategy": "hash", "namespace": "e"}]}
+                {
+                    "name": "t",
+                    "columns": [{"name": "email", "strategy": strategy, "namespace": "e"}],
+                }
             ],
             "targets": {"t": {"type": "file", "format": "csv", "path": str(tmp_path / "o.csv")}},
         }

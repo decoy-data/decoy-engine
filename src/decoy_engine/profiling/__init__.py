@@ -8,17 +8,89 @@ PII detector hits, format signals, sentinel-value flags, plus dataset-level
 re-identification risk. It is the only thing FORECAST sees; FORECAST never
 touches raw data.
 
+A ColumnProfile's `to_dict()` is the raw form. Output meant to be saved or shown goes
+through `profile_document` (or `redact_profile_dict` for a loaded document), which removes
+cell values of value-sensitive columns unless `include_values=True`. A distribution
+snapshot meant to be written goes through `distribution_snapshot_document`, which does the
+same for the snapshot's stats.
+
 Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 `ColumnProfile`. Depends on `decoy_engine.detection`.
 """
 
+from decoy_engine.profiling._model_pass import ModelHit
+from decoy_engine.profiling._profile_document import profile_document, redact_profile_dict
+from decoy_engine.profiling._scan_core import ScanSetCore, ScanSetCoreRead
+from decoy_engine.profiling._scan_integrity import (
+    KEY_BATCH_ROWS,
+    MEMORY_LIMIT,
+    ChildFacts,
+    ChildKeyFacts,
+    KeyBatches,
+    KeyFacts,
+    RelationshipFacts,
+    column_distinct,
+    key_facts,
+)
+from decoy_engine.profiling._snapshot_values import (
+    distribution_snapshot_document,
+    snapshot_joint_warnings,
+)
+from decoy_engine.profiling._starter_config import (
+    ColumnSuggestion,
+    StarterConfig,
+    starter_config,
+)
+from decoy_engine.profiling._value_redaction import (
+    MIN_RELEASE_COUNT,
+    POLICY_RAW,
+    POLICY_REDACTED,
+    REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
+    VALUE_POLICY_KEY,
+    is_value_sensitive,
+)
+from decoy_engine.profiling.bound_baseline import (
+    BaselineBindingError,
+    BoundBaseline,
+    DriftFinding,
+    DriftVerdict,
+    bind_baseline,
+    evaluate_drift,
+)
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (
     DEFAULT_STRATEGY_BY_DETECTOR,
+    DETECTOR_DESCRIPTORS,
+    DetectorDescriptor,
+    StarterChoice,
     StrategyDefault,
     get_default_strategy,
     known_detector_ids,
 )
+from decoy_engine.profiling.scan_diff import (
+    SCAN_DIFF_SCHEMA,
+    FieldChange,
+    FieldPresence,
+    ScanDiffCore,
+    ScanDiffCoreRead,
+    ScanSetDiff,
+    TableDiff,
+    diff_scan_documents,
+    diff_scan_tables,
+    pii_bucket,
+    scan_diff_to_dict,
+)
+from decoy_engine.profiling.scan_set import (
+    SCAN_SET_SCHEMA,
+    ScanSet,
+    ScanSourceError,
+    TableScan,
+    passes_through,
+    scan_set_to_dict,
+    scan_sources,
+)
+from decoy_engine.profiling.scan_set_read import ScanSetReadError, read_scan_set
 from decoy_engine.profiling.types import (
     ColumnProfile,
     Distribution,
@@ -29,13 +101,68 @@ from decoy_engine.profiling.types import (
 
 __all__ = [
     "DEFAULT_STRATEGY_BY_DETECTOR",
+    "DETECTOR_DESCRIPTORS",
+    "KEY_BATCH_ROWS",
+    "MEMORY_LIMIT",
+    "MIN_RELEASE_COUNT",
+    "POLICY_RAW",
+    "POLICY_REDACTED",
+    "REDACTED_COLUMNS_KEY",
+    "REDACTED_POLICIES",
+    "SCAN_DIFF_SCHEMA",
+    "SCAN_SET_SCHEMA",
+    "VALUE_POLICY_KEY",
+    "BaselineBindingError",
+    "BoundBaseline",
+    "ChildFacts",
+    "ChildKeyFacts",
     "ColumnProfile",
+    "ColumnSuggestion",
+    "DetectorDescriptor",
     "Distribution",
+    "DriftFinding",
+    "DriftVerdict",
+    "FieldChange",
+    "FieldPresence",
     "FieldStats",
+    "KeyBatches",
+    "KeyFacts",
+    "ModelHit",
+    "RelationshipFacts",
+    "ScanDiffCore",
+    "ScanDiffCoreRead",
+    "ScanSet",
+    "ScanSetCore",
+    "ScanSetCoreRead",
+    "ScanSetDiff",
+    "ScanSetReadError",
+    "ScanSourceError",
     "SentinelFlag",
+    "StarterChoice",
+    "StarterConfig",
     "StrategyDefault",
+    "TableDiff",
+    "TableScan",
     "TopValue",
+    "bind_baseline",
+    "column_distinct",
+    "diff_scan_documents",
+    "diff_scan_tables",
+    "distribution_snapshot_document",
+    "evaluate_drift",
     "get_default_strategy",
+    "is_value_sensitive",
+    "key_facts",
     "known_detector_ids",
+    "passes_through",
+    "pii_bucket",
     "profile_columns",
+    "profile_document",
+    "read_scan_set",
+    "redact_profile_dict",
+    "scan_diff_to_dict",
+    "scan_set_to_dict",
+    "scan_sources",
+    "snapshot_joint_warnings",
+    "starter_config",
 ]

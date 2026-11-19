@@ -19,8 +19,9 @@ branch, the `if not shapes: return ""` empty-guard, is killed
 (`test_empty_shapes_message_is_empty`). Both the shape predicate
 `caller_managed_residency_shapes` and the `residency_quality_warning` factory
 have **0 surviving mutants**: the factory's `code`/`provider`/`detail` fields are
-pinned by `test_residency_quality_warning_shape` (and the redundant `column=None`
-default was dropped so no equivalent survivor exists). The predicate's every
+pinned by `test_residency_quality_warning_shape` and by the evidence-model test
+(see "Evidence-model mutations" below); the redundant `column=None`
+default was dropped so no equivalent survivor exists. The predicate's every
 branch (resident-by-type, `sink is None`, `source_loader is not None`, and the
 tuple assembly) is killed by the by-shape unit tests
 (`test_resident_source_is_detected_by_type_not_dict_non_emptiness`,
@@ -48,6 +49,20 @@ would wrongly warn on the guaranteed LazySource+sink shape. It is pinned by
 `test_bounded_shape_reports_no_caller_managed_shapes` (a non-empty dict of
 LazySources reports no shapes). The corresponding mutmut mutants on the
 `isinstance` check are all killed.
+
+## Evidence-model mutations (2026-11-17, fix/ooc-warning-evidence)
+
+The factory now emits `provider="out_of_core_route"` and a scalar-only `detail` (one `True`
+flag per shape plus `message`) so `EvidencePayload` accepts it. Three hand mutations on the
+final head, run against `tests/unit/records/test_evidence_accepts_run_warnings.py`,
+`test_ooc_residency_warning.py` and `test_r3_within_route_baseline.py`; all killed:
+
+- restore `provider=""`: killed (evidence model refuses the empty name; the shape test pins the name);
+- restore a list in `detail` (`detail["shapes"] = list(shapes)`): killed (evidence model refuses the list);
+- skip unknown shapes (`... for s in shapes if s in _SHAPE_FLAGS`): killed by
+  `test_residency_warning_refuses_an_unknown_shape`.
+
+The mutmut counts above predate this change and were not regenerated.
 
 ## Candidate findings
 

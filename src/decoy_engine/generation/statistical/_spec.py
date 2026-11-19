@@ -43,17 +43,36 @@ behind its own opt-in.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine.contracts import distribution_snapshot as dsc
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileRole
-from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
+from decoy_engine.generation.statistical._cell_format import (
+    CellFormat,
+    cell_format_from_dict,
+    decode_cell_format,
+)
+from decoy_engine.generation.statistical._numeric_shape import (
+    decode_numeric_shape,
+    numeric_shape_withheld,
+    redacted_fix_hint,
+)
+from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
+from decoy_engine.profiling import (
+    POLICY_RAW,
+    REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
+    VALUE_POLICY_KEY,
+)
 
 _SUPPORTED_KINDS = ("numeric", "categorical", "datetime", "freetext")
+# `empty` (an all-null source column) is sampled only when the snapshot carries a `cell_format`
+# block, which is what makes "all null" a stated fact rather than a missing histogram.
+_EMPTY_KIND = "empty"
 _OTHER_MODES = ("redistribute", "emit")
 
 # The placeholder emitted for tail mass under other_mode="emit".
@@ -101,6 +120,11 @@ class StatisticalSpec:
     # The sampler (`_sample.py`) dispatches on `carrier is None` for exactly
     # this reason, so legacy behavior stays byte-identical.
     carrier: str | None = None
+    # Fitted cell shape (`generation/statistical/_cell_format.py`); None for a snapshot without the
+    # block, which keeps the old draw sequence byte for byte.
+    cell_format: CellFormat | None = None
+    # Year ranges from the contract decoder; admission and the sampler read these, not `year_bins`.
+    datetime_buckets: tuple[dsc.DatetimeBucket, ...] | None = None
 
 
 def spec_to_dict(spec: StatisticalSpec) -> dict[str, Any]:
@@ -114,6 +138,10 @@ def spec_to_dict(spec: StatisticalSpec) -> dict[str, Any]:
     data = asdict(spec)
     if data.get("carrier") is None:
         del data["carrier"]
+    if data.get("cell_format") is None:
+        del data["cell_format"]
+    if data.get("datetime_buckets") is None:
+        del data["datetime_buckets"]
     return data
 
 
@@ -134,21 +162,18 @@ def spec_from_dict(data: Mapping[str, Any]) -> StatisticalSpec:
         parent_first=bool(data["parent_first"]),
         snapshot_digest=data.get("snapshot_digest"),
         carrier=data.get("carrier"),
+        cell_format=cell_format_from_dict(
+            data["column"], str(data["kind"]), data.get("cell_format")
+        ),
+        datetime_buckets=dsc.pinned_buckets(
+            str(data["kind"]), dict(data["stats"]), data.get("datetime_buckets")
+        ),
     )
 
 
-# `_load_snapshot` is the sole `open()` site for a snapshot artifact in
-# this package (guide section 4.7 item 3): the process-global content-
-# keyed cache that used to live here is GONE. It stopped being a
-# correctness mechanism once the compiler started reading every path
-# exactly once, up front, into an immutable pinned mapping
-# (`plan._generation.read_and_pin_snapshots`) before any check or
-# `load_spec` call runs -- caching a second time here would only risk
-# serving a DIFFERENT read's bytes to a caller expecting the compiler's
-# pinned bytes. `load_spec` below never calls this function itself; it
-# takes the already-parsed snapshot mapping as an explicit argument. This
-# function remains for compile-time callers that still need to read a
-# path (the compiler's read-once pass) and for tests building fixtures.
+# `_load_snapshot` is the sole `open()` site for a snapshot artifact in this package (guide section
+# 4.7 item 3). `load_spec` never calls it: it takes the snapshot the compiler already read and
+# pinned. It remains for compile-time callers that must read a path, and for tests building fixtures.
 def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, dict[str, Any]]:
     """Read + parse a snapshot artifact. Returns `(content_sha256, parsed)`.
     No caching: every call is a fresh read + hash + parse."""
@@ -174,25 +199,19 @@ def _load_snapshot(path: str, field_key: str = "snapshot_file") -> tuple[str, di
             message=f"snapshot_file {shown!r} could not be read: {failure}",
         )
     digest = hashlib.sha256(raw).hexdigest()
-    try:
-        snap = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise StatisticalSpecError(
-            code=reasons.plan.STATISTICAL_SNAPSHOT_UNREADABLE,
-            message=f"snapshot_file {shown!r} could not be read: {exc}",
-        ) from exc
+    snap = parse_snapshot_json(raw, shown=shown)
     if not isinstance(snap, dict):
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
             message=f"snapshot_file {shown!r} does not contain a JSON object at the top level.",
         )
     version = snap.get("schema_version")
-    if version != DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION:
+    if version not in dsc.ACCEPTED_SCHEMA_VERSIONS:
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
             message=(
                 f"snapshot_file {shown!r} declares schema {version!r}; this engine "
-                f"consumes {DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION!r}."
+                f"consumes {dsc.ACCEPTED_SCHEMA_VERSIONS!r}."
             ),
         )
     return digest, snap
@@ -216,6 +235,66 @@ def _snapshot_declares_flag(
     schema = dp_block.get("column_schema") if isinstance(dp_block, Mapping) else None
     entry = schema.get(source_column) if isinstance(schema, Mapping) else None
     return isinstance(entry, Mapping) and entry.get("carrier") == "flag"
+
+
+def _refuse_withheld_values(
+    name: Any,
+    snap: Mapping[str, Any],
+    *,
+    source_column: str,
+    kind: Any,
+    dp_verified: bool,
+    condition_on: Any,
+    holds_numeric_shape: bool = False,
+) -> None:
+    """Refuse a column that would sample categories a redacted fit snapshot withheld.
+
+    Only the marker is read, and only to refuse: `value_policy: "raw"` removes this refusal
+    and grants nothing, so the `allow_real_categories` opt-in still applies after it. A
+    snapshot with neither marker key is a legacy file and keeps its old behavior; the
+    placeholder string a profile uses for withheld text is never a signal, because a raw or
+    legacy snapshot can hold it as a real category. Numeric and datetime columns read
+    coarse bins and years that carry no cell value, so they reach it only through a restored
+    `quantile_grid` or `exact_values` block (`holds_numeric_shape`).
+    """
+    if VALUE_POLICY_KEY not in snap and REDACTED_COLUMNS_KEY not in snap:
+        return
+    samples_values = (
+        (kind == "categorical" and not dp_verified)
+        or condition_on is not None
+        or holds_numeric_shape
+    )
+    if not samples_values:
+        return
+    policy = snap.get(VALUE_POLICY_KEY)
+    listed = snap.get(REDACTED_COLUMNS_KEY)
+    well_formed = (
+        isinstance(policy, str) and (policy in REDACTED_POLICIES or policy == POLICY_RAW)
+    ) and (isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed))
+    if well_formed and policy == POLICY_RAW:
+        return
+    if not well_formed:
+        why = (
+            "the snapshot's value-policy marker (`value_policy`, `redacted_columns`) is missing "
+            "or malformed, so it cannot be shown that the values of source column "
+            f"{source_column!r} were kept"
+        )
+    else:
+        named = (source_column,) if condition_on is None else (source_column, str(condition_on))
+        redacted = [c for c in named if c in (listed or ())]
+        if not redacted:
+            return
+        why = (
+            f"the snapshot withheld the real values of source column {redacted[0]!r} "
+            "(a sensitive column, or one with too few rows to release values)"
+        )
+    raise StatisticalSpecError(
+        code=reasons.plan.STATISTICAL_SNAPSHOT_VALUES_REDACTED,
+        message=(
+            f"statistical column {name!r}: {why}, so there are no values to sample. "
+            + redacted_fix_hint(numeric=kind == "numeric" and condition_on is None)
+        ),
+    )
 
 
 def load_spec(
@@ -319,7 +398,19 @@ def load_spec(
         )
 
     kind = col_entry.get("kind")
-    if kind not in _SUPPORTED_KINDS:
+    cell_format = (
+        decode_cell_format(
+            name,
+            str(kind),
+            col_entry,
+            snapshot=snap,
+            # `null_probability` is None-means-absent: any other value, 0 included, owns the nulls.
+            apply_nulls=col_cfg.get("null_probability") is None,
+        )
+        if kind in (*_SUPPORTED_KINDS, _EMPTY_KIND)
+        else None
+    )
+    if kind not in _SUPPORTED_KINDS and not (kind == _EMPTY_KIND and cell_format is not None):
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_KIND_UNSUPPORTED,
             message=(
@@ -352,6 +443,19 @@ def load_spec(
                 f"bool, got {allow_real!r}."
             ),
         )
+
+    col_stats = col_entry.get("stats") if isinstance(col_entry.get("stats"), dict) else {}
+    _refuse_withheld_values(
+        name,
+        snap,
+        source_column=source_column,
+        kind=kind,
+        dp_verified=dp_verified,
+        condition_on=col_cfg.get("condition_on"),
+        holds_numeric_shape=kind == "numeric"
+        and not dp_verified
+        and numeric_shape_withheld(col_stats),
+    )
 
     if high_cardinality and col_cfg.get("allow_real_categories") is not True:
         raise StatisticalSpecError(
@@ -399,7 +503,6 @@ def load_spec(
     # tail is already gone from the artifact, so redistribution would
     # permanently drop it. Provenance marker, not `other_count`, is the
     # source of truth (DP snapshots deep-copy the marker through noising).
-    col_stats = col_entry.get("stats") if isinstance(col_entry.get("stats"), dict) else {}
     if high_cardinality and col_stats.get("high_cardinality") is not True:
         raise StatisticalSpecError(
             code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_SNAPSHOT_MISMATCH,
@@ -412,6 +515,9 @@ def load_spec(
                 f"before setting high_cardinality: true here."
             ),
         )
+
+    if kind == "numeric":
+        decode_numeric_shape(name, col_stats, carrier)  # refuse a malformed block at load
 
     other_mode = str(col_cfg.get("other_mode") or "redistribute")
     if other_mode not in _OTHER_MODES:
@@ -466,6 +572,17 @@ def load_spec(
             )
         parent_first = joint["columns"][0] == condition_on
 
+    buckets = None
+    if kind == "datetime":
+        buckets = dsc.decoded_or_none(snap.get("schema_version"), col_stats)
+        if buckets is None:
+            raise StatisticalSpecError(
+                code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH,
+                message=(
+                    f"statistical column {name!r}: the snapshot schema_version or the "
+                    "datetime year_bins is not a supported shape."
+                ),
+            )
     return StatisticalSpec(
         column=str(name),
         source_column=source_column,
@@ -478,4 +595,6 @@ def load_spec(
         parent_first=parent_first,
         snapshot_digest=snapshot_digest,
         carrier=carrier,
+        cell_format=cell_format,
+        datetime_buckets=buckets,
     )

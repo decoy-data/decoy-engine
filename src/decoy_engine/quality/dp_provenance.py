@@ -267,62 +267,57 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the
 # annotation below) so the DP behaviour is the tested behaviour; the CLI's extra
 # packages (typer/rich/...) are off the DP code path. Membership, not equality:
-# a distinct profile that pins the same proof-critical set earns its own row
-# rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9,
-# CLI host wiring).
+# a distinct profile with the same proof-critical set earns its own row rather
+# than forcing an isolated fit environment (ROADMAP item 2 / phase 9, CLI host wiring).
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
-            # decoy-engine dev/CI certification profile: 77 distributions from
-            # `uv sync --frozen --extra dev --extra lint --extra vault --extra
-            # cloud` on Python 3.10.20 (the profile the dps-dependency-matrix
-            # workflow installs).
-            # Verified directly (uv sync + installed_distribution_set +
-            # compute_lock_fingerprint, not assumed): the dist SET here is
-            # byte-identical to the pre-cloud-extra 895b9a20... profile except
-            # for decoy-engine's own version string, because boto3/botocore
-            # were already present via `moto[s3]` in [dev] and adding
-            # `--extra cloud` only pulls in the google-cloud-storage closure
-            # that wasn't there before -- so this fingerprint changed for two
-            # independent reasons landing in the same change: the cloud extra
-            # split, AND the decoy-engine 0.5.0 -> 0.6.0 version bump, since
-            # the version string is itself part of the hashed set.
-            # The prior value (6c0b2bbd...) was this same 77-dist profile on
-            # the PRE-0.5.0 lock, before the release bump and the
-            # packaging>=21.0 direct dep; 895b9a20... was the 0.5.0,
-            # pre-cloud-extra profile. Reverting only decoy-engine to 0.4.0
-            # reproduces 6c0b2bbd... exactly.
-            # 0.6.0 -> 0.7.0 release re-pin: prior value 56bff582... Verified
-            # directly (fresh 3.10.20 venv, uv sync --frozen with the extras
-            # above): still 77 dists, and setting only decoy-engine back to
-            # 0.6.0 in the installed set reproduces 56bff582... exactly, so
-            # the change is the version string alone.
-            # 0.7.0 -> 0.17.0 (prior 72c03428..., the 0.8.0-0.16.0 stamps skipped it) and
-            # 0.17.0 -> 0.18.0 re-pins: same check, 77 dists each. From 0.18.0 a re-pin keeps
-            # the prior release's row (here 5a76ea92...) so its snapshots still compile.
+            # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
+            # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
+            # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
+            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
+            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with
+            # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
+            # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
+            # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
+            # pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
+            "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
+            "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
+            "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
+            "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
+            "f921d069fb3cd5baebc6940de37076103ba6a663c977db346c81fd6cdcbfc326",
+            "044f8c7b26dfaac7e0bc3973ee3a355e64379ede67a596410aceed74acf6c366",
+            "bdec8dd8c27cfa533b9cea788c7254b66957977f9670c7004a4dc90028929224",
+            "e738e729ab9d2ad7710ab51cb774adb274ffa3256cf4c4ef4cea1fcbd1790b44",
+            "5253dc7923b3bbe72ca7866460aa3d556735851ffb304534834c7103fd665950",
+            "fcf186c32c5dd41eba586238760f12c481171e908082dbc31d3295b387be7cf0",
+            "4560f601e6f299e4c586ce9d795dbaea8e14ac5dc8b5d0e1310b57913e25eac9",
+            "176aff0bf8727f2fe64e0bddd4febb487aeaa05daa97547143ec6cc4230200cc",
+            "78af2b5a1bb11c826f1d3918f705dc7edada72a081804e74d55e37938d8300b6",
+            "7d1c1a2a2be450a59fa17d810663a7bfe5e825204cca99bfe039ba12b6226aed",
+            "b9b42047dc09ce89593e0be2dc6f7125a91af661bbb644b3a27342c84fd44ab0",
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
-            # decoy-cli pristine RUNTIME profile: engine 0.18.0 + CLI (typer/rich/
-            # duckdb) + the DP closure, no dev tooling (pytest/ruff/mypy absent).
-            # The exact third-party set is pinned in the CLI repo's
-            # requirements-certified.txt (proof-critical opendp/
-            # dp-accounting/numpy/scipy/pandas/pyarrow at the annotated versions,
-            # packaging==26.2). To reproduce: `--no-dev` install that file into a
-            # 3.10.20 venv and run the CLI repo's scripts/cert_smoke.py, which
-            # recomputes compute_lock_fingerprint over the running set (this hash)
-            # and then exercises fit -> dps-marginal/v3 -> generate end to end.
-            # Its legitimacy is verified in the CLI repo, not here.
-            # Verified directly (65 dists, real 3.10.20 install): reverting only
-            # decoy-engine 0.6.0 -> 0.5.0 in this set reproduces the prior
-            # 5a2f7ef7... exactly, so the change is purely the version bump,
-            # not a proof-critical library change. An earlier draft pinned a
-            # dev-polluted env (c2c766...); this is the clean one.
-            # 0.6.0 -> 0.7.0 release re-pin: prior value e75c87e9... Verified
-            # (65 dists, fresh 3.10.20 venv from requirements-certified.txt +
-            # this engine + decoy-cli): setting only decoy-engine back to
-            # 0.6.0 reproduces e75c87e9... exactly.
-            # 0.7.0 -> 0.17.0 (prior f2a5910f...) and 0.17.0 -> 0.18.0 (a7b40d54..., kept)
-            # re-pins: derived; the CLI's 63 pins + the prior engine + cli 0.1.0 reproduce each.
+            # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure,
+            # no dev tooling. The third-party set is pinned in the CLI repo's
+            # requirements-certified.txt (proof-critical libraries at the annotated versions,
+            # packaging==26.2). To reproduce: `--no-dev` install it into a 3.10.20 venv and run the
+            # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
+            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change just
+            # the engine version; 0.5.0 and 0.6.0 ran in a real 3.10.20 venv, later rows come from
+            # the pins. All stay, newest first. Row F (24zc) follows the 0.28.0 row.
+            "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+            "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
+            "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
+            "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
+            "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",
+            "620a48a5b979d483aa3522900590c4fe5a376aeb9cedbd16a415639522c1204b",
+            "73acf493827ce8dbd72c6da486eb4f30e72a66cf7abb90b0127cef3e14f75eec",
+            "1db3e3daf52c2b3944393f8a90e98d7519f50540191c6aefc9a987d097a2998f",
+            "d5898d1ff084203f455907d8648e59e0156e320d0e5a12ba1e22aeba8ad6675d",
+            "aa038ddd1d2e783042e34c75c313921f19b8e1dc580559cf8d5081ed19ea11e1",
+            "725f80a30807dee263ee9404c05829d4947870b2600ab0a165c0fa7951b91268",
+            "795732eb0808001d9c4591f3693637187637bb383a87b8caa95b8f2f269f9211",
             "b643894ded2ab84c4a0a9d9032a1de3d2330db89161f231e509024428b7533f3",
             "a7b40d54f68488ecbcc253c35a03517eefc456625a9b0240470e765e2bbc4476",
         }

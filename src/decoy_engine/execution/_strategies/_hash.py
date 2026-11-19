@@ -13,12 +13,16 @@ keyed on it); a hash column without one is a wiring error.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.determinism import derive
 from decoy_engine.execution._adapter import (
     StrategyContext,
+    StrategyOption,
     pandas_column_to_kernel_input,
     provider_config_to_dict,
 )
@@ -28,11 +32,29 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel import hash_array
 from decoy_engine.plan._types import ColumnSeed
 
+# The hex length of the HMAC-SHA256 digest `derive` returns: no token is longer.
+_DIGEST_HEX_LENGTH = 64
+
+
+def hash_truncate(cfg: dict[str, Any]) -> int | None:
+    """The positive `truncate` the kernel slices tokens to, or None for the full digest."""
+    raw = cfg.get("truncate")
+    return raw if isinstance(raw, int) and raw > 0 else None
+
 
 class HashStrategyHandler:
     """Deterministic joinability-preserving hash via derive(...)."""
 
     name: str = "hash"
+    namespace_required: bool = True
+    join_safe: bool = True
+    wizard_options: tuple[StrategyOption, ...] = ()
+    offer_in_wizard: bool = True
+
+    def output_string_width(self, provider_config: Sequence[tuple[str, Any]]) -> int | None:
+        """The UTF-8 width of every non-null token `run` writes (the lifecycle estimate)."""
+        truncate = hash_truncate(provider_config_to_dict(provider_config))
+        return _DIGEST_HEX_LENGTH if truncate is None else min(truncate, _DIGEST_HEX_LENGTH)
 
     def run(
         self,
@@ -48,8 +70,7 @@ class HashStrategyHandler:
                 message=f"column {column!r} uses the hash strategy but has no namespace.",
             )
         cfg = provider_config_to_dict(plan.provider_config)
-        raw_truncate = cfg.get("truncate")
-        truncate = raw_truncate if isinstance(raw_truncate, int) and raw_truncate > 0 else None
+        truncate = hash_truncate(cfg)
 
         # An ungated integer column with nulls was widened to float64 in the frame; its exact
         # typed Arrow values were recorded at ingest and key the hash instead.

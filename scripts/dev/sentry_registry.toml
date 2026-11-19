@@ -1,6 +1,8 @@
 # Binds each sentry id to exactly one baseline file under tests/sentry/baselines/.
 # scripts/dev/ratchet_check.py compares every baseline with its merge-base copy and fails
-# when keys are added. A new sentry adds its row here in the slice that introduces it.
+# when keys are added. An entry may list `approved_growth` rows (exact key plus a dated owner
+# decision, `owner YYYY-MM-DD <text>`); only a listed key may be added without failing.
+# A new sentry adds its row here in the slice that introduces it.
 # Engine has no plan-format baseline yet; the F29 reason baseline is frozen by
 # tests/sentry/test_reason_baseline_frozen.py and stays outside this registry.
 
@@ -19,14 +21,11 @@ baseline = "tests/sentry/baselines/f29-consumer-inventory.json"
 [[sentry]]
 id = "secret-material-census"
 baseline = "tests/sentry/baselines/secret-material-census.json"
-
-[[sentry]]
-id = "file-access-registry"
-baseline = "tests/sentry/baselines/file-access-registry.json"
-
-[[sentry]]
-id = "file-access-modules"
-baseline = "tests/sentry/baselines/file-access-modules.json"
+approved_growth = [
+  { key = "decoy_engine/signed_evidence/_jws.py::SigningInputSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+  { key = "decoy_engine/signed_evidence/_signer.py::LocalEs256Signer.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+  { key = "decoy_engine/signed_evidence/_signer.py::ResolvedSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+]
 
 [[sentry]]
 id = "module-size"
@@ -43,6 +42,10 @@ baseline = "tests/sentry/baselines/exception-hierarchy.json"
 [[sentry]]
 id = "file-access-entry-seams"
 baseline = "tests/sentry/baselines/file-access-entry-seams.json"
+
+[[sentry]]
+id = "post-scan-route-exempt"
+baseline = "tests/sentry/baselines/post-scan-route-exempt.json"
 
 [[sentry]]
 id = "locator-waivers"
@@ -83,3 +86,75 @@ baseline = "tests/sentry/baselines/private-file-sinks.json"
 [[sentry]]
 id = "gcs-call-kwargs"
 baseline = "tests/sentry/baselines/gcs-call-kwargs.json"
+
+[[sentry]]
+id = "serial-resources"
+baseline = "tests/sentry/baselines/serial-resources.json"
+
+[[sentry]]
+id = "reason-policy-single-source"
+baseline = "tests/sentry/baselines/reason-policy-single-source.json"
+
+[[sentry]]
+id = "reason-unchecked-helpers"
+baseline = "tests/sentry/baselines/reason-unchecked-helpers.json"
+
+[[sentry]]
+id = "exception-context"
+baseline = "tests/sentry/baselines/exception-context.json"
+
+[[sentry]]
+id = "validation-name-messages"
+baseline = "tests/sentry/baselines/validation-name-messages.json"
+
+[[sentry]]
+id = "package-fanout"
+baseline = "tests/sentry/baselines/package-fanout.json"
+
+[[sentry]]
+id = "import-layers"
+baseline = "tests/sentry/baselines/import-layers.json"
+
+[[sentry]]
+id = "table-kind-truth-tests"
+baseline = "tests/sentry/baselines/table-kind-truth-tests.json"
+
+[[sentry]]
+id = "post-scan-blocking"
+baseline = "tests/sentry/baselines/post-scan-blocking.json"
+
+[[sentry]]
+id = "post-scan-pass-through"
+baseline = "tests/sentry/baselines/post-scan-pass-through.json"
+
+[[sentry]]
+id = "post-scan-key-core"
+baseline = "tests/sentry/baselines/post-scan-key-core.json"
+
+[[sentry]]
+id = "post-scan-reason-identity"
+baseline = "tests/sentry/baselines/post-scan-reason-identity.json"
+
+[[sentry]]
+id = "post-scan-gate-applies"
+baseline = "tests/sentry/baselines/post-scan-gate-applies.json"
+
+[[sentry]]
+id = "post-scan-commit"
+baseline = "tests/sentry/baselines/post-scan-commit.json"
+
+[[sentry]]
+id = "post-scan-model-predicate"
+baseline = "tests/sentry/baselines/post-scan-model-predicate.json"
+
+[[sentry]]
+id = "post-scan-readability"
+baseline = "tests/sentry/baselines/post-scan-readability.json"
+
+[[sentry]]
+id = "post-scan-route-coverage"
+baseline = "tests/sentry/baselines/post-scan-route-coverage.json"
+
+[[sentry]]
+id = "strategy-docs-agree"
+baseline = "tests/sentry/baselines/strategy-docs-agree.json"

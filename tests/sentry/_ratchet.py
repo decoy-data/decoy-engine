@@ -3,15 +3,24 @@
 A baseline is a JSON file ``{"sentry_id", "created_in", "entries": {key: {"reason"}}}``
 under ``tests/sentry/baselines/``. ``scripts/dev/sentry_registry.toml`` binds each sentry id to
 exactly one baseline path. ``check`` compares the working tree with a base commit and returns
-findings; an empty list means the ratchet holds. Messages carry ids, paths and keys only.
+findings; an empty list means the ratchet holds. Baseline keys compare exactly, except the
+``permitted::<file>::<site>::<digest>`` keys of the sentries in ``REKEY_PER_SITE``, which
+compare by count per site (see ``growth``). An entry that carries a numeric ``max`` may keep
+or lower it, never raise or drop it (see ``max_raised``). A key of the form
+``<file>.py::<qualname>::<name>`` key of a ``REHOME_BY_BINDING`` sentry may also move 1:1 to a new
+entry that declares ``moved_from`` when the old site is gone from the source (see ``rehomes``).
+Messages carry ids, paths and keys only.
 """
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 if sys.version_info >= (3, 11):
@@ -22,7 +31,17 @@ else:
 REGISTRY = "scripts/dev/sentry_registry.toml"
 BASELINE_DIR = "tests/sentry/baselines"
 MIN_REASON = 15
+DECISION = re.compile(r"^owner \d{4}-\d{2}-\d{2} .{10,}$")
+_GLOB_CHARS = frozenset("*?[]")
 PLACEHOLDERS = frozenset({"todo", "tbd", "fixme", "xxx", "n/a", "none"})
+# Only sentries whose last key segment is a message digest may re-key; for any other sentry a
+# changed last segment can mean a different permitted thing, so it compares exactly.
+REKEY_PER_SITE = frozenset({"validation-name-messages"})
+# Only these sentries may move a key to a new home, and only by a declared ``moved_from``. Their
+# keys are ``<file under src/>::<qualname>::<name>``, optionally followed by ``::<ordinal>`` (the
+# call sites of one method in one function); other sentries use other key shapes (src-relative
+# paths) for which "the old site is gone" cannot be proven.
+REHOME_BY_BINDING = frozenset({"secret-material-census", "gcs-call-kwargs"})
 
 
 @dataclass(frozen=True)
@@ -49,6 +68,44 @@ def parse_registry(text: str) -> tuple[dict[str, str], list[str]]:
             findings.append(f"registry: two sentries ({', '.join(ids)}) share baseline {path}")
         if not path.startswith(BASELINE_DIR + "/"):
             findings.append(f"registry: baseline {path} is outside {BASELINE_DIR}/")
+    return out, findings
+
+
+def _decision_ok(decision: object) -> bool:
+    """A dated owner decision: the whole string matches and the date is a real calendar day."""
+    if not isinstance(decision, str) or not DECISION.fullmatch(decision):
+        return False
+    try:
+        date.fromisoformat(decision.split(" ", 2)[1])
+    except ValueError:
+        return False
+    return True
+
+
+def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
+
+    A row is ``{ key, decision }``; the key compares exactly (no glob or prefix) and the decision
+    must name a dated owner decision. Growth of a baseline passes only through a row here.
+    """
+    out: dict[str, dict[str, str]] = {}
+    findings: list[str] = []
+    for row in tomllib.loads(text).get("sentry", []):
+        sid = row.get("id", "")
+        for item in row.get("approved_growth", []):
+            key = item.get("key") if isinstance(item, dict) else None
+            decision = item.get("decision") if isinstance(item, dict) else None
+            if not isinstance(key, str) or not key:
+                findings.append(f"{sid}: approved_growth row has no key")
+            elif _GLOB_CHARS & set(key):
+                findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
+            elif not _decision_ok(decision):
+                findings.append(
+                    f"{sid}: approved_growth for {key} needs a decision "
+                    "'owner YYYY-MM-DD <text of 10+ chars>'"
+                )
+            else:
+                out.setdefault(sid, {})[key] = decision
     return out, findings
 
 
@@ -85,9 +142,160 @@ def _git_show(root: Path, ref: str, rel: str) -> str | None:
     return res.stdout if res.returncode == 0 else None
 
 
-def _base_keys(root: Path, ref: str, path: str) -> frozenset[str]:
+def _base_entries(root: Path, ref: str, path: str) -> dict[str, object]:
     text = _git_show(root, ref, path)
-    return parse_baseline(text).keys if text is not None else frozenset()
+    return parse_baseline(text).reasons if text is not None else {}
+
+
+def _max_of(entry: object) -> int | None:
+    value = entry.get("max") if isinstance(entry, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def max_raised(head: object, base: object) -> bool:
+    """True when a numeric ``max`` rose, or was dropped, against the base entry."""
+    old, new = _max_of(base), _max_of(head)
+    return old is not None and (new is None or new > old)
+
+
+def _permit_site(key: str) -> str | None:
+    """``<file>::<site>`` of a ``permitted::<file>::<site>::<digest>`` key, else ``None``."""
+    kind, _, rest = key.partition("::")
+    site, sep, digest = rest.rpartition("::")
+    return site if kind == "permitted" and sep and digest and "::" in site else None
+
+
+def growth(
+    head: frozenset[str], base: frozenset[str], per_site: bool = True
+) -> tuple[frozenset[str], list[str]]:
+    """Keys that count as growth over ``base``, and permit sites that were only re-keyed.
+
+    A permitted key embeds a digest of its message, so any edit to a permitted site moves the
+    key. For those keys growth is per site: a site absent from ``base`` or holding more keys than
+    it did there is growth; the same count under new digests is a re-key, reported for review.
+    The sentry still decides what is permitted. Every other key kind, and every key when
+    ``per_site`` is false, compares exactly.
+    """
+    if not per_site:
+        return frozenset(head - base), []
+
+    def by_site(keys: frozenset[str]) -> dict[str, list[str]]:
+        sites: dict[str, list[str]] = {}
+        for key in keys:
+            site = _permit_site(key)
+            if site is not None:
+                sites.setdefault(site, []).append(key)
+        return sites
+
+    head_sites, base_sites = by_site(head), by_site(base)
+    grown = {k for k in head - base if _permit_site(k) is None}
+    rekeyed: list[str] = []
+    for site, keys in sorted(head_sites.items()):
+        old = base_sites.get(site, [])
+        if len(keys) > len(old):
+            grown |= set(keys) - base
+        elif set(keys) - base:
+            rekeyed.append(site)
+    return frozenset(grown), rekeyed
+
+
+def _find_defs(node: ast.AST, part: str) -> list[ast.AST]:
+    """Every def or class named ``part`` under ``node``, looking inside if/try/with/for blocks."""
+    found: list[ast.AST] = []
+    todo = list(ast.iter_child_nodes(node))
+    while todo:
+        child = todo.pop(0)
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if child.name == part:
+                found.append(child)
+            continue
+        todo.extend(ast.iter_child_nodes(child))
+    return found
+
+
+def _qualname_nodes(tree: ast.AST, qualname: str) -> list[ast.AST]:
+    nodes: list[ast.AST] = [tree]
+    for part in qualname.split("."):
+        nodes = [d for n in nodes for d in _find_defs(n, part)]
+    return nodes
+
+
+def _mentions(n: ast.AST, name: str) -> bool:
+    """True when ``n`` binds or reads ``name``: a closure that only reads it still holds the site."""
+    if isinstance(n, ast.arg):
+        return n.arg == name
+    if isinstance(n, ast.Name):
+        return n.id == name
+    if isinstance(n, ast.Attribute):
+        return n.attr == name
+    if isinstance(n, ast.alias):
+        return (n.asname or n.name.partition(".")[0]) == name
+    if isinstance(n, ast.MatchMapping):
+        return n.rest == name
+    # def, class, except-as, match capture, type-param and any later form that names itself.
+    return getattr(n, "name", None) == name
+
+
+def _site_parts(key: str) -> tuple[str, str, str] | None:
+    """Split ``<file>::<qualname>::<name>`` with an optional all-digit ``::<ordinal>`` suffix."""
+    parts = key.split("::")
+    if len(parts) == 4 and parts[3].isdigit():
+        parts = parts[:3]
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+
+
+def site_gone(root: Path, key: str, base_ref: str) -> bool:
+    """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
+
+    ``<file>`` is relative to ``src/``. Proof by AST: the qualified def or class is missing, or it
+    is present but neither binds nor reads ``name`` (``_mentions``) in any same-named def. A
+    qualname part that is not an identifier (``<lambda>``) is never proven. A missing file proves it only
+    when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
+    file that never existed is "not proven" and returns false.
+    """
+    parts = _site_parts(key)
+    if parts is None or not parts[0].endswith(".py") or not parts[2].isidentifier():
+        return False
+    file, qualname, name = parts
+    if not all(q.isidentifier() for q in qualname.split(".")):
+        return False
+    path = root / "src" / file
+    if not path.is_file():
+        return _git_show(root, base_ref, f"src/{file}") is not None
+    nodes = _qualname_nodes(ast.parse(path.read_text(encoding="utf-8")), qualname)
+    return not any(_mentions(n, name) for node in nodes for n in ast.walk(node))
+
+
+def rehomes(
+    root: Path,
+    base_ref: str,
+    grown: frozenset[str],
+    head_entries: dict[str, object],
+    lost: dict[str, object],
+) -> tuple[frozenset[str], list[str]]:
+    """Split ``grown`` into declared 1:1 moves of ``lost`` keys, and the rest.
+
+    A grown key is a move only when its entry names the old key in ``moved_from`` and that old
+    key was lost from this baseline, is proven gone (``site_gone``), carries no numeric ``max``,
+    ends in the same bound name, and is named by no other entry. Anything else stays growth.
+    """
+    claims: dict[str, list[str]] = {}
+    for key in grown:
+        entry = head_entries.get(key)
+        old = entry.get("moved_from") if isinstance(entry, dict) else None
+        if isinstance(old, str):
+            claims.setdefault(old, []).append(key)
+    remaining = set(grown)
+    report: list[str] = []
+    for old, keys in sorted(claims.items()):
+        old_parts, new_parts = _site_parts(old), _site_parts(keys[0])
+        same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
+        if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
+            continue
+        if site_gone(root, old, base_ref):
+            remaining.discard(keys[0])
+            report.append(f"re-homed {old} -> {keys[0]} (declared in moved_from; old site gone)")
+    return frozenset(remaining), report
 
 
 def _fmt(keys: frozenset[str]) -> str:
@@ -100,6 +308,10 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
     head, findings = parse_registry(
         reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
     )
+    approvals, approval_findings = parse_approvals(
+        reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
+    )
+    findings += approval_findings
     base_text = _git_show(root, base_ref, REGISTRY)
     base_reg = parse_registry(base_text)[0] if base_text is not None else {}
     report: list[str] = []
@@ -120,12 +332,21 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
                 f"{path}: sentry_id {base.sentry_id!r} does not match registry id {sid}"
             )
         findings += reason_findings(path, base)
+        findings += [
+            f"{sid}: stale approved_growth, {key} is not in {path}"
+            for key in sorted(set(approvals.get(sid, {})) - base.keys)
+        ]
 
     removed = set(base_reg) - set(head)
-    old_union: frozenset[str] = frozenset().union(
-        *(_base_keys(root, base_ref, base_reg[s]) for s in removed)
-    )
+    # A key a replacement keeps must keep its max too, or a rename would launder a raised max.
+    old_entries: dict[str, list[object]] = {}
+    for s in removed:
+        for key, entry in _base_entries(root, base_ref, base_reg[s]).items():
+            old_entries.setdefault(key, []).append(entry)
+    old_union = frozenset(old_entries)
     new_union: frozenset[str] = frozenset()
+    replaced_raised: set[str] = set()
+    union_ids = set(removed)
     for sid, base in sorted(loaded.items()):
         path = head[sid]
         report.append(f"{sid}: {len(base.keys)} key(s) in {path}")
@@ -133,19 +354,51 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
             if base_reg[sid] != path:
                 findings.append(f"{sid}: baseline moved from {base_reg[sid]} to {path}")
                 continue
-            grown = base.keys - _base_keys(root, base_ref, path)
+            old = _base_entries(root, base_ref, path)
+            grown, rekeyed = growth(base.keys, frozenset(old), sid in REKEY_PER_SITE)
+            report += [
+                f"{sid}: re-keyed permitted site {site} (review the message)" for site in rekeyed
+            ]
+            if grown and sid in REHOME_BY_BINDING:
+                lost = {k: e for k, e in old.items() if k not in base.keys}
+                grown, moved = rehomes(root, base_ref, grown, base.reasons, lost)
+                report += [f"{sid}: {line}" for line in moved]
+            approved = grown & frozenset(approvals.get(sid, {}))
+            report += [
+                f"{sid}: approved growth {k} ({approvals[sid][k]})" for k in sorted(approved)
+            ]
+            grown -= approved
             if grown:
                 findings.append(
                     f"{sid}: baseline gained key(s) not in the merge base: {_fmt(grown)}"
                 )
+            raised = sorted(
+                k for k in base.keys & old.keys() if max_raised(base.reasons[k], old[k])
+            )
+            if raised:
+                findings.append(f"{sid}: max raised or dropped for key(s): {', '.join(raised)}")
         elif removed:
             new_union |= base.keys
+            union_ids.add(sid)
+            replaced_raised |= {
+                k
+                for k in base.keys & old_union
+                if any(max_raised(base.reasons[k], old) for old in old_entries[k])
+            }
         else:
             # Newly registered in this diff: the one way a first inventory is admitted.
             report.append(f"{sid}: first inventory, {len(base.keys)} key(s), review required")
-    grown = new_union - old_union
+    grown, rekeyed = growth(new_union, old_union, union_ids <= REKEY_PER_SITE)
+    report += [
+        f"replacement: re-keyed permitted site {site} (review the message)" for site in rekeyed
+    ]
     if removed and grown:
         findings.append(
             f"replacement or split of {_fmt(frozenset(removed))} adds key(s): {_fmt(grown)}"
+        )
+    if replaced_raised:
+        findings.append(
+            f"replacement or split of {_fmt(frozenset(removed))} raised or dropped max for"
+            f" key(s): {_fmt(frozenset(replaced_raised))}"
         )
     return findings, report

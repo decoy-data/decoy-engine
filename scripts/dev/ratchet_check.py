@@ -2,6 +2,14 @@
 
 Usage: ratchet_check.py [--root DIR] [--base REF]
   --base   default: merge-base of origin/main and HEAD
+A key may not be added, except a key the registry lists under that baseline's `approved_growth`
+(an exact key plus a dated `owner YYYY-MM-DD ...` decision; stale or malformed rows fail), and that for sentries in REKEY_PER_SITE the
+`permitted::<file>::<site>::<digest>` keys count per site: re-keying a site (same count, new
+digest) passes and prints a review line; a higher count or a new site fails.
+For sentries in REHOME_BY_BINDING, a `<file>.py::<qualname>::<name>` key may move to a new key
+only when the new entry declares `moved_from: <old key>`, the old key has the same bound name,
+was lost from this baseline, carries no numeric max, is claimed once, and the old site is
+proven gone from the source (AST proof); the key count never grows.
 The logic lives in tests/sentry/_ratchet.py so the unit tests and this gate step share it.
 """
 

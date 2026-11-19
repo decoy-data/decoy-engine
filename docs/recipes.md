@@ -21,6 +21,7 @@ sources:
   people:
     type: file
     format: csv
+    has_header: true
     path: ./people.csv
 tables:
   - name: people
@@ -55,7 +56,7 @@ config_dict = {
     "version": 2,
     "global_settings": {"seed": 42},
     "sources": {
-        "people": {"type": "file", "format": "csv", "path": "./people.csv"},
+        "people": {"type": "file", "format": "csv", "has_header": True, "path": "./people.csv"},
     },
     "tables": [
         {
@@ -98,10 +99,12 @@ sources:
   customers:
     type: file
     format: csv
+    has_header: true
     path: ./customers.csv
   orders:
     type: file
     format: csv
+    has_header: true
     path: ./orders.csv
 tables:
   - name: customers
@@ -147,8 +150,9 @@ has no parent (`preserve`, `remap`, `warn`, `fail`). See
 
 ## (c) Generate a synthetic table
 
-Generation needs no input file: it builds rows from a column spec. Set
-`mode: generate` (or pass `--mode generate` on the command line).
+Generation needs no input file: it builds rows from a column spec. A table that
+lists `generate_columns` is a generate table. The config has no top-level `mode:`
+key; pass `--mode generate` on the command line to run it.
 
 ```yaml
 version: 2

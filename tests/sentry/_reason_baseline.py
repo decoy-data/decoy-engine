@@ -13,6 +13,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+# Run as a script, so put both this folder (sibling helpers) and the repo root (the
+# tests.sentry.defects package that _reason_scan imports) on the path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _reason_scan as scan
 
@@ -22,9 +25,12 @@ FIXTURES = scan.ROOT / "tests" / "fixtures" / "f29"
 # sees the code on; the same wire string may exist in two namespaces without renaming either.
 FAMILY_NAMESPACE: dict[str, str] = {
     "PipelineValidationError": "config",
+    "EnvFlagError": "config",
     "ValidationError": "config",
     "ValidationMessage": "config",
     "SubsetConfigError": "config",
+    "CanonicalJsonError": "config",
+    "BaselineBindingError": "pre_scan",
     "NamespaceConfigError": "config",
     "PlanCompileError": "plan",
     "PlanCheckError": "plan",

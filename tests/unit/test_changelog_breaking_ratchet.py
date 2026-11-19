@@ -14,16 +14,17 @@ Two named limits:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
+
+from scripts.release.stamp_release import release_sections as _releases
+from scripts.release.stamp_release import section_digest as _digest
 
 ROOT = Path(__file__).resolve().parents[2]
 CHANGELOG = ROOT / "CHANGELOG.md"
 PINS = ROOT / "tests" / "fixtures" / "changelog_released_sections.json"
 
-_RELEASE = re.compile(r"^## \[(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)\] - \d{4}-\d{2}-\d{2}$", re.M)
 _SUBSECTION = re.compile(r"^### (.+)$", re.M)
 _BREAKING = "Breaking for consumers"
 _BREAK_WORDS = re.compile(r"now fails?|\brefus(?:e|es|ed)\b|\braises?\b|\brejected\b", re.I)
@@ -31,6 +32,444 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.0", "New base dependencies `joserfc` and `rfc8785`. Artifact file"): (
+        "new verifier; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.0", "The `out_of_core_caller_managed_residency` warning carried a"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`EvidencePayload` refuses an empty `provider` and any non-sc"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`subset_inputs_from_config(config, *, local_copies=None)` ta"): (
+        "new optional argument; without it the existing refusal stands"
+    ),
+    ("0.28.0", "Three codes are registered ahead of the callers that raise t"): (
+        "new codes ahead of their callers; nothing raises them yet"
+    ),
+    ("0.28.0", "`scan_baseline.sha256` pins the baseline file's bytes. `deco"): (
+        "the Breaking bullet on `on_drift: fail` without a digest covers the refusal; the rest is new surface"
+    ),
+    ("0.28.0", "When a Postgres source host dropped the connection attempt w"): (
+        "a different reason code for a host that never answered; the run failed before too"
+    ),
+    ("0.28.0", "`tolerance_pct` must be a number above 0 and at most 100. `o"): (
+        "new config block; the refusals named are its own"
+    ),
+    ("0.28.0", "A run that asks for the check is refused before any route re"): (
+        "new opt-in check; the refusals named are its own"
+    ),
+    ("0.28.0", "The `nested` strategy no longer rewrites a number it does no"): (
+        "the Breaking bullet on the `nested` strategy covers it"
+    ),
+    ("0.28.0", "`estimate_job` now returns three more fields on `JobEstimate"): (
+        "new fields; the estimate is advisory and never raises, gates or changes a route"
+    ),
+    ("0.28.0", "`expand_policy` now checks the `policy.prohibit` list on eve"): (
+        "new package not read by any config yet; the refusals named are its own"
+    ),
+    ("0.28.0", "`expansion_to_dict` writes the `policy-expansion/v1` explana"): (
+        "new writer not called yet; the refusal is its own"
+    ),
+    ("0.28.0", "`PublicationRequest(vault=VaultBinding(writer, out))` is acc"): (
+        "new opt-in binding; the refusals named are its own"
+    ),
+    ("0.28.0", "A missing NER model is now refused with one message for ever"): (
+        "same refusal with one message across surfaces; no run that passed before is refused"
+    ),
+    ("0.28.0", "`build_fingerprint` now adds one engine-owned `decoy-ner:<su"): (
+        "the Breaking bullet on `build_fingerprint` covers it"
+    ),
+    ("0.28.0", "New package `decoy_engine.config.policy` with the models of "): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `run_probe()`, `probe_status()` "): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.28.0", "`lock/v1` gains an optional `probe` field. `build_runtime_lo"): (
+        "new optional field; a lock written without it still reads, and the refusal is for a null value no engine wrote"
+    ),
+    ("0.28.0", "The Postgres snapshot primitive now shares its session helpe"): (
+        "new shape guard on a new snapshot primitive; the refusal is its own"
+    ),
+    ("0.28.0", "`decoy_engine.profiling` gains `scan-diff/v1`, the drift rul"): (
+        "new document; the refusals named are its own"
+    ),
+    ("0.28.0", "A statistical snapshot with a negative or non-finite weight "): (
+        "the Breaking bullet on a negative or non-finite weight or count covers it"
+    ),
+    ("0.28.0", "`DeclarationRequest.for_validate(config)` reads the header o"): (
+        "new constructor; `decoy run` keeps its existing refusal"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `build_runtime_lock()`, `Runtime"): (
+        "new function and reader; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.keyprovider.is_key_version_label()` is the one"): (
+        "new check of an existing label rule; the new reason is raised only by the new lock"
+    ),
+    ("0.28.0", "The NER hit threshold is now per model (`NER_MIN_RATES`): en"): (
+        "the Breaking bullet on an NER model without a calibrated rate covers it"
+    ),
+    ("0.28.0", "A distribution snapshot may now store a datetime column as y"): (
+        "new opt-in v2 form no writer emits yet; the refusal is for a malformed bucket list"
+    ),
+    ("0.28.0", "A source-hygiene sentry now fails on any MD5 call or `noqa: "): (
+        "test-only sentry; the failure is a CI failure, not a consumer-visible one"
+    ),
+    ("0.28.0", "A relationship whose parent and child tables are both genera"): (
+        "relaxation: a relationship between generated tables now runs; the refusal for a mask-table edge is unchanged"
+    ),
+    ("0.28.0", "The `cli-local-1` evidence payload takes an optional `scan_b"): (
+        "new optional payload member and config key; an older reader refusing them is why the CLI writes them only after it pins this engine"
+    ),
+    ("0.28.0", "`VaultWriter.publish(out)` writes the vault and returns a `V"): (
+        "new method; the refusals named are its own"
+    ),
+    ("0.27.0", "`run_pipeline_isolated` publishes `output_dir` through `publ"): (
+        "the Breaking bullet on `run_pipeline_isolated` covers it"
+    ),
+    ("0.27.0", "Behaviour changes on the isolated route: a target that alrea"): (
+        "the Breaking bullet on `run_pipeline_isolated` covers it"
+    ),
+    ("0.27.0", "`decoy_engine.delivery.resume` gains the two persisted recor"): (
+        "new records; the refusals named are the new strict reader's own"
+    ),
+    ("0.27.0", "`ParquetTransactionalSink.commit()` now publishes through `p"): (
+        "the Breaking bullet on the reference sink covers it"
+    ),
+    ("0.27.0", "`run_fk_out_of_core(temp_dir=...)` now runs in a fresh priva"): (
+        "relaxation: a `temp_dir` holding other files is no longer refused"
+    ),
+    ("0.27.0", "The out-of-core masked-key stager now writes its narrow copy"): (
+        "internal staging path; output bytes unchanged, and a value-free error replaces a driver error on a failure path"
+    ),
+    ("0.27.0", "`connect_duckdb` now spills into a scratch arena directory: "): (
+        "internal scratch handling; an unsafe spill directory is refused where it was chmodded, output bytes unchanged"
+    ),
+    ("0.27.0", "`ParquetTransactionalSink` now moves every call through one "): (
+        "the Breaking bullet on the reference sink covers it"
+    ),
+    ("0.27.0", "The post-scan runs the classifier and spaCy NER detectors a "): (
+        "new opt-in detectors; a model that cannot load refuses only a run that names it"
+    ),
+    ("0.27.0", "`decoy_engine.publication.publish_unit(out, txn, request, ta"): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.27.0", "New package `decoy_engine.publication` with the `decoy-publi"): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.27.0", "The descriptor bytes and the `result_id` input use `decoy_en"): (
+        "new descriptor in this release; the refusal is its own"
+    ),
+    ("0.27.0", "`fileaccess` gains the `publication` stage label. On Linux a"): (
+        "new stage label; the failures named are its own"
+    ),
+    ("0.27.0", "`decoy_engine.profile.FixedWidthLazySource` reads a fixed-wi"): (
+        "new source, not on the run path yet; the refusal is its own"
+    ),
+    ("0.26.0", "`PipelineConfig` validation refuses (`config/target_shared_d"): (
+        "Breaking: a config where two declared tables share one target destination is refused"
+    ),
+    ("0.25.0", "`profiling.starter_config(scan, *, baseline_path, targets, s"): (
+        "new builder; `refuses` names what the new `PipelineConfig` check does with the placeholder, covered by the namespace entry in the Breaking list"
+    ),
+    ("0.25.0", "`contracts.strategy_requirements` now holds the strategy req"): (
+        "moves the requirement table; the refusals named are the new `starter_config` function's own"
+    ),
+    ("0.25.0", '`config.target_identity` is the one definition of "same dest'): (
+        "new helper; the refusals named are the new `starter_config` function's own"
+    ),
+    ("0.25.0", "`post_scan.integrity: true` with regex detectors no longer k"): (
+        "relaxation: integrity runs on more routes and `execution_mode: stream` no longer refuses it"
+    ),
+    ("0.25.0", "A model detector, or `post_scan.ner_findings: fail`, still n"): (
+        "unchanged refusal: model detectors and `ner_findings: fail` still need resident values; the retired reason points at the new one"
+    ),
+    ("0.25.0", "An explicit integrity check is never run unchecked. With `po"): (
+        "Breaking: an explicit `post_scan.integrity: true` with a sink the gate cannot read back is refused before any sink is written"
+    ),
+    ("0.25.0", "The prefix `decoy-set-namespace-` is reserved for the placeh"): (
+        "Breaking: a namespace beginning `decoy-set-namespace-` is refused"
+    ),
+    ("0.25.0", "A run that streams its tables into a `ParquetTransactionalSi"): (
+        "guard inside the new staged gate's own re-read: a lazy source that changed between bind and read"
+    ),
+    ("0.25.0", "`ParquetTransactionalSink.staged_tables()` returns each stag"): (
+        "relaxation: an explicit `sequential` or `out_of_core` request that was refused now runs"
+    ),
+    ("0.25.0", "`run_pipeline` with a `source_loader` and a `tables:` entry "): (
+        "Breaking: a table masked through `source_loader` with no `sources:` entry is refused"
+    ),
+    ("0.25.0", "A second guard runs after the plan is built. A supplied mask"): (
+        "Breaking: the same loader-table refusal, as a second guard after the plan is built"
+    ),
+    ("0.25.0", "Breaking: every digest, HMAC and signature input is now buil"): (
+        "Breaking: every digest, HMAC and signature input is built by one canonical writer and several digests change"
+    ),
+    ("0.25.0", "A YAML date or timestamp, NaN, Infinity or an unpaired surro"): (
+        "Breaking: a YAML date or timestamp, NaN, Infinity or an unpaired surrogate in a config is refused at plan compile"
+    ),
+    ("0.25.0", "Boolean environment flags go through one parser, `decoy_engi"): (
+        "Breaking: environment flags read one accepted set and an unknown value raises `EnvFlagError`"
+    ),
+    ("0.25.0", "`DECOY_ML_DISABLED` used to disable ML only for `1`; it now "): (
+        "Breaking: environment flags read one accepted set and an unknown value raises `EnvFlagError`"
+    ),
+    ("0.24.0", "- Two sentries hold the result: `tests/sentry/profiling/test"): (
+        "describes two internal sentries; `raise` names a source raise site, not a consumer-visible failure"
+    ),
+    ("0.24.0", "The gate blocks wherever it can read the output back: the re"): (
+        "the sentence says no run that succeeded before is refused for the deferred routes; the gate's own withholding is the first paragraph of this entry"
+    ),
+    ("0.24.0", "A relationship whose parent table is generated treats the or"): (
+        "narrows the gate: inherited and quarantined orphans no longer withhold a run; only a new orphan or a key-type mismatch the run introduced does"
+    ),
+    ("0.24.0", "A `formula` that reads a plain `sequence`, a `pyint` or `pyf"): (
+        "Breaking: a generate `formula` reads a plain `sequence`, a numeric faker column and a numeric column with nulls as numbers; text use is refused at compile"
+    ),
+    ("0.24.0", "On a column that has to be compared as text, equal numbers n"): (
+        "post-scan findings only: equal numbers can add a finding, never hide one, and nothing is refused"
+    ),
+    ("0.24.0", "A `derived` column that reads another column-level `derived`"): (
+        "relaxation: a chained `derived` column that used to be refused is accepted; the remaining refusals are unchanged"
+    ),
+    ("0.24.0", "`compile_plan` and `run_config_only_checks` refuse a column "): (
+        "Breaking: a column that leaves out a setting its strategy needs is refused at validation and compile"
+    ),
+    ("0.24.0", "`run_config_only_checks` (and so `decoy validate`) now also "): (
+        "validate now raises the code `compile_plan` already raised for the same config, so the run failed there before"
+    ),
+    ("0.24.0", "A seeded categorical or non-deterministic faker column under"): (
+        "relaxation: a `--chunked` run on `large_string` text columns that was refused now runs"
+    ),
+    ("0.24.0", "A statistical `snapshot_file` holding a byte that is not val"): (
+        "error code and exit code change only; a snapshot with a non-UTF-8 byte already failed validate and run"
+    ),
+    ("0.24.0", "`derived` and `formula` now treat `Decimal('NaN')`, numpy Na"): (
+        "Breaking: `derived` and `formula` treat NaN-like and NaT values as missing and write a null cell"
+    ),
+    ("0.24.0", "- Breaking, pre-GA, hard cut: `tokenize` derives each token "): (
+        "Breaking: a vault writer is refused with a sink or a chunked entry, a `TokenVaultWriter` needs `derivation_scope`, tokenize output changes, and an existing vault file is refused"
+    ),
+    ("0.24.0", "- Breaking, pre-GA: boundary rule B0. A file-vault `vault_wr"): (
+        "Breaking: a vault writer is refused with a sink or a chunked entry, a `TokenVaultWriter` needs `derivation_scope`, tokenize output changes, and an existing vault file is refused"
+    ),
+    ("0.24.0", "- Breaking, pre-GA: the file vault is published privately, d"): (
+        "Breaking: a vault writer is refused with a sink or a chunked entry, a `TokenVaultWriter` needs `derivation_scope`, tokenize output changes, and an existing vault file is refused"
+    ),
+    ("0.23.0", "`decoy_engine.connectors` exports `S3ObjectStore`, `ObjectSt"): (
+        "new classes; the match is `rejected` as a put_if result name, not a refusal"
+    ),
+    ("0.23.0", "- `VaultWriter`, `load_vault` and the run-entry key-match gu"): (
+        "Breaking: a vault opens and writes only under the 32-byte mask root"
+    ),
+    ("0.23.0", "- `vault_writer_for_config` never keys a vault on `job_seed`"): (
+        "Breaking: a vault opens and writes only under the 32-byte mask root"
+    ),
+    ("0.23.0", "A bound iterator (`bind_iterator`) now runs every step, incl"): (
+        "Breaking: a bound iterator runs in a private context copied when it was bound"
+    ),
+    ("0.23.0", "A generate column can say how its values are printed with `o"): (
+        "new opt-in key: the refusals apply only to a column that sets `output_type`"
+    ),
+    ("0.23.0", "A relationship whose parent table is generated is refused wi"): (
+        "Breaking: a generated relationship parent whose key is not provably unique is refused"
+    ),
+    ("0.23.0", "Four reasons in the `decoy` namespace, all pending release: "): (
+        "new reason codes and a new delivery input check; no existing call changes"
+    ),
+    ("0.23.0", "On Linux and macOS, every directory the engine creates on an"): (
+        "retry refusal for a directory left unopenable by a crash under a restrictive umask; no change for a normal run"
+    ),
+    ("0.23.0", "Plan only, no code change. `docs/plans/2026-10-30-f22-public"): (
+        "plan only, no code change; the refusals described are the planned publication guarantee"
+    ),
+    ("0.23.0", "The `fpe` strategy reported two failures under codes the rea"): (
+        "the same two failures now carry registered codes; which inputs fail is unchanged"
+    ),
+    ("0.23.0", "The declaration gate refuses a column the config declares fo"): (
+        "Breaking: a column declared for a mask table but missing from the source is refused"
+    ),
+    ("0.23.0", "The entries that mask without running the post-scan (`run_se"): (
+        "Breaking: the mask entries that run no post-scan refuse a model post-scan config"
+    ),
+    ("0.23.0", "The file is read once at compile time and its bytes are stor"): (
+        "new `lookup` type: the refusal applies only to a plan that carries a lookup column"
+    ),
+    ("0.23.0", "The local record library's `evidence` payload (`cli-local-1`"): (
+        "new optional key pair; the reader refuses only a half pair, which no earlier writer produced"
+    ),
+    ("0.23.0", "The post-scan report's `fk_preservation` findings now come f"): (
+        "Breaking: one orphan the run introduced now fails at any table size"
+    ),
+    ("0.23.0", "The shared staging writer now raises `out_of_core_temp_disk_"): (
+        "Breaking: a full scratch disk during staging raises a code in CAPACITY_EXCLUSIONS"
+    ),
+    ("0.23.0", "What a caller has to do: build a vault writer from an admitt"): (
+        "Breaking: a vault opens and writes only under the 32-byte mask root"
+    ),
+    ("0.23.0", "`ConnectorError` takes a keyword `kind`, one of `access_deni"): (
+        "Breaking: S3 and GCS connector errors carry fixed text and a `kind`"
+    ),
+    ("0.23.0", "`config.post_scan_gate_applies(config)` is the one decision "): (
+        "new gate core; no route calls it yet, so no existing run is refused"
+    ),
+    ("0.23.0", "`declared_casting` gains the `boolean/text/v1` format (gener"): (
+        "new opt-in cast format: a config that does not declare it is unchanged"
+    ),
+    ("0.23.0", "`decoy_engine.fileaccess` exports `ScratchArena`, an A-4 `St"): (
+        "new class; no engine route uses it yet, so no existing run is refused"
+    ),
+    ("0.23.0", "`decoy_engine.run_result` exports `RunResultCollector`, a pr"): (
+        "new class; the match is the sentence saying it never raises"
+    ),
+    ("0.23.0", "`decoy_engine.subset` gains `sample_request(config, *, rows,"): (
+        "new function and optional fields; refusals reach only a caller that asks for a sample"
+    ),
+    ("0.23.0", "`decoy_engine.subset` gains `select_subset(request, inputs, "): (
+        "new function; standalone subsetting refuses what it refused before"
+    ),
+    ("0.23.0", "`decoy_engine.verification.canary.scan_canary_artifacts` sca"): (
+        "new function; its refusals reach only new callers"
+    ),
+    ("0.23.0", "`decoy_engine.verification.postmask` gains `post_scan_verdic"): (
+        "new function; the loader check refuses only a batch wider than its declared type, a new input"
+    ),
+    ("0.23.0", "`derived` expressions accept `if(condition, value, other)`, "): (
+        "new syntax; a missing column in an unchosen branch is refused as it was in other branches"
+    ),
+    ("0.23.0", "`generate_option_catalog()` lists `derived_aggregate`'s `op`"): (
+        "catalog listing only; config parse is unchanged"
+    ),
+    ("0.23.0", "`plan_delivery` now plans every declared table whose target "): (
+        "callers pass an outcome per deliverable table; the change removes a raise (s3 and gcs outcomes) rather than adding one"
+    ),
+    ("0.23.0", "`profile_source`, `run_pipeline` and `run_pipeline_isolated`"): (
+        "Breaking: a source column or table the config does not declare is refused before any row is read"
+    ),
+    ("0.23.0", "`run_mask_pipeline_chunked`, `run_mask_chunked` and `run_nat"): (
+        "Breaking: the three chunked entries refuse an undeclared table or column"
+    ),
+    ("0.23.0", "`run_pipeline` now applies a `subset:` block: it selects the"): (
+        "new capability: a config with a `subset:` block used to be refused and now runs"
+    ),
+    ("0.23.0", "`runtime/out_of_core_reorder_disk_budget_too_small` is a new"): (
+        "Breaking: the reorder disk case raises the new code, in CAPACITY_EXCLUSIONS"
+    ),
+    ("0.23.0", "`scikit-learn==1.7.2` and `lightgbm==4.6.0` moved from the `"): (
+        "Breaking: the `ml` extra is removed; the match says a missing library does not raise"
+    ),
+    ("0.23.0", "`scripts/release/stamp_release.py` now stamps the registry i"): (
+        "release tooling only; it refuses a tag, not a runtime call"
+    ),
+    ("0.23.0", "`type: lookup` draws each row's value from a list kept in a "): (
+        "new `lookup` type: the refusals apply only to the new type"
+    ),
+    ("0.22.0", "`type: distribution` with `family: uniform` and `low`, `high"): (
+        "new feature: the family and key refusals apply only to the new distribution type"
+    ),
+    ("0.22.0", "`run_config_only_checks` and `compile_plan` now call one che"): (
+        "Breaking: a generate column that fails the per-type checks now fails at validate and run"
+    ),
+    ("0.22.0", "A `formula` that uses syntax the runtime evaluator cannot ru"): (
+        "Breaking: a formula with an unknown name now fails at validate; the unevaluable-syntax "
+        "case used to generate a column of nulls"
+    ),
+    ("0.21.0", "Generation now raises `warning.generation_condition_parent_u"): (
+        "new warning record; generated bytes do not change"
+    ),
+    ("0.21.0", "The generation fidelity gate now hands a structured `Quality"): (
+        "new warning channel and a stricter warn trigger; nothing is refused"
+    ),
+    ("0.21.0", "`decoy_engine.generation.generation_order(config)` returns e"): (
+        "new function; output order only, per-table bytes unchanged, and the bad "
+        "reference_table error keeps its ValueError type"
+    ),
+    ("0.21.0", "`contingency_top_k` on `compute_distribution_snapshot` and `"): (
+        "Breaking: contingency_top_k outside 1..1000 or a bool is refused"
+    ),
+    ("0.21.0", "A cap above the default is refused in a plain snapshot (`inc"): (
+        "Breaking: an over-default cap on a non-categorical joint is refused in a plain snapshot"
+    ),
+    ("0.20.0", "A `reference` column with `distribution: fitted` now has its"): (
+        "new feature: the refusals apply only to a fitted reference column, new in this release"
+    ),
+    ("0.20.0", "`decoy_engine.detect_usable_cpus(*, fs_root=None, affinity=N"): (
+        "new function; it raises only for new callers"
+    ),
+    ("0.20.0", '`run_pipeline(execution_mode="stream")` means "must stream".'): (
+        "new opt-in mode: only `stream` refuses; `auto` routing is unchanged"
+    ),
+    ("0.20.0", "A `type: statistical` column whose snapshot carries a `cell_"): (
+        "new snapshot block: a snapshot without it generates byte-identical output"
+    ),
+    ("0.20.0", "Registry 1.17.0 adds four identities for GEN-UNIQUE: `config"): (
+        "new reason identities; nothing raises them in this entry"
+    ),
+    ("0.20.0", "Registry 1.16.0 adds one `plan` identity, `statistical_cell_"): (
+        "new reason identity; nothing raises it in this entry"
+    ),
+    ("0.20.0", "A generate column now accepts only the option keys its `type"): (
+        "Breaking: unknown or malformed generate options are refused"
+    ),
+    ("0.20.0", "Pre-GA hard change: a config that carried an unknown or malf"): (
+        "Breaking: unknown or malformed generate options are refused"
+    ),
+    ("0.20.0", "A pipeline with `global_settings.dp` now refuses a `type: re"): (
+        "Breaking: DP refuses a fitted reference column"
+    ),
+    ("0.20.0", "`PipelineConfig` accepts an optional top-level `name:`. It i"): (
+        "new optional key: a config without `name:` dumps and hashes as before"
+    ),
+    ("0.20.0", "`run_pipeline(..., quarantine_path=None)` takes the path the"): (
+        "new keyword with a default; only a bad value is refused"
+    ),
+    ("0.20.0", "`decoy_engine.profile.profile_relationships_from_config(rela"): (
+        "new function; its refusals reach only new callers"
+    ),
+    ("0.20.0", "A generate run that keeps its output in memory is now refuse"): (
+        "Breaking: an in-memory generate run over capacity is refused"
+    ),
+    ("0.20.0", "Generation reads that marker. A `type: statistical` column t"): (
+        "only snapshots fit with the new redaction marker; an older one loads as before"
+    ),
+    ("0.20.0", "`decoy_engine.quality.check_dp_fit_request(column_schema, *,"): (
+        "new function; it raises only for new callers"
+    ),
+    ("0.20.0", "The out-of-core spill root and its subdirectories, the isola"): (
+        "Breaking: a caller-named scratch dir that is unsafe is refused (scratch_unsafe)"
+    ),
+    ("0.20.0", "`scan_sources(sources, *, tables=None, sample_rows=10_000, s"): (
+        "new function; its refusals reach only new callers"
+    ),
+    ("0.20.0", "- `decoy_engine.parse_pipeline_config(raw)` is the one route"): (
+        "error type and text only; the same configs are refused"
+    ),
+    ("0.20.0", "- Validator text is shown only for the new `ConfigRuleError`"): (
+        "error text only; the same configs are refused"
+    ),
+    ("0.20.0", "- A per-row `derived` failure no longer echoes the cell valu"): (
+        "error text only; the same rows fail"
+    ),
+    ("0.20.0", "- A source table with duplicate field names (caller Arrow ta"): (
+        "Breaking: duplicate source field names are refused"
+    ),
+    ("0.20.0", "- `run_discovery_sql`: `DiscoverySqlError` no longer include"): (
+        "error text and class only; the same queries fail"
+    ),
+    ("0.20.0", "`pre_scan.detectors` and `post_scan.detectors` choose betwee"): (
+        "new optional config keys; a config without them dumps and hashes as before"
+    ),
+    ("0.20.0", "Behavior change: the local protected quarantine arena goes t"): (
+        "Breaking: the quarantine arena goes through the allocator"
+    ),
+    ("0.19.0", "A column can now declare `logical_type`, `parse_format`, `se"): (
+        "new opt-in feature: a route refuses only a job that declares casting, "
+        "a config that does not is unchanged (PLAN_VERSION is in the Breaking list)"
+    ),
+    ("0.19.0", "`decoy_engine.read_csv_source(path, dialect, *, table, dtype"): (
+        "Breaking: a column_names that is not a list or tuple of strings is refused"
+    ),
     ("0.18.0", "- Output: versus 3.10 output, at least one threshold moves i"): (
         "Breaking: weighted categorical masking moves masked output"
     ),
@@ -90,15 +529,6 @@ TRIAGED: dict[tuple[str, str], str] = {
 }
 
 
-def _releases(text: str) -> list[tuple[str, str]]:
-    """(version, section text from its heading up to the next release heading), newest first."""
-    marks = list(_RELEASE.finditer(text))
-    return [
-        (m.group(1), text[m.start() : marks[i + 1].start() if i + 1 < len(marks) else len(text)])
-        for i, m in enumerate(marks)
-    ]
-
-
 def _entries_outside_breaking(section: str) -> list[str] | None:
     """Normalized entries (bullets and paragraphs) outside the Breaking list, or None when the
     release has no Breaking list."""
@@ -115,11 +545,6 @@ def _entries_outside_breaking(section: str) -> list[str] | None:
             if normalized:
                 out.append(normalized)
     return out
-
-
-def _digest(section: str) -> str:
-    lines = [line.rstrip() for line in section.strip().splitlines()]
-    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def _untriaged_and_stale(text: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
@@ -185,3 +610,24 @@ def test_the_pins_catch_an_entry_filed_under_an_old_release() -> None:
     actual = {v: _digest(s) for v, s in _releases(mutated)[1:]}
     pinned = json.loads(PINS.read_text(encoding="utf-8"))
     assert actual[old_version] != pinned[old_version]
+
+
+def test_editing_the_link_footer_moves_no_pin() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    edited = text.rstrip("\n") + "\n[0.0.1]: https://example.invalid/moved\n"
+    before = {v: _digest(s) for v, s in _releases(text)}
+    after = {v: _digest(s) for v, s in _releases(edited)}
+    assert before == after
+
+
+def test_a_reference_inside_the_oldest_section_stays_in_its_digest() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    oldest = _releases(text)[-1][0]
+    head, sep, tail = text.partition(f"## [{oldest}]")
+    assert sep
+    body_end = tail.index("\n\n") + 2
+    inner = tail[:body_end] + "[ref]: https://example.invalid/x\n\nmore text\n\n" + tail[body_end:]
+    edited = head + sep + inner
+    section = dict(_releases(edited))[oldest]
+    assert "more text" in section
+    assert "[ref]: https://example.invalid/x" in section

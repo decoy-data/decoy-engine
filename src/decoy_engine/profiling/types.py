@@ -14,10 +14,13 @@ Everything here must be JSON-serializable via dataclasses.asdict.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Final
 
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
+
+# What a null cell reads as in `TopValue.value`, so a literal cell can read the same.
+NULL_CELL_TEXT: Final = "(null)"
 
 
 @dataclass
@@ -190,8 +193,12 @@ class ColumnProfile:
 
     # Run metadata
     engine_version: str = "0.1.0"
-    generated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
-        """JSON-ready dict. Use this when persisting or sending over the wire."""
+        """The raw JSON-ready dict, cell values included.
+
+        For a document a person saves, commits or reads, use `profile_document`, which removes
+        the values of value-sensitive columns unless `include_values=True`.
+        """
         return asdict(self)

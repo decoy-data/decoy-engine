@@ -33,6 +33,7 @@ from decoy_engine.execution._residency_warning import (
     residency_warning_message,
 )
 from decoy_engine.profile._readers import LazySource
+from tests._declared_schema import file_schemas
 from tests.unit.execution.test_out_of_core_routing import (
     _fk_ooc_config,
     _sources,
@@ -135,9 +136,10 @@ def test_empty_shapes_message_is_empty() -> None:
 def test_residency_quality_warning_shape() -> None:
     qw = residency_quality_warning(("a resident pa.Table source",))
     assert qw.code == RESIDENCY_WARNING_CODE
-    assert qw.provider == ""  # route-level, not provider-attributed
+    assert qw.provider == "out_of_core_route"  # route-level, a real non-empty name
     assert qw.column is None  # not column-attributed
-    assert qw.detail["shapes"] == ["a resident pa.Table source"]
+    assert qw.detail["resident_source"] is True
+    assert set(qw.detail) == {"resident_source", "message"}  # scalars only
     assert "a resident pa.Table source" in qw.detail["message"]
 
 
@@ -153,9 +155,9 @@ def test_forced_ooc_resident_no_sink_warns_and_records(tmp_path: Path) -> None:
     assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
     qws = _residency_qws(result)
     assert len(qws) == 1
-    shapes = qws[0].detail["shapes"]
-    assert "a resident pa.Table source" in shapes
-    assert any(s.startswith("no sink") for s in shapes)
+    detail = qws[0].detail
+    assert detail["resident_source"] is True
+    assert detail["no_sink"] is True
     residency = result.quality_metrics["residency"]
     assert residency["caller_managed"] is True
     assert "a resident pa.Table source" in residency["shapes"]
@@ -184,9 +186,9 @@ def test_forced_ooc_resident_with_sink_warns_but_not_for_sink(tmp_path: Path) ->
     result = run_pipeline(
         config, sources, engine_version="0.1.0", execution_mode="out_of_core", sink=sink
     )
-    shapes = _residency_qws(result)[0].detail["shapes"]
-    assert "a resident pa.Table source" in shapes
-    assert not any(s.startswith("no sink") for s in shapes)  # a sink is present
+    detail = _residency_qws(result)[0].detail
+    assert detail["resident_source"] is True
+    assert "no_sink" not in detail  # a sink is present
 
 
 def test_forced_ooc_loader_job_records_the_source_loader_shape(tmp_path: Path) -> None:
@@ -201,10 +203,10 @@ def test_forced_ooc_loader_job_records_the_source_loader_shape(tmp_path: Path) -
         engine_version="0.1.0",
         execution_mode="out_of_core",
         source_loader=_file_loader(config),
+        source_loader_schemas=file_schemas(config),
     )
     assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
-    shapes = _residency_qws(result)[0].detail["shapes"]
-    assert any(s.startswith("a source_loader") for s in shapes)
+    assert _residency_qws(result)[0].detail["source_loader"] is True
 
 
 def test_forced_ooc_byte_parity_preserved_with_warning(tmp_path: Path) -> None:

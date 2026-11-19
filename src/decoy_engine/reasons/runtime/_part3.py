@@ -33,8 +33,10 @@ __all__ = [
     "FILTER_EXPRESSION_ERROR",
     "FILTER_EXPRESSION_NOT_BOOLEAN",
     "FPE_CHECKSUM_INVALID_SOURCE",
+    "FPE_CHECKSUM_UNSUPPORTED_STRATEGY",
     "FPE_UNENCRYPTABLE_DOMAIN",
     "FPE_UNENCRYPTABLE_LENGTH",
+    "FPE_UNENCRYPTABLE_VALUE",
     "GENERATION_NOT_REPRODUCIBLE",
     "INVALID_SUBSTRATE",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED",
@@ -49,10 +51,20 @@ __all__ = [
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NUMEXPR_REQUIRED",
+    "POST_SCAN_DISTRIBUTION_DEFERRED",
+    "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
+    "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
+    "RECORD_CORRUPT",
+    "RECORD_INVALID",
+    "RECORD_KIND_RESERVED",
+    "SCAN_SOURCE_FAILED",
+    "SCRATCH_ACL_FAILED",
+    "SCRATCH_UNSAFE",
     "SHUFFLE_REQUIRES_NAMESPACE",
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
     "SUBSET_MATERIALIZE_COUNT_MISMATCH",
@@ -61,6 +73,8 @@ __all__ = [
     "TOKENIZE_REQUIRES_STRING_DTYPE",
     "TOKENIZE_REQUIRES_VAULT",
     "TOKENIZE_VAULT_ERROR",
+    "TOKENIZE_VAULT_SCOPE_REQUIRED",
+    "TOKEN_VAULT_DERIVATION_UNSUPPORTED",
     "TOP_CODE_BOUNDS_UNRESOLVABLE",
     "TOP_CODE_NON_INTEGRAL_OBJECT_COLUMN",
     "TOP_CODE_WITH_WHEN_UNSUPPORTED",
@@ -70,7 +84,9 @@ __all__ = [
     "TRUNCATE_MASK_CHAR_INVALID",
     "UNIFIED_SLICE_INVARIANT_VIOLATION",
     "UNKNOWN_TRANSFORM_OP",
+    "VAULT_COMMIT_FAILED",
     "VAULT_CRYPTO_NOT_INSTALLED",
+    "VAULT_EXISTS",
     "VAULT_FORMAT_UNSUPPORTED",
     "VAULT_KEY_MISMATCH",
     "VAULT_PROTOCOL_VERSION_MISMATCH",
@@ -123,6 +139,18 @@ FAKER_POSITIONAL_TABLE_UNKNOWN = _d(
     "faker_positional_table_unknown", "Faker positional table unknown."
 )
 FPE_UNENCRYPTABLE_DOMAIN = _d("fpe_unencryptable_domain", "FPE unencryptable domain.")
+FPE_UNENCRYPTABLE_VALUE = _d(
+    "fpe_unencryptable_value",
+    "A value cannot be format-preserving-encrypted without leaking cleartext or losing round-trip.",
+    since="1.24.0",
+)
+# The plain symbol FPE_CHECKSUM_UNSUPPORTED is the low-level `fpe.checksum_unsupported`.
+FPE_CHECKSUM_UNSUPPORTED_STRATEGY = _d(
+    "fpe_checksum_unsupported",
+    "The FPE checksum scheme is unsupported or the value's length is invalid for it.",
+    symbol="FPE_CHECKSUM_UNSUPPORTED_STRATEGY",
+    since="1.24.0",
+)
 JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED = _d(
     "joint_mask_key_by_snapshot_misaligned", "Joint mask key by snapshot misaligned."
 )
@@ -156,6 +184,22 @@ TOKENIZE_REQUIRES_STRING_DTYPE = _d(
 )
 TOKENIZE_REQUIRES_VAULT = _d("tokenize_requires_vault", "Tokenize requires vault.")
 TOKENIZE_VAULT_ERROR = _d("tokenize_vault_error", "Tokenize vault error.")
+# B-6 D2: the token key is bound to the vault's own derivation scope. A writer with no scope was
+# minted under the earlier derivation and is refused (pre-release hard cut, no migration).
+TOKENIZE_VAULT_SCOPE_REQUIRED = _d(
+    "tokenize_vault_scope_required",
+    "The token vault writer has no valid derivation scope (16 to 64 bytes).",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.26.0",
+)
+TOKEN_VAULT_DERIVATION_UNSUPPORTED = _d(
+    "token_vault_derivation_unsupported",
+    "The token vault was created before vault-scoped token derivation; use a new vault.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.26.0",
+)
 TOP_CODE_BOUNDS_UNRESOLVABLE = _d("top_code_bounds_unresolvable", "Top code bounds unresolvable.")
 TOP_CODE_NON_INTEGRAL_OBJECT_COLUMN = _d(
     "top_code_non_integral_object_column", "Top code non integral object column."
@@ -229,6 +273,19 @@ VAULT_KEY_MISMATCH = _d(
     "Vault key mismatch.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
+)
+# B-6 D1: the vault is published durably and exclusively; neither text names a path or errno.
+VAULT_COMMIT_FAILED = _d(
+    "vault_commit_failed",
+    "The vault could not be written durably; publish no output that it would reverse.",
+    since="1.26.0",
+)
+VAULT_EXISTS = _d(
+    "vault_exists",
+    "A vault already exists at the target; choose a new path or remove it with its outputs.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.26.0",
 )
 VAULT_PROTOCOL_VERSION_MISMATCH = _d(
     "vault_protocol_version_mismatch",
@@ -309,3 +366,56 @@ _d = _catalog.runtime("decoy_engine.transforms.text_mask")
 
 CHECKSUM_INVALID = _d("checksum_invalid", "Checksum invalid.")
 SUB_MINIMUM_DOMAIN = _d("sub_minimum_domain", "Sub minimum domain.")
+
+_d = _catalog.runtime("ProtectedDirAclFailed")
+
+SCRATCH_ACL_FAILED = _d("scratch_acl_failed", "Scratch ACL failed.", since="1.7.0")
+
+_d = _catalog.runtime("ProtectedDirUnsafe")
+
+SCRATCH_UNSAFE = _d("scratch_unsafe", "Scratch unsafe.", since="1.7.0")
+
+_d = _catalog.runtime("RecordError")
+
+RECORD_CORRUPT = _d("record_corrupt", "Record corrupt.", since="1.20.0")
+RECORD_INVALID = _d("record_invalid", "Record invalid.", since="1.20.0")
+RECORD_KIND_RESERVED = _d("record_kind_reserved", "Record kind reserved.", since="1.20.0")
+
+_d = _catalog.runtime("ScanSourceError")
+
+SCAN_SOURCE_FAILED = _d("scan_source_failed", "A table could not be scanned.", since="1.10.0")
+
+# An explicit `post_scan.integrity: true` is never run unchecked: these refuse what it cannot judge.
+_d = _catalog.runtime("ExecutionError")
+
+POST_SCAN_INTEGRITY_SINK_UNREADABLE = _d(
+    "post_scan_integrity_sink_unreadable",
+    "The Post-scan integrity checks cannot read this sink back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)
+POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
+    "post_scan_integrity_transforms_unsupported",
+    "The Post-scan integrity checks cannot compare a transformed table with its source.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.27.0",
+)
+# `post_scan.distribution` needs the run's inputs readable before the route runs; a loader run or
+# any other deferred gate cannot give that, so it is refused rather than left unchecked.
+POST_SCAN_DISTRIBUTION_DEFERRED = _d(
+    "post_scan_distribution_deferred",
+    "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.30.0",
+)
+# A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
+# (a publication outcome) would name the wrong stage.
+SPOOL_DISK_FULL = _d(
+    "spool_disk_full",
+    "The disk or quota for the local copy of a remote source is too small.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.30.0",
+)

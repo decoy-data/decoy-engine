@@ -30,9 +30,14 @@
 name: native-companion
 
 on:
-  # Manual dispatch only. gate-selfhosted.yml is the merge gate; the paid runners
-  # fire on demand so they stop failing every push (X0a). Old triggers: git history.
+  pull_request:
+  schedule:
+    - cron: "37 3 * * *"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -56,6 +61,7 @@ jobs:
   # time (the cross image is a build tool, not the compatibility baseline).
   companion-wheel-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +138,7 @@ jobs:
   # Windows-specific binary name. Same shared parity_smoke.py as every other target.
   companion-wheel-windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +186,7 @@ jobs:
   # parity_smoke.py as every other target.
   companion-wheel-macos:
     runs-on: macos-15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -222,6 +230,7 @@ jobs:
   # same 1.98.0 as rust-toolchain.toml so CI and local builds agree.
   companion-rust-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Install pinned Rust with rustfmt + clippy
@@ -250,6 +259,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -318,6 +328,15 @@ jobs:
       # (skipif no companion), so this is the one job that runs them.
       - name: native FPE (FF1) on both routes (companion-present case)
         run: pytest tests/native/test_c6a_fpe_chunked.py tests/native/test_fpe_ext_loader.py tests/physical/test_shadow_fpe.py -v --tb=short
+      # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
+      # it, so this is the one job that can prove the chunked route leaks no source metadata.
+      # A skip here would hide that, so the step fails on any SKIPPED line and on an empty
+      # selection (pytest exits 5 then).
+      - name: Output metadata canary, auto-chunk route (companion-present case, must not skip)
+        run: |
+          set -o pipefail
+          pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
+          if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A
@@ -330,6 +349,7 @@ jobs:
   # plain std). A crash, a sanitizer report, or an unexpected process exit fails the job.
   companion-fuzz-sanitizer:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Install nightly Rust with rust-src (build-std needs it)
@@ -386,6 +406,7 @@ jobs:
   # regression-gate for no new signal).
   core-companion-absent:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
