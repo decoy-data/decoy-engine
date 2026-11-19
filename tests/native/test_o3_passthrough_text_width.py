@@ -227,7 +227,7 @@ def test_o3a_fixed_schema_sink_file_is_byte_equal_when_aggregate_text_is_wide(
         base = o._published(tmp_path / "base" / "out", table)
         got = o._published(tmp_path / "narrow" / "out", table)
         assert pq.ParquetFile(got).metadata.num_row_groups == 1
-        assert pq.ParquetFile(got).schema_arrow.field("n").type == pa.large_string()
+        assert pq.ParquetFile(got).schema_arrow == pq.ParquetFile(base).schema_arrow
         assert got.read_bytes() == base.read_bytes()
 
 
