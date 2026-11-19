@@ -205,6 +205,16 @@ experimental: the connector SDK objects defined in `decoy_engine.sdk` and their 
 name now defaults to documented internal. Later slices of the batch add their own lines here: the `FormulaStrategy`
 base removal, the public renames, and the `when:`, compressed-CSV and pass-through output changes.
 
+**Pre-GA output change (date_shift `jitter_days`, DATE-SHIFT-JITTER, 2026-11-19).** `date_shift` now reads
+`jitter_days: N` as the window `[-N, N]` on every route. Before, no route read the key and a config with it shifted by
+up to a year. Output changes for every config that sets `jitter_days` (the shipped disguises when a client applies
+them, the recommendations default, platform fixtures). `jitter_days` together with `min_days` or `max_days` is refused
+at plan compile, as is a `jitter_days` that is not an integer, is negative or exceeds 106,751, and any `min_days` or
+`max_days` that `int()` coerces to a value outside [-106751, 106751]. Configs that set `min_days` and `max_days` keep
+today's `int()` coercion and window. One new plan reason, `date_shift_window_invalid`. Re-pin checklist: the platform
+fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
+`build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

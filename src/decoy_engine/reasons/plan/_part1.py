@@ -84,6 +84,7 @@ __all__ = [
     "DATE_SHIFT_MISSING_GROUP_BY_REF",
     "DATE_SHIFT_PRESERVE_VALUES_INVALID",
     "DATE_SHIFT_REQUIRES_NAMESPACE",
+    "DATE_SHIFT_WINDOW_INVALID",
     "DERIVED_AGGREGATE_COLUMN_MISSING",
     "DERIVED_AGGREGATE_MISSING_COLUMN_REF",
     "DERIVED_AGGREGATE_OP_INVALID",
@@ -381,6 +382,7 @@ CATEGORICAL_REQUIRES_NAMESPACE = _d(
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace.", since="1.26.0"
 )
+DATE_SHIFT_WINDOW_INVALID = _d("date_shift_window_invalid", "Date shift window invalid.")
 FPE_REQUIRES_NAMESPACE = _d("fpe_requires_namespace", "FPE requires namespace.", since="1.26.0")
 HASH_REQUIRES_NAMESPACE = _d("hash_requires_namespace", "Hash requires namespace.", since="1.26.0")
 NESTED_STRATEGY_UNSET = _d("nested_strategy_unset", "Nested strategy unset.", since="1.26.0")
