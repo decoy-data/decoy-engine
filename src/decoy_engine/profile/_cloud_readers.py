@@ -164,11 +164,8 @@ def _csv_rows_from_ranges(
         if end > len(buffer):
             buffer += fetch(len(buffer), end - 1)
         whole = len(buffer) >= size
-        text = buffer if whole else buffer.rsplit(b"\n", 1)[0] + b"\n"
         try:
-            frame = pd.read_csv(
-                io.BytesIO(text), nrows=n + 1, **pandas_lexeme_kwargs(lexeme_columns)
-            )
+            frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
         except pd.errors.ParserError:
             if whole:
                 raise

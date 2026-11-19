@@ -51,20 +51,20 @@ def test_every_reader_is_in_the_conformance_matrix() -> None:
 
 
 def test_a_reader_missing_from_the_matrix_is_caught() -> None:
-    module = types.ModuleType("decoy_engine.profile._seeded")
+    module = types.ModuleType("seeded_module")
 
     class Seeded:
         def sample_frame(self, sample_rows: int) -> None: ...
 
     Seeded.__module__ = module.__name__
     module.Seeded = Seeded  # type: ignore[attr-defined]
-    assert owned_readers([module]) - set(READER_MATRIX) == {"decoy_engine.profile._seeded.Seeded"}
+    assert owned_readers([module]) - set(READER_MATRIX) == {"seeded_module.Seeded"}
 
 
 def test_a_re_export_is_not_a_second_definition() -> None:
     from decoy_engine.profile._cloud_readers import S3CsvSource
 
-    module = types.ModuleType("decoy_engine.profile._reexport")
+    module = types.ModuleType("reexport_module")
     module.S3CsvSource = S3CsvSource  # type: ignore[attr-defined]
     assert owned_readers([module]) == set()
 
