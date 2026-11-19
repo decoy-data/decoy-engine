@@ -366,7 +366,9 @@ row's offset from the keyed index derivation that pooled sampling uses, in one b
 column, instead of a separate numpy generator per row. It is about N times faster (see the
 benchmark record). Dates stay inside the configured window, null anchors stay null, and output
 stays the same across runs, batch sizes and routes. Output from earlier releases does not
-match: regenerate stored windowed_date output. SEED_PROTOCOL_VERSION does not change: a bump
+match: regenerate stored windowed_date output. Global row numbers must now be below 2^62
+(before: below 2^64); a larger or negative row number raises
+windowed_date_row_number_out_of_range. SEED_PROTOCOL_VERSION does not change: a bump
 would rekey every keyed column and vault before GA, and only this site moves.
 ```
 
@@ -390,7 +392,10 @@ New `tests/unit/generation/test_windowed_date_offsets.py`:
    give the same dates for the same anchors, seed, namespace and row numbers.
 7. `test_row_number_domain`: `r = -1` and `r = 2**62` raise the registered error, value-free,
    with no `__cause__` or `__context__`.
-8. The S1 error-parity cases that do not involve row numbers still raise the same errors.
+8. The S1 error-parity cases that do not involve row numbers still raise the same errors. The
+   S1 success case `row_offset = 2**63 - 1 - n` becomes an error in S2: the domain narrows from
+   below 2^64 to below 2^62. The test asserts the new registered error for it, and the S2 PR
+   names the change.
 
 Red-first: tests 1, 2, 4 and 5 pass on S1 too (they pin properties). Tests 6 and 7, the new
 provider golden and the re-baselined digest are red until the derivation lands.
@@ -560,59 +565,97 @@ default instead of one thread. Pass `native_threads=1` for the old behavior. Out
 
 ### Current behavior
 
-`jitter_days` is accepted but read by no date_shift route. The handler reads `min_days` and
-`max_days` with defaults -365 and 365 and swaps them when reversed
-(`execution/_strategies/_date_shift.py:118-121`). The other readers repeat that rule by hand:
+`jitter_days` is accepted but read by no date_shift route. The date_shift window is resolved by
+hand in four places (the Rust crate holds no copy; it receives the resolved bounds):
 
-- `execution/native/_operator_params.py:250` and `:295` (`DateShiftParams`, which the shadow
-  bindings read at `physical/_shadow_bindings.py:397`);
-- `execution/native/_operator_config_rejections.py:186`;
-- `execution/native/_kernels_scalar.py:249`;
-- `execution/out_of_core/_mask_group_c.py:238`.
+- the handler, `execution/_strategies/_date_shift.py:118-121` (defaults -365 and 365, swap when
+  reversed);
+- `execution/native/_operator_params.py:293-299` (`DateShiftParams`, which the shadow bindings
+  read at `physical/_shadow_bindings.py:397`);
+- `execution/native/_date_shift_ext.py:58-75` (`DEFAULT_MIN_DAYS`, `DEFAULT_MAX_DAYS`,
+  `resolve_shift_range` with its swap, called at `:167`);
+- `execution/native/_operator_config_rejections.py:186` (bounds admission against
+  `MAX_ABS_SHIFT_DAYS`).
 
 So every shipped disguise (`jitter_days: 15` to `30`) and the recommendations default
 (`jitter_days: 15`) shift by up to a year.
 
+Not date_shift readers, and left alone: `_operator_params.py:250`, `_kernels_scalar.py:249-252`
+and `out_of_core/_mask_group_c.py:238` read text_mask per-span date bounds, where a present but
+null bound has its own parity rule (`_strategies/_text_mask.py:145`, `transforms/text_mask.py:502`).
+Routing them through `shift_window` would give text_mask jitter behavior and break that parity.
+V2-LOG line: TEXT-MASK-DATE-BOUNDS, the text_mask per-span bounds are read in five places and
+want their own resolver.
+
 ### Design
 
-- One resolver, `shift_window(cfg) -> tuple[int, int]`, in `transforms/date_shift.py` (the
-  transform module both the handler and the native lane already import). Rules:
-  - `jitter_days: N`, an `int` (not `bool`) with `N >= 0`: `(-N, N)`;
-  - otherwise today's rule: `min_days` and `max_days` with defaults -365 and 365, swapped when
-    reversed.
-- Every reader above calls `shift_window`. None keeps its own default or swap.
-- Compile refusals in the existing `plan/_checks_date_shift.py` (top level and nested), one
-  registered reason `plan.DATE_SHIFT_WINDOW_INVALID` with a fixed message per case: `jitter_days`
-  together with `min_days` or `max_days`; `jitter_days` not an `int`, a `bool`, or negative.
+- One resolver and one validator in `transforms/date_shift.py` (the transform module both the
+  handler and the native lane already import), side by side:
+  - `shift_window_problem(cfg) -> str | None` returns a fixed problem word, or `None`. It
+    refuses `jitter_days` together with `min_days` or `max_days`; a `jitter_days` that is not an
+    `int`, is a `bool`, or is negative; and a resolved window whose bound exceeds
+    `MAX_ABS_SHIFT_DAYS` (106,751, `pd.Timedelta.max.days`), so `jitter_days: 200000` is refused.
+  - `shift_window(cfg) -> tuple[int, int]`: `jitter_days: N` gives `(-N, N)`; otherwise
+    `min_days` and `max_days` with defaults -365 and 365, swapped when reversed. It raises the
+    registered error when `shift_window_problem` returns a problem, so a bad `jitter_days`
+    never falls through to `min_days`/`max_days`.
+- `MAX_ABS_SHIFT_DAYS`, `DEFAULT_MIN_DAYS` and `DEFAULT_MAX_DAYS` move beside the resolver;
+  `_date_shift_ext.py` imports them. `resolve_shift_range` keeps only the `range_size`
+  arithmetic on bounds that `shift_window` resolved.
+- The four readers above call `shift_window`. None keeps its own default or swap.
+- Both refusal points call `shift_window_problem` and nothing else: the compile refusal in the
+  existing `plan/_checks_date_shift.py` (top level and nested; reason
+  `plan.DATE_SHIFT_WINDOW_INVALID`, fixed message per problem word) and the native admission at
+  `_operator_config_rejections.py:186`.
 - Guard test (cross-cutting rule, choke point plus fitness function):
   `tests/sentry/test_date_shift_window_reader.py` walks the syntax tree of `src/decoy_engine` and
-  fails on a `"min_days"`, `"max_days"` or `"jitter_days"` string read outside `shift_window`,
-  with a ratchet allowlist for the modules that use those keys for other strategies
-  (`windowed_date`, `text_mask`, `config/_generate_options.py`, `plan/checks/_generate_columns.py`).
+  fails on a `"min_days"`, `"max_days"` or `"jitter_days"` string read outside an exact-file
+  allowlist. The allowlist is a census at the S4a head and may only shrink. Each entry names its
+  reason:
+  - date_shift resolver and validator: `transforms/date_shift.py`;
+  - not a window read: the wizard option defaults (`_strategies/_date_shift.py:98-99`), the
+    recommendations descriptors (`profiling/recommendations.py:158-187`);
+  - other strategies: windowed_date (`generation/_column_streams.py:66`,
+    `_window_admission.py:308-309`, `transforms/windowed_date.py`), text_mask
+    (`_strategies/_text_mask.py:145`, `transforms/text_mask.py`, `out_of_core/_text_mask_native.py:49`,
+    `_operator_params.py`, `_kernels_scalar.py`, `out_of_core/_mask_group_c.py`), generate options
+    (`config/_generate_options.py`, `plan/checks/_generate_columns.py`).
+  The builder fills the final list from the census and puts it in the PR. Files that hold both a
+  text_mask read and a date_shift read (`_operator_params.py`) are allowlisted per function, not
+  per file. A self-test plants `cfg.get("min_days")` in a temporary date_shift module and asserts
+  the sentry fails.
 
 ### Acceptance tests (S4a)
 
 New `tests/unit/transforms/test_date_shift_window.py` and a route test:
 
-1. `test_shift_window_rules`: `jitter_days` 0, 1, 30; min/max given, reversed, defaulted.
-2. `test_jitter_route_parity`: one config with `jitter_days: 7` on full_frame, sequential, the
-   chunked native lane (companion), out_of_core and the shadow binding; output bytes are equal
-   on every route and equal to the same config with `min_days: -7, max_days: 7`. Every shift is
-   inside `[-7, 7]`.
-3. `test_jitter_conflict_refused`: `jitter_days` with `min_days`, with `max_days`; `"7"`, `True`,
-   `-1`; each raises `PlanCompileError` with `date_shift_window_invalid` before any read, top
-   level and nested.
-4. `test_reader_sentry`: the guard test above.
+1. `test_shift_window_rules`: `jitter_days` 0, 1, 30, 106,751; min/max given, reversed,
+   defaulted; `shift_window` raises on every bad `jitter_days` instead of using min/max.
+2. `test_jitter_route_parity`: one config with `jitter_days: 7`, one cell per route: full_frame,
+   sequential (pandas), the sequential native lane (`_sequential_native.py:512`, companion), the
+   chunked native lane (companion), the shadow binding, and a nested date_shift child. Each cell
+   asserts, from the run evidence (the routing record and lane fields in `quality_metrics`), the
+   route it actually took, so a silent fallback fails the cell. out_of_core refuses date_shift
+   (`out_of_core/_compat.py:84-89`): that cell asserts the registered decline, not output. Output
+   bytes are equal on every taken route and equal to the same config with
+   `min_days: -7, max_days: 7`. Every shift is inside `[-7, 7]`.
+3. `test_window_invalid_refused`: `jitter_days` with `min_days`, with `max_days`; `"7"`, `True`,
+   `-1`, `106,752`; each raises `PlanCompileError` with `date_shift_window_invalid` before any
+   read, top level and nested; the native admission returns the same problem word for each.
+4. `test_reader_sentry`: the guard test above, plus its planted-read self-test.
 
 Red-first: tests 1, 2 and 3 are red on base (no resolver; `jitter_days` ignored). Test 4 is red on
-base (five readers outside the resolver).
+base (four readers outside the resolver).
 
 ### Mutations (S4a)
 
 1. `shift_window` ignores `jitter_days`: tests 1 and 2 red.
 2. One route keeps its own `cfg.get("min_days", -365)`: test 2 red on that route, test 4 red.
-3. Conflict refusal removed: test 3 red.
+3. Conflict refusal removed from `shift_window_problem`: test 3 red at compile and native.
 4. `bool` accepted as `jitter_days`: test 3 red.
+5. `MAX_ABS_SHIFT_DAYS` check dropped: the `106,752` case red.
+6. Native admission keeps its own bounds check instead of calling `shift_window_problem`: the
+   native half of test 3 red on `jitter_days: 106,752`.
 
 ### Changelog (S4a, output-changing)
 
@@ -629,9 +672,9 @@ that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_ret
 
 | File | Change | Directory and CODEMAP line | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/transforms/date_shift.py` | `shift_window` | `transforms/` | `_detect_format` |
-| the five readers listed above | call `shift_window` | existing files | |
-| `src/decoy_engine/plan/_checks_date_shift.py` | the window refusal | `plan/` | existing date_shift checks |
+| `src/decoy_engine/transforms/date_shift.py` | `shift_window`, `shift_window_problem`, the moved constants | `transforms/` | `_detect_format` |
+| the four readers listed above | call `shift_window`; native admission calls `shift_window_problem` | existing files | |
+| `src/decoy_engine/plan/_checks_date_shift.py` | the window refusal through `shift_window_problem` | `plan/` | existing date_shift checks |
 | `src/decoy_engine/reasons/plan/` (the part with room) | `DATE_SHIFT_WINDOW_INVALID` | `reasons/plan/` | `DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED` |
 | `tests/unit/transforms/test_date_shift_window.py`, `tests/sentry/test_date_shift_window_reader.py` | new | `tests/unit/transforms/`, `tests/sentry/` | other date_shift tests, other sentries |
 | `changelog.d/date-shift-jitter.md`, `docs/compatibility-contract.md` | fragment, dated entry | | |
@@ -667,12 +710,12 @@ required strategy setting:
     check asks the declared-casting registry which `(table, column)` pairs have a contract
     (the same lookup `plan/_checks_declared_casting.py` uses) and skips the date_format
     descriptor for those. The rule stays in the registry that owns it.
-  - The walk extends to `nested` children (`nested_children`), using the registry's path style
-    (`tables.<t>.columns.<c>.provider_config.date_format`, and the nested form the existing
-    nested checks use). Census first: the builder lists every shipped config and test whose
-    nested children would now fail an existing descriptor (namespace). If the census is not
-    empty, it reports to the orchestrator before going further, rather than narrowing the walk on
-    its own.
+  - The walk extends to `nested` children (`nested_children`) for `provider_config`-rooted
+    descriptors only, re-rooted onto the child's `provider_config.strategy_config`
+    (`_nested_json/_rules.py:47` holds the child's config there). Today that is only the
+    date_format descriptor. Root-level descriptors (namespace) never apply to a child, because a
+    child takes its parent's namespace (`execution/_strategies/nested/_handler.py:193-194`). Paths use the registry's
+    style for the parent plus the nested form the existing nested checks use for the child.
 - Reason `plan.DATE_SHIFT_REQUIRES_DATE_FORMAT` (`date_shift_requires_date_format`, following the
   `<STRATEGY>_REQUIRES_NAMESPACE` naming) in `reasons/plan/`. The message carries table and
   column names (config identifiers, never a cell value).
@@ -701,12 +744,20 @@ The winning variant is `DetectionResult.format_pattern` (`detection/types.py:94`
 `FieldStats.format_pattern` (`profiling/types.py:105`, `profiling/profiler.py:117`). One fixed
 format per detector is wrong, so no writer uses one:
 
+- A winning variant is not enough. `_ISO_DATE_RE` accepts shapes no variant matches (for
+  example `T..HH:MMZ` and ` HH:MM:SSZ`), and `_dominant_variant` (`detection/_scoring.py:152-180`)
+  returns the largest variant even when it covers only part of the detector's hits. So the
+  detector also records whether the winning variant covers every hit: a new additive field
+  `format_pattern_complete: bool` on `DetectionResult`, set in `_dominant_variant` (all hits
+  counted under one label, none left over), surfaced beside `format_pattern` on `FieldStats`, and
+  added to the value-free field list in `profiling/_value_redaction.py:120-127`.
 - Engine starter: `profiling/_starter_inference.py::infer_starter_strategy` takes the top
-  confident match. When its descriptor's strategy is date_shift, the decision's
-  `provider_config` gains `date_format = match.format_pattern`. When `format_pattern` is `None`
-  (no single variant won), the decision is `_FALLBACK` (redact with the louder review), because a
-  date_shift without a format would not compile. Public `starter_config` therefore only writes
-  configs that compile.
+  confident match. When its descriptor's strategy is date_shift and the match has
+  `format_pattern_complete`, the decision's `provider_config` gains
+  `date_format = match.format_pattern`. Otherwise (no variant, or a variant that covers only
+  part of the hits), the decision is `_FALLBACK` (redact with the louder review), because a
+  date_shift with a wrong or missing format would fail rows or not compile. Public
+  `starter_config` therefore only writes configs that compile and fit the whole column.
 - Recommendations: `profiling/recommendations.py` descriptors keep their params
   (`jitter_days: 15`, now honoured by S4a); the `starter` `provider_config` loses the fixed
   min/max and gains nothing static. The format always comes from the match. Re-baseline
@@ -758,13 +809,14 @@ At CLI `origin/main` 4564b745:
 
 - `src/decoy/cli/_init_inference.py:99-118` (`iso_date`, `us_date`) and the writer in
   `src/decoy/cli/init.py` (around `:193-220`, which writes only `min_days`/`max_days`): write
-  `date_format` from the top match's `format_pattern`; when it is `None`, do not suggest
-  date_shift (fall back the way the CLI does for an unknown column).
+  `date_format` from the top match's `format_pattern`, only when `format_pattern_complete` is
+  true; otherwise do not suggest date_shift (fall back the way the CLI does for an unknown
+  column). Same rule as the engine starter.
 - `src/decoy/templates/hipaa.yaml` (`dob`, `admission_date`, `discharge_date`) and
   `src/decoy/templates/pci.yaml` (`transaction_date`): add `date_format: "%Y-%m-%d"` (templates
   are fixed sample schemas with no scan).
-- Tests per detector variant (one ISO datetime, `%Y%m%d`, `%m/%d/%y`, `%d.%m.%Y`, `%d-%m-%Y`) and
-  the docs.
+- Tests per detector variant (one ISO datetime, `%Y%m%d`, `%m/%d/%y`, `%d.%m.%Y`, `%d-%m-%Y`), a
+  mixed column (two variants), and the docs.
 
 C1 is forward-safe (the format is accepted today), so it merges first, and it must merge before
 the CLI re-pins to the engine release that carries S4b. Inbox line: DATE-SHIFT-FORMAT-CLI.
@@ -778,7 +830,10 @@ New `tests/unit/plan/checks/test_date_shift_format.py`:
    `compile_plan` and from `run_config_only_checks`.
 2. `test_refused_before_read`: `run_pipeline` with a `source_loader` that records calls: the
    loader is never called and nothing is staged.
-3. `test_nested_child_refused`.
+3. `test_nested_child_refused`: a nested date_shift child with no
+   `provider_config.strategy_config.date_format` is refused with the child path.
+3b. `test_nested_hash_child_without_namespace_compiles`: a nested hash child with no namespace
+   compiles (it takes the parent's namespace).
 4. `test_declared_casting_column_exempt`: end to end through `run_pipeline` and the
    declared-casting boundary: a declared date contract with `parse_format`, a date_shift column
    with no `date_format`; cells reach the handler as `date32` object cells; the run completes,
@@ -790,8 +845,9 @@ New `tests/unit/plan/checks/test_date_shift_format.py`:
 7. `test_shipped_configs_compile`: both testflight manifests and the `gen_proof_manifest` date
    proof pass `check_required_strategy_settings`.
 8. `test_starter_writes_detected_variant`: for a column of each variant above, `starter_config`
-   writes that variant as `date_format`; a column with no winning variant gets the redact
-   fallback; every written config compiles.
+   writes that variant as `date_format`. Three columns get the redact fallback: one with no winning
+   variant, a mixed ISO column (`%Y-%m-%d` cells plus `%Y-%m-%dT%H:%M:%S` cells), and one of
+   `T..HH:MMZ` cells (accepted by the detector, matched by no variant). Every written config compiles.
 9. `test_handler_backstop`: the date_shift handler called on a string column with no format and
    no declared contract raises the registered runtime error, not a detection; the same column
    with a declared contract does not.
@@ -811,6 +867,8 @@ case; the backstop half of test 9 is red on base.
 4. Key the backstop on dtype: test 4 red (date32 object cells).
 5. Restore `_detect_format` in the handler: test 9 red.
 6. Starter writes a fixed `%Y-%m-%d` per detector: test 8 red on every non-ISO-date variant.
+7. Starter ignores `format_pattern_complete`: the mixed-column case of test 8 red.
+8. Nested walk applies the namespace descriptor to children: test 3b red.
 
 ### Placement (S4b)
 
@@ -820,6 +878,7 @@ case; the backstop half of test 9 is red on base.
 | `src/decoy_engine/plan/checks/_required_settings.py` | declared-casting skip, nested walk | `plan/checks/` | the `coherent_with` skip |
 | `src/decoy_engine/reasons/plan/` (the part with room) | `DATE_SHIFT_REQUIRES_DATE_FORMAT` | `reasons/plan/` | the `*_REQUIRES_NAMESPACE` reasons |
 | `src/decoy_engine/profiling/_starter_inference.py`, `recommendations.py` | detected variant in the starter | `profiling/` | same files |
+| `src/decoy_engine/detection/types.py`, `_scoring.py`, `profiling/types.py`, `profiling/profiler.py`, `profiling/_value_redaction.py` | `format_pattern_complete` | `detection/`, `profiling/` | `format_pattern` |
 | the tolerance sites in the table above | delete or guard | existing files | |
 | testflight, `scripts/gen_proof_manifest.py`, docs, fixtures | as listed | existing files | |
 | `tests/unit/plan/checks/test_date_shift_format.py` | new | `tests/unit/plan/` | `test_checks_date_shift.py` |
@@ -849,8 +908,10 @@ detected."
 - FM6 A wrong fixed format written for a detector (for example slashes for `eu_date`). No writer
   uses a fixed format; test 8 per variant.
 - FM7 A route keeps reading the window by hand after S4a. The reader sentry.
-- FM8 The nested walk refuses existing nested configs for a missing namespace. The census runs
-  first and is reported.
+- FM8 The nested walk refuses existing nested children for a missing namespace. Only
+  `provider_config`-rooted descriptors are re-rooted onto children; test 3b.
+- FM9 A starter writes the largest variant for a column that mixes shapes, and rows fail at run
+  time. `format_pattern_complete` gate; the mixed case of test 8.
 
 ## Enumerations
 
@@ -876,7 +937,7 @@ From the code at 92152f328.
   - lazy input reads: `_chunked_input.py:388` (Parquet honours it; CSV and fixed-width ignore it);
   - records: `_pipeline_auto_chunk.py:583-589`, `_pipeline_finalize.py:138`;
   - isolation: `_isolated_run.py`, `_isolated_common.py` (forwarded kwargs).
-- date_shift window (S4a): the five readers in the S4a section.
+- date_shift window (S4a): the four readers in the S4a section (text_mask bounds excluded).
 - Missing date_shift format (S4b): the S4b site table.
 
 ### Exit paths
@@ -898,7 +959,9 @@ N/A: no slice reads or writes a key.
 - `quality_metrics["auto_chunk"]["native_threads"]` and `native_thread_clamp` (S3, existing; now
   set on default runs).
 - `StarterDecision.provider_config` for date detectors now carries `date_format` (S4b).
-- No dataclass field of a public result type is added or removed.
+- `DetectionResult.format_pattern_complete` and `FieldStats.format_pattern_complete` (S4b, new,
+  additive, a bool, value-free).
+- No other dataclass field of a public result type is added or removed.
 
 ### Output surfaces
 
@@ -943,6 +1006,7 @@ N/A: no slice reads or writes a key.
 | date_shift output for `jitter_days` configs | S4a | breaking (output-changing), changelog'd |
 | Plan compile refusals and the reason manifest | S2, S4a, S4b | additive reasons; S4a and S4b add refusals (breaking) |
 | `starter_config` output, recommendations fixture | S4b | breaking content change |
+| `DetectionResult` and `FieldStats` fields | S4b | additive (`format_pattern_complete`) |
 | `generation.pool` public names | S2 | additive |
 | `SEED_PROTOCOL_VERSION` | S2 | unchanged (7), pre-GA decision recorded |
 | Disguise YAML content | none | unchanged |
@@ -989,7 +1053,7 @@ Assume the batch shipped and went wrong. The likely causes, and what stops each:
   re-baselines, one fragment, one record update.
 - S3: four source files, one helper in `execution.pipeline` (not root-exported), one test file
   with per-route cases, a contract entry, a fragment.
-- S4a: one resolver, five readers switched, one refusal in an existing check, one reason, two
+- S4a: one resolver and one validator, four readers switched, one refusal in an existing check, one reason, two
   test files including one sentry, a fragment, a contract entry.
 - S4b: one registry descriptor, the required-settings walk, one reason, the starter, about eight
   source files edited (mostly deletions), two testflight manifests, the proof script, docs, 18 or
@@ -1018,7 +1082,18 @@ A build well past these sizes stops and reports before review.
 | 14 | LOW: resolver name | Renamed `native_threads_for_run` |
 | 15 | LOW: Exception and warnings | Fallback catches `Exception`; tests 6 and 7 |
 
-Partial disagreement, on 5: extending the required-settings walk to nested children applies every
-descriptor there, including namespace, which could newly refuse nested configs. The plan keeps
-the extension but puts a census first and stops for a decision if it finds any, instead of
-widening a refusal blind.
+On 5, round 1 noted a concern that the nested walk would apply the namespace descriptor to
+children. Round 2 resolved it: only `provider_config`-rooted descriptors are re-rooted onto
+children (below).
+
+## Review round 2 response (Dennis on 24025e868, final Dennis round)
+
+| # | Finding | Change in this revision |
+|---|---|---|
+| 1 | HIGH: S4a reader list | List is now the handler, `_operator_params.py:293-299`, `_date_shift_ext.py:58-75` and `_operator_config_rejections.py:186`. The three text_mask per-span readers are excluded, with V2-LOG line TEXT-MASK-DATE-BOUNDS. The Rust crate holds no copy |
+| 2 | HIGH: S4b nested walk | Only `provider_config`-rooted descriptors are re-rooted onto `provider_config.strategy_config`; namespace never applies to a child. Test 3b (nested hash child without a namespace compiles), mutation 8. Census-and-stop step dropped |
+| 3 | MEDIUM: one validator | `shift_window_problem` beside `shift_window`, called by the compile refusal and the native admission; checks `MAX_ABS_SHIFT_DAYS`; `shift_window` raises on a bad `jitter_days`. Test 3 and mutations 5, 6 |
+| 4 | MEDIUM: sentry allowlist | Exact-file (per function where mixed) allowlist from a census at the S4a head, shrink-only, each entry classified; planted-read self-test |
+| 5 | MEDIUM: parity cells | Each cell asserts its taken route from run evidence; out_of_core asserts its decline; sequential native lane and a nested child cell added |
+| 6 | MEDIUM: starter on mixed columns | New additive `format_pattern_complete`; date_shift is written only when the variant covers every hit; mixed and no-variant cases in test 8 and in C1 |
+| 7 | LOW: S2 row-number domain | S2 test 8 and the changelog name the narrowing from below 2^64 to below 2^62 |
