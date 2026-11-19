@@ -429,6 +429,16 @@ def _drop(table: dict[str, Any], names: set[str]) -> None:
         existing["columns"] = [*have, *(n for n in in_source_order if n not in have)]
 
 
+def config_problems_text(err: PipelineConfigError) -> str:
+    """The value-free text for a config failure: the first few problem codes and locations.
+
+    The one formatter of a `PipelineConfigError` for the review functions; a problem holds a code
+    and a location, never a submitted value.
+    """
+    shown = [f"{p.code} at {p.location or '(root)'}" for p in err.problems[:_MAX_PROBLEMS_SHOWN]]
+    return "; ".join(shown) or "no detail"
+
+
 def _validation_problems(
     config: dict[str, Any], file_access: FileAccess | None, base_dir: str | Path | None
 ) -> str:
@@ -440,10 +450,7 @@ def _validation_problems(
             swap_placeholder_namespaces(config)[0], file_access=file_access, base_dir=base_dir
         )
     except PipelineConfigError as err:
-        shown = [
-            f"{p.code} at {p.location or '(root)'}" for p in err.problems[:_MAX_PROBLEMS_SHOWN]
-        ]
-        summary = "; ".join(shown) or "no detail"
+        summary = config_problems_text(err)
     except PlanCompileError as err:
         summary = f"{err.code} at {err.path or '(root)'}"
     return summary
