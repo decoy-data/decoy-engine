@@ -281,6 +281,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
             # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
             # pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
+            "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
             "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
             "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
@@ -306,6 +307,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change just
             # the engine version; 0.5.0 and 0.6.0 ran in a real 3.10.20 venv, later rows come from
             # the pins. All stay, newest first. Row F (24zc) follows the 0.28.0 row.
+            "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
             "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
             "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
             "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",

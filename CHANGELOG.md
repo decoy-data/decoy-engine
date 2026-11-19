@@ -9,6 +9,20 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-19
+
+### Fixed (DP certified row for the CLI runtime profile, CERT-ROW, 2026-11-19)
+
+The 0.28.0 release certified the CLI runtime profile from the 0.27.0 pin file, which lacks `joserfc` and `rfc8785`. Engine 0.28.0 needs both, so no real 0.28.0 install had a certified row and `fit_dp_snapshot` refused with `dp_stack_uncertified`. 0.28.1 adds the row for the 69-pin profile (the 0.27.0 closure plus `joserfc==1.7.7` and `rfc8785==0.1.4`). Every earlier row stays.
+
+Release prep now refuses a CLI pin file that leaves out any package of the engine's own base requirements closure in `uv.lock`, so a new engine dependency cannot be missed again.
+
+### Removed (unused strategy base modules, FREEZE-S1, 2026-11-18)
+
+`decoy_engine.internal.base` (`MaskingStrategy`, the config validator and IO handler base classes) and `decoy_engine.transforms.base` (`BaseMaskingStrategy`) are removed. Nothing in the engine or the CLI used them. `decoy_engine.transforms.__all__` is now empty. `FormulaStrategy` keeps its name, module path and output; it is now a plain class that logs through its module logger.
+
+Importing `decoy_engine` no longer sets the `decoy_engine` logger to INFO as a side effect; a host that wants engine INFO lines sets that level itself.
+
 ## [0.28.0] - 2026-11-18
 
 ### Breaking for consumers

@@ -83,13 +83,20 @@ _V0_27_0_ROWS = (
     "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
     "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
 )
-# The three rows this release certifies: the dev/CI lock with the engine at 0.28.0, the CLI
-# runtime profile on engine 0.28.0, and row F (that profile with certifi 2026.10.18, cryptography
+# The three rows v0.28.0 certified: the dev/CI lock with the engine at 0.28.0, the CLI
+# runtime profile on engine 0.28.0 (stamped from the 0.27.0 pin file, so without joserfc and
+# rfc8785), and row F (that profile with certifi 2026.10.18, cryptography
 # 50.0.0, pyasn1 0.6.5 and urllib3 2.8.0, roadmap row 24zc).
 _V0_28_0_ROWS = (
     "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
     "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
     "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
+)
+# The two rows v0.28.1 certifies: the dev/CI lock with the engine at 0.28.1, and the CLI runtime
+# profile on engine 0.28.1 with the 69 pins an install of the engine really has.
+_V0_28_1_ROWS = (
+    "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
+    "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
 )
 _ALL_ROWS = (
     _V0_17_0_ROWS
@@ -105,6 +112,7 @@ _ALL_ROWS = (
     + _V0_26_0_ROWS
     + _V0_27_0_ROWS
     + _V0_28_0_ROWS
+    + _V0_28_1_ROWS
 )
 
 
