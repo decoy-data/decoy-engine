@@ -193,8 +193,8 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
-class ScanSetCoreRead(  # type: ignore[misc]
-    derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)
+class ScanSetCoreRead(
+    derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)  # type: ignore[misc]
 ):
     """`ScanSetCore` read tolerantly. A table whose basis is not exactly `whole` (an older
     record, or a value a later minor added) reads with no key candidates: they were never proven."""
