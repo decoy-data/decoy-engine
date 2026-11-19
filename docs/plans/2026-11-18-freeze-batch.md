@@ -1,4 +1,4 @@
-Status: plan (revision 3.2, 2026-11-18; Dennis rounds 1 and 2, Codex rev 3 gate, and orchestrator O3 self-check addressed; owner answered Q1 to Q12)
+Status: plan (revision 3.3, 2026-11-19; O3 build blocker on fixed-schema Parquet sinks resolved by the orchestrator; revision 3.2: Dennis rounds 1 and 2, Codex rev 3 gate, and orchestrator O3 self-check addressed; owner answered Q1 to Q12)
 
 # 1.0 freeze batch: the experimental tier, the frozen surface, and the output shapes that change before the freeze
 
@@ -51,6 +51,16 @@ Why 1.0: all three rows pass the "freeze" test of the triage. After 1.0, any of 
 | L2 | Zip `external_attr` is fixed explicitly; tar coverage in AT-O2b is labelled a guard. | 8, 10.4 |
 | L3 | The import sentry handles `import urllib`, aliased `from urllib import request`, and AST-resolved constants. | 8, 10.7 |
 | L4 | The pre-mortem records the memory and conversion cost of forcing NaN-style evaluation for nullable integer `when:` columns. | 14 |
+
+### Revision 3.3 changes
+
+The O3 builder measured that a fixed-schema Parquet sink cannot keep the `origin/main` failure for a later unsplittable value once batch one narrowed its schema to `string`. On pyarrow 24, `ParquetWriter(schema=string).write_batch(<large_string batch>)` raises `ValueError` (schema mismatch), and a cast of the 2 GiB value to `string` raises `ArrowInvalid` outside the file-access guard. Neither matches main. Translating the error by hand is not allowed.
+
+| Change | Closed in |
+|---|---|
+| A Parquet sink whose writer schema is fixed at construction (out-of-core sink, streamed chunked Parquet sink) keeps the source pass-through `large_string` field as on `origin/main`. Narrow batches are widened back to `large_string` at the sink boundary by copying offsets only. That sink's file bytes and every failure stay identical to main. Narrowing still applies to in-memory results, resident collectors, CSV, and `run_mask_chunked` chunks. | 4 (O3 paragraph), 5.5, 5.6, 7, AT-O3a, AT-O3f |
+| AT-O3a: the fixed-schema Parquet sink cells assert `large_string` and byte equality with `origin/main`; every other cell asserts `string`. A new mutation: narrow the fixed-schema sink field, and the 2 GiB parity cell goes red. | 8 |
+| Whole-frame Parquet writes (schema built from the complete result) narrow as before, because their schema is chosen after every batch is seen. | 5.6 |
 
 ### Revision 3.2 changes
 
@@ -245,7 +255,7 @@ AT-O1 route cells assert a route-owned production witness before checking values
 |---|---|---|
 | reason `layout.report_source_ambiguous` | renamed `report.source_ambiguous` | `--json` error `code`, CI report |
 | reasons `url_scheme_refused`, `url_redirect_refused`, `notify_url_scheme_refused` | added | `--json` error `code` |
-| Arrow type of pass-through text | `large_string` to `string` batch slices when values fit 32-bit offsets. A later wider value promotes resident and CSV output to `large_string` without a source reread. Parquet keeps its existing 2 GiB writer failure. | In-memory and Parquet schema. CSV text is type-free. |
+| Arrow type of pass-through text | `large_string` to `string` batch slices when values fit 32-bit offsets. A later wider value promotes resident and CSV output to `large_string` without a source reread. Parquet keeps its existing 2 GiB writer failure. A Parquet sink whose schema is fixed at construction (out-of-core, streamed chunked) keeps `large_string` exactly as `origin/main` (revision 3.3). | In-memory and whole-frame Parquet schema. CSV text is type-free. |
 | Arrow type of any null-bearing integer column read by `when:` and passed through | `double` to `int64` where a route or strategy widened it; source `int64` retained everywhere | Parquet schema, CSV text (`5` instead of `5.0`) |
 | `when:` blank-row selection for FK keys, declared integers, date-shift anchors, `top_code`, and `group_key` siblings | pandas `pd.NA` route-dependent selection to the uniform NaN-style table | selected rows on every route; Breaking entry names all five classes |
 | gzip header FNAME and MTIME; tar member mtime, uid, gid, names; zip entry `date_time` | removed or fixed | compressed output bytes |
@@ -253,7 +263,7 @@ AT-O1 route cells assert a route-owned production witness before checking values
 
 ### 5.6 Output surfaces
 
-- Parquet schema and CSV text of the routes in 5.3 (O1, O3). For O3, CSV converts each batch independently to text. Thus, it accepts a later unsplittable batch. Parquet fixes its schema at writer construction. It retains each `origin/main` failure for one 2 GiB value.
+- Parquet schema and CSV text of the routes in 5.3 (O1, O3). For O3, CSV converts each batch independently to text. Thus, it accepts a later unsplittable batch. Parquet fixes its schema at writer construction, so a fixed-schema Parquet sink keeps the source `large_string` field and widens narrow batches back at the sink boundary (revision 3.3). Its file bytes and each `origin/main` failure for one 2 GiB value stay unchanged. Whole-frame Parquet output narrows, because its schema is chosen after every batch.
 - Compressed CSV bytes (O2).
 - Rows selected by `when:` on integer columns when a value or integer literal is outside `[-2**53, 2**53]`, for int64-to-float-literal comparisons that cannot be proved exact, and for blanks in the five formerly `pd.NA` classes (O1).
 - `--json` error `code` (S4, S6).
@@ -339,7 +349,7 @@ AT-O1 route cells assert a route-owned production witness before checking values
 | AT-O2d | the decompressed CSV equals the uncompressed run's bytes | guard | change the line terminator | O2 |
 | AT-O2e | with `zipfile.ZIP64_LIMIT` patched below the fixture size, zip writes and reads successfully with a ZIP64 local header and no new refusal; the staged size was set before `ZipFile.open` | streaming header lacks ZIP64 | omit `ZipInfo.file_size` | O2 |
 | AT-O2f | `.tar`, `.tar.bz2`, `.tar.xz`, `.bz2`, `.xz`, and `.zst` output bytes and decoded CSV match the base; wrappers use `encoding="utf-8", newline=""` | guard | route `.xz` through the new gzip writer | O2 |
-| AT-O3a | For every route in 5.3, ordinary pass-through `large_string` batches are `string` in successful output. Each cell asserts its route witness. | `run_mask_chunked` keeps `large_string`. | Remove the narrow in the passthrough branch. | O3 |
+| AT-O3a | For every route in 5.3, ordinary pass-through `large_string` batches are `string` in successful output, except a fixed-schema Parquet sink, which keeps `large_string` and is byte-equal to `origin/main` (revision 3.3). Each cell asserts its route witness. | `run_mask_chunked` keeps `large_string`; a fixed-schema Parquet sink narrows its field. | Remove the narrow in the passthrough branch. Narrow the fixed-schema sink field. | O3 |
 | AT-O3b | an FK pass-through `large_string` key joins the same rows | guard | narrow the parent only | O3 |
 | AT-O3c | AT-E3-2 (`tests/native/test_chunked_nondet_categorical_admission.py:709`) and the G7 signatures in `tests/parity/test_phase_d_dcomp_composite_ooc.py` expect `string`, changed in the same commit as the cast; the gate checks that only the expected type/signature assertions and test name change | pin `large_string` | none: diff-checked at the gate | O3 |
 | AT-O3d | Out-of-core: `passthrough_array` observes and narrows each chunk. It never calls `combine_chunks` or reads a values buffer. | Combined or decoded first. | Narrow after `combine_chunks`. Separately access `buffers()[2]`. | O3 |
