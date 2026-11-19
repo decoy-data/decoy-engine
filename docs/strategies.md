@@ -1340,15 +1340,23 @@ lists, bare references, bytes and f-string literals, backtick-quoted names and
 names with characters other than ASCII letters, digits and `_`. There is no null
 check in the grammar. `x >= ''` (string) and `x < 0 or x >= 0` (numeric) select the
 non-null rows. Their negations select the null rows only on numpy-backed columns; on a
-pandas nullable dtype (`string`, `Int64`, `Float64`, including Parquet written by pandas)
+pandas nullable dtype (`string`, `Float64`, including Parquet written by pandas)
 the negation selects no rows, so there is no way to gate on "is null" there (see the
-CHANGELOG migration table). A name that pandas would not
+CHANGELOG migration table). An integer column is the exception: every integer column
+follows the rule in the next paragraph, whatever its role. A name that pandas would not
 read as a column is reserved and refused as a reference: the numexpr function
 names (`sin`, `abs`, `where` and the rest), the pandas eval names (`inf`, `nan`,
 `index`, `columns`, `Timestamp`, `datetime`, `list`, `tuple`) and the Python
 keywords. Rename the column or compare it through another one.
 
-A null cell behaves as pandas treats it. It equals no literal, so `==`, `in` and
+An integer column compares exactly on every route, including values and literals beyond
+2**53, and a blank integer cell is treated as `NaN`: `!=`, `not in` and `not (...)` around a
+comparison that is false for it select the blank row, and `==`, `in` and the ordering tests do
+not. This holds for plain columns and for FK keys, declared integers, `date_shift` anchors,
+`top_code` columns and `group_key` siblings alike. A null cell in any other column behaves as
+pandas treats it.
+
+A null cell equals no literal, so `==`, `in` and
 the ordering tests do not select it, while `!=`, `not in` and `not (...)` do. A
 nullable column can give a missing result for a test, and a missing result
 selects nothing. The native chunked route takes the selection from the same pandas
