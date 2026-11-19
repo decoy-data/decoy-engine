@@ -243,8 +243,12 @@ def marker_findings(tree: Tree) -> list[str]:
     return out
 
 
-_PASS_OPTS = ("-m", "-n", "--dist", "--junitxml")  # the options the two passes may differ in
 SERIAL_STEP_IF = "${{ !cancelled() }}"
+# The one ignore the regression gate ships (the layers-gate job owns that test), and the only
+# options its passes may carry besides the ones that differ per pass (-m, xdist, --junitxml).
+# Anything else could drop tests from both passes at once, so it is a finding.
+GATE_IGNORE = "--ignore=tests/sentry/layout/test_import_layers.py"
+_GATE_OPT_PREFIXES = ("--tb=", "--durations=")
 
 
 def _gate_passes(tree: Tree) -> list[tuple[dict[str, Any], list[str]]]:
@@ -259,17 +263,39 @@ def _gate_passes(tree: Tree) -> list[tuple[dict[str, Any], list[str]]]:
 
 
 def _has_xdist(args: list[str]) -> bool:
-    return any(a == "-n" or (a.startswith("-n") and not a.startswith("--")) for a in args)
+    """Any spelling of -n, --numprocesses, --dist, or loading xdist through -p."""
+    for i, a in enumerate(args):
+        if a.startswith(("--numprocesses", "--dist")):
+            return True
+        if a.startswith("-n") and not a.startswith("--"):
+            return True
+        if a == "-p" and i + 1 < len(args) and "xdist" in args[i + 1]:
+            return True
+        if a.startswith("-p") and not a.startswith("--") and "xdist" in a:
+            return True
+    return False
+
+
+def _has_workers(args: list[str]) -> bool:
+    """The pass sets a worker count: -n, -nN, -n=N, --numprocesses N or --numprocesses=N."""
+    return any(
+        (a.startswith("-n") and not a.startswith("--")) or a.startswith("--numprocesses")
+        for a in args
+    )
 
 
 def _rest(args: list[str]) -> list[str]:
-    """The args without the options the two passes may differ in (and their values)."""
+    """The args without -m, xdist and --junitxml (and their values); `--opt value` is joined."""
     out, i = [], 0
     while i < len(args):
         a = args[i]
-        if a in _PASS_OPTS:
+        bare = a in ("-m", "-n", "--numprocesses", "--dist", "--junitxml")
+        if a in ("--ignore", "--tb", "--durations") and i + 1 < len(args):
+            out.append(f"{a}={args[i + 1]}")
             i += 2
-        elif a.startswith(("--dist=", "--junitxml=")) or (
+        elif bare:
+            i += 2
+        elif a.startswith(("--junitxml=", "--numprocesses=", "--dist=")) or (
             a.startswith(("-m", "-n")) and not a.startswith("--")
         ):
             i += 1
@@ -277,6 +303,15 @@ def _rest(args: list[str]) -> list[str]:
             out.append(a)
             i += 1
     return out
+
+
+def _options_ok(rest: list[str]) -> bool:
+    """Exactly the whole suite, the one shipped ignore, and report options: nothing selects."""
+    return (
+        rest.count("tests") == 1
+        and rest.count(GATE_IGNORE) == 1
+        and all(a in ("tests", GATE_IGNORE) or a.startswith(_GATE_OPT_PREFIXES) for a in rest)
+    )
 
 
 def _agreement_findings(tree: Tree, gate_lanes: list[Lane]) -> list[str]:
@@ -298,21 +333,20 @@ def _agreement_findings(tree: Tree, gate_lanes: list[Lane]) -> list[str]:
     want = norm(pinned)
     if any(not ln.whole_suite for ln in gate_lanes):
         return bad
-    if len(gate_lanes) == 1:
-        return [] if norm(gate_lanes[0].expr) == want else bad
-    if len(gate_lanes) != 2:
-        return bad
     passes = _gate_passes(tree)
-    if len(passes) != 2:
+    if len(passes) != len(gate_lanes) or not all(_options_ok(_rest(a)) for _, a in passes):
+        return bad
+    if len(gate_lanes) == 1:
+        return [] if norm(gate_lanes[0].expr) == want and not _has_xdist(passes[0][1]) else bad
+    if len(gate_lanes) != 2:
         return bad
     by_expr = {norm(ln.expr): i for i, ln in enumerate(gate_lanes)}
     if set(by_expr) != {f"{want} and not serial", f"{want} and serial"}:
         return bad
     par, ser = passes[by_expr[f"{want} and not serial"]], passes[by_expr[f"{want} and serial"]]
     ok = (
-        _has_xdist(par[1])
+        _has_workers(par[1])
         and not _has_xdist(ser[1])
-        and "--dist" not in ser[1]
         and "if" not in par[0]
         and str(ser[0].get("if", "")).strip() == SERIAL_STEP_IF
         and _rest(par[1]) == _rest(ser[1])

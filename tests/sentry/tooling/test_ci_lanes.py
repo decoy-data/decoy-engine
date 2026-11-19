@@ -388,6 +388,20 @@ def test_gates_expression_must_equal_the_hosted_one() -> None:
     assert has(lanes.marker_findings(t), "M5 gates.sh has no single")
 
 
+def _both(par: dict[str, Any], ser: dict[str, Any], extra: str) -> None:
+    """Add the same option to both passes: the passes still agree, but tests may be dropped."""
+    for step in (par, ser):
+        step["run"] = step["run"].replace("--tb=short", f"{extra} --tb=short", 1)
+
+
+def test_one_lane_gate_with_a_selection_option_is_a_finding() -> None:
+    t = seeded()
+    expr = parse_marker_expr(TREE.gates)
+    ignore = "--ignore=tests/sentry/layout/test_import_layers.py"
+    only_lane(t, ("ci.yml", "regression-gate"), f"pytest tests -m '{expr}' {ignore} -k fast")
+    assert has(lanes.marker_findings(t), "M5")
+
+
 def _gate_steps(t: lanes.Tree) -> tuple[dict[str, Any], dict[str, Any]]:
     steps = [
         s
@@ -432,6 +446,49 @@ def test_regression_gate_split_needs_both_passes() -> None:
         pytest.param(
             lambda par, ser: ser.update(run=ser["run"].replace("--tb=short", "-n 4 --tb=short", 1)),
             id="serial-xdist",
+        ),
+        pytest.param(lambda par, ser: _both(par, ser, "-k fast"), id="same-k-both"),
+        pytest.param(
+            lambda par, ser: _both(par, ser, "--deselect tests/x.py::t"), id="same-deselect-both"
+        ),
+        pytest.param(
+            lambda par, ser: _both(par, ser, "--ignore=tests/unit"), id="extra-ignore-both"
+        ),
+        pytest.param(
+            lambda par, ser: _both(par, ser, "--ignore-glob=*golden*"), id="ignore-glob-both"
+        ),
+        pytest.param(lambda par, ser: _both(par, ser, "-x"), id="exitfirst-both"),
+        pytest.param(lambda par, ser: _both(par, ser, "--lf"), id="lf-both"),
+        pytest.param(lambda par, ser: _both(par, ser, "--maxfail=3"), id="maxfail-both"),
+        pytest.param(lambda par, ser: _both(par, ser, "--co"), id="collect-only-both"),
+        pytest.param(lambda par, ser: _both(par, ser, "tests/unit/a.py::t"), id="node-id-both"),
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("--tb=short", "--numprocesses=4 --tb=short", 1)
+            ),
+            id="serial-numprocesses-eq",
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("--tb=short", "--numprocesses 4 --tb=short", 1)
+            ),
+            id="serial-numprocesses-space",
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(run=ser["run"].replace("--tb=short", "-n4 --tb=short", 1)),
+            id="serial-n-joined",
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("--tb=short", "-p xdist --tb=short", 1)
+            ),
+            id="serial-p-xdist",
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("--tb=short", "--dist loadfile --tb=short", 1)
+            ),
+            id="serial-dist-only",
         ),
         pytest.param(
             lambda par, ser: par.update(run=par["run"].replace("-n 4 --dist loadfile", "")),
