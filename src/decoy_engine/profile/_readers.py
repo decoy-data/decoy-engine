@@ -92,7 +92,9 @@ class ProfileSource(Protocol):
         ...
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        """Up to `sample_rows` rows as a DataFrame (bounded read)."""
+        """Exactly `sample_rows` rows when the source holds at least that many; fewer only
+        when the read reached the end of the source. A caller may read a short frame as the
+        end, so a reader never returns one for any other reason."""
         ...
 
     def to_frame(self) -> pd.DataFrame:
