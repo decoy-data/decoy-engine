@@ -255,3 +255,22 @@ def test_the_unified_config_set_equals_the_plan_set(
     assert lossless_int_columns_from_config(cfg, "t", source) == want, (cls, expression)
     # Only the null-free `when:` read is legitimately empty; every other case must name `v`.
     assert bool(want) == (expression != "id == 5" or cls != "plain"), (cls, expression, want)
+
+
+@pytest.mark.parametrize(
+    ("config", "want"),
+    [
+        ({"group_by": "g"}, "g"),
+        ({"group_by": ""}, None),
+        ({"group_by": 3}, None),
+        ({}, None),
+        (None, None),
+    ],
+)
+def test_group_by_sibling_is_the_one_reader(
+    config: dict[str, object] | None, want: str | None
+) -> None:
+    """An empty or non-string `group_by` is never a real column, on the plan and config routes."""
+    from decoy_engine.execution._runner import group_by_sibling
+
+    assert group_by_sibling(config) == want
