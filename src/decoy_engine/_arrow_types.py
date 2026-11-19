@@ -85,7 +85,7 @@ def split_wide_batch(batch: pa.RecordBatch) -> list[pa.RecordBatch]:
     cuts = {0, batch.num_rows}
     for column in batch.columns:
         if pa.types.is_large_string(column.type):
-            cuts.update(_text_cuts(column) or ())
+            cuts |= set(_text_cuts(column) or ())
     bounds = sorted(cuts)
     if len(bounds) <= 2:
         return [batch]

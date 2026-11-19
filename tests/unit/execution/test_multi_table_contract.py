@@ -382,7 +382,7 @@ def test_a_mixed_job_returns_each_table_in_its_own_shape(tmp_path: Path) -> None
     assert mt.dispatched_tables(got) == ["big"]
     big, small = got.outputs["big"], got.outputs["small"]
     assert big.schema.metadata is None
-    assert big.schema.field("keep").type == pa.large_string()
+    assert big.schema.field("keep").type == pa.string()  # O3: pass-through text narrows
     assert small.schema.metadata is not None and b"pandas" in small.schema.metadata
     assert small.equals(off.outputs["small"], check_metadata=True)
     assert small.schema.field("keep").type == pa.string()

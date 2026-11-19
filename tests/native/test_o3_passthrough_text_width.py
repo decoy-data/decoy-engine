@@ -24,7 +24,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import _arrow_types, run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.execution import ParquetTransactionalSink, _chunked, run_pipeline
+from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
 from decoy_engine.execution import _chunked_output_sink as sink_mod
 from decoy_engine.execution._pipeline_auto_chunk import join_dispatcher_chunks
 from decoy_engine.execution.native import _chunked_entry
@@ -376,15 +376,28 @@ def test_o3f_later_wide_value_promotes_without_replay(small_limit: None) -> None
     assert column_values(got, "keep") == WIDE
 
 
-def test_o3f_resident_collectors_widen_the_earlier_chunk(small_limit: None) -> None:
+def test_o3f_resident_collector_widens_the_earlier_chunk(
+    small_limit: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     table = _source(WIDE)
     got = _run("run_mask_chunked", [table.slice(0, 3), table.slice(3)])
-    for joined in (
-        _chunked.concat_masked_chunks(got, table=TABLE),
-        join_dispatcher_chunks(got, table=TABLE),
-    ):
-        assert joined.schema.field("keep").type == pa.large_string()
-        assert joined.column("keep").to_pylist() == WIDE
+    joined = join_dispatcher_chunks(got, table=TABLE)
+    assert joined.schema.field("keep").type == pa.large_string()
+    assert joined.column("keep").to_pylist() == WIDE
+    # The same through the auto-chunk run: `x0`..`x9` fit two bytes, `x10` promotes the column.
+    monkeypatch.setattr(_arrow_types, "_OFFSET_LIMIT", 2)
+    cfg, source = r3.single_table(tmp_path, hash_column=False)
+    run = r3._go(
+        cfg,
+        {"t": _large_text(source)},
+        key_provider=r3.key_provider(),
+        auto_chunk=True,
+        chunk_size_rows=5,
+        auto_chunk_threshold_rows=1,
+    )
+    assert run.quality_metrics["auto_chunk"]["mode"] != "full_frame"
+    assert run.outputs["t"].schema.field("p").type == pa.large_string()
+    assert run.outputs["t"].column("p").to_pylist() == source.column("p").to_pylist()
 
 
 def test_o3f_state_is_monotonic_and_aligns_analytic_and_fk_types(small_limit: None) -> None:
