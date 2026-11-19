@@ -331,6 +331,7 @@ def test_all_lists_every_public_name():
         "prepare_declared_sources",
         "source_columns",
         # SCAN-MULTI S1a: the multi-table scan and its scan-set/v1 document.
+        "ScanDeclaration",
         "ScanSet",
         "ScanSetCore",
         "TableScan",

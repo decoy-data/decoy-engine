@@ -1036,6 +1036,8 @@ staging or spawn, and the child `run_pipeline` rechecks. The refusals are `sourc
 position and a count, never a column) and `source_file.undeclared_table`.
 `DeclarationRequest.for_validate` is the offline form for `decoy validate`: it reads only local file headers, never opens an `s3`, `gcs` or other non-file source, and names those sources in `remote_sources` so the caller can report them as not checked (additive, 2026-11-16, QA-GATE G-eng).
 
+`DeclarationRequest.for_scan(config, tables=None)` is the scan form (additive, SCAN-MULTI E-S1c, 2026-11-19). It reads `sources`, `relationships` and `version` of a sources-only file or a full pipeline, checks the inputs with the one `scan_sources` validator and opens no data file. A `column_names_file` is read once. The capability's `scan_declaration` property is a frozen `ScanDeclaration`; on a capability from any other request it raises `TypeError`.
+
 **Declaration gate on the chunked entries (CONFIG-EXPLICIT E2d).** `run_mask_pipeline_chunked`,
 `run_mask_chunked` and `run_native_or_oracle_chunked` call `prepare_declared_sources`
 (`DeclarationRequest.for_chunks`) after the subset refusal and before `chunks` is touched, then

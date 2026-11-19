@@ -155,9 +155,39 @@ def declare(
     sources: Mapping[str, Mapping[str, Any]], relationships: Sequence[Mapping[str, Any]]
 ) -> tuple[DeclaredRelationship, ...]:
     """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data."""
+    return _declare(sources, relationships, set_aside_generate=False)[0]
+
+
+def declare_pipeline(
+    sources: Mapping[str, Mapping[str, Any]], relationships: Sequence[Mapping[str, Any]]
+) -> tuple[tuple[DeclaredRelationship, ...], int]:
+    """`declare` for a full pipeline. A relationship with an end whose table is not in
+    `sources` (a generate table) is set aside and counted, not refused; scan has no rows to
+    count for it. Every entry is parsed first, so a malformed one is a refusal either way."""
+    return _declare(sources, relationships, set_aside_generate=True)
+
+
+def _declare(
+    sources: Mapping[str, Mapping[str, Any]],
+    relationships: Sequence[Mapping[str, Any]],
+    *,
+    set_aside_generate: bool,
+) -> tuple[tuple[DeclaredRelationship, ...], int]:
+    parsed = [
+        (
+            position,
+            parse_relationship_config(dict(raw), prefix=f"relationship {position} is invalid"),
+        )
+        for position, raw in enumerate(relationships, 1)
+    ]
     declared = []
-    for position, raw in enumerate(relationships, 1):
-        config = parse_relationship_config(dict(raw), prefix=f"relationship {position} is invalid")
+    unchecked = 0
+    for position, config in parsed:
+        if set_aside_generate and any(
+            e.table not in sources for e in (config.parent, *config.children)
+        ):
+            unchecked += 1
+            continue
         for end in (config.parent, *config.children):
             if end.table not in sources:
                 raise PipelineConfigError(
@@ -170,7 +200,7 @@ def declare(
         if any(len(c.columns) != len(config.parent.columns) for c in config.children):
             raise PipelineConfigError(f"relationship {position} has key widths that differ")
         declared.append(DeclaredRelationship(position, config))
-    return tuple(declared)
+    return tuple(declared), unchecked
 
 
 def relationship_facts(

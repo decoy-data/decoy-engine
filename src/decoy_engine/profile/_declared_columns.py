@@ -9,11 +9,14 @@ config instead of from the plan.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
+from decoy_engine.config import PipelineConfig, PipelineConfigError
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect, source_refusal
 from decoy_engine.profile._readers import build_declared_source
@@ -241,6 +244,96 @@ def _run_schemas(
     return merged
 
 
+# The top-level keys a sources-only scan file may carry. Every other `PipelineConfig` field
+# marks the mapping as a full pipeline, derived from the model so a new field joins by existing.
+_SCAN_KEYS = frozenset({"sources", "relationships", "version"})
+_PIPELINE_ONLY = frozenset(PipelineConfig.model_fields) - _SCAN_KEYS
+
+
+@dataclasses.dataclass(frozen=True)
+class ScanDeclaration:
+    """What `scan_sources` is given for a scan config: validated descriptors, the selected
+    tables in order, the relationships to check, how many full-pipeline relationships were set
+    aside (a generate table has no rows to count) and which pipeline-only keys were ignored."""
+
+    descriptors: Mapping[str, Mapping[str, Any]]
+    tables: tuple[str, ...]
+    relationships: tuple[Mapping[str, Any], ...]
+    unchecked_relationships: int = 0
+    ignored_keys: tuple[str, ...] = ()
+
+
+def _frozen_descriptors(descriptors: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
+    return MappingProxyType(
+        {n: MappingProxyType(copy.deepcopy(dict(d))) for n, d in descriptors.items()}
+    )
+
+
+def _scan_shape(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[Mapping[str, Any]]]:
+    """The raw `sources` and `relationships` of a scan config, refused by name when their
+    shape is wrong. Never echoes a value."""
+    if not isinstance(config, Mapping):
+        raise PipelineConfigError("scan config must be a mapping")
+    version = config.get("version", 2)
+    if type(version) is not int or version != 2:
+        raise PipelineConfigError("scan config version must be the integer 2")
+    sources = config.get("sources")
+    if not isinstance(sources, Mapping) or not sources:
+        raise PipelineConfigError("scan config sources must be a non-empty mapping")
+    for name, raw in sources.items():
+        if not isinstance(raw, Mapping):
+            raise PipelineConfigError(f"source for table {name!r} must be a mapping")
+    relationships = config.get("relationships", [])
+    if not isinstance(relationships, list):
+        raise PipelineConfigError("scan config relationships must be a list")
+    for position, raw in enumerate(relationships, 1):
+        if not isinstance(raw, Mapping):
+            raise PipelineConfigError(f"relationship {position} must be a mapping")
+    return dict(sources), list(relationships)
+
+
+def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -> ScanDeclaration:
+    # Imported here because the profiling package imports this one.
+    from decoy_engine.profiling import _scan_integrity
+    from decoy_engine.profiling.scan_set import validate_scan_inputs
+
+    sources, relationships = _scan_shape(config)
+    ignored = tuple(k for k in config if k in _PIPELINE_ONLY)
+    if not ignored:
+        unknown = next((k for k in config if k not in _SCAN_KEYS), None)
+        if unknown is not None:
+            raise PipelineConfigError(f"scan config has an unknown top-level key {unknown!r}")
+    kept, unchecked = relationships, 0
+    if ignored:
+        declared, unchecked = _scan_integrity.declare_pipeline(sources, relationships)
+        kept = [relationships[d.position - 1] for d in declared]
+    descriptors, selected, _ = validate_scan_inputs(sources, tables, kept)
+    return ScanDeclaration(
+        _frozen_descriptors(descriptors),
+        tuple(selected),
+        tuple(MappingProxyType(copy.deepcopy(dict(r))) for r in kept),
+        unchecked,
+        ignored,
+    )
+
+
+def _inline_names(scan: ScanDeclaration, file_access: FileAccess | None) -> ScanDeclaration:
+    """`scan` with each `column_names_file` read once and its names inline, so the scan never
+    opens the names file again. No data file is opened."""
+    from decoy_engine.profiling.scan_set import validate_scan_inputs
+
+    sources: dict[str, dict[str, Any]] = {}
+    for name, descriptor in scan.descriptors.items():
+        source = dict(descriptor)
+        if source.get("column_names_file") is not None:
+            dialect = resolve_csv_dialect(source, table=name, file_access=file_access)
+            del source["column_names_file"]
+            source.update(has_header=False, column_names=list(dialect.column_names or ()))
+        sources[name] = source
+    descriptors, _, _ = validate_scan_inputs(sources, scan.tables, scan.relationships)
+    return dataclasses.replace(scan, descriptors=_frozen_descriptors(descriptors))
+
+
 @dataclasses.dataclass(frozen=True)
 class DeclarationRequest:
     """What a route will read, as the catalogs `prepare_declared_sources` resolves and checks.
@@ -250,6 +343,7 @@ class DeclarationRequest:
     _descriptors: tuple[tuple[str, Mapping[str, Any]], ...]
     _inputs: tuple[DeclarationInput, ...]
     _remote: tuple[str, ...] = ()
+    _scan: ScanDeclaration | None = None
 
     @property
     def remote_sources(self) -> tuple[str, ...]:
@@ -270,6 +364,14 @@ class DeclarationRequest:
     @classmethod
     def for_descriptors(cls, config: Mapping[str, Any]) -> DeclarationRequest:
         return cls(config, _config_sources(config), ())
+
+    @classmethod
+    def for_scan(
+        cls, config: Mapping[str, Any], tables: Sequence[str] | None = None
+    ) -> DeclarationRequest:
+        """A scan of a sources-only file or a full pipeline. It reads no data and checks no
+        columns: a scan is what finds them. Every refusal is raised here or by `prepare`."""
+        return cls(config, (), (), _scan=_scan_declaration(config, tables))
 
     @classmethod
     def for_supplied(
@@ -312,17 +414,26 @@ class PreparedDeclaredSources:
         config: Mapping[str, Any],
         inputs: tuple[DeclarationInput, ...],
         created_targets: CreatedTargets | None = None,
+        scan: ScanDeclaration | None = None,
     ) -> None:
         if token is not _TOKEN:
             raise TypeError("PreparedDeclaredSources is built by prepare_declared_sources")
         self._config = config
         self._created_targets = created_targets
+        self._scan = scan
         self._config_id = id(config)
         self.inputs = inputs
         # `for_chunks` with a schema: the columns a chunk of that table may carry.
         self._chunk_columns = {
             i.table: i.columns for i in inputs if i.origin == "chunk" and i.columns is not None
         }
+
+    @property
+    def scan_declaration(self) -> ScanDeclaration:
+        """The declaration of a `for_scan` request; any other capability raises `TypeError`."""
+        if self._scan is None:
+            raise TypeError("scan_declaration needs a capability prepared from for_scan")
+        return self._scan
 
     def matches(self, config: Mapping[str, Any]) -> bool:
         """True when `config` is the object this capability was prepared for."""
@@ -406,6 +517,7 @@ def prepare_declared_sources(
 
     `created_targets` is the execution layer's policy for columns the config creates; an
     execution route gets it through `prepare_declared_execution_sources`."""
+    scan = None if request._scan is None else _inline_names(request._scan, file_access)
     resolved = [
         DeclarationInput(
             name, source_columns(descriptor, table=name, file_access=file_access), "descriptor"
@@ -416,13 +528,14 @@ def prepare_declared_sources(
     if created_targets is not None:
         inputs = tuple(_with_created(request._config, i, created_targets) for i in inputs)
     check_columns_declared(request._config, inputs)
-    return PreparedDeclaredSources(_TOKEN, request._config, inputs, created_targets)
+    return PreparedDeclaredSources(_TOKEN, request._config, inputs, created_targets, scan)
 
 
 __all__ = [
     "DeclarationFinding",
     "DeclarationRequest",
     "PreparedDeclaredSources",
+    "ScanDeclaration",
     "check_columns_declared",
     "declaration_findings",
     "declared_columns",

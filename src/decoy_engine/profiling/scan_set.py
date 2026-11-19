@@ -177,15 +177,9 @@ def scan_sources(
         isinstance(sample_rows, bool) or not isinstance(sample_rows, int) or sample_rows < 1
     ):
         raise PipelineConfigError("sample_rows must be a positive integer or None")
-    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
-    selected = list(descriptors) if tables is None else list(tables)
-    if repeated_names(selected):
-        raise PipelineConfigError("tables selects the same table more than once")
-    unknown = [t for t in selected if t not in descriptors]
-    if unknown:
-        raise PipelineConfigError("tables names a table that is not in sources")
-
-    declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
+    descriptors, selected, declared = validate_scan_inputs(
+        sources, tables, relationships if integrity else ()
+    )
 
     models, runs = load_pre_scan(pre_scan, file_access)
 
@@ -212,6 +206,24 @@ def scan_sources(
         scanned_at=datetime.now(timezone.utc).isoformat(),
         detectors=runs,
     )
+
+
+def validate_scan_inputs(
+    sources: Mapping[str, Mapping[str, Any]],
+    tables: Sequence[str] | None,
+    relationships: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], list[str], tuple[_scan_integrity.DeclaredRelationship, ...]]:
+    """The one check of a scan's inputs: every descriptor, the `tables` selection and the
+    declared relationships. Returns the validated descriptors, the selected names in order and
+    the declared relationships. Reads no data."""
+    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
+    selected = list(descriptors) if tables is None else list(tables)
+    if repeated_names(selected):
+        raise PipelineConfigError("tables selects the same table more than once")
+    unknown = [t for t in selected if t not in descriptors]
+    if unknown:
+        raise PipelineConfigError("tables names a table that is not in sources")
+    return descriptors, selected, _scan_integrity.declare(descriptors, relationships)
 
 
 def _integrity_facts(
