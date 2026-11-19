@@ -331,7 +331,7 @@ def _when_read_columns(
                 refs = when_column_refs(parse_when_cached(when))
             except ValidationError:
                 continue  # the evaluator raises its coded error; nothing to protect here
-            out.setdefault(table, set()).update(refs)
+            out[table] = out.get(table, set()) | set(refs)
     return out
 
 
@@ -385,7 +385,7 @@ def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> 
     exact: dict[str, set[str]] = {}
     for edge in graph.edges:
         for table in (edge.parent_table, edge.child_table):
-            exact.setdefault(table, set()).update(fk_columns_for_table(graph.edges, table))
+            exact[table] = exact.get(table, set()) | fk_columns_for_table(graph.edges, table)
     for source in (
         source_anchor_columns(plan, registry),
         top_code_columns(plan, registry),
@@ -393,7 +393,7 @@ def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> 
         declared_integer_columns(plan),
     ):
         for table, cols in source.items():
-            exact.setdefault(table, set()).update(cols)
+            exact[table] = exact.get(table, set()) | set(cols)
     when_read = _when_read_columns(
         (table, ((n, seed.when) for n, seed in table_seed.per_column))
         for table, table_seed in plan.seed_envelope.per_table
