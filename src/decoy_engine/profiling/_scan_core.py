@@ -193,12 +193,11 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
+# A table whose basis is not exactly `whole` (an older record, or a value a later minor added)
+# reads with no key candidates: they were never proven.
 class ScanSetCoreRead(
     derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)  # type: ignore[misc]
 ):
-    """`ScanSetCore` read tolerantly. A table whose basis is not exactly `whole` (an older
-    record, or a value a later minor added) reads with no key candidates: they were never proven."""
-
     @model_validator(mode="before")
     @classmethod
     def _drop_unproven_keys(cls, data: Any) -> Any:
