@@ -1,0 +1,50 @@
+{
+ "sentry_id": "snapshot-parse-single-owner",
+ "created_in": "EW1",
+ "entries": {
+  "execution/physical/_shadow_generation.py::_decode_generation_config_shallow": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "generation/_pinned_compile.py::compile_pinned_plan_with_generation": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "generation/_pinned_execute.py::_check_plan": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 4
+  },
+  "generation/_pinned_execute.py::_run": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 2
+  },
+  "generation/_pinned_execute.py::_scan_plan_for_tokens": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 2
+  },
+  "generation/_pinned_plan.py::fingerprint": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "generation/_plan_entry.py::_prepare_generation": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "generation/statistical/_snapshot_io.py::parse_snapshot_json": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "internal/faker_setup.py::_load_json": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "plan/_serialize.py::_generation_plan_from_dict": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  },
+  "quality/dp_provenance.py::assert_lock_matches_installed": {
+   "reason": "existing entry of generation/test_snapshot_parse_single_owner.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink",
+   "max": 1
+  }
+ }
+}

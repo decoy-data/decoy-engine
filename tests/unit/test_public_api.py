@@ -82,6 +82,9 @@ def test_all_lists_every_public_name():
         "PipelineConfig",
         # VALUE-FREE-ERRORS A1: the value-free config parse route and its error vocabulary.
         "parse_pipeline_config",
+        # OUTPUT-METADATA-LEAK E1: the one rule for output Parquet key/value metadata.
+        "output_schema",
+        "output_table",
         "ConfigProblem",
         "ConfigRuleError",
         # S9: Masker + DataGenerator removed from the public surface. The
