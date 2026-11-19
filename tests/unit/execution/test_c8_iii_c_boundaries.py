@@ -418,6 +418,7 @@ def test_no_raising_boundary_renders_the_predicate(boundary: str, tmp_path: Path
 # --- 4a kept defenses, tested directly ----------------------------------------
 
 
+# An integer column is compared exactly without pandas' evaluator, so these use the text column.
 def test_the_eval_scope_clamps_hold_for_an_accepted_predicate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -429,7 +430,7 @@ def test_the_eval_scope_clamps_hold_for_an_accepted_predicate(
         return real(self, expr, **kwargs)
 
     monkeypatch.setattr(pd.DataFrame, "eval", spy)
-    _eval_predicate(_frame(), "x > 1", "redact", column="s")
+    _eval_predicate(_frame(), "s != 'v1'", "redact", column="s")
     assert len(seen) == 1
     assert seen[0]["engine"] == "numexpr"
     assert seen[0]["local_dict"] == {}
@@ -444,7 +445,7 @@ def test_an_accepted_predicate_with_a_non_boolean_result_is_rejected(
 ) -> None:
     monkeypatch.setattr(pd.DataFrame, "eval", lambda *a, **k: result)
     with pytest.raises(StrategyError) as info:
-        _eval_predicate(_frame(), "x > 1", "redact", column="s")
+        _eval_predicate(_frame(), "s != 'v1'", "redact", column="s")
     assert info.value.code == "when_expression_not_boolean"
     assert info.value.strategy == "redact"
 
@@ -457,7 +458,7 @@ def test_a_missing_numexpr_still_raises_the_numexpr_required_code(
 
     monkeypatch.setattr(pd.DataFrame, "eval", boom)
     with pytest.raises(StrategyError) as info:
-        _eval_predicate(_frame(), "x > 1", "redact", column="s")
+        _eval_predicate(_frame(), "s != 'v1'", "redact", column="s")
     assert info.value.code == "numexpr_required"
 
 

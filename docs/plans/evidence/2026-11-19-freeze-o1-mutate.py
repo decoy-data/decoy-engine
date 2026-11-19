@@ -8,29 +8,27 @@ M = {
     # name: (file, old, new)
     "skip_object_path": (
         E / "_when_gate.py",
-        "    if wide:\n        values = col.to_numpy(dtype=object",
-        "    if False:\n        values = col.to_numpy(dtype=object",
+        "    if wide:\n        obj = pd.Series(",
+        "    if False:\n        obj = pd.Series(",
     ),
     "drop_literal_check": (
         E / "_when_gate.py",
-        "        isinstance(x, float) or (isinstance(x, int) and abs(x) > _EXACT_FLOAT_INT)\n        for x in literals",
-        "        False\n        for x in literals",
+        "wide = wide_col or any(isinstance(x, int) and abs(x) > _EXACT_FLOAT_INT for x in nums)",
+        "wide = wide_col",
     ),
     "drop_value_check": (
         E / "_when_gate.py",
-        "        wide = low is not pd.NA and (int(low) < -_EXACT_FLOAT_INT or int(high) > _EXACT_FLOAT_INT)",
-        "        wide = wide",
+        "wide = {c: _is_wide(pdf[c]) for c in ints}",
+        "wide = {c: False for c in ints}",
     ),
-    "float_literal_not_object": (
+    "float_bound_rounds_down": (E / "_when_gate.py", '(">=", floor + 1)', '(">=", floor)'),
+    "non_integral_ne_false": (
         E / "_when_gate.py",
-        "isinstance(x, float) or (isinstance(x, int)",
-        "(isinstance(x, int)",
+        '        if op == "!=":\n            return True',
+        '        if op == "!=":\n            return False',
     ),
-    "restore_pd_na": (
-        E / "_when_gate.py",
-        "    if not pd.api.types.is_integer_dtype(col.dtype):\n        return col\n",
-        "    if not pd.api.types.is_integer_dtype(col.dtype) or not isinstance(col.dtype, np.dtype):\n        return col\n",
-    ),
+    "blank_never_selected": (E / "_when_gate.py", 'null_out = op == "!="', "null_out = False"),
+    "float_copy_returns": (E / "_when_gate.py", "    if not ints or any(", "    if True or any("),
     "drop_fk": (
         E / "_fk_keys.py",
         "            exact[table] = exact.get(table, set()) | fk_columns_for_table(graph.edges, table)",

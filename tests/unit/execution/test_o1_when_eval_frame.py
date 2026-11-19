@@ -211,12 +211,70 @@ def test_duplicate_column_labels_hand_the_frame_back_unchanged() -> None:
 
 
 @pytest.mark.parametrize("literal", [5.5, float(BIG), 5.0])
-def test_a_float_literal_against_an_integer_column_takes_the_object_path(literal: float) -> None:
-    """Plan 4.3: such a comparison never depends on float64 rounding. With in-range values the
-    result is the same either way, so the dtype is the only witness of the rule."""
+def test_a_float_literal_against_an_in_range_integer_column_takes_no_object_path(
+    literal: float,
+) -> None:
+    """A float bound is rounded to an integer bound and compared on the integers where they are:
+    no object column, no float64 copy. The frame builder keeps the column's own values."""
     from decoy_engine.execution._when_gate import when_eval_frame
 
     frame = pd.DataFrame({"v": pd.array([1, None, 7], dtype="Int64")})
     out = when_eval_frame(frame, ["v"], {"v": [literal]})
-    assert out["v"].dtype == object
-    assert [x is not pd.NA for x in out["v"]] == [True, True, True]
+    assert out["v"].dtype != object
+
+
+def _no_frame_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    import decoy_engine.execution._when_gate as gate
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("the in-range integer path must not build an object or float frame")
+
+    monkeypatch.setattr(gate, "when_eval_frame", boom)
+
+
+_BOUNDS = [
+    "18.5", "-18.5", "18.0", "-18.0", "0.5", "-0.5", "1e300", "-1e300", "9223372036854775807.0",
+]  # fmt: skip
+_OPS = ["==", "!=", "<", "<=", ">", ">="]
+
+
+@pytest.mark.parametrize("bound", _BOUNDS)
+@pytest.mark.parametrize("op", _OPS)
+def test_float_bounds_round_exactly_and_never_build_a_frame(
+    monkeypatch: pytest.MonkeyPatch, op: str, bound: str
+) -> None:
+    values: list[int | None] = [-19, -18, -17, 0, 1, 18, 19, 20, None, BIG - 1, BIG, -BIG]
+    _no_frame_build(monkeypatch)
+    for name, frame in _frames(values):
+        for expression in (f"v {op} {bound}", f"{bound} {op} v", f"not (v {op} {bound})"):
+            assert _eval(frame, expression) == reference(expression, values), (name, expression)
+
+
+@pytest.mark.parametrize(
+    ("expression", "want"),
+    [
+        ("v > -18.5", [False, True, True, True, False]),  # v >= -18
+        ("v >= -18.5", [False, True, True, True, False]),
+        ("v < -18.5", [True, False, False, False, False]),  # v <= -19
+        ("v <= 18.5", [True, True, True, False, False]),  # v <= 18
+        ("v > 18.5", [False, False, False, True, False]),  # v >= 19
+        ("v == 18.5", [False] * 5),
+        ("v != 18.5", [True] * 5),
+        ("v in [18.5, 19]", [False, False, False, True, False]),
+        ("v not in [18.5, 19]", [True, True, True, False, True]),
+    ],
+)
+def test_non_integral_bounds_keep_the_blank_rule(
+    monkeypatch: pytest.MonkeyPatch, expression: str, want: list[bool]
+) -> None:
+    values: list[int | None] = [-19, -18, 18, 19, None]
+    _no_frame_build(monkeypatch)
+    for name, frame in _frames(values):
+        assert _eval(frame, expression) == want, (name, expression)
+
+
+def test_values_just_above_and_below_2_53_stay_exact_with_a_float_bound() -> None:
+    values: list[int | None] = [BIG - 1, BIG, BIG + 1, -BIG - 1, None]
+    for expression in (f"v > {float(BIG)}", f"v == {float(BIG)}", "v < 18.5", f"v != {float(BIG)}"):
+        for name, frame in _frames(values):
+            assert _eval(frame, expression) == reference(expression, values), (name, expression)
