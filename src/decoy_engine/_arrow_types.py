@@ -19,6 +19,21 @@ def is_text(t: pa.DataType) -> bool:
     return pa.types.is_string(t) or pa.types.is_large_string(t)
 
 
+def narrow_text(array: pa.Array) -> pa.Array:
+    """Return `array` as a `string` array: `string` unchanged, `large_string` safely cast.
+
+    The one owner of offset-width normalization for kernels that have a `string` fast path.
+    The cast copies offsets and leaves the value bytes alone, so it does not check UTF-8: the
+    caller still validates. It raises `pa.ArrowInvalid` when the text does not fit 32-bit
+    offsets, and `TypeError` for any other type.
+    """
+    if pa.types.is_string(array.type):
+        return array
+    if pa.types.is_large_string(array.type):
+        return array.cast(pa.string())
+    raise TypeError(f"narrow_text needs a string or large_string array, got {array.type}")
+
+
 def is_text_or_null(t: pa.DataType) -> bool:
     """`is_text`, or the `null` type of an all-null batch the reader could not type."""
     return is_text(t) or pa.types.is_null(t)

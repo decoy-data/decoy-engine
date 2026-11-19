@@ -284,6 +284,7 @@ def test_the_note_constants_are_pinned() -> None:
         "lifecycle not priced: target {table} has a format with no rule",
         "lifecycle not priced: layout of target {table} not readable",
         "lifecycle not priced: column {column} has an output width its strategy does not declare",
+        "lifecycle not priced: generated column {column} has no width source",
         "lifecycle not priced ({error})",
     } == lc.NOTE_SHAPES
 

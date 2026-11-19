@@ -1,14 +1,16 @@
 import hashlib
+import logging
 import random
 from typing import Any
 
 import pandas as pd
 
 from decoy_engine.expressions import make_mask_globals, safe_eval
-from decoy_engine.transforms.base import BaseMaskingStrategy
+
+_LOG = logging.getLogger(__name__)
 
 
-class FormulaStrategy(BaseMaskingStrategy):
+class FormulaStrategy:
     """Transform existing column values via a Python expression.
 
     Single-mode evaluator (F0 of the formula consolidation): every formula
@@ -39,7 +41,7 @@ class FormulaStrategy(BaseMaskingStrategy):
     def apply(self, column: pd.Series, rule: dict[str, Any]) -> pd.Series:
         expr = rule.get("formula", "")
         if not expr:
-            self.logger.warning(
+            _LOG.warning(
                 f"formula strategy on '{rule.get('column', 'unnamed')}' "
                 f"missing 'formula' field; leaving column unchanged"
             )

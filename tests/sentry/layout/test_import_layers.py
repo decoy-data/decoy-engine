@@ -46,11 +46,11 @@ LAYERS: tuple[str, ...] = (
     "plan : generation : generators : transforms : declared_casting : secret_providers"
     " : keyprovider : relationships : providers_v2 : reference_tables : quality : subset",
     "profile : profiling : detection : internal : progress : context : config : determinism"
-    " : contracts : connectors : expressions : validators : sdk : run_result",
+    " : contracts : connectors : expressions : validators : sdk : run_result : signed_evidence",
     "io : data_discovery : disguises : phase : telemetry : safe_output : fileaccess",
     "errors : reason_adapter : validation_result : release : reasons : instrumentation"
     " : checksums : _opaque : _lexeme : _error_base : _progress_events : _reference_date"
-    " : codesets : _execution_error : _field_names : _value_free : _arrow_types : _canonical",
+    " : codesets : _execution_error : _field_names : _value_free : _arrow_types : _canonical : _nested_json",
 )
 
 
@@ -258,7 +258,7 @@ def test_a_reviewed_new_package_goes_green_only_with_its_snapshot(
     (pkg / "__init__.py").write_text('"""A reviewed foundation leaf."""\n', encoding="utf-8")
     cfg = tree / ".importlinter"
     before = ignore_keys(cfg.read_text(encoding="utf-8"))
-    _edit(cfg, " : _canonical\n", " : _canonical : _probe_leaf\n")
+    _edit(cfg, " : _nested_json\n", " : _nested_json : _probe_leaf\n")
     assert lint_scratch(tree)
     text = cfg.read_text(encoding="utf-8")
     assert ignore_keys(text) == before

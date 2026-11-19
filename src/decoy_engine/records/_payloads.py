@@ -36,7 +36,8 @@ Number = StrictInt | StrictFloat
 # keep their wider shape: a manifest already on disk must still read. New payloads use SafeName,
 # Sha256 and the other shared types.
 _PLAIN = r"^[^\x00-\x1f\x7f]+$"
-Name = Annotated[StrictStr, StringConstraints(min_length=1, max_length=256, pattern=_PLAIN)]
+# A name is any non-empty str: the shared rule `is_plain_name`, which accepts every name the config does.
+Name = Annotated[StrictStr, StringConstraints(min_length=1)]
 RelPath = Annotated[StrictStr, StringConstraints(min_length=1, max_length=1024, pattern=_PLAIN)]
 # Sample-run paths are machine paths, reduced to file names by export, so they stay loose too.
 PathText = RelPath

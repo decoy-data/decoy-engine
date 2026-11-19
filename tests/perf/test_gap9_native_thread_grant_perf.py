@@ -19,6 +19,7 @@ per-thread batch buffers, bounded by the batch size and not by the table.
 from __future__ import annotations
 
 import json
+import os
 import resource
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 from decoy_engine.execution.native._companion_status import native_companion_status
 
 # Both tests measure the native out-of-core path (native_columns > 0, native thread
@@ -89,6 +91,7 @@ def _worker(data_dir: Path, work_root: Path, threads: int, *extra: str) -> dict[
         text=True,
         timeout=660,
         check=False,
+        env={**os.environ, **CAPPED_ENV},
     )
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BENCH_JSON "))

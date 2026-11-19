@@ -50,4 +50,4 @@ def test_retry_class_follows_the_outcome(spec):
 
 def test_new_codes_are_unreleased_and_old_ones_keep_their_release():
     for s in _connector():
-        assert (s.since == reasons.UNRELEASED) == (s.code in _NEW), s.code
+        assert (s.since == "1.30.0") == (s.code in _NEW), s.code

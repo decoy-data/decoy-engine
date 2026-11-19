@@ -126,8 +126,9 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
-            hits.append(f"{rel}: undecodable")
-            continue
+            # Bytes that are not UTF-8 are still scanned, one byte per character, so a retired name
+            # (always ASCII) in such a file is caught and a deliberately invalid fixture is not a hit.
+            text = data.decode("latin-1")
         if rel == "CHANGELOG.md":
             text = _non_history_text(text)
         if RETIRED_PATTERN.search(text):
@@ -258,11 +259,17 @@ def test_a_tracked_path_missing_from_disk_is_a_hit(tmp_path: pathlib.Path) -> No
     assert scan(tmp_path, ["docs/gone.md"]) == ["docs/gone.md: missing"]
 
 
-def test_an_undecodable_text_file_fails_instead_of_being_skipped(tmp_path: pathlib.Path) -> None:
+def test_an_undecodable_text_file_is_scanned_not_skipped(tmp_path: pathlib.Path) -> None:
     target = tmp_path / "docs" / "page.md"
     target.parent.mkdir()
     target.write_bytes(b"caf\xe9 " + NAME.encode())
-    assert scan(tmp_path, ["docs/page.md"]) == ["docs/page.md: undecodable"]
+    assert scan(tmp_path, ["docs/page.md"]) == ["docs/page.md: content"]
+
+
+def test_an_undecodable_file_without_a_retired_name_is_clean(tmp_path: pathlib.Path) -> None:
+    target = tmp_path / "vector.bin"
+    target.write_bytes(b'{"a": "\xff\xfe"}')
+    assert scan(tmp_path, ["vector.bin"]) == []
 
 
 def test_a_binary_file_is_checked_by_path_only(tmp_path: pathlib.Path) -> None:

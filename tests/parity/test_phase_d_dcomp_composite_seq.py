@@ -255,7 +255,7 @@ def test_warn_composite_orphan_warning_is_byte_identical_on_ff_seq_native_and_se
     assert sorted(map(repr, ff.warnings)) == sorted(map(repr, python.warnings))
     (warning,) = _orphan_warnings(ff)
     assert (warning.code, warning.detail["orphan_rows"]) == ("orphan_fk", 1)
-    assert warning.column == ",".join(warning.detail["child_columns"])
+    assert warning.column == warning.detail["child_columns"]
     # Output channel: python SEQ equals the oracle on all 9 dimensions; native SEQ is the
     # oracle's tables with the stand-in's mark on every derived token.
     d.assert_strict_parity(ff, python, name)

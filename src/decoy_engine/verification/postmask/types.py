@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from decoy_engine.detection.types import DetectorRun, DetectorSource, ModelRef
+from decoy_engine.verification.postmask.distribution import DistributionFinding
 
 # Bump when the report dict shape changes in a non-backward-compatible
 # way. The platform persists this on the JobPostScanIntegrityReport row so reads of
@@ -163,3 +164,6 @@ class PostMaskReport:
     detectors: tuple[DetectorRun, ...] = ()
     tables_checked: tuple[str, ...] = ()
     config_sha256: str | None = None
+    # Present only when `post_scan.distribution` asked for the check; the section is omitted from
+    # the report otherwise, so a report without the check keeps its exact shape.
+    distribution: tuple[DistributionFinding, ...] | None = None

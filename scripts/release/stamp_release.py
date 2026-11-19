@@ -148,13 +148,42 @@ def parse_fragment(text: str) -> Fragment:
     return Fragment(breaking, block)
 
 
+_LINK_DEF = re.compile(r"\[[^\]\n]+\]: https?://\S*")
+
+
+def _footer_start(text: str) -> int:
+    """Offset where the trailing link-reference block starts (len(text) if there is none).
+
+    Only the block at end of file counts, so a reference definition inside a section body
+    never cuts that section short.
+    """
+    end = len(text)
+    start = end
+    for line in reversed(text.splitlines(keepends=True)):
+        stripped = line.strip()
+        if stripped and not _LINK_DEF.fullmatch(stripped):
+            break
+        end -= len(line)
+        if stripped:
+            start = end
+    return start
+
+
 def release_sections(text: str) -> list[tuple[str, str]]:
-    """(version, section text from its heading up to the next release heading), newest first."""
+    """(version, section text from its heading up to the next release heading), newest first.
+
+    The oldest section stops at the link-reference footer: those links belong to the whole
+    file, so editing one (an org move, a new compare link) must not change a released pin.
+    """
     marks = list(_RELEASE.finditer(text))
-    return [
-        (m.group(1), text[m.start() : marks[i + 1].start() if i + 1 < len(marks) else len(text)])
-        for i, m in enumerate(marks)
-    ]
+    out = []
+    for i, m in enumerate(marks):
+        if i + 1 < len(marks):
+            end = marks[i + 1].start()
+        else:
+            end = max(_footer_start(text), m.end())
+        out.append((m.group(1), text[m.start() : end]))
+    return out
 
 
 def section_digest(section: str) -> str:

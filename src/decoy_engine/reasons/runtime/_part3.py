@@ -51,6 +51,7 @@ __all__ = [
     "NESTED_TARGET_UNSET",
     "NESTED_TARGET_UNWRITABLE_CONTAINER",
     "NUMEXPR_REQUIRED",
+    "POST_SCAN_DISTRIBUTION_DEFERRED",
     "POST_SCAN_INTEGRITY_SINK_UNREADABLE",
     "POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED",
     "RECORD_CORRUPT",
@@ -63,6 +64,7 @@ __all__ = [
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
     "SUBSET_MATERIALIZE_COUNT_MISMATCH",
@@ -399,4 +401,21 @@ POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.27.0",
+)
+# `post_scan.distribution` needs the run's inputs readable before the route runs; a loader run or
+# any other deferred gate cannot give that, so it is refused rather than left unchecked.
+POST_SCAN_DISTRIBUTION_DEFERRED = _d(
+    "post_scan_distribution_deferred",
+    "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
+    outcome=Outcome.CONFIGURATION,
+    retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.30.0",
+)
+# A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
+# (a publication outcome) would name the wrong stage.
+SPOOL_DISK_FULL = _d(
+    "spool_disk_full",
+    "The disk or quota for the local copy of a remote source is too small.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.30.0",
 )

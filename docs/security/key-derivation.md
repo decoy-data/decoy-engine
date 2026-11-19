@@ -5,7 +5,7 @@ re-identification-protecting derivation, how that secret is turned into
 purpose-scoped keys, and what happens when no secret (or a weak one) is
 supplied. It supersedes the earlier `DECOY_MASTER_KEY` / `make_key_resolver`
 design, which was never wired into the live masking path -- see the
-[DE-02 KeyProvider design brief](https://github.com/louiskeep/decoy-engine/blob/main/docs/security/de-02-keyprovider-design.md)
+[DE-02 KeyProvider design brief](https://github.com/decoy-data/decoy-engine/blob/main/docs/security/de-02-keyprovider-design.md)
 for the finding and the migration (excluded from the built docs site; see
 `docs/conf.py`).
 
