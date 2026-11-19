@@ -51,6 +51,15 @@ class Rule(enum.Enum):
     KEPT_YEAR_START = "kept_year_start"  # first instant of the first folded range
     KEPT_YEAR_END = "kept_year_end"  # last instant of the last folded range
     FOLD_UNDER_K = "fold_under_k"  # labels and cells under K rows move into other_count
+    # The floor rules for a column the profiler did not flag, in a plain profile document
+    # (`PROFILE_FLOOR_FIELDS`). Each needs counts from the same document.
+    HELD_BY_K = "held_by_k"  # kept when the top values prove K rows hold the text
+    UNDER_K_PLACEHOLDER = "under_k_placeholder"  # a text no count proves K rows hold
+    AGGREGATE_2K = "aggregate_2k"  # kept when the column has 2K non-null cells
+    FOLD_DECADES = "fold_decades"  # decade buckets coded at the K-th row, then merged to K rows
+    DECADE_START = "decade_start"  # first day of the first folded decade
+    DECADE_END = "decade_end"  # last day of the last folded decade
+    SENTINEL_TABLE = "sentinel_table"  # kept only when it is the fixed table text
 
 
 REDACTED: Final = "[redacted]"
@@ -209,8 +218,79 @@ DATA_RULES: Final = frozenset(
         Rule.KEPT_YEAR_START,
         Rule.KEPT_YEAR_END,
         Rule.FOLD_UNDER_K,
+        Rule.HELD_BY_K,
+        Rule.UNDER_K_PLACEHOLDER,
+        Rule.AGGREGATE_2K,
+        Rule.FOLD_DECADES,
+        Rule.DECADE_START,
+        Rule.DECADE_END,
+        Rule.SENTINEL_TABLE,
     }
 )
+# Rules for a column the profiler did not flag, in a plain profile document. The flagged table
+# withholds a slot; this one keeps it only when a count in the same document proves K rows
+# behind it (Hundepool et al., Statistical Disclosure Control, Wiley 2012, sections 3.4 and 4.2).
+# A distribution is keyed `Distribution.<kind>`; an unknown kind gets the flagged rules.
+PROFILE_DISTRIBUTION_KINDS: Final = frozenset(
+    {"numeric", "date", "categorical", "pattern", "freetext"}
+)
+
+
+def _floor(scope: str, **rules: Rule) -> dict[tuple[str, str], Rule]:
+    return {(scope, name): rule for name, rule in rules.items()}
+
+
+_NULLS: Final = {"min": Rule.NULL, "max": Rule.NULL, "mean": Rule.NULL}
+PROFILE_FLOOR_FIELDS: Final[Mapping[tuple[str, str], Rule]] = types.MappingProxyType(
+    {
+        **_floor(
+            "FieldStats",
+            min_value=Rule.HELD_BY_K,
+            max_value=Rule.HELD_BY_K,
+            mode_value=Rule.HELD_BY_K,
+            mean_value=Rule.AGGREGATE_2K,
+            date_min=Rule.DECADE_START,
+            date_max=Rule.DECADE_END,
+            sample_invalid=Rule.EMPTY_LIST,
+        ),
+        **_floor("DetectorMatch", sample_misses=Rule.EMPTY_LIST),
+        **_floor("TopValue", value=Rule.UNDER_K_PLACEHOLDER),
+        **_floor("Distribution.categorical", labels=Rule.UNDER_K_PLACEHOLDER, **_NULLS),
+        **_floor(
+            "Distribution.numeric",
+            labels=Rule.PLACEHOLDER_EACH,
+            **{**_NULLS, "mean": Rule.AGGREGATE_2K},
+        ),
+        **_floor(
+            "Distribution.date",
+            labels=Rule.FOLD_DECADES,
+            min=Rule.DECADE_START,
+            max=Rule.DECADE_END,
+            mean=Rule.NULL,
+        ),
+        **_floor("Distribution.pattern", labels=Rule.PLACEHOLDER_EACH, **_NULLS),
+        **_floor("SentinelFlag", value=Rule.SENTINEL_TABLE, note=Rule.SENTINEL_TABLE),
+    }
+)
+# Slots an unflagged column keeps as they are: free-text length buckets and length statistics.
+PROFILE_FLOOR_KEEP: Final = frozenset(
+    ("Distribution.freetext", name) for name in ("labels", "min", "max", "mean")
+)
+
+
+def profile_floor_slots(type_name: str, kind: Any = None) -> tuple[dict[str, Rule], frozenset[str]]:
+    """(rule by slot, slots kept as they are) for one value-bearing type of an unflagged column."""
+    scope = type_name
+    if isinstance(kind, str) and kind in PROFILE_DISTRIBUTION_KINDS:
+        scope = f"Distribution.{kind}"
+    names = [name for t, name in VALUE_FIELDS if t == type_name]
+    kept = frozenset(name for name in names if (scope, name) in PROFILE_FLOOR_KEEP)
+    rules = {
+        name: PROFILE_FLOOR_FIELDS.get((scope, name), VALUE_FIELDS[(type_name, name)])
+        for name in names
+        if name not in kept
+    }
+    return rules, kept
 
 
 def snapshot_rules(scope: str) -> Mapping[str, Rule]:
@@ -425,9 +505,16 @@ def _containers(node: Any, steps: _Steps, parent: Any, key: Any) -> Iterator[dic
         yield from _containers(node[step], rest, node, step)
 
 
+@dataclasses.dataclass(frozen=True)
+class PlaceholderAt:
+    """Replace only these entries of a list slot, so a floor keeps the labels K rows hold."""
+
+    indexes: frozenset[int]
+
+
 def _apply(
     container: dict[str, Any],
-    rules: Mapping[str, Rule],
+    rules: Mapping[str, Rule | PlaceholderAt],
     keep: Callable[[str, Any], bool],
     *,
     denied_value: Any = REDACTED,
@@ -440,7 +527,14 @@ def _apply(
         if name not in container or container[name] is None:
             continue
         current = container[name]
-        if rule is Rule.NULL:
+        if isinstance(rule, PlaceholderAt):
+            if isinstance(current, list):
+                container[name] = [
+                    REDACTED if i in rule.indexes else v for i, v in enumerate(current)
+                ]
+            else:
+                container[name] = REDACTED
+        elif rule is Rule.NULL:
             container[name] = None
         elif rule is Rule.EMPTY_LIST:
             container[name] = []

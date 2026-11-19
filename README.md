@@ -8,18 +8,18 @@ deterministic: the same input, seed and keys give the same result.
 The engine is source-available under the Functional Source License (FSL-1.1-ALv2): use it for anything, including production, except building a competing product, and each release becomes Apache-2.0 two years after it ships. The engine has no network or auth surface of its own. It is a
 library that you call from your own code.
 
-Most people use Decoy through the [`decoy` CLI](https://github.com/louiskeep/decoy), which drives
+Most people use Decoy through the [`decoy` CLI](https://github.com/decoy-data/decoy), which drives
 this engine from a shell. Read this page if you want to embed the engine in your own Python tool
 or work on the engine itself.
 
 ## Status
 
-The engine is at version 0.27.0. Each CLI release pins one exact engine version
+The engine is at version 0.28.0. Each CLI release pins one exact engine version
 (`decoy-engine==X.Y.Z`). The CLI 1.0.0 release is targeted for the end of December 2026. When it
 ships, the surfaces listed in [docs/frozen-surfaces.md](docs/frozen-surfaces.md) are frozen under
 the rules in [docs/compatibility-contract.md](docs/compatibility-contract.md). Until then they can
 still change. The roadmap for version 1 is
-[docs/ROADMAP.md in the CLI repository](https://github.com/louiskeep/decoy/blob/main/docs/ROADMAP.md),
+[docs/ROADMAP.md in the CLI repository](https://github.com/decoy-data/decoy/blob/main/docs/ROADMAP.md),
 and `CHANGELOG.md` lists every change.
 
 The engine is built for one user on one machine. The version 1 threat model is accidental leaks.
@@ -29,14 +29,14 @@ It does not defend against a hostile process in the same Python interpreter.
 
 In version 1 the engine reaches users inside the `decoy` CLI bundle. The bundle holds the matched
 engine, the native companion and the CLI. Install the CLI bundle with the steps in the
-[CLI install guide](https://github.com/louiskeep/decoy/blob/main/docs/install.md). There is no
+[CLI install guide](https://github.com/decoy-data/decoy/blob/main/docs/install.md). There is no
 separate engine install step, and a public engine package comes later.
 
 To work on the engine, install from a clone. [CONTRIBUTING.md](CONTRIBUTING.md) has the full
 setup, and `scripts/dev/bootstrap.sh` builds the exact locked environment:
 
 ```sh
-git clone https://github.com/louiskeep/decoy-engine && cd decoy-engine
+git clone https://github.com/decoy-data/decoy-engine && cd decoy-engine
 pip install -e ".[dev]"
 ```
 
@@ -104,7 +104,7 @@ config = PipelineConfig.model_validate(config_dict).model_dump()
 sources = {"people": pacsv.read_csv("people.csv")}
 
 # 3. Run the pipeline: profile, compile, wire relationships, execute.
-result = run_pipeline(config, sources, engine_version="0.27.0")
+result = run_pipeline(config, sources, engine_version="0.28.0")
 
 # result.outputs["people"] is the masked pyarrow.Table.
 masked = result.outputs["people"]
@@ -181,6 +181,6 @@ License 2.0 on the second anniversary of its release. FSL is
 source-available, not OSI open source.
 
 See `LICENSE`, `NOTICE`, `TRADEMARKS.md`, and the plain-English
-[licensing FAQ](https://github.com/louiskeep/decoy/blob/main/LICENSING.md).
+[licensing FAQ](https://github.com/decoy-data/decoy/blob/main/LICENSING.md).
 Releases published before the switch to FSL stay under the Apache License
 2.0 they shipped with.

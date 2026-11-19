@@ -267,23 +267,22 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the
 # annotation below) so the DP behaviour is the tested behaviour; the CLI's extra
 # packages (typer/rich/...) are off the DP code path. Membership, not equality:
-# a distinct profile that pins the same proof-critical set earns its own row
-# rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9,
-# CLI host wiring).
+# a distinct profile with the same proof-critical set earns its own row rather
+# than forcing an isolated fit environment (ROADMAP item 2 / phase 9, CLI host wiring).
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
             # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
             # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version, and from 0.18.0 every prior row
-            # stays so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0)
-            # with certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces
-            # 31ecf945.... 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine
-            # moved); 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79...
-            # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
-            # regenerated NOTICE. Rows from SCAN-ML M2 (classifier stack in base deps) on are one
-            # per engine release, newest first.
+            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
+            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with
+            # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
+            # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
+            # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
+            # pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
+            "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
+            "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
             "f921d069fb3cd5baebc6940de37076103ba6a663c977db346c81fd6cdcbfc326",
@@ -304,10 +303,11 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # requirements-certified.txt (proof-critical libraries at the annotated versions,
             # packaging==26.2). To reproduce: `--no-dev` install it into a 3.10.20 venv and run the
             # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
-            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change
-            # just decoy-engine's version; 0.6.0 (and 0.5.0) were installed in a real 3.10.20 venv,
-            # later rows are computed from the pins. All stay, one per engine release, newest first;
-            # SCAN-ML M2 1db3e3da... (67 pins) and the older d5898d1f... follow them.
+            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change just
+            # the engine version; 0.5.0 and 0.6.0 ran in a real 3.10.20 venv, later rows come from
+            # the pins. All stay, newest first. Row F (24zc) follows the 0.28.0 row.
+            "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+            "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
             "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
             "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
             "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",

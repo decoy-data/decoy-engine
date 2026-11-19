@@ -629,7 +629,7 @@ def _hash_config(config: dict[str, Any]) -> str:
     The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
     is called), `pre_scan` only suggests and `scan_baseline` is a pointer, so none is
-    masking semantics. The one exception is `scan_baseline.on_drift`, hashed when set (below). A user swapping a local file source for an S3 source does not change which
+    masking semantics. The one exception is `scan_baseline.on_drift` (with its `sha256`), hashed when set (below). A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
     stays in: under `ner_findings: fail` its `dismissed` list decides what blocks.
@@ -641,11 +641,14 @@ def _hash_config(config: dict[str, Any]) -> str:
     and every other site that hashes the config.
     """
     semantic_config = {k: v for k, v in config.items() if k not in _UNHASHED_BLOCKS}
-    # `scan_baseline.on_drift` decides whether a run is refused, so it is hashed when set. The
-    # pointer (`path`, `schema`) stays out.
+    # `scan_baseline.on_drift` and the digest that pins the baseline decide which drift refuses a
+    # run, so they are hashed when `on_drift` is set. The pointer (`path`, `schema`) stays out.
     baseline = config.get("scan_baseline")
     if isinstance(baseline, dict) and baseline.get("on_drift") is not None:
-        semantic_config["scan_baseline"] = {"on_drift": baseline["on_drift"]}
+        hashed = {"on_drift": baseline["on_drift"]}
+        if baseline.get("sha256") is not None:
+            hashed["sha256"] = baseline["sha256"]
+        semantic_config["scan_baseline"] = hashed
     global_settings = semantic_config.get("global_settings")
     if isinstance(global_settings, dict) and any(
         key in global_settings for key in _NON_SEMANTIC_GLOBAL_SETTINGS

@@ -12,10 +12,13 @@ from typing import TYPE_CHECKING, Any
 from decoy_engine.generation._numeric_typing import generated_table_to_pandas, reader_types
 
 if TYPE_CHECKING:
-    from decoy_engine.generation._bounds import FloorShortfall
+    from collections.abc import Mapping
+
+    from decoy_engine.generation._bounds import FloorShortfall, GeneratedTerms
 
 __all__ = [
     "detected_memory_bytes",
+    "generated_lifecycle_terms",
     "generated_table_to_pandas",
     "generation_order",
     "reader_types",
@@ -32,6 +35,17 @@ def resident_floor_shortfall(config: dict[str, Any], available_bytes: int) -> Fl
     from decoy_engine.generation._bounds import generation_floor_shortfall
 
     return generation_floor_shortfall(config, classify_plan(config), available_bytes)
+
+
+def generated_lifecycle_terms(
+    config: dict[str, Any], spec_widths: Mapping[tuple[str, str], float]
+) -> GeneratedTerms:
+    """The resident bytes and unique working set of a config's generate tables, for the job
+    estimate. `spec_widths` is the declared text width by `(table, column)`."""
+    from decoy_engine.generation._admission import classify_plan
+    from decoy_engine.generation._bounds import generated_lifecycle_terms as _terms
+
+    return _terms(config, classify_plan(config), spec_widths)
 
 
 def generation_order(config: dict[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:

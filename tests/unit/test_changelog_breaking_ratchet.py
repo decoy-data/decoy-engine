@@ -32,6 +32,99 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.0", "New base dependencies `joserfc` and `rfc8785`. Artifact file"): (
+        "new verifier; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.0", "The `out_of_core_caller_managed_residency` warning carried a"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`EvidencePayload` refuses an empty `provider` and any non-sc"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`subset_inputs_from_config(config, *, local_copies=None)` ta"): (
+        "new optional argument; without it the existing refusal stands"
+    ),
+    ("0.28.0", "Three codes are registered ahead of the callers that raise t"): (
+        "new codes ahead of their callers; nothing raises them yet"
+    ),
+    ("0.28.0", "`scan_baseline.sha256` pins the baseline file's bytes. `deco"): (
+        "the Breaking bullet on `on_drift: fail` without a digest covers the refusal; the rest is new surface"
+    ),
+    ("0.28.0", "When a Postgres source host dropped the connection attempt w"): (
+        "a different reason code for a host that never answered; the run failed before too"
+    ),
+    ("0.28.0", "`tolerance_pct` must be a number above 0 and at most 100. `o"): (
+        "new config block; the refusals named are its own"
+    ),
+    ("0.28.0", "A run that asks for the check is refused before any route re"): (
+        "new opt-in check; the refusals named are its own"
+    ),
+    ("0.28.0", "The `nested` strategy no longer rewrites a number it does no"): (
+        "the Breaking bullet on the `nested` strategy covers it"
+    ),
+    ("0.28.0", "`estimate_job` now returns three more fields on `JobEstimate"): (
+        "new fields; the estimate is advisory and never raises, gates or changes a route"
+    ),
+    ("0.28.0", "`expand_policy` now checks the `policy.prohibit` list on eve"): (
+        "new package not read by any config yet; the refusals named are its own"
+    ),
+    ("0.28.0", "`expansion_to_dict` writes the `policy-expansion/v1` explana"): (
+        "new writer not called yet; the refusal is its own"
+    ),
+    ("0.28.0", "`PublicationRequest(vault=VaultBinding(writer, out))` is acc"): (
+        "new opt-in binding; the refusals named are its own"
+    ),
+    ("0.28.0", "A missing NER model is now refused with one message for ever"): (
+        "same refusal with one message across surfaces; no run that passed before is refused"
+    ),
+    ("0.28.0", "`build_fingerprint` now adds one engine-owned `decoy-ner:<su"): (
+        "the Breaking bullet on `build_fingerprint` covers it"
+    ),
+    ("0.28.0", "New package `decoy_engine.config.policy` with the models of "): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `run_probe()`, `probe_status()` "): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.28.0", "`lock/v1` gains an optional `probe` field. `build_runtime_lo"): (
+        "new optional field; a lock written without it still reads, and the refusal is for a null value no engine wrote"
+    ),
+    ("0.28.0", "The Postgres snapshot primitive now shares its session helpe"): (
+        "new shape guard on a new snapshot primitive; the refusal is its own"
+    ),
+    ("0.28.0", "`decoy_engine.profiling` gains `scan-diff/v1`, the drift rul"): (
+        "new document; the refusals named are its own"
+    ),
+    ("0.28.0", "A statistical snapshot with a negative or non-finite weight "): (
+        "the Breaking bullet on a negative or non-finite weight or count covers it"
+    ),
+    ("0.28.0", "`DeclarationRequest.for_validate(config)` reads the header o"): (
+        "new constructor; `decoy run` keeps its existing refusal"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `build_runtime_lock()`, `Runtime"): (
+        "new function and reader; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.keyprovider.is_key_version_label()` is the one"): (
+        "new check of an existing label rule; the new reason is raised only by the new lock"
+    ),
+    ("0.28.0", "The NER hit threshold is now per model (`NER_MIN_RATES`): en"): (
+        "the Breaking bullet on an NER model without a calibrated rate covers it"
+    ),
+    ("0.28.0", "A distribution snapshot may now store a datetime column as y"): (
+        "new opt-in v2 form no writer emits yet; the refusal is for a malformed bucket list"
+    ),
+    ("0.28.0", "A source-hygiene sentry now fails on any MD5 call or `noqa: "): (
+        "test-only sentry; the failure is a CI failure, not a consumer-visible one"
+    ),
+    ("0.28.0", "A relationship whose parent and child tables are both genera"): (
+        "relaxation: a relationship between generated tables now runs; the refusal for a mask-table edge is unchanged"
+    ),
+    ("0.28.0", "The `cli-local-1` evidence payload takes an optional `scan_b"): (
+        "new optional payload member and config key; an older reader refusing them is why the CLI writes them only after it pins this engine"
+    ),
+    ("0.28.0", "`VaultWriter.publish(out)` writes the vault and returns a `V"): (
+        "new method; the refusals named are its own"
+    ),
     ("0.27.0", "`run_pipeline_isolated` publishes `output_dir` through `publ"): (
         "the Breaking bullet on `run_pipeline_isolated` covers it"
     ),
@@ -517,3 +610,24 @@ def test_the_pins_catch_an_entry_filed_under_an_old_release() -> None:
     actual = {v: _digest(s) for v, s in _releases(mutated)[1:]}
     pinned = json.loads(PINS.read_text(encoding="utf-8"))
     assert actual[old_version] != pinned[old_version]
+
+
+def test_editing_the_link_footer_moves_no_pin() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    edited = text.rstrip("\n") + "\n[0.0.1]: https://example.invalid/moved\n"
+    before = {v: _digest(s) for v, s in _releases(text)}
+    after = {v: _digest(s) for v, s in _releases(edited)}
+    assert before == after
+
+
+def test_a_reference_inside_the_oldest_section_stays_in_its_digest() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    oldest = _releases(text)[-1][0]
+    head, sep, tail = text.partition(f"## [{oldest}]")
+    assert sep
+    body_end = tail.index("\n\n") + 2
+    inner = tail[:body_end] + "[ref]: https://example.invalid/x\n\nmore text\n\n" + tail[body_end:]
+    edited = head + sep + inner
+    section = dict(_releases(edited))[oldest]
+    assert "more text" in section
+    assert "[ref]: https://example.invalid/x" in section

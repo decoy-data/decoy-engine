@@ -140,6 +140,7 @@ def starter_config(
     scan: ScanSet,
     *,
     baseline_path: str | None = None,
+    baseline_sha256: str | None = None,
     targets: Mapping[str, dict[str, Any]] | None = None,
     seed: int = 42,
     relationships: Sequence[Mapping[str, Any]] = (),
@@ -150,6 +151,8 @@ def starter_config(
     scan does not carry them. `targets` maps a table to a full target descriptor that replaces
     the default. A placeholder namespace is written where a declared relationship names none.
     """
+    if baseline_sha256 is not None and baseline_path is None:
+        raise ValueError("baseline_sha256 needs baseline_path")
     _check_relationship_shapes(scan, relationships)
     keys = declared_key_namespaces(relationships)
     allocated = _allocate_targets(scan, targets or {})
@@ -181,6 +184,8 @@ def starter_config(
     }
     if baseline_path is not None:
         config["scan_baseline"] = {"path": baseline_path, "schema": SCAN_SET_SCHEMA}
+        if baseline_sha256 is not None:
+            config["scan_baseline"]["sha256"] = baseline_sha256
     _refuse_shared_destinations(allocated, [t["name"] for t in tables])
     check_starter_config(config)
     return StarterConfig(

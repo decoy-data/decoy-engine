@@ -33,6 +33,7 @@ __all__ = [
     "Spec",
     "SpecCheck",
     "SpecRefusedError",
+    "VersionSpec",
     "attempt",
     "parse_or_token",
 ]
@@ -87,6 +88,24 @@ class ExactSpec:
 
     def describe(self) -> str:
         return f"exact:{self.value}"
+
+
+@dataclass(frozen=True)
+class VersionSpec:
+    """A numeric format version: exactly the declared integer (a ``bool`` is not one)."""
+
+    value: int
+
+    def load(self, raw: Any) -> int:
+        if type(raw) is not int or raw != self.value:
+            _refuse("schema_unknown")
+        return raw
+
+    def dump(self, value: Any) -> Any:
+        return value
+
+    def describe(self) -> str:
+        return f"version:{self.value}"
 
 
 @dataclass(frozen=True)

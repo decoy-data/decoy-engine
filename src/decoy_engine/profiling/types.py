@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Final
 
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
+
+# What a null cell reads as in `TopValue.value`, so a literal cell can read the same.
+NULL_CELL_TEXT: Final = "(null)"
 
 
 @dataclass

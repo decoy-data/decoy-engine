@@ -45,6 +45,7 @@ class ObjectStore(Protocol):
     def put_if(self, key: str, data: bytes, expected: Version | None) -> PutResult: ...
     def delete_created(self, key: str, version: Version) -> None: ...
     def iter_object(self, key: str) -> Iterator[bytes]: ...
+    def size(self, key: str) -> int: ...
     def check_region(self) -> None: ...
 
 
@@ -86,7 +87,15 @@ class S3ObjectStore:
         """Create ``key`` from ``fd``; an existing object is ``precondition_failed``."""
         client = _EtagCapture(self._client(single_request=True))
         chunks = iter(lambda: fd.read(_CHUNK_BYTES), b"")
-        _clients.s3_put(client, self._config.bucket, key, chunks, {"IfNoneMatch": "*"})
+        # `upload_part` is idempotent per part number, so it keeps the two-attempt client.
+        _clients.s3_put(
+            client,
+            self._config.bucket,
+            key,
+            chunks,
+            {"IfNoneMatch": "*"},
+            part_client=self._client(single_request=False),
+        )
         return client.etag
 
     def read_small(self, key: str, limit: int) -> tuple[bytes, Version] | None:
@@ -131,7 +140,18 @@ class S3ObjectStore:
 
     def iter_object(self, key: str) -> Iterator[bytes]:
         """The S3 source's read loop, so a read fix lands in one place."""
-        yield from _stream_object(self._client(single_request=False), self._config.bucket, key)
+        yield from _stream_object(
+            self._client(single_request=False),
+            self._client(single_request=True),
+            self._config.bucket,
+            key,
+        )
+
+    def size(self, key: str) -> int:
+        """The object's length in bytes, from one HEAD; a missing key is ``not_found``."""
+        client = self._client(single_request=False)
+        response = _clients.s3_call(client.head_object, Bucket=self._config.bucket, Key=key)
+        return int(response["ContentLength"])
 
     def check_region(self) -> None:
         """Refuse a bucket whose own region header differs from the client's region."""
@@ -152,3 +172,9 @@ class GCSObjectStore:
         """The GCS source's read loop."""
         config = self._config
         yield from _stream_blob(lambda: _build_gcs_client(config).bucket(config.bucket), key)
+
+    def size(self, key: str) -> int:
+        """The object's length in bytes, from one metadata read; a missing key is ``not_found``."""
+        blob = _build_gcs_client(self._config).bucket(self._config.bucket).blob(key)
+        _clients.gcs_reload(blob)
+        return int(blob.size)
