@@ -13,7 +13,17 @@ Base: engine `origin/main` 92152f328. Source: record
 called out and changelog'd as output-changing; F4 requires the format (Q4: require, do not detect).
 
 Rows: GEN-WINDOWED-BATCH (F1), ENGINE-THREADS-DEFAULT (F3), DATE-SHIFT-FORMAT (F4). Engine only,
-plus one named CLI follow-up slice for F4.
+plus one CLI follow-up slice and one platform follow-up row for F4.
+
+Revision 2 (Dennis plan review round 1 on b1cd9bd67, GO-WITH-FIXES). The response to each finding
+is at the end of this plan.
+
+## Decided (2026-11-19, after review round 1)
+
+- D1. date_shift honours `jitter_days` before freeze. `jitter_days: N` means the window
+  `[-N, N]`. One resolver serves every route (slice S4a).
+- D2. `bucket_perturb` format guessing (`transforms/bucket_perturb.py:165`) is its own inbox row,
+  BUCKET-PERTURB-FORMAT. It is out of scope here.
 
 ## Slices
 
@@ -21,37 +31,44 @@ plus one named CLI follow-up slice for F4.
 |---|---|---|---|---|---|
 | S1 `feat/gen-windowed-batch` | F1 part 1: proof step, batched derive, vectorized parse, shift and format | 1 day | R1 | none | unchanged (proved) |
 | S2 `feat/gen-windowed-offsets` | F1 part 2: offsets from the batched index kernel | 1 day | R2 | S1, and the S1 benchmark gate | change, called out |
-| S3 `feat/engine-threads-default` | F3 | 0.5 to 1 day | R2 | none | unchanged (proved) |
-| S4 `feat/date-shift-format-required` | F4 engine | 1 day | R2 | none | refusal added |
-| C1 (CLI repo) `feat/date-shift-format-cli` | F4 CLI follow-up | 0.5 day | R1 | none; must merge before the CLI re-pins to the engine release that carries S4 | none |
+| S3 `feat/engine-threads-default` | F3 | 1 day | R2 | none | unchanged (proved per route) |
+| S4a `feat/date-shift-jitter` | F4 part 1: `jitter_days` resolver on every route (D1) | 1 day | R2 | none | change for configs with `jitter_days`, called out |
+| S4b `feat/date-shift-format-required` | F4 part 2: refuse a missing format; detected format in the starter | 1 day | R2 | S4a (same files) | refusal added |
+| C1 (CLI repo) `feat/date-shift-format-cli` | F4 CLI follow-up | 0.5 day | R1 | none; must merge before the CLI re-pins to the engine release that carries S4b | none |
+| P1 (platform, parked) PLATFORM-DISGUISE-DATE-FORMAT | F4 platform follow-up row, not built in this batch | 0.5 day | R1 | S4b | none |
 
-S1, S3 and S4 touch different files and can build in parallel in separate worktrees (never two
-writers in one worktree). S3 and S4 both add a `docs/compatibility-contract.md` entry and a
-`changelog.d/` fragment: keep both on merge.
+S1, S3 and S4a touch different files and can build in parallel in separate worktrees (never two
+writers in one worktree). S3, S4a and S4b each add a `docs/compatibility-contract.md` entry and a
+`changelog.d/` fragment: keep all on merge.
 
-Gates (gate roster): R1 slices get Codex. R2 slices get Codex and Dennis. Test depth per
+Gates (gate roster): R1 slices get Codex. R2 slices get Dennis and Codex. Test depth per
 `testing.md`: T0 per edit, T1 impact set per commit, T2 at each gate. Full-suite triggers: S2
-(output bytes and goldens move), S3 (frozen public signature), S4 (frozen contract: a new refusal,
-a new registered reason, shared fixtures). S1 has no trigger.
+(output bytes and goldens move), S3 (frozen public signature), S4a (output change on a frozen
+contract), S4b (a new refusal, a new registered reason, shared fixtures). S1 has no trigger.
 
 ## Pinned guarantees and non-goals
 
 - S1: `apply_windowed_date` returns exactly the same list, and raises exactly the same exception
-  type and message, as `origin/main` for every input in the parity corpus. It is faster.
+  type and message, as `origin/main` for every input in the parity corpus and the property test.
+  It emits no warning. It is faster.
 - S2: `windowed_date` output dates change for the same seed (mask and generate kinds both). Per
   row, the date stays inside `[anchor + min_days, anchor + max_days]`, null anchors stay null, the
   output stays keyed on the global row number (partitionable), and it stays deterministic across
   runs, batch sizes, routes and thread counts.
 - S3: `run_pipeline()` with no `native_threads` uses the usable cores (cgroup and affinity aware).
-  Output data bytes are identical to `native_threads=1`.
-- S4: every `date_shift` column without a usable `provider_config.date_format` is refused at
+  On every route that receives the count, output data bytes are identical to `native_threads=1`.
+- S4a: a date_shift column with `jitter_days: N` shifts inside `[-N, N]` on every route, with the
+  same bytes as `min_days: -N, max_days: N`. `jitter_days` together with `min_days` or `max_days`
+  is refused at compile.
+- S4b: every `date_shift` column without a usable `provider_config.date_format` is refused at
   plan compile with one registered, value-free reason, before any source is read. The only
-  exemption is a column whose format is owned by a declared-casting contract.
+  exemption is a column whose format is owned by a declared-casting contract. Where the engine
+  writes a date_shift suggestion from a scan, it writes the format variant the scan detected.
 
 Non-goals: F2 (fitted sampler RNG), C2 (vectorizing sequence, reference and null streams), a Rust
-date kernel, `bucket_perturb` format detection (owner question 2), the `text_mask` per-span date
-detection (a span is not a column), other entry points' thread defaults (`run_mask_chunked`,
-`run_sequential` keep `1`), platform changes (parked; re-pin checklist item only).
+date kernel, `bucket_perturb` (D2), `text_mask` per-span dates (a span is not a column, and
+text_mask takes no `jitter_days`), other entry points' thread defaults (`run_mask_chunked`,
+`run_sequential` keep `1`), platform code changes (parked; follow-up row P1 and re-pin lines).
 
 ## S1. GEN-WINDOWED-BATCH part 1 (byte-identical)
 
@@ -68,8 +85,9 @@ mask strategy (`execution/_strategies/_windowed_date.py:79`), the generation str
    for `early` and `late`);
 4. `_shift_and_format` (`pd.Timedelta`, range check, `strftime("%Y-%m-%d")`).
 
-The draw site is `mask.windowed_date` (`execution/native/_draw_sites_mask.py:344`), reproduced by
-`WindowedDateProvider` (`execution/native/protocol/providers_mask.py:318`).
+The draw site is `mask.windowed_date` (`execution/native/_draw_sites_mask.py:344`, call site
+`transforms/windowed_date.py::apply_windowed_date`), reproduced by `WindowedDateProvider`
+(`execution/native/protocol/providers_mask.py:318`).
 
 ### Probe (this plan, Dell WSL2 node, 100k rows, ISO anchors, `early`, one warm call then one timed)
 
@@ -90,7 +108,7 @@ The draw site is `mask.windowed_date` (`execution/native/_draw_sites_mask.py:344
 attributed yet (likely allocator or GC churn from 100k short-lived Generators interleaved with
 Timestamps). Step 0 profiles it. One run, n=1: this is a direction, not a baseline.
 
-### F1 byte-identity expectation (the question the row asks first)
+### F1 byte-identity expectation
 
 - The pool sampler's batched derive (`generation/pool/_sampler.py:118-166`,
   `derive_index_batch`) does NOT keep the per-row bytes. It canonicalizes the source
@@ -127,29 +145,46 @@ unattributed half is named before code changes.
 
 ### Design
 
-All changes are inside `transforms/windowed_date.py`. The current loop moves unchanged into a
-private `_apply_reference(config, anchors, row_numbers, seed, namespace)`. A new fast path runs
-first:
+All changes are inside `transforms/windowed_date.py`. The current per-row loop stays inline in
+`apply_windowed_date` as the reference path, unchanged. A fast path runs first:
 
-1. Classify each cell once: null (exactly `_is_null_cell`, no `pd.isna`, so `""` and `"NaT"`
-   stay non-null), `str`, or other. A naive `datetime64[ns]` Series is a second admitted shape
-   (cells are Timestamps, nulls are NaT). Anything else (object `date` or `datetime` cells, a
-   tz-aware dtype, ints) goes to `_apply_reference` for the whole batch.
+1. Admission, by exact type and never by `isinstance`:
+   - a batch whose non-null cells are all `type(v) is str`;
+   - all `type(v) is datetime.date` (dob anchors, masked `date32` cells);
+   - all `type(v) is datetime.datetime` with `tzinfo is None`, or all `type(v) is pd.Timestamp`
+     with `tz is None` (fitted anchors);
+   - a naive `datetime64[ns]` Series.
+   Nulls are exactly `_is_null_cell` (no `pd.isna`, so `""` and `"NaT"` stay non-null). Mixed
+   types, subclasses, tz-aware values and anything else take the reference path for the whole
+   batch. A `positions` list whose length differs from the batch takes the reference path, which
+   raises its own `zip(strict=True)` `ValueError`.
 2. `str` cells: `_ISO_ANCHOR.match` per cell (the same compiled pattern), then
-   `pd.to_datetime(values, format="ISO8601")` on the non-null cells.
+   `pd.to_datetime(values, format="ISO8601")` on the non-null cells. Typed cells convert with
+   `np.array(..., dtype="datetime64[ns]")`.
 3. Row numbers for non-null rows (from `positions` or `range(row_offset, ...)`), derived with one
-   `DeriveContext` and `derive_sources(namespace, (i.to_bytes(8, "big") for i in rows))`.
-4. Per non-null row: `_sample_offset(np.random.default_rng(seed_int), ...)`, unchanged.
-5. `shifted = parsed + offsets.astype("timedelta64[D]")`, the range check against
-   `SUPPORTED_MIN`/`SUPPORTED_MAX` vectorized, then `shifted.dt.strftime(_DATE_FMT)`.
-6. Assemble `list[str | None]` with `None` at null rows.
+   `DeriveContext` and `derive_sources(namespace, (i.to_bytes(8, "big") for i in rows))`. No
+   context is built for an all-null batch, as today.
+4. Per non-null row: `_sample_offset(np.random.default_rng(seed_bytes_to_int(d[:8])), ...)`.
+   `seed_bytes_to_int` (`determinism/_seeds.py:34`) gives the same integer as the base
+   `int.from_bytes(d[:8], "big")`, so bytes do not move, and `tests/.../test_rng_construction.py`
+   stays green with no allowlist entry. This draw loop is in the body of `apply_windowed_date`,
+   so the draw-site entry's call site, the draw-site inventory and the pinned catalogue hash do
+   not move. The vector parse and format are helpers that draw nothing.
+5. Overflow guard before any vector arithmetic: offsets and results are checked in integer days.
+   If any `|offset|` exceeds 106,751 days (the ns `timedelta64` range), or any result falls
+   outside `SUPPORTED_MIN`/`SUPPORTED_MAX`, the batch takes the reference path. NumPy datetime
+   addition wraps silently, so this check comes first, not after.
+6. `shifted = parsed + offsets.astype("timedelta64[D]")`, then `shifted.dt.strftime(_DATE_FMT)`.
+7. Assemble `list[str | None]` with `None` at null rows.
 
-Error parity by construction: any exception or anomaly in the fast path (a grammar miss, NaT, an
-out-of-range anchor or result, overflow, a `to_bytes` overflow) discards the fast-path work and
-reruns the batch through `_apply_reference`, which raises the exact first error the old loop
-raised. There is no third error behavior. The function is pure, so the rerun has no side effects.
-The seed and the `DeriveContext` stay local and are deleted on the exception path (the existing
-`except BaseException: del seed` shape; the secret-material census sentry covers this module).
+Error parity by construction: any `Exception` or anomaly in the fast path (a grammar miss, NaT,
+an out-of-range anchor or result, overflow, a `to_bytes` overflow on a negative or too-large row
+number) discards the fast-path work and reruns the batch through the reference path, which raises
+the exact first error the old loop raised. The fallback catches `Exception`, not `BaseException`,
+so `KeyboardInterrupt` and `SystemExit` propagate. The function is pure, so the rerun has no side
+effects. The seed and the `DeriveContext` stay local and are deleted on the exception path (the
+existing `except BaseException: del seed` shape, which re-raises; the secret-material census
+sentry covers this module).
 
 Time-boxed option (2 hours, keep only if the parity corpus stays identical): a cheaper exact
 per-row Generator construction. Drop it if it needs numpy internals.
@@ -157,13 +192,10 @@ per-row Generator construction. Drop it if it needs numpy internals.
 Established solutions: the batched keyed derive is the engine's own `derive_sources` (HMAC state
 copied after the fixed prefix, stdlib `hmac.copy`), already used by date_shift. Vectorized date
 arithmetic is pandas `to_datetime(format=...)` plus `Series.dt.strftime`. NumPy has no batch
-constructor for many seeded Generators (search run: numpy parallel-RNG docs; the documented
-pattern is `SeedSequence.spawn`, which gives different streams), so an exact byte-preserving
-vectorization of the per-row PCG64 draw would mean reimplementing SeedSequence, PCG64 and the
-bounded-integer method by hand. Rejected as hand-rolled machinery; S2 changes the derivation
-instead.
-
-Design notes: no new structure. One private helper and one fast path in the same module.
+constructor for many seeded Generators (numpy parallel-RNG docs; the documented pattern is
+`SeedSequence.spawn`, which gives different streams), so an exact byte-preserving vectorization of
+the per-row PCG64 draw would mean reimplementing SeedSequence, PCG64 and the bounded-integer
+method by hand. Rejected as hand-rolled machinery; S2 changes the derivation instead.
 
 ### Parity corpus (committed, `tests/unit/generation/_windowed_date_corpus.py`)
 
@@ -172,59 +204,72 @@ Design notes: no new structure. One private helper and one fast path in the same
 - Edge anchors: date only; `T` and space separators; minutes only; seconds; fractions of 1 to 9
   digits; `1700-01-01` and `2200-12-31` (with windows that stay in range); pre-1970 anchors with a
   time of day; `2000-02-29`, `1900-02-28`, `2024-02-29`.
-- Windows: `uniform`, `early`, `late`; `min_days == max_days`; negative windows; `-30..90`.
-- Row numbering: `row_offset` 0, 65,536, 2^32, `2^63 - 1 - n`; a non-contiguous `positions` list.
-- Seeds: 8 bytes and 32 bytes. Anchor shapes: object `str`, `datetime64[ns]` Series, object
-  `datetime.date`, object `pd.Timestamp`.
+- Windows: `uniform`, `early`, `late`; `min_days == max_days`; negative windows; `-30..90`;
+  windows past the ns `timedelta` range (`max_days = 106,752` and `200,000`).
+- Row numbering: `row_offset` 0, 65,536, 2^32, `2^63 - 1 - n`; a non-contiguous `positions` list;
+  negative `positions`; a `positions` list one shorter and one longer than the batch.
+- Seeds: 8 bytes and 32 bytes. Namespaces: normal, and `""` with an all-null batch and with a
+  non-null batch.
+- Anchor shapes: object `str`, `datetime64[ns]` Series, object `datetime.date`, object naive
+  `datetime.datetime`, object naive `pd.Timestamp`, a `date` subclass, a mixed `str` and `date`
+  batch.
 - Error cases, each at a non-first row after good rows: bad grammar, `""`, `"NaT"`, a zone in
   the string, a tz-aware Timestamp, an int cell, an out-of-range anchor, a result past
-  `SUPPORTED_MAX`, a row number past 2^64.
+  `SUPPORTED_MAX`, a row number past 2^64, a negative position.
 
 ### Acceptance tests (S1)
 
-In `test_windowed_date_batch_parity.py`, besides step 0:
+In `test_windowed_date_batch_parity.py`, besides step 0. "Reference" below means the base loop,
+kept as a test oracle copied verbatim from 92152f328 into the corpus module.
 
-1. `test_fast_path_equals_reference_on_corpus`: for every corpus case, the new
-   `apply_windowed_date` output equals `_apply_reference` output, list for list.
+1. `test_fast_path_equals_reference_on_corpus`: for every corpus case, `apply_windowed_date`
+   output equals the reference output, list for list.
 2. `test_error_parity`: for every error case, same exception type, same `str(exc)`, and
-   `__cause__ is None and __context__ is None` (recurring defect 3).
-3. `test_fast_path_is_taken`: a spy on `_apply_reference` is not called for an all-`str` batch
-   or a `datetime64[ns]` batch, and is called for an object `date` batch.
+   `__cause__ is None and __context__ is None` (recurring defect 3). The positions length
+   mismatch raises the same `ValueError`.
+3. `test_fast_path_is_taken`: a spy on `_parse_anchor` (called only by the reference path) is not
+   called for each admitted shape, and is called for a `date` subclass batch and a mixed batch.
 4. `test_batch_boundaries_do_not_change_output`: the generation stream at batch sizes 1, 7,
    32,768 and 65,536 gives the same column.
 5. `test_fast_path_equals_reference_property` (Hypothesis, fixed seed and database): generated
    anchor lists (ISO strings in and out of the grammar, nulls, typed cells), windows, offsets and
-   `positions`; the fast path and `_apply_reference` give the same list or the same error.
-   A failing example is pinned as a regular case.
+   `positions`; same list or same error. A failing example is pinned as a regular case.
+6. `test_fast_path_emits_no_warning`: the corpus under `warnings.simplefilter("error")`.
+7. `test_interrupt_propagates`: a `KeyboardInterrupt` raised inside the fast path (patched
+   helper) propagates and does not trigger the reference rerun.
 
 Must pass unchanged: `tests/native/test_determinism_goldens.py::TestWindowedDateGolden`,
 `tests/native/test_draw_site_providers_golden.py`, `tests/native/test_draw_sites_catalogue_pinned.py`,
-`tests/unit/generation/test_fr1_windowed_date.py`, `tests/unit/execution/test_dgrn_windowed_date.py`,
-`tests/unit/generation/test_gen_window.py`, `tests/native/test_c8_iii_d2_native_positional_when.py`.
-A failure in any of them is a stop and a report, never an edit.
+`test_rng_construction.py`, `tests/unit/generation/test_fr1_windowed_date.py`,
+`tests/unit/execution/test_dgrn_windowed_date.py`, `tests/unit/generation/test_gen_window.py`,
+`tests/native/test_c8_iii_d2_native_positional_when.py`. A failure in any of them is a stop and a
+report, never an edit.
 
-Red-first: the step 0 tests pass on base (they pin the premise and the digest). Acceptance test 3
-is red on base (no `_apply_reference`). Tests 1, 2, 4 and 5 are written before the fast path and
-run green against the moved reference, so a broken fast path turns them red.
+Red-first: the step 0 tests pass on base (they pin the premise and the digest). Test 3 is red on
+base (the spy is called for every shape). Test 7 is red against a fallback that catches
+`BaseException`. Tests 1, 2, 4, 5 and 6 are written before the fast path and run green against
+base, so a broken fast path turns them red.
 
 ### Mutations (S1, on the final head)
 
 1. Pass a constant namespace to `derive_sources`: digest and parity red.
 2. Row number off by one (`row_offset + 1`): red.
 3. Ignore `positions`: the `when:` positional case red.
-4. Drop the vectorized result range check: error parity red.
+4. Drop the overflow guard: the past-range window cases red.
 5. Re-raise in the fast path instead of falling back: error parity red (message differs).
 6. Use `pd.isna` for the null mask: the `""` and `"NaT"` error cases red.
 7. `_DATE_FMT` with a time part: red.
 8. Skip the second draw for `early`: red.
+9. Admit by `isinstance` instead of exact type: the `date` subclass case red.
+10. Catch `BaseException` in the fallback: test 7 red.
 
 ### Placement (S1)
 
 | File | Change | Directory and CODEMAP line | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/transforms/windowed_date.py` | `_apply_reference` (moved loop), fast path | `transforms/` ("Transforms", by transform) | same file, 343 lines today, expect about 440 |
+| `src/decoy_engine/transforms/windowed_date.py` | fast path and two draw-free helpers; reference loop stays inline | `transforms/` ("Transforms", by transform) | same file, 343 lines today, expect about 450 |
 | `tests/unit/generation/test_windowed_date_batch_parity.py` | new | `tests/unit/generation/` ("Generation" tests) | `test_fr1_windowed_date.py` |
-| `tests/unit/generation/_windowed_date_corpus.py` | new, shared with S2 | `tests/unit/generation/` | same |
+| `tests/unit/generation/_windowed_date_corpus.py` | new, holds the corpus and the reference oracle, shared with S2 | `tests/unit/generation/` | same |
 | `tests/perf/test_windowed_date_bench.py` | new, `-m benchmark` | `tests/` row: `perf/` | `test_f4a_gen_capacity.py` |
 
 No new public name. No CODEMAP change. Choke point: `apply_windowed_date` is already the one entry
@@ -239,15 +284,15 @@ Per `performance.md`: workload, baseline, warmup, variance and tail, recorded be
   companion is installed (S2 also runs once without it).
 - Baseline: `origin/main` 92152f328 measured in the same session, interleaved
   (base, candidate, base, candidate) to cancel drift. No number from the record is the baseline.
-- Workload A, column micro-benchmark (`tests/perf/test_windowed_date_bench.py`): 200,000 rows
-  from the corpus generator (ISO anchors, 5% nulls), each of `uniform`, `early`, `late`, window
-  `-30..90`. Fresh process per configuration. One untimed warm call, then 7 timed calls. Report
-  median, min, max and interquartile range in us/row. Scoped as a micro-benchmark; workload B is
-  the end-to-end claim.
+- Workload A, column micro-benchmark (`tests/perf/test_windowed_date_bench.py`): 200,000 rows,
+  5% nulls, each of `uniform`, `early`, `late`, window `-30..90`, in two anchor shapes: ISO
+  strings and object `datetime.date` cells (the dob and masked-`date32` shape). Fresh process per
+  configuration. One untimed warm call, then 7 timed calls. Report median, min, max and
+  interquartile range in us/row. Scoped as a micro-benchmark; workload B is the end-to-end claim.
 - Workload B, end to end: `tests/perf/test_f4a_gen_capacity.py` pure-generation 1M tier
   (1M `orders` plus 100k `people`, batch 32,768, 1024 MB budget), 3 runs each. Report wall
   seconds, rows/s and peak RSS (`wait4`). The record's 1M figure (about 15.0k rows/s on a 4-core
-  host) is context only.
+  host) is context only. The builder records which anchor shape this workload feeds windowed_date.
 - Workload C, share: cProfile or py-spy at 150k rows (the record's profile size): the
   `windowed_date` share of pure-generation time, before and after.
 - Variance rule: if `(max - min) / median` exceeds 10% on workload A, or the 3 runs of workload B
@@ -256,9 +301,9 @@ Per `performance.md`: workload, baseline, warmup, variance and tail, recorded be
 - Correctness guard in every run: the workload B output digest is equal across reruns; for S1 it
   also equals the base digest.
 - Resource budget: workload B peak RSS at most base +10% and under the F4a 500 MB ceiling.
-- Targets. S1: workload A at most 45 us/row (from about 132); workload B at least 2x base rows/s.
-  S2: workload A at most 10 us/row with the companion and at most 20 without it; workload B at
-  least 4x base.
+- Targets. S1: workload A at most 45 us/row (from about 132) for both anchor shapes; workload B
+  at least 2x base rows/s. S2: workload A at most 10 us/row with the companion and at most 20
+  without it; workload B at least 4x base.
 - Results go to `docs/records/2026-11-xx-gen-windowed-batch-bench.md` (Status: record) with the
   raw JSON under `docs/records/evidence/`.
 
@@ -271,24 +316,32 @@ the cost of all other generation columns together (about 9 us/row, from the reco
 
 ### Design
 
-Replace step 4 of the S1 fast path, and the reference path with it, by the pool sampler's index
-kernel: `derive_index_batch(pa.array(row_numbers, pa.int64()), mask_key=seed,
-namespace=namespace, pool_size=span + 1)`, reached through the same lazy loader the sampler uses
-(`_compiled_index_kernel()`, with the reference kernel as the byte-identical fallback) and
-checked with the sampler's `_validated_index_array`. Reuse them, do not copy them: export the two
-helpers from `generation/pool` under public names (they are private today; recurring defect 6).
+Replace the per-row draw (S1 step 4) on both paths with the pool sampler's index kernel, reached
+through the same lazy loader the sampler uses (`_compiled_index_kernel()`, with the reference
+kernel as the byte-identical fallback) and checked with the sampler's `_validated_index_array`.
+Reuse them, do not copy them: export the two helpers from `generation/pool` under public names
+(they are private today; recurring defect 6).
 
-- `uniform`: `offset = min_days + idx`.
-- `early` and `late`: a second call over the same row numbers with namespace
-  `f"{namespace}/draw2"`, then `min` or `max` of the two offsets. This keeps the
-  "min or max of two uniform draws" distribution the module documents.
-- `span == 0`: no call, `offset = min_days` (today's rule).
-- Row numbers above int64 (`positions` past 2^63 - 1): the call uses the reference kernel over
-  Python ints. Same result as the compiled kernel would give.
+- The draw index is part of the source, not the namespace. For global row number `r` and draw
+  `k` (0 for the first draw, 1 for the second), the source is the int64 `2 * r + k`, under the
+  column's own namespace unchanged. The map `(r, k) -> 2r + k` is injective, so no two
+  (row, draw) pairs share a source, and a column named `x/draw2` cannot collide with anything,
+  because no namespace is built from a suffix.
+- Domain check before the call, in `windowed_date.py`: every `r` must satisfy
+  `0 <= r < 2**62`, so `2r + 1` fits int64 and stays in the range where `_encode_int` (signed
+  big-endian body) gives the same bytes on the compiled and the reference kernel. A negative or
+  too-large row number raises a registered value-free error
+  (`runtime.WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE`), raised outside any `except` block.
+- `uniform`: `offset = min_days + idx(k=0)`. `early` and `late`: `min` or `max` of the k=0 and
+  k=1 offsets, two calls over the same rows. This keeps the "min or max of two uniform draws"
+  distribution the module documents.
+- `pool_size = span + 1`. `span == 0`: no call, `offset = min_days` (today's rule).
 
-The derive envelope does not change, so `SEED_PROTOCOL_VERSION` stays 7. Precedent:
-`docs/determinism.md:209` (a change outside the envelope needs no bump). The site's
-`provider_version` and family move instead.
+`SEED_PROTOCOL_VERSION` stays 7. The reason: the engine is pre-GA, and a bump would rekey every
+keyed column and every vault, far more than this one site needs. The derive envelope itself does
+not change; the change is scoped to the `mask.windowed_date` site and is recorded through its
+`provider_version`, the draw-site entry and the Breaking changelog line. This decision is written
+into the S2 PR and the changelog fragment.
 
 ### What changes with it
 
@@ -308,13 +361,13 @@ The derive envelope does not change, so `SEED_PROTOCOL_VERSION` stays 7. Precede
 ```
 Breaking (output-changing): windowed_date produces different dates for the same seed.
 
-### Changed (windowed_date offsets, GEN-WINDOWED-BATCH, 2026-11-xx)
-
-windowed_date now draws each row's offset from the keyed index derivation that pooled
-sampling uses, in one batch per column, instead of a separate numpy generator per row. It is
-about N times faster (see the benchmark record). Dates stay inside the configured window, null
-anchors stay null, and output stays the same across runs, batch sizes and routes. Output from
-earlier releases does not match: regenerate stored windowed_date output.
+Changed (windowed_date offsets, GEN-WINDOWED-BATCH, 2026-11-xx): windowed_date now draws each
+row's offset from the keyed index derivation that pooled sampling uses, in one batch per
+column, instead of a separate numpy generator per row. It is about N times faster (see the
+benchmark record). Dates stay inside the configured window, null anchors stay null, and output
+stays the same across runs, batch sizes and routes. Output from earlier releases does not
+match: regenerate stored windowed_date output. SEED_PROTOCOL_VERSION does not change: a bump
+would rekey every keyed column and vault before GA, and only this site moves.
 ```
 
 ### Acceptance tests (S2)
@@ -327,49 +380,58 @@ New `tests/unit/generation/test_windowed_date_offsets.py`:
    p > 0.001. `early`: mean offset below the window midpoint minus 15 days. `late`: above the
    midpoint plus 15 days. Fixed seed, fixed bounds, never edited to pass.
 3. `test_compiled_equals_reference`: with the companion, compiled and reference kernels give the
-   same offsets on the corpus, including row numbers past int64 (reference only).
+   same offsets on the corpus, including `r = 2**62 - 1`.
 4. `test_partitionable` (Hypothesis over split points): any split of the rows into chunks with
    their global row numbers gives the same column; the `positions` path gives each row the value
    of the ungated run.
 5. `test_namespace_independence`: two columns with different namespaces differ in at least 99%
-   of rows over 10k rows.
+   of rows over 10k rows; a column named `x` and one named `x/draw2` differ in at least 99%.
 6. `test_mask_and_generate_share_the_derivation`: the mask strategy and the generation stream
    give the same dates for the same anchors, seed, namespace and row numbers.
-7. Every S1 error-parity case still raises the same error (the error path did not move).
+7. `test_row_number_domain`: `r = -1` and `r = 2**62` raise the registered error, value-free,
+   with no `__cause__` or `__context__`.
+8. The S1 error-parity cases that do not involve row numbers still raise the same errors.
 
-Red-first: tests 1, 2, 4 and 5 pass on S1 too (they pin properties). Test 6 against the new
+Red-first: tests 1, 2, 4 and 5 pass on S1 too (they pin properties). Tests 6 and 7, the new
 provider golden and the re-baselined digest are red until the derivation lands.
 
 ### Mutations (S2)
 
 1. `pool_size = span` (off by one): the window edge is never drawn, chi-square red.
-2. The same namespace for both draws: `early` and `late` collapse to `uniform`, test 2 red.
+2. The same source for both draws (`2r` for k=1): `early` and `late` collapse to `uniform`,
+   test 2 red.
 3. `min` and `max` swapped: test 2 red.
 4. Local row number instead of global: test 4 red.
 5. Skip `_validated_index_array`: the stub-kernel test (an index past `pool_size`) red.
+6. Domain check bound `2**63`: test 7 red.
 
 ### Placement (S2)
 
 | File | Change | Directory and CODEMAP line | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/transforms/windowed_date.py` | offsets from the index kernel | `transforms/` | same file |
+| `src/decoy_engine/transforms/windowed_date.py` | offsets from the index kernel, domain check | `transforms/` | same file |
 | `src/decoy_engine/generation/pool/__init__.py`, `_sampler.py` | export the loader and validator under public names | `generation/pool/` ("Generation", pools) | `PoolSampler` |
 | `src/decoy_engine/execution/native/_draw_sites_mask.py`, `protocol/providers_mask.py` | the site entry and provider | `execution/native/` | the other mask sites |
+| `src/decoy_engine/reasons/runtime/` (the part with room) | `WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE` | `reasons/runtime/` | other runtime reasons |
 | `tests/unit/generation/test_windowed_date_offsets.py` | new | `tests/unit/generation/` | the S1 parity test |
 | `changelog.d/gen-windowed-offsets.md` | new fragment | "Changelog fragments" | other fragments |
 
 ### Failure modes (F1)
 
-- FM1 A fast path that differs subtly from the reference (a pandas parse rule, a null rule).
-  Closed by full-corpus and property parity plus the pinned base digest.
+- FM1 A fast path that differs subtly from the reference (a pandas parse rule, a null rule, a
+  typed-cell conversion). Closed by full-corpus and property parity plus the pinned base digest.
 - FM2 Error drift: a different first error, or a value in the message. Closed by the
   fall-back-to-reference rule and test 2.
 - FM3 A builder edits a golden to pass in S1. Any golden edit in S1 is a stop.
 - FM4 S2 claimed as byte-identical. The step 0 negative test shows it cannot be.
-- FM5 Absurd windows (a span past 2^56 days) raise the coded `pool_size_overflow` in S2 instead
+- FM5 Silent datetime overflow in the vector add. The integer-day guard runs before it; corpus
+  cases past 106,751 days.
+- FM6 Absurd windows (a span past 2^56 days) raise the coded `pool_size_overflow` in S2 instead
   of drawing. Value-free, and such windows already fail the date range. Accepted.
-- FM6 Benchmark noise passed off as a win. Interleaved baseline, variance rule, max reported.
-- FM7 Memory: the fast path holds one batch of anchors, digests and offsets (a few MB at 65,536
+- FM7 Benchmark noise passed off as a win. Interleaved baseline, variance rule, max reported.
+- FM8 The speed claim holds only for strings while real anchors are `date` objects. Typed-cell
+  admission plus the `date` workload in workload A.
+- FM9 Memory: the fast path holds one batch of anchors, digests and offsets (a few MB at 65,536
   rows). Workload B peak RSS is checked against base.
 
 ## S3. ENGINE-THREADS-DEFAULT
@@ -380,20 +442,23 @@ provider golden and the re-baselined digest are red until the derivation lands.
 cores from the engine's own `detect_usable_cpus()` (CLI `src/decoy/_resources.py:114-120`).
 `detect_usable_cpus()` (`execution/pipeline/_host.py:146`) is `max(1, min(affinity, floor(cgroup
 quota)))`, cached per process, and raises `runtime.cpu_detection_failed` on an unreadable cgroup.
-Rust clamps to `min(requested, host cores, 4)`. Thread count never changes output (in-crate
-`thread_count_never_changes_output`, `docs/plans/2026-10-15-gap9-native-thread-grant.md:29`).
-The count also switches lazy-input reads to Arrow threads (`execution/_chunked_input.py:388`,
-`use_threads=native_threads > 1`) and stamps `native_thread_clamp` into
-`quality_metrics["auto_chunk"]` when it is above 1 (`_pipeline_auto_chunk.py:588`). The
-signature is frozen by `tests/unit/execution/test_r3_public_signature_freeze.py:56`
-(`"1"`, `"int"`). The platform grants its own thread count (`api/config.py:334`).
+Rust clamps to `min(requested, host cores, 4)`. Thread count never changes output in-crate
+(`thread_count_never_changes_output`, `docs/plans/2026-10-15-gap9-native-thread-grant.md:29`).
+`ctx.native_threads` reaches every route listed in Enumerations, Routes. It also switches lazy
+Parquet reads to Arrow threads (`execution/_chunked_input.py:388`); the lazy CSV and fixed-width
+readers ignore `use_threads` (`profile/_lazy_csv.py:211`, `profile/_lazy_fixed_width.py:211`).
+It stamps `native_thread_clamp` into `quality_metrics["auto_chunk"]` when above 1
+(`_pipeline_auto_chunk.py:588`). The signature is frozen by
+`tests/unit/execution/test_r3_public_signature_freeze.py:56` (`"1"`, `"int"`). The platform
+grants its own thread count.
 
 ### Design
 
 - `native_threads: int | None = None`. `None` means auto. An explicit int keeps today's
   validation (1 to `MAX_NATIVE_THREADS`, bool refused).
-- One resolver, `resolve_native_threads(requested: int | None) -> ResolvedThreads`, in
-  `execution/pipeline/_host.py` beside `detect_usable_cpus`. Auto is
+- One resolver, `native_threads_for_run(requested: int | None) -> RunThreads`, in
+  `execution/pipeline/_host.py` beside `detect_usable_cpus`. The name does not shadow the
+  companion's `_kernel.resolve_native_threads` used at `_host.py:184`. Auto is
   `min(detect_usable_cpus(), MAX_NATIVE_THREADS)`. If detection raises `cpu_detection_failed`,
   auto resolves to 1 with source `auto_fallback`: the default must not fail a run that works
   today, and no output byte depends on the count. The source is recorded, so the fallback is not
@@ -401,8 +466,9 @@ signature is frozen by `tests/unit/execution/test_r3_public_signature_freeze.py:
 - Called once, in `_pipeline_context` where the knobs are validated today
   (`_pipeline_context.py:260`). `ctx.native_threads` stays an `int`, so every downstream signature
   is unchanged.
-- `quality_metrics["auto_chunk"]` gains `native_threads_source`: `explicit`, `auto` or
-  `auto_fallback` (additive, value-free).
+- The source (`explicit`, `auto` or `auto_fallback`) is recorded through
+  `stamp_execution_metrics` (`_pipeline_finalize.py:76`), so it appears on every route's run
+  record, not only under `auto_chunk`. Additive and value-free.
 - `run_pipeline_isolated` forwards kwargs unchanged; an omitted value resolves in the child,
   under the child's own cgroup and affinity.
 
@@ -415,8 +481,8 @@ CLI uses it. No new detection code.
 
 New `tests/unit/execution/test_native_threads_default.py`:
 
-1. `test_default_resolves_to_usable_cpus`: detection patched to 3; a chunked `run_pipeline` with
-   no `native_threads` records `native_threads == 3` and `native_threads_source == "auto"`.
+1. `test_default_resolves_to_usable_cpus`: detection patched to 3; a `run_pipeline` with no
+   `native_threads` records 3 and source `auto` in the execution metrics.
 2. `test_explicit_value_wins`: `native_threads=1` and `=2` are recorded as given, source
    `explicit`.
 3. `test_detection_failure_falls_back_to_one`: detection raises `cpu_detection_failed`; the run
@@ -425,18 +491,27 @@ New `tests/unit/execution/test_native_threads_default.py`:
 4. `test_cap`: detection patched to 5,000; resolved to `MAX_NATIVE_THREADS`.
 5. `test_invalid_values_still_refused`: 0, -1, 1,025, `True` and `"4"` raise
    `invalid_execution_knob` before any read.
-6. `test_default_output_bytes_equal_single_thread` (needs the companion; runs on a node with 4 or
-   more cores): a W2-shaped table above a lowered auto-chunk threshold, as a resident table, a lazy
-   CSV source and a lazy Parquet source. Output table bytes and schema with the default equal
-   `native_threads=1`. Covers the Arrow `use_threads` input read.
-7. The signature freeze row moves to `("native_threads", "KEYWORD_ONLY", "None", "int | None")`.
+6. `test_default_output_bytes_equal_single_thread_per_route` (needs the companion; runs on a node
+   with 4 or more cores): one parametrized case per route in Enumerations, Routes (full_frame,
+   sequential, out_of_core, mixed, multi-table, generate-mask, unified slice, the chunked native
+   lane), each forced onto its route. Output table bytes and schema with the default equal
+   `native_threads=1`. Input kinds: resident tables, and a lazy Parquet source on the chunked
+   lane (the one reader that honours `use_threads`). A lazy CSV cell is kept as a
+   CHARACTERIZATION (its reader ignores the flag), not counted as thread evidence.
+7. `test_source_on_every_route`: the source field is present in the execution metrics for each
+   route of test 6.
+8. `test_out_of_core_rss_under_memory_limit`: out_of_core with `memory_limit` set, default
+   against `native_threads=1`, 3 runs each on the same node; peak RSS of the default run stays
+   under the limit and at most +15% over the 1-thread run. Marked `benchmark`, run at the gate.
+9. The signature freeze row moves to `("native_threads", "KEYWORD_ONLY", "None", "int | None")`.
    The parameter count stays 47.
 
 Benchmark note for the PR (not a gate): gap9 W2 at 1M rows, default against `native_threads=1`,
 wall and peak RSS, 3 runs each on the same node. A peak RSS rise over 15% goes to the owner
 before merge.
 
-Red-first: tests 1, 3, 4 and 7 are red on base. Tests 2, 5 and 6 pass on base and pin behavior.
+Red-first: tests 1, 3, 4, 7 and 9 are red on base. Tests 2, 5, 6 and 8 pass on base (the default
+is 1 there) and pin behavior.
 
 ### Mutations (S3)
 
@@ -445,14 +520,15 @@ Red-first: tests 1, 3, 4 and 7 are red on base. Tests 2, 5 and 6 pass on base an
 3. Cap removed: test 4 red.
 4. The resolver skipped for an isolated run that passes no value: an isolated variant of test 1
    (the child records the source) red.
+5. The source stamped under `auto_chunk` only: test 7 red on the non-chunked routes.
 
 ### Placement (S3)
 
 | File | Change | Directory and CODEMAP line | Sits beside |
 |---|---|---|---|
 | `src/decoy_engine/execution/_pipeline.py` | default and docstring | `execution/` ("Pipeline spine and routes") | same file |
-| `src/decoy_engine/execution/pipeline/_host.py` | `resolve_native_threads`, `ResolvedThreads` | `execution/pipeline/` | `detect_usable_cpus` (194 lines) |
-| `src/decoy_engine/execution/_pipeline_context.py`, `_pipeline_auto_chunk.py` | one call, one record field | `execution/` | same files |
+| `src/decoy_engine/execution/pipeline/_host.py` | `native_threads_for_run`, `RunThreads` | `execution/pipeline/` | `detect_usable_cpus` (194 lines) |
+| `src/decoy_engine/execution/_pipeline_context.py`, `_pipeline_finalize.py` | one call, one stamped field | `execution/` | same files |
 | `tests/unit/execution/test_native_threads_default.py` | new | `tests/unit/execution/` | `test_r3_public_signature_freeze.py` |
 | `docs/compatibility-contract.md` | dated pre-GA entry; the 2026-10-01 line that says `native_threads: int = 1` points to it | contract doc | other pre-GA entries |
 | `changelog.d/engine-threads-default.md` | new fragment | "Changelog fragments" | other fragments |
@@ -460,31 +536,114 @@ Red-first: tests 1, 3, 4 and 7 are red on base. Tests 2, 5 and 6 pass on base an
 Compatibility-contract entry (draft): "Pre-GA default change (ENGINE-THREADS-DEFAULT, 2026-11-xx).
 `run_pipeline(..., native_threads: int | None = None)`: `None` uses the usable cores
 (`detect_usable_cpus`, capped at 1024; 1 if detection fails). Explicit values are unchanged.
-Output data does not depend on the thread count. Default runs now read lazy sources with Arrow
-threads and record `native_thread_clamp` and `native_threads_source` in
-`quality_metrics.auto_chunk`. Re-pin checklist: the platform passes its own thread grant; check
-any platform call that omits `native_threads`."
+Output data does not depend on the thread count. Default runs now read lazy Parquet sources with
+Arrow threads, record the thread source in the execution metrics, and record
+`native_thread_clamp` under `auto_chunk`. Re-pin checklist: the platform passes its own thread
+grant; check any platform call that omits `native_threads`."
 
 Changelog fragment: "Changed: `run_pipeline` uses the usable CPU cores for native kernels by
 default instead of one thread. Pass `native_threads=1` for the old behavior. Output is the same."
 
 ### Failure modes (S3)
 
-- FM1 A thread-dependent byte (Arrow CSV inference, chunk order). Test 6 on lazy CSV and Parquet.
+- FM1 A thread-dependent byte on one route (chunk order, Arrow Parquet reads). Test 6 per route.
 - FM2 An unreadable cgroup makes default runs fail. Fallback to 1, recorded, test 3.
-- FM3 More memory from threads in a memory-capped isolated child (thread stacks, Arrow read
-  buffers). Rust caps at 4 threads; RSS is reported in the PR; the isolated suite runs in T1.
-- FM4 Host-dependent run records: `quality_metrics.auto_chunk.native_threads` now differs by host
-  for library callers, as it already does for the CLI. Stated in the contract entry.
+- FM3 More memory from threads in a memory-capped run (thread stacks, Arrow read buffers,
+  out_of_core hash runs). Rust caps at 4 threads; test 8 under `memory_limit`; RSS in the PR.
+- FM4 Host-dependent run records: the thread count now differs by host for library callers, as
+  it already does for the CLI. Stated in the contract entry.
+- FM5 A route missing from the parity list. The Routes enumeration is a grep census of
+  `native_threads=ctx.native_threads` and of every function taking `native_threads`; the builder
+  re-runs it on the head and adds any new route to test 6.
 
-## S4. DATE-SHIFT-FORMAT (engine)
+## S4a. DATE-SHIFT jitter_days on every route (D1)
+
+### Current behavior
+
+`jitter_days` is accepted but read by no date_shift route. The handler reads `min_days` and
+`max_days` with defaults -365 and 365 and swaps them when reversed
+(`execution/_strategies/_date_shift.py:118-121`). The other readers repeat that rule by hand:
+
+- `execution/native/_operator_params.py:250` and `:295` (`DateShiftParams`, which the shadow
+  bindings read at `physical/_shadow_bindings.py:397`);
+- `execution/native/_operator_config_rejections.py:186`;
+- `execution/native/_kernels_scalar.py:249`;
+- `execution/out_of_core/_mask_group_c.py:238`.
+
+So every shipped disguise (`jitter_days: 15` to `30`) and the recommendations default
+(`jitter_days: 15`) shift by up to a year.
+
+### Design
+
+- One resolver, `shift_window(cfg) -> tuple[int, int]`, in `transforms/date_shift.py` (the
+  transform module both the handler and the native lane already import). Rules:
+  - `jitter_days: N`, an `int` (not `bool`) with `N >= 0`: `(-N, N)`;
+  - otherwise today's rule: `min_days` and `max_days` with defaults -365 and 365, swapped when
+    reversed.
+- Every reader above calls `shift_window`. None keeps its own default or swap.
+- Compile refusals in the existing `plan/_checks_date_shift.py` (top level and nested), one
+  registered reason `plan.DATE_SHIFT_WINDOW_INVALID` with a fixed message per case: `jitter_days`
+  together with `min_days` or `max_days`; `jitter_days` not an `int`, a `bool`, or negative.
+- Guard test (cross-cutting rule, choke point plus fitness function):
+  `tests/sentry/test_date_shift_window_reader.py` walks the syntax tree of `src/decoy_engine` and
+  fails on a `"min_days"`, `"max_days"` or `"jitter_days"` string read outside `shift_window`,
+  with a ratchet allowlist for the modules that use those keys for other strategies
+  (`windowed_date`, `text_mask`, `config/_generate_options.py`, `plan/checks/_generate_columns.py`).
+
+### Acceptance tests (S4a)
+
+New `tests/unit/transforms/test_date_shift_window.py` and a route test:
+
+1. `test_shift_window_rules`: `jitter_days` 0, 1, 30; min/max given, reversed, defaulted.
+2. `test_jitter_route_parity`: one config with `jitter_days: 7` on full_frame, sequential, the
+   chunked native lane (companion), out_of_core and the shadow binding; output bytes are equal
+   on every route and equal to the same config with `min_days: -7, max_days: 7`. Every shift is
+   inside `[-7, 7]`.
+3. `test_jitter_conflict_refused`: `jitter_days` with `min_days`, with `max_days`; `"7"`, `True`,
+   `-1`; each raises `PlanCompileError` with `date_shift_window_invalid` before any read, top
+   level and nested.
+4. `test_reader_sentry`: the guard test above.
+
+Red-first: tests 1, 2 and 3 are red on base (no resolver; `jitter_days` ignored). Test 4 is red on
+base (five readers outside the resolver).
+
+### Mutations (S4a)
+
+1. `shift_window` ignores `jitter_days`: tests 1 and 2 red.
+2. One route keeps its own `cfg.get("min_days", -365)`: test 2 red on that route, test 4 red.
+3. Conflict refusal removed: test 3 red.
+4. `bool` accepted as `jitter_days`: test 3 red.
+
+### Changelog (S4a, output-changing)
+
+`changelog.d/date-shift-jitter.md`: "Breaking (output-changing): date_shift now honours
+`jitter_days: N` as the window `[-N, N]`; before, it was ignored and shifts used -365 to 365.
+`jitter_days` together with `min_days` or `max_days` is refused. Affected: the shipped disguises
+(ccpa, cpni, default, ferpa, gdpr, glba, hipaa, pc, pci, sox) when a client applies them; the
+recommendations default for iso_date, us_date and eu_date (`jitter_days: 15`); platform fixtures
+that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`,
+`build_energy.py`, `build_mortgage_credit.py`, `build_insurance.py`). Configs that set
+`min_days` and `max_days` do not change."
+
+### Placement (S4a)
+
+| File | Change | Directory and CODEMAP line | Sits beside |
+|---|---|---|---|
+| `src/decoy_engine/transforms/date_shift.py` | `shift_window` | `transforms/` | `_detect_format` |
+| the five readers listed above | call `shift_window` | existing files | |
+| `src/decoy_engine/plan/_checks_date_shift.py` | the window refusal | `plan/` | existing date_shift checks |
+| `src/decoy_engine/reasons/plan/` (the part with room) | `DATE_SHIFT_WINDOW_INVALID` | `reasons/plan/` | `DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED` |
+| `tests/unit/transforms/test_date_shift_window.py`, `tests/sentry/test_date_shift_window_reader.py` | new | `tests/unit/transforms/`, `tests/sentry/` | other date_shift tests, other sentries |
+| `changelog.d/date-shift-jitter.md`, `docs/compatibility-contract.md` | fragment, dated entry | | |
+
+## S4b. DATE-SHIFT-FORMAT required
 
 ### Every place that tolerates a missing format today
 
-| Site | What it does now | After S4 |
+| Site | What it does now | After S4b |
 |---|---|---|
-| `execution/_strategies/_date_shift.py:145` | `cfg.get("date_format") or _detect_format(col)` | no detection. A missing format is allowed only for an already-typed datetime column (declared casting); an object or string column without one raises a registered runtime error, a backstop behind the compile check |
-| `execution/_strategies/_date_shift.py:305` | `shifted.astype(str)` when there is no format | kept only for the declared-casting typed column |
+| `execution/_strategies/_date_shift.py:145` | `cfg.get("date_format") or _detect_format(col)` | no detection; a missing format is allowed only for a column with a declared-casting contract; otherwise a registered runtime error (backstop behind the compile check) |
+| `execution/_strategies/_date_shift.py:305` | `shifted.astype(str)` when there is no format | kept only for the declared-casting column |
 | `execution/_planner.py:416-431` | `date_shift_requires_explicit_format` chunk decline | deleted (unreachable); its tests move to the compile refusal |
 | `execution/native/_requirements.py:384-402` | `format_detect` prepass | deleted |
 | `execution/native/_requirements.py:577-582` | comment: a format-less date_shift is still native with a prepass | rewritten |
@@ -492,125 +651,206 @@ default instead of one thread. Pass `native_threads=1` for the old behavior. Out
 | `execution/native/_capabilities.py:207`, `execution/physical/_shadow_bindings.py:289`, `execution/out_of_core/_mask_group_c.py:58` | comments on format detection | updated |
 | `transforms/date_shift.py` docstring | lists date_shift as a `_detect_format` user | updated; `_detect_format` stays for `bucket_perturb` and `text_mask` |
 
-### The refusal
+### The refusal, through the strategy requirements registry
 
-- New `check_date_shift_date_format(config)` in `src/decoy_engine/plan/checks/_date_shift_format.py`,
-  registered in `plan/_compile.py` with the other config-only checks (both compile branches and
-  `run_config_only_checks`), so it runs before any profile or read.
-- It refuses a `date_shift` column, top level or a `nested` child (`nested_children`, as
-  `_checks_date_shift.py:117-129` does), whose `provider_config.date_format` is missing, `None`,
-  not a `str`, or blank after strip.
-- Exemption: a column with a declared-casting contract. `_checks_declared_casting.py:221` refuses
-  `date_format` on such a column ("declare the format once"), so the contract's `parse_format`
-  owns it. The check uses the same contract lookup the declared-casting check uses, not a copy.
-- Reason: `plan.DATE_SHIFT_DATE_FORMAT_REQUIRED` (`date_shift_date_format_required`), registered
-  in `reasons/plan/`. Message: the table and column names (config identifiers, never a cell
-  value) and the fix, "add provider_config.date_format, for example %Y-%m-%d". Path
-  `tables[i].columns[j].provider_config.date_format`.
+No new check module. The rule is one more descriptor in the registry that already holds every
+required strategy setting:
+
+- `contracts/strategy_requirements.py:58` `REQUIREMENTS_BY_STRATEGY["date_shift"]` gains
+  `StrategyRequirement(("provider_config", "date_format"),
+  reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT, "date_shift needs provider_config.date_format,
+  for example %Y-%m-%d.")`, next to its namespace descriptor. The registry's `_missing` already
+  treats a non-string or blank value as missing.
+- `plan/checks/_required_settings.py::check_required_strategy_settings` runs it in both compile
+  entry points, with two changes:
+  - Declared-casting skip, written the way the `coherent_with` namespace skip is (`:50-64`): the
+    check asks the declared-casting registry which `(table, column)` pairs have a contract
+    (the same lookup `plan/_checks_declared_casting.py` uses) and skips the date_format
+    descriptor for those. The rule stays in the registry that owns it.
+  - The walk extends to `nested` children (`nested_children`), using the registry's path style
+    (`tables.<t>.columns.<c>.provider_config.date_format`, and the nested form the existing
+    nested checks use). Census first: the builder lists every shipped config and test whose
+    nested children would now fail an existing descriptor (namespace). If the census is not
+    empty, it reports to the orchestrator before going further, rather than narrowing the walk on
+    its own.
+- Reason `plan.DATE_SHIFT_REQUIRES_DATE_FORMAT` (`date_shift_requires_date_format`, following the
+  `<STRATEGY>_REQUIRES_NAMESPACE` naming) in `reasons/plan/`. The message carries table and
+  column names (config identifiers, never a cell value).
+
+Handler backstop, keyed on the plan's declared column, not on dtype: declared dates arrive as
+`date32` object cells after the cast boundary, so a dtype test cannot tell them apart. The
+backstop raises when the column has no `date_format` and no declared-casting contract for its
+`(table, column)`, using the same lookup. If the handler has no table context, the backstop sits
+at the strategy dispatch point where the plan is known; the builder names the point in the PR.
 
 Established solutions: pandas made the same move in PDEP-4: one format per column, no silent
 switching, and an explicit `format=` is the documented way to parse consistently
 ([PDEP-4](https://pandas.pydata.org/pdeps/0004-consistent-to-datetime-parsing.html)). The engine
-already requires a format for `date_preserve` (`transforms/date_preserve.py:101-105`); S4 applies
-the same rule to the whole column.
+already requires a format for `date_preserve` (`transforms/date_preserve.py:101-105`).
 
-### Shipped engine configs that would now be refused, and their update
+### Where a suggestion is written, it carries the detected variant
 
-| Item | Today | Update in S4 |
+The date detectors have several variants each (`detection/detectors.py:245-262`):
+
+- `iso_date`: `%Y-%m-%dT%H:%M:%SZ`, `%Y-%m-%dT%H:%M:%S`, `%Y-%m-%d %H:%M:%S`, `%Y-%m-%dT%H:%M`,
+  `%Y-%m-%d %H:%M`, `%Y-%m-%d`, `%Y%m%d`;
+- `us_date`: `%m/%d/%Y`, `%m/%d/%y`;
+- `eu_date`: `%d.%m.%Y`, `%d.%m.%y`, `%d-%m-%Y` (never slashes; `detection/_patterns.py:43`).
+
+The winning variant is `DetectionResult.format_pattern` (`detection/types.py:94`), surfaced on
+`FieldStats.format_pattern` (`profiling/types.py:105`, `profiling/profiler.py:117`). One fixed
+format per detector is wrong, so no writer uses one:
+
+- Engine starter: `profiling/_starter_inference.py::infer_starter_strategy` takes the top
+  confident match. When its descriptor's strategy is date_shift, the decision's
+  `provider_config` gains `date_format = match.format_pattern`. When `format_pattern` is `None`
+  (no single variant won), the decision is `_FALLBACK` (redact with the louder review), because a
+  date_shift without a format would not compile. Public `starter_config` therefore only writes
+  configs that compile.
+- Recommendations: `profiling/recommendations.py` descriptors keep their params
+  (`jitter_days: 15`, now honoured by S4a); the `starter` `provider_config` loses the fixed
+  min/max and gains nothing static. The format always comes from the match. Re-baseline
+  `tests/fixtures/scan_multi/default_strategy_by_detector_base.json`.
+- Disguises: the ten rules in `src/decoy_engine/disguises/*.yaml` stay as they are (one rule over
+  `iso_date`, `us_date`, `eu_date`; no format; no split). A disguise is applied to a column by a
+  client that knows the column's detection, and that client writes the format.
+
+Where the disguise expander is:
+
+- The platform frontend applies disguises: `api/disguises/router.py:90-97` returns a bundle's
+  `field_rules`, and `web/src/pipelines/hifi/MaskInspector.tsx` (around `:1786`) applies each
+  rule's mask and params to columns whose detected kind matches. The same file already reads the
+  detected `format_pattern` for its format field (`:1628-1674`). The platform is parked, so
+  follow-up row P1 (PLATFORM-DISGUISE-DATE-FORMAT): when a date_shift rule is applied, write the
+  column's detected `format_pattern` as `provider_config.date_format`, and do not apply the rule
+  when there is none. Plus a re-pin checklist line.
+- The engine's `config/policy/expand_policy` takes disguise decisions through an injected
+  `classification_default` callable (`config/policy/_expand.py:145-150, :347-351`). At base it has
+  no caller in the engine, the CLI or the platform. A classification-level decision has no
+  detected format, so a date_shift decision from it is refused by S4b at compile with the column
+  path. That is the intended behavior (require, do not detect); the docstring says so.
+- The CLI does not expand disguises. It lists disguise ids (`cli/reference.py`,
+  `cli/completers.py`, `cli/explain.py`) and uses its own templates and `decoy init` inference
+  (C1).
+
+### Other shipped engine configs that would now be refused, and their update
+
+| Item | Today | Update in S4b |
 |---|---|---|
-| 10 disguise rules: `src/decoy_engine/disguises/{ccpa,cpni,default,ferpa,gdpr,glba,hipaa,pc,pci,sox}.yaml`, one rule each | `detectors: [iso_date, us_date, eu_date]`, `mask: date_shift`, `params: {jitter_days: N}`, no format | split each into three rules, one detector each, with `date_format` `%Y-%m-%d`, `%m/%d/%Y`, `%d/%m/%Y`; `jitter_days` as decided in owner question 1; the builder checks that `FieldRule` validation and `expected_field_groups` accept the split |
-| `src/decoy_engine/profiling/recommendations.py`, the `iso_date`, `us_date`, `eu_date` descriptors | `default=("date_shift", {"jitter_days": 15})`; `starter` `provider_config={"min_days": -365, "max_days": 365}` for `iso_date` and `us_date` | add the detector's `date_format` to `default` and `starter`, so the public `profiling.starter_config` builds configs that compile; re-baseline `tests/fixtures/scan_multi/default_strategy_by_detector_base.json` |
-| `testflight/jobs/a_healthcare_claims/manifest.yaml` (`dob`) | no format | add the format the fixture data uses (the builder reads the generator) |
+| `testflight/jobs/a_healthcare_claims/manifest.yaml` (`dob`) | no format | the format the fixture data uses (the builder reads the generator) |
 | `testflight/jobs/b_retail_m2m/manifest.yaml` (`signup_date`) | no format | same; the nightly testflight goes red without it |
+| `scripts/gen_proof_manifest.py:459` (the date_shift proof, `min_days: 30, max_days: 90`) | no format | `date_format: "%Y-%m-%d"` (its inputs are ISO); regenerate the proof page per the proof-page rule |
 | `examples/` | no `date_shift` | none |
-| Docs: `docs/strategies.md` (about line 253, "When no date format is detected..."), `docs/execution-backends.md`, `docs/reasons.md`, `docs/qa/07-mask-dates-and-numbers.md`, `docs/quality/mutation-ledgers/execution_planner.md` | describe detection | describe the requirement |
+| Docs: `docs/strategies.md` (about line 253), `docs/execution-backends.md`, `docs/reasons.md`, `docs/qa/07-mask-dates-and-numbers.md`, `docs/quality/mutation-ledgers/execution_planner.md` | describe detection | describe the requirement and the detected-variant rule |
 | Test fixtures | 18 test files use `date_shift` with no `date_format` anywhere in the file (grep at base; more files mix both) | add the format; tests whose subject is detection become refusal tests or are deleted with the code |
 
 The strategy wizard option already defaults `date_format` to `%Y-%m-%d`
 (`_strategies/_date_shift.py:100`); the builder confirms a wizard-written config carries it.
 
+Platform re-pin checklist lines (no platform code in this batch): the `api/storm` disguise
+application path and the P1 row; `api/templates/upload_csv_mask_to_s3.yaml` (date_shift with
+`min_days`, no format); the platform fixtures with date_shift (`fixtures/build_*.py`); any
+platform-built config that omits `date_format`.
+
 ### CLI follow-up slice C1 (CLI repo, not engine work)
 
-`decoy init` and `decoy scan` write date_shift columns with no format, and two templates ship
-without one (CLI `origin/main` 4564b745):
+At CLI `origin/main` 4564b745:
 
-- `src/decoy/cli/_init_inference.py` (`iso_date`, `us_date`) and
-  `src/decoy/cli/project/_columns.py:94-97`: write `date_format` by detector.
+- `src/decoy/cli/_init_inference.py:99-118` (`iso_date`, `us_date`) and the writer in
+  `src/decoy/cli/init.py` (around `:193-220`, which writes only `min_days`/`max_days`): write
+  `date_format` from the top match's `format_pattern`; when it is `None`, do not suggest
+  date_shift (fall back the way the CLI does for an unknown column).
 - `src/decoy/templates/hipaa.yaml` (`dob`, `admission_date`, `discharge_date`) and
-  `src/decoy/templates/pci.yaml` (`transaction_date`): add `date_format: "%Y-%m-%d"`.
-- Their tests and docs.
+  `src/decoy/templates/pci.yaml` (`transaction_date`): add `date_format: "%Y-%m-%d"` (templates
+  are fixed sample schemas with no scan).
+- Tests per detector variant (one ISO datetime, `%Y%m%d`, `%m/%d/%y`, `%d.%m.%Y`, `%d-%m-%Y`) and
+  the docs.
 
 C1 is forward-safe (the format is accepted today), so it merges first, and it must merge before
-the CLI re-pins to the engine release that carries S4. Inbox line: DATE-SHIFT-FORMAT-CLI.
+the CLI re-pins to the engine release that carries S4b. Inbox line: DATE-SHIFT-FORMAT-CLI.
 
-### Acceptance tests (S4)
+### Acceptance tests (S4b)
 
 New `tests/unit/plan/checks/test_date_shift_format.py`:
 
-1. `test_missing_format_refused`: missing, `None`, `""`, `"   "`, `5`, `True` each raise
-   `PlanCompileError` with `date_shift_date_format_required` and the path, from `compile_plan`
-   and from `run_config_only_checks`.
+1. `test_missing_format_refused`: missing, `None`, `""`, `"   "`, `5`, `True`: each raises
+   `PlanCompileError` with `date_shift_requires_date_format` and the registry path, from
+   `compile_plan` and from `run_config_only_checks`.
 2. `test_refused_before_read`: `run_pipeline` with a `source_loader` that records calls: the
    loader is never called and nothing is staged.
 3. `test_nested_child_refused`.
-4. `test_declared_casting_column_exempt`: a declared date contract with `parse_format` and a
-   date_shift column with no `date_format` compiles and runs.
+4. `test_declared_casting_column_exempt`: end to end through `run_pipeline` and the
+   declared-casting boundary: a declared date contract with `parse_format`, a date_shift column
+   with no `date_format`; cells reach the handler as `date32` object cells; the run completes,
+   and the backstop does not fire.
 5. `test_message_value_free`: the message carries no cell value; `__cause__` and `__context__`
    are None.
-6. `test_reason_registered`: the code is in the reason registry and the release baseline.
-7. `test_shipped_configs_compile`: each disguise rule's mask config (checked by the same function,
-   since the expansion lives outside the engine), `starter_config` output for each date detector,
-   and both testflight manifests pass the check.
-8. `test_handler_guard`: the date_shift handler called directly on a string column with no format
-   raises the registered runtime error, not a detection.
+6. `test_reason_registered`: the code is in the reason registry and the release baseline, and the
+   descriptor is in `REQUIREMENTS_BY_STRATEGY["date_shift"]`.
+7. `test_shipped_configs_compile`: both testflight manifests and the `gen_proof_manifest` date
+   proof pass `check_required_strategy_settings`.
+8. `test_starter_writes_detected_variant`: for a column of each variant above, `starter_config`
+   writes that variant as `date_format`; a column with no winning variant gets the redact
+   fallback; every written config compiles.
+9. `test_handler_backstop`: the date_shift handler called on a string column with no format and
+   no declared contract raises the registered runtime error, not a detection; the same column
+   with a declared contract does not.
 
 Rewritten, not weakened: `test_execution_planner.py:630`, `test_planner_mutation_kills.py:165,182`
 and `test_chunked_date_shift_admission.py:486` assert the compile refusal instead of the planner
 decline.
 
-Red-first: tests 1, 2, 3, 6, 7 and 8 are red on base. Test 4 passes on base and pins the exempt
-case.
+Red-first: tests 1, 2, 3, 6, 7, 8 and 9 are red on base. Test 4 passes on base and pins the exempt
+case; the backstop half of test 9 is red on base.
 
-### Mutations (S4)
+### Mutations (S4b)
 
 1. Treat a blank string as present: test 1 red.
 2. Skip nested children: test 3 red.
-3. Drop the declared-casting exemption: test 4 red.
-4. Register the check in one compile branch only: the `run_config_only_checks` half of test 1 red.
-5. Restore `_detect_format` in the handler: test 8 red.
+3. Drop the declared-casting skip: test 4 red.
+4. Key the backstop on dtype: test 4 red (date32 object cells).
+5. Restore `_detect_format` in the handler: test 9 red.
+6. Starter writes a fixed `%Y-%m-%d` per detector: test 8 red on every non-ISO-date variant.
 
-### Placement (S4)
+### Placement (S4b)
 
 | File | Change | Directory and CODEMAP line | Sits beside |
 |---|---|---|---|
-| `src/decoy_engine/plan/checks/_date_shift_format.py` | new check | `plan/checks/` ("Plan compile and checks": new checks in `plan/checks/_<topic>.py`; 8 files today) | `_checks_date_shift.py` (older check, stays) |
-| `src/decoy_engine/plan/_compile.py` | register the check | `plan/` | other config-only checks |
-| `src/decoy_engine/reasons/plan/_part1.py` (or the part with room) | new reason | `reasons/plan/` | `DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED` |
+| `src/decoy_engine/contracts/strategy_requirements.py` | the date_format descriptor | `contracts/` | the namespace descriptors |
+| `src/decoy_engine/plan/checks/_required_settings.py` | declared-casting skip, nested walk | `plan/checks/` | the `coherent_with` skip |
+| `src/decoy_engine/reasons/plan/` (the part with room) | `DATE_SHIFT_REQUIRES_DATE_FORMAT` | `reasons/plan/` | the `*_REQUIRES_NAMESPACE` reasons |
+| `src/decoy_engine/profiling/_starter_inference.py`, `recommendations.py` | detected variant in the starter | `profiling/` | same files |
 | the tolerance sites in the table above | delete or guard | existing files | |
-| disguises, recommendations, testflight, docs, fixtures | as listed | existing files | |
+| testflight, `scripts/gen_proof_manifest.py`, docs, fixtures | as listed | existing files | |
 | `tests/unit/plan/checks/test_date_shift_format.py` | new | `tests/unit/plan/` | `test_checks_date_shift.py` |
-| `changelog.d/date-shift-format-required.md` | new fragment | "Changelog fragments" | other fragments |
-| `docs/compatibility-contract.md` | dated pre-GA entry | contract doc | other pre-GA entries |
+| `changelog.d/date-shift-format-required.md`, `docs/compatibility-contract.md` | fragment, dated entry | | |
 
-Choke point: the compile check is the one place the rule lives. The runtime guard in the handler
-is a backstop with its own reason and test (mutation 5), not a second copy of the rule.
+Choke point: the strategy requirements registry is the one place the rule is held. The handler
+backstop has its own reason and test (mutation 5); it is not a second copy of the rule.
 
 Changelog fragment: "Breaking: a `date_shift` column without `provider_config.date_format` is
-refused at plan compile (`date_shift_date_format_required`). Add the column's format, for example
+refused at plan compile (`date_shift_requires_date_format`). Add the column's format, for example
 `%Y-%m-%d`. The engine no longer guesses the format from a sample. Columns whose format comes from
-a declared-casting contract are not affected."
+a declared-casting contract are not affected. Starter configs write the date variant the scan
+detected."
 
 ### Failure modes (S4)
 
-- FM1 A shipped config the list misses fails at run time for a user. Test 7 checks every shipped
-  config; the full suite runs (shared-fixtures trigger).
-- FM2 The declared-casting conflict: requiring a format the other check forbids. Test 4.
+- FM1 A shipped config the list misses fails at run time for a user. Test 7 and the full suite
+  (shared-fixtures trigger).
+- FM2 The declared-casting conflict: requiring a format the other check forbids. Test 4, end to
+  end.
 - FM3 A builder deletes a detection test without replacing what it guarded. The PR lists each
   deleted test with the test that now covers its case.
 - FM4 The CLI re-pins before C1 merges, and `decoy init` output stops compiling. C1 merges first;
   the CLI re-pin checklist gets a line.
 - FM5 Reason baselines (`tests/fixtures/f29/*`, `tests/sentry/baselines/f29-*`) drift. Updated in
   the same commit as the reason, by their own regenerator.
+- FM6 A wrong fixed format written for a detector (for example slashes for `eu_date`). No writer
+  uses a fixed format; test 8 per variant.
+- FM7 A route keeps reading the window by hand after S4a. The reader sentry.
+- FM8 The nested walk refuses existing nested configs for a missing namespace. The census runs
+  first and is reported.
 
 ## Enumerations
 
@@ -624,19 +864,28 @@ From the code at 92152f328.
   (`generation/_grouped_windowed_generators.py:111`), and the native protocol reproduction
   (`execution/native/protocol/providers_mask.py:318`, test-side only). All three runtime callers
   pass through `apply_windowed_date`.
-- `native_threads`: `_pipeline_context.py:433` into the chunked native lane,
-  `_chunked_input.py:388` (lazy Arrow reads), `_pipeline_auto_chunk.py:583-589` (record),
-  `_isolated_run.py` (forwarded kwargs). Out-of-core sizes DuckDB threads on its own
-  (`out_of_core/_duckdb.py::_threads_for_memory_limit`) and does not read it.
-- Missing date_shift format: the S4 site table (handler, planner decline, native prepass, native
-  rejection, comments).
+- `ctx.native_threads` (S3):
+  - full_frame: `_pipeline_full_frame.py:207`;
+  - sequential and out_of_core through `_pipeline_route_dispatch.py:145` and `:202`, then
+    `out_of_core/_runner.py:125, :243` (`OocHashRun`);
+  - mixed: `_pipeline_mixed_route.py:233`;
+  - multi-table: `_pipeline_multi_table.py:315, :385`;
+  - generate-mask: `_pipeline_generate_mask.py:99, :268, :303`;
+  - unified slice: `_unified_slice.py:154, :240, :459`;
+  - the chunked native lane: `_pipeline_context.py:433`;
+  - lazy input reads: `_chunked_input.py:388` (Parquet honours it; CSV and fixed-width ignore it);
+  - records: `_pipeline_auto_chunk.py:583-589`, `_pipeline_finalize.py:138`;
+  - isolation: `_isolated_run.py`, `_isolated_common.py` (forwarded kwargs).
+- date_shift window (S4a): the five readers in the S4a section.
+- Missing date_shift format (S4b): the S4b site table.
 
 ### Exit paths
 
 - S1 fast path, success: returns the list; local buffers and the seed copy go out of scope.
-- S1 fast path, exception or anomaly: buffers are discarded, the reference loop reruns, and the
-  `except BaseException: del seed` shape deletes the seed copy on its error exit.
-- S2 to S4: N/A, they open no file and hold no state.
+- S1 fast path, `Exception` or anomaly: buffers are discarded, the reference path reruns, and the
+  `except BaseException: del seed` shape deletes the seed copy on its error exit and re-raises.
+- S1 fast path, `KeyboardInterrupt` or `SystemExit`: propagates; the same `del seed` shape runs.
+- S2 to S4b: N/A, they open no file and hold no state.
 
 ### FK shapes
 
@@ -644,104 +893,132 @@ N/A: no slice reads or writes a key.
 
 ### Fields
 
-- `quality_metrics["auto_chunk"]["native_threads_source"]` (S3, new, closed set of three words).
+- The thread source in the execution metrics stamped by `stamp_execution_metrics` (S3, new,
+  closed set of three words).
 - `quality_metrics["auto_chunk"]["native_threads"]` and `native_thread_clamp` (S3, existing; now
   set on default runs).
-- No dataclass field of a public result type changes.
+- `StarterDecision.provider_config` for date detectors now carries `date_format` (S4b).
+- No dataclass field of a public result type is added or removed.
 
 ### Output surfaces
 
-- S1 and S2: output column values and `WindowedDateError` messages.
+- S1 and S2: output column values and `WindowedDateError` messages; S2 adds one registered
+  runtime error.
 - S3: the run record (`quality_metrics`).
-- S4: the `PlanCompileError` message and path, `docs/reasons.md`, the reason baselines, and the
-  runtime guard's error message.
+- S4a: output column values for `jitter_days` configs; one plan refusal.
+- S4b: the `PlanCompileError` message and path, `docs/reasons.md`, the reason baselines, the
+  backstop's error message, and `starter_config` output.
 - No slice adds a log line, stdout or stderr output.
 
 ## Reuse inventory
 
-- `DeriveContext.derive_sources` (`determinism/_derive.py:241`): the batched derive for S1.
+- `DeriveContext.derive_sources` (`determinism/_derive.py:241`) and `seed_bytes_to_int`
+  (`determinism/_seeds.py:34`): S1.
 - `derive_index_batch`, `_compiled_index_kernel`, `_validated_index_array`
   (`generation/pool/_sampler.py`, `execution/native/_crypto_ext.py`, `_crypto_reference.py`):
   the S2 offset kernel, exported, not copied.
-- `detect_usable_cpus` and `MAX_NATIVE_THREADS` (`execution/pipeline/_host.py`): S3.
+- `detect_usable_cpus`, `MAX_NATIVE_THREADS` (`execution/pipeline/_host.py`) and
+  `stamp_execution_metrics` (`_pipeline_finalize.py:76`): S3.
 - `require_lane_knobs` (`_pipeline_auto_chunk.py`): S3 keeps it as the validator.
-- Reason registry (`reasons/plan/`), the registry sentry and the f29 baselines: S4.
-- `nested_children` and the declared-casting contract lookup (`plan/_checks_declared_casting.py`):
-  S4.
+- `REQUIREMENTS_BY_STRATEGY` and `check_required_strategy_settings`: S4b, instead of a new check.
+- The declared-casting contract lookup and `nested_children`: S4b.
+- `DetectionResult.format_pattern` and `FieldStats.format_pattern`: S4b and C1.
+- The existing `plan/_checks_date_shift.py`: the S4a refusal.
+- Reason registry (`reasons/plan/`, `reasons/runtime/`), the registry sentry and the f29
+  baselines: S2, S4a, S4b.
 - Sentries that must stay green: module size (`tests/sentry/test_module_size.py`; S1 keeps the
-  module under 600), the secret-material census, the public import boundary, the plan/ and
-  transforms/ fan-out freezes, the physical-seam sentry (no slice adds an `execution/` seam).
-- New machinery: one check module (S4) and one resolver (S3). Each is a single function at the
-  existing choke point.
+  module under 600), `test_rng_construction.py`, the secret-material census, the public import
+  boundary, the plan/ and transforms/ fan-out freezes, the physical-seam sentry (no slice adds an
+  `execution/` seam).
+- New machinery: the S3 resolver, the S4a resolver and its reader sentry. Each is one function at
+  an existing choke point.
 
 ## Frozen contracts touched
 
 | Contract | Slice | Kind |
 |---|---|---|
 | `run_pipeline` signature (`test_r3_public_signature_freeze.py:56`, `docs/compatibility-contract.md:869`) | S3 | breaking default change (pre-GA), additive `None` |
-| `quality_metrics.auto_chunk` keys | S3 | additive (`native_threads_source`) |
+| Execution metrics keys | S3 | additive (thread source) |
 | windowed_date output bytes, draw-site catalogue, provider goldens | S2 | breaking (output-changing), changelog'd |
-| Plan compile refusals and the reason manifest | S4 | breaking (new refusal), additive reason |
-| Shipped disguises, `starter_config` output, recommendations fixture | S4 | breaking content change |
+| date_shift output for `jitter_days` configs | S4a | breaking (output-changing), changelog'd |
+| Plan compile refusals and the reason manifest | S2, S4a, S4b | additive reasons; S4a and S4b add refusals (breaking) |
+| `starter_config` output, recommendations fixture | S4b | breaking content change |
 | `generation.pool` public names | S2 | additive |
-| `SEED_PROTOCOL_VERSION` | S2 | unchanged (7) |
+| `SEED_PROTOCOL_VERSION` | S2 | unchanged (7), pre-GA decision recorded |
+| Disguise YAML content | none | unchanged |
 
 ## Pre-mortem
 
 Assume the batch shipped and went wrong. The likely causes, and what stops each:
 
 - S1 merged with a one-row difference on an input outside the corpus (a pandas ISO8601 parse that
-  accepts a string the regex also accepts but reads differently). Stopped by the property test,
-  the fall-back rule on any NaT, and the per-cell regex kept in front of the vector parse.
-- S2 skipped because S1 looked fast enough, and F1 closed at 2.5x. Stopped by the data gate in
-  the benchmark protocol; a skip is recorded with its numbers.
-- S3 made a customer's container run out of memory with more threads. Stopped by the Rust cap of
-  4, the RSS check in the PR and the explicit `native_threads=1` escape.
-- S4 broke the nightly testflight or a CLI project because one shipped config was missed. Stopped
-  by S4 test 7, the full suite, and C1 merging before the CLI re-pin.
-- The disguise split changed how the platform expands rules. Stopped by keeping rule ids stable
-  where the expander keys on them; the builder checks the expander's key before splitting and
-  reports if a split changes it.
+  accepts a string the regex also accepts but reads differently, or a typed cell converted
+  differently). Stopped by the property test, the fall-back rule on any NaT, the per-cell regex in
+  front of the vector parse, and exact-type admission.
+- S2 skipped because S1 looked fast enough on strings while real anchors are dates. Stopped by the
+  `date` workload and the data gate; a skip is recorded with its numbers.
+- S3 made a container run out of memory with more threads on out_of_core. Stopped by the Rust cap
+  of 4, test 8 under `memory_limit`, and the `native_threads=1` escape.
+- S4a fixed jitter on the pandas route only. Stopped by the route parity test and the reader
+  sentry.
+- S4b broke the nightly testflight, the proof page or a CLI project. Stopped by test 7, the full
+  suite, and C1 merging before the CLI re-pin.
+- A starter wrote `%d/%m/%Y` for an `eu_date` column that uses dots. Stopped by writing the
+  detected variant only, test 8 per variant.
 
 ## Class table
 
 | # | Class | Closing structure | Proving test | Mutation that must turn it red |
 |---|---|---|---|---|
-| 1 | Value-bearing output | S1 and S2: every error is raised by the unchanged reference loop, outside the `except` block, so no anchor value reaches the message or the chain. S4: the refusal names config identifiers only. S3: `native_threads_source` is a closed three-word set | S1 test 2 (`str`, `__cause__`, `__context__`), S4 test 5 | S1 mutation 5 (raise from the fast path); format the column value into the S4 message: test 5 red |
-| 2 | Cleanup missing on an exit path | S1: the seed and `DeriveContext` are deleted on the exception path (existing `del seed` shape), covered by the secret-material census sentry. S2 to S4: N/A, no resource is opened | the census sentry on `transforms/windowed_date.py` | drop the `del` on the fast path: the sentry red |
-| 3 | State machine and concurrency | S3: thread count changes scheduling only; Rust kernels are proved thread-count independent in-crate. S1, S2, S4: N/A, pure functions | S3 test 6 (default against 1 thread, resident, lazy CSV, lazy Parquet) | S3 mutation 1 hides the default; a thread-dependent Arrow read turns test 6 red |
-| 4 | Route parity and silent fallback | S1: one entry point (`apply_windowed_date`) for mask, generation and grouped callers; the fast path falls back to the reference only by rerunning it, never by a different answer. S2: mask and generation share one derivation. S4: one compile check before any route; the planner decline and native prepass are deleted, not left as a second route. S3: the fallback to 1 is recorded, not silent | S1 tests 1, 3, 5; S2 test 6; S4 tests 1, 2, 8; S3 test 3 | S1 mutation 5; S4 mutations 4 and 5; S3 mutation 2 |
+| 1 | Value-bearing output | S1: every error comes from the unchanged reference path, raised outside `except`. S2: the row-number error is registered and value-free. S4a and S4b: refusals name config identifiers only. S3: the thread source is a closed three-word set | S1 test 2, S2 test 7, S4b test 5 | S1 mutation 5; format a value into the S4b message: test 5 red |
+| 2 | Cleanup missing on an exit path | S1: the seed and `DeriveContext` are deleted on every exit, including interrupts (existing `del seed` shape), covered by the secret-material census sentry. S2 to S4b: N/A, no resource is opened | the census sentry on `transforms/windowed_date.py`; S1 test 7 | drop the `del` on the fast path: the sentry red |
+| 3 | State machine and concurrency | S3: thread count changes scheduling only; Rust kernels are proved thread-count independent in-crate; per-route byte parity. Others: N/A, pure functions | S3 test 6 | a thread-dependent route turns its test 6 cell red |
+| 4 | Route parity and silent fallback | S1: one entry point for mask, generation and grouped callers; the fast path falls back only by rerunning the reference. S2: mask and generation share one derivation. S3: parity on every route; the fallback to 1 is recorded. S4a: one window resolver for every route plus the reader sentry. S4b: one registry descriptor before any route; the planner decline and native prepass are deleted | S1 tests 1, 3, 5; S2 test 6; S3 tests 3, 6, 7; S4a tests 2, 4; S4b tests 1, 2, 9 | S1 mutation 5; S3 mutations 2, 5; S4a mutation 2; S4b mutations 3, 5 |
 | 5 | Referential integrity | N/A: no FK is read or written by any slice | | |
-| 6 | Untrusted producer | S4: config is the untrusted input; a missing, blank or non-string format is refused at the boundary with one registered reason. S1: anchor cells outside the admitted shapes go to the reference loop, which keeps today's validation | S4 test 1 (missing, `None`, `""`, blank, int, bool); S1 error-parity corpus | S4 mutation 1 (blank accepted) |
+| 6 | Untrusted producer | S4a and S4b: config is the untrusted input; bad `jitter_days`, conflicts, and missing, blank or non-string formats are refused at compile. S1: cells outside the exact admitted types go to the reference path, which keeps today's validation. S2: row numbers outside the domain are refused | S4a test 3; S4b test 1; S1 corpus; S2 test 7 | S4a mutation 4; S4b mutation 1; S1 mutation 9; S2 mutation 6 |
 | 7 | TOCTOU on a path | N/A: no slice opens or checks a path | | |
-| 8 | Weak tests and overclaimed evidence | S1 pins the base digest from 92152f328 and adds a negative test that S2 is not byte-identical; red-first lists label which tests pass on base; benchmark claims need the interleaved baseline and the variance rule; S2 distribution bounds are fixed and never edited to pass | step 0 tests; the benchmark record | edit a golden in S1: stop rule; loosen the chi-square bound: review refusal |
-| 9 | Behavior-preserving refactor drift | S1 moves the loop unchanged into `_apply_reference` and proves the fast path against it on the corpus and by property test | S1 tests 1 and 5, the unchanged goldens list | S1 mutations 1 to 8 |
-| 10 | Frozen contract drift | S2: draw-site entry, provider version and goldens move together with a Breaking changelog line. S3: the freeze row and the contract entry move in the same commit. S4: the reason is registered through the reason registry and baselines; changelog and contract entry | S3 test 7; S4 test 6; the catalogue pinned test in S2 | spell the S4 code as a literal: the registry sentry red; change the S3 default without the freeze row: test 7 red |
+| 8 | Weak tests and overclaimed evidence | S1 pins the base digest from 92152f328 and adds a negative test that S2 is not byte-identical; red-first lists label which tests pass on base; the lazy CSV thread cell is labelled CHARACTERIZATION; benchmark claims need the interleaved baseline, the variance rule and both anchor shapes; S2 distribution bounds are fixed and never edited to pass | step 0 tests; the benchmark record; S3 test 6 labels | edit a golden in S1: stop rule; loosen the chi-square bound: review refusal |
+| 9 | Behavior-preserving refactor drift | S1 keeps the reference loop inline and proves the fast path against a verbatim copy of the base loop on the corpus and by property test; `test_rng_construction.py` and the draw-site catalogue stay green with no allowlist change | S1 tests 1 and 5, the unchanged goldens list | S1 mutations 1 to 10 |
+| 10 | Frozen contract drift | S2: draw-site entry, provider version and goldens move together with a Breaking changelog line; SEED_PROTOCOL_VERSION decision recorded. S3: the freeze row and the contract entry move in one commit. S4a and S4b: reasons registered through the registry and baselines; changelog lines list what changes | S3 test 9; S4b test 6; the catalogue pinned test in S2 | spell a code as a literal: the registry sentry red; change the S3 default without the freeze row: test 9 red |
 
 ## Size
 
-- S1: one source file (about +100 lines), three new test files, one bench file, one record. No
+- S1: one source file (about +110 lines), three new test files, one bench file, one record. No
   public name.
-- S2: four source files, two public names in `generation.pool`, one test file, re-baselines, one
-  fragment, one record update.
-- S3: four source files, one helper in `execution.pipeline` (not root-exported), one test file,
-  a contract entry, a fragment.
-- S4: one new check module, one reason, about eight source files edited (mostly deletions), ten
-  disguise YAMLs, two testflight manifests, docs, 18 or more test files, a contract entry, a
-  fragment.
+- S2: four source files, two public names in `generation.pool`, one reason, one test file,
+  re-baselines, one fragment, one record update.
+- S3: four source files, one helper in `execution.pipeline` (not root-exported), one test file
+  with per-route cases, a contract entry, a fragment.
+- S4a: one resolver, five readers switched, one refusal in an existing check, one reason, two
+  test files including one sentry, a fragment, a contract entry.
+- S4b: one registry descriptor, the required-settings walk, one reason, the starter, about eight
+  source files edited (mostly deletions), two testflight manifests, the proof script, docs, 18 or
+  more test files, a contract entry, a fragment.
+- C1: three CLI source files, two templates, tests, docs.
 
 A build well past these sizes stops and reports before review.
 
-## Owner questions
+## Review round 1 response (Dennis on b1cd9bd67)
 
-1. The disguise rules pass `jitter_days: N`, but the date_shift handler reads only `min_days` and
-   `max_days` (default -365 to 365). So the disguises can shift dates by up to a year, not the
-   plus or minus N days their `why` text promises (HIPAA: "plus/minus 30d"). Fix it in S4 while
-   those lines are open (`min_days: -N, max_days: N`; output changes, before freeze), or as its
-   own row? Recommendation: fix it in S4 and call it out in the same changelog fragment.
-2. `bucket_perturb` also detects a missing `date_format` from a whole-series sample
-   (`transforms/bucket_perturb.py:165`), the same class S4 removes from date_shift. Apply the same
-   requirement before freeze, or leave it? Recommendation: an inbox line now
-   (BUCKET-PERTURB-FORMAT), decided before freeze.
+| # | Finding | Change in this revision |
+|---|---|---|
+| 1 | BLOCKER: one format per detector is wrong | Three-format split dropped. Every writer uses the detected `format_pattern`; `None` falls back. Disguise YAML unchanged; the expander is the platform frontend (`MaskInspector.tsx`), so follow-up row P1 and a re-pin line; the engine's `expand_policy` has no caller and refuses at compile; the CLI does not expand disguises. Per-variant tests in S4b test 8 and C1 |
+| 2 | HIGH: jitter_days on native and shadow | New slice S4a: one `shift_window` resolver for all five readers, conflict refusal, route parity test, reader sentry, changelog list including the platform fixtures |
+| 3 | HIGH: S3 routes | Routes enumeration rewritten per route; per-route byte parity (test 6); out_of_core RSS under `memory_limit` (test 8) |
+| 4 | MEDIUM: source via stamp_execution_metrics | Done; test 7 and mutation 5 |
+| 5 | DESIGN HIGH: no new check module | Descriptor in `REQUIREMENTS_BY_STRATEGY`, checked by `check_required_strategy_settings`, declared-casting skip in the `coherent_with` style, nested walk, registry path style. Reason renamed `DATE_SHIFT_REQUIRES_DATE_FORMAT` |
+| 6 | MEDIUM: seed_bytes_to_int and draw token | Both in S1 design step 4; `test_rng_construction.py` on the must-pass list |
+| 7 | MEDIUM: date objects | Exact-type admission of `date`, naive `datetime` and naive `Timestamp`; `date` workload in workload A; targets apply to both shapes |
+| 8 | MEDIUM: corpus | Past-ns windows, negative positions, length mismatch, empty namespace with all-null and non-null batches added; overflow guard added to the design |
+| 9 | MEDIUM: no-bump reason | Rewritten: pre-GA, a bump would rekey every keyed column and vault |
+| 10 | MEDIUM: draw2 namespace collision | Draw index in the source (`2r + k`); explicit domain check `0 <= r < 2**62` with a registered error; tests 5 and 7 |
+| 11 | MEDIUM: guard keyed on dtype | Backstop keyed on the declared column; test 4 end to end through the cast boundary |
+| 12 | MEDIUM: coverage | `scripts/gen_proof_manifest.py:459` added; platform re-pin lines for `api/storm`, the upload template and fixtures |
+| 13 | LOW: lazy CSV ignores use_threads | Claim corrected; the CSV cell is a CHARACTERIZATION |
+| 14 | LOW: resolver name | Renamed `native_threads_for_run` |
+| 15 | LOW: Exception and warnings | Fallback catches `Exception`; tests 6 and 7 |
 
-Neither question blocks S1, S2 or S3. Question 1 only changes the S4 disguise edit.
+Partial disagreement, on 5: extending the required-settings walk to nested children applies every
+descriptor there, including namespace, which could newly refuse nested configs. The plan keeps
+the extension but puts a census first and stops for a decision if it finds any, instead of
+widening a refusal blind.
