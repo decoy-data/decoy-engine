@@ -283,6 +283,14 @@ the guard cannot recognise (a person name, an address) is the stated limit. The 
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
 
+Each table also holds `basis` (`whole` or `sample`) and `scanned_rows`, the rows the field counts were taken over
+(PROFILE-SAMPLE-LABELS). `whole` is written only when the read reached the end of the source, with an exact
+`row_count` equal to `scanned_rows`; `key_candidates` is empty on a `sample`: the write model refuses a sampled key claim, and a read of a core with no `basis`, or any `basis` other than `whole`, drops its stored `key_candidates` (they were never proven by a whole read), so that core stays readable and exportable. Both members have read defaults, so a
+core written before them reads as `basis: "sample"` with `scanned_rows: null`. A `basis` string outside the two
+values reads as `sample`, so a third value added in a later minor is not a break. `basis`, `scanned_rows` and the two
+values are frozen at 1.0. A plain profile document (`profile_document`, `ColumnProfile`) gains the same `basis` key, the
+last field of the dataclass.
+
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
 refused, scores floats (bool and strings refused), drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The

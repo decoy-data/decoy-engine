@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Final
 
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
+from decoy_engine.profiling._basis import Basis
 
 # What a null cell reads as in `TopValue.value`, so a literal cell can read the same.
 NULL_CELL_TEXT: Final = "(null)"
@@ -194,6 +195,10 @@ class ColumnProfile:
     # Run metadata
     engine_version: str = "0.1.0"
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    # What the field counts were taken over: `whole` only when the read reached the end of the
+    # source. The default fails closed for a constructor or document that never said.
+    basis: Basis = "sample"
 
     def to_dict(self) -> dict[str, Any]:
         """The raw JSON-ready dict, cell values included.
