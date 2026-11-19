@@ -84,6 +84,9 @@ READERS: dict[tuple[str, str, str], str] = {
     ("profile/_declared_columns.py", "source_columns", "resolve_csv_dialect"): (
         "the gate itself: the dialect and any `column_names_file` for the header read"
     ),
+    ("profile/_declared_columns.py", "_csv_inline", "resolve_csv_dialect"): (
+        "a scan request reads a column_names_file once; no data row is opened"
+    ),
     ("profile/_lazy_build.py", "_resident_csv", "resolve_csv_dialect"): (
         "reads a `column_names_file` only; no data row, and the factory's callers are listed here"
     ),

@@ -73,6 +73,14 @@ def test_invalid_descriptor_is_a_config_failure_naming_the_table(tmp_path: Path)
     assert info.value.__cause__ is None and info.value.__context__ is None
 
 
+def test_selection_refusals_keep_their_messages(tmp_path: Path) -> None:
+    sources = {"a": _csv(tmp_path, "a", "id\n1\n")}
+    with pytest.raises(PipelineConfigError, match="same table more than once"):
+        scan_sources(sources, tables=["a", "a"])
+    with pytest.raises(PipelineConfigError, match="not in sources"):
+        scan_sources(sources, tables=["nope"])
+
+
 def test_every_source_is_validated_selected_or_not(tmp_path: Path) -> None:
     sources = {"a": _csv(tmp_path, "a", "id\n1\n"), "b": {"type": "file", "bogus": 1}}
     with pytest.raises(PipelineConfigError):
