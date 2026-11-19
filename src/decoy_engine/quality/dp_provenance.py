@@ -279,10 +279,9 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
             # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
             # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
-            # pytest-timeout (80); 0a373cf2... adds time-machine (81). A lock change needs its own row
-            # (test_dp_lock_row.py) and NOTICE.
+            # pytest-timeout (80); 0a373cf2... adds time-machine (81); 8e4bb980... is that lock at engine
+            # 0.28.1. A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
-            # 8e4bb980... is the 0.28.1 lock with time-machine (81 dists, engine 0.28.1).
             "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
             "0a373cf26022ec43eb0cb60f89026d9e5878471110b7263f5c28d4bde2fc4897",
             "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
@@ -302,12 +301,10 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "b9b42047dc09ce89593e0be2dc6f7125a91af661bbb644b3a27342c84fd44ab0",
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
-            # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no
-            # dev tooling, pinned in the CLI repo's requirements-certified.txt (proof-critical libraries
-            # at the annotated versions, packaging==26.2). To reproduce: `--no-dev` install it into a
-            # 3.10.20 venv and run the CLI repo's scripts/cert_smoke.py (recomputes this fingerprint,
-            # then fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change just the
-            # engine version. All stay, newest first. 0.28.0 lacks joserfc and rfc8785; use 0.28.1.
+            # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
+            # tooling, pinned in the CLI repo's requirements-certified.txt (packaging==26.2). Reproduce with
+            # a `--no-dev` install in a 3.10.20 venv and the CLI repo's scripts/cert_smoke.py. Engine-only
+            # bumps from 0.6.0 change just the engine version. All stay, newest first; 0.28.0 lacks joserfc.
             "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
             "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
             "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",

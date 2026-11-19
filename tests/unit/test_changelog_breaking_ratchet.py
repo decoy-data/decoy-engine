@@ -32,6 +32,15 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.1", "Every open flag the engine uses now comes from one module, `"): (
+        "Windows-only; the engine did not import there before, and POSIX behavior is unchanged"
+    ),
+    ("0.28.1", "The 0.28.0 release certified the CLI runtime profile from th"): (
+        "describes the 0.28.0 bug this release fixes; no run that passed before is refused"
+    ),
+    ("0.28.1", "Release prep now refuses a CLI pin file that leaves out any "): (
+        "release tooling only; no engine consumer sees it"
+    ),
     ("0.28.0", "New base dependencies `joserfc` and `rfc8785`. Artifact file"): (
         "new verifier; the refusals named are its own and nothing calls it yet"
     ),
