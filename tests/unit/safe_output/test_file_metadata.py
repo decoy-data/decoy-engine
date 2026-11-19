@@ -542,3 +542,12 @@ def test_an_index_named_like_a_column_keeps_its_real_name() -> None:
     table = _from_pandas(frame, preserve_index=True)
     assert output_schema(table.schema).metadata == table.schema.metadata
     assert output_table(table).to_pandas().index.name == "a"
+
+
+def test_pandas_types_with_forged_parameters_are_written_as_storage() -> None:
+    from pandas.core.arrays.arrow.extension_types import ArrowIntervalType, ArrowPeriodType
+
+    for forged in (ArrowPeriodType("DCY-CANARY"), ArrowIntervalType(pa.int64(), "DCY-CANARY")):
+        out = output_schema(pa.schema([pa.field("n", forged)]))
+        assert not isinstance(out.field("n").type, pa.BaseExtensionType)
+        assert CANARY not in out.serialize().to_pybytes()

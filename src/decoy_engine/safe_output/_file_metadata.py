@@ -85,10 +85,19 @@ _INTERVAL_CLOSED: Final = frozenset({"left", "right", "both", "neither"})
 
 
 def _params_ok(t: pa.BaseExtensionType) -> bool:
-    """The pandas types carry one short parameter each; keep the type only if it has the known shape."""
+    """The pandas types carry one short parameter each; keep the type only if it is a pandas
+    frequency string (parsed by pandas, not free text) or one of the four interval closures."""
     if t.extension_name == "pandas.period":
         freq = getattr(t, "freq", None)
-        return isinstance(freq, str) and _PERIOD_FREQ.fullmatch(freq) is not None
+        if not (isinstance(freq, str) and _PERIOD_FREQ.fullmatch(freq)):
+            return False
+        from pandas.tseries.frequencies import to_offset  # pandas is only needed for this type
+
+        try:
+            to_offset(freq)
+        except (ValueError, TypeError):
+            return False
+        return True
     if t.extension_name == "pandas.interval":
         return getattr(t, "closed", None) in _INTERVAL_CLOSED
     return True
