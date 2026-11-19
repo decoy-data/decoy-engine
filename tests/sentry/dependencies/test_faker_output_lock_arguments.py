@@ -157,3 +157,34 @@ def test_a_changed_grid_row_is_named_by_family_target_and_case() -> None:
         "grid reflected random_int reflected.random_int.min_max_equal arguments"
     ]
     assert output_lock.diff_grid(old, {})["removed"] and output_lock.diff_grid({}, old)["added"]
+
+
+def test_a_seed_zero_raise_does_not_skip_seed_seven(monkeypatch: pytest.MonkeyPatch) -> None:
+    import argument_rows as rows
+
+    seen: list[int] = []
+
+    class Runner:
+        def __init__(self, *_: Any) -> None: ...
+
+        def draw(self, row: dict[str, Any], seed: int) -> list[Any]:
+            seen.append(seed)
+            if seed == 0:
+                raise ValueError("seed zero")
+            return ["ok"]
+
+    grid = {"reflected.x.y": {"family": "reflected", "arguments": {"args": [], "kwargs": {}}}}
+    monkeypatch.setattr(rows, "_RowRunner", Runner)
+    monkeypatch.setattr(rows, "derive_grid", lambda *_: grid)
+    fake_faker = type("F", (), {"Faker": staticmethod(lambda *_: object())})
+    cells = rows.argumented_cells(
+        "en_US",
+        None,
+        fake_faker,
+        digest=lambda vals: "d:" + "|".join(map(str, vals)),
+        cls=lambda e: type(e).__name__ if e else "",
+        norm=lambda v: v,
+    )
+    assert seen == [0, 7]
+    # One seed raised and one did not: the cell is a digest of both outcomes, not an error.
+    assert cells["reflected.x.y"]["draws"] == "d:raises:ValueError|ok"
