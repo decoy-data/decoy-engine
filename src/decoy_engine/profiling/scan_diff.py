@@ -337,9 +337,12 @@ class ScanDiffCore(_Core):
     tables: list[TableDiffCore]
 
 
-class ScanDiffCoreRead(
-    derive_read(ScanDiffCore, base=StrictReadBase, token=None, module=__name__)  # type: ignore[misc]
-):
+_ScanDiffCoreReadBase: Any = derive_read(
+    ScanDiffCore, base=StrictReadBase, token=None, module=__name__
+)
+
+
+class ScanDiffCoreRead(_ScanDiffCoreReadBase):
     """`ScanDiffCore` with unknown members ignored and `scan-diff/v1.<minor>` accepted."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
