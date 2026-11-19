@@ -33,6 +33,7 @@ from decoy_engine.generation.copula._model import (
     ROLE_NULL,
     ColumnMarginal,
 )
+from decoy_engine.quality.diagnostic import snapshot_null_fraction
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
@@ -116,11 +117,21 @@ def intervals_for(column: ColumnMarginal, role: str) -> Intervals:
     other = column.other_count if role != ROLE_NULL else 0
     if other > 0:
         states.append(State(STATE_OTHER, "", other))
-    counts = np.array([s.count for s in states], dtype=np.float64)
-    total = float(counts.sum())
-    width = counts / total
+    total = float(sum(s.count for s in states))
+    # The null state's share is the snapshot null rate, from its one owner.
+    null_share = snapshot_null_fraction(
+        {"null_count": column.null_count, "non_null_count": column.non_null_count}
+    )  # None only for zero rows, which the model validator refuses
+    width = np.array(
+        [(null_share or 0.0) if s.kind == STATE_NULL else _share(s.count, total) for s in states],
+        dtype=np.float64,
+    )
     lower = np.concatenate(([0.0], np.cumsum(width)[:-1]))
-    return Intervals(tuple(states), lower, width, other / total)
+    return Intervals(tuple(states), lower, width, _share(other, total))
+
+
+def _share(count: int, total: float) -> float:
+    return count / total
 
 
 def encode_states(intervals: Intervals, state_index: IntArray, jitter: FloatArray) -> FloatArray:

@@ -34,6 +34,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
+from decoy_engine.determinism import seed_bytes_to_int
 from decoy_engine.generation.copula import _floors, _rng
 from decoy_engine.generation.copula._marginals import (
     STATE_LABEL,
@@ -98,11 +99,11 @@ def fit_gaussian_copula(
 
         bitgen = np.random.PCG64(
             np.random.SeedSequence(
-                int.from_bytes(
+                seed_bytes_to_int(
                     hashlib.sha256(
                         _rng.framed(_rng.FIT_LABEL) + len(seed).to_bytes(4, "big") + seed
                     ).digest(),
-                    "big",
+                    widths=(32,),
                 )
             )
         )
