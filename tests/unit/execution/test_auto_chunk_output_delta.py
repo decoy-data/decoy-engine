@@ -140,6 +140,10 @@ def test_cell_matches_record_and_differences_are_guarantee_3(
                 name, disp, legacy, string_output=False, faker_native_all_null=faker_native_all_null
             )
         else:
-            # (c) a passthrough column present in today's output equals the source exactly.
-            assert disp.column(name).equals(src.column(name)), f"{name}: passthrough values/type"
-            assert disp.schema.field(name).equals(src.schema.field(name), check_metadata=True)
+            # (c) a passthrough column present in today's output equals the source exactly, except
+            # that O3 narrows a `large_string` source column to `string`.
+            want_field, want = src.schema.field(name), src.column(name)
+            if pa.types.is_large_string(want_field.type):
+                want_field, want = want_field.with_type(pa.string()), want.cast(pa.string())
+            assert disp.column(name).equals(want), f"{name}: passthrough values/type"
+            assert disp.schema.field(name).equals(want_field, check_metadata=True)

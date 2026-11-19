@@ -46,6 +46,15 @@ def _companion_state(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
 def _check_case(cfg: dict[str, Any], src: pa.Table, tmp_path: Path, **extra: Any) -> None:
     """Test 1's per-case assertions: a recording sink forwarding to a real Parquet sink."""
     expected = b6a.reference(cfg, src, **extra)[support.TABLE]
+    # O3: the resident reference narrows a pass-through `large_string` column to `string`, while a
+    # fixed-schema Parquet sink keeps the source `large_string` (same values, same file bytes as main).
+    for i, field in enumerate(expected.schema):
+        if pa.types.is_string(field.type) and pa.types.is_large_string(
+            src.schema.field(field.name).type
+        ):
+            expected = expected.set_column(
+                i, field.with_type(pa.large_string()), expected.column(i).cast(pa.large_string())
+            )
     sink, target = b6a.real_sink(tmp_path)
     result = b6a.run_streamed(cfg, src, sink, **extra)
     assert result.outputs == {}

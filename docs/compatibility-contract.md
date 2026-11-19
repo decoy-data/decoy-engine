@@ -610,6 +610,19 @@ No `SEED_PROTOCOL_VERSION` change.
 
 ### 3.4 The public API + CLI contract
 
+- **Pass-through text width (O3, 2026-11):** a pass-through `large_string` column leaves
+  every route as `string` when its values fit 32-bit offsets, and as `large_string` after
+  one value that cannot fit. Each batch is judged from its own offsets: a batch whose total
+  exceeds the limit is split at row boundaries into ordered `string` slices, and the source is
+  never pre-scanned or reread. A value that cannot fit promotes the column to `large_string`
+  for the rest of the run: the CSV writer keeps the value, and resident output widens its
+  earlier chunks. Parquet cannot store a single value of 2 GiB or more on any head: the raw
+  writer raises `ArrowInvalid` and a strict file-access write raises `FileAccessReadError`.
+  O3 adds no earlier refusal. A sink whose writer schema is fixed before the first batch
+  keeps the source `large_string` field, byte-equal to the previous release: the out-of-core
+  sink, the streamed `run_auto_chunk` sink and any `TransactionalSink`. Narrowing to `string`
+  applies to resident results, `run_mask_chunked` chunks, whole-frame output and CSV.
+
 - **Python:** the symbols re-exported from `decoy_engine/__init__.py` and
   `decoy_engine/sdk.py`, with their signatures and output-affecting defaults.
   As of 2026-09-30 this includes `read_fixed_width` and `FixedWidthParseError`
@@ -675,7 +688,9 @@ No `SEED_PROTOCOL_VERSION` change.
   nullable integer above 2^53, comes back exact; a read passthrough column that
   pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
   or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
-  string-redact and native-admissible deterministic categorical columns, the source type for passthrough), no pandas
+  string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
+  that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
+  "Pass-through text width" in §3.4), no pandas
   metadata on yielded chunks, and identical validation on both routes. A column
   that is `null`-typed in the first chunk and typed in a later one raises
   `chunked_leading_null_type` on both routes. Its error codes are
