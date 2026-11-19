@@ -6,6 +6,9 @@ independent baseline (same marginals, columns permuted apart) must fail the Spea
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -74,3 +77,11 @@ def test_constant_column_samples_its_constant() -> None:
     model = fit_gaussian_copula(frame, snapshot(frame), seed=seed_bytes(1))
     synth = sample_gaussian_copula(model, 50, seed=seed_bytes(2))
     assert (synth["k"] == 4.5).all()
+
+
+def test_fit_reproduces_the_recorded_model() -> None:
+    # `_model_v1.json` stands in for a fit in the model tests; this keeps it a real fit output.
+    recorded = json.loads((Path(__file__).parent / "_model_v1.json").read_text(encoding="utf-8"))
+    frame = numeric_frame(1, n=400)
+    model = fit_gaussian_copula(frame, snapshot(frame), seed=seed_bytes(5))
+    assert json.loads(json.dumps(model.to_dict())) == recorded

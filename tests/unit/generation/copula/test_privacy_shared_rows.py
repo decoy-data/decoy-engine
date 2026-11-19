@@ -1,7 +1,7 @@
 """A7 floor cells on shared rows: a pairwise-complete correlation sees only the rows both sides
 observe, so the distinguished-rows floor is counted on those rows too, for value, categorical and
-null-indicator partners. Also the structural zero under an indefinite raw matrix, and the exact
-eigenvalue floor of the repair."""
+null-indicator partners. Also the structural zero under an indefinite raw matrix (the repair's
+exact eigenvalue floor is tested beside it, in `test_nearest_corr.py`)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 from decoy_engine.generation.copula import GaussianCopulaModel, _fit, fit_gaussian_copula
 from decoy_engine.generation.copula._marginals import from_snapshot_entry
 from decoy_engine.generation.copula._model import latent_layout
-from decoy_engine.generation.copula._nearest_corr import min_eigenvalue, nearest_correlation
+from decoy_engine.generation.copula._nearest_corr import min_eigenvalue
 
 from ._fixtures import fit_stream, seed_bytes, snapshot
 
@@ -84,18 +84,6 @@ def test_structural_zero_holds_when_the_raw_matrix_is_indefinite() -> None:
     model = fit_gaussian_copula(frame, snap, seed=seed_bytes(1))
     matrix = model.correlation_matrix()
     assert matrix[1, 2] == 0.0 and abs(matrix[0, 1]) > 0.5 and abs(matrix[0, 2]) > 0.5
-
-
-@pytest.mark.parametrize("floor", [1e-8, 1e-3, 0.01, 0.1])
-def test_repair_reaches_the_requested_floor(floor: float) -> None:
-    for case in range(20):
-        rng = np.random.default_rng(100 + case)
-        a = rng.uniform(-1, 1, (8, 8))
-        a = (a + a.T) / 2
-        np.fill_diagonal(a, 1.0)
-        out = nearest_correlation(a, floor=floor)
-        assert min_eigenvalue(out) >= floor
-        assert np.all(np.diag(out) == 1.0)
 
 
 def test_shared_row_tie_suppresses_the_later_variable() -> None:
