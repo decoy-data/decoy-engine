@@ -152,10 +152,16 @@ class KeyFacts:
 
 
 def declare(
-    sources: Mapping[str, Mapping[str, Any]], relationships: Sequence[Mapping[str, Any]]
+    sources: Mapping[str, Mapping[str, Any]],
+    relationships: Sequence[Mapping[str, Any]],
+    positions: Sequence[int] | None = None,
 ) -> tuple[DeclaredRelationship, ...]:
-    """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data."""
-    return _declare(sources, relationships, set_aside_generate=False)[0]
+    """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data.
+    `positions` are the entries' places in the user's file (default: 1, 2, ...), so a refusal
+    names the right one after a caller kept only some of them."""
+    if positions is not None and len(positions) != len(relationships):
+        raise PipelineConfigError("relationship_positions must have one entry per relationship")
+    return _declare(sources, relationships, positions or (), set_aside_generate=False)[0]
 
 
 def declare_pipeline(
@@ -164,21 +170,23 @@ def declare_pipeline(
     """`declare` for a full pipeline. A relationship with an end whose table is not in
     `sources` (a generate table) is set aside and counted, not refused; scan has no rows to
     count for it. Every entry is parsed first, so a malformed one is a refusal either way."""
-    return _declare(sources, relationships, set_aside_generate=True)
+    return _declare(sources, relationships, (), set_aside_generate=True)
 
 
 def _declare(
     sources: Mapping[str, Mapping[str, Any]],
     relationships: Sequence[Mapping[str, Any]],
+    positions: Sequence[int],
     *,
     set_aside_generate: bool,
 ) -> tuple[tuple[DeclaredRelationship, ...], int]:
+    numbered = zip(positions or range(1, len(relationships) + 1), relationships, strict=True)
     parsed = [
         (
             position,
             parse_relationship_config(dict(raw), prefix=f"relationship {position} is invalid"),
         )
-        for position, raw in enumerate(relationships, 1)
+        for position, raw in numbered
     ]
     declared = []
     unchecked = 0

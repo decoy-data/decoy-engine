@@ -11,7 +11,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ### Added (SCAN-MULTI E-S1c: scan declaration, 2026-11-19)
 
-`DeclarationRequest.for_scan(config, tables=None)` turns a sources-only file or a full pipeline into the inputs of `scan_sources`, before any data row is read. `prepare_declared_sources` returns a `PreparedDeclaredSources` whose new `scan_declaration` property is a frozen `ScanDeclaration`: validated `descriptors`, the selected `tables`, the `relationships` to check, `unchecked_relationships` (a count of full-pipeline relationships that touch a generate table) and `ignored_keys`. A `column_names_file` is read once and carried inline. Nothing changes for `scan_sources` callers.
+`DeclarationRequest.for_scan(config, tables=None)` turns a sources-only file or a full pipeline into the inputs of `scan_sources`, before any data row is read. `prepare_declared_sources` returns a `PreparedDeclaredSources` whose new `scan_declaration` property is a frozen `ScanDeclaration`: validated `descriptors`, the selected `tables`, the `relationships` to check, `relationship_positions` (each kept relationship's place in the file), `unchecked_relationships` (a count of full-pipeline relationships that touch a generate table) and `ignored_keys`. A `column_names_file` is read once and carried inline. `scan_sources` takes the new keyword `relationship_positions` so a refusal names the relationship's place in the user's file; without it the numbering is unchanged.
 
 ## [0.28.0] - 2026-11-18
 

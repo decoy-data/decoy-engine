@@ -53,7 +53,7 @@ def two(tmp_path: Path) -> dict[str, Any]:
 
 
 def test_valid_sources_only_and_full_pipeline(two: dict[str, Any]) -> None:
-    expected, _, _ = scan_set.validate_scan_inputs(two, None, ())
+    expected = scan_set.validate_scan_inputs(two, None, ()).descriptors
     only = _declare({"sources": two})
     full = _declare({"version": 2, "sources": two, "tables": [], "global_settings": {"seed": 1}})
     for decl in (only, full):
@@ -101,6 +101,12 @@ def test_shape_values_are_coded_refusals(
     assert type(caught.value) is PipelineConfigError
 
 
+@pytest.mark.parametrize("tables", [5, "x", ["a", 5, {"name": 3}, None]])
+def test_unusable_tables_key_is_ignored_not_crashed(two: dict[str, Any], tables: Any) -> None:
+    decl = _declare({"sources": two, "tables": tables})
+    assert decl.ignored_keys == ("tables",)
+
+
 @pytest.mark.parametrize("key", sorted(set(PipelineConfig.model_fields) - _SHAPE_KEYS))
 def test_shape_is_derived_from_pipeline_config(two: dict[str, Any], key: str) -> None:
     decl = _declare({"sources": two, key: {}, "zz_unknown_key": 1})
@@ -127,7 +133,25 @@ def test_mixed_pipeline_sets_aside_generate_relationships(two: dict[str, Any]) -
         _declare({"sources": two, "tables": [], "relationships": [broken]})
 
 
-def test_table_selection_is_checked_at_prepare(two: dict[str, Any]) -> None:
+def test_relationship_positions_follow_the_file(two: dict[str, Any]) -> None:
+    to_generate = _rel("a", "g1")
+    wrong_column = {**_rel("a", "b"), "children": [{"table": "b", "columns": ["zz"]}]}
+    decl = _declare({"sources": two, "tables": [], "relationships": [to_generate, wrong_column]})
+    assert decl.relationship_positions == (2,)
+    with pytest.raises(PipelineConfigError, match="relationship 2 "):
+        scan_sources(
+            decl.descriptors,
+            relationships=decl.relationships,
+            relationship_positions=decl.relationship_positions,
+        )
+    repeated = {**_rel("a", "b"), "parent": {"table": "a", "columns": ["id", "id"]}}
+    with pytest.raises(PipelineConfigError, match="relationship 2 "):
+        _declare({"sources": two, "tables": [], "relationships": [to_generate, repeated]})
+
+
+def test_table_selection_is_refused_when_the_request_is_built(two: dict[str, Any]) -> None:
+    with pytest.raises(PipelineConfigError, match="not in sources"):
+        DeclarationRequest.for_scan({"sources": two}, ["zz"])
     with pytest.raises(PipelineConfigError, match="not in sources"):
         _declare({"sources": two}, ["a", "zz"])
     with pytest.raises(PipelineConfigError, match="more than once"):

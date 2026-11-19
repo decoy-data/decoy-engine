@@ -151,6 +151,8 @@ def declaration_findings(
     columns, each group in input order."""
     from decoy_engine.execution._pipeline_context import classify_table_kinds
 
+    if not inputs:
+        return ()
     known = {e.get("name") for e in config.get("tables") or [] if isinstance(e, Mapping)}
     kinds = classify_table_kinds(dict(config))
     tables: list[DeclarationFinding] = []
@@ -260,6 +262,8 @@ class ScanDeclaration:
     descriptors: Mapping[str, Mapping[str, Any]]
     tables: tuple[str, ...]
     relationships: tuple[Mapping[str, Any], ...]
+    # Each kept relationship's place in the user's file, for `scan_sources(relationship_positions=)`.
+    relationship_positions: tuple[int, ...] = ()
     unchecked_relationships: int = 0
     ignored_keys: tuple[str, ...] = ()
 
@@ -293,7 +297,6 @@ def _scan_shape(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[Mapping
 
 def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -> ScanDeclaration:
     # Imported here because the profiling package imports this one.
-    from decoy_engine.profiling import _scan_integrity
     from decoy_engine.profiling.scan_set import validate_scan_inputs
 
     sources, relationships = _scan_shape(config)
@@ -302,16 +305,14 @@ def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -
         unknown = next((k for k in config if k not in _SCAN_KEYS), None)
         if unknown is not None:
             raise PipelineConfigError(f"scan config has an unknown top-level key {unknown!r}")
-    kept, unchecked = relationships, 0
-    if ignored:
-        declared, unchecked = _scan_integrity.declare_pipeline(sources, relationships)
-        kept = [relationships[d.position - 1] for d in declared]
-    descriptors, selected, _ = validate_scan_inputs(sources, tables, kept)
+    checked = validate_scan_inputs(sources, tables, relationships, full_pipeline=bool(ignored))
+    positions = tuple(d.position for d in checked.declared)
     return ScanDeclaration(
-        _frozen_descriptors(descriptors),
-        tuple(selected),
-        tuple(MappingProxyType(copy.deepcopy(dict(r))) for r in kept),
-        unchecked,
+        _frozen_descriptors(checked.descriptors),
+        tuple(checked.selected),
+        tuple(MappingProxyType(copy.deepcopy(dict(relationships[p - 1]))) for p in positions),
+        positions,
+        checked.unchecked,
         ignored,
     )
 
@@ -337,7 +338,7 @@ def _inline_names(scan: ScanDeclaration, file_access: FileAccess | None) -> Scan
     from decoy_engine.profiling.scan_set import validate_scan_inputs
 
     sources = {n: _csv_inline(n, d, file_access) for n, d in scan.descriptors.items()}
-    descriptors, _, _ = validate_scan_inputs(sources, scan.tables, scan.relationships)
+    descriptors = validate_scan_inputs(sources, scan.tables, ()).descriptors
     return dataclasses.replace(scan, descriptors=_frozen_descriptors(descriptors))
 
 
