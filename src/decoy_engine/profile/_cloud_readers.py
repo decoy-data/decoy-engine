@@ -146,6 +146,38 @@ def _csv_sample_from_window(
     )
 
 
+def _csv_rows_from_ranges(
+    size: int, fetch: Callable[[int, int], bytes], n: int, lexeme_columns: Any = None
+) -> pd.DataFrame:
+    """The first `n` data rows of a CSV object, fewer only when the object has fewer.
+
+    Fetches the first window, then ranged windows of doubling size appended to the buffer
+    (a byte is never fetched twice), until the buffer cut at its last newline parses to
+    `n + 1` rows or the buffer is the whole object. One row past `n` proves the `n`-th row
+    was complete. A `ParserError` on a prefix may be a quoted field cut open at the last
+    newline, so it fetches again; on the whole object it is raised as `to_frame` would.
+    """
+    buffer = b""
+    window = _CSV_SAMPLE_WINDOW_BYTES
+    while True:
+        end = min(len(buffer) + window, size)
+        if end > len(buffer):
+            buffer += fetch(len(buffer), end - 1)
+        whole = len(buffer) >= size
+        text = buffer if whole else buffer.rsplit(b"\n", 1)[0] + b"\n"
+        try:
+            frame = pd.read_csv(
+                io.BytesIO(text), nrows=n + 1, **pandas_lexeme_kwargs(lexeme_columns)
+            )
+        except pd.errors.ParserError:
+            if whole:
+                raise
+        else:
+            if whole or len(frame) > n:
+                return frame.iloc[:n]
+        window *= 2
+
+
 # ---------------------------------------------------------------------
 # S3
 # ---------------------------------------------------------------------
@@ -224,7 +256,11 @@ class S3ParquetSource:
 
 
 class S3CsvSource:
-    """Bounded `ProfileSource` for an S3 CSV object (size estimate + window)."""
+    """`ProfileSource` for an S3 CSV object.
+
+    The row estimate and schema read one leading window. `sample_frame` reads ranged windows
+    until it holds the rows asked for or the object ends, so an ordinary sample is bounded but a
+    no-newline object or one giant quoted row can need the whole object."""
 
     def __init__(self, descriptor: dict[str, Any]) -> None:
         self._descriptor = descriptor
@@ -252,8 +288,14 @@ class S3CsvSource:
         return pa.Table.from_pandas(head, preserve_index=False).schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        size, window = self._size_and_window()
-        return _csv_sample_from_window(window, size, sample_rows, self._descriptor.get(LEXEME_KEY))
+        client = _s3_for(self._descriptor)
+        size = _s3_size(client, self._bucket, self._key)
+        return _csv_rows_from_ranges(
+            size,
+            lambda start, end: _s3_range(client, self._bucket, self._key, start, end),
+            sample_rows,
+            self._descriptor.get(LEXEME_KEY),
+        )
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
@@ -292,32 +334,40 @@ def _gcs_size(blob: Any) -> int:
     return int(blob.size)
 
 
+def _with_gcs_reads(
+    descriptor: dict[str, Any], consume: Callable[[int, Callable[[int, int], bytes]], Any]
+) -> Any:
+    """Run `consume(size, fetch)` inside one GCS client block.
+
+    Q18: storage.Client owns an HTTP transport; the context manager closes it once every
+    metadata and ranged read of this operation has completed.
+    """
+    with _clients.gcs_client() as client:
+        blob = _gcs_blob(descriptor, client)
+        size = _gcs_size(blob)
+
+        def fetch(start: int, end_inclusive: int) -> bytes:
+            return bytes(_clients.gcs_download(blob, start=start, end=end_inclusive))
+
+        return consume(size, fetch)
+
+
 class GcsParquetSource:
     """Bounded `ProfileSource` for a GCS Parquet object (footer + batch reads)."""
 
     def __init__(self, descriptor: dict[str, Any]) -> None:
         self._descriptor = descriptor
 
-    def _with_reads(self, consume: Callable[[int, Callable[[int, int], bytes]], Any]) -> Any:
-        # Q18: storage.Client owns an HTTP transport; close it via the context
-        # manager once all ranged reads for this call have completed.
-        with _clients.gcs_client() as client:
-            blob = _gcs_blob(self._descriptor, client)
-            size = _gcs_size(blob)
-
-            def fetch(start: int, end_inclusive: int) -> bytes:
-                return bytes(_clients.gcs_download(blob, start=start, end=end_inclusive))
-
-            return consume(size, fetch)
-
     def row_count(self) -> RowCount:
-        return self._with_reads(lambda size, fetch: _read_parquet_row_count(size, fetch))
+        return _with_gcs_reads(self._descriptor, _read_parquet_row_count)
 
     def schema(self) -> pa.Schema:
-        return self._with_reads(lambda size, fetch: _read_parquet_schema(size, fetch))
+        return _with_gcs_reads(self._descriptor, _read_parquet_schema)
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return self._with_reads(lambda size, fetch: _read_parquet_sample(size, fetch, sample_rows))
+        return _with_gcs_reads(
+            self._descriptor, lambda size, fetch: _read_parquet_sample(size, fetch, sample_rows)
+        )
 
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
@@ -326,7 +376,11 @@ class GcsParquetSource:
 
 
 class GcsCsvSource:
-    """Bounded `ProfileSource` for a GCS CSV object (size estimate + window)."""
+    """`ProfileSource` for a GCS CSV object.
+
+    The row estimate and schema read one leading window. `sample_frame` reads ranged windows
+    until it holds the rows asked for or the object ends, so an ordinary sample is bounded but a
+    no-newline object or one giant quoted row can need the whole object."""
 
     def __init__(self, descriptor: dict[str, Any]) -> None:
         self._descriptor = descriptor
@@ -355,8 +409,12 @@ class GcsCsvSource:
         return pa.Table.from_pandas(head, preserve_index=False).schema
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        size, window = self._size_and_window()
-        return _csv_sample_from_window(window, size, sample_rows, self._descriptor.get(LEXEME_KEY))
+        return _with_gcs_reads(
+            self._descriptor,
+            lambda size, fetch: _csv_rows_from_ranges(
+                size, fetch, sample_rows, self._descriptor.get(LEXEME_KEY)
+            ),
+        )
 
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
