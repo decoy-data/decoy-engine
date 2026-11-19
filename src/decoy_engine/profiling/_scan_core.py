@@ -8,7 +8,7 @@ detector ids and column names. `scan_set.py` builds these models from a scan.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Final, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic_core import PydanticCustomError
@@ -22,7 +22,7 @@ from decoy_engine._value_free import (
     derive_read,
 )
 from decoy_engine.detection._ner_rate import RateBucket
-from decoy_engine.profiling._basis import Basis
+from decoy_engine.profiling._basis import Basis, key_claim_allowed
 from decoy_engine.profiling._model_pass import Band
 from decoy_engine.profiling._scan_integrity import Status
 
@@ -103,7 +103,12 @@ class _TableCoreRules(SharedRules):
 
     @model_validator(mode="before")
     @classmethod
-    def _legacy_null_count(cls, data: Any) -> Any:
+    def _legacy_shape(cls, data: Any) -> Any:
+        # A record written before the basis labels names no basis, so its keys were never
+        # proven. They are dropped here, on write and on read, instead of refused: the record
+        # stays readable and exportable and claims nothing it cannot back.
+        if isinstance(data, dict) and "basis" not in data and data.get("key_candidates"):
+            data = {**data, "key_candidates": []}
         # A record written before the basis labels has neither member. A missing `scanned_rows`
         # is admitted only for that legacy shape, checked on the raw basis: an unknown basis
         # would otherwise fall back to `sample` on read and hide a missing count.
@@ -129,7 +134,18 @@ class _TableCoreRules(SharedRules):
         return self
 
 
-class TableCore(_Core, _TableCoreRules):
+class _KeyRules(WriteRules):
+    """A producer may not write a key claim from a sample."""
+
+    @model_validator(mode="after")
+    def _keys_need_a_whole_read(self) -> _KeyRules:
+        t: Any = self
+        if not key_claim_allowed(t.basis == "whole", bool(t.key_candidates)):
+            raise _refuse("key_candidates needs a whole basis")
+        return self
+
+
+class TableCore(_Core, _TableCoreRules, _KeyRules):
     name: str
     descriptor: dict[str, Any]
     row_count: int
@@ -177,4 +193,23 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
-ScanSetCoreRead: Final = derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)
+class ScanSetCoreRead(  # type: ignore[misc]
+    derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)
+):
+    """`ScanSetCore` read tolerantly. A table whose basis is not exactly `whole` (an older
+    record, or a value a later minor added) reads with no key candidates: they were never proven."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unproven_keys(cls, data: Any) -> Any:
+        tables = data.get("tables") if isinstance(data, dict) else None
+        if not isinstance(tables, list):
+            return data
+        fixed = [
+            {**t, "key_candidates": []}
+            if isinstance(t, dict)
+            and not key_claim_allowed(t.get("basis") == "whole", bool(t.get("key_candidates")))
+            else t
+            for t in tables
+        ]
+        return {**data, "tables": fixed}

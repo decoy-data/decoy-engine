@@ -29,6 +29,7 @@ __all__ = [
     "Basis",
     "BasisClass",
     "claim_keys",
+    "key_claim_allowed",
     "read_basis",
 ]
 
@@ -44,10 +45,19 @@ def read_basis(strategy: str, cap: int | None, reached_end: bool) -> Basis:
     return "whole" if strategy == "full" or cap is None or reached_end else "sample"
 
 
+def key_claim_allowed(whole: bool, claimed: bool) -> bool:
+    """The one key rule: a key claim needs a whole read; an empty claim is always fine.
+
+    The scan, the persisted scan core (write and read) and the planner profile all call it, so
+    "no key from a sample" has one definition.
+    """
+    return whole or not claimed
+
+
 def claim_keys(profile: ColumnProfile) -> tuple[str, ...]:
     """Columns that are keys: no nulls and all values distinct, claimed from a whole read only."""
     scanned = profile.row_count
-    if profile.basis != "whole" or scanned <= 0:
+    if scanned <= 0 or not key_claim_allowed(profile.basis == "whole", True):
         return ()
     return tuple(
         f.name for f in profile.fields if f.null_count == 0 and f.distinct_count == scanned

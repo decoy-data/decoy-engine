@@ -59,5 +59,7 @@ def test_a_pre_basis_scan_set_record_decodes_exports_and_reads_back() -> None:
     assert header.withheld_records == () and header.record_count == 1
     payload = exported.record.raw["payload"]
     assert payload["tables"][0]["descriptor"]["path"] == "claims.csv"
+    # The stored keys were never proven by a whole read, so export drops them.
+    assert payload["tables"][0]["key_candidates"] == []
     again = records.decode(canonical_bytes(exported.record.raw))
     assert isinstance(again, records.DecodedRecord) and again.id == exported.record.id

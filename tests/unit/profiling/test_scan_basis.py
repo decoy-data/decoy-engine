@@ -136,13 +136,14 @@ def test_at8_a_loaded_document_keeps_only_a_literal_basis(bad: Any) -> None:
 
 def _core(**table: Any) -> dict[str, Any]:
     doc = copy.deepcopy(corpus("scan-set-v1-core.json"))
-    doc["tables"][0].update(table)
+    # The stored core claims keys with no basis; a sampled table must claim none to be written.
+    doc["tables"][0].update({"key_candidates": [], **table})
     return doc
 
 
 def _drop(**table: Any) -> dict[str, Any]:
-    """The legacy core with the named table members removed."""
-    doc = _core()
+    """The pre-change core (it still claims keys) with the named table members removed."""
+    doc = copy.deepcopy(corpus("scan-set-v1-core.json"))
     for name in table:
         doc["tables"][0].pop(name, None)
     return doc
@@ -267,3 +268,58 @@ def test_at10_a_whole_basis_without_a_scanned_count_cannot_be_built() -> None:
     table.update(basis="whole", scanned_rows=None, row_count_exact=True)
     with pytest.raises(ValidationError):
         TableCore.model_validate(table)
+
+
+# -- the one key rule at the scan-core boundary ----------------------------------------------------
+
+KEYS = ["id", "amount"]
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        {"basis": "sample", "scanned_rows": None},
+        {"basis": "sample", "scanned_rows": 10},
+    ],
+    ids=["sample-null-count", "sample-counted"],
+)
+def test_a_producer_cannot_write_a_key_claim_from_a_sample(shape: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        ScanSetCore.model_validate(_core(key_candidates=KEYS, **shape))
+
+
+def test_a_whole_basis_may_claim_keys_on_write_and_read() -> None:
+    for model in MODELS:
+        got = model.model_validate(_core(key_candidates=KEYS, **WHOLE))
+        assert got.tables[0].key_candidates == KEYS  # type: ignore[attr-defined]
+
+
+def test_a_pre_basis_core_loses_its_unproven_keys_on_write_and_on_read() -> None:
+    for model in MODELS:
+        table = model.model_validate(_drop(basis=0, scanned_rows=0)).tables[0]  # type: ignore[attr-defined]
+        assert table.key_candidates == [] and table.basis == "sample"
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        {"basis": "sample", "scanned_rows": None},
+        {"basis": "sample", "scanned_rows": 10},
+        {"basis": "exact", "scanned_rows": 10},
+        {"basis": "Jane Roe", "scanned_rows": 10},
+    ],
+    ids=["sample-null-count", "sample-counted", "later-minor", "free-text"],
+)
+def test_a_read_drops_key_claims_on_any_basis_but_whole(shape: dict[str, Any]) -> None:
+    got = ScanSetCoreRead.model_validate(_core(key_candidates=KEYS, **shape))
+    assert got.tables[0].key_candidates == []  # type: ignore[attr-defined]
+
+
+def test_the_key_rule_has_one_definition() -> None:
+    from decoy_engine.profile import _types as planner
+    from decoy_engine.profiling import _basis, _scan_core
+
+    for module in (_scan_core, planner):
+        assert module.key_claim_allowed is _basis.key_claim_allowed  # type: ignore[attr-defined]
+    assert _basis.key_claim_allowed(True, True) and _basis.key_claim_allowed(False, False)
+    assert not _basis.key_claim_allowed(False, True)
