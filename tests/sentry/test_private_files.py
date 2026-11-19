@@ -19,6 +19,15 @@ whose `OSError`/`PermissionError`/`Exception`/bare handler is only `pass`, `...`
 `continue`; P4 a chmod (not fchmod) outside `decoy_engine/fileaccess/` whose mode has no
 execute bit or is not a constant.
 
+P5 an `os.open` that creates a file with mode 0600 and no `O_NOFOLLOW`, flags read
+through `os.O_*` and `_osflags.X` (mapped by `POSIX_NAME`; a module-level or local name is
+followed to its assignment). Limits of P5: an `import os as o` or `from os import O_CREAT`
+alias is not resolved (only the `os.` and `_osflags.` spellings are read); a flags or mode
+argument that is not a literal expression or a followed name (a call result, a parameter, a
+conditional) is not read, so that open is skipped; and on Windows `_osflags.NOFOLLOW` is 0, so
+the rule proves the flag is spelled, not that it protects there (the Windows arm of a private
+create is `create_owner_only_file`, EW4).
+
 Named limits: `duckdb.connection.execute` SQL is not read, so those dispositions are the hand
 review's; P3 and P4 see what the file-access scan (`tests/sentry/fa/`, reused here) records
 (`os.chmod`, `os.fchmod`, `.chmod()` on a known `Path`); `os.lchmod` is not in its sink set.
@@ -35,6 +44,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.fileaccess._osflags import POSIX_NAME
 from tests.sentry.fa.rules import load_registry
 from tests.sentry.fa.scan import Site, scan_tree
 
@@ -104,6 +114,16 @@ def _mode_arg(node: ast.Call, index: int, name: str = "mode") -> ast.AST | None:
     return node.args[index] if len(node.args) > index else None
 
 
+FLAG_MODULES = ("os", "_osflags")
+
+
+def _flag_name(node: ast.Attribute) -> str:
+    """`os.O_X` and `_osflags.X` both name the POSIX flag `O_X`; anything else names itself."""
+    if isinstance(node.value, ast.Name) and node.value.id == "_osflags":
+        return POSIX_NAME.get(node.attr, node.attr)
+    return node.attr
+
+
 def _writes(site: Site) -> bool:
     """True when a readable sink's call passes a write mode or write flags (fail closed)."""
     node = site.node
@@ -117,9 +137,9 @@ def _writes(site: Site) -> bool:
         if flags is None:
             return True
         for sub in ast.walk(flags):
-            if isinstance(sub, ast.Attribute) and sub.attr in WRITE_FLAGS:
+            if isinstance(sub, ast.Attribute) and _flag_name(sub) in WRITE_FLAGS:
                 return True
-            if isinstance(sub, ast.Name) and sub.id != "os":
+            if isinstance(sub, ast.Name) and sub.id not in FLAG_MODULES:
                 return True  # a named flag set the scan cannot read
         return False
     index = (0 if site.sink == "Path.open" else 1) + shift
@@ -229,6 +249,54 @@ def mode_findings(sites: list[Site], exempt_prefix: str) -> list[Finding]:
     return out
 
 
+# -- P5: a private open does not follow a final symlink ----------------------------------------
+
+
+def _module_assigns(root: Path, module: str) -> dict[str, ast.expr]:
+    tree = ast.parse((root / module).read_text(encoding="utf-8"))
+    return {
+        t.id: n.value
+        for n in tree.body
+        if isinstance(n, ast.Assign)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+
+
+def _flags_of(
+    expr: ast.AST,
+    local: dict[str, ast.expr],
+    module: dict[str, ast.expr],
+    seen: frozenset[str] = frozenset(),
+) -> set[str]:
+    names: set[str] = set()
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Attribute):
+            names.add(_flag_name(sub))
+        elif isinstance(sub, ast.Name) and sub.id not in FLAG_MODULES and sub.id not in seen:
+            followed = local.get(sub.id) or module.get(sub.id)
+            if followed is not None:
+                names |= _flags_of(followed, {}, module, seen | {sub.id})
+    return names
+
+
+def private_open_findings(sites: list[Site], root: Path) -> list[Finding]:
+    out: list[Finding] = []
+    for site in sites:
+        if site.sink != "os.open":
+            continue
+        shift = 1 if isinstance(site.node.func, ast.Name) and site.node.func.id == "_call" else 0
+        flags = _mode_arg(site.node, 1 + shift, "flags")
+        mode = _mode_arg(site.node, 2 + shift, "mode")
+        if flags is None or not (isinstance(mode, ast.Constant) and mode.value == 0o600):
+            continue
+        local = site.scope_info.assigned if site.scope_info is not None else {}
+        names = _flags_of(flags, local, _module_assigns(root, site.module))
+        if "O_CREAT" in names and "O_NOFOLLOW" not in names:
+            out.append(Finding(site.module, site.line, site.function, "P5"))
+    return out
+
+
 # -- the engine -------------------------------------------------------------------------------
 
 
@@ -273,6 +341,11 @@ def test_private_baseline_has_no_stale_keys() -> None:
     )
 
 
+def test_private_opens_do_not_follow_a_final_symlink() -> None:
+    found = [str(f) for f in private_open_findings(list(_engine_sites()), SRC)]
+    assert not found, "a 0600 create without O_NOFOLLOW (P5):\n" + "\n".join(found)
+
+
 @pytest.mark.parametrize("rule", ["P3", "P4"])
 def test_no_swallowed_or_late_mode_change(rule: str) -> None:
     found = [str(f) for f in mode_findings(list(_engine_sites()), EXEMPT_PREFIX) if f.rule == rule]
@@ -312,6 +385,7 @@ def seeded(tmp_path_factory: pytest.TempPathFactory) -> dict[str, set[str]]:
     entries = load_registry(SEEDED / "seeded_registry.toml.txt")
     findings = disposition_findings(entries, {s.key: s for s in sites}, frozenset())
     findings += mode_findings(sites, "pf/fileaccess/")
+    findings += private_open_findings(sites, root)
     out: dict[str, set[str]] = {}
     for f in findings:
         out.setdefault(f"{f.path}::{f.function}", set()).add(f.rule)
@@ -326,6 +400,11 @@ def seeded(tmp_path_factory: pytest.TempPathFactory) -> dict[str, set[str]]:
         ("pf/seeded_read_row.py::save", {"P1"}),
         ("pf/seeded_read_row.py::wrapped_write", {"P1"}),
         ("pf/seeded_private_row.py::save", {"P2"}),
+        ("pf/seeded_read_row.py::osflags_write", {"P1"}),
+        ("pf/seeded_osflags.py::private_without_nofollow", {"P5"}),
+        ("pf/seeded_osflags.py::private_os_spelling_without_nofollow", {"P5"}),
+        ("pf/seeded_osflags.py::private_named_flags_without_nofollow", {"P5"}),
+        ("pf/seeded_osflags.py::private_local_flags_without_nofollow", {"P5"}),
         ("pf/seeded_modes.py::swallowed_dir_chmod", {"P3"}),
         ("pf/seeded_modes.py::swallowed_fchmod", {"P3"}),
         ("pf/seeded_modes.py::from_import_alias", {"P4"}),
@@ -342,3 +421,6 @@ def test_seeded_controls_pass(seeded: dict[str, set[str]]) -> None:
     assert "pf/seeded_modes.py::directory_chmod_and_fchmod" not in seeded
     assert "pf/seeded_p1_p2.py::public_report" not in seeded
     assert "pf/seeded_read_row.py::wrapped_read" not in seeded
+    assert "pf/seeded_read_row.py::osflags_read" not in seeded
+    assert "pf/seeded_osflags.py::private_with_nofollow" not in seeded
+    assert "pf/seeded_osflags.py::public_create" not in seeded

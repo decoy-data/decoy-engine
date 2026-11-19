@@ -54,3 +54,19 @@ sink = "open"
 ordinal = 0
 reason = "seeded P2 case: private open, not baselined"
 disposition = "private"
+
+[[entry]]
+module = "pf/seeded_read_row.py"
+function = "osflags_write"
+sink = "os.open"
+ordinal = 0
+reason = "seeded P1 case: read row whose os.open passes write flags spelled through _osflags"
+disposition = "read"
+
+[[entry]]
+module = "pf/seeded_read_row.py"
+function = "osflags_read"
+sink = "os.open"
+ordinal = 0
+reason = "seeded control: read row whose os.open passes read-only flags spelled through _osflags"
+disposition = "read"

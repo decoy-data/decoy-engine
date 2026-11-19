@@ -84,3 +84,19 @@ from decoy_engine.vault._format import VAULT_NAMESPACE as VAULT_NAMESPACE
 from decoy_engine.vault._format import VaultError as VaultError
 from decoy_engine.vault._reader import load_vault as load_vault
 # isort: on
+
+# The vault became a package; a module never needed `__all__`, a public package does (census).
+__all__ = [
+    "VAULT_FORMAT_VERSION",
+    "VAULT_KEY_LABEL",
+    "VAULT_NAMESPACE",
+    "VaultCommit",
+    "VaultError",
+    "VaultWriter",
+    "assert_vault_writer_keyed",
+    "collect_vault_entries",
+    "issue_commit",
+    "iter_vault_columns",
+    "load_vault",
+    "vault_writer_for_config",
+]

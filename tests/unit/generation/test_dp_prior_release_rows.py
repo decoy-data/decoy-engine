@@ -92,10 +92,12 @@ _V0_28_0_ROWS = (
     "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
     "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
 )
-# The two rows v0.28.1 certifies: the dev/CI lock with the engine at 0.28.1, and the CLI runtime
-# profile on engine 0.28.1 with the 69 pins an install of the engine really has.
+# The rows v0.28.1 certifies: the dev/CI lock with the engine at 0.28.1 (376aa2... before the
+# time-machine pin of the Faker output lock, 8e4bb9... with it), and the CLI runtime profile on
+# engine 0.28.1 with the 69 pins an install of the engine really has.
 _V0_28_1_ROWS = (
     "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
+    "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
     "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
 )
 _ALL_ROWS = (
