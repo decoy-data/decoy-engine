@@ -424,3 +424,34 @@ def test_public_engine_imports_are_not_flagged(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert _internal_importers(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# FAKER-MIGRATE (AT-L21): the output-lock sentries are split by concern and stay below the size rule.
+# ---------------------------------------------------------------------------
+
+_DEPENDENCY_SENTRIES = ENGINE_ROOT / "tests" / "sentry" / "dependencies"
+_LOCK_SENTRIES = (
+    "test_faker_output_lock.py",
+    "test_faker_output_lock_schema.py",
+    "test_faker_output_lock_arguments.py",
+)
+
+
+def _physical_lines(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
+
+
+def test_output_lock_sentries_are_split_and_bounded() -> None:
+    manifest = (ENGINE_ROOT / "tests" / "sentry" / "test_sentry_manifest.py").read_text(
+        encoding="utf-8"
+    )
+    for name in _LOCK_SENTRIES:
+        path = _DEPENDENCY_SENTRIES / name
+        assert path.is_file(), name
+        assert _physical_lines(path) < 600, name
+        assert f'"tests/sentry/dependencies/{name}"' in manifest, name
+    assert _physical_lines(_DEPENDENCY_SENTRIES / "_faker_lock_lists.py") < 600
+    support = _DEPENDENCY_SENTRIES / "_faker_output_lock_support.py"
+    assert _physical_lines(support) < 250
+    assert "def test_" not in support.read_text(encoding="utf-8")

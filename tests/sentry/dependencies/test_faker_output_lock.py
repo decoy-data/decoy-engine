@@ -1,294 +1,45 @@
-"""Sentry: Faker output may not move unseen (FAKER-MIGRATE, AT-L1 to AT-L18).
+"""Sentry: Faker output may not move unseen (FAKER-MIGRATE, AT-L1, AT-L3 to AT-L6, AT-L8, AT-L9,
+AT-L11, AT-L13).
 
 `scripts/faker-determinism/output_lock.json` records, for every Faker locale, digests of what the
-engine's two Faker surfaces return under a frozen clock. These cells re-run the workers and diff
-the result against the file. The static cells (shape, reviewed lists, anchors) run in the ordinary
-sentry gate; the cells that spawn workers carry `faker_output_lock` and run in the required
-`faker-output-lock` CI job. Digests and exception class names only: no value reaches a message.
+engine's Faker surfaces return under a frozen clock. These cells re-run the workers and diff the
+result against the file. The cells that spawn workers carry `faker_output_lock` and run in the
+required `faker-output-lock` CI job; the seeded runner cells are static. Digests and exception
+class names only: no value reaches a message. Schema and reviewed lists are in
+`test_faker_output_lock_schema.py`, argument-bearing calls in
+`test_faker_output_lock_arguments.py`.
 """
 
+# ruff: noqa: F811  (fixtures are imported from the shared support module)
 from __future__ import annotations
 
 import copy
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.sentry.dependencies._faker_lock_lists import (
-    ANCHORS,
-    EN_US_DIGEST_FLOOR,
-    EXPECTED_CALENDAR,
-    EXPECTED_RAISES,
-    EXPECTED_UNSTABLE,
-    Entry,
-    Everywhere,
+from tests.sentry.dependencies._faker_lock_lists import EXPECTED_CALENDAR, EXPECTED_RAISES
+from tests.sentry.dependencies._faker_output_lock_support import (  # noqa: F401
+    SMALL,
+    _calendar,
+    _check_anchors_and_floor,
+    _expand,
+    _load_lock,
+    _minimal_lock,
+    _names,
+    _pairs,
+    _raises,
+    _small_diff,
+    _stub,
+    derived_surface,
+    docs_high_seeds_and_clock_b,
+    docs_low_seeds,
+    full_capture,
+    output_lock,
+    small_baseline,
 )
-
-ROOT = Path(__file__).resolve().parents[3]
-TOOL_DIR = ROOT / "scripts" / "faker-determinism"
-if str(TOOL_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOL_DIR))
-
-_spec = importlib.util.spec_from_file_location("output_lock", TOOL_DIR / "output_lock.py")
-assert _spec is not None and _spec.loader is not None
-output_lock = importlib.util.module_from_spec(_spec)
-sys.modules["output_lock"] = output_lock
-_spec.loader.exec_module(output_lock)
-
-LOCK_FILE = output_lock.LOCK_PATH
-SMALL = ["en_US", "pt_BR"]
-WORKER_CELL = [pytest.mark.faker_output_lock, pytest.mark.timeout(180)]
-
-
-# --- helpers -----------------------------------------------------------------------------------
-
-
-def _load_lock() -> dict[str, Any]:
-    return json.loads(LOCK_FILE.read_text(encoding="utf-8"))
-
-
-def _fields(surface: str) -> tuple[str, ...]:
-    return output_lock.SURFACE_FIELDS[surface]
-
-
-def _pairs(locales: dict[str, Any], pred: Any) -> set[tuple[str, str, str]]:
-    return {
-        (loc, surface, name)
-        for loc, entry in locales.items()
-        for surface in output_lock.SURFACE_FIELDS
-        for name, cell in entry[surface].items()
-        if pred(cell, surface)
-    }
-
-
-def _expand(
-    locales: dict[str, Any], table: dict[tuple[str, str], Entry]
-) -> set[tuple[str, str, str]]:
-    out: set[tuple[str, str, str]] = set()
-    for (surface, name), (where, reason) in table.items():
-        assert reason, f"{surface} {name} needs a reason"
-        if isinstance(where, Everywhere):
-            have = {
-                (loc, surface, name)
-                for loc, e in locales.items()
-                if name in e[surface] and loc not in where.except_
-            }
-            # A locale that joins the lock widens "everywhere"; the count makes that an edit.
-            assert len(have) == where.count, f"{surface} {name} now covers {len(have)} locales"
-            out |= have
-        else:
-            out |= {(loc, surface, name) for loc in where}
-    return out
-
-
-def _unstable(cell: dict[str, Any], surface: str) -> bool:
-    return any(cell[f] == "unstable" for f in _fields(surface))
-
-
-def _raises(cell: dict[str, Any], surface: str) -> bool:
-    return any(cell[f].startswith("raises:") for f in _fields(surface))
-
-
-def _calendar(cell: dict[str, Any], surface: str) -> bool:
-    return cell["calendar"] is True
-
-
-def _names(diff: dict[str, list[str]]) -> str:
-    return output_lock.render_diff(diff)
-
-
-def _stub(tmp_path: Path, body: str) -> str:
-    path = tmp_path / "stub.py"
-    path.write_text(body, encoding="utf-8")
-    return str(path)
-
-
-def _minimal_lock() -> dict[str, Any]:
-    digest = "a" * 64
-    return {
-        "lock_version": 2,
-        "faker_version": "40.23.0",
-        "codec_version": 1,
-        "samples": 8,
-        "clocks": ["2026-10-16T12:00:00Z", "2027-11-20T12:00:00Z"],
-        "locales": {
-            "en_US": {
-                "resolved": "en_US",
-                "reflected": {
-                    "first_name": {
-                        "kwargs": ["a"],
-                        "per_seed": digest,
-                        "sequential": "raises:ValueError",
-                        "calendar": False,
-                    }
-                },
-                "adapter": {
-                    "person_email": {"batch": "raises:AdapterError/KeyError", "calendar": True}
-                },
-                "raw": {"dob_anchored": {"draws": digest, "calendar": False}},
-                "argumented": {
-                    "date_between.date_objects": {
-                        "arguments": {
-                            "args": [],
-                            "kwargs": {"start_date": {"date": "2000-01-01"}, "end_date": "today"},
-                        },
-                        "draws": digest,
-                        "calendar": False,
-                    }
-                },
-            }
-        },
-    }
-
-
-def _leaf_paths(node: Any, path: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
-    """Paths of every primitive field and every list element of a lock document."""
-    if isinstance(node, dict):
-        return [p for k, v in node.items() for p in _leaf_paths(v, (*path, k))]
-    if isinstance(node, list):
-        return [p for i, v in enumerate(node) for p in _leaf_paths(v, (*path, i))]
-    return [path]
-
-
-def _set_at(doc: Any, path: tuple[Any, ...], value: Any) -> None:
-    for key in path[:-1]:
-        doc = doc[key]
-    doc[path[-1]] = value
-
-
-_WRONG_TYPES = (True, 7, 8.0, "7", "x", None, [], {})
-
-
-@pytest.fixture(scope="module")
-def small_baseline() -> dict[str, Any]:
-    return output_lock.capture(locales=SMALL)
-
-
-# The full capture is nine workers (eight clock-A hash seeds, one clock B). One test cell carries
-# the setup of the fixture it first asks for, and a cell has 180 s, so the nine run as two batches,
-# each built by its own early test below; `full_capture` then only classifies their documents.
-
-
-@pytest.fixture(scope="module")
-def docs_low_seeds() -> list[dict[str, Any]]:
-    return output_lock.gather([(output_lock.CLOCK_A, s) for s in output_lock.A_SEEDS[:4]])
-
-
-@pytest.fixture(scope="module")
-def docs_high_seeds_and_clock_b() -> list[dict[str, Any]]:
-    jobs = [(output_lock.CLOCK_A, s) for s in output_lock.A_SEEDS[4:]]
-    return output_lock.gather([*jobs, (output_lock.CLOCK_B, 0)])
-
-
-@pytest.fixture(scope="module")
-def full_capture(
-    docs_low_seeds: list[dict[str, Any]], docs_high_seeds_and_clock_b: list[dict[str, Any]]
-) -> dict[str, Any]:
-    docs = [*docs_low_seeds, *docs_high_seeds_and_clock_b]
-    return output_lock.classify(docs[:-1], docs[-1])
-
-
-def _small_diff(baseline: dict[str, Any], stub: str) -> dict[str, list[str]]:
-    observed = output_lock.capture(locales=SMALL, stub=stub)
-    return output_lock.diff_locales(baseline, observed)
-
-
-# --- static cells (no worker; ordinary sentry gate) --------------------------------------------
-
-
-def test_lock_is_closed_and_strict() -> None:
-    raw = LOCK_FILE.read_text(encoding="utf-8")
-    doc = json.loads(raw)
-    assert output_lock.check_lock_shape(doc) == []
-    assert raw == output_lock.canonical_text(doc), "output_lock.json is not canonical JSON"
-    assert output_lock.check_lock_shape(_minimal_lock()) == []
-
-
-# Argument descriptors accept several scalar types by design; AT-L18 tests them on their own.
-_STORED_FIELDS = [p for p in _leaf_paths(_minimal_lock()) if "arguments" not in p]
-
-
-@pytest.mark.parametrize("path", _STORED_FIELDS, ids=lambda p: ".".join(map(str, p)))
-def test_every_stored_field_refuses_wrong_types(path: tuple[Any, ...]) -> None:
-    good = _minimal_lock()
-    for wrong in _WRONG_TYPES:
-        bad = copy.deepcopy(good)
-        node: Any = bad
-        for key in path:
-            node = node[key]
-        if type(node) is type(wrong):
-            continue  # the same type is not a wrong type; patterns are tested separately
-        _set_at(bad, path, wrong)
-        assert output_lock.check_lock_shape(bad), f"{path} accepted {type(wrong).__name__}"
-
-
-@pytest.mark.parametrize(
-    "edit",
-    [
-        lambda d: d.update(extra=1),
-        lambda d: d["locales"]["en_US"].update(extra=1),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(extra=1),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(per_seed="a" * 63),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(per_seed="a" * 64 + "\n"),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(sequential="raises:x y"),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(calendar=1),
-        lambda d: d["locales"]["en_US"]["adapter"]["person_email"].update(calendar="yes"),
-        lambda d: d.update(lock_version=True),
-        lambda d: d.update(samples=8.0),
-        lambda d: d.update(samples="8"),
-        lambda d: d.update(clocks=["a", 1]),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(kwargs=[True]),
-        lambda d: d["locales"]["en_US"]["reflected"]["first_name"].update(kwargs=[1]),
-        lambda d: d["locales"]["en_US"].update(resolved=1),
-    ],
-)
-def test_malformed_lock_copies_are_refused(edit: Any) -> None:
-    doc = _minimal_lock()
-    edit(doc)
-    assert output_lock.check_lock_shape(doc)
-
-
-def test_non_canonical_bytes_are_refused() -> None:
-    doc = _minimal_lock()
-    assert output_lock.canonical_text(doc) != json.dumps(doc, indent=2) + "\n"
-    assert output_lock.canonical_text(doc).endswith("}\n")
-
-
-def test_expected_unstable_equals_the_lock() -> None:
-    locales = _load_lock()["locales"]
-    assert _pairs(locales, _unstable) == _expand(locales, EXPECTED_UNSTABLE)
-
-
-def test_a_new_locale_joining_an_everywhere_entry_is_caught() -> None:
-    locales = copy.deepcopy(_load_lock()["locales"])
-    locales["zz_ZZ"] = copy.deepcopy(locales["en_US"])
-    with pytest.raises(AssertionError, match="now covers"):
-        _expand(locales, EXPECTED_UNSTABLE)
-
-
-def test_a_stable_pair_marked_unstable_is_caught() -> None:
-    # Holds even if the real expected set were empty: the seeded copy differs from the list.
-    locales = copy.deepcopy(_load_lock()["locales"])
-    locales["en_US"]["reflected"]["first_name"]["per_seed"] = "unstable"
-    assert _pairs(locales, _unstable) != _expand(locales, EXPECTED_UNSTABLE)
-
-
-def test_expected_raises_equals_the_lock() -> None:
-    locales = _load_lock()["locales"]
-    assert _pairs(locales, _raises) == _expand(locales, EXPECTED_RAISES)
-
-
-def test_expected_calendar_equals_the_lock() -> None:
-    locales = _load_lock()["locales"]
-    assert _pairs(locales, _calendar) == _expand(locales, EXPECTED_CALENDAR)
-
-
-def test_anchors_and_floor() -> None:
-    _check_anchors_and_floor(_load_lock()["locales"])
 
 
 @pytest.mark.faker_output_lock
@@ -309,42 +60,6 @@ def test_workers_for_the_high_hash_seeds_and_clock_b_ran(
 @pytest.mark.timeout(180)
 def test_capture_keeps_anchors_and_floor(full_capture: dict[str, Any]) -> None:
     _check_anchors_and_floor(full_capture)
-
-
-def _check_anchors_and_floor(locales: dict[str, Any]) -> None:
-    for loc, surface, name in ANCHORS:
-        cell = locales[loc][surface][name]
-        assert all(len(cell[f]) == 64 for f in _fields(surface)), f"{loc} {surface} {name}"
-    digests = [
-        c
-        for c in locales["en_US"]["reflected"].values()
-        if all(len(c[f]) == 64 for f in _fields("reflected"))
-    ]
-    assert len(digests) >= EN_US_DIGEST_FLOOR
-
-
-def test_diff_has_one_branch_per_kind() -> None:
-    old = _minimal_lock()["locales"]
-    new = copy.deepcopy(old)
-    cell = new["en_US"]["reflected"]["first_name"]
-    cell["per_seed"] = "b" * 64
-    cell["sequential"] = "unstable"
-    cell["calendar"] = True
-    cell["kwargs"] = ["b"]
-    new["en_US"]["reflected"]["extra"] = copy.deepcopy(cell)
-    del new["en_US"]["adapter"]["person_email"]
-    new["de_DE"] = copy.deepcopy(new["en_US"])
-    diff = output_lock.diff_locales(old, new)
-    assert diff["changed"] and diff["removed"] and diff["added"]
-    assert diff["newly calendar-dependent"] and diff["newly unstable"]
-    old["en_US"]["reflected"]["first_name"]["sequential"] = "unstable"
-    assert output_lock.diff_locales(old, copy.deepcopy(old)) == {k: [] for k in output_lock.KINDS}
-    old2 = copy.deepcopy(old)
-    old2["en_US"]["reflected"]["first_name"]["sequential"] = "c" * 64
-    assert output_lock.diff_locales(old, old2)["newly reproducible"]
-    flipped = copy.deepcopy(old)
-    flipped["en_US"]["adapter"]["person_email"]["calendar"] = False
-    assert output_lock.diff_locales(old, flipped)["no longer calendar-dependent"]
 
 
 def _fake_runner(by_seed: dict[int, str], seen: list[tuple[str, int]] | None = None) -> Any:
@@ -412,34 +127,6 @@ def test_unstable_cell_that_agrees_on_every_seed_is_newly_reproducible() -> None
     observed = output_lock.capture(runner=steady)
     diff = output_lock.diff_locales(_baseline_with("unstable"), observed)
     assert "en_US reflected passport_gender per_seed" in diff["newly reproducible"]
-
-
-def test_changelog_line_for_changed_and_no_longer_calendar() -> None:
-    old = _minimal_lock()["locales"]
-    new = copy.deepcopy(old)
-    new["en_US"]["adapter"]["person_email"].update(batch="d" * 64, calendar=False)
-    lines = output_lock.changelog_changed_lines(output_lock.diff_locales(old, new))
-    assert lines == [
-        "Changed: en_US adapter person_email: digest changed and no longer depends on the calendar"
-    ]
-
-
-def test_codec_scalar_forms_and_error_hygiene() -> None:
-    import datetime as dt
-    import decimal
-
-    codec = sys.modules["digest_codec"]
-    enc = codec._pool_digest
-    aware = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
-    naive = dt.datetime(2026, 1, 1, 12, 0)
-    assert enc([aware]) != enc([naive])
-    assert enc([aware]) == enc([naive.replace(tzinfo=dt.timezone(dt.timedelta(0)))])
-    assert enc([dt.date(2026, 1, 1)]) != enc([naive])
-    assert enc([decimal.Decimal("1.50")]) != enc([decimal.Decimal("1.5")])
-    with pytest.raises(codec.PoolDigestTypeError) as info:
-        enc(["ok", ["SECRET-VALUE"]])
-    assert "SECRET-VALUE" not in str(info.value)
-    assert info.value.__cause__ is None and info.value.__context__ is None
 
 
 # --- worker cells (marker faker_output_lock; run in the required CI job) -----------------------
@@ -669,246 +356,91 @@ def test_raw_shapes_are_in_the_capture(small_baseline: dict[str, Any]) -> None:
     assert small_baseline["en_US"]["raw"] == _load_lock()["locales"]["en_US"]["raw"]
 
 
-# --- argument-bearing calls (AT-L16 to AT-L18) -------------------------------------------------
+_RANDOM_INT = (
+    "import functools\n"
+    "from faker.providers import BaseProvider as B\n"
+    "_o = B.random_int\n"
+    "@functools.wraps(_o)\n"
+    "def _w(self, min=0, max=9999, step=1):\n"
+    "    out = _o(self, min, max, step)\n"
+    "    return out + 1 if (min, max) == (7, 7) else out\n"
+    "B.random_int = _w\n"
+)
+_ADDRESS_DROPS_KEYS = (
+    "import functools\n"
+    "from faker.providers.address import Provider as A\n"
+    "_o = A.address\n"
+    "@functools.wraps(_o)\n"
+    "def _w(self, *a, **k):\n"
+    "    return _o(self)\n"
+    "A.address = _w\n"
+)
+_ADAPTER_EXTRA = (
+    "from decoy_engine.providers_v2 import _faker_adapter as fa\n"
+    "_o = fa.FakerAdapter._faker_call\n"
+    "def _w(self, provider, spec, fake=None):\n"
+    "    out = _o(self, provider, spec, fake)\n"
+    "    hit = spec.extra.get('min') == 7 == spec.extra.get('max')\n"
+    "    return out + 1 if hit and isinstance(out, int) else out\n"
+    "fa.FakerAdapter._faker_call = _w\n"
+)
+_DATE_BETWEEN_POSITIONAL = (
+    "import functools\n"
+    "from faker.providers.date_time import Provider as P\n"
+    "_o = P.date_between\n"
+    "@functools.wraps(_o)\n"
+    "def _w(self, *a, **k):\n"
+    "    out = _o(self, *a, **k)\n"
+    "    return out.replace(year=out.year - 1) if a else out\n"
+    "P.date_between = _w\n"
+)
+_STUBS = {
+    "reflected_random_int": (_RANDOM_INT, "reflected.random_int.min_max_equal"),
+    "address_override_drops_keys": (
+        _ADDRESS_DROPS_KEYS,
+        "address_override.address.unexpected_keyword",
+    ),
+    "adapter_extra": (_ADAPTER_EXTRA, "adapter.random_int_range.min_max_equal"),
+    "formula_positional": (_DATE_BETWEEN_POSITIONAL, "formula.date_between.positional_"),
+}
 
-_ARG_STUBS = {
-    # (a) the counterexample: output moves only when `start_date` is supplied.
-    "date_between_start_date": (
-        "import functools\n"
-        "from faker.providers.date_time import Provider as P\n"
-        "_orig = P.date_between\n"
-        "@functools.wraps(_orig)\n"
-        "def _w(self, *a, **k):\n"
-        "    out = _orig(self, *a, **k)\n"
-        "    return out.replace(year=out.year - 1) if 'start_date' in k else out\n"
-        "P.date_between = _w\n"
-    ),
-    # (b) output moves only when a bound is a date object.
-    "date_between_date_object": (
-        "import datetime, functools\n"
-        "from faker.providers.date_time import Provider as P\n"
-        "_orig = P.date_between\n"
-        "@functools.wraps(_orig)\n"
-        "def _w(self, *a, **k):\n"
-        "    out = _orig(self, *a, **k)\n"
-        "    objs = [v for v in (*a, *k.values()) if isinstance(v, datetime.date)]\n"
-        "    return out.replace(year=out.year - 1) if objs else out\n"
-        "P.date_between = _w\n"
-    ),
-    # (c) anchored date of birth moves only for a non-default age bound.
-    "anchored_dob_age_bounds": (
-        "import datetime, functools\n"
-        "import _engine_access as a\n"
-        "_orig = a.anchored_date_of_birth\n"
-        "@functools.wraps(_orig)\n"
-        "def _w(fake, tzinfo=None, minimum_age=0, maximum_age=115):\n"
-        "    out = _orig(fake, tzinfo, minimum_age, maximum_age)\n"
-        "    if (minimum_age, maximum_age) == (0, 115):\n"
-        "        return out\n"
-        "    return out + datetime.timedelta(days=1)\n"
-        "a.anchored_date_of_birth = _w\n"
-    ),
-}
-# `future_date` and `past_date` call `date_between` with keyword bounds, so a stub on it moves them
-# too; an absolute date string refuses in 40.23.0 (ParseError) and so cannot move.
-_ARG_EXPECTED_CHANGED = {
-    "date_between_start_date": {
-        "date_between.relative",
-        "date_between.date_objects",
-        "date_between.equal_boundary",
-        "future_date.relative",
-        "future_date.date_object",
-        "past_date.relative",
-        "past_date.date_object",
-    },
-    "date_between_date_object": {
-        "date_between.date_objects",
-        "date_between.equal_boundary",
-        "future_date.date_object",
-        "past_date.date_object",
-    },
-    "anchored_dob_age_bounds": {
-        "date_of_birth.adult_range",
-        "date_of_birth.equal_age_boundary",
-        "date_of_birth.adult_positional",
-    },
-}
+
+def _reflected_oracle(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    """Every reflected cell that differs between two captures, found without the sentry's diff."""
+    out = set()
+    for loc in SMALL:
+        old, new = before[loc]["reflected"], after[loc]["reflected"]
+        out |= {f"{loc} reflected {n}" for n in set(old) | set(new) if old.get(n) != new.get(n)}
+    return out
+
+
+def _reflected_reported(diff: dict[str, list[str]]) -> set[str]:
+    return {
+        " ".join(n.split(" ")[:3]) for names in diff.values() for n in names if " reflected " in n
+    }
 
 
 @pytest.mark.faker_output_lock
 @pytest.mark.timeout(180)
-@pytest.mark.parametrize("name", sorted(_ARG_STUBS))
+@pytest.mark.parametrize("name", sorted(_STUBS))
 def test_argument_only_changes_are_locked(
-    name: str, small_baseline: dict[str, Any], tmp_path: Path
+    name: str, small_baseline: dict[str, Any], tmp_path: Any
 ) -> None:
-    diff = _small_diff(small_baseline, _stub(tmp_path, _ARG_STUBS[name]))
-    moved = {
-        n.split(" argumented ", 1)[1].split(" ", 1)[0]
-        for n in diff["changed"]
-        if " argumented " in n
-    }
-    assert {m for m in moved} == _ARG_EXPECTED_CHANGED[name]
-    # The no-argument call of the changed method did not move: the old reflected cell was blind.
-    assert not [n for n in diff["changed"] if " reflected date_between " in n]
-    assert not [n for n in diff["changed"] if " reflected date_of_birth " in n]
-    assert "SECRET" not in _names(diff)
+    body, named = _STUBS[name]
+    after = output_lock.capture(locales=SMALL, stub=_stub(tmp_path, body))
+    diff = output_lock.diff_locales(small_baseline, after)
+    changed = [n for n in diff["changed"] if " argumented " in n]
+    assert any(f" argumented {named}" in n for n in changed), changed
+    # The complete reflected diff equals an independent cell-by-cell oracle: no subset filter, and
+    # an indirect reflected caller of the changed method is reported too.
+    assert _reflected_reported(diff) == _reflected_oracle(small_baseline, after)
+    assert "SECRET" not in output_lock.render_diff(diff)
 
 
-def _formula_forwarding_methods(source: str) -> set[str]:
-    """Faker methods the formula scope exposes with caller-supplied arguments, from its AST.
-
-    A dict value `self.faker.<m>` binds the method itself; a lambda that takes `*args` or `**kwargs`
-    forwards them, to `self.faker.<m>` or to the anchored date-of-birth helper (keyed by its name)."""
-    import ast
-
-    tree = ast.parse(source)
-    scope = next(
-        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_formula_scope"
-    )
-    table = next(
-        n.value
-        for n in ast.walk(scope)
-        if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)
-    )
-    out: set[str] = set()
-    for key, value in zip(table.keys, table.values, strict=True):
-        if isinstance(value, ast.Attribute) and ast.unparse(value.value) == "self.faker":
-            out.add(value.attr)
-        elif isinstance(value, ast.Lambda) and (value.args.vararg or value.args.kwarg):
-            calls = [ast.unparse(c.func) for c in ast.walk(value.body) if isinstance(c, ast.Call)]
-            if "anchored_date_of_birth" in calls and isinstance(key, ast.Constant):
-                out.add(str(key.value))
-            out.update(c.removeprefix("self.faker.") for c in calls if c.startswith("self.faker."))
-    return out
-
-
-_FORMULA_SOURCE = ROOT / "src" / "decoy_engine" / "generators" / "_formula.py"
-
-
-def test_every_argument_forwarding_formula_helper_has_grid_cases() -> None:
-    source = _FORMULA_SOURCE.read_text(encoding="utf-8")
-    assert _formula_forwarding_methods(source) == {m for m, _ in output_lock.grid_cells()}
-    # A new forwarding helper without a grid entry is caught (the seeded scratch copy).
-    seeded = source.replace(
-        '"date_between": self.faker.date_between,',
-        '"date_between": self.faker.date_between,\n'
-        '            "date_time_between": self.faker.date_time_between,',
-        1,
-    )
-    assert seeded != source
-    assert _formula_forwarding_methods(seeded) != {m for m, _ in output_lock.grid_cells()}
-
-
-# Faker-forwarding call families the lock covers: a call that spreads `**kwargs` into a callee
-# named like a provider. A file outside this table is a new family with no lock surface.
-_FORWARDING_FAMILIES = {
-    "generation/_column_streams.py": "reflected wrapper",
-    "generation/_faker_pool.py": "reflected wrapper",
-    "generation/_unique.py": "reflected wrapper",
-    "generation/synthesize.py": "reflected wrapper",
-    "generators/columns.py": "reflected wrapper",
-    "internal/faker_setup.py": "reflected wrapper and its address override",
-    "execution/native/_draw_site_providers_gen_pool.py": "reflected wrapper (native mirror)",
-    "execution/native/protocol/providers_gen.py": "reflected wrapper (native mirror)",
-    "providers_v2/_faker_adapter.py": "adapter",
-}
-
-
-def _forwarding_files(root: Path) -> set[str]:
-    import ast
-    import re
-
-    found: set[str] = set()
-    for path in sorted(root.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (
-                isinstance(node, ast.Call)
-                and any(k.arg is None for k in node.keywords)
-                and re.search(r"(?i)faker|fake|provider|method", ast.unparse(node.func))
-            ):
-                found.add(path.relative_to(root).as_posix())
-    return found
-
-
-def test_a_new_faker_forwarding_family_is_reported(tmp_path: Path) -> None:
-    found = _forwarding_files(ROOT / "src" / "decoy_engine")
-    assert found <= set(_FORWARDING_FAMILIES), sorted(found - set(_FORWARDING_FAMILIES))
-    (tmp_path / "new.py").write_text("def f(provider, kw):\n    return provider(**kw)\n")
-    assert _forwarding_files(tmp_path) == {"new.py"}
-
-
-_EXPECTED_GRID = {
-    "date_between.relative": ([], {"start_date": "-30y", "end_date": "today"}),
-    "date_between.absolute_strings": ([], {"start_date": "2000-01-01", "end_date": "2000-12-31"}),
-    "date_between.date_objects": (
-        [],
-        {"start_date": {"date": "2000-01-01"}, "end_date": {"date": "2000-12-31"}},
-    ),
-    "date_between.equal_boundary": (
-        [],
-        {"start_date": {"date": "2000-01-01"}, "end_date": {"date": "2000-01-01"}},
-    ),
-    "future_date.relative": ([], {"end_date": "+30d"}),
-    "future_date.absolute_string": ([], {"end_date": "2030-01-01"}),
-    "future_date.date_object": ([], {"end_date": {"date": "2030-01-01"}}),
-    "past_date.relative": ([], {"start_date": "-30d"}),
-    "past_date.absolute_string": ([], {"start_date": "2000-01-01"}),
-    "past_date.date_object": ([], {"start_date": {"date": "2000-01-01"}}),
-    "date_of_birth.full_bounds": ([], {"minimum_age": 0, "maximum_age": 115}),
-    "date_of_birth.adult_range": ([], {"minimum_age": 18, "maximum_age": 65}),
-    "date_of_birth.equal_age_boundary": ([], {"minimum_age": 18, "maximum_age": 18}),
-    "date_of_birth.adult_positional": ([None, 18, 65], {}),
-}
-for _m in ("date_this_decade", "date_this_year", "date_this_month"):
-    for _case, _kw in (
-        ("before_only", (True, False)),
-        ("after_only", (False, True)),
-        ("both_sides", (True, True)),
-        ("neither_side", (False, False)),
-    ):
-        _EXPECTED_GRID[f"{_m}.{_case}"] = ([], {"before_today": _kw[0], "after_today": _kw[1]})
-
-
-def test_argument_grid_is_fixed_and_strict() -> None:
-    cells = {f"{m}.{c}": (a, k) for (m, c), (a, k) in output_lock.grid_cells().items()}
-    assert cells == _EXPECTED_GRID
-    methods = {m for m, _ in output_lock.grid_cells()}
-    assert all(any(m == x for x, _ in output_lock.grid_cells()) for m in methods)
-    # Decoding then re-encoding is byte-identical for every descriptor.
-    for args, kwargs in cells.values():
-        for d in (*args, *kwargs.values()):
-            again = output_lock.encode_descriptor(output_lock.decode_descriptor(d))
-            assert json.dumps(again, sort_keys=True) == json.dumps(d, sort_keys=True)
-    good = _minimal_lock()
-    assert output_lock.check_lock_shape(good) == []
-    path = ("locales", "en_US", "argumented", "date_between.date_objects", "arguments")
-    for bad in (
-        {"args": [], "kwargs": {"start_date": {"date": 1}}},
-        {"args": [], "kwargs": {"start_date": {"date": "2000-13-45"}}},
-        {"args": [], "kwargs": {"start_date": {"date": "2000-01-01\n"}}},
-        {"args": [], "kwargs": {"start_date": {"date": "2000-01-01", "x": 1}}},
-        {"args": [], "kwargs": {"start_date": {"when": "2000-01-01"}}},
-        {"args": [], "kwargs": {"start_date": 1.5}},
-        {"args": [], "kwargs": {"start_date": [1]}},
-        {"args": {}, "kwargs": {}},
-        {"args": [], "kwargs": []},
-        {"args": []},
-        {"args": [], "kwargs": {}, "extra": 1},
-    ):
-        broken = copy.deepcopy(good)
-        _set_at(broken, path, bad)
-        assert output_lock.check_lock_shape(broken), bad
-
-
-def test_a_changed_argument_descriptor_is_a_named_change() -> None:
-    old = _minimal_lock()["locales"]
-    new = copy.deepcopy(old)
-    cell = new["en_US"]["argumented"]["date_between.date_objects"]
-    cell["arguments"]["kwargs"]["end_date"] = "-1y"
-    diff = output_lock.diff_locales(old, new)
-    assert diff["changed"] == ["en_US argumented date_between.date_objects arguments"]
-    del new["en_US"]["argumented"]["date_between.date_objects"]
-    new["en_US"]["argumented"]["date_between.other"] = cell
-    diff = output_lock.diff_locales(old, new)
-    assert diff["removed"] == ["en_US argumented date_between.date_objects"]
-    assert diff["added"] == ["en_US argumented date_between.other"]
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+def test_decade_relative_case_crosses_clock_boundary() -> None:
+    assert output_lock.CLOCK_A.startswith("2026-10-") and output_lock.CLOCK_B.startswith("2030-01-")
+    cells = output_lock.capture(locales=["en_US"])["en_US"]["argumented"]
+    for helper in ("date_this_decade", "date_this_year", "date_this_month"):
+        assert cells[f"formula.{helper}.after_today_true"]["calendar"] is True, helper
