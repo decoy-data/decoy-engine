@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from decoy_engine.generation.copula._nearest_corr import (
     SHRINK_LADDER,
     min_eigenvalue,

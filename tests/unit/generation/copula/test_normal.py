@@ -13,6 +13,7 @@ from statistics import NormalDist
 
 import numpy as np
 import pytest
+
 from decoy_engine.generation.copula._normal import ndtr, ndtri
 
 _REF = json.loads(Path(__file__).with_name("_normal_reference.json").read_text(encoding="utf-8"))
