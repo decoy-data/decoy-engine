@@ -7,9 +7,11 @@ lives in `model_pack/_mlstack.py`; the trainer and the status probe both go thro
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -26,13 +28,14 @@ def _mlstack() -> ModuleType:
 def test_sklearn_is_imported_before_lightgbm(monkeypatch: pytest.MonkeyPatch) -> None:
     mod = _mlstack()
     seen: list[str] = []
-    real = importlib.import_module
+    real = builtins.__import__
 
-    def record(name: str, package: str | None = None) -> ModuleType:
-        seen.append(name)
-        return real(name, package)
+    def record(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in {"sklearn", "lightgbm"}:
+            seen.append(name)
+        return real(name, *args, **kwargs)
 
-    monkeypatch.setattr(mod.importlib, "import_module", record)
+    monkeypatch.setattr(builtins, "__import__", record)
     mod.import_ml_stack()
     assert seen == ["sklearn", "lightgbm"]
 
