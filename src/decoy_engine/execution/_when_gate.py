@@ -162,7 +162,10 @@ def when_eval_frame(
         if name not in frame.columns:
             continue
         col = frame[name]
-        if not isinstance(col, pd.Series):  # duplicate column labels: let pandas report them
+        if not isinstance(col, pd.Series):
+            # Duplicate column labels give a DataFrame. The whole frame goes back unchanged, so
+            # pandas evaluates (or refuses) it exactly as it did before the exact-integer frame;
+            # the config gate already rejects duplicate names, so this is a defensive path.
             return frame
         data[name] = _exact_column(col, literals.get(name, ()))
     return pd.DataFrame(data, index=frame.index)

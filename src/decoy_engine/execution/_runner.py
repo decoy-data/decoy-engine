@@ -23,7 +23,7 @@ import heapq
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
@@ -173,8 +173,8 @@ def date_shift_group_columns(plan: Plan, registry: ProviderRegistry) -> dict[str
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
             continue
-        group_by = provider_config_to_dict(node.plan_slice.provider_config).get("group_by")
-        if isinstance(group_by, str) and group_by:
+        group_by = group_by_sibling(provider_config_to_dict(node.plan_slice.provider_config))
+        if group_by is not None:
             out.setdefault(node.table, set()).add(group_by)
     return out
 
@@ -199,6 +199,14 @@ def top_code_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[st
         for col in node.columns:
             out.setdefault(node.table, set()).add(col)
     return out
+
+
+def group_by_sibling(provider_config: Mapping[str, Any] | None) -> str | None:
+    """The `group_by` sibling a `group_key` column names, or None. The one reading of that key:
+    an empty or non-string value is never a real column (the plan walker and unified admission
+    both go through here)."""
+    group_by = (provider_config or {}).get("group_by")
+    return group_by if isinstance(group_by, str) and group_by else None
 
 
 def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[str, set[str]]:

@@ -176,3 +176,35 @@ def test_blank_bearing_chunk_of_in_range_values_with_an_out_of_range_literal(
     """The literal alone forces exact evaluation: float64 would round the literal to 2**53."""
     frame = dict(_frames(values))["Int64"]
     assert _eval(frame, expression) == reference(expression, values)
+
+
+def test_python_engine_error_is_value_free_and_has_no_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The exact-integer path evaluates with pandas' Python engine. Its failure carries no
+    expression, no literal and no chained cause, as the numexpr path does."""
+    import logging
+
+    from decoy_engine.execution._errors import StrategyError
+
+    frame = pd.DataFrame({"v": pd.array([BIG + 1, None], dtype="Int64")})
+    # The wide literal selects the object path; a string literal against it cannot compare.
+    expression = f"v == {L} and v == 'secret-literal-123'"
+    with caplog.at_level(logging.DEBUG, logger="decoy_engine.execution._when_gate"):
+        with pytest.raises(StrategyError) as info:
+            _eval(frame, expression)
+    assert info.value.code == "when_expression_error"
+    assert info.value.__cause__ is None and info.value.__context__ is None
+    assert "secret-literal-123" not in str(info.value)
+    assert str(L) not in str(info.value)
+    assert all(
+        "secret-literal-123" not in r.getMessage() and str(L) not in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_duplicate_column_labels_hand_the_frame_back_unchanged() -> None:
+    from decoy_engine.execution._when_gate import when_eval_frame
+
+    frame = pd.DataFrame([[1, 2]], columns=["v", "v"])
+    assert when_eval_frame(frame, ("v",), {"v": (1,)}) is frame

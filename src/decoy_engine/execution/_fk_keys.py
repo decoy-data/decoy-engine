@@ -411,14 +411,15 @@ def lossless_int_columns_from_config(
     declared integers, `group_key` `group_by` siblings, and the columns a `when:` reads.
     Relationships are declined upstream and `date_shift`/`top_code` never reach it."""
     from decoy_engine._lexeme import integer_columns_by_table
+    from decoy_engine.execution._runner import group_by_sibling
 
     exact: set[str] = set(integer_columns_by_table(config).get(table, ()))
     entries = next(
         (t.get("columns") or () for t in config.get("tables") or () if t.get("name") == table), ()
     )
     for entry in entries:
-        group_by = (entry.get("provider_config") or {}).get("group_by")
-        if entry.get("strategy") == "group_key" and isinstance(group_by, str) and group_by:
+        group_by = group_by_sibling(entry.get("provider_config"))
+        if entry.get("strategy") == "group_key" and group_by is not None:
             exact.add(group_by)
     when_read = _when_read_columns([(table, ((e.get("name"), e.get("when")) for e in entries))])
     return LosslessInts(

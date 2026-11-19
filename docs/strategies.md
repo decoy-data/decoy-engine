@@ -1353,7 +1353,10 @@ An integer column compares exactly on every route, including values and literals
 2**53, and a blank integer cell is treated as `NaN`: `!=`, `not in` and `not (...)` around a
 comparison that is false for it select the blank row, and `==`, `in` and the ordering tests do
 not. This holds for plain columns and for FK keys, declared integers, `date_shift` anchors,
-`top_code` columns and `group_key` siblings alike. A null cell in any other column behaves as pandas treats it. It equals no literal, so `==`, `in` and
+`top_code` columns and `group_key` siblings alike. A null cell in any other column behaves as
+pandas treats it.
+
+A null cell equals no literal, so `==`, `in` and
 the ordering tests do not select it, while `!=`, `not in` and `not (...)` do. A
 nullable column can give a missing result for a test, and a missing result
 selects nothing. The native chunked route takes the selection from the same pandas
