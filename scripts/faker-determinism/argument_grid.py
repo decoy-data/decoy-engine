@@ -1,12 +1,10 @@
 """The derived caller-argument surface of the Faker output lock, and its grid.
 
 Callers reach Faker with arguments through four seams: YAML `faker_kwargs` into the reflected
-wrapper, the same mapping into the separate `address` wrapper, `ProviderSpec.extra` into the V2
-adapter, and positional or keyword arguments in formulas. This module discovers those targets from
-the runtime callables and their effective signatures (never from source text), derives one grid of
-rows from `PARAMETER_SHAPES`, and holds the closed descriptor codec the lock stores them in. It
-imports no engine module: the engine seams arrive as the `access` argument
-(`_engine_access.py`).
+wrapper and the separate `address` wrapper, `ProviderSpec.extra` into the V2 adapter, and formula
+arguments. This module discovers those targets from the runtime callables and their effective
+signatures (never source text), derives one grid of rows, and holds the closed descriptor codec the
+lock stores them in. Engine seams arrive as the `access` argument (`_engine_access.py`).
 """
 
 from __future__ import annotations
@@ -25,13 +23,12 @@ BYTE_LIMIT = 32 * 1024 * 1024  # canonical lock bytes
 
 
 def text_within_limit(text: str) -> bool:
-    """True when the canonical lock text is no larger than the byte cap."""
     return len(text.encode("utf-8")) <= BYTE_LIMIT
 
 
 _EMPTY = inspect.Parameter.empty
 _VAR_KW, _VAR_POS = inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL
-_KW_NAME, _POS_NAME = _VAR_KW.name, _VAR_POS.name  # `Param.kind` holds the kind name
+_KW_NAME, _POS_NAME = _VAR_KW.name, _VAR_POS.name
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
