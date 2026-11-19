@@ -61,6 +61,10 @@ class StarterDecision:
 
     `deterministic` is always False today; it is kept because the CLI's `Inference` carried it
     and the emitter writes `deterministic: true` when it is set.
+
+    `detector_id` names the detector whose descriptor chose the strategy, and
+    `confidence_bucket` is that match's bucket. Both are empty when no detector decided (the
+    fallback and the integer-key rule), so a review can name what it is confirming.
     """
 
     strategy: str
@@ -68,12 +72,14 @@ class StarterDecision:
     provider_config: Mapping[str, Any] = field(default_factory=_empty_mapping)
     review: str = ""
     deterministic: bool = False
+    detector_id: str = ""
+    confidence_bucket: str | None = None
 
 
 _FALLBACK = StarterDecision(strategy="redact", review=_FALLBACK_REVIEW)
 
 
-def _from_descriptor(detector_id: str) -> StarterDecision:
+def _from_descriptor(detector_id: str, bucket: str | None) -> StarterDecision:
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
         return _FALLBACK
@@ -82,6 +88,8 @@ def _from_descriptor(detector_id: str) -> StarterDecision:
         provider=choice.provider,
         provider_config=choice.provider_config,
         review=choice.review,
+        detector_id=detector_id,
+        confidence_bucket=bucket,
     )
 
 
@@ -109,7 +117,10 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
     if confident:
         confident.sort(key=lambda m: -getattr(m, "match_rate", 0.0))
         top = confident[0]
-        base = _from_descriptor(getattr(top, "detector_id", ""))
+        bucket = getattr(top, "confidence", None)
+        base = _from_descriptor(
+            getattr(top, "detector_id", ""), bucket if isinstance(bucket, str) else None
+        )
         ambiguous = (
             len(confident) > 1
             and getattr(top, "match_rate", 0.0) - getattr(confident[1], "match_rate", 0.0)
@@ -124,6 +135,8 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
             provider_config=base.provider_config,
             review=_AMBIGUOUS_TEMPLATE.format(signals=signals, chosen=base.strategy),
             deterministic=base.deterministic,
+            detector_id=base.detector_id,
+            confidence_bucket=base.confidence_bucket,
         )
 
     if getattr(field_stats, "inferred_type", "") == "integer" and getattr(
