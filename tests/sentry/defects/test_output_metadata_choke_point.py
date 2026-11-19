@@ -3,12 +3,12 @@ only by an output writer of the Arrow adapter, and each output writer applies `s
 
 The scan walks `src/decoy_engine` and finds every call that can write a Parquet file: the pyarrow
 writers, the two adapter writers, the Polars and pandas writers by attribute name, and an
-`execute()` or `sql()` call whose SQL text is a `COPY ... TO` into Parquet. The SQL text joins
+`execute()`, `sql()`, `query()` or `from_query()` call whose SQL text is a `COPY ... TO` into Parquet. The SQL text joins
 string literals and f-string parts and resolves a name bound to a module-level string constant,
 also through `from m import NAME as alias`. A hit passes only when it sits in an output writer
 (`write_output_table`, `output_parquet_writer`), in a raw primitive of the adapters, or in a row
-of `baselines/parquet-intermediate-writers.json`: an intermediate file Decoy never publishes, or
-the subset output, which Polars writes without source metadata. The baseline is shrink-only
+of `baselines/parquet-intermediate-writers.json`: an intermediate file Decoy never publishes. The
+baseline is shrink-only
 (`scripts/dev/ratchet_check.py`), keyed by module and function, with the count of hits it excuses.
 
 Named limits: attribute-name matching (`write_parquet`, `sink_parquet`, `to_parquet`) does not
@@ -49,7 +49,7 @@ QUALIFIED = frozenset(
     }
 )
 ATTRIBUTE_WRITERS = frozenset({"to_parquet", "write_parquet", "sink_parquet"})
-SQL_CALLS = frozenset({"execute", "sql"})
+SQL_CALLS = frozenset({"execute", "sql", "query", "from_query"})
 COPY_TO_PARQUET = re.compile(
     r"\bCOPY\b[\s\S]*?\bTO\b[\s\S]*?(\bFORMAT\s*['\"]?PARQUET\b|\.parquet\b)", re.IGNORECASE
 )
@@ -62,7 +62,7 @@ OUTPUT_WRITERS = {
 PRIMITIVES = frozenset(
     {(ARROW, "write_table"), (ARROW, "parquet_writer"), (POLARS, "write_parquet")}
 )
-CATEGORIES = frozenset({"intermediate", "published-polars"})
+CATEGORIES = frozenset({"intermediate"})
 
 
 @dataclass(frozen=True)
@@ -269,9 +269,8 @@ def test_baseline_rows_are_reviewed() -> None:
         assert len(reason) >= 15 and not reason.lower().startswith(("todo", "review")), key
 
 
-def test_the_published_polars_row_is_the_subset_output() -> None:
-    rows = {k for k, e in _baseline().items() if e["category"] == "published-polars"}
-    assert {k.partition("::")[0] for k in rows} == {"decoy_engine/subset/_materialize.py"}
+def test_no_published_writer_is_baselined() -> None:
+    assert not [k for k in _baseline() if "subset/_materialize" in k]
 
 
 def test_the_scan_sees_the_seven_copy_statements_in_three_functions() -> None:
@@ -399,6 +398,15 @@ SEEDED: dict[str, tuple[str, str]] = {
     ),
     "copy_sql_call": (
         "def f(conn):\n    conn.sql(\"copy (select 1) to 'x' (format parquet)\")\n",
+        "sql:copy-to-parquet",
+    ),
+    "copy_query_call": (
+        "def f(conn):\n    conn.query(\"COPY t TO 'x' (FORMAT PARQUET)\")\n",
+        "sql:copy-to-parquet",
+    ),
+    "copy_from_query_call": (
+        "import duckdb\n"
+        "def f():\n    duckdb.from_query(\"copy (select 1) to 'x' (format parquet)\")\n",
         "sql:copy-to-parquet",
     ),
     "copy_extension_only": (

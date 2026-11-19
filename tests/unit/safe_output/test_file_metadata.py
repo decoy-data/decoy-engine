@@ -550,3 +550,80 @@ def test_a_pandas_period_with_a_forged_frequency_is_written_as_storage() -> None
     out = output_schema(pa.schema([pa.field("n", ArrowPeriodType("DCY-CANARY"))]))
     assert out.field("n").type == pa.int64()
     assert CANARY not in out.serialize().to_pybytes()
+
+
+# -- free text in type parameters ----------------------------------------------------------------
+
+BAD_TZ = "https://user:DCY-CANARY@example.invalid/x"
+
+
+def _interval(subtype: pa.DataType, closed: str = "right") -> pa.DataType:
+    from pandas.core.arrays.arrow.extension_types import ArrowIntervalType
+
+    return ArrowIntervalType(subtype, closed)
+
+
+def _written(typ: pa.DataType, tmp_path: Path) -> tuple[pa.Table, bytes]:
+    """Write one column of `typ` through the output rule and read the file back."""
+    if isinstance(typ, pa.BaseExtensionType):
+        sub = typ.storage_type[0].type
+        ends = pa.array([0, 1], pa.int64()).cast(sub)
+        storage = pa.StructArray.from_arrays([ends, ends], fields=list(typ.storage_type))
+        column = pa.ExtensionArray.from_storage(typ, storage)
+    else:
+        column = pa.array([0, 1], pa.int64()).cast(typ)
+    path = tmp_path / "t.parquet"
+    pq.write_table(output_table(pa.table({"c": column})), path)
+    return pq.read_table(path), path.read_bytes()
+
+
+def test_a_timestamp_with_free_text_in_its_zone_loses_the_zone(tmp_path: Path) -> None:
+    back, raw = _written(pa.timestamp("us", BAD_TZ), tmp_path)
+    assert back.schema.field("c").type == pa.timestamp("us")
+    assert CANARY not in raw
+
+
+@pytest.mark.parametrize("tz", ["UTC", "Europe/Paris", "+05:30", "America/New_York"])
+def test_a_timestamp_with_a_known_zone_keeps_it(tz: str) -> None:
+    typ = pa.timestamp("ns", tz)
+    assert output_schema(pa.schema([pa.field("c", typ)])).field("c").type == typ
+
+
+@pytest.mark.parametrize("tz", ["", "bad", "utc", "../../etc/passwd", "x" * 80, BAD_TZ])
+def test_unknown_zone_text_is_never_kept(tz: str) -> None:
+    out = output_schema(pa.schema([pa.field("c", pa.timestamp("s", tz))])).field("c").type
+    assert out == pa.timestamp("s")
+
+
+def test_a_zone_in_a_nested_or_dictionary_type_is_checked() -> None:
+    bad = pa.timestamp("s", BAD_TZ)
+    schema = pa.schema(
+        [
+            pa.field("l", pa.list_(bad)),
+            pa.field("s", pa.struct([pa.field("t", bad)])),
+            pa.field("m", pa.map_(pa.string(), bad)),
+            pa.field("d", pa.dictionary(pa.int8(), bad)),
+        ]
+    )
+    assert CANARY not in output_schema(schema).serialize().to_pybytes()
+
+
+def test_an_interval_with_a_free_text_zone_subtype_is_written_as_storage(tmp_path: Path) -> None:
+    typ = _interval(pa.timestamp("us", BAD_TZ))
+    out = output_schema(pa.schema([pa.field("c", typ)])).field("c").type
+    assert not isinstance(out, pa.BaseExtensionType)
+    back, raw = _written(typ, tmp_path)  # pq.read_table must succeed
+    assert CANARY not in raw
+    assert back.num_rows == 2
+
+
+def test_an_interval_with_a_known_zone_subtype_is_kept() -> None:
+    typ = _interval(pa.timestamp("us", "UTC"))
+    assert output_schema(pa.schema([pa.field("c", typ)])).field("c").type == typ
+
+
+def test_the_pandas_blob_never_carries_unknown_zone_text() -> None:
+    table = pa.table({"c": pa.array([0], pa.int64()).cast(pa.timestamp("us", BAD_TZ))})
+    meta = table.schema.with_metadata({PD: b"{}"}).metadata
+    out = output_schema(table.schema.with_metadata(meta))
+    assert CANARY not in out.serialize().to_pybytes()

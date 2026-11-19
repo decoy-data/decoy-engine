@@ -24,6 +24,7 @@ from functools import lru_cache
 from typing import Any, Final
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
 from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, column_metadata, pairs_for
@@ -87,7 +88,8 @@ _INTERVAL_CLOSED: Final = frozenset({"left", "right", "both", "neither"})
 
 def _params_ok(t: pa.BaseExtensionType) -> bool:
     """The pandas types carry one short parameter each; keep the type only if it is a pandas
-    frequency string (parsed by pandas, not free text) or one of the four interval closures."""
+    frequency string (parsed by pandas, not free text), or one of the four interval closures with a
+    subtype that is its own sanitized form."""
     if t.extension_name == "pandas.period":
         freq = getattr(t, "freq", None)
         if not (isinstance(freq, str) and _PERIOD_FREQ.fullmatch(freq)):
@@ -102,8 +104,35 @@ def _params_ok(t: pa.BaseExtensionType) -> bool:
             return False
         return True
     if t.extension_name == "pandas.interval":
-        return getattr(t, "closed", None) in _INTERVAL_CLOSED
+        subtype = getattr(t, "subtype", None)
+        return (
+            getattr(t, "closed", None) in _INTERVAL_CLOSED
+            and isinstance(subtype, pa.DataType)
+            and _type(subtype).equals(subtype, check_metadata=True)
+        )
     return True
+
+
+_TZ_SHAPE: Final = re.compile(r"[A-Za-z0-9_+\-/:]{1,64}")
+
+
+@lru_cache(maxsize=256)
+def _tz_known(tz: str) -> bool:
+    """True for a timezone name pyarrow resolves (an IANA name or a UTC offset), the closed set
+    a timezone parameter may take. Any other text, a URL or a secret included, is not one."""
+    if not _TZ_SHAPE.fullmatch(tz):
+        return False
+    try:
+        pc.assume_timezone(pa.array([0], pa.timestamp("s")), tz)
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+        return False
+    return True
+
+
+def _timestamp(t: pa.TimestampType) -> pa.DataType:
+    """A timestamp keeps its zone only when the zone is a known name; otherwise it is the naive
+    type of the same unit, with the same stored integers."""
+    return t if t.tz is None or _tz_known(t.tz) else pa.timestamp(t.unit)
 
 
 def _extension(t: pa.BaseExtensionType) -> pa.DataType:
@@ -115,6 +144,8 @@ def _extension(t: pa.BaseExtensionType) -> pa.DataType:
 def _type(t: pa.DataType) -> pa.DataType:
     if isinstance(t, pa.BaseExtensionType):
         return _extension(t)
+    if pa.types.is_timestamp(t):
+        return _timestamp(t)
     for matches, rebuild in _REBUILDERS:
         if matches(t):
             return rebuild(t)

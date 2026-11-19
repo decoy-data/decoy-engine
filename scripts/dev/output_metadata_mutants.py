@@ -28,6 +28,7 @@ DESC = "src/decoy_engine/_pandas_meta/_descriptors.py"
 T_FM = ["tests/unit/safe_output/test_file_metadata.py"]
 T_W = ["tests/fileaccess/test_output_writers.py"]
 T_S1 = ["tests/sentry/defects/test_output_metadata_choke_point.py"]
+T_S1_PATH = T_S1[0]
 CANARY = "tests/security/test_output_metadata_canary.py"
 RULES = ("is_struct", "is_list", "is_large_list", "is_fixed_size_list", "is_list_view")
 RULES += ("is_large_list_view", "is_map", "is_union", "is_dictionary", "is_run_end_encoded")
@@ -72,6 +73,16 @@ MUTANTS += [
     ("H1 delete the extension branch", FM, rep("    if isinstance(t, pa.BaseExtensionType):\n        return _extension(t)\n", ""), [*T_FM, f"{CANARY}::test_route_is_clean[extension_types_publish]"]),
     ("H1 keep every extension", FM, rep("return t if keep and storage.equals", "return t if storage.equals"), T_FM),
     ("H1 skip the pandas parameter check", FM, rep("keep = t.extension_name in _PLAIN_EXTENSIONS and _params_ok(t)", "keep = t.extension_name in _PLAIN_EXTENSIONS"), T_FM),
+    ("TZ timestamp zone not checked", FM, rep("return t if t.tz is None or _tz_known(t.tz) else pa.timestamp(t.unit)", "return t"), T_FM),
+    ("TZ every zone known", FM, rep("    if not _TZ_SHAPE.fullmatch(tz):\n        return False\n", "    return True\n"), T_FM),
+    ("TZ shape check only", FM, rep("    try:\n        pc.assume_timezone(pa.array([0], pa.timestamp(\"s\")), tz)\n    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):\n        return False\n", ""), T_FM),
+    ("TZ timestamp branch removed from _type", FM, rep("    if pa.types.is_timestamp(t):\n        return _timestamp(t)\n", ""), T_FM),
+    ("TZ interval subtype not checked", FM, rep("            and isinstance(subtype, pa.DataType)\n            and _type(subtype).equals(subtype, check_metadata=True)\n", ""), T_FM),
+    ("TZ interval storage comparison removed", FM, rep("return t if keep and storage.equals(t.storage_type, check_metadata=True) else storage", "return t if keep else storage"), T_FM),
+    ("S1 sentry misses query()", T_S1_PATH, rep('{"execute", "sql", "query", "from_query"}', '{"execute", "sql", "from_query"}'), T_S1),
+    ("S1 sentry misses from_query()", T_S1_PATH, rep('{"execute", "sql", "query", "from_query"}', '{"execute", "sql", "query"}'), T_S1),
+    ("SUB subset writes raw Arrow", "src/decoy_engine/subset/_materialize.py", rep("arrow_adapter.write_output_table(frame.to_arrow()", "arrow_adapter.write_table(frame.to_arrow()"), [*T_S1, CANARY, "-k", "subset or choke"]),
+    ("SUB baseline re-exempts subset", "tests/sentry/baselines/parquet-intermediate-writers.json", rep('    "decoy_engine/vault/_writer.py', '    "decoy_engine/subset/_materialize.py::materialize_subset": {"category": "intermediate", "max": 1, "reason": "reinstated exemption for mutation"},\n    "decoy_engine/vault/_writer.py'), T_S1),
     ("AT-M2 allow PANDAS_ATTRS", FM, rep("    _PANDAS: _sanitize_pandas_blob,\n", '    _PANDAS: _sanitize_pandas_blob,\n    b"PANDAS_ATTRS": lambda raw, schema: raw,\n'), T_FM),
     ("AT-M3 keep attributes", FM, rep('"attributes": {},', '"attributes": source.get("attributes", {}),'), T_FM),
     ("AT-M3 other separators", FM, rep("return json.dumps(blob).encode()", 'return json.dumps(blob, separators=(",", ":")).encode()'), T_FM),

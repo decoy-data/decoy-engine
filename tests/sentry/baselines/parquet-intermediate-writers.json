@@ -37,11 +37,6 @@
       "max": 1,
       "reason": "masked-key stage read back by the out-of-core runner; scratch inside the run, never a published output"
     },
-    "decoy_engine/subset/_materialize.py::materialize_subset": {
-      "category": "published-polars",
-      "max": 1,
-      "reason": "published subset output written by Polars from a scan, which carries no Arrow key/value metadata; guarded by the canary subset cell"
-    },
     "decoy_engine/vault/_writer.py::VaultWriter.serialize": {
       "category": "intermediate",
       "max": 1,
