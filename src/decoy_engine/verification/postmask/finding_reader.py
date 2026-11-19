@@ -1,0 +1,110 @@
+"""One versioned reader for a persisted residual-PII finding row.
+
+`ResidualPIIFinding` is the writer; a report dict holds its fields. The reader takes the field
+set, the required fields and the defaults from that dataclass, so a field added there is read
+here without a second table. A v2 row predates the model detectors: it has none of
+`V3_ADDED_FIELDS`, which read as their defaults, and its `match_rate` is always a number. A v3
+row must carry every field. A failure names no field and no value.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from collections.abc import Callable, Mapping
+from typing import Any, get_args
+
+from decoy_engine.detection.types import DETECTOR_ORDER
+from decoy_engine.verification.postmask.types import (
+    READABLE_SCHEMA_VERSIONS,
+    SCHEMA_VERSION,
+    ResidualPIIFinding,
+    Severity,
+)
+
+__all__ = ["V3_ADDED_FIELDS", "MalformedFindingError", "read_residual_finding"]
+
+# The fields v3 added to the writer. A v2 row lacks them and reads their defaults.
+V3_ADDED_FIELDS: tuple[str, ...] = ("source", "model", "band", "dismissed", "promoted")
+
+_SEVERITIES = frozenset(get_args(Severity))
+_FIELDS = {f.name: f for f in dataclasses.fields(ResidualPIIFinding)}
+
+
+class MalformedFindingError(ValueError):
+    """A finding row does not have the versioned shape. The message holds no value."""
+
+
+def _text(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _opt_text(value: object) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _opt_number(value: object) -> bool:
+    return value is None or _number(value)
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _flag(value: object) -> bool:
+    return isinstance(value, bool)
+
+
+def _model(value: object) -> bool:
+    return value is None or (
+        isinstance(value, Mapping)
+        and isinstance(value.get("id"), str)
+        and isinstance(value.get("version"), str)
+    )
+
+
+# One check per writer field; `tests/unit/verification` pins the keys to the dataclass fields.
+FIELD_CHECKS: dict[str, Callable[[object], bool]] = {
+    "table": _text,
+    "column": _text,
+    "detector_id": _text,
+    "match_rate": _opt_number,
+    "severity": lambda v: isinstance(v, str) and v in _SEVERITIES,
+    "configured_strategy": _opt_text,
+    "sample_match_count": _count,
+    "message": _text,
+    "source_identity_rate": _opt_number,
+    "source_compared": _flag,
+    "source": lambda v: isinstance(v, str) and v in DETECTOR_ORDER,
+    "model": _model,
+    "band": _opt_text,
+    "dismissed": _flag,
+    "promoted": _flag,
+}
+
+
+def read_residual_finding(raw: object, *, version: str) -> dict[str, Any]:
+    """The finding row `raw` of a report at `version`, with defaults filled in.
+
+    Raises `MalformedFindingError` for a row that is not a mapping, lacks a required field, or has
+    a field of the wrong type, and for an unreadable `version`.
+    """
+    if version not in READABLE_SCHEMA_VERSIONS or not isinstance(raw, Mapping):
+        raise MalformedFindingError("the finding row is not readable")
+    current = version == SCHEMA_VERSION
+    row: dict[str, Any] = dict(raw)
+    for name, field in _FIELDS.items():
+        if name in row:
+            continue
+        if field.default is dataclasses.MISSING or current:
+            raise MalformedFindingError("the finding row lacks a field")
+        row[name] = field.default
+    if not all(FIELD_CHECKS[name](row[name]) for name in _FIELDS):
+        raise MalformedFindingError("the finding row has a field of the wrong type")
+    if not current and row["match_rate"] is None:
+        # `None` is the classifier finding's marker, which only v3 reports carry.
+        raise MalformedFindingError("the finding row has a field of the wrong type")
+    return row

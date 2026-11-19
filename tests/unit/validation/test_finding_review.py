@@ -10,6 +10,7 @@ relationship.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import itertools
 from typing import Any
 
@@ -36,6 +37,7 @@ from decoy_engine.validation.starter_review import (
     ReviewVerdict,
     column_entry,
 )
+from decoy_engine.verification.postmask import ResidualPIIFinding
 from tests._ner import needs_ner
 
 V = ReviewVerdict
@@ -414,23 +416,7 @@ def test_a_malformed_row_raises_the_value_free_error(rows: list[Any]) -> None:
     assert isinstance(err, ReviewEntryError)
 
 
-_V3_FIELDS = [
-    "table",
-    "column",
-    "detector_id",
-    "severity",
-    "match_rate",
-    "configured_strategy",
-    "sample_match_count",
-    "message",
-    "source_identity_rate",
-    "source_compared",
-    "source",
-    "model",
-    "band",
-    "dismissed",
-    "promoted",
-]
+_V3_FIELDS = [f.name for f in dataclasses.fields(ResidualPIIFinding)]
 
 
 @pytest.mark.parametrize("missing", _V3_FIELDS)
@@ -605,3 +591,19 @@ def test_property_edits_do_not_depend_on_decision_order(data: st.DataObject) -> 
     if not isinstance(first, str):
         replaced = [e.path for e in first if e.op == "replace"]
         assert len(replaced) == len(set(replaced))
+
+
+def test_a_v2_row_with_a_null_match_rate_is_refused() -> None:
+    """`match_rate: None` marks a classifier finding, which only v3 reports carry."""
+    v2 = {
+        k: v
+        for k, v in EMAIL.items()
+        if k not in ("source", "model", "band", "dismissed", "promoted")
+    }
+    report = {
+        "schema_version": "post-scan-integrity/v2",
+        "residual_pii": [{**v2, "match_rate": None}],
+    }
+    assert isinstance(_refusal(lambda: finding_edits(_config(), report, [])), ReviewEntryError)
+    v3 = _report({**EMAIL, "match_rate": None})
+    assert finding_edits(_config(), v3, []) == ()

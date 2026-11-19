@@ -16,11 +16,11 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 from decoy_engine import reasons
 from decoy_engine.config import Dismissal, PipelineConfigError
-from decoy_engine.detection.types import DETECTOR_ORDER, DetectorSource, ModelRef
+from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.profiling import check_starter_config, declared_key_namespaces, detector_entry
 from decoy_engine.validation.starter_review import (
     ReviewDecision,
@@ -33,13 +33,14 @@ from decoy_engine.validation.starter_review import (
     _edited_entry,
     _index_of,
     column_entry,
+    config_problems_text,
     pin_key_entry,
 )
 from decoy_engine.verification.postmask import (
     READABLE_SCHEMA_VERSIONS,
-    SCHEMA_VERSION,
+    MalformedFindingError,
     ResidualPIIFinding,
-    Severity,
+    read_residual_finding,
 )
 from decoy_engine.verification.postmask.residual_pii import dismissible
 
@@ -91,13 +92,12 @@ class FindingDecision:
 class ConfigEdit:
     """What to change in the pipeline file; the caller decides how to write it.
 
-    `replace` swaps the node at `path`; `append` adds `value` to the list at `path`;
-    `append_block` adds the mapping `value` as a new block at `path`. `note` is the REVIEW note
+    `replace` swaps the node at `path`; `append` adds `value` to the list at `path`. `note` is the REVIEW note
     for a replaced or appended column entry (None: no note).
     """
 
     path: tuple[str | int, ...]
-    op: Literal["replace", "append", "append_block"]
+    op: Literal["replace", "append"]
     value: Mapping[str, Any]
     note: str | None = None
 
@@ -197,17 +197,14 @@ def _check_applied(config: Mapping[str, Any], edits: Sequence[ConfigEdit]) -> No
         last = edit.path[-1]
         if edit.op == "replace":
             parent[last] = copy.deepcopy(dict(edit.value))
-        elif edit.op == "append":
+        else:
             target = parent.setdefault(last, []) if isinstance(parent, dict) else parent[last]
             target.append(copy.deepcopy(dict(edit.value)))
-        else:
-            parent[last] = copy.deepcopy(dict(edit.value))
     problems = ""
     try:
         check_starter_config(applied)
     except PipelineConfigError as err:
-        shown = "; ".join(f"{p.code} at {p.location or '(root)'}" for p in err.problems[:5])
-        problems = shown or "no detail"
+        problems = config_problems_text(err)
     # Raised outside the handler so the config error is not implicit context.
     if problems:
         raise ReviewEntryError(f"the edited config fails validation ({problems})")
@@ -239,7 +236,7 @@ def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]
         raise _malformed()
     rows: dict[_Identity, Mapping[str, Any]] = {}
     for raw in listed:
-        row = _read_finding(raw, current=version == SCHEMA_VERSION)
+        row = _read_finding(raw, version=version)
         model = row["model"]
         identity = (
             row["table"],
@@ -255,78 +252,17 @@ def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]
     return rows
 
 
-# The finding fields by type, as `ResidualPIIFinding` writes them into a v3 report. A v2 row
-# predates the model detectors: it has none of `_V3_ONLY`, which read as a regex finding with no
-# model, not dismissed and not promoted. A v3 row must carry every field.
-_V3_ONLY = ("source", "model", "band", "dismissed", "promoted")
-_V3_DEFAULTS: dict[str, Any] = {
-    "source": "regex",
-    "model": None,
-    "band": None,
-    "dismissed": False,
-    "promoted": False,
-}
-_OPTIONAL_V2 = {
-    "configured_strategy": None,
-    "sample_match_count": 0,
-    "message": "",
-    "source_identity_rate": None,
-    "source_compared": False,
-}
-_SEVERITIES = frozenset(get_args(Severity))
-
-
-def _read_finding(raw: object, *, current: bool) -> dict[str, Any]:
-    """One finding row, checked against the whole versioned shape, or a value-free refusal.
-
-    Every field the review reads is typed here, so nothing downstream can fail on a bad value.
-    """
-    if not isinstance(raw, Mapping):
-        raise _malformed()
-    row: dict[str, Any] = dict(raw)
-    required: tuple[str, ...] = ("table", "column", "detector_id", "severity", "match_rate")
-    if current:
-        required += tuple(_OPTIONAL_V2) + _V3_ONLY
-    if any(name not in row for name in required):
-        raise _malformed()
-    for name, default in {**_OPTIONAL_V2, **({} if current else _V3_DEFAULTS)}.items():
-        row.setdefault(name, default)
-    model = row["model"]
-    ok = (
-        all(isinstance(row[n], str) for n in ("table", "column", "detector_id"))
-        and isinstance(row["message"], str)
-        and isinstance(row["severity"], str)
-        and row["severity"] in _SEVERITIES
-        and isinstance(row["source"], str)
-        and row["source"] in DETECTOR_ORDER
-        and (row["match_rate"] is None or _is_number(row["match_rate"]))
-        and (row["configured_strategy"] is None or isinstance(row["configured_strategy"], str))
-        and _is_int(row["sample_match_count"])
-        and (row["source_identity_rate"] is None or _is_number(row["source_identity_rate"]))
-        and isinstance(row["source_compared"], bool)
-        and (row["band"] is None or isinstance(row["band"], str))
-        and isinstance(row["dismissed"], bool)
-        and isinstance(row["promoted"], bool)
-        and (
-            model is None
-            or (
-                isinstance(model, Mapping)
-                and isinstance(model.get("id"), str)
-                and isinstance(model.get("version"), str)
-            )
-        )
-    )
-    if not ok:
+def _read_finding(raw: object, *, version: str) -> dict[str, Any]:
+    """One finding row through the postmask reader, or a value-free refusal."""
+    row: dict[str, Any] | None = None
+    try:
+        row = read_residual_finding(raw, version=version)
+    except MalformedFindingError:
+        pass
+    # Raised outside the handler so the reader's error is not implicit context.
+    if row is None:
         raise _malformed()
     return row
-
-
-def _is_number(value: object) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
-
-
-def _is_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _malformed() -> ReviewEntryError:

@@ -20,10 +20,11 @@ from dataclasses import dataclass
 from typing import Any, NamedTuple, cast, get_args
 
 from decoy_engine import reasons
+from decoy_engine.detection.types import DetectorSource
 from decoy_engine.errors import DecoyError
 from decoy_engine.reasons import MAX_NAME_LEN, ReasonRef, reason_ref_payload
 from decoy_engine.verification.postmask import _keys
-from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS
+from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS, Severity
 
 __all__ = [
     "PostScanBlockedError",
@@ -65,8 +66,8 @@ _MAX_SPOTS = 3
 # Read from `_keys` so a new status or baseline cannot be missed here.
 _STATUSES = frozenset(get_args(_keys.Status))
 _BASELINES = frozenset(get_args(_keys.Baseline))
-_SEVERITIES = frozenset({"info", "warning", "fail", "error"})
-_MODEL_SOURCES = frozenset({"ner", "classifier"})
+_SEVERITIES = frozenset(get_args(Severity))
+_MODEL_SOURCES = frozenset(get_args(DetectorSource)) - {"regex"}
 _NER_MODES = ("warn", "fail")
 # A report that cannot be read is a check that could not run, so it blocks.
 _UNREADABLE = object()
