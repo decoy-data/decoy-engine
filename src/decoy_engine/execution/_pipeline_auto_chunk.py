@@ -30,6 +30,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import (
+    large_text_names,
     narrow_text_columns,
     unify_text_widths,
     widen_text_columns,
@@ -121,9 +122,8 @@ def join_dispatcher_chunks(
     3. chunks that differ from the target schema are cast to it, and the result is
        one contiguous table with no schema metadata.
 
-    `text_columns` are the pass-through text columns whose width may change mid-call: a
-    `string`/`large_string` disagreement on one of them resolves to `large_string`, and on any
-    other column it still raises.
+    `text_columns` (pass-through text) may disagree as `string`/`large_string`: that resolves
+    to `large_string`. On any other column it still raises.
 
     Precondition: `chunks` is non-empty (the resident route always yields at least one
     chunk); an empty list is a caller bug and raises `chunked_schema_mismatch` naming
@@ -161,7 +161,6 @@ def _target_field(
     if not typed:
         return first
     if any(f.type != typed[0].type for f in typed):
-        # A pass-through text column promoted to `large_string` after earlier `string` chunks.
         if first.name in text_columns:
             widest = unify_text_widths({f.type for f in typed})
             if len(widest) == 1:
@@ -336,10 +335,9 @@ def _run_dispatcher(
     from decoy_engine.execution.native._chunked_schema_rule import build_schema_rule
 
     rule = build_schema_rule(config, table=table, first=source, registry=registry)
-    text_columns = frozenset(
-        n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
+    return join_dispatcher_chunks(
+        chunks, table=table, text_columns=large_text_names(rule.passthrough_types)
     )
-    return join_dispatcher_chunks(chunks, table=table, text_columns=text_columns)
 
 
 def _run_streamed(
@@ -396,9 +394,7 @@ def _run_streamed(
             base_row_offset=0,
             native_threads=native_threads,
         )
-        wide_columns = frozenset(
-            n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
-        )
+        wide_columns = large_text_names(rule.passthrough_types)
         arrived: dict[str, set[pa.DataType]] = {}
         stats = _output_sink.stream_table(
             sink,
@@ -411,10 +407,9 @@ def _run_streamed(
             empty_schema=first.schema if first.num_rows == 0 else None,
         )
         if collected is not None:
-            # The resident collector gets the narrowed type main's resident lane gives, now that
-            # no later chunk can promote a column that stayed narrow.
-            narrow = [n for n, types in arrived.items() if types == {pa.string()}]
-            collected[table] = narrow_text_columns(collected[table], narrow)
+            # No later chunk can promote a column that stayed narrow, so the resident
+            # collector gets the narrowed type.
+            collected[table] = narrow_text_columns(collected[table], arrived)
     finally:
         inputs.close()
     return stats.block(), inputs.block()

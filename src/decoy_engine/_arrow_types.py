@@ -11,7 +11,7 @@ join tokens in `decoy_engine.internal.fk_tokens`.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from itertools import pairwise
 
 import numpy as np
@@ -176,15 +176,20 @@ def widen_text_columns(
         yield chunk
 
 
-def narrow_text_columns(table: pa.Table, columns: Iterable[str]) -> pa.Table:
-    """Cast the named `large_string` columns of a collected table to `string`, chunk by chunk.
+def large_text_names(types: Mapping[str, pa.DataType]) -> frozenset[str]:
+    """The names whose type is `large_string`."""
+    return frozenset(n for n, t in types.items() if pa.types.is_large_string(t))
 
-    The caller knows every chunk of each column fits 32-bit offsets (its width state never
-    promoted), and the chunking is kept so no chunk grows.
+
+def narrow_text_columns(table: pa.Table, arrived: Mapping[str, set[pa.DataType]]) -> pa.Table:
+    """Cast to `string` the columns that only ever arrived as `string` (see `widen_text_columns`).
+
+    A column that arrived as `large_string` was promoted and stays wide. The cast is per chunk
+    and keeps the chunking, so no chunk grows past the 32-bit offsets it already fit.
     """
-    for name in columns:
+    for name, types in arrived.items():
         idx = table.schema.get_field_index(name)
-        if idx >= 0 and pa.types.is_large_string(table.schema.field(idx).type):
+        if types == {pa.string()} and idx >= 0:
             field = table.schema.field(idx).with_type(pa.string())
             table = table.set_column(idx, field, table.column(idx).cast(pa.string()))
     return table
