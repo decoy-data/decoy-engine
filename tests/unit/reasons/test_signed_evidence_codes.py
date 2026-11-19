@@ -167,10 +167,10 @@ def test_the_wire_table_is_total_and_injective_over_the_registered_identities() 
         assert evidence.WIRE_IDENTITY[token] == identity
 
 
-def test_every_identity_resolves_unreleased_with_a_fixed_summary() -> None:
+def test_every_identity_resolves_in_1_30_with_a_fixed_summary() -> None:
     for identity in evidence.WIRE_TOKEN:
         spec = reasons.get("evidence", str(identity))
-        assert spec.since == reasons.UNRELEASED
+        assert spec.since == "1.30.0"
         assert spec.summary.startswith("Signed evidence was refused")
 
 
