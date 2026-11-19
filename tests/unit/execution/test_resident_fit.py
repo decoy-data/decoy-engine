@@ -115,6 +115,7 @@ def test_bound_sums_over_tables() -> None:
     assert lower_bound_bytes([]) == 0
 
 
+@pytest.mark.serial
 def test_bound_does_not_touch_io_host_memory_or_a_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     from decoy_engine.execution import _probe
     from decoy_engine.execution.out_of_core import _budget
