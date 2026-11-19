@@ -192,6 +192,32 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_platform_checks.py", "DIR_FD_ALLOWLIST"),
     ),
     Source(
+        "ci-write-scopes",
+        "_ci_lock_scan.py",
+        in_code("_ci_lock_scan.py", "WRITE_ALLOWLIST"),
+    ),
+    Source(
+        "canonical-json-choke-point",
+        "defects/test_canonical_json_choke_point.py",
+        in_code("defects/test_canonical_json_choke_point.py", "ALLOWLIST"),
+    ),
+    Source(
+        "ner-mismatch-single-site",
+        "defects/test_ner_mismatch_single_site.py",
+        in_code("defects/test_ner_mismatch_single_site.py", "ALLOWED"),
+    ),
+    Source(
+        "validation-route-allowlist",
+        "defects/test_validation_sites.py",
+        in_code("defects/test_validation_sites.py", "ROUTE_ALLOWLIST"),
+    ),
+    Source(
+        "snapshot-parse-single-owner",
+        "generation/test_snapshot_parse_single_owner.py",
+        in_code("generation/test_snapshot_parse_single_owner.py", "ALLOWED"),
+        maxes=in_code("generation/test_snapshot_parse_single_owner.py", "ALLOWED").maxes,
+    ),
+    Source(
         "physical-seam-scoped",
         "layout/_scoped_changes.py",
         in_code("layout/_scoped_changes.py", "SCOPED_EXCEPTIONS"),
@@ -413,6 +439,7 @@ NOT_A_LIST: dict[str, str] = {
     "consumer-contract.json": "F29 consumer contract, compared whole by test_reason_registry",
     "openapi.json": "generated schema used as a negative fixture in a residual-surface test",
     "file_access_registry.toml": "file access registry, allowed to grow; guarded by its Count header",
+    "required_serial.toml": "grow-only serial-test registry; removal needs a [[removed]] reason and every id is checked at collection",
     "file_access_modules.toml": "file access module list, allowed to grow with new access modules",
 }
 

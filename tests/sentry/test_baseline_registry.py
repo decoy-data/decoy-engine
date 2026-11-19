@@ -23,7 +23,9 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-LIST_NAME = re.compile(r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS")
+LIST_NAME = re.compile(
+    r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS"
+)
 DATA_LITERAL = re.compile(r"[\w.\-]+\.(?:json|toml)$")
 IGNORED_DATA = {"pyproject.toml", "Cargo.toml", "package.json", "e1-1.json"}
 
@@ -140,3 +142,22 @@ def test_seeded_unregistered_readers_are_caught() -> None:
     assert unregistered_readers(seeded_file, {"fresh-list.json"}, consts, files) == [
         "test_new.py: data file fresh-list.json"
     ]
+
+
+def test_exception_and_census_tables_in_subfolders_are_caught() -> None:
+    """The EW1 gap: inline `*_EXCEPTIONS` and `*_CENSUS` tables, one in a subfolder, bypassed this."""
+    consts, files = _covered()
+    seeded = {
+        "layout/_new.py": 'SCOPED_EXCEPTIONS = {("a.py", "u"): "why"}\n',
+        "test_new.py": 'CENSUS: dict[str, int] = {"a.py": 1}\n',
+    }
+    assert unregistered_readers(seeded, set(), consts, files) == [
+        "layout/_new.py: constant SCOPED_EXCEPTIONS",
+        "test_new.py: constant CENSUS",
+    ]
+
+
+def test_the_scan_reaches_sentry_subfolders() -> None:
+    names = {p.relative_to(bs.SENTRY).as_posix() for p in bs.SENTRY.rglob("*.py") if _scanned(p)}
+    assert "layout/_scoped_changes.py" in names
+    assert "layout/test_package_fanout.py" in names

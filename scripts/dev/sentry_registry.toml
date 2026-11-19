@@ -174,3 +174,23 @@ baseline = "tests/sentry/baselines/dir-fd-readers.json"
 [[sentry]]
 id = "physical-seam-scoped"
 baseline = "tests/sentry/baselines/physical-seam-scoped.json"
+
+[[sentry]]
+id = "ci-write-scopes"
+baseline = "tests/sentry/baselines/ci-write-scopes.json"
+
+[[sentry]]
+id = "canonical-json-choke-point"
+baseline = "tests/sentry/baselines/canonical-json-choke-point.json"
+
+[[sentry]]
+id = "ner-mismatch-single-site"
+baseline = "tests/sentry/baselines/ner-mismatch-single-site.json"
+
+[[sentry]]
+id = "validation-route-allowlist"
+baseline = "tests/sentry/baselines/validation-route-allowlist.json"
+
+[[sentry]]
+id = "snapshot-parse-single-owner"
+baseline = "tests/sentry/baselines/snapshot-parse-single-owner.json"
