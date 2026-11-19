@@ -240,7 +240,7 @@ def post_scan_verdict(report: Mapping[str, Any], *, ner_findings: str = "warn") 
         for finding in _rows(report, section):
             row = project_for_verdict(finding, version=version, residual=section == "residual_pii")
             severity = row.severity
-            if section == "residual_pii" and not row.valid and severity != "fail":
+            if section == "residual_pii" and not row.valid:
                 # The strict reader refuses this row (a missing field, a wrong type, or a v3
                 # field in a v2 report), so its severity is not trusted: the check errored.
                 blocked.add(_CHECK_ERROR)

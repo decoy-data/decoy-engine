@@ -102,14 +102,16 @@ def test_the_verdict_reads_a_v2_row_as_regex_whatever_its_source_says(ner_findin
     bare = post_scan_verdict(_report(V2), ner_findings=ner_findings)
     with_source = post_scan_verdict(_report(V2, source="ner"), ner_findings=ner_findings)
     assert bare.blocking and with_source.blocking
-    assert with_source.codes == bare.codes
+    names = {c.code for c in with_source.codes}
+    assert {c.code for c in bare.codes} <= names and "finding_blocked" in names
 
 
 def test_a_v3_ner_row_is_still_a_model_row_for_the_verdict() -> None:
-    row = {"source": "ner", "severity": "fail"}
-    v3 = post_scan_verdict(_report(V3, **row), ner_findings="warn")
+    row = {**_v3(), "source": "ner", "severity": "fail", "model": {"id": "m", "version": "1"}}
+    v3 = post_scan_verdict({"schema_version": V3, "residual_pii": [row]}, ner_findings="warn")
     assert not v3.blocking
-    assert post_scan_verdict(_report(V3, **row), ner_findings="fail").blocking
+    fail = post_scan_verdict({"schema_version": V3, "residual_pii": [row]}, ner_findings="fail")
+    assert fail.blocking
 
 
 @pytest.mark.parametrize("raw", [None, "x", 3, [1]])
@@ -149,3 +151,19 @@ def test_a_valid_warning_row_does_not_block(ner_findings: str) -> None:
     v3 = _warning_report(V3, {**_v3(), "severity": "warning"})
     assert not post_scan_verdict(v2, ner_findings=ner_findings).blocking
     assert not post_scan_verdict(v3, ner_findings=ner_findings).blocking
+
+
+@pytest.mark.parametrize("ner_findings", ["warn", "fail"])
+@pytest.mark.parametrize("source", ["classifier", "ner"])
+@pytest.mark.parametrize("version", [V2, V3])
+def test_an_invalid_model_fail_row_blocks_in_every_mode(
+    version: str, source: str, ner_findings: str
+) -> None:
+    """A model row skips the generic severity rule, so the strict-reader refusal must block it."""
+    row = {**_v3(), "severity": "fail", "source": source, "model": None}
+    if version == V2:
+        row = {**_BASE, "severity": "fail", "source": source}  # a v3 field in a v2 row
+    else:
+        row = {k: v for k, v in row.items() if k != "message"}  # a required field missing
+    verdict = post_scan_verdict(_warning_report(version, row), ner_findings=ner_findings)
+    assert verdict.blocking
