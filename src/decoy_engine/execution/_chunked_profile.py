@@ -49,6 +49,21 @@ def walk_one_table(table: pa.Table, *, table_name: str) -> Any:
     )
 
 
+def _as_chunk_sample(table_profile: Any) -> Any:
+    """Label every column of a first-chunk table as a sample.
+
+    The chunk is the head of a larger source, so its counts are not whole-source
+    counts and none of its columns may claim to be a key. Runs last, so columns
+    rebuilt from Arrow for carried passthrough names are covered too."""
+    return dataclasses.replace(
+        table_profile,
+        columns=tuple(
+            dataclasses.replace(c, sampled=True, is_candidate_key_sampled=False)
+            for c in table_profile.columns
+        ),
+    )
+
+
 def first_chunk_profile(
     first_chunk: pa.Table,
     *,
@@ -63,6 +78,10 @@ def first_chunk_profile(
     Profile silently masks nothing. The first chunk gives real dtypes;
     distinct counts and row_count describe only that chunk, which is
     fine -- admitted strategies consume nothing distribution-dependent.
+    `row_count` is the chunk length, not the source's, and `row_count_exact`
+    stays True because `execution/capacity.py` reads it; every column is
+    labelled `sampled` with no candidate-key flag (`_as_chunk_sample`). No route
+    serializes this profile.
     Faker pools size from the config-declared pool_size (the admission
     rule requires it explicitly), never from profile distinct counts,
     and the pool-capacity pre-flight lands in checks_skipped under
@@ -90,7 +109,7 @@ def first_chunk_profile(
         )
     return Profile(
         schema_version=1,
-        tables=(table_profile,),
+        tables=(_as_chunk_sample(table_profile),),
         relationships=(),
         profiled_at=datetime(1970, 1, 1, 0, 0, 0),
         decoy_engine_version=engine_version,

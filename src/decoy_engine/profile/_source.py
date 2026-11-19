@@ -246,13 +246,23 @@ def _profile_one_source(
         effective_sample_rows = sample_rows
 
     row_count = reader.row_count()
-    sample_df = reader.sample_frame(effective_sample_rows)
+    # An estimated row count (CSV) can undershoot the sample, so ask for one row
+    # past the cap: under the `sample_frame` contract a read that returns more than
+    # the cap proves the source holds more rows. An exact count already says so,
+    # and keeps the read at the cap.
+    probe = 0 if row_count.exact else 1
+    sample_df = reader.sample_frame(effective_sample_rows + probe)
+    if len(sample_df) > effective_sample_rows:
+        sample_df = sample_df.head(effective_sample_rows)
+        proven_total = effective_sample_rows + 1
+    else:
+        proven_total = len(sample_df)
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
-    effective_total = max(row_count.value, len(sample_df))
+    effective_total = max(row_count.value, proven_total)
     table = walk_dataframe(
         sample_df,
         table_name=table_name,
