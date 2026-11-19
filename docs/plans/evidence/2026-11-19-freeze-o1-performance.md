@@ -59,7 +59,7 @@ Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-1
 | `when:`-read columns dropped | AT-O1f | red: `...[plain]` |
 | set built by hand in `_chunked_carry.py` | AT-O1e | red: `test_only_allowlisted_functions_call_the_helper[fk_columns_for_table]` |
 | new function calls `to_pandas_fk_safe` | AT-O1e | red: `...[to_pandas_fk_safe]` |
-| `group_by_sibling` returns `None` | this round | red, run without `-x`: plan side `test_the_plan_side_set_names_the_sibling`; config side `test_the_unified_config_set_equals_the_plan_set[group_key-id == 5]`; runtime `TestEndToEndParity::test_chunked_equals_full_frame_across_chunk_sizes` (all sizes), `TestIntNullGroupBy`, `TestNullSentinelPerDtype`, and 30 more in `test_group_key_chunked.py` |
+| `group_by_sibling` returns `None` | this round | red, run without `-x`: plan side `test_the_plan_side_set_names_the_sibling`; config side `test_the_unified_config_set_equals_the_plan_set[group_key-id == 5]`; runtime `TestEndToEndParity::test_chunked_equals_full_frame_across_chunk_sizes` (all sizes), `TestIntNullGroupBy`, `TestNullSentinelPerDtype`, and about 40 other tests in `test_group_key_chunked.py` |
 
 Test-side mutations (drop the route witness, drop the fallback assertion) are changes to the tests themselves and are not run by this script.
 
