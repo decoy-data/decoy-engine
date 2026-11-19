@@ -358,6 +358,32 @@ SEEDED: dict[str, tuple[str, str]] = {
         '    conn.execute(f"COPY (SELECT {sel}) " f"TO {dest} (FORMAT parquet, ROW_GROUP_SIZE 5)")\n',
         "sql:copy-to-parquet",
     ),
+    "reference_passed_to_guard": (
+        PQ + "def f(t, fh):\n    guarded(1, 2, pq.write_table, t, fh)\n",
+        "pyarrow.parquet.write_table",
+    ),
+    "partial_of_writer": (
+        "import functools\n" + PQ + "def f(t, p):\n    functools.partial(pq.write_table, t)(p)\n",
+        "pyarrow.parquet.write_table",
+    ),
+    "attribute_reference_passed": (
+        "def f(df, fh):\n    guarded(1, 2, df.write_parquet, fh)\n",
+        "attr:write_parquet",
+    ),
+    "copy_quoted_format": (
+        "def f(conn):\n    conn.execute(\"COPY t TO 'x' (FORMAT 'PARQUET')\")\n",
+        "sql:copy-to-parquet",
+    ),
+    "copy_str_format_call": (
+        'def f(conn, dest):\n    conn.execute("COPY t TO {} (FORMAT PARQUET)".format(dest))\n',
+        "sql:copy-to-parquet",
+    ),
+    "copy_local_variable": (
+        "def f(conn, dest):\n"
+        '    sql = f"COPY t TO {dest} (FORMAT PARQUET)"\n'
+        "    conn.execute(sql)\n",
+        "sql:copy-to-parquet",
+    ),
     "copy_concatenated": (
         "def f(conn, dest):\n    conn.execute('COPY t TO ' + dest + ' (FORMAT PARQUET)')\n",
         "sql:copy-to-parquet",

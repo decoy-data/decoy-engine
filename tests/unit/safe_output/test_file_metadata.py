@@ -20,6 +20,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.safe_output import _file_metadata as fm
 from decoy_engine.safe_output import output_schema, output_table, sanitized_schema_metadata
@@ -99,6 +100,7 @@ NESTED: dict[str, Callable[[], pa.DataType]] = {
     "sparse_union": lambda: pa.union([_fld("a", pa.int64()), _fld("b", pa.string())], "sparse"),
     "dictionary_value": lambda: pa.dictionary(pa.int8(), pa.struct([_fld("c", pa.int64())])),
     "run_end_encoded": lambda: pa.run_end_encoded(pa.int32(), pa.struct([_fld("c", pa.int64())])),
+    "deep": lambda: pa.list_(_fld("item", pa.struct([_fld("c", pa.list_(_fld("x", pa.int8())))]))),
 }
 
 
@@ -410,3 +412,133 @@ def test_output_table_strips_nested_child_metadata() -> None:
     out = output_table(table)
     assert CANARY not in b"".join(schema_texts(out.schema))
     assert CANARY not in b"".join(schema_texts(pa.schema([pa.field("s", out.column("s").type)])))
+
+
+# -- extension types -----------------------------------------------------------------------------
+
+
+def _opaque() -> pa.DataType:
+    child = _fld("c", pa.int64())
+    return pa.opaque(pa.struct([child]), "DCY-CANARY-type", "DCY-CANARY-vendor")
+
+
+def _tensor() -> pa.DataType:
+    return pa.fixed_shape_tensor(pa.float64(), (2,), dim_names=["DCY-CANARY-dim"])
+
+
+class _Unknown(pa.ExtensionType):
+    """A Python-registered extension whose serialized parameters hold source text."""
+
+    def __init__(self) -> None:
+        super().__init__(pa.int64(), "test.unknown_ext")
+
+    def __arrow_ext_serialize__(self) -> bytes:
+        return b"DCY-CANARY-params"
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type: pa.DataType, serialized: bytes):
+        return cls()
+
+
+@pytest.fixture
+def unknown_ext():
+    pa.register_extension_type(_Unknown())
+    yield _Unknown()
+    pa.unregister_extension_type("test.unknown_ext")
+
+
+def _storage_of(typ: pa.DataType) -> pa.DataType:
+    return typ.storage_type
+
+
+EXTENSIONS: dict[str, Callable[[], pa.DataType]] = {"opaque": _opaque, "tensor": _tensor}
+
+
+@pytest.mark.parametrize("kind", EXTENSIONS)
+def test_free_text_extension_is_written_as_its_clean_storage(kind: str) -> None:
+    typ = EXTENSIONS[kind]()
+    out = output_schema(_dirty(typ))
+    got = out.field("n").type
+    assert not isinstance(got, pa.BaseExtensionType)
+    assert CANARY not in out.serialize().to_pybytes()
+    assert CANARY not in b"".join(schema_texts(out))
+    assert got.equals(typ.storage_type)
+
+
+def test_python_registered_extension_is_written_as_its_storage(unknown_ext) -> None:
+    out = output_schema(pa.schema([pa.field("n", unknown_ext)]))
+    assert out.field("n").type == pa.int64()
+    assert CANARY not in out.serialize().to_pybytes()
+
+
+def test_extension_branch_applies_inside_nested_types() -> None:
+    out = output_schema(pa.schema([pa.field("n", pa.list_(pa.field("item", _opaque())))]))
+    assert CANARY not in out.serialize().to_pybytes()
+
+
+ALLOWED_EXTENSIONS = {"uuid": pa.uuid, "bool8": pa.bool8, "json": pa.json_}
+
+
+@pytest.mark.parametrize("kind", ALLOWED_EXTENSIONS)
+def test_parameterless_extension_is_kept(kind: str) -> None:
+    typ = ALLOWED_EXTENSIONS[kind]()
+    out = output_schema(pa.schema([pa.field("n", typ)]))
+    assert out.field("n").type == typ
+    assert isinstance(out.field("n").type, pa.BaseExtensionType)
+
+
+def test_extension_columns_write_and_read_back(tmp_path: Path) -> None:
+    arr = pa.ExtensionArray.from_storage(
+        _tensor(), pa.array([[1.0, 2.0], [3.0, 4.0]], pa.list_(pa.float64(), 2))
+    )
+    table = pa.table({"t": arr})
+    out = output_table(table)
+    path = tmp_path / "t.parquet"
+    pq.write_table(out, path)
+    assert pq.read_table(path).column("t").to_pylist() == [[1.0, 2.0], [3.0, 4.0]]
+    assert CANARY not in path.read_bytes()
+
+
+# -- index columns -------------------------------------------------------------------------------
+
+PERIOD_FRAME = pd.DataFrame(
+    {
+        "a": [1, 2, 3],
+        "p": pd.period_range("2020-01", periods=3, freq="M"),
+        "i": pd.interval_range(0, 3),
+    }
+)
+
+
+@pytest.mark.parametrize("index", [None, "p", "i"])
+def test_period_and_interval_frames_round_trip(index: str | None) -> None:
+    frame = PERIOD_FRAME if index is None else PERIOD_FRAME.set_index(index)
+    table = _from_pandas(frame, preserve_index=index is not None)
+    out = output_table(table)
+    pd.testing.assert_frame_equal(out.to_pandas(), table.to_pandas())
+    assert output_schema(table.schema).metadata == table.schema.metadata
+
+
+def test_a_duplicated_index_entry_is_written_once() -> None:
+    body = json.loads(CLEAN)
+    body["index_columns"] = ["i"] * 5
+    out = _blob(output_schema(_with_blob(json.dumps(body).encode())))
+    assert out["index_columns"] == ["i"]
+    assert out["column_indexes"] == [dict(COLUMN_INDEX_ENTRY, metadata={"encoding": "UTF-8"})]
+
+
+def test_an_index_entry_for_a_field_with_no_column_entry_is_dropped() -> None:
+    frame = pd.DataFrame({"a": [1, 2], "l": [[1], [2]]})
+    schema = _from_pandas(frame, preserve_index=False).schema
+    body = json.loads(schema.metadata[PD])
+    body["index_columns"] = ["l"]
+    out = _blob(output_schema(schema.with_metadata({PD: json.dumps(body).encode()})))
+    assert out["index_columns"] == []
+    assert out["column_indexes"] == []
+
+
+def test_an_index_named_like_a_column_keeps_its_real_name() -> None:
+    frame = pd.DataFrame({"a": [1, 2]}, index=pd.Index([5, 6], name="a"))
+    table = _from_pandas(frame, preserve_index=True)
+    assert output_schema(table.schema).metadata == table.schema.metadata
+    assert output_table(table).to_pandas().index.name == "a"

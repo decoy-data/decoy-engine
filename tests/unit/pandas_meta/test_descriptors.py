@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 import json
+from types import MappingProxyType
 from typing import Any
 
 import pandas as pd
@@ -105,3 +106,21 @@ def test_the_plain_pair_is_the_default(typ: pa.DataType) -> None:
 )
 def test_a_type_outside_the_registry_has_no_pairs(typ: pa.DataType) -> None:
     assert pairs_for(typ) == ()
+
+
+def test_the_shared_tables_are_read_only() -> None:
+    assert isinstance(PLAIN_PAIRS, MappingProxyType)
+    assert isinstance(COLUMN_INDEX_ENTRY, MappingProxyType)
+    assert isinstance(COLUMN_INDEX_ENTRY["metadata"], MappingProxyType)
+    with pytest.raises(TypeError):
+        COLUMN_INDEX_ENTRY["name"] = "x"  # type: ignore[index]
+
+
+def test_pandas_period_and_interval_pairs_follow_their_parameters() -> None:
+    frame = pd.DataFrame(
+        {"p": pd.period_range("2020-01", periods=2, freq="M"), "i": pd.interval_range(0, 2)}
+    )
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    entries = json.loads(table.schema.metadata[b"pandas"])["columns"]
+    for entry, field in zip(entries, table.schema, strict=True):
+        assert (entry["pandas_type"], entry["numpy_type"]) in pairs_for(field.type)

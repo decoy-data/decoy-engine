@@ -344,6 +344,23 @@ def _publish_unit_route(tmp_path: Path) -> list[Path]:
     )
 
 
+def _extension_publish_route(tmp_path: Path) -> list[Path]:
+    """Extension columns whose type parameters hold source text: an opaque type over struct
+    storage (names and a child with field metadata) and a fixed-shape tensor (dimension names)."""
+    child = pa.field("c", pa.int64(), metadata={b"k": mc.NESTED.encode()})
+    opaque = pa.opaque(pa.struct([child]), mc.EXT, mc.EXT)
+    tensor = pa.fixed_shape_tensor(pa.float64(), (2,), dim_names=[mc.EXT])
+    base = mc.canary_table({"a": pa.array(["x", "y"])})
+    ext_o = pa.ExtensionArray.from_storage(
+        opaque, pa.array([{"c": 1}, {"c": 2}], opaque.storage_type)
+    )
+    ext_t = pa.ExtensionArray.from_storage(
+        tensor, pa.array([[1.0, 2.0], [3.0, 4.0]], tensor.storage_type)
+    )
+    table = base.append_column("o", ext_o).append_column("t", ext_t)
+    return _publish_resident(tmp_path, {"t": table})
+
+
 def _subset_route(tmp_path: Path) -> list[Path]:
     from decoy_engine.subset import FanOutPolicy, SeedSpec, SubsetSource, run_subset
     from tests.unit.subset.conftest import JOB_SEED, rel
@@ -393,6 +410,7 @@ ROUTES: dict[str, Route] = {
     "declared_casting": _fk_route("out_of_core", OOC, lazy=True, sink=True, declared=True),
     "multi_parent_fk": _multi_parent_route,
     "composite_fk": _composite_route,
+    "extension_types_publish": _extension_publish_route,
     "subset": _subset_route,
 }
 
