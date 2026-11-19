@@ -1,11 +1,20 @@
 ---
-Status: plan
+Status: built
+Shipped: CHANGELOG "Changed (unified-slice route activation, 2026-09-20)"; `run_pipeline`'s `unified_slice_enabled` defaults to `True`
 ---
 
 # Unified-slice route activation (Phase 4 / roadmap A2)
 
 > Codex plan-gate: GO (round 3, 2026-09-20). Cam mechanism ack: given (2026-09-20).
 > Supersedes the parked `2026-09-18-route-activation.md`.
+
+> **Built (2026-09-20).** The default flip and the inert-sink admission change shipped.
+> The Frame below describes the state before activation ("defaults `False`", "nothing
+> uses it by default") and is kept for history; it is no longer current. The lane is
+> on by default and admission decides per job: a job declines to the pandas full-frame
+> route when any column lacks an admitted operator binding (for example a faker or hash
+> column on a host without the native companion), which `quality_metrics` shows as no
+> `unified_slice_activation` entry.
 
 ## Frame
 

@@ -1,8 +1,9 @@
 """D2: `compile_physical_plan(inputs) -> PhysicalPlan` -- the pure compiler.
 
 Executes nothing itself. As of Task 4.5 it is reached in production only from
-the one sanctioned connection point, the default-OFF unified-slice lane
-(`execution/_unified_slice.py`); every OTHER production path stays disconnected
+the one sanctioned connection point, the unified-slice lane
+(`execution/_unified_slice.py`, on by default, `unified_slice_enabled=True`;
+admission decides per job); every OTHER production path stays disconnected
 from `execution.physical` (the D5 seam sentries enforce that single-exception
 allowlist). The frozen SELECTION PRECEDENCE (TASK-4.3-PLAN.md D2), from
 `_pipeline.py`'s call order:

@@ -44,8 +44,9 @@ Package layout:
                        `PhysicalTable` / `PhysicalNode` / `SynthesisStage`,
                        plus (Task 4.6 slice 1) the faker-only `PoolBinding`.
   `_compiler`       -- Task 4.3 D2: `compile_physical_plan`, pure; reached in
-                       production only via the Task 4.5 default-OFF unified-
-                       slice lane, never any other route.
+                       production only via the Task 4.5 unified-slice lane
+                       (on by default; admission decides per job), never
+                       any other route.
   `_snapshot`        -- Task 4.3 D1: `capture_physical_plan_inputs`, the
                        real (non-synthesized) preflight-only snapshot builder.
   `_shadow_bindings` -- Task 4.4 C0: slice-only `ExecutionBinding`
