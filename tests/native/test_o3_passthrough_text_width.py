@@ -203,6 +203,34 @@ def test_o3a_out_of_core_writes_string_but_a_fixed_schema_sink_keeps_large_strin
     assert run.outputs["P"].schema.field("n").type == expected
 
 
+def _fits_each_not_together() -> s.Shape:
+    """Rows of 5 bytes each: one row fits a limit of 8, three rows (15 bytes) do not."""
+    return o.component_shape(
+        OrphanPolicy.PRESERVE,
+        pa.large_string(),
+        parent_n=["aaaaa", "bbbbb", "ccccc"],
+        child_k=["a", "b", "c"],
+        child_n=["aaaaa", "bbbbb", "bbbbb"],
+    )
+
+
+@pytest.mark.parametrize("mode", ["sink-batch", "sink-reorder"])
+def test_o3a_fixed_schema_sink_file_is_byte_equal_when_aggregate_text_is_wide(
+    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sink that fixes `large_string` keeps the source batches: one row group, same bytes."""
+    shape = _fits_each_not_together()
+    o.run_ooc(shape, mode, tmp_path=tmp_path / "base", batch_rows=10)
+    monkeypatch.setattr(_arrow_types, "_OFFSET_LIMIT", 8)
+    o.run_ooc(shape, mode, tmp_path=tmp_path / "narrow", batch_rows=10)
+    for table in ("P", "C"):
+        base = o._published(tmp_path / "base" / "out", table)
+        got = o._published(tmp_path / "narrow" / "out", table)
+        assert pq.ParquetFile(got).metadata.num_row_groups == 1
+        assert pq.ParquetFile(got).schema_arrow.field("n").type == pa.large_string()
+        assert got.read_bytes() == base.read_bytes()
+
+
 def test_o3a_streamed_chunked_sink_keeps_the_large_string_field() -> None:
     chunks = [
         pa.table({"keep": pa.array(["ab", None], pa.string())}),
@@ -260,7 +288,7 @@ _TRIPWIRE = textwrap.dedent(
     import numpy as np
     import pyarrow as pa
     from decoy_engine import _arrow_types
-    
+
     page = mmap.PAGESIZE
     region = mmap.mmap(-1, page)
     addr = ctypes.addressof(ctypes.c_char.from_buffer(region))
