@@ -131,6 +131,7 @@ SENTRIES = (
     "tests/sentry/parallel/test_serial_resources.py",
     "tests/sentry/parallel/test_stable_ids.py",
     "tests/sentry/post_scan/test_post_scan_choke_points.py",
+    "tests/sentry/profiling/test_field_basis_registry.py",
     "tests/sentry/profiling/test_generated_at_shape.py",
     "tests/sentry/profiling/test_profile_source_contract_coverage.py",
     "tests/sentry/profiling/test_profile_value_registry.py",
