@@ -7,7 +7,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from decoy_engine._arrow_types import TextWidthState, is_text, narrow_text
+from decoy_engine._arrow_types import is_text, narrow_text
 from decoy_engine.determinism import derive
 from decoy_engine.internal.pandas_missing import is_null_cell as _is_missing
 from decoy_engine.kernel._canonicalize import canonicalize_derive_source
@@ -33,24 +33,11 @@ def _array_to_pylist(values: pa.Array | pa.ChunkedArray | list[Any]) -> list[Any
     return list(values)
 
 
-def passthrough_array(values: Any, width: TextWidthState | None = None) -> Any:
-    """Return values without changing logical values.
-
-    With a width state, each chunk of a text column is narrowed from its offsets and the
-    chunks are never combined; one array must fit as one slice, so the caller splits a wider
-    batch first (`split_wide_batch`). Without one, a chunked input becomes one array.
-    """
-    if width is None:
-        return values.combine_chunks() if isinstance(values, pa.ChunkedArray) else values
-    chunks = values.chunks if isinstance(values, pa.ChunkedArray) else [values]
-    parts = [part for chunk in chunks for part in width.observe(chunk)]
+def passthrough_array(values: pa.Array | pa.ChunkedArray) -> pa.Array:
+    """Return values as one Arrow array without changing logical values."""
     if isinstance(values, pa.ChunkedArray):
-        return pa.chunked_array(
-            parts, type=width.arrow_type if is_text(values.type) else values.type
-        )
-    if len(parts) != 1:
-        raise ValueError("an array wider than 32-bit offsets must be split before narrowing")
-    return parts[0]
+        return values.combine_chunks()
+    return values
 
 
 def hash_array(

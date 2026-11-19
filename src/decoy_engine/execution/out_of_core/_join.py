@@ -502,9 +502,6 @@ def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-__all__ = ["fk_output_array", "mask_child_fk", "mask_child_fk_fail"]
-
-
 def _fk_key_value_roundtrip_type(dtype: pa.DataType) -> pa.DataType:
     """The round-trip type of a value AFTER it passes through `fk_key_value`.
 
@@ -576,3 +573,6 @@ def _dtype_unsupported(dtype: pa.DataType, reason: str) -> ExecutionError:
             "rejected rather than allowed to drift from whole-column inference."
         ),
     )
+
+
+__all__ = ["fk_output_array", "mask_child_fk", "mask_child_fk_fail"]

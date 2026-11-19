@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine._arrow_types import TextWidthState
+from decoy_engine._arrow_types import TextWidthState, split_wide_batch
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._compat import _column_seed
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
+from decoy_engine.execution.out_of_core._source import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
 from decoy_engine.transforms.code_set import (
     CodeSetConfig,
@@ -31,7 +32,7 @@ from decoy_engine.transforms.code_set import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
 
     from decoy_engine.execution.out_of_core._relation import ParentKeyRelation
@@ -224,6 +225,17 @@ def open_joiner(
     except BaseException:
         del mask_key
         raise
+
+
+def iter_source_batches(src: pa.Table | LazySource, batch_rows: int) -> Iterator[pa.RecordBatch]:
+    """The source as record batches of at most `batch_rows`, each cut so its text fits 32-bit offsets."""
+    batches = (
+        src.iter_batches(batch_rows)
+        if isinstance(src, LazySource)
+        else src.to_batches(max_chunksize=batch_rows)
+    )
+    for batch in batches:
+        yield from split_wide_batch(batch)
 
 
 __all__ = [

@@ -119,25 +119,75 @@ class TextWidthState:
             return [array.cast(pa.large_string())]
         return [array]
 
+    def observe_column(self, column: pa.Array | pa.ChunkedArray) -> pa.ChunkedArray:
+        """Narrow every chunk of one column, keeping a single type across the whole call.
+
+        A promotion partway through leaves the earlier `string` parts behind, so they are
+        cast to `large_string` once the state is wide. A non-text column passes through.
+        """
+        chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
+        if not is_text(column.type):
+            return pa.chunked_array(chunks, type=column.type)
+        parts = [part for chunk in chunks for part in self.observe(chunk)]
+        if self.wide:
+            parts = [p.cast(pa.large_string()) if pa.types.is_string(p.type) else p for p in parts]
+        return pa.chunked_array(parts, type=self.arrow_type)
+
+
+def narrow_passthrough(values: pa.Array, width: TextWidthState) -> pa.Array:
+    """Narrow one batch-sized text array under `width`, as exactly one array.
+
+    The caller splits a batch wider than 32-bit offsets first (`split_wide_batch`), so a
+    second part means a caller skipped that step.
+    """
+    parts = width.observe(values)
+    if len(parts) != 1:
+        raise AssertionError("a text array wider than 32-bit offsets must be split first")
+    return parts[0]
+
 
 def promoted_text_type(fixed: pa.DataType, state: TextWidthState | None) -> pa.DataType:
     """`large_string` for a text type whose width state was promoted, else `fixed` unchanged."""
     return pa.large_string() if state is not None and state.wide and is_text(fixed) else fixed
 
 
-def widen_text_columns(chunks: Iterable[pa.Table], columns: frozenset[str]) -> Iterator[pa.Table]:
+def widen_text_columns(
+    chunks: Iterable[pa.Table],
+    columns: frozenset[str],
+    seen: dict[str, set[pa.DataType]] | None = None,
+) -> Iterator[pa.Table]:
     """Give pass-through text columns the source `large_string` field again.
 
     A Parquet writer fixes its schema before the first chunk, so a sink keeps the source field
-    as on main and every failure stays main's. Widening copies offsets only.
+    as on main and every failure stays main's. Widening copies offsets only. `seen`, when given,
+    collects the text type each named column had on arrival, so a caller can tell a column that
+    stayed `string` from one that was promoted.
     """
     for chunk in chunks:
         for name in columns:
             idx = chunk.schema.get_field_index(name)
-            if idx >= 0 and pa.types.is_string(chunk.schema.field(idx).type):
+            if idx < 0 or not is_text(chunk.schema.field(idx).type):
+                continue
+            if seen is not None:
+                seen.setdefault(name, set()).add(chunk.schema.field(idx).type)
+            if pa.types.is_string(chunk.schema.field(idx).type):
                 field = chunk.schema.field(idx).with_type(pa.large_string())
                 chunk = chunk.set_column(idx, field, chunk.column(idx).cast(pa.large_string()))
         yield chunk
+
+
+def narrow_text_columns(table: pa.Table, columns: Iterable[str]) -> pa.Table:
+    """Cast the named `large_string` columns of a collected table to `string`, chunk by chunk.
+
+    The caller knows every chunk of each column fits 32-bit offsets (its width state never
+    promoted), and the chunking is kept so no chunk grows.
+    """
+    for name in columns:
+        idx = table.schema.get_field_index(name)
+        if idx >= 0 and pa.types.is_large_string(table.schema.field(idx).type):
+            field = table.schema.field(idx).with_type(pa.string())
+            table = table.set_column(idx, field, table.column(idx).cast(pa.string()))
+    return table
 
 
 def unify_text_widths(types: set[pa.DataType]) -> set[pa.DataType]:

@@ -29,7 +29,11 @@ from typing import TYPE_CHECKING, Any, cast
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine._arrow_types import unify_text_widths, widen_text_columns
+from decoy_engine._arrow_types import (
+    narrow_text_columns,
+    unify_text_widths,
+    widen_text_columns,
+)
 from decoy_engine.execution import _chunked_input
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import ExecutionResult
@@ -101,7 +105,9 @@ def merge_lane_stamp(
     return {**reproducibility_stamp, **routed_quality_metrics.get("auto_chunk", {})}
 
 
-def join_dispatcher_chunks(chunks: list[pa.Table], *, table: str) -> pa.Table:
+def join_dispatcher_chunks(
+    chunks: list[pa.Table], *, table: str, text_columns: frozenset[str] = frozenset()
+) -> pa.Table:
     """Join the dispatcher lane's chunks into one table, keeping what B1 produced.
 
     `concat_masked_chunks` rebuilds every field as `pa.field(name, type)`, which turns
@@ -115,6 +121,10 @@ def join_dispatcher_chunks(chunks: list[pa.Table], *, table: str) -> pa.Table:
     3. chunks that differ from the target schema are cast to it, and the result is
        one contiguous table with no schema metadata.
 
+    `text_columns` are the pass-through text columns whose width may change mid-call: a
+    `string`/`large_string` disagreement on one of them resolves to `large_string`, and on any
+    other column it still raises.
+
     Precondition: `chunks` is non-empty (the resident route always yields at least one
     chunk); an empty list is a caller bug and raises `chunked_schema_mismatch` naming
     the table instead of an `IndexError`.
@@ -127,7 +137,7 @@ def join_dispatcher_chunks(chunks: list[pa.Table], *, table: str) -> pa.Table:
             raise _mismatch(
                 table, f"column names differ across chunks: {names} vs {chunk.column_names}"
             )
-    fields = [_target_field(chunks, index, table) for index in range(len(names))]
+    fields = [_target_field(chunks, index, table, text_columns) for index in range(len(names))]
     schema = pa.schema(fields)
     parts = [c if c.schema.equals(schema, check_metadata=True) else c.cast(schema) for c in chunks]
     return pa.concat_tables(parts).combine_chunks().replace_schema_metadata(None)
@@ -140,7 +150,9 @@ def _mismatch(table: str, detail: str) -> ExecutionError:
     )
 
 
-def _target_field(chunks: list[pa.Table], index: int, table: str) -> pa.Field:
+def _target_field(
+    chunks: list[pa.Table], index: int, table: str, text_columns: frozenset[str]
+) -> pa.Field:
     per_chunk = [c.schema.field(index) for c in chunks]
     first = per_chunk[0]
     if all(f.equals(first, check_metadata=True) for f in per_chunk):
@@ -150,9 +162,10 @@ def _target_field(chunks: list[pa.Table], index: int, table: str) -> pa.Field:
         return first
     if any(f.type != typed[0].type for f in typed):
         # A pass-through text column promoted to `large_string` after earlier `string` chunks.
-        widest = unify_text_widths({f.type for f in typed})
-        if len(widest) == 1:
-            return next(f for f in typed if f.type == next(iter(widest)))
+        if first.name in text_columns:
+            widest = unify_text_widths({f.type for f in typed})
+            if len(widest) == 1:
+                return next(f for f in typed if f.type == next(iter(widest)))
         types = sorted({str(f.type) for f in typed})
         raise _mismatch(table, f"column {first.name!r} has disagreeing types {types}")
     return typed[0]
@@ -320,7 +333,13 @@ def _run_dispatcher(
             )
         )
     )
-    return join_dispatcher_chunks(chunks, table=table)
+    from decoy_engine.execution.native._chunked_schema_rule import build_schema_rule
+
+    rule = build_schema_rule(config, table=table, first=source, registry=registry)
+    text_columns = frozenset(
+        n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
+    )
+    return join_dispatcher_chunks(chunks, table=table, text_columns=text_columns)
 
 
 def _run_streamed(
@@ -341,11 +360,11 @@ def _run_streamed(
     preresolved: PreResolvedColumn | None = None,
     cast_run: Any = None,  # accepted for the shared call shape; run_auto_chunk refuses it earlier
     align_row_groups: bool = False,
+    collected: dict[str, pa.Table] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The dispatcher lane with the chunks streamed into `sink`; returns the `output` and
     `input` blocks. A `LazySource` is read as batches (B6b) and its handle is closed on every
     exit."""
-    from decoy_engine.execution import _transactional_sink
     from decoy_engine.execution.native._chunked_schema_rule import build_schema_rule
     from decoy_engine.execution.native.chunked import _core
 
@@ -377,23 +396,25 @@ def _run_streamed(
             base_row_offset=0,
             native_threads=native_threads,
         )
+        wide_columns = frozenset(
+            n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
+        )
+        arrived: dict[str, set[pa.DataType]] = {}
         stats = _output_sink.stream_table(
             sink,
             table,
-            # A real sink fixes its writer schema before chunk one, so it keeps the source
-            # `large_string` field as on main; the in-memory collector keeps the narrowed type.
-            chunks
-            if isinstance(sink, _transactional_sink._CallableSinkAdapter)
-            else widen_text_columns(
-                chunks,
-                frozenset(
-                    n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
-                ),
-            ),
+            # Every sink sees the source `large_string` field on each chunk, as on main: a writer
+            # fixes its schema before chunk one and a later promotion must not change it.
+            widen_text_columns(chunks, wide_columns, arrived),
             fixed_columns=rule.string_columns | frozenset(rule.passthrough_types),
             align_row_groups=align_row_groups,
             empty_schema=first.schema if first.num_rows == 0 else None,
         )
+        if collected is not None:
+            # The resident collector gets the narrowed type main's resident lane gives, now that
+            # no later chunk can promote a column that stayed narrow.
+            narrow = [n for n, types in arrived.items() if types == {pa.string()}]
+            collected[table] = narrow_text_columns(collected[table], narrow)
     finally:
         inputs.close()
     return stats.block(), inputs.block()
@@ -518,6 +539,7 @@ def run_auto_chunk(
                 expected=expected,
                 chunk_results=streamed_evidence,
                 align_row_groups=align_row_groups,
+                collected=collected,
                 **common,
             )
             evidence = _without_elapsed(streamed_evidence.route_evidence())

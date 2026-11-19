@@ -23,9 +23,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from decoy_engine import _arrow_types, run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine import _arrow_types, reasons, run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.execution import ParquetTransactionalSink, run_pipeline
 from decoy_engine.execution import _chunked_output_sink as sink_mod
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline_auto_chunk import join_dispatcher_chunks
 from decoy_engine.execution.native import _chunked_entry
 from decoy_engine.execution.out_of_core import _mask
@@ -33,7 +34,7 @@ from decoy_engine.execution.out_of_core._batch_join import _resolve_output_types
 from decoy_engine.execution.out_of_core._mask import masked_output_type
 from decoy_engine.fileaccess._types import FileAccessReadError
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
-from decoy_engine.kernel import passthrough_array
+from decoy_engine.profile._readers import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
 from tests._declared_schema import chunked_entry_kwargs, declare_rest
 from tests.native._chunked_categorical_support import cat_col, make_config, passthrough
@@ -196,7 +197,7 @@ def test_o3a_out_of_core_writes_string_but_a_fixed_schema_sink_keeps_large_strin
     mode: str, expected: pa.DataType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The Parquet sink fixes its schema before batch one, so it keeps main's field (plan 3.3)."""
-    calls = _spy(monkeypatch, _mask, "passthrough_array")
+    calls = _spy(monkeypatch, _mask, "narrow_passthrough")
     run = o.run_ooc(o.large_string_component_shape(OrphanPolicy.PRESERVE), mode, tmp_path=tmp_path)
     assert calls
     assert run.outputs["P"].schema.field("n").type == expected
@@ -259,8 +260,7 @@ _TRIPWIRE = textwrap.dedent(
     import numpy as np
     import pyarrow as pa
     from decoy_engine import _arrow_types
-    from decoy_engine.kernel import passthrough_array
-
+    
     page = mmap.PAGESIZE
     region = mmap.mmap(-1, page)
     addr = ctypes.addressof(ctypes.c_char.from_buffer(region))
@@ -273,7 +273,7 @@ _TRIPWIRE = textwrap.dedent(
     if sys.argv[1] == "control":
         chunk.to_pylist()  # must crash: proves the tripwire bites
     else:
-        out = passthrough_array(pa.chunked_array([chunk, chunk]), _arrow_types.TextWidthState())
+        out = _arrow_types.TextWidthState().observe_column(pa.chunked_array([chunk, chunk]))
         assert out.type == pa.string() and out.num_chunks == 4 and len(out) == 8
     print("OK")
     """
@@ -298,7 +298,7 @@ def test_o3d_tripwire_control_crashes_on_a_payload_read() -> None:
 def test_o3d_out_of_core_passthrough_uses_the_state(small_limit: None) -> None:
     state = _arrow_types.TextWidthState()
     chunk = pa.array(["ab", "cd", "ef"], pa.large_string())
-    out = passthrough_array(pa.chunked_array([chunk, chunk]), state)
+    out = state.observe_column(pa.chunked_array([chunk, chunk]))
     assert out.num_chunks == 4 and out.type == pa.string() and not state.wide
     assert out.to_pylist() == ["ab", "cd", "ef"] * 2
 
@@ -381,7 +381,7 @@ def test_o3f_resident_collector_widens_the_earlier_chunk(
 ) -> None:
     table = _source(WIDE)
     got = _run("run_mask_chunked", [table.slice(0, 3), table.slice(3)])
-    joined = join_dispatcher_chunks(got, table=TABLE)
+    joined = join_dispatcher_chunks(got, table=TABLE, text_columns=frozenset({"keep"}))
     assert joined.schema.field("keep").type == pa.large_string()
     assert joined.column("keep").to_pylist() == WIDE
     # The same through the auto-chunk run: `x0`..`x9` fit two bytes, `x10` promotes the column.
@@ -451,32 +451,6 @@ def test_o3b_promoted_parent_state_reaches_the_out_of_core_joiner(
     assert any(st is not None and st.wide for states in seen for st in states)
 
 
-def test_o3e_analytic_fk_routing_receives_the_run_width_states(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from decoy_engine.execution import _pipeline_routing_fk_dtype as routing
-    from decoy_engine.execution.out_of_core import _batch_join
-    from tests.unit.execution import test_pipeline_routing_fk_dtype as fk
-
-    seen: list[Any] = []
-    real = _batch_join._resolve_output_types
-    monkeypatch.setattr(
-        _batch_join,
-        "_resolve_output_types",
-        lambda **kw: (seen.append(kw["text_widths"]), real(**kw))[1],
-    )
-    state = _arrow_types.TextWidthState()
-    state.wide = True
-    big = pa.array(["a"], pa.large_string())
-    routing.fk_out_of_core_dtype_hazard(
-        fk._plan("passthrough"),
-        fk._graph(),
-        caller_sources=fk._sources(big, big),
-        text_widths={"parent": {"pk": state}},
-    )
-    assert seen == [(state,)]
-
-
 def _sparse_2gib_table(tmp_path: Path) -> pa.Table:
     size = 2**31
     path = tmp_path / "sparse.bin"
@@ -527,3 +501,122 @@ def test_o3e_pandas_routes_succeed_under_a_small_limit(small_limit: None, tmp_pa
         **r3._ROW_ROUTING,
     )
     _no_large_text(seq.outputs)
+
+
+# AT-O3f: a promotion partway through one call, on every path that builds a column from parts.
+
+
+def test_o3f_observe_column_recasts_earlier_parts_on_a_mid_call_promotion(
+    small_limit: None,
+) -> None:
+    state = _arrow_types.TextWidthState()
+    column = pa.chunked_array(
+        [pa.array(["ab"], pa.large_string()), pa.array(["ghijklmnop"], pa.large_string())]
+    )
+    out = state.observe_column(column)
+    assert state.wide
+    assert out.type == pa.large_string()
+    assert {c.type for c in out.chunks} == {pa.large_string()}
+    assert out.to_pylist() == ["ab", "ghijklmnop"]
+    narrow = _arrow_types.TextWidthState().observe_column(
+        pa.chunked_array([pa.array(["ab", None], pa.large_string())])
+    )
+    assert narrow.type == pa.string() and narrow.to_pylist() == ["ab", None]
+    ints = _arrow_types.TextWidthState().observe_column(pa.chunked_array([pa.array([1, 2])]))
+    assert ints.type == pa.int64()
+
+
+def test_o3f_run_mask_chunked_multi_chunk_column_promotes_mid_call(small_limit: None) -> None:
+    keep = pa.chunked_array(
+        [pa.array(["ab", "cd"], pa.large_string()), pa.array(["ghijklmnop"], pa.large_string())]
+    )
+    cats = pa.chunked_array([pa.array(["a", "b"]), pa.array(["a"])])
+    got = _run("run_mask_chunked", [pa.table({"c": cats, "keep": keep})])
+    assert [t.schema.field("keep").type for t in got] == [pa.large_string()]
+    assert column_values(got, "keep") == ["ab", "cd", "ghijklmnop"]
+
+
+def test_o3f_auto_chunk_lazy_source_without_a_sink_promotes_mid_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The no-sink collector receives widened chunks, so a late promotion cannot disagree."""
+    monkeypatch.setattr(_arrow_types, "_OFFSET_LIMIT", 2)
+    cfg, source = r3.single_table(tmp_path, hash_column=False)
+    path = tmp_path / "large.parquet"
+    pq.write_table(_large_text(source), path)
+    cfg["sources"]["t"]["path"] = str(path)
+    run = r3._go(
+        cfg,
+        {"t": LazySource(path)},
+        key_provider=r3.key_provider(),
+        auto_chunk=True,
+        chunk_size_rows=5,
+        auto_chunk_threshold_rows=1,
+    )
+    assert run.outputs["t"].schema.field("p").type == pa.large_string()
+    assert run.outputs["t"].column("p").to_pylist() == source.column("p").to_pylist()
+
+
+def test_o3f_auto_chunk_lazy_source_without_a_sink_narrows_when_nothing_promotes(
+    tmp_path: Path,
+) -> None:
+    cfg, source = r3.single_table(tmp_path, hash_column=False)
+    path = tmp_path / "large.parquet"
+    pq.write_table(_large_text(source), path)
+    cfg["sources"]["t"]["path"] = str(path)
+    run = r3._go(
+        cfg,
+        {"t": LazySource(path)},
+        key_provider=r3.key_provider(),
+        auto_chunk=True,
+        chunk_size_rows=5,
+        auto_chunk_threshold_rows=1,
+    )
+    assert run.outputs["t"].schema.field("p").type == pa.string()
+    assert run.outputs["t"].column("p").to_pylist() == source.column("p").to_pylist()
+
+
+def test_o3f_join_widens_only_the_named_text_columns() -> None:
+    a = pa.table({"keep": pa.array(["x"], pa.string()), "other": pa.array(["x"], pa.string())})
+    b = pa.table(
+        {"keep": pa.array(["y"], pa.large_string()), "other": pa.array(["y"], pa.large_string())}
+    )
+    with pytest.raises(ExecutionError) as err:
+        join_dispatcher_chunks([a, b], table=TABLE, text_columns=frozenset({"keep"}))
+    assert err.value.code == reasons.runtime.CHUNKED_SCHEMA_MISMATCH
+    assert "other" in str(err.value)
+    with pytest.raises(ExecutionError):
+        join_dispatcher_chunks([a, b], table=TABLE)
+
+
+# AT-O3a/O3f: the out-of-core mask narrows a `large_string` column no strategy touches.
+
+
+def _unmasked_batch(values: list[str | None]) -> pa.RecordBatch:
+    return pa.record_batch(
+        {"k": pa.array(["a"] * len(values), pa.string()), "u": pa.array(values, pa.large_string())}
+    )
+
+
+@pytest.mark.parametrize("seeded", [True, False])
+def test_o3a_out_of_core_narrows_an_unconfigured_large_string_column(seeded: bool) -> None:
+    plan = s.make_plan({"U": s.table_seed({"k": s.hashed("ns")})} if seeded else {})
+    widths: dict[str, _arrow_types.TextWidthState] = {}
+    out = _mask.mask_batch(plan, "U", _unmasked_batch(["ab", None, "cd"]), text_widths=widths)
+    assert out.schema.field("u").type == pa.string()
+    assert out.column("u").to_pylist() == ["ab", None, "cd"]
+    assert not widths["u"].wide
+
+
+@pytest.mark.parametrize("seeded", [True, False])
+def test_o3f_out_of_core_unconfigured_column_promotes_across_batches(
+    seeded: bool, small_limit: None
+) -> None:
+    plan = s.make_plan({"U": s.table_seed({"k": s.hashed("ns")})} if seeded else {})
+    widths: dict[str, _arrow_types.TextWidthState] = {}
+    first = _mask.mask_batch(plan, "U", _unmasked_batch(["ab"]), text_widths=widths)
+    later = _mask.mask_batch(plan, "U", _unmasked_batch(["ghijklmnop"]), text_widths=widths)
+    assert first.schema.field("u").type == pa.string()
+    assert later.schema.field("u").type == pa.large_string()
+    assert later.column("u").to_pylist() == ["ghijklmnop"]
+    assert widths["u"].wide

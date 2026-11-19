@@ -329,8 +329,7 @@ def _narrow_passthrough(
     rule: SchemaRule, name: str, column: pa.ChunkedArray, field: pa.Field
 ) -> tuple[pa.ChunkedArray, pa.Field]:
     state = rule.text_widths.setdefault(name, TextWidthState())
-    parts = [part for chunk in column.chunks for part in state.observe(chunk)]
-    return pa.chunked_array(parts, type=state.arrow_type), field.with_type(state.arrow_type)
+    return state.observe_column(column), field.with_type(state.arrow_type)
 
 
 def normalize_chunk(

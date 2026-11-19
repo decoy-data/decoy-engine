@@ -61,7 +61,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from decoy_engine._arrow_types import TextWidthState, split_wide_batch
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
@@ -95,6 +95,9 @@ from decoy_engine.execution.out_of_core._stream_driver_support import (
     _payload_schema,
     _replace_fk_columns,
     open_joiner,
+)
+from decoy_engine.execution.out_of_core._stream_driver_support import (
+    iter_source_batches as _iter_source_batches,
 )
 from decoy_engine.execution.out_of_core._stream_join import (
     ChildKeyLockstepCursor,
@@ -569,16 +572,6 @@ def stream_table(
     except BaseException:
         del mask_key
         raise
-
-
-def _iter_source_batches(src: TableSource, batch_rows: int) -> Iterator[pa.RecordBatch]:
-    batches = (
-        src.iter_batches(batch_rows)
-        if isinstance(src, LazySource)
-        else src.to_batches(max_chunksize=batch_rows)
-    )
-    for batch in batches:
-        yield from split_wide_batch(batch)
 
 
 __all__ = ["stream_table"]

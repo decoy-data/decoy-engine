@@ -27,7 +27,6 @@ out-of-core.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import pyarrow as pa
@@ -35,7 +34,6 @@ import pyarrow as pa
 from decoy_engine.execution._errors import ExecutionError
 
 if TYPE_CHECKING:
-    from decoy_engine._arrow_types import TextWidthState
     from decoy_engine.plan._types import Plan
     from decoy_engine.profile._readers import LazySource
     from decoy_engine.relationships import RelationshipGraph
@@ -52,15 +50,12 @@ def fk_out_of_core_dtype_hazard(
     graph: RelationshipGraph,
     *,
     caller_sources: dict[str, pa.Table | LazySource],
-    text_widths: Mapping[str, Mapping[str, TextWidthState]] | None = None,
 ) -> bool:
     """True when out-of-core could reject (or cannot pin the type of) a relationship
     key of this job although the oracle completes it."""
-    from decoy_engine.execution.out_of_core._batch_join import (
-        _python_roundtrip_type,
-        _resolve_output_types,
-    )
+    from decoy_engine.execution.out_of_core._batch_join import _resolve_output_types
     from decoy_engine.execution.out_of_core._compat import _column_seed
+    from decoy_engine.execution.out_of_core._join import _python_roundtrip_type
     from decoy_engine.execution.out_of_core._mask import masked_output_type
     from decoy_engine.relationships._graph import OrphanPolicy
 
@@ -105,11 +100,6 @@ def fk_out_of_core_dtype_hazard(
                     tuple(s for s in seeds if s is not None)
                     if edge.orphan_policy is OrphanPolicy.REMAP
                     else None
-                ),
-                # Routing runs before any batch, so a caller passes states only when it has them.
-                text_widths=tuple(
-                    (text_widths or {}).get(edge.parent_table, {}).get(c)
-                    for c in edge.parent_columns
                 ),
             )
             matched = tuple(_python_roundtrip_type(t) for t in masked)

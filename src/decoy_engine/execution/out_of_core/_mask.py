@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine._arrow_types import TextWidthState
+from decoy_engine._arrow_types import TextWidthState, narrow_passthrough
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution.out_of_core._categorical_native import native_categorical_array
@@ -215,7 +215,7 @@ def mask_column(
             )
         if seed.strategy == "passthrough":
             if text_width is not None and isinstance(values, pa.Array):
-                return passthrough_array(values, text_width)
+                return narrow_passthrough(values, text_width)
             return passthrough_array(values)
         if seed.strategy == "redact":
             return redact_array(values, redact_with=cfg.get("redact_with", "REDACTED"))
@@ -384,7 +384,7 @@ def _narrow_unmasked(
         if field.name in skip or not pa.types.is_large_string(field.type):
             continue
         state = widths.setdefault(field.name, TextWidthState())
-        arrays[idx] = passthrough_array(arrays[idx], state)
+        arrays[idx] = narrow_passthrough(arrays[idx], state)
         fields[idx] = field.with_type(state.arrow_type)
     return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
 
