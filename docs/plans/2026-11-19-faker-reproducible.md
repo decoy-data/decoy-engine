@@ -408,6 +408,8 @@ Against the plan contract's defect catalog (`obsidian-vault/30_Resources/Decoy-P
 
 ## 16. Owner questions
 
+Answered 2026-11-19: recommended on Q1 and Q3 to Q6; Q2 no (no upstream Faker pull requests).
+
 | Id | Question | Recommended | Why |
 |---|---|---|---|
 | Q1 | Canonical order for it_IT cities | `sorted(...)` (codepoint order) | Faker's own idiom for deduplicated lists (et_EE); obviously canonical; an upstream PR with the same order converges. Alternative: first-appearance order (`dict.fromkeys`), which keeps the data file's order |
@@ -419,7 +421,7 @@ Against the plan contract's defect catalog (`obsidian-vault/30_Resources/Decoy-P
 
 ## 17. Follow-ups (outside the guarantee)
 
-- F-1: upstream Faker PRs (Q2).
+- F-1: dropped. Owner 2026-11-19 answered Q2 no: no upstream Faker pull requests.
 - F-2: an engine-code rule for set iteration that reaches output (non-goal), if the route matrix ever finds one.
 - F-3: the same construction rule for the `mimesis` adapter if the extra joins the freeze.
 - F-4 (V2-LOG): the coded runtime refusal of 4.3, revisited at the first Faker bump the shim cannot fix; it maps lock keys to `(provider, locale)`, reuses the resolver in `plan/checks/_generate_columns.py`, sits in `plan/checks/` with tests in `tests/unit/plan/checks/`, and applies catalog class RD-3 to its error.
