@@ -95,7 +95,7 @@ jobs:
           extras: dev
           python: ${{ matrix.python }}
       - name: Faker output lock
-        run: pytest tests/sentry/dependencies/test_faker_output_lock.py -m faker_output_lock --tb=short
+        run: pytest tests/sentry/dependencies -m faker_output_lock --tb=short
 
   mypy:
     if: github.event_name != 'pull_request'

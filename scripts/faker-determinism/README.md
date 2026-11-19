@@ -97,13 +97,15 @@ clock is frozen.
   CPython 3.10.20 with the pinned Faker. Read the printed diff, which has seven kinds: changed,
   removed, added, newly reproducible, newly unstable, newly calendar-dependent, no longer
   calendar-dependent. Commit the file in the same PR as the pin change.
-- Check it: `tests/sentry/dependencies/test_faker_output_lock.py`. The cells marked
-  `faker_output_lock` (all in that one file; the schema and caller-argument sentries are static) spawn nine workers (clock A at hash seeds 0 to 7, clock B at seed 0). Each
-  takes about 55 CPU seconds, so a full capture is about 170 to 185 seconds on four CPUs. The cells run
-  them as two batches, so no cell holds more than about half. They are the required
-  `faker-output-lock` CI job on CPython 3.10.20, 3.11.9 and 3.12.7. The reviewed lists in that
-  file (`EXPECTED_UNSTABLE`, `EXPECTED_RAISES`, `EXPECTED_CALENDAR`, `ANCHORS`) must equal the
-  lock; changing a list needs a reason in the same diff.
+- Check it: `tests/sentry/dependencies/test_faker_output_lock*.py`. The cells marked
+  `faker_output_lock` (all in `test_faker_output_lock.py`; the schema and caller-argument
+  sentries are static) spawn nine workers: clock A at hash seeds 0 to 7, clock B at seed 0. Each
+  takes about 55 CPU seconds, so a full capture is about 170 to 185 seconds on four CPUs. The
+  cells run them as two batches, so no cell holds more than about half. The CI job runs
+  `pytest tests/sentry/dependencies -m faker_output_lock` and is required on CPython 3.10.20,
+  3.11.9 and 3.12.7. The reviewed lists in `_faker_lock_lists.py` (`EXPECTED_UNSTABLE`,
+  `EXPECTED_RAISES`, `EXPECTED_CALENDAR`, `ANCHORS`) must equal the lock; changing a list needs a
+  reason in the same diff.
 - After 1.0: a Faker bump may ship in a 1.x release only when the diff holds added providers or
   locales, newly reproducible pairs, or pairs that stop depending on the calendar. Anything else
   is a 2.0 change. See the compatibility contract, section 3.3.

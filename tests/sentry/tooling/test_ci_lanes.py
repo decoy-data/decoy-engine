@@ -519,6 +519,10 @@ def test_pg_gate_seeded_failures() -> None:
 # --- FAKER-MIGRATE AT-L12: the required faker-output-lock matrix job -------------------------
 
 
+# Selected by marker over the whole sentry directory, so a marked cell in any lock module runs.
+FAKER_LOCK_RUN = "pytest tests/sentry/dependencies -m faker_output_lock --tb=short"
+
+
 def faker_lock_findings(tree: lanes.Tree) -> list[str]:
     """The Faker lock lane: required, matrixed on three minors, fail-fast off, import-smoke apart."""
     out: list[str] = []
@@ -535,6 +539,8 @@ def faker_lock_findings(tree: lanes.Tree) -> list[str]:
     marked = [i for i, s in enumerate(fl["steps"]) if "-m faker_output_lock" in s.get("run", "")]
     if len(marked) != 1:
         out.append("faker-output-lock does not run the marked cells in exactly one step")
+    elif fl["steps"][marked[0]]["run"].strip() != FAKER_LOCK_RUN:
+        out.append(f"faker-output-lock must run exactly `{FAKER_LOCK_RUN}`")
     # The shared hidden-failure scanner: `||`, `exit 0`, `set +e`, `if`, `continue-on-error`.
     out += scan.hiding_findings(
         fl, marked[0] if len(marked) == 1 else None, "Faker lock", "a red Faker lock"
@@ -560,6 +566,16 @@ def test_removing_the_required_faker_job_is_caught() -> None:
     t = seeded()
     t.required["merge"][0]["jobs"].remove("faker-output-lock")
     assert has(faker_lock_findings(t), "not a required merge job")
+
+
+def test_faker_lane_run_line_is_pinned() -> None:
+    t = seeded()
+    j = job(t, "ci.yml", "faker-output-lock")
+    k = next(i for i, s in enumerate(j["steps"]) if "-m faker_output_lock" in s.get("run", ""))
+    j["steps"][k]["run"] = (
+        "pytest tests/sentry/dependencies/test_faker_output_lock.py -m faker_output_lock --tb=short"
+    )
+    assert has(faker_lock_findings(t), "must run exactly")
 
 
 def test_faker_lane_rules_are_each_seeded() -> None:
