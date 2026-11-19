@@ -85,7 +85,11 @@ def _col(name: str, strategy: str = "passthrough", **fields: Any) -> dict[str, A
 
 
 def build_case(
-    cls: str, tmp: Path, expression: str, gated: dict[str, Any] | None = None
+    cls: str,
+    tmp: Path,
+    expression: str,
+    gated: dict[str, Any] | None = None,
+    m_source: pa.Array | None = None,
 ) -> tuple[dict[str, Any], dict[str, pa.Table]]:
     """A one- or two-table job whose gated column `m` carries `expression` over the integer
     column `v`, with `v` in the pipeline role named by `cls`.
@@ -130,7 +134,7 @@ def build_case(
     elif cls == "group_key":
         base["k"] = pa.array(["x"] * 6, pa.string())
         cols.append(_col("k", "group_key", provider_config={"group_by": "v"}))
-    base["m"] = pa.array(M_SOURCE, pa.string())
+    base["m"] = m_source if m_source is not None else pa.array(M_SOURCE, pa.string())
     if cls == "fk":
         tables["parent"] = pa.table(
             {"pid": pa.array([x for x in VALUES if x is not None], pa.int64())}

@@ -12,7 +12,6 @@ A new route must add itself here.
 
 from __future__ import annotations
 
-import importlib.util
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,8 +43,22 @@ from tests.unit.execution._o1_when_support import (
 ALL_EXPRESSIONS = [*OPS, *FLOAT_OPS]
 # Classes whose `v` is still an integer after the run (a top_code column becomes its label text).
 INT_OUTPUT = ["plain", "fk", "declared", "anchor", "group_key"]
+
+
 # The classes unified admission takes today. The others are asserted as the explicit fallback.
-COMPANION = importlib.util.find_spec("decoy_engine_native") is not None
+def _companion_has_raw_hex() -> bool:
+    """The group_key routes need the compiled raw-hex kernel to load and pass its self-test, not
+    just any companion: an older compiled one lacks it and the job takes the oracle."""
+    from decoy_engine.execution.native._group_key_ext import load_compiled_raw_hex_kernel
+
+    try:
+        load_compiled_raw_hex_kernel()
+    except Exception:
+        return False
+    return True
+
+
+COMPANION = _companion_has_raw_hex()
 # With the companion installed `group_key` also runs natively and on the unified lane (it needs the
 # raw-hex extension); without it the job takes the oracle and the full-frame lane.
 UNIFIED_ADMITS = {"declared", "plain"} | ({"group_key"} if COMPANION else set())
@@ -251,9 +264,8 @@ def test_unified_flag_on_and_off_agree_on_values_types_and_metadata(
 
 # -- AT-O1f over the gated column's strategy ----------------------------------------------------
 # The strategies that run on the text column `m` while an integer `v` is read by the predicate.
-# Limit (plan 8, AT-O1f): strategies that need another source type (fpe over digits, formula,
-# bucketize and bucket_perturb over numbers, date_shift over dates) cannot gate the text column;
-# `top_code` over `v` itself is the `top_code` class cell above.
+# Strategies that need a numeric, digit or date source get that source on `m` (GATED_SOURCES).
+# Limit (plan 8, AT-O1f): `date_shift` is the `anchor` class cell, `top_code` the `top_code` class cell.
 GATED = {
     "redact": {"strategy": "redact"},
     "hash": {"strategy": "hash", "namespace": "o1_hash"},
@@ -264,16 +276,51 @@ GATED = {
 }
 
 
+# Strategies that need a numeric, digit or date source on `m`: (column spec, source values).
+GATED_SOURCES: dict[str, tuple[dict[str, Any], list[Any]]] = {
+    "formula": (
+        {"strategy": "formula", "provider_config": {"formula": "value + 1"}},
+        [10, 20, 30, 40, 50, 60],
+    ),
+    "bucket_perturb": (
+        {
+            "strategy": "bucket_perturb",
+            "namespace": "o1_bp",
+            "provider_config": {"bucket": "week", "date_format": "%Y-%m-%d"},
+        },
+        [f"2024-01-{d:02d}" for d in (8, 9, 15, 16, 22, 23)],
+    ),
+    "fpe": (
+        {"strategy": "fpe", "namespace": "o1_fpe", "provider_config": {"charset": "digits"}},
+        [f"{i:09d}" for i in range(1, 7)],
+    ),
+    "shuffle": ({"strategy": "shuffle", "namespace": "o1_sh"}, M_SOURCE),
+}
+# Refused by the engine under a `when:` gate, so no cell: `top_code` (top_code_with_when_unsupported)
+# and `bucketize` over numbers (gated_string_output_on_numeric_unsupported). Not covered: `derived` needs a second source column and an operation list, so it has no
+# single-column cell here; it reaches the same `when_eval_frame` through the generic work list.
+
+
+def _gated_case(tmp: Path, strategy: str) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+    if strategy in GATED:
+        return build_case("plain", tmp, OPS[0], gated=GATED[strategy])
+    spec, values = GATED_SOURCES[strategy]
+    return build_case("plain", tmp, OPS[0], gated=spec, m_source=pa.array(values))
+
+
 # The gated strategies unified admission takes today; the others fall back to the full-frame lane.
 UNIFIED_STRATEGIES = {"redact", "truncate", "text_redact"}
 
 
-@pytest.mark.parametrize("strategy", sorted(GATED))
+ALL_GATED = sorted({*GATED, *GATED_SOURCES})
+
+
+@pytest.mark.parametrize("strategy", ALL_GATED)
 @pytest.mark.parametrize("route", ["full_frame", "unified"])
 def test_the_blank_bearing_integer_is_int64_under_every_gated_strategy(
     tmp_path: Path, strategy: str, route: str
 ) -> None:
-    cfg, tables = build_case("plain", tmp_path, OPS[0], gated=GATED[strategy])
+    cfg, tables = _gated_case(tmp_path, strategy)
     result = _run(cfg, tables, **_kwargs(route))
     qm = result.quality_metrics
     if route == "unified" and strategy in UNIFIED_STRATEGIES:
@@ -283,11 +330,13 @@ def test_the_blank_bearing_integer_is_int64_under_every_gated_strategy(
     assert result.outputs["t"].schema.field("v").type == pa.int64(), (strategy, route)
 
 
-@pytest.mark.parametrize("strategy", sorted(set(GATED) - {"text_mask"}))  # text_mask+when: refused
+@pytest.mark.parametrize(
+    "strategy", sorted(set(ALL_GATED) - {"text_mask"})
+)  # text_mask+when: refused
 def test_the_chunked_oracle_keeps_int64_under_every_gated_strategy(
     tmp_path: Path, strategy: str
 ) -> None:
-    cfg, tables = build_case("plain", tmp_path, OPS[0], gated=GATED[strategy])
+    cfg, tables = _gated_case(tmp_path, strategy)
     chunks = split(tables["t"], 2)
     with _adapter_calls() as calls:
         out = list(

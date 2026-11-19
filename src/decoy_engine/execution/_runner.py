@@ -233,8 +233,8 @@ def group_key_group_by_columns(plan: Plan, registry: ProviderRegistry) -> dict[s
             continue
         if not isinstance(node.plan_slice, ColumnSeed):
             continue
-        group_by = provider_config_to_dict(node.plan_slice.provider_config).get("group_by")
-        if isinstance(group_by, str) and group_by:
+        group_by = group_by_sibling(provider_config_to_dict(node.plan_slice.provider_config))
+        if group_by is not None:
             out.setdefault(node.table, set()).add(group_by)
     return out
 

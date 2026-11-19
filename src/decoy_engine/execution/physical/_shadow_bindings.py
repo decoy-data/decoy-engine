@@ -31,6 +31,7 @@ from decoy_engine.execution._operator_registry import (
     OPERATORS,
     POSITIONAL_FAKER_SOURCE_TYPES,
 )
+from decoy_engine.execution._runner import group_by_sibling
 from decoy_engine.execution.native._capabilities import capabilities_for
 from decoy_engine.execution.native._categorical_prepared import (
     prepare_categorical,
@@ -367,8 +368,7 @@ def execution_binding_for_slice_node(
     elif strategy == "group_key":
         # group_key keys on a SIBLING column, not the target; `group_key_config_rejection`
         # already proved group_by is present and `length` is a valid even int in range.
-        group_by = cfg.get("group_by")
-        if not isinstance(group_by, str) or not group_by:
+        if group_by_sibling(cfg) is None:
             return None  # pragma: no cover - config gate guarantees a group_by
         if caps.key_source is None:
             return None  # pragma: no cover - group_key is mask-keyed

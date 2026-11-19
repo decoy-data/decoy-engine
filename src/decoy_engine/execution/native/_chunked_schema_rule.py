@@ -68,6 +68,7 @@ import pyarrow.compute as pc
 from decoy_engine import reasons
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._runner import group_by_sibling
 
 _STRING_OUTPUT_STRATEGIES = frozenset({"hash", "truncate", "redact"})
 
@@ -216,10 +217,8 @@ def group_key_pinned_columns(
     for name, col in configured.items():
         if col.get("strategy") != "group_key" or _has_when(col) or written is None:
             continue
-        provider_config = col.get("provider_config")
-        cfg = provider_config if isinstance(provider_config, dict) else {}
-        group_by = cfg.get("group_by")
-        if not isinstance(group_by, str) or group_by == name or group_by in written:
+        group_by = group_by_sibling(col.get("provider_config"))
+        if group_by is None or group_by == name or group_by in written:
             continue
         sibling = configured.get(group_by)
         if sibling is not None and (sibling.get("strategy") != "passthrough" or _has_when(sibling)):
@@ -228,6 +227,8 @@ def group_key_pinned_columns(
             continue
         if not group_key_sibling_type_admitted(first_schema.field(group_by).type):
             continue
+        provider_config = col.get("provider_config")
+        cfg = provider_config if isinstance(provider_config, dict) else {}
         if group_key_config_rejection(name, table, None, provider_config=cfg) is None:
             pinned.add(name)
     return frozenset(pinned)
