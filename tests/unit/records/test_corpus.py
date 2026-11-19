@@ -39,3 +39,25 @@ def test_decoy_job_log_v1_sample_reads_header_and_events() -> None:
     assert log.header.invocation_id == INVOCATION and log.header.command == "run"
     assert len(log.events) == 2 and not log.truncated_tail and log.bad_lines == 0
     assert json.loads((CORPUS / "decoy-job-log-v1.jsonl").read_text().splitlines()[0])["log_schema"]
+
+
+# -- scan-set/v1 written before the basis labels (PROFILE-SAMPLE-LABELS E1) ---------------------
+# Both files were written once at the engine head before E1 and are never regenerated: they are
+# what an older engine saved, so a later engine must still read and export them.
+
+
+def test_a_pre_basis_scan_set_record_decodes_exports_and_reads_back() -> None:
+    from decoy_engine.records import canonical_bytes
+    from tests.unit.records._helpers import PRODUCER, T0
+
+    data = (CORPUS / "scan-set-v1.json").read_bytes()
+    got = records.decode(data)
+    assert isinstance(got, records.DecodedRecord) and got.kind == "scan-set"
+    lines = list(records.export_lines([got.raw], producer=PRODUCER, exported_at=T0))
+    items = list(records.read_export(lines))
+    header, exported = items[0], items[1]
+    assert header.withheld_records == () and header.record_count == 1
+    payload = exported.record.raw["payload"]
+    assert payload["tables"][0]["descriptor"]["path"] == "claims.csv"
+    again = records.decode(canonical_bytes(exported.record.raw))
+    assert isinstance(again, records.DecodedRecord) and again.id == exported.record.id
