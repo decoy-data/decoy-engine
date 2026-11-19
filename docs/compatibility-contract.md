@@ -1116,6 +1116,8 @@ change in any release. The registry is `src/decoy_engine/contracts/stability.py`
   one by one. A public subpackage that section 3.4 does not name defaults to internal, unless one of its objects
   is exported by a frozen path or the registry lists the name as frozen or experimental. No name is unclassified:
   each export matches one explicit registry row or one package rule.
+  Inside a subpackage that section 3.4 names, a name it does not list is internal too (for example
+  `detection.load_detectors`).
 - The tier belongs to the object and applies to every path that exports it. A constant is matched by its name and
   its object identity, so `SEED_PROTOCOL_VERSION` has one tier wherever it is exported. Only the paths that section
   3.4 names are a stability promise. Another path to a frozen object, such as `decoy_engine.execution.ExecutionResult`,
