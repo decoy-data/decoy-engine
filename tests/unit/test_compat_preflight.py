@@ -29,8 +29,8 @@ _TICKED_CHECKLIST = """
 
 
 def test_touched_frozen_detects_frozen_paths() -> None:
-    changed = ["README.md", "src/decoy_engine/vault.py", "tests/unit/test_x.py"]
-    assert preflight.touched_frozen(changed) == ["src/decoy_engine/vault.py"]
+    changed = ["README.md", "src/decoy_engine/vault/_format.py", "tests/unit/test_x.py"]
+    assert preflight.touched_frozen(changed) == ["src/decoy_engine/vault/_format.py"]
 
 
 def test_touched_frozen_ignores_non_frozen() -> None:

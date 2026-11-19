@@ -25,8 +25,9 @@ import pytest
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine import vault as vault_module
+from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.publication import _vault_order
-from decoy_engine.vault import VaultCommit, VaultError, load_vault
+from decoy_engine.vault import VaultCommit, VaultError, _format, load_vault
 from tests.fileaccess.publication._chain_support import (
     Recorder,
     anchor_at,
@@ -476,14 +477,14 @@ def test_write_chain_fsync_eio_keeps_the_leaf_and_a_retry_is_vault_exists(
 def _vault_blob_with_header(header: Any) -> bytes:
     """A real vault whose unencrypted header is replaced by `header`."""
     blob, _ = writer().serialize()
-    magic = vault_module._MAGIC
-    _, rest = vault_module._read_frame(blob, len(magic))
-    return magic + vault_module._frame(json.dumps(header).encode()) + blob[rest:]
+    magic = _format._MAGIC
+    _, rest = _format._read_frame(blob, len(magic))
+    return magic + _format._frame(json.dumps(header).encode()) + blob[rest:]
 
 
 _GOOD_HEADER = {
     "format": vault_module.VAULT_FORMAT_VERSION,
-    "seed_protocol_version": vault_module.SEED_PROTOCOL_VERSION,
+    "seed_protocol_version": SEED_PROTOCOL_VERSION,
 }
 _BAD_HEADERS = [
     [1],
@@ -560,10 +561,10 @@ def test_adopt_refuses_a_character_device_leaf_before_reading(
 def _vault_blob_with_chunks(*payloads: bytes) -> bytes:
     """A real header followed by one correctly encrypted frame per payload."""
     blob, _ = writer().serialize()
-    magic = vault_module._MAGIC
-    _, rest = vault_module._read_frame(blob, len(magic))
+    magic = _format._MAGIC
+    _, rest = _format._read_frame(blob, len(magic))
     fernet = writer()._fernet()
-    frames = b"".join(vault_module._frame(fernet.encrypt(p)) for p in payloads)
+    frames = b"".join(_format._frame(fernet.encrypt(p)) for p in payloads)
     return blob[:rest] + frames
 
 

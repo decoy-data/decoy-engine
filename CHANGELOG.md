@@ -9,6 +9,253 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-18
+
+### Breaking for consumers
+
+- `scan_baseline.on_drift: fail` now needs `scan_baseline.sha256`, the SHA-256 of the baseline file. Without it the config is refused with `config/scan_baseline_unbound`.
+- a plain `profile_document` or `redact_profile_dict` document now redacts, in every column, any top value or label held by fewer than 10 rows, any label of a column whose labels read as sentences, every numeric bin label, any numeric or date extreme it cannot prove is held by 10 rows, and the invalid-date samples. Date decades are merged until each holds 10 rows, and the outer decades are those of the 10th earliest and 10th latest dated rows; a column with fewer than 19 dated rows releases no decade. `include_values=True` output is unchanged.
+- A plain `decoy fit` snapshot now keeps no label, joint cell or year held by fewer than 10 rows and no exact numeric or date extreme, and it writes short sentence columns as free text. A column too small to floor is withheld and listed. Use `--include-values` for the old content. `value_policy` is now `flagged-redacted/v2`.
+- the two v0.16.0 route tombstones are removed from the reason registry; a record that names one now reads as `decoy/unknown_reason_from_future`.
+- a generate snapshot with a negative or non-finite weight or count is now refused at run, even when its total is positive
+- a `pre_scan` or `post_scan` config that names an NER model other than en_core_web_sm or en_core_web_md (for example en_core_web_lg) now refuses at load with `provider.ner_model_uncalibrated`; `text_redact` is unaffected.
+- a DuckDB interrupt that is not the deadline (Ctrl-C) is now raised as `KeyboardInterrupt`, no longer reported as `export_failed`
+- ten connector reasons now carry outcome `configuration` and retry class `configuration_repair`: `ambiguous_name`, `column_name_unsupported`, `column_not_found`, `duplicate_relation`, `extension_unavailable`, `extension_untrusted_location`, `relation_not_found`, `relation_shape_changed`, `unsupported_column_type` and `value_not_representable`
+- the `group_key` distribution-behavior label is now `destroys_frequency` instead of `preserves_cardinality_only`, in newly compiled plan YAML and the strategy manifest
+- `build_fingerprint` adds a `decoy-ner:<surface>` component per NER surface, so a run resumed under a different NER model is refused with `resume.fingerprint_changed`, and a caller component named `decoy-ner:...` raises `ValueError`
+- `estimate_job` changes three values on a mask job with string columns that used to be unpriceable: `priceable` goes from False to True, `peak_bytes` from None to a number and `runtime` from None to a band, and it adds the note texts `row counts estimated from file size` and `lifecycle not priced: ...`, which a consumer keeping a closed set of known note shapes must add
+- `QualityWarning` now refuses an empty `provider`, an empty `column` and a non-scalar `detail` value when it is built, and joins a list of names in `detail` with ", ". Several producers changed their `detail` fields: `text_mask_sub_floor_span_handled`, `top_code_generalized`, `geo_generalize_cascade`, `generation_fidelity_below_threshold`, and the `out_of_core_caller_managed_residency` and `orphan_fk` warnings. A consumer that reads those fields must follow the new shapes.
+- the `nested` strategy now fails a row with a coded warning for a cell that repeats an object key, is over 16 MiB or 64 levels deep, or holds a raw lone surrogate (it passed through before), and it no longer rewrites numbers it does not mask, so some written values change.
+
+### Added (signed evidence verifier, F33 E1, 2026-11-17)
+
+New `decoy_engine.signed_evidence` package: a closed `EvidenceStatementV1` signed as RFC 8785 (JCS) canonical bytes inside a detached ES256 JWS, and an offline verifier that returns independent result dimensions. A valid signature is never a release pass. `verify_signed_evidence` takes a caller-named artifact directory; `verify_signed_bundle` takes a `SignedBundle` from `open_signed_bundle`, which reads `evidence.json` and `evidence.sig.json` once through a held directory handle. `parse_expectations` loads a digest-pinned expectations document (version 1) and builds the one `VerificationContext` the verifier accepts. An unbound output count above zero gives the PARTIAL exit class.
+
+New base dependencies `joserfc` and `rfc8785`. Artifact files are read through the engine file-access layer with no-follow opens, a changed-during-read check and fail-closed enumeration. Producing a signed bundle is not part of this change, and the verifier refuses a Windows host until the Windows chain lands.
+
+Engine owners gained what the verifier needs: `jcs_bytes` joins the canonical byte forms, `strict_json_loads` accepts `forbid_float` and `forbid_negative_zero` (defaults unchanged), `VersionSpec` joins the strict specs, `FileAccessDenied` carries an optional closed `kind` (its text is unchanged), and `fileaccess.open_ambient_tree` opens a caller-named directory once. New `evidence` reason identities, released in registry 1.30.0: `evidence/adopt_not_verified`, `evidence/artifact_changed_during_read`, `evidence/artifact_enumeration_failed`, `evidence/artifact_missing`, `evidence/artifact_not_regular_file`, `evidence/artifact_path_unsafe`, `evidence/artifact_platform_unsupported`, `evidence/artifact_unreadable`, `evidence/bom`, `evidence/bundle_construction_forbidden`, `evidence/bundle_member_missing`, `evidence/bundle_member_unavailable`, `evidence/bundle_root_missing`, `evidence/bundle_root_not_directory`, `evidence/canonicalization_failed`, `evidence/carrier_construction_forbidden`, `evidence/carrier_fields_invalid`, `evidence/catalog.bom`, `evidence/catalog.duplicate_member`, `evidence/catalog.float_not_allowed`, `evidence/catalog.integer_out_of_domain`, `evidence/catalog.invalid_unicode`, `evidence/catalog.non_finite_number`, `evidence/catalog.not_json`, `evidence/catalog.not_utf8`, `evidence/catalog.too_deep`, `evidence/catalog.too_large`, `evidence/catalog.too_many_nodes`, `evidence/catalog_duplicate_requirement`, `evidence/catalog_no_required_checks`, `evidence/catalog_schema_invalid`, `evidence/catalog_schema_unsupported`, `evidence/context_incomplete`, `evidence/context_invalid`, `evidence/duplicate_member`, `evidence/envelope.duplicate_member`, `evidence/envelope.float_not_allowed`, `evidence/envelope.integer_out_of_domain`, `evidence/envelope.invalid_unicode`, `evidence/envelope.non_finite_number`, `evidence/envelope.too_deep`, `evidence/envelope.too_large`, `evidence/envelope.too_many_nodes`, `evidence/envelope_alg_not_es256`, `evidence/envelope_base64url_invalid`, `evidence/envelope_crit_invalid`, `evidence/envelope_cty_invalid`, `evidence/envelope_header_field_invalid`, `evidence/envelope_header_field_missing`, `evidence/envelope_header_member_forbidden`, `evidence/envelope_not_json`, `evidence/envelope_payload_present`, `evidence/envelope_protected_not_json`, `evidence/envelope_shape_unsupported`, `evidence/envelope_typ_invalid`, `evidence/envelope_unprotected_header`, `evidence/expectations.bom`, `evidence/expectations.duplicate_member`, `evidence/expectations.float_not_allowed`, `evidence/expectations.integer_out_of_domain`, `evidence/expectations.invalid_unicode`, `evidence/expectations.non_finite_number`, `evidence/expectations.not_json`, `evidence/expectations.not_utf8`, `evidence/expectations.too_deep`, `evidence/expectations.too_large`, `evidence/expectations.too_many_nodes`, `evidence/expectations_artifact_id_duplicate`, `evidence/expectations_artifacts_empty`, `evidence/expectations_bad_path`, `evidence/expectations_bad_token`, `evidence/expectations_digest_mismatch`, `evidence/expectations_missing_field`, `evidence/expectations_out_of_range`, `evidence/expectations_pin_invalid`, `evidence/expectations_schema_unknown`, `evidence/expectations_unknown_field`, `evidence/expectations_wrong_type`, `evidence/float_not_allowed`, `evidence/input_access_denied`, `evidence/input_invalid`, `evidence/input_too_large`, `evidence/input_unavailable`, `evidence/integer_out_of_domain`, `evidence/invalid_unicode`, `evidence/legacy_integrity_only`, `evidence/non_finite_number`, `evidence/not_json`, `evidence/not_utf8`, `evidence/permit_construction_forbidden`, `evidence/permit_fields_invalid`, `evidence/signature_encoding_invalid`, `evidence/signer_bad_signature`, `evidence/signer_identity_invalid`, `evidence/signer_identity_mismatch`, `evidence/signer_invalid`, `evidence/signer_key_invalid`, `evidence/signer_verify_unsupported`, `evidence/signing_failed`, `evidence/statement.bom`, `evidence/statement.duplicate_member`, `evidence/statement.float_not_allowed`, `evidence/statement.integer_out_of_domain`, `evidence/statement.invalid_unicode`, `evidence/statement.non_finite_number`, `evidence/statement.not_json`, `evidence/statement.not_utf8`, `evidence/statement.too_deep`, `evidence/statement.too_large`, `evidence/statement.too_many_nodes`, `evidence/statement_array_order`, `evidence/statement_artifact_id_duplicate`, `evidence/statement_coverage_invalid`, `evidence/statement_missing_field`, `evidence/statement_not_canonical`, `evidence/statement_path_duplicate`, `evidence/statement_path_invalid`, `evidence/statement_publication_incoherent`, `evidence/statement_schema_invalid`, `evidence/statement_schema_unsupported`, `evidence/statement_too_many_artifacts`, `evidence/statement_too_many_checks`, `evidence/statement_unknown_field`, `evidence/too_deep`, `evidence/too_large`, `evidence/too_many_nodes`, `evidence/trust_policy.bom`, `evidence/trust_policy.duplicate_member`, `evidence/trust_policy.float_not_allowed`, `evidence/trust_policy.integer_out_of_domain`, `evidence/trust_policy.invalid_unicode`, `evidence/trust_policy.non_finite_number`, `evidence/trust_policy.not_json`, `evidence/trust_policy.not_utf8`, `evidence/trust_policy.too_deep`, `evidence/trust_policy.too_large`, `evidence/trust_policy.too_many_nodes`, `evidence/trust_policy_alg_unsupported`, `evidence/trust_policy_digest_mismatch`, `evidence/trust_policy_duplicate_kid`, `evidence/trust_policy_key_conflict`, `evidence/trust_policy_key_invalid`, `evidence/trust_policy_lifecycle_incoherent`, `evidence/trust_policy_pin_invalid`, `evidence/trust_policy_schema_invalid`, `evidence/trust_policy_schema_unsupported`, `evidence/trust_policy_thumbprint_mismatch`.
+
+### Fixed (run warnings pass the evidence model, R2-ooc-warning, 2026-11-17)
+
+The `out_of_core_caller_managed_residency` warning carried an empty `provider` and a list in `detail`, and the `orphan_fk` warning carried lists in `detail`. `EvidencePayload` refuses both, so the CLI stored no evidence record for those runs. The residency warning now names the route (`provider="out_of_core_route"`) and `detail` holds one `True` flag per caller-managed shape (`resident_source`, `no_sink`, `source_loader`) plus the fixed `message`. The `orphan_fk` warning's `parent_columns` and `child_columns` are now comma-joined strings, the same form its `column` already used. The `quality_metrics["residency"]` record is unchanged. A new test checks that the warnings of the three out-of-core FK runs and of the R3 baseline scenarios are accepted by `EvidencePayload`. The rule for every other warning is enforced where it is built (`QualityWarning`, see the warning-class entry), and a property test checks that anything the constructor accepts is accepted by `EvidencePayload`.
+
+### Changed (every QualityWarning is built evidence-ready, R2-warning-class, 2026-11-17)
+
+`EvidencePayload` refuses an empty `provider` and any non-scalar `detail` value, so a run whose warning broke either rule stored no CLI evidence record. `QualityWarning` now enforces both when it is built. `provider` must be a non-empty string and `column` is `None` or non-empty. A list or tuple of names in `detail` is joined with ", " in the constructor, the one place that does it. Any other non-scalar `detail` value raises a `TypeError` that names the key and never the value. The `detail` annotation is narrowed so mypy flags a producer that passes a dict.
+
+Producers changed: `text_mask_sub_floor_span_handled` is built by one factory (`by_detector` is now `name=count` pairs). `top_code_generalized` drops its per-row `generalized` map and keeps `over_count` and `under_count`. `geo_generalize_cascade` reports `rows_generalized` and per-decision counts instead of a row map. `generation_fidelity_below_threshold` carries `name=score` strings in `worst_columns` and `below_columns`. `cardinality_collisions` and `cardinality_match_deviation` name the strategy as `provider` for scalar transforms. `fit_joint_cells_truncated`, `mimesis_locale_fallback` and `undeclared_output_columns` now carry joined strings.
+
+### Added (subset inputs for remote sources, F02-E6, 2026-11-18)
+
+`subset_inputs_from_config(config, *, local_copies=None)` takes a mapping from table name to a local path. An `s3`, `gcs` or `sftp` source with a copy in that mapping becomes a local `SubsetSource` on the copy, so a caller can fetch the object first and subset it. Without a copy the source is still refused as `config.subset_source_type_unsupported`; the text now names the table only and no longer echoes the source type. A `file` source ignores the mapping. The caller owns fetching and removing each copy.
+
+Three codes are registered ahead of the callers that raise them: `config/remote_uri_invalid` and `runtime/spool_disk_full` (the disk or quota for the local copy of a remote source is too small; listed in `CAPACITY_EXCLUSIONS` as disk, not memory, so it never maps to a capacity verdict), and the warning `warning/sftp_lock_not_removed`.
+
+### Fixed (memory-capped bench and probe runs use the one capped child env, CAPPED-S1, 2026-11-18)
+
+The memory probe and the capped bench driver now start their child with the shared capped env, so they get the same BLAS thread limits as the capped worker. Before, they built their own env without those limits and could fail on a many-core host the same way the worker did. The build-floor probe now uses the shared memory-cap setter. Engine output does not change.
+
+### Added (connector retry executor and S3 resume, F02-E1, 2026-11-18)
+
+Connector reads now have one retry executor, `connectors/_retry.py`, with bounded backoff (3 attempts, 1 s base, 2x, plus or minus 25 percent jitter, 120 s deadline). An S3 object read that fails mid-stream resumes at the byte it reached, pinned to the first ETag with a conditional `Range` request. If the object changed, the read stops with the new connector error kind `source_changed`. `digest_mismatch` and `host_key_rejected` join the closed kind set for later F02 slices. Retry progress reports now keep one attempt floor per retried operation. The object store gains `size(key)` for S3 and GCS. No output changes.
+
+### Added (full-lifecycle estimate for generate and mixed jobs, F24 84-E2, 2026-11-18)
+
+`estimate_job` now fills `lifecycle_peak_bytes`, `limiting_phase` and `phase_bytes` for generate-only and mixed jobs. A generate table has no source, so it adds no ingest bytes. Its execute bytes are what a resident run holds for its columns, with the width of each text column included, plus the largest unique-draw working set. Its write bytes are the Arrow output beside the mask outputs. A plan that runs the legacy whole-table path is priced with every cell as a Python object. A mixed job adds the generated bytes to the mask route's execute phase.
+
+`peak_bytes` of a generate-only job stays `None`, and a mixed job stays `priceable=False`; no existing value changes. A generate column with no width source (a `formula`, for example) leaves the three fields unset and adds the note `lifecycle not priced: generated column {column} has no width source`. A consumer that keeps a set of known note shapes (the platform's `_KNOWN_NOTE_SHAPES`) must add it at its next engine repin.
+
+New public function `decoy_engine.generation.generated_lifecycle_terms`.
+
+### Added (bound scan baseline, F15 E2, 2026-11-18)
+
+`scan_baseline.sha256` pins the baseline file's bytes. `decoy_engine.profiling.bind_baseline` checks the digest before it parses, then reads the file with the strict JSON parser; a changed file raises `BaselineBindingError` with `pre_scan/baseline_digest_mismatch`, and a file that is not a readable `scan-set/v1` scan with `pre_scan/baseline_unreadable`. The config refusal for `on_drift: fail` without a digest is `config/scan_baseline_unbound`. A baseline with no digest never passes silently: `evaluate_drift` returns `warned` with `pre_scan/baseline_unbound` when nothing drifted. `evaluate_drift` returns a `DriftVerdict` (`passed`, `warned`, `failed`) that names each drifted table and column and holds no cell value. `starter_config` takes `baseline_sha256`. The strict JSON parser now also refuses a number that overflows to infinity, such as `1e999`. The digest is part of the plan hash when `on_drift` is set. The new names are exported from `decoy_engine.profiling`.
+
+### Fixed (a Postgres host that does not answer now reports as unreachable, capped-s2, 2026-11-18)
+
+When a Postgres source host dropped the connection attempt without any reply, the engine waited for the whole job deadline and reported `deadline_exceeded`. Every Postgres connection now carries a connect timeout shorter than the deadline (10 s at most), so the same case reports `source_unreachable` and points the user at the address or firewall. A connect timeout written in the connection string is replaced by the engine value. A key/value connection string that ends in an odd number of backslashes is now refused as `source_unreachable` before any connection is made. No new reason code.
+
+### Changed (redact and truncate are faster on `large_string` text columns, LARGE-STRING-FAST, 2026-11-18)
+
+`redact` and `truncate` now take the vectorized Arrow path when a text column is stored as `large_string`, which is what Polars Parquet files and pandas `string[pyarrow]` columns produce. Before, those columns fell back to a per-row Python loop that was 8 to 55 times slower in the kernel and about 10 times slower for a whole job. The column is cast to `string` first, so output values, nulls and types do not change. Text that does not fit 32-bit offsets, or is not valid UTF-8, still takes the per-row path as before.
+
+### Added (post_scan.distribution config and report section, DI-1b, 2026-11-18)
+
+`post_scan.distribution: {tolerance_pct, on_breach}` turns on the distribution check of row 31. With `post_scan.integrity: true`, each mask table's masking input is compared with its output on the facts its strategy keeps (`row_count`, `null_rate`, `distinct_ratio`, `mean`, `std`), and a fact that moved by more than `tolerance_pct` is a `warning` row in a new optional `distribution` section of the `post-scan-integrity/v3` report. The section holds table and column names, the fact, a severity and a rounded percent change, never a value. The `post_scan_integrity` check of the run result is `warned` when a row breaches.
+
+`tolerance_pct` must be a number above 0 and at most 100. `on_breach` accepts `warn` only, so no release takes a strict setting that cannot block yet; `fail` is refused at config load. The block needs `post_scan.integrity: true`. A config without it keeps its dump and plan hash; a set block changes both.
+
+A run that asks for the check is refused before any route read when a mask table declares transforms (`post_scan_integrity_transforms_unsupported`) or when the run reads its sources through a loader or another deferred gate (`runtime/post_scan_distribution_deferred`, new). Rows quarantined by D8 are subtracted from the expected `row_count`. The output-side null counts and moments are tallied only when the check is configured, and only for columns with a checked fact.
+
+A declared-cast table with a quarantine-policy column may now give fewer rows on a read-back than its footer declares (the cast drops the quarantined rows). The stream-length check accepts that for such a table only, so an integrity run that used to fail the column suite for it now completes without the positional source comparison. Tables with a `fail` or null policy keep the exact check.
+
+### Changed (plain profile document floors every unflagged column, 24zm E1b, 2026-11-18)
+
+A profile document written with `include_values=False` no longer stores the cells of a column the profiler did not flag. A top value, mode, categorical label or numeric bound stays only when a count in the same document shows at least 10 rows hold it. A label with no exact count stays only when its rounded share puts it at 10 rows or more. Numeric bin labels and the distribution `min` and `max` are `[redacted]` or `null`, and `mean_value` stays only for 20 or more non-null cells, and not when 1 to 9 non-null rows sit outside the released top values (a reader could subtract them). Date decade buckets are coded at the 10th row from each end and merged until each holds 10 rows. A sentinel flag keeps its text only when it is the fixed table text. Bool columns are exempt, and flagged columns are handled as before. The tail coding that the fit snapshot uses for years is now one function, `release_ranges_at_k`, shared with the profile document.
+
+### Changed (pure re-export __init__ files need no hand entry, fix24-e3, 2026-11-17)
+
+Tests only. The physical-seam byte-identity sentry permits a new or changed `__init__.py` under
+`execution/` that only re-exports, so the hand entry for `_strategies/nested/__init__.py` is gone.
+
+### Fixed (memory-capped jobs no longer crash on hosts with many cores, main-red, 2026-11-18)
+
+A job run under a memory cap could stop with a segmentation fault on a host with many CPU cores. numpy's bundled OpenBLAS starts one thread per core when the worker imports numpy, and each thread reserves about 40 MiB before the cap is applied. On a 26-core host the worker was over a 768 MiB cap before it read any data. The capped worker now starts with `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS` and `MKL_NUM_THREADS` set to 1. The engine does no BLAS work and sizes its own native threads, so output and speed do not change.
+
+### Changed (residual PII, row 24zu, 2026-11-17)
+
+Residual PII no longer fails a `redact`, `hash` or `bucketize` column on hits from name-hint-only detectors (`mrn`, `person_name`, `first_name`, `last_name`, `address`, `cvv`, `fax_number`, `health_plan_id`, `license_num`, `device_id`, `biometric_id`) when the source comparison ran and no row kept its source value. Those detectors fire on a loose shape plus a column name, so the constant `REDACTED` or a hash output can match. The finding is now `info` at zero identity, `warning` when some rows still equal their source, and `fail` when every comparable row equals its source or at least half do (three or more rows). The messages carry no rate or value. `text_redact` columns, columns with any other detector hit, and columns with no source comparison grade as before. A `post_scan.dismissed` entry never lowers a gated warning. `NAME_HINT_GATED_DETECTORS` is a new name in `decoy_engine.detection`.
+
+### Changed (plain fit snapshots, row 24zp, 2026-11-17)
+
+A datetime column's year ranges in a plain fit snapshot are now bottom and top coded, as numeric columns already are. Every row below the year of the K-th lowest row counts under that year, and every row above the K-th highest counts under that year (K is 10, `MIN_RELEASE_COUNT`). Before this, one row at 1850 among 1990s rows made the first range start at 1850, and the plain `min` named that year. Now the outer edges and the plain `min` and `max` come from the K-th row at each end, so moving any of the 9 lowest or 9 highest rows further out changes nothing. When the K-th highest row's year is below the K-th lowest row's year (fewer than 19 rows, 2K-1), any range would name a tail row's year, so no range is released, the 2K-1 floor numeric columns already have. The snapshot schema v2 shape is unchanged.
+
+### Fixed (nested cells are read under bounds and numbers are kept as read, 82-E1, 2026-11-17)
+
+The `nested` strategy no longer rewrites a number it does not mask: `1.10`, `1e400` and a long decimal come back as written. A cell that repeats an object key, is over 16 MiB or 64 levels deep, or holds a raw lone surrogate fails its row with a coded warning instead of passing through. A leaf list of integers with a null reaches the child as integers and a null (it was `float64` with `NaN`, which `hash` refused), and a child output of `NaN` is written as JSON `null`. Pre-GA behavior change; see the compatibility contract.
+
+New warning codes: `warning/nested_cell_oversized`, `warning/nested_cell_too_deep`, `warning/nested_cell_duplicate_key`, `warning/nested_cell_number_out_of_range` and `warning/nested_child_non_finite`.
+
+### Changed (cell-format fit helpers move below generation, main-red fix, 2026-11-17)
+
+Internal move with no user-visible change. The cell-format fit helpers (`learn_cell_format`, `add_cell_format`, `scrub_cell_format` and the member descriptor) now live in `profiling/cell_format.py`, and `finite_numeric_cells` lives in `internal/pandas_compat.py`. `decoy_engine.generation.statistical` and `decoy_engine.quality.snapshot` still export every name they did before, and snapshot output is byte-identical. This removes the last import from `profiling` into `generation` for these helpers, so the layer ignore list only shrinks.
+
+### Added (full-lifecycle estimate for mask jobs, F24 84-E1, 2026-11-17)
+
+`estimate_job` now returns three more fields on `JobEstimate`, all defaulted: `lifecycle_peak_bytes`, `limiting_phase` and `phase_bytes`. They give the largest of three phase peaks (ingest, execute, write) for a caller that reads every file source whole, holds inputs and outputs, and writes the last target, and name the phase that sets it. The ingest and write phases are new. The execute phase is the existing measured model, plus the input tables the caller holds that the measurement did not. The estimate stays advisory: it never raises, gates or changes a route, and its notes hold names, byte counts and exception type names only. No reason code is added.
+
+Three values change on a mask job with string columns that used to be unpriceable (a CSV source is all strings): `priceable` goes from False to True, `peak_bytes` from None to a number, and `runtime` from None to a band. Each string width now comes from a sample of at most 10,000 rows of the source file. A column with no value in that sample, or a type with no size model, still leaves the job unpriceable and is named in the notes.
+
+New note texts: `row counts estimated from file size` and the `lifecycle not priced: ...` family. A consumer that keeps a set of known note shapes (the platform's `_KNOWN_NOTE_SHAPES`) must add them at its next engine repin.
+
+Generate-only and mixed jobs, and subset jobs, get no lifecycle fields yet.
+
+### Added (policy prohibitions and explanation, F16-E2b, 2026-11-17)
+
+`expand_policy` now checks the `policy.prohibit` list on every decided mask field, including a column's own strategy. A `forbid` entry refuses a field whose strategy is listed, a `require` entry refuses a field whose strategy is not, and a strategy name that is not a known masking strategy is refused as `config/policy_unknown_strategy`. A prohibition that selects no field is not an error and reports `matched: 0`. All violations come back in one error with the new reason code `config/policy_prohibited`; the message names the prohibition id, the strategy and the `table.column` only.
+
+`expansion_to_dict` writes the `policy-expansion/v1` explanation: per field the strategy, level, `sources` (every source that agreed on the decision, ordered column, rules in policy order, disguise, default), overridden rule ids and a decision digest, the rules and prohibitions with their match counts, and a fingerprint of the decisions and the disguise pin. It never holds `provider_config`. A column whose own strategy is empty or longer than 64 characters is refused as `config/policy_unknown_strategy`. Nothing calls either yet: `PipelineConfig` does not read a `policy` block until slice E3, so no config, dump or hash changes.
+
+### Added (vault before output in publish_unit, F22 b2, 2026-11-16)
+
+`PublicationRequest(vault=VaultBinding(writer, out))` is accepted by `publish_unit` and `publish_tables` (it raised `NotImplementedError` before). Under the destination lock and after a bind verdict, the vault is written durably (`VaultWriter.publish`) or, when one is already at its leaf, adopted in place if it holds this writer's rows, and only then is the unit bound; its descriptor records the vault's `sha256`, `size` and `entry_count`, and the receipt's `vault_digest` is set. A vault at the leaf with other rows is refused with `publication_vault_conflict`, and nothing is bound. Any other vault failure (`vault_commit_failed`) is raised as `VaultError` after the stage is aborted, with nothing bound. A republish of the same result reports `already_committed` only when the request and the bound unit both have a vault or both have none, the vault leaf (fsynced with its chain first) has the descriptor's size and digest, and its rows are this writer's; otherwise `publication_vault_mismatch`, and an fsync failure gives `commit_uncertain`. A republish writes no vault. A request whose `vault.writer` is not a `VaultWriter` raises `TypeError`.
+
+### Changed (NER not-installed message and resume model identity, SCAN-ML-MD M-2a2, 2026-11-17)
+
+A missing NER model is now refused with one message for every surface (`pre_scan`, `post_scan`, `text_redact`, `text_mask`). It names the surface, the refused model, that model's pinned wheel URL and the config key that selects another model. The text carries no config value other than the model name. `ner_status()` and `ner_rates()` resolve a missing `model` through the one resolver, and the `NER_MIN_RATE` alias is removed.
+
+`build_fingerprint` now adds one engine-owned `decoy-ner:<surface>` component per NER surface the run uses, holding the resolved model and installed version. A run resumed under a different NER model is refused with `resume.fingerprint_changed`. A caller component whose name starts with `decoy-ner:` raises `ValueError`. A run with no NER surface has the same fingerprint as before. A resume record written earlier for a run with NER is refused once.
+
+### Changed (nested handler moves into its own package, 82-E1a, 2026-11-17)
+
+The private nested strategy handler module moved from `execution/_strategies/_nested.py` to `execution/_strategies/nested/_handler.py`. The handler code is unchanged, the `nested` strategy name is unchanged, and no output changes.
+
+### Added (policy selectors and expansion, F16-E2a, 2026-11-17)
+
+New package `decoy_engine.config.policy` with the models of the pipeline `policy` block (`PolicyConfig`, `PolicyRule`, `Prohibition`, `ColumnDecision`), the closed `Selector` grammar (table and column globs, classification, tag, logical type, relationship role), the 5-level precedence registry (`PrecedenceLevel`) and `expand_policy`, a pure function that decides each mask column from the highest level that matches it. It refuses two different decisions at one level, a column no level decides, a column without a strategy that sets strategy-only keys, and a rule that selects nothing, all in one error. Nothing calls it yet: `PipelineConfig` does not read a `policy` block until a later slice, so no config, dump or hash changes.
+
+Eight reason codes join the `config` namespace: `config/policy_block_invalid` (a duplicate id, a prohibition without exactly one of forbid and require, or a `provider_config` value JSON cannot carry), `config/policy_selector_invalid`, `config/policy_unknown_classification`, `config/policy_unknown_strategy`, `config/policy_selector_unmatched`, `config/policy_rule_conflict`, `config/policy_field_undecided` and `config/policy_column_partial`. Their messages name rule ids and `table.column` only.
+
+### Added (synthetic probe and the `probe` lock field, 78-E2, 2026-11-17)
+
+`decoy_engine.support` adds `run_probe()`, `probe_status()` and `ProbeError`. The probe runs fixed public inputs through the keyed hash core, FF1 and the seeded Faker pool, and returns a SHA-256 digest. `probe_status(digest)` is `ok` only when the digest equals the golden for the current seed protocol (`PROBE_GOLDEN`), and `mismatch` otherwise, including a protocol with no golden row. The probe covers the Python reference path; the native companion has its own known-answer vectors. It reads no key, file or environment variable. It refuses to run while a custom provider overrides `person_first_name`. A failure raises `ProbeError` with the new reason `runtime/probe_failed` and fixed text.
+
+`lock/v1` gains an optional `probe` field. `build_runtime_lock()` always sets it. A lock written without it still reads (as `None`) and rewrites to the same bytes; a `null` `probe` is refused.
+
+`decoy_engine.providers_v2.custom_provider_names()` is the public reader of the V2 custom-provider table (the former private `_v2_custom_provider_names`, renamed).
+
+The probe golden changes only in a PR that bumps the seed protocol or repins Faker, and that PR's fragment names the change. The CI `import-smoke` job now runs the probe on Python 3.11.9 and 3.12.7.
+
+### Changed (plain fit snapshot floors every unflagged column, fit E1, 2026-11-17)
+
+`distribution_snapshot_document` with `include_values=False` applies one floor, `MIN_RELEASE_COUNT`, to the columns the profiler did not flag. Categorical labels and joint cells under 10 rows fold into `other_count`. Numeric `min`, `max` and histogram edges sit on a 1, 2 or 5 times power-of-ten grid at or beyond the 10th smallest and largest cell, and a `quantiles` entry is kept only with 10 rows on each side. Datetime columns, flagged ones included, are stored as contiguous year ranges of at least 10 rows, so the document is `distribution-snapshot/v2`. A string column whose median label has 3 or more words is written as free text. A column with nothing left to release (a numeric under 20 finite cells, a categorical with every label under 10 rows, a datetime with no year held by 10 rows) gets the flagged treatment and is listed in `redacted_columns`. Bool columns are exempt. The raw writer, the DP writer and `include_values=True` are unchanged. Readers accept `flagged-redacted/v1` and `/v2`.
+
+### Changed (Postgres source prep, CLI-DB-SRC E1, 2026-11-17)
+
+The Postgres snapshot primitive now shares its session helpers with the coming Postgres source and target. The connection, extension load and identifier rule moved to `connectors/_postgres_session.py`. `connectors/postgres_catalog.py` adds `relation_columns`, which reads a relation's columns before any row, and a shape guard: a `RelationSelection` with `whole_relation=True` is refused with `relation_shape_changed` if the relation's columns changed inside the snapshot transaction. `validate_identifier` and `POSTGRES_SOURCE_USAGE_CODES` are new names in `postgres_snapshot`.
+
+Snapshot errors no longer keep DuckDB's text as `__context__`, so a connection string cannot reach a traceback. A DuckDB interrupt that is not the deadline (Ctrl-C) is raised as `KeyboardInterrupt` and no longer reported as `export_failed`. On DuckDB 2.x the extension directory is set through `extension_directories`.
+
+New connector reason codes `connector/relation_shape_changed` and `connector/column_name_unsupported` are new in registry 1.30.0. Ten connector codes now have outcome `configuration` and retry class `configuration_repair`: `ambiguous_name`, `column_name_unsupported`, `column_not_found`, `duplicate_relation`, `extension_unavailable`, `extension_untrusted_location`, `relation_not_found`, `relation_shape_changed`, `unsupported_column_type` and `value_not_representable`. The registry version and manifests change at the release.
+
+A merge-required `pg-gate` CI job runs every `pg_integration` test against a Postgres service container and fails on any skip.
+
+### Added (scan-diff/v1 and read_scan_set, F15 E1, 2026-11-17)
+
+`decoy_engine.profiling` gains `scan-diff/v1`, the drift rules between two scans in one module. `diff_scan_tables` is the CLI's `compute_scan_diff` rules over two table dicts (a legacy profile table still diffs). `diff_scan_documents` matches tables by name and adds the set-level drift kinds `table_added` and `no_common_table`. `scan_diff_to_dict` writes the value-free `scan-diff/v1` document through the strict `ScanDiffCore`; `ScanDiffCoreRead` reads `scan-diff/v1.<minor>`, ignores unknown members and refuses an unknown drift kind. `pii_bucket` holds the bucket thresholds. `read_scan_set` is the one reader of a parsed `scan-set/v1` document and raises `ScanSetReadError` with a closed `kind`. Nothing changes for a caller until the CLI uses these names. The names are not exported from `decoy_engine`.
+
+### Added (distribution facts and findings for the post-scan distribution check, DI-1a, 2026-11-17)
+
+New pure building blocks for the distribution check of row 31. They add no config key and change no run: the config block, the report section and the block on breach come in later slices.
+
+`contracts.distribution_behavior` gains `NULLS_NOT_PRESERVED`, the strategies whose output nulls do not follow their source nulls (`joint_mask`, `group_key`, `windowed_date`, `grouped_series`, `derived`, `derived_aggregate`, `formula`, `geo_generalize`). `verification.postmask.distribution.preserved_facts` derives the facts a column is checked on (`row_count`, `null_rate`, `distinct_ratio`, `mean`, `std`) from the behaviour label and that set; `categorical` is checked on the row count and null rate only. `distribution_findings` turns the measured facts of a source and an output into one value-free row per fact (`table`, `column`, `fact`, `severity`, `delta_pct`); a fact that is undefined or not finite is a row with `delta_pct: null`, never NaN or infinity. The column-facts passes gain null counts and streamed moments (`ColumnFacts.output_values`, and `value_facts` for a source-only pass), merged per batch by the pairwise formula of Chan, Golub and LeVeque, so batch cuts do not change the result. The standard deviation is the sample one (`ddof=1`).
+
+The `group_key` distribution-behavior label changes from `preserves_cardinality_only` to `destroys_frequency`: its output cardinality is that of its `group_by` column, not of the column it is configured on. The label is written into newly compiled plan YAML for `group_key` columns and into the strategy manifest. `pipeline_config_hash` does not change.
+
+### Deprecated (workflow reason tombstones, WFR-E1, 2026-11-17)
+
+The platform workflow reasons are retired with the workflows. `platform/workflow_restart_interrupted`, `platform/workflow_step_not_run` and `platform/workflow_step_failed` keep their code, symbol and text and still resolve, so a stored record that names one still reads. Each now carries `deprecated_in` and points at a live reason: `platform/startup_failed`, `platform/job_cancelled` and `platform/job_failed`. The declarations moved to `reasons/platform/_retired.py`. Release prep stamps the deprecation.
+
+### Removed (two route tombstones, RETIRED-NAME E1, 2026-11-16)
+
+The registry no longer holds the two v0.16.0 route tombstones, the reasons that `route/post_scan_integrity_requested` and `route/post_scan_integrity` replaced. `reasons.find` returns `None` for them, and `reasons.route` no longer has their symbols. A persisted record that names one decodes as `decoy/unknown_reason_from_future`, with the original identity kept in its context. This ships in registry version `1.30.0`.
+
+### Changed (one degenerate-snapshot rule for validate and run, QA-GATE G-eng, 2026-11-16)
+
+A statistical snapshot with a negative or non-finite weight or count is now refused with `statistical_stats_degenerate` by the sampler, window admission and the compile check alike. Before, the sampler only refused a total of zero or less, so a snapshot with one negative weight and a positive total was sampled at run. The compile check that `decoy validate` runs now applies the same rule, so a snapshot with an empty label set or all-zero counts is refused before the run, with the code the run gives. An inverted datetime range and negative or descending freetext length edges are now refused by the sampler and the compile check too, not only by window admission.
+
+#### Offline declared-column request
+
+`DeclarationRequest.for_validate(config)` reads the header or footer of local file sources only and never opens an `s3` or `gcs` source. Its `remote_sources` property names the sources it skipped so a caller can report them as not checked. `decoy run` keeps using `for_descriptors`, which still refuses a missing declared column before any row.
+
+### Added (faker collision report, Z-E1, 2026-11-16)
+
+A `--post-validate` run now reports, for each deterministic `faker` column that is not `unique` and has no `when:`, how many distinct source values merged into shared masked values. The warning code is `cardinality_collisions` (`warning/cardinality_collisions`). Its detail holds `table`, `source_distinct`, `output_distinct`, `distinct_lost` and `pool_size`: names and counts only. `decoy_engine.generation.pool.effective_pool_size` is a new public name.
+
+`docs/strategies.md` and `docs/security/token-vault.md` no longer say deterministic identifier and pool strategies map distinct source values to distinct masked values. Deterministic `faker` is a keyed many-to-one pick. Only `fpe` is one-to-one, and an untruncated `hash` or `tokenize` is collision-resistant, not collision-free.
+
+### Added (runtime lock envelope, 78-E1, 2026-11-16)
+
+`decoy_engine.support` adds `build_runtime_lock()`, `RuntimeLock`, `read_runtime_lock()`, `compare_runtime_locks()` and `LockDifference`. A `lock/v1` document records the engine, NumPy, pandas, PyArrow, Python, seed protocol, time zone, compatibility phase, Faker version, a provider registry digest, a digest of the shipped data files, the versions of the engine's other base dependencies and an optional `key_version` label. It holds no key, no key check value, no path and no host name. The reader refuses an unknown tag, a missing field and a wrong type, and ignores a field added under `lock/v1`. `compare_runtime_locks` names each field that differs.
+
+`decoy_engine.keyprovider.is_key_version_label()` is the one check of the `key_version` label rule. The resume store records and the lock both use it. A bad label given to the lock raises `MaskSecretError` with the new reason `runtime/key_version_invalid`.
+
+### Added (per-model NER hit rates and the md wheel, SCAN-ML-MD M-1, 2026-11-16)
+
+The NER hit threshold is now per model (`NER_MIN_RATES`): en_core_web_sm keeps 0.211 and en_core_web_md gets 0.122, measured by the same rule over the calibration corpus plus a committed clinical-vocabulary negative corpus (Synthea drug, vaccine, lab, procedure, condition and device terms, pinned by digest). `NerRate` carries its threshold. `NER_MODEL_WHEELS` pins the en_core_web_md 3.8.0 wheel, and the ner-gate CI job installs every pinned wheel. The default NER model is unchanged. `load_detectors` refuses an installed NER model that has no calibrated rate with `provider/ner_model_uncalibrated`, before any row is read.
+
+### Changed (datetime snapshot buckets read through one decoder, fit E0, 2026-11-16)
+
+A distribution snapshot may now store a datetime column as year ranges, `distribution-snapshot/v2` entries `{start_year, end_year, count}`, so a run of sparse years folds into one bucket. Every reader (spec loading, window admission, the sampler and both fidelity scorers) goes through `decoy_engine.contracts.distribution_snapshot`, which also reads the existing v1 `{year, count}` entries unchanged. No writer emits v2 yet, and v1 scores do not move. A malformed, inverted, overlapping or out-of-range bucket list is refused with a fixed-text error that quotes no snapshot value.
+
+### Changed (the distribution behavior table moves to contracts, 24e E0, 2026-11-16)
+
+The table that maps each strategy to its distribution behavior moved from the private module `execution/_distribution_behavior.py` to `decoy_engine.contracts.distribution_behavior`, so the plan layer reads it without importing `execution`. The labels and `distribution_behavior_for` are unchanged, and no output or manifest byte moves. The type alias of the labels is private (`_DistributionBehavior`).
+
+### Changed (unkeyed date_shift is refused and the MD5 path is gone, row 24zb, 2026-11-16)
+
+An unkeyed `date_shift` already stopped with `keyed_strategy_requires_secret` before any source read. That behavior is now pinned on every run route, and the dead code that held the reversible MD5 offset is deleted: `decoy_engine.transforms.date_shift.DateShiftStrategy` and its private helpers `_parse_date`, `_shift_for_value_md5` and `_shift_for_value_keyed` are removed. None of them was exported from `decoy_engine` or `decoy_engine.transforms`. `_detect_format` and `_COMMON_FORMATS` stay. Keyed `date_shift` output does not change.
+
+`keyed_columns_for_config` and `secret_requirements_for_config` now classify the mask `columns` of a raw table dict that also holds `generate_columns`. Before, they skipped such a dict. A validated config cannot have both kinds, so schema-valid input gives the same result.
+
+A source-hygiene sentry now fails on any MD5 call or `noqa: S324` waiver in `src/decoy_engine`, and a keyed-strategy sentry fails when a handler that reads `mask_key` is classified unkeyed or a `StrategyContext` is built without `require_mask_key`. The `mask.date_shift` draw-site entry now names the live handler (metadata only; no output changes).
+
+### Changed (generate-only relationship edges need no namespace, DI-CLOSE E1, 2026-11-16)
+
+A relationship whose parent and child tables are both generate tables no longer needs a `namespace`. The engine derives a private label for the edge, so `compile_plan`, the capacity estimate and `run_pipeline` accept it, and the generated rows are the same as without the `relationships:` block. Edges with a mask table on either side still need a namespace and are refused with `namespace_missing`. A config with relationships runs on the full-frame route. `docs/recipes.md` and `docs/strategies.md` no longer tell users to write a top-level `mode: generate` key.
+
+### Added (scan baseline evidence member and the on_drift check surface, SCAN-CHECKS B-1 and D-1, 2026-11-16)
+
+The `cli-local-1` evidence payload takes an optional `scan_baseline` member (path, fingerprint, method, size) so a run can record the hash of the baseline its pipeline points at. A manifest without it is unchanged, and a default export withholds its path like other machine paths. `scan_baseline` takes an optional `on_drift: warn | fail`. When set it is part of the plan hash; `path` and `schema` still are not. The run result gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`, checks the caller ran before the engine did. A blocking pre-check that failed makes the status `findings`. `Check` and `CheckCounts` are exported from `decoy_engine.run_result`. New reasons: `pre_scan/drift_detected`, `pre_scan/drift_blocked` and `warning/scan_baseline_missing`. A 0.27 reader refuses the new payload member and the config key, so the CLI writes them only after it pins this engine. A tolerant `RunResultRead` from 0.27 reads the new check id as a plain token.
+
+### Added (vault commit and durable adopt, F22 b1, 2026-11-16)
+
+`VaultWriter.publish(out)` writes the vault and returns a `VaultCommit(sha256, size, entry_count, adopted)` that only the vault module can issue, after the leaf and its whole directory chain were fsynced. `VaultWriter.write` now fsyncs that chain too. `OutputDir` gains `adopt_file(limit=)`: it opens the file leaf read-only without following a link, reads at most `limit` bytes (`LeafTooLarge` beyond), fsyncs the same descriptor and then the chain, and only then returns the bytes. `publication._vault_order` adds `adopt_vault`, `same_rows` and `BytesHandle`: an existing vault is adopted only when it opens under the writer's key to the same rows; `adopt_vault` returns `None` for a conflict (the caller refuses with `publication_vault_conflict`) and raises `VaultError` `vault_commit_failed` with fixed text when the leaf cannot be made durable. A directory fsync reported as unsupported (`EINVAL`, `EBADF`, `ENOTSUP`) no longer fails a chain walk. `iter_vault_columns` and `collect_vault_entries` moved to `decoy_engine.internal.vault_entries` and stay importable from `decoy_engine.vault`.
+
+### Changed (the no-sink collector opens its scratch arena on the first spill, RUN-STREAM E5b, 2026-11-16)
+
+A lazy source with no sink now creates the private scratch directory only when a held-back chunk first spills. A run that never spills makes no directory, and no longer fails on a Windows host, where the scratch arena is unavailable. A run that must spill on Windows still fails, at the first spill.
+
 ## [0.27.0] - 2026-11-16
 
 ### Breaking for consumers

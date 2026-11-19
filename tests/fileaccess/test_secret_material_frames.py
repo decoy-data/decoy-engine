@@ -21,7 +21,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import context as _context
-from decoy_engine import determinism, keyprovider, vault
+from decoy_engine import determinism, fileaccess, keyprovider, vault
 from decoy_engine.keyprovider import SecretKeyProvider
 from decoy_engine.secret_providers import REQUIREMENTS, SecretBuffer
 from tests.fileaccess.locals_support import _strings
@@ -131,7 +131,7 @@ def test_fernet_construction_failure(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_vault_writer_construction_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(vault.fileaccess, "capture", _raise)
+    monkeypatch.setattr(fileaccess, "capture", _raise)
     with pytest.raises(RuntimeError) as info:
         vault.VaultWriter(VAULT_KEY)
     _assert_no_frame_holds(info.value, VAULT_KEY)
@@ -152,7 +152,7 @@ def test_assert_vault_writer_keyed(writer: str) -> None:
 
 
 def test_vault_writer_for_config(env_secret: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(vault.fileaccess, "capture", _raise)
+    monkeypatch.setattr(fileaccess, "capture", _raise)
     with pytest.raises(RuntimeError) as info:
         vault.vault_writer_for_config(_keyed_config(env_secret))
     _assert_no_frame_holds(info.value, SECRET, _mask_root())

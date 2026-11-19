@@ -21,7 +21,7 @@ from scripts.release import dp_rows
 from scripts.release import stamp_release as sr
 
 PROVENANCE = "src/decoy_engine/quality/dp_provenance.py"
-VERSION = "0.28.0"
+VERSION = "0.29.0"
 CLI_VERSION = "9.8.7"
 UV = shutil.which("uv")
 _ROW = re.compile(r'^\s+"([0-9a-f]{64})",$', re.M)
@@ -118,7 +118,7 @@ def _dev_row(clone: Path) -> str:
     py = dp_rows.lock_profile_python(clone)
     extras = dp_rows.bootstrap_extras((clone / "scripts/dev/bootstrap.sh").read_text("utf-8"))
     got = dp_rows.profile_pins(clone, extras, py, UV)
-    assert ("decoy-engine", "0.27.0") not in got  # the engine version is added, not exported
+    assert ("decoy-engine", "0.28.0") not in got  # the engine version is added, not exported
     return _fp({*got, ("decoy-engine", VERSION)})
 
 
@@ -150,8 +150,8 @@ def test_the_rows_are_computed_for_the_stamped_version(clone: Path, pins: dict[s
     assert _run(clone, _args(pins)) == 0
     dev, _ = _blocks((clone / PROVENANCE).read_text("utf-8"))
     assert dev[0] == _dev_row(clone)
-    # A row for the pyproject version (0.27.0) would be a different hash: the stamp used --version.
-    assert dev[0] != dp_rows.dev_row(clone, "0.27.0", UV)
+    # A row for the pyproject version (0.28.0) would be a different hash: the stamp used --version.
+    assert dev[0] != dp_rows.dev_row(clone, "0.28.0", UV)
 
 
 def test_allow_delta_admits_a_named_package(clone: Path, pins: dict[str, Path]) -> None:
@@ -219,7 +219,7 @@ def test_a_late_refusal_leaves_the_tree_unchanged(clone: Path, pins: dict[str, P
     """A version CHANGELOG.md already holds fails after the DP plan exists; nothing is written."""
     before = (clone / PROVENANCE).read_bytes()
     argv = _args(pins)
-    argv[argv.index("--version") + 1] = "0.27.0"
+    argv[argv.index("--version") + 1] = "0.28.0"
     assert _run(clone, argv) == 1
     assert _git(clone, "status", "--porcelain", "--untracked-files=all") == ""
     assert (clone / PROVENANCE).read_bytes() == before

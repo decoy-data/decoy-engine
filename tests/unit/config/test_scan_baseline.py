@@ -244,7 +244,7 @@ def test_f15_t6_fail_without_a_digest_is_refused_naming_the_field_and_no_value()
 def test_f15_t6_the_unbound_code_is_registered_pending() -> None:
     spec = reasons.REASONS[("config", "scan_baseline_unbound")]
     assert str(reasons.config.SCAN_BASELINE_UNBOUND) == "scan_baseline_unbound"
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.30.0"
 
 
 def test_f15_t6_warn_without_a_digest_is_accepted() -> None:
