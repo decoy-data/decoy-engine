@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import re
+import warnings
 from collections.abc import Callable, Mapping
 from functools import lru_cache
 from typing import Any, Final
@@ -94,7 +95,9 @@ def _params_ok(t: pa.BaseExtensionType) -> bool:
         from pandas.tseries.frequencies import to_offset  # pandas is only needed for this type
 
         try:
-            to_offset(freq)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)  # a deprecated alias still parses
+                to_offset(freq)
         except (ValueError, TypeError):
             return False
         return True
