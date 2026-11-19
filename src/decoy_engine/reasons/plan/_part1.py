@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "ALLOW_COLLISIONS_MODE_CONFLICT",
@@ -382,7 +383,9 @@ CATEGORICAL_REQUIRES_NAMESPACE = _d(
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace.", since="1.26.0"
 )
-DATE_SHIFT_WINDOW_INVALID = _d("date_shift_window_invalid", "Date shift window invalid.")
+DATE_SHIFT_WINDOW_INVALID = _d(
+    "date_shift_window_invalid", "Date shift window invalid.", since=UNRELEASED
+)
 FPE_REQUIRES_NAMESPACE = _d("fpe_requires_namespace", "FPE requires namespace.", since="1.26.0")
 HASH_REQUIRES_NAMESPACE = _d("hash_requires_namespace", "Hash requires namespace.", since="1.26.0")
 NESTED_STRATEGY_UNSET = _d("nested_strategy_unset", "Nested strategy unset.", since="1.26.0")
