@@ -10,23 +10,31 @@ becomes the checked ``Token`` leaf it is given, so a value a later minor added s
 free text does not. A validator both sides must run lives on a :class:`SharedRules` class
 (validators only: no fields, no config) that the write model inherits, and the read model
 inherits it too; a validator put straight on a write model fails the derivation at import
-instead of being dropped.
+instead of being dropped. A check only the writer should run (a registry lookup a later minor may
+outgrow) lives on a :class:`WriteRules` class instead: the write model inherits it and the read
+model does not. :class:`ReadUnknownAs` marks a ``Literal`` field whose unknown string value a
+reader maps to a fixed fallback, so a value a later minor added fails closed instead of failing the
+read.
 """
 
 from __future__ import annotations
 
 import types
 from collections.abc import Callable, Collection
+from dataclasses import dataclass
 from enum import Enum
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Generic, Literal, TypeVar, Union, get_args, get_origin
 
 from annotated_types import Ge
-from pydantic import BaseModel, Field, Strict, create_model
+from pydantic import BaseModel, BeforeValidator, Field, Strict, create_model
+from pydantic_core import PydanticUndefined
 
 __all__ = [
     "Count",
+    "ReadUnknownAs",
     "SharedRules",
     "ValueFree",
+    "WriteRules",
     "derive_read",
     "has_kind",
     "is_plain_name",
@@ -45,6 +53,30 @@ def is_plain_name(value: object) -> bool:
 
 class SharedRules(BaseModel):
     """Base of a rules class: validators a write model and its derived read model both run."""
+
+
+class WriteRules(BaseModel):
+    """Base of a write-only rules class: validators only the write model runs (no fields, no config).
+
+    The derived read model does not inherit them, so an older reader still accepts a value a newer
+    registry added. The same fail-closed checks as :class:`SharedRules` apply to the class itself.
+    """
+
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class ReadUnknownAs(Generic[T]):
+    """Annotation marker for a ``Literal`` field: a reader maps an unknown string to ``fallback``.
+
+    The write model still enforces the ``Literal``. The derived read model keeps the ``Literal``
+    and adds a before-validator that swaps a string outside it for ``fallback``; a value that is
+    not a string reaches strict validation and is refused. ``fallback`` must be one of the
+    ``Literal``'s own values, so the swapped value is always a checked one.
+    """
+
+    fallback: T
 
 
 class ValueFree:
@@ -74,21 +106,39 @@ def _owner(model: type[BaseModel], name: str) -> type:
     return next(c for c in model.__mro__ if name in vars(c))
 
 
-def _shared_rules(model: type[BaseModel]) -> tuple[type[SharedRules], ...]:
-    """The rules classes of ``model`` (MRO order), after a fail-closed check of its validators."""
-    rules = tuple(
+def _rule_classes(
+    model: type[BaseModel],
+) -> tuple[tuple[type[SharedRules], ...], tuple[type[WriteRules], ...]]:
+    """The shared and the write-only rules classes of ``model`` (MRO order), checked fail closed."""
+    shared = tuple(
         c for c in model.__mro__ if issubclass(c, SharedRules) and SharedRules in c.__bases__
     )
-    for rule in rules:
+    write = tuple(
+        c for c in model.__mro__ if issubclass(c, WriteRules) and WriteRules in c.__bases__
+    )
+    for rule in (*shared, *write):
         if rule.model_fields:
             raise TypeError(f"{rule.__name__} is a rules class and declares fields")
         if rule.model_config:
             raise TypeError(f"{rule.__name__} is a rules class and sets model_config")
     # By owner, not name: a same-named validator on the model would run on the write side only.
-    unshared = sorted(n for n in _validator_names(model) if _owner(model, n) not in rules)
+    owners = (*shared, *write)
+    unshared = sorted(n for n in _validator_names(model) if _owner(model, n) not in owners)
     if unshared:
-        raise TypeError(f"{model.__name__} has validators outside a SharedRules class: {unshared}")
-    return rules
+        raise TypeError(f"{model.__name__} has validators outside a rules class: {unshared}")
+    return shared, write
+
+
+def _shared_rules(model: type[BaseModel]) -> tuple[type[SharedRules], ...]:
+    """The rules classes the read model of ``model`` inherits (shared ones only)."""
+    return _rule_classes(model)[0]
+
+
+def _unknown_as(values: tuple[Any, ...], fallback: Any) -> Callable[[Any], Any]:
+    def swap(value: Any) -> Any:
+        return fallback if isinstance(value, str) and value not in values else value
+
+    return swap
 
 
 def _is_union(origin: object) -> bool:
@@ -117,6 +167,10 @@ class _Deriver:
         origin = get_origin(ann)
         if origin is Annotated:
             base, *meta = get_args(ann)
+            marker = next((m for m in meta if isinstance(m, ReadUnknownAs)), None)
+            if marker is not None:
+                rest = [m for m in meta if m is not marker]
+                return self.unknown_as(base, marker, rest)
             if self.substitute is not None:
                 replaced = self.substitute(meta)
                 if replaced is not None:
@@ -128,10 +182,18 @@ class _Deriver:
             args = tuple(a if a is Ellipsis else self.annotation(a) for a in get_args(ann))
             return origin[args]
         if origin is Literal or (isinstance(ann, type) and issubclass(ann, Enum)):
-            return self.token
+            return ann if self.token is None else self.token
         if isinstance(ann, type) and issubclass(ann, BaseModel):
             return self.model(ann)
         return ann
+
+    def unknown_as(self, base: Any, marker: ReadUnknownAs[Any], rest: list[Any]) -> Any:
+        values = get_args(base)
+        if get_origin(base) is not Literal:
+            raise TypeError("ReadUnknownAs marks a Literal field")
+        if marker.fallback not in values:
+            raise TypeError("ReadUnknownAs fallback is not a value of its Literal")
+        return Annotated[(base, BeforeValidator(_unknown_as(values, marker.fallback)), *rest)]
 
     def model(self, model: type[BaseModel]) -> type[BaseModel]:
         if model in self.cache:
@@ -145,10 +207,19 @@ class _Deriver:
             tagged = any(has_kind(info.metadata, k) for k in self.required_kinds)
             # A tag's writer default must not stand in for a document that never stated it.
             default: Any = ... if tagged or info.is_required() else info.default
+            if default is PydanticUndefined:
+                # A default_factory field: the reader keeps the writer's factory.
+                spec = Field(
+                    default_factory=info.default_factory,
+                    alias=info.alias,
+                    exclude_if=info.exclude_if,
+                )
+            else:
+                spec = Field(default, alias=info.alias, exclude_if=info.exclude_if)
             # Only a Literal is held exact: a field of the same name that is a model still derives.
             keep = name in self.exact_fields and get_origin(info.annotation) is Literal
             read_ann = ann if keep else self.annotation(ann)
-            fields[name] = (read_ann, Field(default, alias=info.alias, exclude_if=info.exclude_if))
+            fields[name] = (read_ann, spec)
         read = create_model(
             f"{model.__name__}Read",
             __base__=(self.base, *rules),
@@ -171,7 +242,7 @@ def derive_read(
 ) -> type[BaseModel]:
     """The tolerant read model of ``model``, built on ``base`` (which sets ``extra="ignore"``).
 
-    Every enum and ``Literal`` becomes ``token`` (the checked ``Token`` leaf, which lives with the one validator factory in ``run_result/_model.py``); named value-free types keep their checks.
+    Every enum and ``Literal`` becomes ``token`` (the checked ``Token`` leaf, which lives with the one validator factory in ``run_result/_model.py``); named value-free types keep their checks. ``token=None`` keeps each enum and ``Literal`` as written, so only a field marked :class:`ReadUnknownAs` gets tolerant behavior (the marker is read before ``substitute``).
     ``substitute`` gets an ``Annotated`` field's metadata and returns the read annotation to use in
     its place, or ``None`` to keep going (run results swap reason payloads this way).
     ``required_kinds`` names ``ValueFree`` kinds that must be present on read even when the writer

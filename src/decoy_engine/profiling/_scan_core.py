@@ -8,13 +8,15 @@ detector ids and column names. `scan_set.py` builds these models from a scan.
 
 from __future__ import annotations
 
-import types
-from typing import Annotated, Any, Final, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Final, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
+from decoy_engine._value_free import ReadUnknownAs, SharedRules, WriteRules, derive_read
 from decoy_engine.detection._ner_rate import RateBucket
+from decoy_engine.profiling._basis import Basis
 from decoy_engine.profiling._model_pass import Band
 from decoy_engine.profiling._scan_integrity import Status
 
@@ -29,16 +31,18 @@ class _Core(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
-class WarningRefCore(_Core):
+class _WarningRules(WriteRules):
+    @model_validator(mode="after")
+    def _known(self) -> _WarningRules:
+        # Write side only: the read model does not inherit write rules, so an older reader still
+        # accepts a code a newer registry added.
+        reasons.require_known(reasons.ReasonRef(self.namespace, self.code))  # type: ignore[attr-defined]
+        return self
+
+
+class WarningRefCore(_Core, _WarningRules):
     namespace: str
     code: str
-
-    @model_validator(mode="after")
-    def _known(self) -> WarningRefCore:
-        # Write side only: the read variant drops validators, so an older reader still
-        # accepts a code a newer registry added.
-        reasons.require_known(reasons.ReasonRef(self.namespace, self.code))
-        return self
 
 
 class ModelRefCore(_Core):
@@ -83,7 +87,43 @@ class FieldCore(_Core):
     model_hits: list[ModelHitCore] = Field(default_factory=list)
 
 
-class TableCore(_Core):
+def _refuse(text: str) -> PydanticCustomError:
+    # Fixed text: a PydanticCustomError template is never built from the payload.
+    return PydanticCustomError("scan_core_table", text)
+
+
+class _TableCoreRules(SharedRules):
+    """The relations between a table's row counts and its basis, on write and on read."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_null_count(cls, data: Any) -> Any:
+        # A record written before the basis labels has neither member. A missing `scanned_rows`
+        # is admitted only for that legacy shape, checked on the raw basis: an unknown basis
+        # would otherwise fall back to `sample` on read and hide a missing count.
+        if isinstance(data, dict) and data.get("scanned_rows") is None:
+            if "basis" in data and data["basis"] != "sample":
+                raise _refuse("scanned_rows is required unless the basis is sample")
+        return data
+
+    @model_validator(mode="after")
+    def _row_relations(self) -> _TableCoreRules:
+        t: Any = self
+        if t.row_count < 0:
+            raise _refuse("row_count is negative")
+        scanned = t.scanned_rows
+        if scanned is None:
+            if t.basis != "sample":
+                raise _refuse("a whole basis needs scanned_rows")
+            return self
+        if not 0 <= scanned <= t.row_count:
+            raise _refuse("scanned_rows is outside 0..row_count")
+        if t.basis == "whole" and not (t.row_count_exact and scanned == t.row_count):
+            raise _refuse("a whole basis needs an exact row_count equal to scanned_rows")
+        return self
+
+
+class TableCore(_Core, _TableCoreRules):
     name: str
     descriptor: dict[str, Any]
     row_count: int
@@ -95,6 +135,9 @@ class TableCore(_Core):
     warnings: list[WarningRefCore]
     reid_risk_score: float | None
     quasi_identifier_groups: list[list[str]]
+    # Defaults keep a record written before the basis labels readable, as a sample.
+    basis: Annotated[Basis, ReadUnknownAs("sample")] = "sample"
+    scanned_rows: int | None = None
 
 
 class ChildFactsCore(_Core):
@@ -128,25 +171,8 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
-def _relaxed(model: type[BaseModel]) -> type[BaseModel]:
-    """`model` with unknown fields ignored, nested models included."""
-
-    def swap(annotation: Any) -> Any:
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            return _relaxed(annotation)
-        origin = get_origin(annotation)
-        if origin is None:
-            return annotation
-        args = tuple(swap(a) for a in get_args(annotation))
-        if origin in (Union, types.UnionType):
-            return Union[args]  # noqa: UP007 - built from a runtime tuple
-        return origin[args]
-
-    fields: dict[str, Any] = {
-        name: (swap(info.annotation), info) for name, info in model.model_fields.items()
-    }
-    config = ConfigDict(extra="ignore", frozen=True, strict=True)
-    return create_model(f"{model.__name__}Read", __config__=config, **fields)
+class _ReadCore(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
 
-ScanSetCoreRead: Final = _relaxed(ScanSetCore)
+ScanSetCoreRead: Final = derive_read(ScanSetCore, base=_ReadCore, token=None, module=__name__)

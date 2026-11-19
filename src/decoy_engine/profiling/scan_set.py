@@ -27,7 +27,7 @@ import logging
 import math
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, cast
@@ -50,6 +50,7 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
+from decoy_engine.profiling._basis import claim_keys, read_basis
 from decoy_engine.profiling._model_pass import (
     REGEX_ONLY,
     ModelHit,
@@ -285,15 +286,24 @@ def _read_and_profile(
 
     reader = src.build_declared_source(name, descriptor)
     whole = strategy == "full" or sample_rows is None
-    if sample_rows is None or whole or strategy == "random":
+    if whole or strategy == "random":
         frame = reader.to_frame()
         total, exact = len(frame), True
+        # A random read keeps everything when the source fits the cap: no sampling happened.
+        reached_end = whole or sample_rows is None or len(frame) <= sample_rows
         if not whole and sample_rows is not None and len(frame) > sample_rows:
             frame = frame.sample(n=sample_rows, random_state=_RANDOM_SEED).reset_index(drop=True)
     else:
+        # One row past the cap: under the `sample_frame` contract a short read is the end of the
+        # source, so a frame of `cap + 1` rows proves the table is larger than the sample.
         count = reader.row_count()
-        frame = reader.sample_frame(sample_rows)
-        total, exact = max(count.value, len(frame)), count.exact
+        frame = reader.sample_frame(sample_rows + 1)
+        reached_end = len(frame) <= sample_rows
+        if reached_end:
+            total, exact = len(frame), True
+        else:
+            frame = frame.iloc[:sample_rows]
+            total, exact = max(count.value, sample_rows + 1), count.exact
     refuse_duplicate_field_names(name, [str(c) for c in frame.columns])
 
     is_csv = descriptor["type"] == "file" and descriptor["format"] == "csv"
@@ -322,6 +332,7 @@ def _read_and_profile(
         sample_row_cap=row_cap,
         file_access=file_access,
     )
+    profile = replace(profile, basis=read_basis(profile.sample_strategy, row_cap, reached_end))
     models, position = model_pass
     hits = {} if models is None else models.run(frame, name, position)
     del frame
@@ -363,12 +374,6 @@ def _table_scan(
     zero_counts: dict[str, int] | None,
     hits: Mapping[str, tuple[ModelHit, ...]],
 ) -> TableScan:
-    scanned = profile.row_count
-    keys = tuple(
-        f.name
-        for f in profile.fields
-        if scanned > 0 and f.null_count == 0 and f.distinct_count == scanned
-    )
     return TableScan(
         name=name,
         descriptor=descriptor,
@@ -376,7 +381,7 @@ def _table_scan(
         warnings=warned,
         row_count=total,
         row_count_exact=exact,
-        key_candidates=keys,
+        key_candidates=claim_keys(profile),
         null_counts={f.name: f.null_count for f in profile.fields},
         leading_zero_counts={
             f.name: None if zero_counts is None else zero_counts.get(f.name) for f in profile.fields
@@ -454,6 +459,8 @@ def _table_core(t: TableScan) -> TableCore:
         warnings=[WarningRefCore.model_validate(asdict(w)) for w in t.warnings],
         reid_risk_score=_finite(p.reid_risk_score) if p.row_count > 0 else None,
         quasi_identifier_groups=[[core_name[n] for n in g] for g in p.quasi_identifier_groups],
+        basis=p.basis,
+        scanned_rows=p.row_count,
     )
 
 

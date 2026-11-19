@@ -85,6 +85,20 @@ def test_there_is_one_deriver() -> None:
     assert _model.derive_read is _value_free.derive_read
 
 
+def test_the_scan_core_readers_come_from_the_one_deriver() -> None:
+    import decoy_engine.profiling._scan_core as scan_core
+    import decoy_engine.profiling.scan_diff as scan_diff
+    from decoy_engine import _value_free
+
+    for module in (scan_core, scan_diff):
+        assert module.derive_read is _value_free.derive_read  # type: ignore[attr-defined]
+        assert not hasattr(module, "_relaxed")
+    # The generated bases carry the deriver's name and module stamp, never a hand-built copy.
+    assert scan_core.ScanSetCoreRead.__name__ == "ScanSetCoreRead"
+    assert scan_diff.ScanDiffCoreRead.__mro__[1].__name__ == "ScanDiffCoreRead"
+    assert scan_diff.ScanDiffCoreRead.__mro__[1].__module__ == scan_diff.__name__
+
+
 # -- H3 -----------------------------------------------------------------------------------------
 
 

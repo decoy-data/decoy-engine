@@ -29,6 +29,7 @@ from decoy_engine.detection.types import (
     DetectorMatch,
 )
 from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.profiling._basis import read_basis
 from decoy_engine.profiling._classification import (
     _classify_alphabet,
     _classify_numeric_range,
@@ -461,6 +462,11 @@ def _profile_columns_inner(
             reid_risk_score=reid_score,
             quasi_identifier_groups=qi_groups,
             k_anonymity=k_anonymity,
+            basis=read_basis(
+                sample_strategy,
+                sample_row_cap,
+                sample_row_cap is not None and len(df) < sample_row_cap,
+            ),
         )
     except Exception as exc:
         if logger is not None:

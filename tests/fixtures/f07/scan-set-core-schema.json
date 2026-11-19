@@ -374,6 +374,15 @@
       "TableCore": {
         "additionalProperties": false,
         "properties": {
+          "basis": {
+            "default": "sample",
+            "enum": [
+              "whole",
+              "sample"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
           "descriptor": {
             "additionalProperties": true,
             "title": "Descriptor",
@@ -445,6 +454,18 @@
             ],
             "title": "Sample Strategy",
             "type": "string"
+          },
+          "scanned_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scanned Rows"
           },
           "warnings": {
             "items": {
@@ -919,6 +940,15 @@
       },
       "TableCoreRead": {
         "properties": {
+          "basis": {
+            "default": "sample",
+            "enum": [
+              "whole",
+              "sample"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
           "descriptor": {
             "additionalProperties": true,
             "title": "Descriptor",
@@ -990,6 +1020,18 @@
             ],
             "title": "Sample Strategy",
             "type": "string"
+          },
+          "scanned_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scanned Rows"
           },
           "warnings": {
             "items": {
