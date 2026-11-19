@@ -41,11 +41,19 @@ ROOT = HERE.parent.parent
 if str(HERE) not in sys.path:  # loaded by file path in tests: the sibling modules need this
     sys.path.insert(0, str(HERE))
 
+from argument_grid import (  # noqa: E402,F401
+    ARGUMENT_GRID,
+    OutputLockError,
+    decode_descriptor,
+    descriptor_ok,
+    encode_descriptor,
+    grid_cells,
+)
 from digest_codec import CODEC_VERSION, _pool_digest  # noqa: E402
 from worker_env import worker_env  # noqa: E402
 
 LOCK_PATH = HERE / "output_lock.json"
-LOCK_VERSION = 1
+LOCK_VERSION = 2
 SAMPLES = 8
 CLOCK_A = "2026-10-16T12:00:00Z"  # the F0 parity oracle instant (tests/parity/_f0_fixtures.py)
 CLOCK_B = "2027-11-20T12:00:00Z"  # A plus 400 days: a different calendar date and year
@@ -69,11 +77,12 @@ KINDS = (
     "no longer calendar-dependent",
 )
 _REFLECTED_FIELDS = ("per_seed", "sequential")
-SURFACE_FIELDS = {"reflected": _REFLECTED_FIELDS, "adapter": ("batch",), "raw": ("draws",)}
-
-
-class OutputLockError(RuntimeError):
-    """A refusal with a fixed message: no value, no exception text."""
+SURFACE_FIELDS = {
+    "reflected": _REFLECTED_FIELDS,
+    "adapter": ("batch",),
+    "raw": ("draws",),
+    "argumented": ("draws",),
+}
 
 
 # --- worker -----------------------------------------------------------------------------------
@@ -173,6 +182,30 @@ def _raw_cells(locale: str, fake: Any, access: Any) -> dict[str, Any]:
     return cells
 
 
+def _argumented_cells(fake: Any, access: Any) -> dict[str, Any]:
+    """Each grid case run at seeds 0 to 7. The stored `arguments` is the descriptor, not a value."""
+    cells: dict[str, Any] = {}
+    for (method, case), (args, kwargs) in grid_cells().items():
+        call_args = [decode_descriptor(a) for a in args]
+        call_kwargs = {k: decode_descriptor(v) for k, v in kwargs.items()}
+        values: list[Any] = []
+        err = ""
+        try:
+            for i in range(SAMPLES):
+                fake.seed_instance(i)
+                if method == "date_of_birth":
+                    values.append(access.anchored_date_of_birth(fake, *call_args, **call_kwargs))
+                else:
+                    values.append(getattr(fake, method)(*call_args, **call_kwargs))
+        except Exception as exc:
+            err = f"raises:{_cls(exc)}"
+        cells[f"{method}.{case}"] = {
+            "arguments": {"args": args, "kwargs": kwargs},
+            "draws": err or _digest(values),
+        }
+    return cells
+
+
 def run_worker_in_process(
     clock: str, locales: list[str] | None, stub: str | None
 ) -> dict[str, Any]:
@@ -201,6 +234,7 @@ def run_worker_in_process(
             "reflected": _reflected_cells(fake_ps, fake_seq, access),
             "adapter": _adapter_cells(locale, faker.Faker(locale), names, faker),
             "raw": _raw_cells(locale, fake_ps, access),
+            "argumented": _argumented_cells(access.make_faker(locale), access),
         }
     return out
 
@@ -215,9 +249,7 @@ def classify(a_docs: list[dict[str, Any]], b_doc: dict[str, Any]) -> dict[str, A
     for loc, entry in a_docs[0].items():
         out: dict[str, Any] = {
             "resolved": entry["resolved"],
-            "reflected": {},
-            "adapter": {},
-            "raw": {},
+            **{surface: {} for surface in SURFACE_FIELDS},
         }
         for surface, fields in SURFACE_FIELDS.items():
             for name, cell in entry[surface].items():
@@ -233,6 +265,8 @@ def classify(a_docs: list[dict[str, Any]], b_doc: dict[str, Any]) -> dict[str, A
                     calendar = calendar or (b_cell is not None and b_cell[f] != values[0])
                 if surface == "reflected":
                     merged["kwargs"] = cell["kwargs"]
+                if surface == "argumented":
+                    merged["arguments"] = cell["arguments"]
                 merged["calendar"] = calendar
                 out[surface][name] = merged
         locales[loc] = out
@@ -273,6 +307,8 @@ def _diff_cell(
             out["removed"].append(f"{label} keyword argument {kwarg}")
         elif kwarg not in old_kw:
             out["added"].append(f"{label} keyword argument {kwarg}")
+    if old.get("arguments") != new.get("arguments"):
+        out["changed"].append(f"{label} arguments")
     for f in (*_REFLECTED_FIELDS, "batch", "draws"):
         if f not in old:
             continue
@@ -342,7 +378,7 @@ def check_lock_shape(doc: object) -> list[str]:
         return problems
     for loc, entry in locales.items():
         base = f"locales.{loc}"
-        keys = {"resolved", "reflected", "adapter", "raw"}
+        keys = {"resolved", "reflected", "adapter", "raw", "argumented"}
         if not need(isinstance(entry, dict) and set(entry) == keys, base):
             continue
         need(type(entry["resolved"]) is str, f"{base}.resolved")
@@ -350,6 +386,7 @@ def check_lock_shape(doc: object) -> list[str]:
             ("reflected", ("kwargs", "per_seed", "sequential", "calendar")),
             ("adapter", ("batch", "calendar")),
             ("raw", ("draws", "calendar")),
+            ("argumented", ("arguments", "draws", "calendar")),
         ):
             cells = entry[surface]
             if not need(isinstance(cells, dict), f"{base}.{surface}"):
@@ -362,12 +399,26 @@ def check_lock_shape(doc: object) -> list[str]:
                     v = cell[f]
                     if f == "calendar":
                         need(type(v) is bool, f"{path}.calendar")
+                    elif f == "arguments":
+                        need(_arguments_ok(v), f"{path}.arguments")
                     elif f == "kwargs":
                         ok = type(v) is list and all(type(k) is str for k in v)
                         need(ok, f"{path}.kwargs")
                     else:
                         need(type(v) is str and DIGEST_RE.fullmatch(v) is not None, f"{path}.{f}")
     return problems
+
+
+def _arguments_ok(v: object) -> bool:
+    if not isinstance(v, dict) or set(v) != {"args", "kwargs"}:
+        return False
+    args, kwargs = v["args"], v["kwargs"]
+    return (
+        type(args) is list
+        and all(descriptor_ok(a) for a in args)
+        and isinstance(kwargs, dict)
+        and all(type(k) is str and descriptor_ok(x) for k, x in kwargs.items())
+    )
 
 
 def canonical_text(doc: dict[str, Any]) -> str:

@@ -87,7 +87,7 @@ per-seed digest, a sequential-draw digest) and the adapter surface (the masking 
 a batch digest through `FakerAdapter.generate_batch`), plus a `raw` surface for the calls the
 engine makes outside the reflected provider set: the text-mask calls (`text_mask.<detector>`, en_US
 only, through `_mask_faker`, which returns the raw method output without the reflected provider's
-newline joining) and the anchored date of birth (`dob_anchored`, every locale). It holds digests and exception class names
+newline joining) and the anchored date of birth (`dob_anchored`, every locale). An `argumented` surface runs a fixed grid of explicit-argument calls for every Faker method the formula helpers expose (`ARGUMENT_GRID` in `argument_grid.py`: `date_between`, `date_this_*`, `future_date`, `past_date`, `date_of_birth`), and stores each case's argument descriptor beside its digest, so a changed argument is a reviewed diff. A sentry derives the helper methods from `_formula_scope` and fails when one has no grid case. It holds digests and exception class names
 only, never a generated value or exception text. A cell is a 64-hex digest, `unstable` (processes
 disagree at one clock), or `raises:<Class>[/<Cause>]`. `calendar: true` marks a pair whose digest
 differs between the two frozen clocks (2026-10-16 and 2027-11-20): it is stable only because the
@@ -99,7 +99,7 @@ clock is frozen.
   calendar-dependent. Commit the file in the same PR as the pin change.
 - Check it: `tests/sentry/dependencies/test_faker_output_lock.py`. The cells marked
   `faker_output_lock` spawn nine workers (clock A at hash seeds 0 to 7, clock B at seed 0). Each
-  takes about 55 CPU seconds, so a full capture is about 170 seconds on four CPUs. The cells run
+  takes about 55 CPU seconds, so a full capture is about 170 to 185 seconds on four CPUs. The cells run
   them as two batches, so no cell holds more than about half. They are the required
   `faker-output-lock` CI job on CPython 3.10.20, 3.11.9 and 3.12.7. The reviewed lists in that
   file (`EXPECTED_UNSTABLE`, `EXPECTED_RAISES`, `EXPECTED_CALENDAR`, `ANCHORS`) must equal the

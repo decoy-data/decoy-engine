@@ -23,6 +23,8 @@ Entry = tuple["Everywhere | tuple[str, ...]", str]
 
 RAISES_REASON = "provider raises with no arguments in this locale"
 CALENDAR_REASON = "reads the date or time (clock-reading provider)"
+ARG_CALENDAR_REASON = "the call resolves today or a relative bound, so its range follows the clock"
+ARG_PARSE_REASON = "Faker 40.23.0 refuses an ISO date string here (ParseError); a date object works"
 
 EXPECTED_UNSTABLE: dict[tuple[str, str], Entry] = {
     ("adapter", "address_city"): (
@@ -96,6 +98,9 @@ EXPECTED_UNSTABLE: dict[tuple[str, str], Entry] = {
 }
 
 EXPECTED_RAISES: dict[tuple[str, str], Entry] = {
+    ("argumented", "date_between.absolute_strings"): (Everywhere(count=107), ARG_PARSE_REASON),
+    ("argumented", "future_date.absolute_string"): (Everywhere(count=107), ARG_PARSE_REASON),
+    ("argumented", "past_date.absolute_string"): (Everywhere(count=107), ARG_PARSE_REASON),
     ("adapter", "address_state"): (
         (
             "ar_DZ",
@@ -195,6 +200,22 @@ EXPECTED_RAISES: dict[tuple[str, str], Entry] = {
 }
 
 EXPECTED_CALENDAR: dict[tuple[str, str], Entry] = {
+    ("argumented", "date_between.relative"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_decade.after_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_decade.before_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_decade.neither_side"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_month.after_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_month.before_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_month.both_sides"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_month.neither_side"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_year.after_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_year.before_only"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_year.both_sides"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "date_this_year.neither_side"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "future_date.date_object"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "future_date.relative"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "past_date.date_object"): (Everywhere(count=107), ARG_CALENDAR_REASON),
+    ("argumented", "past_date.relative"): (Everywhere(count=107), ARG_CALENDAR_REASON),
     ("reflected", "am_pm"): (Everywhere(count=107), CALENDAR_REASON),
     ("reflected", "ascii_company_email"): (("bg_BG", "ru_RU"), CALENDAR_REASON),
     ("reflected", "ascii_email"): (("az_AZ", "ru_RU"), CALENDAR_REASON),

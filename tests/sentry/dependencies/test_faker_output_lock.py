@@ -709,14 +709,24 @@ _ARG_STUBS = {
         "a.anchored_date_of_birth = _w\n"
     ),
 }
+# `future_date` and `past_date` call `date_between` with keyword bounds, so a stub on it moves them
+# too; an absolute date string refuses in 40.23.0 (ParseError) and so cannot move.
 _ARG_EXPECTED_CHANGED = {
     "date_between_start_date": {
         "date_between.relative",
-        "date_between.absolute_strings",
         "date_between.date_objects",
         "date_between.equal_boundary",
+        "future_date.relative",
+        "future_date.date_object",
+        "past_date.relative",
+        "past_date.date_object",
     },
-    "date_between_date_object": {"date_between.date_objects", "date_between.equal_boundary"},
+    "date_between_date_object": {
+        "date_between.date_objects",
+        "date_between.equal_boundary",
+        "future_date.date_object",
+        "past_date.date_object",
+    },
     "anchored_dob_age_bounds": {
         "date_of_birth.adult_range",
         "date_of_birth.equal_age_boundary",
@@ -738,8 +748,9 @@ def test_argument_only_changes_are_locked(
         if " argumented " in n
     }
     assert {m for m in moved} == _ARG_EXPECTED_CHANGED[name]
-    # No call without the argument moved: the reflected cells stay green (the lock's old blind spot).
-    assert not [n for n in diff["changed"] if " reflected " in n]
+    # The no-argument call of the changed method did not move: the old reflected cell was blind.
+    assert not [n for n in diff["changed"] if " reflected date_between " in n]
+    assert not [n for n in diff["changed"] if " reflected date_of_birth " in n]
     assert "SECRET" not in _names(diff)
 
 
