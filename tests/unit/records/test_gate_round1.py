@@ -95,6 +95,10 @@ def test_the_scan_core_readers_come_from_the_one_deriver() -> None:
         assert not hasattr(module, "_relaxed")
     # The generated bases carry the deriver's name and module stamp, never a hand-built copy.
     assert scan_core.ScanSetCoreRead.__name__ == "ScanSetCoreRead"
+    assert scan_core.ScanSetCoreRead.__module__ == scan_core.__name__
+    table_read = scan_core.ScanSetCoreRead.model_fields["tables"].annotation.__args__[0]  # type: ignore[union-attr]
+    assert table_read.__name__ == "TableCoreRead"
+    assert issubclass(table_read, scan_core._TableCoreRules)
     assert scan_diff.ScanDiffCoreRead.__mro__[1].__name__ == "ScanDiffCoreRead"
     assert scan_diff.ScanDiffCoreRead.__mro__[1].__module__ == scan_diff.__name__
 

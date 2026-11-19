@@ -309,6 +309,12 @@ def profile_columns(
 ) -> ColumnProfile:
     """Scan a DataFrame and produce a ColumnProfile.
 
+    `basis` on the result is `whole` when the strategy is `full`, there is no cap, or the frame
+    is shorter than the cap. Two edges are the caller's statement: a frame that is already a
+    sample but declared `sample_strategy="full"` reads as `whole`, and a frame of exactly
+    `sample_row_cap` rows reads as `sample`, because the frame alone cannot prove the source
+    ended there. `scan_sources` stamps the basis from the reader instead.
+
     The DataFrame is the only place raw data lives in this call. The returned
     ColumnProfile is JSON-serializable and the ONLY thing FORECAST sees.
 

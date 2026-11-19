@@ -18,6 +18,7 @@ from pydantic import BaseModel, create_model
 from decoy_engine.profile import _types as planner
 from decoy_engine.profiling import _scan_core
 from decoy_engine.profiling._basis import CARRIERS, FIELD_BASIS, BasisClass
+from decoy_engine.profiling._value_redaction import profile_types
 from decoy_engine.profiling.types import ColumnProfile as DocumentProfile
 from decoy_engine.profiling.types import FieldStats
 
@@ -67,6 +68,9 @@ def check(
     """Every reason `registry` does not cover `root` exactly, as names only."""
     problems: list[str] = []
     classes = reach(root)
+    if root is DocumentProfile:
+        # The redactor's own walk, so a type it reaches is a type this sentry checks.
+        classes = list(profile_types().values())
     names = [c.__name__ for c in classes]
     problems += [f"two classes named {n}" for n in sorted(set(names)) if names.count(n) > 1]
     reached = {(root_name, c.__name__, f) for c in classes for f in _hints(c)}
@@ -74,7 +78,8 @@ def check(
     problems += [f"unclassified {k[1]}.{k[2]}" for k in sorted(reached - held)]
     problems += [f"stale entry {k[1]}.{k[2]}" for k in sorted(held - reached)]
     carrier = CARRIERS[root_name]
-    below = {c.__name__ for c in classes}
+    carrier_cls = next((c for c in classes if c.__name__ == carrier[1]), classes[0])
+    below = {c.__name__ for c in reach(carrier_cls)}
     needing = {k[1] for k in held if registry[k] in (BasisClass.SCANNED, BasisClass.CHECKED)}
     problems += [f"{t} is not under the carrier of {root_name}" for t in sorted(needing - below)]
     if registry.get(carrier) is not BasisClass.LABEL:
@@ -152,3 +157,13 @@ def test_a_missing_registry_entry_fails() -> None:
     assert "unclassified TableCore.key_candidates" in check(
         "scan_core", ROOTS["scan_core"], trimmed
     )
+
+
+def test_a_scanned_field_outside_the_carrier_fails() -> None:
+    for key in (
+        ("scan_core", "ScanSetCore", "engine_version"),
+        ("planner", "TableProfile", "name"),
+    ):
+        moved = {**FIELD_BASIS, key: BasisClass.SCANNED}
+        problems = check(key[0], ROOTS[key[0]], moved)
+        assert f"{key[1]} is not under the carrier of {key[0]}" in problems, key

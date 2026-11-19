@@ -200,6 +200,23 @@ def test_at9_a_basis_a_later_minor_added_reads_as_a_sample(unknown: str) -> None
         ScanSetCore.model_validate(_core(basis=unknown, scanned_rows=10))
 
 
+@pytest.mark.parametrize(
+    "shape",
+    [
+        WHOLE,
+        {"basis": "sample", "scanned_rows": None},
+        {"scanned_rows": 10},
+        {"scanned_rows": None},
+    ],
+    ids=["whole", "legacy-null", "sample-count", "null-count"],
+)
+def test_at10_an_unknown_basis_is_refused_on_write_for_every_row_shape(
+    shape: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError):
+        ScanSetCore.model_validate(_core(**{**shape, "basis": "exact"}))
+
+
 @pytest.mark.parametrize("tag", ["scan-set/v2", None])
 def test_at9_the_schema_tag_stays_exact_on_read(tag: str | None) -> None:
     doc = _core()

@@ -27,7 +27,7 @@ from typing import Annotated, Any, Final, Literal, get_args
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
 
-from decoy_engine._value_free import derive_read
+from decoy_engine._value_free import StrictReadBase, derive_read
 from decoy_engine.profiling.scan_set import PII_CANDIDATE_THRESHOLD
 
 SCAN_DIFF_SCHEMA: Final = "scan-diff/v1"
@@ -337,11 +337,9 @@ class ScanDiffCore(_Core):
     tables: list[TableDiffCore]
 
 
-class _ReadCore(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
-
-
-class ScanDiffCoreRead(derive_read(ScanDiffCore, base=_ReadCore, token=None, module=__name__)):  # type: ignore[misc]
+class ScanDiffCoreRead(  # type: ignore[misc]
+    derive_read(ScanDiffCore, base=StrictReadBase, token=None, module=__name__)
+):
     """`ScanDiffCore` with unknown members ignored and `scan-diff/v1.<minor>` accepted."""
 
     model_config = ConfigDict(hide_input_in_errors=True)

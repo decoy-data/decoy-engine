@@ -26,13 +26,14 @@ from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar, Union, get_args, get_origin
 
 from annotated_types import Ge
-from pydantic import BaseModel, BeforeValidator, Field, Strict, create_model
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, Strict, create_model
 from pydantic_core import PydanticUndefined
 
 __all__ = [
     "Count",
     "ReadUnknownAs",
     "SharedRules",
+    "StrictReadBase",
     "ValueFree",
     "WriteRules",
     "derive_read",
@@ -53,6 +54,16 @@ def is_plain_name(value: object) -> bool:
 
 class SharedRules(BaseModel):
     """Base of a rules class: validators a write model and its derived read model both run."""
+
+
+class StrictReadBase(BaseModel):
+    """The read base of a strict document: unknown fields ignored, frozen, strict types.
+
+    One definition for every `derive_read` caller whose write model is strict (the scan core and
+    the scan diff), so the two readers cannot drift in tolerance.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
 
 class WriteRules(BaseModel):

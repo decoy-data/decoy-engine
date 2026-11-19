@@ -14,7 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from pydantic_core import PydanticCustomError
 
 from decoy_engine import reasons
-from decoy_engine._value_free import ReadUnknownAs, SharedRules, WriteRules, derive_read
+from decoy_engine._value_free import (
+    ReadUnknownAs,
+    SharedRules,
+    StrictReadBase,
+    WriteRules,
+    derive_read,
+)
 from decoy_engine.detection._ner_rate import RateBucket
 from decoy_engine.profiling._basis import Basis
 from decoy_engine.profiling._model_pass import Band
@@ -171,8 +177,4 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
-class _ReadCore(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
-
-
-ScanSetCoreRead: Final = derive_read(ScanSetCore, base=_ReadCore, token=None, module=__name__)
+ScanSetCoreRead: Final = derive_read(ScanSetCore, base=StrictReadBase, token=None, module=__name__)
