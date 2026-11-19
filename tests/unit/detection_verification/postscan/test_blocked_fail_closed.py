@@ -62,8 +62,18 @@ def finding(severity: str, **over: Any) -> dict[str, Any]:
         "table": "t",
         "column": "c",
         "detector_id": "email",
+        "match_rate": 0.5,
         "severity": severity,
+        "configured_strategy": None,
+        "sample_match_count": 1,
         "message": CANARY,
+        "source_identity_rate": None,
+        "source_compared": False,
+        "source": "regex",
+        "model": None,
+        "band": None,
+        "dismissed": False,
+        "promoted": False,
         **over,
     }
 
@@ -320,8 +330,14 @@ def test_an_unregistered_or_malformed_identity_collapses_to_check_error(
 def test_a_spot_with_a_malformed_or_overlong_field_is_left_out(over: dict[str, Any]) -> None:
     rep = {**BASE, "residual_pii": [finding("fail", **over)]}
     error = PostScanBlockedError(rep)
-    assert [c.code for c in error.verdict.codes] == ["finding_blocked"]
-    summary = reasons.get("post_scan", "finding_blocked").summary
+    # A field of the wrong type also makes the row one the strict reader refuses, so it adds
+    # `check_error`; the location text is left out either way.
+    codes = [c.code for c in error.verdict.codes]
+    typed_wrong = any(not isinstance(v, str) for v in over.values())
+    assert sorted(codes) == (
+        ["check_error", "finding_blocked"] if typed_wrong else ["finding_blocked"]
+    )
+    summary = reasons.get("post_scan", codes[0]).summary
     assert error.message == str(error) == summary
     text = repr(error.verdict.as_dict()) + str(error) + error.message + error.reason
     assert CANARY not in text and "4242" not in text
