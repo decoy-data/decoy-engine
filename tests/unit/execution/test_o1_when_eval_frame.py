@@ -208,3 +208,15 @@ def test_duplicate_column_labels_hand_the_frame_back_unchanged() -> None:
 
     frame = pd.DataFrame([[1, 2]], columns=["v", "v"])
     assert when_eval_frame(frame, ("v",), {"v": (1,)}) is frame
+
+
+@pytest.mark.parametrize("literal", [5.5, float(BIG), 5.0])
+def test_a_float_literal_against_an_integer_column_takes_the_object_path(literal: float) -> None:
+    """Plan 4.3: such a comparison never depends on float64 rounding. With in-range values the
+    result is the same either way, so the dtype is the only witness of the rule."""
+    from decoy_engine.execution._when_gate import when_eval_frame
+
+    frame = pd.DataFrame({"v": pd.array([1, None, 7], dtype="Int64")})
+    out = when_eval_frame(frame, ["v"], {"v": [literal]})
+    assert out["v"].dtype == object
+    assert [x is not pd.NA for x in out["v"]] == [True, True, True]
