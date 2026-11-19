@@ -279,8 +279,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with
             # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
             # 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine moved);
-            # 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79... adds
-            # pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and NOTICE.
+            # 78af2b5a... adds xdist, execnet (79); 5253dc79... timeout (80); 8382e8b5... PyNaCl.
             "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
             "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
@@ -298,6 +297,7 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "b9b42047dc09ce89593e0be2dc6f7125a91af661bbb644b3a27342c84fd44ab0",
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
+            "8382e8b53b19b564e9e5f732f22639961d44087ce8957fd8c6a3a31364839fd8",
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure,
             # no dev tooling. The third-party set is pinned in the CLI repo's
             # requirements-certified.txt (proof-critical libraries at the annotated versions,
