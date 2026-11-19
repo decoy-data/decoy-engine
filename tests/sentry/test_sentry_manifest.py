@@ -74,6 +74,8 @@ SENTRIES = (
     "tests/sentry/test_reason_baseline_frozen.py",
     "tests/sentry/test_reason_minor_fixtures.py",
     "tests/sentry/test_reason_policy_single_source.py",
+    "tests/sentry/test_finding_rows_read_by_one_reader.py",
+    "tests/sentry/test_review_one_problem_formatter.py",
     "tests/sentry/test_win32_import_surface.py",
     "tests/sentry/test_record_export_rules.py",
     "tests/sentry/test_reason_registry.py",
