@@ -159,9 +159,18 @@ def declare(
     """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data.
     `positions` are the entries' places in the user's file (default: 1, 2, ...), so a refusal
     names the right one after a caller kept only some of them."""
-    if positions is not None and len(positions) != len(relationships):
-        raise PipelineConfigError("relationship_positions must have one entry per relationship")
+    if positions is not None and not _usable_positions(positions, len(relationships)):
+        raise PipelineConfigError(
+            "relationship_positions must be strictly increasing positive integers, "
+            "one per relationship"
+        )
     return _declare(sources, relationships, positions or (), set_aside_generate=False)[0]
+
+
+def _usable_positions(positions: Sequence[Any], count: int) -> bool:
+    """Facts are keyed by position, so a repeat would merge two relationships into one."""
+    ints = all(type(p) is int and p > 0 for p in positions)
+    return ints and len(positions) == count and all(a < b for a, b in zip(positions, positions[1:]))
 
 
 def declare_pipeline(

@@ -17,9 +17,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
 from decoy_engine.config import PipelineConfig, PipelineConfigError
-from decoy_engine.config._csv_dialect import CsvDialect
 from decoy_engine.fileaccess import FileAccess
-from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect, source_refusal
+from decoy_engine.profile._csv_reader import (
+    CsvDialect,
+    read_csv_source,
+    resolve_csv_dialect,
+    source_refusal,
+)
 from decoy_engine.profile._readers import build_declared_source
 from decoy_engine.validation_result import CODES
 
@@ -256,8 +260,10 @@ _DIALECT_KEYS = frozenset({*(f.name for f in dataclasses.fields(CsvDialect)), "c
 
 @dataclasses.dataclass(frozen=True)
 class ScanDeclaration:
-    """What `scan_sources` is given for a scan config. `unchecked_relationships` counts
-    full-pipeline relationships set aside (a generate end has no rows to count)."""
+    """What `scan_sources` is given for a scan config. The mappings are read-only views of
+    copies, two levels deep (nested lists inside a descriptor are plain copies).
+    `unchecked_relationships` counts full-pipeline relationships set aside (a generate end has
+    no rows to count)."""
 
     descriptors: Mapping[str, Mapping[str, Any]]
     tables: tuple[str, ...]

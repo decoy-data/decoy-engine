@@ -149,6 +149,25 @@ def test_relationship_positions_follow_the_file(two: dict[str, Any]) -> None:
         _declare({"sources": two, "tables": [], "relationships": [to_generate, repeated]})
 
 
+@pytest.mark.parametrize(
+    "positions", [[7, 7], [3, 2], [0, 1], [-1, 2], [True, 2], [1.0, 2], ["2", 3]]
+)
+def test_scan_sources_refuses_unusable_relationship_positions(
+    two: dict[str, Any], positions: list[Any]
+) -> None:
+    rels = [_rel("a", "b"), _rel("b", "a")]
+    with pytest.raises(PipelineConfigError, match="relationship_positions") as caught:
+        scan_sources(two, relationships=rels, relationship_positions=positions)
+    assert '"2"' not in str(caught.value) and "'2'" not in str(caught.value)
+    assert caught.value.__context__ is None and caught.value.__cause__ is None
+
+
+def test_scan_sources_accepts_increasing_relationship_positions(two: dict[str, Any]) -> None:
+    rels = [_rel("a", "b"), _rel("b", "a")]
+    scan = scan_sources(two, relationships=rels, relationship_positions=[2, 5])
+    assert len(scan.relationships) == 2
+
+
 def test_table_selection_is_refused_when_the_request_is_built(two: dict[str, Any]) -> None:
     with pytest.raises(PipelineConfigError, match="not in sources"):
         DeclarationRequest.for_scan({"sources": two}, ["zz"])
