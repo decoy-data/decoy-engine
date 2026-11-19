@@ -12,8 +12,13 @@ remove all of it and keep one allow-listed key.
 - Schema level: one key at most, `b"pandas"`, in a rebuilt form. Every other key is absent,
   including `PANDAS_ATTRS`, which `DataFrame.to_parquet` writes for `df.attrs`.
 - Field level: no metadata on any field at any nesting depth. This includes `PARQUET:field_id`
-  and the keys of an unregistered Arrow extension. A registered extension type keeps its
-  parameters, because they are type information.
+  and the keys of an unregistered Arrow extension.
+- Extension types: a column whose type is an extension is written as its storage type, because
+  the type name, vendor name, dimension names or serialized parameters can hold source text.
+  The exceptions are types with no free-text parameter: `arrow.uuid`, `arrow.bool8`,
+  `arrow.json`, and the pandas period and interval types (kept only when their one short
+  parameter has the known shape and their storage holds no metadata). This covers
+  `arrow.opaque`, fixed-shape tensors and any type a Python program registered.
 - `ARROW:schema`: the writer's serialization of the cleaned schema. Pyarrow stores the schema a
   second time in this footer value, so a field comment that a plain byte search cannot find is
   still removed here.
@@ -31,7 +36,7 @@ table in `src/decoy_engine/_pandas_meta/`:
 | Member | Written value |
 |---|---|
 | `columns` | one entry per output field with a known Arrow type. The pandas and numpy types are the pair the source names if that pair is listed for the output Arrow type, otherwise the default pair. The column metadata (time zone, decimal precision and scale, categorical order) comes from the Arrow type |
-| `index_columns` | names that equal an output field name. A range-index object is dropped, because its name is user text and its stop is a source row count |
+| `index_columns` | names that equal an output field name and have a `columns` entry, once each. A range-index object is dropped, because its name is user text and its stop is a source row count |
 | `column_indexes` | pyarrow's default entry when an index column is kept, otherwise empty |
 | `attributes` | always `{}`. The source's `attrs` are never copied |
 | `creator`, `pandas_version` | the running pyarrow and pandas versions |

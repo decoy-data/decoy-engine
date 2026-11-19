@@ -855,11 +855,13 @@ No `SEED_PROTOCOL_VERSION` change.
   unified-slice routes. Converging those routes is roadmap item ROUTE-OUTPUT-CONTRACT.
   Output Parquet key/value metadata (OUTPUT-METADATA-LEAK, 2026-11-19): on every route, a
   published Parquet file carries no field metadata at any depth (this ends "passthrough
-  field metadata kept") and one schema key at most, `b"pandas"`, rebuilt from the output schema
+  field metadata kept"), writes an extension-type column as its storage type (except
+  `arrow.uuid`, `arrow.bool8`, `arrow.json` and the pandas period and interval types) and
+  carries one schema key at most, `b"pandas"`, rebuilt from the output schema
   (see `docs/security/output-metadata.md`). The schema metadata difference between routes
   narrows to "a sanitized pandas blob or none". Output bytes change only for a source with
   custom metadata, `attrs`, field metadata, a column-index name or a range index; masked
-  values, column names, Arrow types, nullability and row-group layout do not change. The
+  values, column names, other Arrow types, nullability and row-group layout do not change. The
   public names `output_schema` and `output_table` are additive. In-memory results returned
   to a caller are outside this promise.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),

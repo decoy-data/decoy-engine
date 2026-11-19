@@ -74,7 +74,35 @@ _REBUILDERS: tuple[tuple[Callable[[pa.DataType], bool], Callable[[Any], pa.DataT
 HANDLED_PREDICATES: Final = frozenset(name for name, _ in _RULES)
 
 
+# Extension types with no free-text parameter. Anything else (opaque, tensors, a type a Python
+# program registered) is written as its storage type, so a source-supplied name, vendor, dimension
+# name or serialized parameter never reaches the output.
+_PLAIN_EXTENSIONS: Final = frozenset(
+    {"arrow.uuid", "arrow.bool8", "arrow.json", "pandas.period", "pandas.interval"}
+)
+_PERIOD_FREQ: Final = re.compile(r"[A-Za-z0-9\-]{1,12}")
+_INTERVAL_CLOSED: Final = frozenset({"left", "right", "both", "neither"})
+
+
+def _params_ok(t: pa.BaseExtensionType) -> bool:
+    """The pandas types carry one short parameter each; keep the type only if it has the known shape."""
+    if t.extension_name == "pandas.period":
+        freq = getattr(t, "freq", None)
+        return isinstance(freq, str) and _PERIOD_FREQ.fullmatch(freq) is not None
+    if t.extension_name == "pandas.interval":
+        return getattr(t, "closed", None) in _INTERVAL_CLOSED
+    return True
+
+
+def _extension(t: pa.BaseExtensionType) -> pa.DataType:
+    storage = _type(t.storage_type)
+    keep = t.extension_name in _PLAIN_EXTENSIONS and _params_ok(t)
+    return t if keep and storage.equals(t.storage_type, check_metadata=True) else storage
+
+
 def _type(t: pa.DataType) -> pa.DataType:
+    if isinstance(t, pa.BaseExtensionType):
+        return _extension(t)
     for matches, rebuild in _REBUILDERS:
         if matches(t):
             return rebuild(t)
@@ -95,22 +123,37 @@ def _pandas_version() -> str | None:
         return None
 
 
-def _source_pairs(columns: object) -> dict[str, tuple[str, str]]:
+def _source_entries(columns: object) -> dict[str, dict[str, Any]]:
+    """The source `columns` entry per field name, first one wins."""
+    out: dict[str, dict[str, Any]] = {}
+    if isinstance(columns, list):
+        for entry in columns:
+            if isinstance(entry, dict) and isinstance(entry.get("field_name"), str):
+                out.setdefault(entry["field_name"], entry)
+    return out
+
+
+def _source_pairs(source: dict[str, Any]) -> dict[str, tuple[str, str]]:
     """The `(pandas_type, numpy_type)` the source names per field; a choice among registry pairs."""
     chosen: dict[str, tuple[str, str]] = {}
-    if not isinstance(columns, list):
-        return chosen
-    for entry in columns:
-        if not isinstance(entry, dict):
-            continue
-        name, kind, numpy = (
-            entry.get("field_name"),
-            entry.get("pandas_type"),
-            entry.get("numpy_type"),
-        )
-        if isinstance(name, str) and isinstance(kind, str) and isinstance(numpy, str):
-            chosen.setdefault(name, (kind, numpy))
+    for name, entry in _source_entries(source.get("columns")).items():
+        kind, numpy = entry.get("pandas_type"), entry.get("numpy_type")
+        if isinstance(kind, str) and isinstance(numpy, str):
+            chosen[name] = (kind, numpy)
     return chosen
+
+
+def _column_name(field: str, is_index: bool, source: dict[str, Any], names: set[str]) -> str | None:
+    """The `name` member: the field name, except a generated index field, which pyarrow names
+    `None`, or by an index name that equals another output field's name (the real name)."""
+    if not (is_index and _GENERATED_INDEX.fullmatch(field)):
+        return field
+    real = _source_entries(source.get("columns")).get(field, {}).get("name")
+    return real if isinstance(real, str) and real in names and real != field else None
+
+
+def _column_index_entry() -> dict[str, Any]:
+    return {**COLUMN_INDEX_ENTRY, "metadata": dict(COLUMN_INDEX_ENTRY["metadata"])}
 
 
 def _sanitize_pandas_blob(raw: bytes, for_schema: pa.Schema) -> bytes | None:
@@ -123,10 +166,8 @@ def _sanitize_pandas_blob(raw: bytes, for_schema: pa.Schema) -> bytes | None:
         return None
     names = set(for_schema.names)
     stored = source.get("index_columns")
-    index_columns = (
-        [c for c in stored if isinstance(c, str) and c in names] if isinstance(stored, list) else []
-    )
-    chosen = _source_pairs(source.get("columns"))
+    stored_names = {c for c in stored if isinstance(c, str)} if isinstance(stored, list) else set()
+    chosen = _source_pairs(source)
     columns: list[dict[str, Any]] = []
     for field in for_schema:
         pairs = pairs_for(field.type)
@@ -134,19 +175,25 @@ def _sanitize_pandas_blob(raw: bytes, for_schema: pa.Schema) -> bytes | None:
             continue
         pair = chosen.get(field.name)
         kind, numpy = pair if pair in pairs else pairs[0]
-        generated = field.name in index_columns and _GENERATED_INDEX.fullmatch(field.name)
         columns.append(
             {
-                "name": None if generated else field.name,
+                "name": _column_name(field.name, field.name in stored_names, source, names),
                 "field_name": field.name,
                 "pandas_type": kind,
                 "numpy_type": numpy,
                 "metadata": column_metadata(field.type),
             }
         )
+    # An index entry is kept only for a field that got a column entry, once, in source order.
+    entries = {c["field_name"] for c in columns}
+    index_columns = (
+        [c for c in dict.fromkeys(c for c in stored if isinstance(c, str)) if c in entries]
+        if isinstance(stored, list)
+        else []
+    )
     blob = {
         "index_columns": index_columns,
-        "column_indexes": [dict(COLUMN_INDEX_ENTRY)] if index_columns else [],
+        "column_indexes": [_column_index_entry()] if index_columns else [],
         "columns": columns,
         "attributes": {},
         "creator": {"library": "pyarrow", "version": pa.__version__},

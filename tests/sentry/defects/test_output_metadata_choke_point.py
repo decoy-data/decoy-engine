@@ -51,7 +51,7 @@ QUALIFIED = frozenset(
 ATTRIBUTE_WRITERS = frozenset({"to_parquet", "write_parquet", "sink_parquet"})
 SQL_CALLS = frozenset({"execute", "sql"})
 COPY_TO_PARQUET = re.compile(
-    r"\bCOPY\b[\s\S]*?\bTO\b[\s\S]*?(\bFORMAT\s+PARQUET\b|\.parquet\b)", re.IGNORECASE
+    r"\bCOPY\b[\s\S]*?\bTO\b[\s\S]*?(\bFORMAT\s*['\"]?PARQUET\b|\.parquet\b)", re.IGNORECASE
 )
 
 # The output writers (allowed callers of the raw primitives) and the primitives themselves.
@@ -88,13 +88,23 @@ def _imports(tree: ast.Module, mod: str, is_pkg: bool) -> dict[str, str]:
             base = scan.resolve_from(mod, is_pkg, node)
             for a in node.names:
                 out[a.asname or a.name] = f"{base}.{a.name}" if base else a.name
-    for _ in range(3):  # a re-binding of a re-binding; bounded so a self-referencing name ends
+    rebound: set[str] = set()  # each name is bound once, so the loop ends at a fixed point
+    changed = True
+    while changed:
+        changed = False
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
                 target, chain = node.targets[0], scan.attr_chain(node.value)
-                if isinstance(target, ast.Name) and chain and chain[0] in out:
-                    if target.id != chain[0]:
-                        out[target.id] = ".".join([out[chain[0]], *chain[1:]])
+                if (
+                    isinstance(target, ast.Name)
+                    and chain
+                    and chain[0] in out
+                    and target.id not in rebound
+                    and target.id != chain[0]
+                ):
+                    out[target.id] = ".".join([out[chain[0]], *chain[1:]])
+                    rebound.add(target.id)
+                    changed = True
     return out
 
 
@@ -105,17 +115,40 @@ def _dotted(node: ast.AST, imports: dict[str, str]) -> str | None:
     return ".".join([imports.get(chain[0], chain[0]), *chain[1:]])
 
 
-def _text(node: ast.AST, mod: str, imports: dict[str, str], consts: dict[str, str]) -> str:
-    """The constant text of a SQL argument; what cannot be resolved reads as empty."""
+def _text(
+    node: ast.AST,
+    mod: str,
+    imports: dict[str, str],
+    consts: dict[str, str],
+    local: dict[str, ast.expr],
+    depth: int = 0,
+) -> str:
+    """The constant text of a SQL argument; what cannot be resolved reads as empty. Joins literals
+    and f-string parts, `+`, `%` and `.format()` receivers, and names bound to a module constant
+    (also imported) or assigned once in the enclosing function."""
+    if depth > 8:
+        return ""
+
+    def sub(child: ast.AST) -> str:
+        return _text(child, mod, imports, consts, local, depth + 1)
+
     if isinstance(node, ast.Constant):
         return node.value if isinstance(node.value, str) else ""
     if isinstance(node, ast.JoinedStr):
-        return "".join(_text(v, mod, imports, consts) for v in node.values)
+        return "".join(sub(v) for v in node.values)
     if isinstance(node, ast.FormattedValue):
-        return _text(node.value, mod, imports, consts)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _text(node.left, mod, imports, consts) + _text(node.right, mod, imports, consts)
+        return sub(node.value)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
+        return sub(node.left) + (sub(node.right) if isinstance(node.op, ast.Add) else "")
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+    ):
+        return sub(node.func.value)
     if isinstance(node, ast.Name):
+        if node.id in local:
+            return sub(local[node.id])
         return consts.get(f"{mod}.{node.id}") or consts.get(imports.get(node.id, ""), "")
     return ""
 
@@ -133,27 +166,55 @@ def _own_constants(tree: ast.Module, mod: str) -> dict[str, str]:
     }
 
 
+def _local_assignments(tree: ast.Module, owner: dict[int, str]) -> dict[str, dict[str, ast.expr]]:
+    """`name = <expr>` inside each function, keyed by the function's qualified name."""
+    out: dict[str, dict[str, ast.expr]] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            table = out.setdefault(owner.get(id(fn), fn.name), {})
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                    if isinstance(node.targets[0], ast.Name):
+                        table[node.targets[0].id] = node.value
+    return out
+
+
 def hits_in(source: str, rel: str, consts: dict[str, str]) -> list[Hit]:
-    """Every Parquet-writing call in one module, with its enclosing qualified function."""
+    """Every Parquet-writing reference in one module, with its enclosing qualified function.
+
+    A writer counts wherever it is named in a load context, not only when it is called, so a
+    reference handed to a wrapper (`guarded(.., pq.write_table, ..)`, `functools.partial`) is a hit.
+    """
     tree = ast.parse(source)
     mod = rel.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
     imports = _imports(tree, mod, rel.endswith("__init__.py"))
+    for top in tree.body:  # a function this module defines is known by its qualified name
+        if isinstance(top, ast.FunctionDef):
+            imports.setdefault(top.name, f"{mod}.{top.name}")
     consts = {**consts, **_own_constants(tree, mod)}
     owner = scan._enclosing(tree)
+    locals_by_fn = _local_assignments(tree, owner)
     found: list[Hit] = []
-    for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):
-        target = _dotted(call.func, imports)
+    for node in ast.walk(tree):
+        function = owner.get(id(node), "") or "<module>"
         watch = None
-        if target in QUALIFIED:
-            watch = target
-        elif isinstance(call.func, ast.Attribute):
-            if call.func.attr in ATTRIBUTE_WRITERS:
-                watch = f"attr:{call.func.attr}"
-            elif call.func.attr in SQL_CALLS and call.args:
-                if COPY_TO_PARQUET.search(_text(call.args[0], mod, imports, consts)):
-                    watch = "sql:copy-to-parquet"
+        if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            target = _dotted(node, imports)
+            if target in QUALIFIED:
+                watch = target
+            elif isinstance(node, ast.Attribute) and node.attr in ATTRIBUTE_WRITERS:
+                watch = f"attr:{node.attr}"
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in SQL_CALLS
+            and node.args
+        ):
+            local = locals_by_fn.get(function, {})
+            if COPY_TO_PARQUET.search(_text(node.args[0], mod, imports, consts, local)):
+                watch = "sql:copy-to-parquet"
         if watch:
-            found.append(Hit(rel, owner.get(id(call), "") or "<module>", watch, call.lineno))
+            found.append(Hit(rel, function, watch, node.lineno))
     return found
 
 
@@ -395,8 +456,8 @@ SEEDED: dict[str, tuple[str, str]] = {
 def test_a_seeded_bypass_is_seen(cell: str) -> None:
     source, watch = SEEDED[cell]
     found = hits_in(source, "decoy_engine/seeded.py", _consts())
-    assert [h.watch for h in found] == [watch], found
-    assert not _is_allowed(found[0])
+    assert found and {h.watch for h in found} == {watch}, found
+    assert not any(_is_allowed(h) for h in found)
 
 
 @pytest.mark.parametrize(

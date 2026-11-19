@@ -11,6 +11,7 @@ a schema, so it is never produced.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Final
 
 import pyarrow as pa
@@ -18,29 +19,33 @@ import pyarrow as pa
 Pair = tuple[str, str]
 
 # The one `column_indexes` entry pyarrow writes for a frame whose index it stores.
-COLUMN_INDEX_ENTRY: Final[Mapping[str, Any]] = {
-    "name": None,
-    "field_name": None,
-    "pandas_type": "unicode",
-    "numpy_type": "object",
-    "metadata": {"encoding": "UTF-8"},
-}
+COLUMN_INDEX_ENTRY: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        "name": None,
+        "field_name": None,
+        "pandas_type": "unicode",
+        "numpy_type": "object",
+        "metadata": MappingProxyType({"encoding": "UTF-8"}),
+    }
+)
 
-PLAIN_PAIRS: Final[Mapping[pa.DataType, Pair]] = {
-    pa.bool_(): ("bool", "bool"),
-    pa.int8(): ("int8", "int8"),
-    pa.int16(): ("int16", "int16"),
-    pa.int32(): ("int32", "int32"),
-    pa.int64(): ("int64", "int64"),
-    pa.uint8(): ("uint8", "uint8"),
-    pa.uint16(): ("uint16", "uint16"),
-    pa.uint32(): ("uint32", "uint32"),
-    pa.uint64(): ("uint64", "uint64"),
-    pa.float32(): ("float32", "float32"),
-    pa.float64(): ("float64", "float64"),
-    pa.string(): ("unicode", "object"),
-    pa.large_string(): ("unicode", "object"),
-}
+PLAIN_PAIRS: Final[Mapping[pa.DataType, Pair]] = MappingProxyType(
+    {
+        pa.bool_(): ("bool", "bool"),
+        pa.int8(): ("int8", "int8"),
+        pa.int16(): ("int16", "int16"),
+        pa.int32(): ("int32", "int32"),
+        pa.int64(): ("int64", "int64"),
+        pa.uint8(): ("uint8", "uint8"),
+        pa.uint16(): ("uint16", "uint16"),
+        pa.uint32(): ("uint32", "uint32"),
+        pa.uint64(): ("uint64", "uint64"),
+        pa.float32(): ("float32", "float32"),
+        pa.float64(): ("float64", "float64"),
+        pa.string(): ("unicode", "object"),
+        pa.large_string(): ("unicode", "object"),
+    }
+)
 
 # pandas' masked extension dtypes name the same data with a capitalised numpy_type.
 _MASKED: Final = {"bool": "boolean", "float32": "Float32", "float64": "Float64"}
@@ -52,6 +57,14 @@ def _plain(t: pa.DataType) -> Pair | None:
     if (pair := PLAIN_PAIRS.get(t)) is not None:
         return pair
     types = pa.types
+    if isinstance(t, pa.BaseExtensionType):
+        # pandas' own extension types: the numpy_type names the validated parameters.
+        name = t.extension_name
+        if name == "pandas.period":
+            return ("object", f"period[{t.freq}]")
+        if name == "pandas.interval":
+            return ("object", f"interval[{t.subtype}, {t.closed}]")
+        return None
     if types.is_float16(t):
         return ("float16", "float16")
     if types.is_binary(t) or types.is_large_binary(t) or types.is_fixed_size_binary(t):
