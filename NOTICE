@@ -122,7 +122,7 @@ Format: name==version, two spaces, license, two spaces, [runtime] or
   pydantic==2.13.4  MIT  [runtime]
   pydantic-core==2.46.4  MIT  [runtime]
   pygments==2.20.0  BSD-2-Clause  [extra: ner]
-  pynacl==1.6.2  Apache-2.0  [extra: sftp]
+  pynacl==1.6.2  Apache-2.0  [runtime]
   python-dateutil==2.9.0.post0  BSD-family-unspecified-clause OR Apache-2.0  [runtime]
   python-stdnum==2.2  LGPL-2.0-or-later  [runtime]
   pytz==2026.2  MIT  [runtime]

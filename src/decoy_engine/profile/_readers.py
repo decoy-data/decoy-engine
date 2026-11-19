@@ -51,7 +51,7 @@ from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 # Fallback bounded sample size when a caller asks for a full scan
 # (sample_rows=None) under residency="bounded" -- see profile_source. A full
@@ -455,6 +455,25 @@ class FixedWidthFileSource(_PolicyBound):
 # ---------------------------------------------------------------------
 
 
+# What a proof read may raise because of its data, not because of access or IO: a row
+# that does not parse, or bytes that do not decode. Such a failure still shows that a row
+# exists, so it is an answer to the proof question, never a profile failure.
+PROOF_READ_ERRORS: tuple[type[Exception], ...] = (pd.errors.ParserError, UnicodeDecodeError)
+
+
+def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
+    """Whether the source holds a row after the first `n`.
+
+    The one end-of-source proof read. It answers that question only: its frame is counted
+    and dropped, so it never changes the profiled sample, and a data error in it (a row
+    past `n` that does not parse) means the row exists. Access and IO errors are not
+    caught; the `n`-row read that builds the sample runs before this and keeps its own."""
+    try:
+        return len(read_sample(n + 1)) > n
+    except PROOF_READ_ERRORS:
+        return True
+
+
 def head_frame_from_batches(
     batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
 ) -> pd.DataFrame:
@@ -555,6 +574,7 @@ def _build_file_source(
 
 __all__ = [
     "BOUNDED_FALLBACK_ROWS",
+    "PROOF_READ_ERRORS",
     "CsvFileSource",
     "FixedWidthFileSource",
     "FooterFacts",
@@ -566,5 +586,6 @@ __all__ = [
     "build_profile_source",
     "estimate_csv_rows",
     "footer_facts_of",
+    "has_row_beyond",
     "head_frame_from_batches",
 ]

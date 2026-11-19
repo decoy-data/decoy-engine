@@ -1,4 +1,3 @@
-# decoy_engine/__init__.py
 """
 decoy_engine -- data masking and synthetic generation library.
 
@@ -31,8 +30,7 @@ Public API (the contract CLI and platform code depend on):
     RELEASE_PHASE / ReleasePhase / is_pre_ga:
                       (decoy_engine.release) the single pre-GA/GA switch the rule
                       inversions and CI gates read. Pre-GA: hard-delete is allowed
-                      and the compatibility contract is advisory. The platform reads
-                      RELEASE_PHASE in process (no separate platform constant).
+                      and the compatibility contract is advisory. The platform reads RELEASE_PHASE in process and keeps no copy.
 
 Public exceptions (also in decoy_engine.errors):
     DecoyError, ConfigError, PipelineValidationError,
@@ -188,6 +186,7 @@ from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source, resolv
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
     PreparedDeclaredSources,
+    ScanDeclaration,
     check_columns_declared,
     declared_columns,
     prepare_declared_sources,
@@ -481,6 +480,7 @@ __all__ = [
     "RouteEvent",
     "RunResult",
     "RunResultRead",
+    "ScanDeclaration",
     "ScanSet",
     "ScanSetCore",
     "SecretCachePolicy",

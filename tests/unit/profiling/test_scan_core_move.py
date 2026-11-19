@@ -16,7 +16,6 @@ _SNAPSHOT = _ROOT / "tests" / "fixtures" / "f07" / "scan-set-core-schema.json"
 _IMPORTERS = {
     "src/decoy_engine/profiling/__init__.py": {"ScanSetCore", "ScanSetCoreRead"},
     "src/decoy_engine/profiling/scan_set_read.py": {"ScanSetCoreRead"},
-    "src/decoy_engine/profiling/scan_diff.py": {"_relaxed"},
     "tests/unit/profiling/test_scan_set.py": {"TableCore"},
     "tests/unit/profiling/test_scan_integrity.py": {"RelationshipFactsCore"},
     "tests/unit/profiling/test_scanml_m3a_record.py": {

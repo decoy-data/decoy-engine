@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -37,11 +37,22 @@ from decoy_engine.config import (
     relationship_shape_error,
 )
 from decoy_engine.contracts.strategy_requirements import requirement_applies, requirements_for
+from decoy_engine.detection.types import DetectorSource, ModelRef
+from decoy_engine.profiling import recommendations
 from decoy_engine.profiling._starter_inference import StarterDecision, infer_starter_strategy
 from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSet, TableScan
 from decoy_engine.safe_output import ConfigProblem
 
-__all__ = ["ColumnSuggestion", "StarterConfig", "starter_config"]
+__all__ = [
+    "ColumnSuggestion",
+    "StarterConfig",
+    "build_entry",
+    "check_starter_config",
+    "declared_key_namespaces",
+    "detector_entry",
+    "starter_config",
+    "swap_placeholder_namespaces",
+]
 
 _KEY_STRATEGY = "hash"
 _CHECK_NAMESPACE = "starter-check"
@@ -66,18 +77,49 @@ _CLOUD_NOTE = (
 )
 
 
+def _empty_entry() -> Mapping[str, Any]:
+    return MappingProxyType({})
+
+
 @dataclass(frozen=True)
 class ColumnSuggestion:
-    """What the starter writes for one column, before it becomes a config entry."""
+    """What the starter writes for one column, before it becomes a config entry.
+
+    Identity is `(table, column, source, detector_id)`; `detector_id` is empty when no detector
+    decided (the fallback, or the integer-key rule). `model` and `band` are for a classifier
+    suggestion and stay `None` for a regex one. `entry` is the column entry `starter_config`
+    built, and `live` says it was written into the config. Only a regex suggestion is live.
+    """
 
     table: str
     column: str
     strategy: str
     provider: str | None = None
-    provider_config: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    provider_config: Mapping[str, Any] = field(default_factory=_empty_entry)
     namespace: str | None = None
     deterministic: bool = False
     is_key: bool = False
+    source: DetectorSource = "regex"
+    detector_id: str = ""
+    model: ModelRef | None = None
+    band: Literal["high", "review"] | None = None
+    confidence_bucket: str | None = None
+    entry: Mapping[str, Any] = field(default_factory=_empty_entry)
+    live: bool = True
+
+    def __post_init__(self) -> None:
+        # `strategy`, `namespace` and `entry` describe one choice; a confirm matches on one and
+        # applies another, so they must agree. Only a regex suggestion is written into the config.
+        if self.live and self.source != "regex":
+            raise ValueError("only a regex suggestion can be live")
+        if self.entry and (
+            self.entry.get("name") != self.column
+            or self.entry.get("strategy") != self.strategy
+            or self.entry.get("namespace") != self.namespace
+        ):
+            raise ValueError(
+                "the suggestion's entry disagrees with its column, strategy or namespace"
+            )
 
 
 @dataclass(frozen=True)
@@ -112,7 +154,7 @@ def starter_config(
     if baseline_sha256 is not None and baseline_path is None:
         raise ValueError("baseline_sha256 needs baseline_path")
     _check_relationship_shapes(scan, relationships)
-    keys = _key_namespaces(relationships)
+    keys = declared_key_namespaces(relationships)
     allocated = _allocate_targets(scan, targets or {})
     suggestions: list[ColumnSuggestion] = []
     notes: dict[tuple[str, str], str] = {}
@@ -128,7 +170,7 @@ def starter_config(
             key = keys.get((table.name, stats.name))
             suggestion = _suggestion(table.name, stats.name, decision, key)
             suggestions.append(suggestion)
-            columns.append(_entry(suggestion))
+            columns.append(dict(suggestion.entry))
             notes[(table.name, stats.name)] = _note(table, stats.name, decision, key)
         tables.append({"name": table.name, "columns": columns})
 
@@ -145,7 +187,7 @@ def starter_config(
         if baseline_sha256 is not None:
             config["scan_baseline"]["sha256"] = baseline_sha256
     _refuse_shared_destinations(allocated, [t["name"] for t in tables])
-    _check(config)
+    check_starter_config(config)
     return StarterConfig(
         config=config,
         notes=MappingProxyType(notes),
@@ -154,7 +196,7 @@ def starter_config(
     )
 
 
-def _key_namespaces(
+def declared_key_namespaces(
     relationships: Sequence[Mapping[str, Any]],
 ) -> dict[tuple[str, str], tuple[str, bool]]:
     """(table, column) -> (namespace, is_placeholder) for every declared key column."""
@@ -187,7 +229,8 @@ def _suggestion(
     table: str, column: str, decision: StarterDecision, key: tuple[str, bool] | None
 ) -> ColumnSuggestion:
     if key is not None:
-        return ColumnSuggestion(table, column, _KEY_STRATEGY, namespace=key[0], is_key=True)
+        bare = ColumnSuggestion(table, column, _KEY_STRATEGY, namespace=key[0], is_key=True)
+        return dataclasses.replace(bare, entry=MappingProxyType(_entry(bare)))
     bare = ColumnSuggestion(
         table,
         column,
@@ -195,8 +238,30 @@ def _suggestion(
         provider=decision.provider,
         provider_config=decision.provider_config,
         deterministic=decision.deterministic,
+        detector_id=decision.detector_id,
+        confidence_bucket=decision.confidence_bucket,
     )
-    return dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
+    named = dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare
+    return dataclasses.replace(named, entry=MappingProxyType(_entry(named)))
+
+
+def detector_entry(detector_id: str, column: str) -> dict[str, Any] | None:
+    """The column entry the starter writes for a column `detector_id` flagged, or None.
+
+    None when the detector has no starter choice. The namespace follows the same registry rule
+    as `starter_config`, so a review that takes a detector's default writes what a scan would.
+    """
+    choice = recommendations.starter_choice(detector_id)
+    if choice is None:
+        return None
+    bare = ColumnSuggestion(
+        "",
+        column,
+        choice.strategy,
+        provider=choice.provider,
+        provider_config=choice.provider_config,
+    )
+    return _entry(dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare)
 
 
 def _needs_namespace(s: ColumnSuggestion) -> bool:
@@ -208,17 +273,47 @@ def _needs_namespace(s: ColumnSuggestion) -> bool:
     )
 
 
-def _entry(s: ColumnSuggestion) -> dict[str, Any]:
-    entry: dict[str, Any] = {"name": s.column, "strategy": s.strategy}
-    if s.provider:
-        entry["provider"] = s.provider
-    if s.namespace is not None:
-        entry["namespace"] = s.namespace
-    if s.provider_config:
-        entry["provider_config"] = dict(s.provider_config)
-    if s.deterministic:
-        entry["deterministic"] = True
+def build_entry(
+    strategy: str,
+    column: str,
+    *,
+    column_fields: Mapping[str, Any] | None = None,
+    provider_config: Mapping[str, Any] | None = None,
+    namespace: str | None = None,
+) -> dict[str, Any]:
+    """The one writer of a column entry's shape and key order.
+
+    `column_fields` are the top-level `ColumnConfig` members (`provider`, `deterministic`),
+    `provider_config` the free-form mapping. It checks nothing about the strategy: the starter
+    passes the settings a detector descriptor chose, and `column_entry` (the review's entry
+    point) checks the settings an operator typed against the strategy catalog before calling it.
+    """
+    fields = dict(column_fields or {})
+    entry: dict[str, Any] = {"name": column, "strategy": strategy}
+    if fields.get("provider"):
+        entry["provider"] = fields.pop("provider")
+    else:
+        fields.pop("provider", None)
+    if namespace is not None:
+        entry["namespace"] = namespace
+    if provider_config:
+        entry["provider_config"] = copy.deepcopy(dict(provider_config))
+    for name, value in fields.items():
+        entry[name] = value
     return entry
+
+
+def _entry(s: ColumnSuggestion) -> dict[str, Any]:
+    return build_entry(
+        s.strategy,
+        s.column,
+        column_fields={
+            "provider": s.provider,
+            **({"deterministic": True} if s.deterministic else {}),
+        },
+        provider_config=s.provider_config,
+        namespace=s.namespace,
+    )
 
 
 def _note(
@@ -320,12 +415,8 @@ def _refuse_shared_destinations(targets: Mapping[str, Any], table_names: Sequenc
         raise ValueError(f"tables {first!r} and {second!r} share one target destination")
 
 
-def _check(config: dict[str, Any]) -> PipelineConfig:
-    """Validate the config; a placeholder must be the only thing that fails it.
-
-    A failure here is a builder bug, so the error names codes and locations, never values.
-    """
-    expected = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
+def swap_placeholder_namespaces(config: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """A copy of `config` with every placeholder namespace set to a real one, and how many."""
     swapped = copy.deepcopy(config)
     placeholders = 0
     for table in swapped["tables"]:
@@ -333,6 +424,16 @@ def _check(config: dict[str, Any]) -> PipelineConfig:
             if str(column.get("namespace", "")).startswith(NAMESPACE_PLACEHOLDER_PREFIX):
                 column["namespace"] = _CHECK_NAMESPACE
                 placeholders += 1
+    return swapped, placeholders
+
+
+def check_starter_config(config: dict[str, Any]) -> PipelineConfig:
+    """Validate the config; a placeholder must be the only thing that fails it.
+
+    A failure here is a builder bug, so the error names codes and locations, never values.
+    """
+    expected = str(reasons.config.NAMESPACE_PLACEHOLDER_UNSET)
+    swapped, placeholders = swap_placeholder_namespaces(config)
     failed = _problems_of(swapped)
     if failed is not None:
         raise PipelineConfigError.from_problems(failed, prefix="starter config failed validation")

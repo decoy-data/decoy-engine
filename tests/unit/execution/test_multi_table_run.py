@@ -419,9 +419,9 @@ def test_chunk_lists_are_dead_before_the_next_dispatched_table_starts(
     real_join = ac.join_dispatcher_chunks
     current: list[str] = []
 
-    def join(chunks: list[pa.Table], *, table: str) -> pa.Table:
+    def join(chunks: list[pa.Table], *, table: str, **kwargs: Any) -> pa.Table:
         probes[table] = [weakref.ref(chunk) for chunk in chunks]
-        return real_join(chunks, table=table)
+        return real_join(chunks, table=table, **kwargs)
 
     monkeypatch.setattr(ac, "join_dispatcher_chunks", join)
     real_run = ac.run_auto_chunk

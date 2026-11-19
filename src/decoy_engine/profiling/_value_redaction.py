@@ -30,7 +30,7 @@ import math
 import numbers
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Final, TypeGuard, Union, get_args, get_origin, get_type_hints
+from typing import Any, Final, Literal, TypeGuard, Union, get_args, get_origin, get_type_hints
 
 from decoy_engine.profiling.types import ColumnProfile
 
@@ -110,7 +110,7 @@ VALUE_FREE_FIELDS: Final[frozenset[tuple[str, str]]] = frozenset(
         "ColumnProfile",
         "source_label", "row_count", "sample_strategy", "sample_row_cap", "fields",
         "reid_risk_columns", "reid_risk_score", "quasi_identifier_groups", "k_anonymity",
-        "engine_version", "generated_at",
+        "engine_version", "generated_at", "basis",
     )
     | _free(
         "FieldStats",
@@ -350,7 +350,12 @@ def _checkable(hint: Any) -> bool:
     origin = get_origin(hint)
     if origin in (Union, types.UnionType, list):
         return all(_checkable(a) for a in get_args(hint))
-    return hint is type(None) or hint in _SCALARS or dataclasses.is_dataclass(hint)
+    return (
+        hint is type(None)
+        or hint in _SCALARS
+        or get_origin(hint) is Literal
+        or dataclasses.is_dataclass(hint)
+    )
 
 
 def _conforms(value: Any, hint: Any) -> bool:
@@ -365,6 +370,9 @@ def _conforms(value: Any, hint: Any) -> bool:
         return True
     if hint is type(None):
         return value is None
+    if origin is Literal:
+        # Exactly one of the declared strings: a near miss or another type may be a cell.
+        return type(value) is str and value in get_args(hint)
     if isinstance(value, bool):
         return hint is bool  # a bool is not a count or a score
     if hint is float:

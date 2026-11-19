@@ -357,6 +357,8 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/pipeline/_lifecycle.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_generate.py",
+            # NONFK-OOM S4a: `decide_split` moves the B7 split decision out of `_pipeline_context`.
+            "src/decoy_engine/execution/pipeline/_route_decision.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",

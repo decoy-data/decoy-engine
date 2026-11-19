@@ -1,0 +1,3 @@
+### Changed (partial-read profiles are labelled samples, PROFILE-SAMPLE-LABELS E2, 2026-11-19)
+
+A first-chunk profile of a chunked mask run now marks every column `sampled` and sets no candidate-key flag, because the chunk is only the head of the source. `profile_source` on a CSV now reads one row past the sample size, so a file whose row estimate falls below the sample no longer reads as the whole table. Its columns are marked `sampled` and carry no key flag. The `profile_hash` of such a partial profile changes. The hash of a profile read to the end of its source does not change, and masked output does not change.

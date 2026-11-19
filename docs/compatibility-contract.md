@@ -283,6 +283,14 @@ the guard cannot recognise (a person name, an address) is the stated limit. The 
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
 
+Each table also holds `basis` (`whole` or `sample`) and `scanned_rows`, the rows the field counts were taken over
+(PROFILE-SAMPLE-LABELS). `whole` is written only when the read reached the end of the source, with an exact
+`row_count` equal to `scanned_rows`; `key_candidates` is empty on a `sample`: the write model refuses a sampled key claim, and a read of a core with no `basis`, or any `basis` other than `whole`, drops its stored `key_candidates` (they were never proven by a whole read), so that core stays readable and exportable. Both members have read defaults, so a
+core written before them reads as `basis: "sample"` with `scanned_rows: null`. A `basis` string outside the two
+values reads as `sample`, so a third value added in a later minor is not a break. `basis`, `scanned_rows` and the two
+values are frozen at 1.0. A plain profile document (`profile_document`, `ColumnProfile`) gains the same `basis` key, the
+last field of the dataclass.
+
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
 refused, scores floats (bool and strings refused), drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The
@@ -610,6 +618,19 @@ No `SEED_PROTOCOL_VERSION` change.
 
 ### 3.4 The public API + CLI contract
 
+- **Pass-through text width (O3, 2026-11):** a pass-through `large_string` column leaves
+  every route as `string` when its values fit 32-bit offsets, and as `large_string` after
+  one value that cannot fit. Each batch is judged from its own offsets: a batch whose total
+  exceeds the limit is split at row boundaries into ordered `string` slices, and the source is
+  never pre-scanned or reread. A value that cannot fit promotes the column to `large_string`
+  for the rest of the run: the CSV writer keeps the value, and resident output widens its
+  earlier chunks. Parquet cannot store a single value of 2 GiB or more on any head: the raw
+  writer raises `ArrowInvalid` and a strict file-access write raises `FileAccessReadError`.
+  O3 adds no earlier refusal. A sink whose writer schema is fixed before the first batch
+  keeps the source `large_string` field, byte-equal to the previous release: the out-of-core
+  sink, the streamed `run_auto_chunk` sink and any `TransactionalSink`. Narrowing to `string`
+  applies to resident results, `run_mask_chunked` chunks, whole-frame output and CSV.
+
 - **Python:** the symbols re-exported from `decoy_engine/__init__.py` and
   `decoy_engine/sdk.py`, with their signatures and output-affecting defaults.
   As of 2026-09-30 this includes `read_fixed_width` and `FixedWidthParseError`
@@ -675,7 +696,9 @@ No `SEED_PROTOCOL_VERSION` change.
   nullable integer above 2^53, comes back exact; a read passthrough column that
   pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
   or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
-  string-redact and native-admissible deterministic categorical columns, the source type for passthrough), no pandas
+  string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
+  that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
+  "Pass-through text width" in §3.4), no pandas
   metadata on yielded chunks, and identical validation on both routes. A column
   that is `null`-typed in the first chunk and typed in a later one raises
   `chunked_leading_null_type` on both routes. Its error codes are
@@ -1054,6 +1077,8 @@ columns is refused before it is profiled or masked. `run_pipeline_isolated` runs
 staging or spawn, and the child `run_pipeline` rechecks. The refusals are `source_file.undeclared_column` (names a
 position and a count, never a column) and `source_file.undeclared_table`.
 `DeclarationRequest.for_validate` is the offline form for `decoy validate`: it reads only local file headers, never opens an `s3`, `gcs` or other non-file source, and names those sources in `remote_sources` so the caller can report them as not checked (additive, 2026-11-16, QA-GATE G-eng).
+
+`DeclarationRequest.for_scan(config, tables=None)` is the scan form (additive, SCAN-MULTI E-S1c, 2026-11-19). It reads `sources`, `relationships` and `version` of a sources-only file or a full pipeline, checks the inputs with the one `scan_sources` validator and opens no data file. A `column_names_file` is read once. `scan_sources` takes the additive keyword `relationship_positions`. The capability's `scan_declaration` property is a frozen `ScanDeclaration`; on a capability from any other request it raises `TypeError`.
 
 **Declaration gate on the chunked entries (CONFIG-EXPLICIT E2d).** `run_mask_pipeline_chunked`,
 `run_mask_chunked` and `run_native_or_oracle_chunked` call `prepare_declared_sources`
