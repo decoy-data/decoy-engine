@@ -8,6 +8,7 @@ data only; the tests live in `test_windowed_date_batch_parity.py`.
 from __future__ import annotations
 
 import datetime as dt
+import decimal
 import hashlib
 import re
 from collections.abc import Callable, Sequence
@@ -477,6 +478,8 @@ def build_cases() -> list[Case]:
         ("float_cell", 1.5),
         ("bool_cell", True),
         ("bytes_cell", b"2000-01-01"),
+        ("numpy_nat", np.datetime64("NaT")),
+        ("decimal_nan", decimal.Decimal("NaN")),
         ("below_range", "1500-01-01"),
         ("above_range", "2300-01-01"),
         ("year_zero_one", "0001-01-01"),

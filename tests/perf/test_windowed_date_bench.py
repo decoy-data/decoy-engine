@@ -77,7 +77,7 @@ def worker(dist: str, shape: str) -> dict[str, object]:
 @pytest.mark.parametrize("shape", ["iso", "date"])
 @pytest.mark.parametrize("dist", ["uniform", "early", "late"])
 def test_windowed_date_us_per_row(dist: str, shape: str) -> None:
-    proc = subprocess.run(
+    proc = subprocess.run(  # noqa: S603
         [sys.executable, str(Path(__file__).resolve()), dist, shape],
         capture_output=True,
         text=True,

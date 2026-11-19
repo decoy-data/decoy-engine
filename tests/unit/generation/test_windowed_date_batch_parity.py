@@ -34,7 +34,7 @@ from tests.unit.generation._windowed_date_corpus import (
     reference_apply_windowed_date,
 )
 
-BASE_DIGEST = "5f9603741ca333c26224baff1ced7c5d49837b7232ef7630cb11b1e4a28d703d"
+BASE_DIGEST = "efd24e5746f20b24f5ced9a4656a2d4125f363e05742b641d60c4091fdae6d7b"
 
 CASES = build_cases()
 CASE_IDS = [c.name for c in CASES]
