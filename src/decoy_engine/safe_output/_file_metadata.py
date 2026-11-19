@@ -123,7 +123,7 @@ def _tz_known(tz: str) -> bool:
     if not _TZ_SHAPE.fullmatch(tz):
         return False
     try:
-        pc.assume_timezone(pa.array([0], pa.timestamp("s")), tz)
+        pc.assume_timezone(pa.array([0], pa.timestamp("s")), tz)  # type: ignore[attr-defined]  # missing from the stubs
     except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
         return False
     return True
