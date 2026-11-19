@@ -94,10 +94,14 @@ _V0_28_0_ROWS = (
 )
 # The rows v0.28.1 certifies: the dev/CI lock with the engine at 0.28.1 (376aa2... before the
 # time-machine pin of the Faker output lock, 8e4bb9... with it), and the CLI runtime profile on
-# engine 0.28.1 with the 69 pins an install of the engine really has.
+# engine 0.28.1 (b61dcfd6... with the 70 pins an install really has, pynacl included; 00f45dee...
+# is the 69-pin profile stamped before PyNaCl became a base dependency). The dev row b2d12cff...
+# adds PyNaCl to the 0.28.1 lock.
 _V0_28_1_ROWS = (
     "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
     "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
+    "b2d12cff2b9b1cb32a7fdd14227befe5b7767a389de47a8d1b3ebd70822c9be1",
+    "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
     "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
 )
 _ALL_ROWS = (
