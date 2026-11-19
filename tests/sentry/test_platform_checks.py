@@ -15,11 +15,24 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry._platform_ast import SRC, WINDOWS_NAME, engine_trees, import_map, resolve
+from tests.sentry._platform_ast import (
+    OSFLAGS,
+    SRC,
+    WINDOWS_NAME,
+    engine_trees,
+    import_map,
+    resolve,
+)
 
 PLATFORM_READS = frozenset({"os.name", "sys.platform", "platform.system", WINDOWS_NAME})
+DIR_FD_NAME = f"{OSFLAGS}.DIR_FD"
+# `_osflags.DIR_FD` is a capability probe (does this `os` take `dir_fd=`?), not a platform
+# test, so it sits outside D9 and is not counted in CENSUS. Reading it is still a platform
+# switch in effect, so only these modules may read it; a new reader is a review decision.
+DIR_FD_ALLOWLIST = frozenset({"decoy_engine/fileaccess/_rooted.py"})
 
-# Exact per-module counts, measured after slice EW1. Keys are paths under `src/`.
+# Exact per-module counts, measured after slice EW1. Keys are paths under `src/`. Registered as
+# the shrink-only `platform-census` baseline: the ratchet never lets an entry's `max` rise.
 CENSUS: dict[str, int] = {
     "decoy_engine/execution/_isolated_commit.py": 1,
     "decoy_engine/execution/_isolated_common.py": 1,
@@ -36,17 +49,21 @@ CENSUS: dict[str, int] = {
 }
 
 
-def count_reads(tree: ast.AST) -> int:
-    imap = import_map(tree)
+def count_reads(
+    tree: ast.AST, rel: str | None = None, names: frozenset[str] = PLATFORM_READS
+) -> int:
+    imap = import_map(tree, rel)
     return sum(
         1
         for node in ast.walk(tree)
-        if isinstance(node, (ast.Attribute, ast.Name)) and resolve(node, imap) in PLATFORM_READS
+        if isinstance(node, (ast.Attribute, ast.Name)) and resolve(node, imap) in names
     )
 
 
-def observed(trees: dict[str, ast.Module]) -> dict[str, int]:
-    counts = {rel: count_reads(tree) for rel, tree in trees.items()}
+def observed(
+    trees: dict[str, ast.Module], names: frozenset[str] = PLATFORM_READS
+) -> dict[str, int]:
+    counts = {rel: count_reads(tree, rel, names) for rel, tree in trees.items()}
     return {rel: n for rel, n in counts.items() if n}
 
 
@@ -61,6 +78,19 @@ def drift(found: dict[str, int], table: dict[str, int]) -> list[str]:
 def test_engine_platform_reads_match_the_census() -> None:
     bad = drift(observed(engine_trees(SRC)), CENSUS)
     assert not bad, "platform reads differ from the committed census (D9):\n" + "\n".join(bad)
+
+
+def test_only_allow_listed_modules_read_the_dir_fd_probe() -> None:
+    readers = set(observed(engine_trees(SRC), frozenset({DIR_FD_NAME})))
+    assert readers == DIR_FD_ALLOWLIST, sorted(readers ^ DIR_FD_ALLOWLIST)
+
+
+def test_a_seeded_dir_fd_read_is_caught(tmp_path: Path) -> None:
+    text = (
+        "from decoy_engine.fileaccess import _osflags\n\n\ndef f():\n    return _osflags.DIR_FD\n"
+    )
+    readers = observed(_seed(tmp_path, "seeded", text), frozenset({DIR_FD_NAME}))
+    assert set(readers) == {"decoy_engine/seeded/seeded.py"}
 
 
 def _seed(tmp_path: Path, name: str, text: str) -> dict[str, ast.Module]:
@@ -83,6 +113,32 @@ SEEDS = {
     "aliased_module": "import sys as s\n\n\ndef f():\n    return s.platform\n",
     "from_sys": "from sys import platform\n\n\ndef f():\n    return platform\n",
 }
+
+RELATIVE_SEEDS = {
+    "relative_from_import": (
+        "decoy_engine/fileaccess/seeded.py",
+        "from ._osflags import WINDOWS\n\n\ndef f():\n    return WINDOWS\n",
+    ),
+    "relative_module_import": (
+        "decoy_engine/fileaccess/seeded.py",
+        "from . import _osflags\n\n\ndef f():\n    return _osflags.WINDOWS\n",
+    ),
+    "relative_from_parent_package": (
+        "decoy_engine/execution/seeded.py",
+        "from ..fileaccess import _osflags\n\n\ndef f():\n    return _osflags.WINDOWS\n",
+    ),
+    "relative_in_package_init": (
+        "decoy_engine/fileaccess/__init__.py",
+        "from ._osflags import WINDOWS as W\n\n\ndef f():\n    return W\n",
+    ),
+}
+
+
+@pytest.mark.parametrize("seed", sorted(RELATIVE_SEEDS))
+def test_census_counts_a_relative_import_of_the_flag(seed: str) -> None:
+    rel, text = RELATIVE_SEEDS[seed]
+    assert count_reads(ast.parse(text), rel) == 1
+    assert count_reads(ast.parse(text)) == 0  # no path, no resolution: why the sentry passes rel
 
 
 @pytest.mark.parametrize("seed", sorted(SEEDS))

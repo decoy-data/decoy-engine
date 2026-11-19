@@ -25,17 +25,36 @@ def engine_trees(src: Path = SRC) -> dict[str, ast.Module]:
     }
 
 
-def import_map(tree: ast.AST) -> dict[str, str]:
-    """Local name to the dotted name it stands for, over module- and function-scope imports."""
+def _absolute_base(rel: str, level: int, module: str | None) -> str | None:
+    """Dotted name of the package a relative import points at, from the importer's path."""
+    package = rel.split("/")[:-1]  # the importer's own package, for a module or an __init__
+    keep = len(package) - (level - 1)
+    if keep < 1:
+        return None
+    return ".".join([*package[:keep], *([module] if module else [])])
+
+
+def import_map(tree: ast.AST, rel: str | None = None) -> dict[str, str]:
+    """Local name to the dotted name it stands for, over module- and function-scope imports.
+
+    A relative `from` import resolves against `rel`, the importer's path under `src/`; without
+    `rel` it cannot resolve and is skipped.
+    """
     out: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root = alias.name.split(".")[0]
                 out[alias.asname or root] = alias.name if alias.asname else root
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                base = node.module
+            else:
+                base = _absolute_base(rel, node.level, node.module) if rel else None
+            if not base:
+                continue
             for alias in node.names:
-                out[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                out[alias.asname or alias.name] = f"{base}.{alias.name}"
     return out
 
 

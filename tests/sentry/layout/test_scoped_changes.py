@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.sentry.layout._scoped_changes import SCOPED_EXCEPTIONS, changed_units
+from tests.sentry.layout._scoped_changes import (
+    SCOPED_EXCEPTIONS,
+    _units,
+    changed_units,
+    scoped_units,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -50,6 +55,14 @@ def test_new_and_removed_units_are_reported() -> None:
 
 
 def test_every_scoped_entry_names_a_file_and_a_reason() -> None:
-    for rel, (units, reason) in SCOPED_EXCEPTIONS.items():
+    for rel, units in scoped_units().items():
         assert (ROOT / rel).is_file(), rel
-        assert units and len(reason) > 30
+        assert units
+    assert all(len(reason) > 30 for reason in SCOPED_EXCEPTIONS.values())
+
+
+def test_every_scoped_unit_exists_in_its_file() -> None:
+    """A unit that no longer exists is dead: the entry must shrink instead of lingering."""
+    for rel, units in scoped_units().items():
+        live = set(_units((ROOT / rel).read_text(encoding="utf-8")))
+        assert units <= live, sorted(units - live)

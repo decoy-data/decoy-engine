@@ -9,7 +9,9 @@ on POSIX).
 
 `POSIX_NAME` maps each exported name to its `os.O_*` name, so a sentry that looks for
 `O_NOFOLLOW` on a private open reads `_osflags.NOFOLLOW` as the same flag. `DIR_FD` is a
-capability probe, not a platform test: it is true where the `os` functions take `dir_fd=` (`os.supports_dir_fd` is empty on Windows).
+capability probe, not a platform test: it is true where the `os` functions take `dir_fd=`
+(`os.supports_dir_fd` is empty on Windows). Only the modules listed in `DIR_FD_READERS` of
+`tests/sentry/test_platform_checks.py` may read it.
 """
 
 from __future__ import annotations
@@ -21,8 +23,12 @@ WINDOWS = sys.platform == "win32"
 DIR_FD = bool(os.supports_dir_fd)
 
 
-def _posix_only(name: str) -> int:
-    return 0 if WINDOWS else getattr(os, name, 0)
+def _posix_only(name: str, *, optional: bool = False) -> int:
+    """0 on Windows. On POSIX the flag must exist: a missing security flag fails the import
+    instead of becoming a silent 0. `optional` is for `O_PATH`, which only Linux defines."""
+    if WINDOWS:
+        return 0
+    return getattr(os, name, 0) if optional else int(getattr(os, name))
 
 
 def _windows_only(name: str) -> int:
@@ -45,7 +51,7 @@ CLOEXEC = _posix_only("O_CLOEXEC")
 DIRECTORY = _posix_only("O_DIRECTORY")
 NONBLOCK = _posix_only("O_NONBLOCK")
 NOCTTY = _posix_only("O_NOCTTY")
-PATH = _posix_only("O_PATH")
+PATH = _posix_only("O_PATH", optional=True)
 
 POSIX_NAME: dict[str, str] = {
     name: f"O_{name}"

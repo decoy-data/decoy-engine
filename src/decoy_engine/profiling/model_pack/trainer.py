@@ -78,7 +78,7 @@ try:
         balanced_accuracy_score,
         brier_score_loss,
     )
-    from lightgbm import LGBMClassifier  # isort: skip  (after sklearn: it loads vcomp140.dll)
+    from decoy_engine.profiling.model_pack._mlstack import LGBMClassifier  # isort: skip  (sklearn first)
 except (ImportError, OSError) as _err:  # OSError: lightgbm dlopen fails without libomp/libgomp
     raise ImportError(
         "scikit-learn and lightgbm failed to import. They are base dependencies: reinstall "

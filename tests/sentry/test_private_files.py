@@ -21,7 +21,12 @@ execute bit or is not a constant.
 
 P5 an `os.open` that creates a file with mode 0600 and no `O_NOFOLLOW`, flags read
 through `os.O_*` and `_osflags.X` (mapped by `POSIX_NAME`; a module-level or local name is
-followed to its assignment).
+followed to its assignment). Limits of P5: an `import os as o` or `from os import O_CREAT`
+alias is not resolved (only the `os.` and `_osflags.` spellings are read); a flags or mode
+argument that is not a literal expression or a followed name (a call result, a parameter, a
+conditional) is not read, so that open is skipped; and on Windows `_osflags.NOFOLLOW` is 0, so
+the rule proves the flag is spelled, not that it protects there (the Windows arm of a private
+create is `create_owner_only_file`, EW4).
 
 Named limits: `duckdb.connection.execute` SQL is not read, so those dispositions are the hand
 review's; P3 and P4 see what the file-access scan (`tests/sentry/fa/`, reused here) records

@@ -33,10 +33,23 @@ from tests.sentry._platform_ast import (
 POSIX_ONLY_MODULES = frozenset({"resource", "fcntl", "pwd", "grp", "termios"})
 # What `signal` defines on Windows; any other `signal.SIG*` name fails the import or the call.
 WINDOWS_SIGNALS = frozenset(
-    {"SIGABRT", "SIGFPE", "SIGILL", "SIGINT", "SIGSEGV", "SIGTERM", "SIGBREAK"}
+    {
+        "SIGABRT",
+        "SIGFPE",
+        "SIGILL",
+        "SIGINT",
+        "SIGSEGV",
+        "SIGTERM",
+        "SIGBREAK",
+        "SIG_DFL",
+        "SIG_IGN",
+    }
 )
 DIR_FD_KEYWORDS = ("dir_fd", "src_dir_fd", "dst_dir_fd")
 IMPORT_ERRORS = frozenset({"ImportError", "ModuleNotFoundError"})
+
+
+OWNERS = frozenset({"permanent", "EW2", "EW3", "EW4", "EW5"})
 
 
 @dataclass(frozen=True)
@@ -86,7 +99,7 @@ def scan_source(source: str, rel: str) -> list[Finding]:
 
 
 def scan_tree(tree: ast.Module, rel: str) -> list[Finding]:
-    imap = import_map(tree)
+    imap = import_map(tree, rel)
     safe = not_windows_ids(tree, imap)
     found: list[Finding] = []
 
@@ -141,7 +154,9 @@ _OPENAT2, _DURABLE, _LOCAL, _OUTPUT = (
 _PROTECTED, _SCRATCH = _FA + "_protected_dir.py", _FA + "_scratch.py"
 
 # Sites that stay until the owning slice adds an `if not _osflags.WINDOWS` branch around them.
-# (rel path, rule) -> (exact site count, owner, reason). An entry only shrinks.
+# (rel path, rule) -> (exact site count, owner, reason). An entry only shrinks: the table is
+# registered as the `win32-import-surface` baseline, whose `max` per entry the ratchet never lets
+# rise. `owner` is one of OWNERS.
 EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
     (_GOV, "signal"): (
         1,
@@ -215,7 +230,22 @@ def test_engine_surface_matches_the_exception_table() -> None:
 
 def test_every_exception_names_an_owner_and_a_reason() -> None:
     for key, (count, owner, reason) in EXCEPTIONS.items():
-        assert count > 0 and owner and len(reason) > 20, key
+        assert count > 0 and owner in OWNERS and len(reason) > 20, key
+
+
+def test_only_the_ml_stack_module_imports_lightgbm() -> None:
+    """The sklearn-before-lightgbm order lives in one helper; nothing else imports lightgbm."""
+    owner = "decoy_engine/profiling/model_pack/_mlstack.py"
+    for rel, tree in engine_trees(SRC).items():
+        for node in ast.walk(tree):
+            names = (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+                if isinstance(node, ast.ImportFrom) and node.level == 0
+                else []
+            )
+            assert rel == owner or not any(n.split(".")[0] == "lightgbm" for n in names), rel
 
 
 SEEDS = {
@@ -249,10 +279,27 @@ CONTROLS = {
     "guarded_import": "try:\n    import fcntl\nexcept ImportError:\n    fcntl = None\n",
     "function_scope_import": "def f():\n    import fcntl\n    return fcntl\n",
     "windows_signal": "import signal\n\n\ndef f():\n    return signal.SIGTERM\n",
+    "signal_defaults": (
+        "import signal\n\n\ndef f():\n    return (signal.SIG_DFL, signal.SIG_IGN)\n"
+    ),
     "string_probe": 'import os\n\n\ndef f():\n    return hasattr(os, "O_NOFOLLOW")\n',
     "if_not_windows": (
         "import os\n"
         "from decoy_engine.fileaccess import _osflags\n\n\n"
+        "def f(fd):\n"
+        "    if not _osflags.WINDOWS:\n"
+        "        os.fchmod(fd, 0o600)\n"
+    ),
+    "if_not_windows_relative_from_import": (
+        "import os\n"
+        "from ._osflags import WINDOWS\n\n\n"
+        "def f(fd):\n"
+        "    if not WINDOWS:\n"
+        "        os.fchmod(fd, 0o600)\n"
+    ),
+    "if_not_windows_relative_module_import": (
+        "import os\n"
+        "from . import _osflags\n\n\n"
         "def f(fd):\n"
         "    if not _osflags.WINDOWS:\n"
         "        os.fchmod(fd, 0o600)\n"
@@ -269,7 +316,7 @@ CONTROLS = {
 
 @pytest.mark.parametrize("control", sorted(CONTROLS))
 def test_seeded_control_passes(control: str) -> None:
-    assert scan_source(CONTROLS[control], "decoy_engine/seeded.py") == []
+    assert scan_source(CONTROLS[control], "decoy_engine/fileaccess/seeded.py") == []
 
 
 def test_a_posix_name_in_the_windows_branch_is_still_caught() -> None:

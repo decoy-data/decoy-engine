@@ -53,7 +53,7 @@ from pathlib import Path
 import pytest
 
 from tests.sentry.layout._reexport_init import imports_physical, is_pure_reexport_init
-from tests.sentry.layout._scoped_changes import SCOPED_EXCEPTIONS, changed_units
+from tests.sentry.layout._scoped_changes import changed_units, scoped_units
 from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
@@ -1009,7 +1009,7 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
     }
     scoped_ok = {
         name
-        for name, (units, _reason) in SCOPED_EXCEPTIONS.items()
+        for name, units in scoped_units().items()
         if name in diff_names
         and changed_units(_git("show", f"{base}:{name}"), (REPO_ROOT / name).read_text("utf-8"))
         <= units

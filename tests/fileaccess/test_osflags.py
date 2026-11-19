@@ -32,6 +32,13 @@ def test_posix_values_equal_os_values(name: str) -> None:
     assert _osflags.WINDOWS is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX values")
+@pytest.mark.parametrize("name", ["NOFOLLOW", "CLOEXEC", "DIRECTORY", "NONBLOCK", "NOCTTY"])
+def test_posix_security_flags_are_nonzero(name: str) -> None:
+    """A security flag that fell back to 0 would drop its protection without a sound."""
+    assert getattr(_osflags, name) != 0
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows values")
 @pytest.mark.parametrize("name", MODES)
 def test_windows_open_modes_are_binary_and_not_inherited(name: str) -> None:

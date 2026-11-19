@@ -23,7 +23,7 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-LIST_NAME = re.compile(r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE")
+LIST_NAME = re.compile(r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS")
 DATA_LITERAL = re.compile(r"[\w.\-]+\.(?:json|toml)$")
 IGNORED_DATA = {"pyproject.toml", "Cargo.toml", "package.json", "e1-1.json"}
 
@@ -108,9 +108,24 @@ def _data_files() -> set[str]:
     }
 
 
+def _scanned(path: Path) -> bool:
+    """Every sentry test, in any subfolder, plus the helper modules that hold a table.
+
+    Seeded fixture sources are inputs to a sentry, not sentries, so they are not read.
+    """
+    rel = path.relative_to(bs.SENTRY).parts
+    return rel[0] not in {"fixtures", "fa_fixtures", "__pycache__"} and not path.name.startswith(
+        "conftest"
+    )
+
+
 def test_no_sentry_reads_an_unregistered_baseline() -> None:
     consts, files = _covered()
-    sources = {p.name: p.read_text(encoding="utf-8") for p in bs.SENTRY.glob("test_*.py")}
+    sources = {
+        p.relative_to(bs.SENTRY).as_posix(): p.read_text(encoding="utf-8")
+        for p in bs.SENTRY.rglob("*.py")
+        if _scanned(p)
+    }
     sources.pop("test_baseline_registry.py")  # holds the seeded fixtures below
     assert unregistered_readers(sources, _data_files(), consts, files) == []
 

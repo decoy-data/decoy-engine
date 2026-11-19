@@ -72,9 +72,9 @@ T = TypeVar("T")
 # Denial key for a bad name given straight to a creator; it names the capability, never the name.
 _CREATOR_KEY = "fileaccess.stage"
 
-_NOFOLLOW = _osflags.NOFOLLOW | _osflags.CLOEXEC
-_DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _NOFOLLOW
-_FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW
+_NOFOLLOW_CLOEXEC = _osflags.NOFOLLOW | _osflags.CLOEXEC
+_DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _NOFOLLOW_CLOEXEC
+_FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW_CLOEXEC
 
 
 def _call(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -95,7 +95,7 @@ def _born_mode(parent_fd: int, name: str) -> int:
     repair falls back to owner-only (narrower, never wider)."""
     if sys.platform != "linux":
         return stat.S_IFDIR | 0o700
-    fd = _call(os.open, name, _osflags.PATH | _NOFOLLOW, dir_fd=parent_fd)
+    fd = _call(os.open, name, _osflags.PATH | _NOFOLLOW_CLOEXEC, dir_fd=parent_fd)
     try:
         born = os.fstat(fd).st_mode
     finally:
@@ -305,7 +305,7 @@ class _StageDir:
 
     def open_file(self, component: str) -> int:
         self._check(component)
-        return _call(os.open, component, _osflags.RDONLY | _NOFOLLOW, dir_fd=self._fd)
+        return _call(os.open, component, _osflags.RDONLY | _NOFOLLOW_CLOEXEC, dir_fd=self._fd)
 
     def create_dir(self, component: str) -> _StageDir:
         self._check(component)

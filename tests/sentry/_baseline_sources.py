@@ -38,6 +38,8 @@ class InCode:
     # Module attributes naming a removed surface. The residual-surface sentry bars that token in
     # tracked files, so the baseline stores a placeholder for it.
     masks: tuple[str, ...] = ()
+    # When each value is a tuple, the index of its integer count (the entry's ``max``).
+    count_at: int | None = None
 
     def _module(self) -> object:
         path = SENTRY / self.test_file
@@ -45,6 +47,7 @@ class InCode:
         if spec is None or spec.loader is None:
             raise ImportError(path)
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # a dataclass in the module looks itself up here
         spec.loader.exec_module(mod)
         return mod
 
@@ -61,7 +64,9 @@ class InCode:
 
     def maxes(self) -> dict[str, int]:
         """Integer values of the constant, keyed like ``__call__``: the live ``max`` per entry."""
-        return {_flat(k): int(v) for k, v in getattr(self._module(), self.constant).items()}
+        table = getattr(self._module(), self.constant)
+        at = self.count_at
+        return {_flat(k): int(v if at is None else v[at]) for k, v in table.items()}
 
 
 in_code = InCode
@@ -168,6 +173,28 @@ SOURCES: tuple[Source, ...] = (
         "test_table_kind_classifier.py",
         in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE"),
         maxes=in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE").maxes,
+    ),
+    Source(
+        "win32-import-surface",
+        "test_win32_import_surface.py",
+        in_code("test_win32_import_surface.py", "EXCEPTIONS", count_at=0),
+        maxes=in_code("test_win32_import_surface.py", "EXCEPTIONS", count_at=0).maxes,
+    ),
+    Source(
+        "platform-census",
+        "test_platform_checks.py",
+        in_code("test_platform_checks.py", "CENSUS"),
+        maxes=in_code("test_platform_checks.py", "CENSUS").maxes,
+    ),
+    Source(
+        "dir-fd-readers",
+        "test_platform_checks.py",
+        in_code("test_platform_checks.py", "DIR_FD_ALLOWLIST"),
+    ),
+    Source(
+        "physical-seam-scoped",
+        "layout/_scoped_changes.py",
+        in_code("layout/_scoped_changes.py", "SCOPED_EXCEPTIONS"),
     ),
     Source("import-layers", ".importlinter", import_layer_keys(".importlinter", "layers")),
     Source(
