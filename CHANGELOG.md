@@ -13,9 +13,22 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ### Breaking for consumers
 
+- a `when:` predicate over an integer column now selects blank rows with one rule on every route and column class (`!=`, `not in` and `not (...)` select them), so FK keys, declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings mask more rows than before.
 - `scan_sources` no longer lists `key_candidates` for a sampled scan, and `scan-set/v1` tables and `profile_document` gain `basis` (and `scanned_rows` on the table).
 - a pass-through `large_string` column is now written as `string` (32-bit offsets) when its values fit; a value that cannot fit keeps `large_string`
 - published Parquet files no longer carry the source file's custom metadata, field metadata or pandas `attrs`, and extension-type columns (opaque, tensors, custom types) are written as their storage type
+
+### Changed (`when:` on integer columns is exact and has one blank-row rule, FREEZE-O1, 2026-11-18)
+
+Integer comparisons in `when:` are exact beyond 2**53. A value or an integer literal outside the range a float64 holds exactly, and any comparison of an integer column with a float literal, is compared as Python integers. Before, a plain integer column with a blank was widened to float64 and `id == 9007199254740993` also selected `9007199254740992`.
+
+A blank integer cell is `NaN` for the predicate on the whole-frame, sequential, chunked, native and unified routes. `!=`, `not in` and a `not` around a comparison that is false for the blank select it; `==`, `in` and the ordering tests do not. FK keys, declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings used the pandas `NA` rule, which selected no blank row for `!=`, so they now mask more rows.
+
+`lossless_int_columns` in `execution/_fk_keys.py` is the one construction of the columns every ingestion site reads as exact integers. It adds the columns a `when:` reads. A null-bearing integer column that a `when:` reads and that passes through is written as `int64` instead of `double` on every route (CSV text `5`, not `5.0`). A job with such a column can now take the unified full-frame route.
+
+### Changed (windowed_date batches its date work, GEN-WINDOWED-BATCH, 2026-11-19)
+
+`windowed_date` now derives the per-row keys in one batch, parses the anchors and formats the dates as vectors, and keeps the per-row numpy draw. Output is the same as before for every input: same dates, same errors, same messages. It is faster for string, `date`, naive `datetime` and naive `Timestamp` anchors. Anything else (mixed types, subclasses, time zones, windows past the nanosecond range) runs the earlier per-row loop.
 
 ### Changed (the multi-table split is decided with the route, NONFK-OOM S4a, 2026-11-19)
 
