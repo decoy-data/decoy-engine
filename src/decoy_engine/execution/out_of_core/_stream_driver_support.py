@@ -227,15 +227,24 @@ def open_joiner(
         raise
 
 
-def iter_source_batches(src: pa.Table | LazySource, batch_rows: int) -> Iterator[pa.RecordBatch]:
-    """The source as record batches of at most `batch_rows`, each cut so its text fits 32-bit offsets."""
+def iter_source_batches(
+    src: pa.Table | LazySource, batch_rows: int, *, fixed_schema: bool = False
+) -> Iterator[pa.RecordBatch]:
+    """The source as record batches of at most `batch_rows`.
+
+    Each is cut so its text fits 32-bit offsets, except for a sink that fixes its schema: it
+    keeps `large_string`, so the source batch boundaries (and the file's row groups) stay as is.
+    """
     batches = (
         src.iter_batches(batch_rows)
         if isinstance(src, LazySource)
         else src.to_batches(max_chunksize=batch_rows)
     )
     for batch in batches:
-        yield from split_wide_batch(batch)
+        if fixed_schema:
+            yield batch
+        else:
+            yield from split_wide_batch(batch)
 
 
 __all__ = [

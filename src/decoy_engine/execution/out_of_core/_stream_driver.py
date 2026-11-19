@@ -328,7 +328,7 @@ def stream_table(
                     extra_known=frozenset(fk_components),
                 )
             )
-            for raw_batch in _iter_source_batches(raw, batch_rows):
+            for raw_batch in _iter_source_batches(raw, batch_rows, fixed_schema=sink is not None):
                 for joiner in joiners:
                     joiner.stage_batch(raw_batch)
                 if raw_parent_spill is not None and raw_batch.num_rows:
@@ -367,6 +367,7 @@ def stream_table(
                     sub_floor_totals=text_mask_sub_floor_totals,
                     hash_plan=hash_plan,
                     text_widths=text_widths,
+                    fixed_schema=sink is not None,
                 )
                 # Aligned source/masked pair, before the reorder and the type reconcile.
                 collect_batch_vault(vault_config, table_name, raw_batch, masked_batch, vault_writer)

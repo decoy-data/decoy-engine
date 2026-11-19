@@ -98,17 +98,21 @@ class TextWidthState:
     Starts narrow. `observe` returns a batch as `string` slices while every value fits, and
     the first value that does not promotes the state to `large_string` for good. There is no
     source pre-scan: each batch is judged from its own offsets when it arrives.
+
+    A `fixed` state belongs to a sink that fixes its schema before batch one: it never narrows
+    or splits, so the column keeps the source `large_string` field, as in the previous release.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, fixed: bool = False) -> None:
         self.wide = False
+        self.fixed = fixed
 
     @property
     def arrow_type(self) -> pa.DataType:
         return pa.large_string() if self.wide else pa.string()
 
     def observe(self, array: pa.Array) -> list[pa.Array]:
-        if not is_text(array.type):
+        if self.fixed or not is_text(array.type):
             return [array]
         if not self.wide and pa.types.is_large_string(array.type):
             parts = split_narrow_text(array)

@@ -195,7 +195,9 @@ def _stream_table(
             orphan_totals = [0] * len(joiners)
 
             def rewritten() -> Iterator[pa.RecordBatch]:
-                for raw_batch in _runner._iter_source_batches(raw, batch_rows):
+                for raw_batch in _runner._iter_source_batches(
+                    raw, batch_rows, fixed_schema=sink is not None
+                ):
                     get_active_channel().rows(table_name, raw_batch.num_rows)
                     for column, seen in code_set_null_seen.items():
                         if seen:
@@ -223,6 +225,7 @@ def _stream_table(
                         sub_floor_totals=text_mask_sub_floor_totals,
                         hash_plan=hash_plan,
                         text_widths=text_widths,
+                        fixed_schema=sink is not None,
                     )
                     # Before the join: FK child keys are not yet remapped here (they decline admission).
                     collect_batch_vault(vault_config, table_name, raw_batch, out, vault_writer)
