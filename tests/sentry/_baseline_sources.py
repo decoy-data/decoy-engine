@@ -38,6 +38,8 @@ class InCode:
     # Module attributes naming a removed surface. The residual-surface sentry bars that token in
     # tracked files, so the baseline stores a placeholder for it.
     masks: tuple[str, ...] = ()
+    # When each value is a tuple, the index of its integer count (the entry's ``max``).
+    count_at: int | None = None
 
     def _module(self) -> object:
         path = SENTRY / self.test_file
@@ -45,6 +47,7 @@ class InCode:
         if spec is None or spec.loader is None:
             raise ImportError(path)
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # a dataclass in the module looks itself up here
         spec.loader.exec_module(mod)
         return mod
 
@@ -61,7 +64,9 @@ class InCode:
 
     def maxes(self) -> dict[str, int]:
         """Integer values of the constant, keyed like ``__call__``: the live ``max`` per entry."""
-        return {_flat(k): int(v) for k, v in getattr(self._module(), self.constant).items()}
+        table = getattr(self._module(), self.constant)
+        at = self.count_at
+        return {_flat(k): int(v if at is None else v[at]) for k, v in table.items()}
 
 
 in_code = InCode
@@ -168,6 +173,54 @@ SOURCES: tuple[Source, ...] = (
         "test_table_kind_classifier.py",
         in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE"),
         maxes=in_code("test_table_kind_classifier.py", "TRUTH_TEST_BASELINE").maxes,
+    ),
+    Source(
+        "win32-import-surface",
+        "test_win32_import_surface.py",
+        in_code("test_win32_import_surface.py", "EXCEPTIONS", count_at=0),
+        maxes=in_code("test_win32_import_surface.py", "EXCEPTIONS", count_at=0).maxes,
+    ),
+    Source(
+        "platform-census",
+        "test_platform_checks.py",
+        in_code("test_platform_checks.py", "CENSUS"),
+        maxes=in_code("test_platform_checks.py", "CENSUS").maxes,
+    ),
+    Source(
+        "dir-fd-readers",
+        "test_platform_checks.py",
+        in_code("test_platform_checks.py", "DIR_FD_ALLOWLIST"),
+    ),
+    Source(
+        "ci-write-scopes",
+        "_ci_lock_scan.py",
+        in_code("_ci_lock_scan.py", "WRITE_ALLOWLIST"),
+    ),
+    Source(
+        "canonical-json-choke-point",
+        "defects/test_canonical_json_choke_point.py",
+        in_code("defects/test_canonical_json_choke_point.py", "ALLOWLIST"),
+    ),
+    Source(
+        "ner-mismatch-single-site",
+        "defects/test_ner_mismatch_single_site.py",
+        in_code("defects/test_ner_mismatch_single_site.py", "ALLOWED"),
+    ),
+    Source(
+        "validation-route-allowlist",
+        "defects/test_validation_sites.py",
+        in_code("defects/test_validation_sites.py", "ROUTE_ALLOWLIST"),
+    ),
+    Source(
+        "snapshot-parse-single-owner",
+        "generation/test_snapshot_parse_single_owner.py",
+        in_code("generation/test_snapshot_parse_single_owner.py", "ALLOWED"),
+        maxes=in_code("generation/test_snapshot_parse_single_owner.py", "ALLOWED").maxes,
+    ),
+    Source(
+        "physical-seam-scoped",
+        "layout/_scoped_changes.py",
+        in_code("layout/_scoped_changes.py", "SCOPED_EXCEPTIONS"),
     ),
     Source("import-layers", ".importlinter", import_layer_keys(".importlinter", "layers")),
     Source(
@@ -395,6 +448,7 @@ NOT_A_LIST: dict[str, str] = {
     "consumer-contract.json": "F29 consumer contract, compared whole by test_reason_registry",
     "openapi.json": "generated schema used as a negative fixture in a residual-surface test",
     "file_access_registry.toml": "file access registry, allowed to grow; guarded by its Count header",
+    "required_serial.toml": "grow-only serial-test registry; removal needs a [[removed]] reason and every id is checked at collection",
     "file_access_modules.toml": "file access module list, allowed to grow with new access modules",
 }
 
