@@ -247,3 +247,58 @@ def test_unified_flag_on_and_off_agree_on_values_types_and_metadata(
     a, b = on.outputs["t"], off.outputs["t"]
     assert a.equals(b)
     assert a.schema.equals(b.schema, check_metadata=True)
+
+
+# -- AT-O1f over the gated column's strategy ----------------------------------------------------
+# The strategies that run on the text column `m` while an integer `v` is read by the predicate.
+# Limit (plan 8, AT-O1f): strategies that need another source type (fpe over digits, formula,
+# bucketize and bucket_perturb over numbers, date_shift over dates) cannot gate the text column;
+# `top_code` over `v` itself is the `top_code` class cell above.
+GATED = {
+    "redact": {"strategy": "redact"},
+    "hash": {"strategy": "hash", "namespace": "o1_hash"},
+    "truncate": {"strategy": "truncate", "provider_config": {"length": 1}},
+    "text_redact": {"strategy": "text_redact"},
+    "text_mask": {"strategy": "text_mask", "namespace": "o1_tm"},
+    "passthrough": {"strategy": "passthrough"},
+}
+
+
+# The gated strategies unified admission takes today; the others fall back to the full-frame lane.
+UNIFIED_STRATEGIES = {"redact", "truncate", "text_redact"}
+
+
+@pytest.mark.parametrize("strategy", sorted(GATED))
+@pytest.mark.parametrize("route", ["full_frame", "unified"])
+def test_the_blank_bearing_integer_is_int64_under_every_gated_strategy(
+    tmp_path: Path, strategy: str, route: str
+) -> None:
+    cfg, tables = build_case("plain", tmp_path, OPS[0], gated=GATED[strategy])
+    result = _run(cfg, tables, **_kwargs(route))
+    qm = result.quality_metrics
+    if route == "unified" and strategy in UNIFIED_STRATEGIES:
+        assert "unified_slice_activation" in qm
+    else:
+        _fk_fallback_witness(qm)
+    assert result.outputs["t"].schema.field("v").type == pa.int64(), (strategy, route)
+
+
+@pytest.mark.parametrize("strategy", sorted(set(GATED) - {"text_mask"}))  # text_mask+when: refused
+def test_the_chunked_oracle_keeps_int64_under_every_gated_strategy(
+    tmp_path: Path, strategy: str
+) -> None:
+    cfg, tables = build_case("plain", tmp_path, OPS[0], gated=GATED[strategy])
+    chunks = split(tables["t"], 2)
+    with _adapter_calls() as calls:
+        out = list(
+            run_mask_pipeline_chunked_below_gate(
+                cfg,
+                chunks,
+                table="t",
+                source_schema=tables["t"].schema,
+                engine_version=ENGINE_VERSION,
+                key_provider=key_provider(),
+            )
+        )
+    assert len(calls) == len(chunks)
+    assert _types(out) == {"int64"}, strategy

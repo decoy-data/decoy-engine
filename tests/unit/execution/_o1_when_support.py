@@ -84,7 +84,9 @@ def _col(name: str, strategy: str = "passthrough", **fields: Any) -> dict[str, A
     return {"name": name, "strategy": strategy, **fields}
 
 
-def build_case(cls: str, tmp: Path, expression: str) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+def build_case(
+    cls: str, tmp: Path, expression: str, gated: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], dict[str, pa.Table]]:
     """A one- or two-table job whose gated column `m` carries `expression` over the integer
     column `v`, with `v` in the pipeline role named by `cls`.
 
@@ -97,7 +99,11 @@ def build_case(cls: str, tmp: Path, expression: str) -> tuple[dict[str, Any], di
 
     ints = pa.array(VALUES, pa.int64())
     base: dict[str, pa.Array] = {"id": pa.array(ID_SOURCE, pa.int64()), "v": ints}
-    cols: list[dict[str, Any]] = [_col("id"), _col("v"), _col("m", "redact", when=expression)]
+    cols: list[dict[str, Any]] = [
+        _col("id"),
+        _col("v"),
+        {**(gated or _col("m", "redact")), "name": "m", "when": expression},
+    ]
     tables: dict[str, pa.Table] = {}
     relationships: list[dict[str, Any]] = []
     extra: list[dict[str, Any]] = []

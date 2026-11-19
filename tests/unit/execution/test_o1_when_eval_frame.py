@@ -188,8 +188,8 @@ def test_python_engine_error_is_value_free_and_has_no_context(
     from decoy_engine.execution._errors import StrategyError
 
     frame = pd.DataFrame({"v": pd.array([BIG + 1, None], dtype="Int64")})
-    # The wide literal selects the object path; a string literal against it cannot compare.
-    expression = f"v == {L} and v == 'secret-literal-123'"
+    # The wide literal selects the object path; ordering a Python int against a string raises TypeError.
+    expression = f"v == {L} and v < 'secret-literal-123'"
     with caplog.at_level(logging.DEBUG, logger="decoy_engine.execution._when_gate"):
         with pytest.raises(StrategyError) as info:
             _eval(frame, expression)
