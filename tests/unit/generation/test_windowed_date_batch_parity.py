@@ -168,7 +168,7 @@ def test_batch_boundaries_do_not_change_output() -> None:
 
 # --- Property test ----------------------------------------------------------------------------
 
-_ISO_POOL = st.one_of(
+_ISO_POOL: st.SearchStrategy[Any] = st.one_of(
     st.dates(min_value=dt.date(1650, 1, 1), max_value=dt.date(2250, 12, 31)).map(str),
     st.datetimes(min_value=dt.datetime(1650, 1, 1), max_value=dt.datetime(2250, 12, 31)).map(
         lambda d: d.isoformat(sep="T")

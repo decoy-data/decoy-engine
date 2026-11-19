@@ -12,6 +12,7 @@ import hashlib
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -212,6 +213,10 @@ def _err_series(bad: Any, *, good_before: int = 6) -> pd.Series:
     return _obj([*good[:good_before], bad, "2002-02-02", "2003-03-03"])
 
 
+def _anchor_pair(anchor: str) -> pd.Series:
+    return _obj(["2000-01-01", anchor])
+
+
 def _typed(kind: str, n: int = 300) -> pd.Series:
     rng = np.random.default_rng(1)
     days = rng.integers(0, 20_000, size=n)
@@ -309,7 +314,7 @@ def build_cases() -> list[Case]:
             cases.append(
                 Case(
                     f"{name}_{dist}",
-                    lambda anchor=anchor: _obj(["2000-01-01", anchor]),
+                    partial(_anchor_pair, anchor),
                     min_days=lo,
                     max_days=hi,
                     distribution=dist,
@@ -388,7 +393,7 @@ def build_cases() -> list[Case]:
             cases.append(
                 Case(
                     f"typed_{kind}_{dist}",
-                    lambda kind=kind: _typed(kind),
+                    partial(_typed, kind),
                     distribution=dist,
                     admitted=True,
                 )
@@ -487,7 +492,7 @@ def build_cases() -> list[Case]:
         ("non_ascii_digits", "\uff12\uff10\uff10\uff10-01-01"),
     ]
     for name, bad in bad_cells:
-        cases.append(Case(f"err_{name}", lambda bad=bad: _err_series(bad), expect_error=True))
+        cases.append(Case(f"err_{name}", partial(_err_series, bad), expect_error=True))
     cases.append(
         Case(
             "err_result_past_max",
