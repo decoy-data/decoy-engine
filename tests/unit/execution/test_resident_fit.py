@@ -80,10 +80,9 @@ def _shared_dictionary_table() -> pa.Table:
 
 def test_shared_dictionary_is_counted_once() -> None:
     table = _shared_dictionary_table()
-    # indices 2 chunks x 4 rows x 4 bytes = 32; dictionary: 3 offsets x 4 + 6 data bytes = 18.
-    assert resident_table_bytes(table) == 32 + 18
-    assert table.nbytes == 32 + 18 + 18  # nbytes charges the dictionary per chunk
-    assert lower_bound_bytes([resident_spec(table)]) == (32 + 18) + 8 * 1
+    # indices: 2 chunks x 4 rows x 4 bytes = 32; dictionary: 4 offsets x 4 + 6 data bytes = 22
+    assert resident_table_bytes(table) == 32 + 22
+    assert lower_bound_bytes([resident_spec(table)]) == (32 + 22) + 8 * 1
 
 
 def test_distinct_dictionaries_are_counted_per_dictionary() -> None:
@@ -92,13 +91,13 @@ def test_distinct_dictionaries_are_counted_per_dictionary() -> None:
         pa.DictionaryArray.from_arrays(pa.array([2, 1], pa.int32()), pa.array(["a", "bb", "ccc"])),
     ]
     table = pa.table({"d": pa.chunked_array(chunks)})
-    assert resident_table_bytes(table) == 2 * 2 * 4 + 2 * 18
+    assert resident_table_bytes(table) == 2 * 2 * 4 + 2 * 22
 
 
-def test_resident_input_is_the_table_nbytes() -> None:
+def test_resident_input_is_the_distinct_buffer_total() -> None:
     table = pa.table({"i": pa.array([1, None, 3], pa.int64()), "s": ["x", "yy", None]})
     spec = resident_spec(table)
-    assert input_bytes([spec]) == table.nbytes
+    assert input_bytes([spec]) == table.get_total_buffer_size()
     assert pandas_bytes([spec]) == 3 * (8 + 8)
 
 
@@ -106,7 +105,7 @@ def test_a_table_the_run_never_converts_costs_input_only() -> None:
     table = pa.table({"s": ["x", "yy"]})
     spec = resident_spec(table, charge_pandas=False)
     assert pandas_bytes([spec]) == 0
-    assert lower_bound_bytes([spec]) == table.nbytes
+    assert lower_bound_bytes([spec]) == table.get_total_buffer_size()
 
 
 def test_bound_sums_over_tables() -> None:
@@ -142,32 +141,83 @@ def _held_bytes(build: Callable[[], pa.Table]) -> tuple[pa.Table, int]:
     return table, pa.total_allocated_bytes() - before
 
 
-def _nested_shared_dictionary_table() -> pa.Table:
-    dictionary = pa.array([f"value-{i:04d}-" + "x" * 20 for i in range(500)])
-    chunks = []
-    for start in range(5):
-        indices = pa.array([(start + i) % 500 for i in range(50)], pa.int32())
-        child = pa.DictionaryArray.from_arrays(indices, dictionary)
-        chunks.append(pa.StructArray.from_arrays([child], names=["d"]))
-    return pa.table({"s": pa.chunked_array(chunks)})
+def _buffers(array: pa.Array) -> list[pa.Buffer]:
+    """Every physical buffer under `array`, at any depth (dictionary values included)."""
+    found = [b for b in array.buffers() if b is not None]
+    if pa.types.is_dictionary(array.type):
+        found += _buffers(array.dictionary)
+    return found
 
 
-def test_nested_shared_dictionary_never_exceeds_what_is_held() -> None:
-    table, held = _held_bytes(_nested_shared_dictionary_table)
+def _largest_buffer(table: pa.Table) -> int:
+    return max(b.size for column in table.columns for c in column.chunks for b in _buffers(c))
+
+
+def _assert_between_largest_buffer_and_held(build: Callable[[], pa.Table]) -> int:
+    """The figure is at most what the allocator handed out and at least the biggest buffer."""
+    table, held = _held_bytes(build)
     figure = resident_table_bytes(table)
-    # nbytes charges the dictionary five times; one copy is held.
-    assert table.nbytes > held
-    assert figure <= held
-    # Only the repeats are removed: the first owner keeps the dictionary.
-    dictionary_bytes = table.column("s").chunk(0).field(0).dictionary.nbytes
-    assert figure == table.nbytes - 4 * dictionary_bytes
+    assert _largest_buffer(table) <= figure <= held, (figure, held)
+    return figure
 
 
-def test_nested_dictionary_in_a_list_is_counted_once() -> None:
-    dictionary = pa.array(["a", "bb", "ccc"])
-    chunks = []
-    for _ in range(3):
-        child = pa.DictionaryArray.from_arrays(pa.array([0, 1, 2, 1], pa.int32()), dictionary)
-        chunks.append(pa.ListArray.from_arrays(pa.array([0, 2, 4], pa.int32()), child))
-    table = pa.table({"l": pa.chunked_array(chunks)})
-    assert resident_table_bytes(table) == table.nbytes - 2 * dictionary.nbytes
+def test_two_columns_over_one_buffer_count_it_once() -> None:
+    def build() -> pa.Table:
+        values = pa.array(range(1000), pa.int64())
+        return pa.table({"x": values, "y": values})
+
+    assert _assert_between_largest_buffer_and_held(build) == 8000
+
+
+def test_overlapping_slices_of_one_dictionary_count_the_backing_buffers_once() -> None:
+    def build() -> pa.Table:
+        values = pa.array([f"entry-{i:04d}" for i in range(1000)])
+        codes = pa.array([0, 1, 2], pa.int32())
+        low = pa.DictionaryArray.from_arrays(codes, values.slice(0, 900))
+        high = pa.DictionaryArray.from_arrays(codes, values.slice(100, 900))
+        return pa.table({"a": low, "b": high})
+
+    backing = sum(b.size for b in pa.array([f"entry-{i:04d}" for i in range(1000)]).buffers() if b)
+    # the one 3-row index buffer both columns use, plus the one backing values array
+    assert _assert_between_largest_buffer_and_held(build) == 12 + backing
+
+
+def test_a_buffer_shared_between_a_column_and_a_struct_child_counts_once() -> None:
+    def build() -> pa.Table:
+        values = pa.array(range(1000), pa.int64())
+        inner = pa.StructArray.from_arrays([values, values], names=["p", "q"])
+        return pa.table({"s": inner, "x": values})
+
+    assert _assert_between_largest_buffer_and_held(build) == 8000
+
+
+def test_a_run_end_encoded_array_shared_by_two_columns_counts_once() -> None:
+    def build() -> pa.Table:
+        ends = pa.array([10, 20, 30], pa.int32())
+        encoded = pa.RunEndEncodedArray.from_arrays(ends, pa.array([1, 2, 3], pa.int64()))
+        return pa.table({"r": encoded, "s": encoded})
+
+    one = pa.RunEndEncodedArray.from_arrays(
+        pa.array([10, 20, 30], pa.int32()), pa.array([1, 2, 3], pa.int64())
+    )
+    assert _assert_between_largest_buffer_and_held(build) == sum(b.size for b in _buffers(one))
+
+
+class _Tagged(pa.ExtensionType):
+    def __init__(self) -> None:
+        super().__init__(pa.int64(), "test.nonfk.tagged")
+
+    def __arrow_ext_serialize__(self) -> bytes:
+        return b""
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type: pa.DataType, serialized: bytes) -> _Tagged:
+        return cls()
+
+
+def test_an_extension_array_over_a_shared_storage_buffer_counts_once() -> None:
+    def build() -> pa.Table:
+        storage = pa.array(range(1000), pa.int64())
+        return pa.table({"e": pa.ExtensionArray.from_storage(_Tagged(), storage), "x": storage})
+
+    assert _assert_between_largest_buffer_and_held(build) == 8000

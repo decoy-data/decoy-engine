@@ -15,22 +15,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
 
 import pyarrow as pa
 
-# list_view arrived in pyarrow 16; the floor for this repo is 14.
-_LIST_PREDICATES = tuple(
-    getattr(pa.types, name)
-    for name in (
-        "is_list",
-        "is_large_list",
-        "is_fixed_size_list",
-        "is_list_view",
-        "is_large_list_view",
-    )
-    if hasattr(pa.types, name)
-)
 _OBJECT_POINTER_BYTES = 8
 _DICTIONARY_CODE_BYTES = 1  # pandas narrows categorical codes; one byte is the floor
 
@@ -64,49 +51,14 @@ def lazy_spec(rows: int, schema: pa.Schema, *, charge_pandas: bool = True) -> Ta
 
 
 def resident_table_bytes(table: pa.Table) -> int:
-    """`table.nbytes`, with every dictionary that several arrays share counted once.
+    """The bytes the table's distinct physical buffers hold.
 
-    `nbytes` charges a dictionary once per array that points at it. The first owner keeps the
-    charge; each later array holding the same dictionary buffers is charged zero for it, at any
-    depth (a dictionary inside a struct, list or map included). A buffer that cannot be shown to
-    be shared stays charged, so the figure never exceeds what is held.
+    Arrow counts each buffer once however many arrays, columns, dictionaries or slices point at
+    it (`Table.get_total_buffer_size`, present since pyarrow 14), and a sliced array counts its
+    whole backing buffer, which the process does hold. So the figure never exceeds what the
+    table occupies.
     """
-    seen: set[tuple[Any, ...]] = set()
-    return sum(
-        chunk.nbytes - _repeated_dictionary_bytes(chunk, seen)
-        for column in table.columns
-        for chunk in column.chunks
-    )
-
-
-def _repeated_dictionary_bytes(array: pa.Array, seen: set[tuple[Any, ...]]) -> int:
-    """Bytes of `array` that belong to a dictionary an earlier array already owns."""
-    t = array.type
-    if pa.types.is_dictionary(t):
-        dictionary = array.dictionary
-        identity = (
-            dictionary.offset,
-            len(dictionary),
-            *((b.address, b.size) for b in dictionary.buffers() if b is not None),
-        )
-        if identity in seen:
-            return dictionary.nbytes
-        seen.add(identity)
-        return _repeated_dictionary_bytes(dictionary, seen)
-    return sum(_repeated_dictionary_bytes(child, seen) for child in _children(array))
-
-
-def _children(array: pa.Array) -> list[pa.Array]:
-    t = array.type
-    if pa.types.is_struct(t):
-        return [array.field(i) for i in range(t.num_fields)]
-    if pa.types.is_union(t):
-        return [array.field(i) for i in range(t.num_fields)]
-    if pa.types.is_map(t):
-        return [array.keys, array.items]
-    if any(is_list(t) for is_list in _LIST_PREDICATES):
-        return [array.values]
-    return []
+    return int(table.get_total_buffer_size())
 
 
 def input_bytes(specs: Iterable[TableBytesSpec]) -> int:

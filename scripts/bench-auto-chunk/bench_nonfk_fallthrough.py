@@ -7,7 +7,7 @@ so the chunked gate declines the table today):
   W-P  the W2 mix (3 hash, 3 passthrough, 2 redact, 2 truncate) plus `ni`, int64 with nulls
   W-S  W-P plus one `shuffle` column
   W-U  W-S plus a unique string ID column, hashed (the common PII shape)
-  W-D  W-S plus two dictionary string columns that share one dictionary across row groups
+  W-D  W-S plus two dictionary-typed string columns, a fresh dictionary per row group
 
 Verbs, all on one file so the driver and its workers stay in step:
 
@@ -160,7 +160,6 @@ def run(args: argparse.Namespace) -> int:
     floor = _status("VmRSS")
     started = time.perf_counter()
     if args.input == "resident":
-        # One shared dictionary per column: the layout the strict figure counts once.
         source: Any = pq.read_table(args.source).unify_dictionaries()
         spec = resident_spec(source)
     else:
