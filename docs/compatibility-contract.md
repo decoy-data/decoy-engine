@@ -610,7 +610,10 @@ No `SEED_PROTOCOL_VERSION` change.
   for the rest of the run: the CSV writer keeps the value, and resident output widens its
   earlier chunks. Parquet cannot store a single value of 2 GiB or more on any head: the raw
   writer raises `ArrowInvalid` and a strict file-access write raises `FileAccessReadError`.
-  O3 adds no earlier refusal.
+  O3 adds no earlier refusal. A sink whose writer schema is fixed before the first batch
+  keeps the source `large_string` field, byte-equal to the previous release: the out-of-core
+  sink, the streamed `run_auto_chunk` sink and any `TransactionalSink`. Narrowing to `string`
+  applies to resident results, `run_mask_chunked` chunks, whole-frame output and CSV.
 
 - **Python:** the symbols re-exported from `decoy_engine/__init__.py` and
   `decoy_engine/sdk.py`, with their signatures and output-affecting defaults.
