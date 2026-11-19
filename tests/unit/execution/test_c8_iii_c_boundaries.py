@@ -505,7 +505,10 @@ def test_the_notnull_form_selects_the_non_null_rows_on_nullable_dtypes(dtype: st
 @pytest.mark.parametrize("dtype", sorted(_NULLABLE))
 def test_the_negated_form_selects_no_rows_on_nullable_dtypes(dtype: str) -> None:
     predicate = f"not ({_NOT_NULL_FORM.get(dtype, _NUMERIC_NOT_NULL)})"
-    assert _selected(_NULLABLE[dtype](), predicate) == [False, False, False]
+    # FREEZE-O1: an integer column follows the NaN-style rule on every route, so the negation
+    # selects its blank row, as it does for float64 and object columns.
+    want = [False, False, True] if dtype == "Int64" else [False, False, False]
+    assert _selected(_NULLABLE[dtype](), predicate) == want
 
 
 def test_the_negated_form_selects_the_null_row_on_numpy_dtypes() -> None:
