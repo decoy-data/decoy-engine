@@ -278,3 +278,30 @@ def test_values_just_above_and_below_2_53_stay_exact_with_a_float_bound() -> Non
     for expression in (f"v > {float(BIG)}", f"v == {float(BIG)}", "v < 18.5", f"v != {float(BIG)}"):
         for name, frame in _frames(values):
             assert _eval(frame, expression) == reference(expression, values), (name, expression)
+
+
+@pytest.mark.parametrize(
+    ("expression", "as_python_ints"),
+    [(f"v > {L}", True), (f"v > {BIG}", False), ("v > 5", False), ("v > 5.5", False)],
+)
+def test_the_object_path_is_taken_only_for_wide_values_or_integer_literals(
+    monkeypatch: pytest.MonkeyPatch, expression: str, as_python_ints: bool
+) -> None:
+    """Route witness: with in-range values the answer is the same on either path, so the left
+    operand's dtype is the only evidence of which one ran."""
+    import decoy_engine.execution._when_gate as gate
+
+    seen: list[object] = []
+
+    def spied(real: Any) -> Any:
+        def call(left: object, right: object) -> object:
+            seen.append(getattr(left, "dtype", None))
+            return real(left, right)
+
+        return call
+
+    for op, real in dict(gate._CMP).items():
+        monkeypatch.setitem(gate._CMP, op, spied(real))
+    frame = pd.DataFrame({"v": pd.array([1, None, 7], dtype="Int64")})
+    _eval(frame, expression)
+    assert [str(d) == "object" for d in seen] == [as_python_ints]
