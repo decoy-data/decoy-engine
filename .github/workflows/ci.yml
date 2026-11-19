@@ -168,7 +168,11 @@ jobs:
             tests/privacy ; do
             test -d "$d" || { echo "MISSING SUITE DIR: $d"; exit 1; }
           done
-      - name: Regression gate (full suite, benchmarks excluded)
+      - name: Regression gate (full suite, benchmarks excluded; parallel pass)
+        # Same two-pass split as scripts/dev/gates.sh: xdist (-n 4 --dist loadfile, one worker per
+        # vCPU) for everything except tests marked `serial`, which assert on wall-clock, memory or
+        # CPU ratios and run alone in the next step. Together the two passes select the same tests
+        # as the old single invocation.
         # `not packaging` too: the packaging module is collected here (it lives
         # under tests/) and only skips today because `build` is absent from
         # .[dev]; excluding the marker makes the dedicated packaging-gate its
@@ -186,11 +190,20 @@ jobs:
         # --ignore: the layer test needs import-linter, which this certified profile lacks; the
         # layers-gate job below owns it.
         run: >
-          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock"
+          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial"
+          -n 4 --dist loadfile
           --ignore=tests/sentry/layout/test_import_layers.py
           --tb=short --durations=25 --junitxml=junit-results.xml
+      - name: Regression gate (serial-marked tests, run alone)
+        # Runs even when the parallel pass failed, so one run reports both. Exit 5 (no tests
+        # collected) is not expected: the serial marker has members.
+        if: ${{ !cancelled() }}
+        run: >
+          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial"
+          --ignore=tests/sentry/layout/test_import_layers.py
+          --tb=short --durations=25 --junitxml=junit-results-serial.xml
 
-      # Mergify consumes this artifact for merge-queue flaky-test detection
+      # Mergify consumes these artifacts for merge-queue flaky-test detection
       # once the app is installed (CAM-STEPS.md). `if: always()` so a failing
       # run still uploads its results -- that is the case Mergify most needs
       # to see. No-op today: nothing reads this artifact until the Mergify
@@ -200,7 +213,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-results
-          path: junit-results.xml
+          path: junit-results*.xml
           retention-days: 14
 
   # layers-gate: the engine import-layer contract (.importlinter, LAYOUT E3). Same isolated route
