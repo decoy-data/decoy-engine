@@ -107,14 +107,8 @@ def test_oracle_output_holds_no_profile_or_plan_hash() -> None:
 
 @pytest.mark.parametrize("name", ["profile_hash", "plan_hash"])
 def test_route_evidence_has_no_hash_field(name: str) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native._dispatch import NativeRouteEvidence
 
-    evidence_types = [
-        v
-        for v in vars(_chunked_entry).values()
-        if isinstance(v, type)
-        and dataclasses.is_dataclass(v)
-        and v.__module__ == _chunked_entry.__name__
-    ]
-    for cls in evidence_types:
-        assert name not in {f.name for f in dataclasses.fields(cls)}
+    fields = {f.name for f in dataclasses.fields(NativeRouteEvidence)}
+    assert "native_admitted" in fields  # the evidence class under test is the real one
+    assert name not in fields
