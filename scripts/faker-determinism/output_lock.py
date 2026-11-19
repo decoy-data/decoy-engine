@@ -10,7 +10,7 @@ class names only: never a generated value, never exception text.
 
 The worker is one process with a frozen process-wide clock (`time_machine`, started before `faker`
 imports, so default arguments that read the date at import are frozen too). The writer runs
-workers at two clocks and three hash seeds, then classifies each cell as a digest, `unstable`
+workers at two clocks and eight hash seeds, then classifies each cell as a digest, `unstable`
 (clock-A processes disagree), or `raises:<class>`; a digest that differs between the two clocks
 keeps its clock-A value with `calendar: true`. The sentry
 (`tests/sentry/dependencies/test_faker_output_lock.py`) re-runs the workers and diffs the result
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -50,7 +51,12 @@ CLOCK_A = "2026-10-16T12:00:00Z"  # the F0 parity oracle instant (tests/parity/_
 CLOCK_B = "2027-11-20T12:00:00Z"  # A plus 400 days: a different calendar date and year
 WRITER_PYTHON = (3, 10, 20)
 WORKER_TIMEOUT_S = 150
-RECHECK_SEEDS = (2, 3, 4, 5, 6, 7)
+A_SEEDS = tuple(range(8))  # PYTHONHASHSEED values of the clock-A workers; never fewer than 8
+# Seeds of the raw call shapes: HMAC-derived 4-byte values in text_mask, so spread over 32 bits.
+RAW_SEEDS = (0, 1, 2, 255, 65537, 2**31, 123456789, 2**32 - 1)
+# text_mask detector ids the lock draws through the engine's `_mask_faker`, which calls the raw
+# Faker method (no newline normalisation, unlike the reflected `address` provider).
+TEXT_MASK_DETECTORS = ("person_name", "first_name", "last_name", "address", "location")
 
 DIGEST_RE = re.compile(r"[0-9a-f]{64}|unstable|raises:[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)?")
 KINDS = (
@@ -63,6 +69,7 @@ KINDS = (
     "no longer calendar-dependent",
 )
 _REFLECTED_FIELDS = ("per_seed", "sequential")
+SURFACE_FIELDS = {"reflected": _REFLECTED_FIELDS, "adapter": ("batch",), "raw": ("draws",)}
 
 
 class OutputLockError(RuntimeError):
@@ -134,6 +141,38 @@ def _adapter_cells(locale: str, fake: Any, names: list[str], faker_mod: Any) -> 
     return cells
 
 
+def _raw_cells(locale: str, fake: Any, access: Any) -> dict[str, Any]:
+    """The call shapes the engine makes on a Faker instance outside the reflected provider set.
+
+    `text_mask.<detector>` is `_mask_faker` (en_US only: `shared_faker()` is the default-locale
+    Faker), which returns the raw method output; `dob_anchored` is the formula `date_of_birth`
+    helper's `date_time_ad` call with explicit anchored bounds."""
+    cells: dict[str, Any] = {}
+    if locale == "en_US":
+        for detector in TEXT_MASK_DETECTORS:
+            values: list[Any] = []
+            err = ""
+            try:
+                for seed in RAW_SEEDS:
+                    values.append(
+                        access.mask_faker_span("probe", seed.to_bytes(4, "big"), detector)
+                    )
+            except Exception as exc:
+                err = f"raises:{_cls(exc)}"
+            cells[f"text_mask.{detector}"] = {"draws": err or _digest(values)}
+    values = []
+    err = ""
+    try:
+        for i in range(SAMPLES):
+            fake.seed_instance(i)
+            values.append(access.anchored_date_of_birth(fake, None, 0, 115))
+            values.append(access.anchored_date_of_birth(fake, None, 18, 65))
+    except Exception as exc:
+        err = f"raises:{_cls(exc)}"
+    cells["dob_anchored"] = {"draws": err or _digest(values)}
+    return cells
+
+
 def run_worker_in_process(
     clock: str, locales: list[str] | None, stub: str | None
 ) -> dict[str, Any]:
@@ -161,6 +200,7 @@ def run_worker_in_process(
             "resolved": resolved,
             "reflected": _reflected_cells(fake_ps, fake_seq, access),
             "adapter": _adapter_cells(locale, faker.Faker(locale), names, faker),
+            "raw": _raw_cells(locale, fake_ps, access),
         }
     return out
 
@@ -173,8 +213,13 @@ def classify(a_docs: list[dict[str, Any]], b_doc: dict[str, Any]) -> dict[str, A
     a digest that differs at clock B keeps its clock-A value with `calendar: true`."""
     locales: dict[str, Any] = {}
     for loc, entry in a_docs[0].items():
-        out: dict[str, Any] = {"resolved": entry["resolved"], "reflected": {}, "adapter": {}}
-        for surface, fields in (("reflected", _REFLECTED_FIELDS), ("adapter", ("batch",))):
+        out: dict[str, Any] = {
+            "resolved": entry["resolved"],
+            "reflected": {},
+            "adapter": {},
+            "raw": {},
+        }
+        for surface, fields in SURFACE_FIELDS.items():
             for name, cell in entry[surface].items():
                 merged: dict[str, Any] = {}
                 calendar = False
@@ -206,8 +251,8 @@ def diff_locales(locked: dict[str, Any], observed: dict[str, Any]) -> dict[str, 
             continue
         if locked[loc]["resolved"] != observed[loc]["resolved"]:
             out["changed"].append(f"{loc} resolved")
-        for surface in ("reflected", "adapter"):
-            old, new = locked[loc][surface], observed[loc][surface]
+        for surface in SURFACE_FIELDS:
+            old, new = locked[loc].get(surface, {}), observed[loc].get(surface, {})
             for name in sorted(set(old) | set(new)):
                 label = f"{loc} {surface} {name}"
                 if name not in new:
@@ -228,7 +273,7 @@ def _diff_cell(
             out["removed"].append(f"{label} keyword argument {kwarg}")
         elif kwarg not in old_kw:
             out["added"].append(f"{label} keyword argument {kwarg}")
-    for f in (*_REFLECTED_FIELDS, "batch"):
+    for f in (*_REFLECTED_FIELDS, "batch", "draws"):
         if f not in old:
             continue
         before, after = old[f], new[f]
@@ -297,13 +342,14 @@ def check_lock_shape(doc: object) -> list[str]:
         return problems
     for loc, entry in locales.items():
         base = f"locales.{loc}"
-        keys = {"resolved", "reflected", "adapter"}
+        keys = {"resolved", "reflected", "adapter", "raw"}
         if not need(isinstance(entry, dict) and set(entry) == keys, base):
             continue
         need(type(entry["resolved"]) is str, f"{base}.resolved")
         for surface, fields in (
             ("reflected", ("kwargs", "per_seed", "sequential", "calendar")),
             ("adapter", ("batch", "calendar")),
+            ("raw", ("draws", "calendar")),
         ):
             cells = entry[surface]
             if not need(isinstance(cells, dict), f"{base}.{surface}"):
@@ -366,55 +412,50 @@ def run_worker(
     return doc
 
 
-def _suspect_locales(observed: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
-    """Locales with a cell the baseline records `unstable` that this run saw as one digest."""
-    out = []
-    for loc, entry in observed.items():
-        for surface, fields in (("reflected", _REFLECTED_FIELDS), ("adapter", ("batch",))):
-            for name, cell in entry[surface].items():
-                locked = baseline.get(loc, {}).get(surface, {}).get(name)
-                if locked and any(
-                    locked[f] == "unstable" and cell[f] != "unstable" for f in fields
-                ):
-                    out.append(loc)
-    return sorted(set(out))
+def _usable_cpus() -> int:
+    """CPUs this process may run on (a CI container or `taskset` can be narrower than the host)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:  # macOS has no affinity call
+        return os.cpu_count() or 2
 
 
-def capture(
-    a_seeds: tuple[int, ...],
+def gather(
+    jobs: list[tuple[str, int]],
     locales: list[str] | None = None,
     stub: str | None = None,
     python_exe: str | None = None,
-    baseline: dict[str, Any] | None = None,
+    runner: Any = None,
+) -> list[dict[str, Any]]:
+    """Run one worker per `(clock, hash seed)` job, at most one per usable CPU at a time.
+
+    More at once would only slow each worker toward its timeout. Results keep the job order."""
+    run = runner or run_worker
+    with ThreadPoolExecutor(max_workers=max(1, min(len(jobs), _usable_cpus()))) as pool:
+        futs = [pool.submit(run, clock, s, locales, stub, python_exe) for clock, s in jobs]
+        return [f.result() for f in futs]
+
+
+def capture(
+    locales: list[str] | None = None,
+    stub: str | None = None,
+    python_exe: str | None = None,
     runner: Any = None,
 ) -> dict[str, Any]:
-    """Run clock A at each hash seed and clock B at seed 0, concurrently, and classify.
+    """Run clock A at hash seeds `A_SEEDS` and clock B at seed 0, and classify.
 
-    The dominant unstable cells are providers that draw from unseeded module-level `random`
-    (the `passport_*` providers, about 428 fields in all). Two processes still agree on all 8 draws
-    of one such field about 0.3% of the time, so a two-seed run would read a few of them as
-    reproducible on every run. With `baseline`, a cell it records `unstable` that these seeds saw
-    agree is re-run over `RECHECK_SEEDS`, and it reads as newly reproducible only if all 8 seeds
-    (the two here plus those six) agree. Hash-order providers (the `it_IT` city set) can also agree
-    by chance, and the chance differs between CPython minors (3.11 changed the str hash)."""
-    run = runner or run_worker
-    with ThreadPoolExecutor(max_workers=len(a_seeds) + 1) as pool:
-        a_futs = [pool.submit(run, CLOCK_A, s, locales, stub, python_exe) for s in a_seeds]
-        b_fut = pool.submit(run, CLOCK_B, 0, locales, stub, python_exe)
-        a_docs = [f.result() for f in a_futs]
-        b_doc = b_fut.result()
-    observed = classify(a_docs, b_doc)
-    suspects = _suspect_locales(observed, baseline) if baseline else []
-    if suspects:
-        with ThreadPoolExecutor(max_workers=len(RECHECK_SEEDS)) as pool:
-            futs = [pool.submit(run, CLOCK_A, s, suspects, stub, python_exe) for s in RECHECK_SEEDS]
-            extra = [f.result() for f in futs]
-        merged = classify(
-            [{loc: d[loc] for loc in suspects} for d in (*a_docs, *extra)],
-            {loc: b_doc[loc] for loc in suspects if loc in b_doc},
-        )
-        observed.update(merged)
-    return observed
+    A cell reads as a digest only if all eight clock-A processes agree. The number of seeds cannot
+    be cut: the dominant unstable cells draw from unseeded module-level `random` (the `passport_*`
+    providers, about 428 fields), and two processes still agree on all 8 draws of one such field
+    about 0.3% of the time. Hash-order providers (the `it_IT` city set) can agree by chance too,
+    and the chance differs between CPython minors (3.11 changed the str hash). Every locale runs at
+    every seed, so a provider that turns seed-dependent after a Faker change shows as a digest that
+    differs at one seed, whatever the baseline held. The hash seed is fixed when the interpreter
+    starts, so each seed is its own process."""
+    docs = gather(
+        [(CLOCK_A, s) for s in A_SEEDS] + [(CLOCK_B, 0)], locales, stub, python_exe, runner
+    )
+    return classify(docs[:-1], docs[-1])
 
 
 def pinned_faker() -> str:
@@ -450,7 +491,7 @@ def write_lock(path: Path = LOCK_PATH) -> int:
         )
         return 1
     try:
-        observed = capture((0, 1, 2))
+        observed = capture()
     except OutputLockError:
         print("output_lock: refused: a worker failed", file=sys.stderr)
         return 1

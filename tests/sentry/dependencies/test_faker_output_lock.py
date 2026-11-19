@@ -52,14 +52,14 @@ def _load_lock() -> dict[str, Any]:
 
 
 def _fields(surface: str) -> tuple[str, ...]:
-    return ("per_seed", "sequential") if surface == "reflected" else ("batch",)
+    return output_lock.SURFACE_FIELDS[surface]
 
 
 def _pairs(locales: dict[str, Any], pred: Any) -> set[tuple[str, str, str]]:
     return {
         (loc, surface, name)
         for loc, entry in locales.items()
-        for surface in ("reflected", "adapter")
+        for surface in output_lock.SURFACE_FIELDS
         for name, cell in entry[surface].items()
         if pred(cell, surface)
     }
@@ -129,6 +129,7 @@ def _minimal_lock() -> dict[str, Any]:
                 "adapter": {
                     "person_email": {"batch": "raises:AdapterError/KeyError", "calendar": True}
                 },
+                "raw": {"dob_anchored": {"draws": digest, "calendar": False}},
             }
         },
     }
@@ -154,16 +155,35 @@ _WRONG_TYPES = (True, 7, 8.0, "7", "x", None, [], {})
 
 @pytest.fixture(scope="module")
 def small_baseline() -> dict[str, Any]:
-    return output_lock.capture((0, 1, 2), locales=SMALL)
+    return output_lock.capture(locales=SMALL)
+
+
+# The full capture is nine workers (eight clock-A hash seeds, one clock B). One test cell carries
+# the setup of the fixture it first asks for, and a cell has 180 s, so the nine run as two batches,
+# each built by its own early test below; `full_capture` then only classifies their documents.
 
 
 @pytest.fixture(scope="module")
-def full_capture() -> dict[str, Any]:
-    return output_lock.capture((0, 1), baseline=_load_lock()["locales"])
+def docs_low_seeds() -> list[dict[str, Any]]:
+    return output_lock.gather([(output_lock.CLOCK_A, s) for s in output_lock.A_SEEDS[:4]])
+
+
+@pytest.fixture(scope="module")
+def docs_high_seeds_and_clock_b() -> list[dict[str, Any]]:
+    jobs = [(output_lock.CLOCK_A, s) for s in output_lock.A_SEEDS[4:]]
+    return output_lock.gather([*jobs, (output_lock.CLOCK_B, 0)])
+
+
+@pytest.fixture(scope="module")
+def full_capture(
+    docs_low_seeds: list[dict[str, Any]], docs_high_seeds_and_clock_b: list[dict[str, Any]]
+) -> dict[str, Any]:
+    docs = [*docs_low_seeds, *docs_high_seeds_and_clock_b]
+    return output_lock.classify(docs[:-1], docs[-1])
 
 
 def _small_diff(baseline: dict[str, Any], stub: str) -> dict[str, list[str]]:
-    observed = output_lock.capture((0, 1), locales=SMALL, stub=stub)
+    observed = output_lock.capture(locales=SMALL, stub=stub)
     return output_lock.diff_locales(baseline, observed)
 
 
@@ -259,6 +279,20 @@ def test_anchors_and_floor() -> None:
 
 @pytest.mark.faker_output_lock
 @pytest.mark.timeout(180)
+def test_workers_for_the_low_hash_seeds_ran(docs_low_seeds: list[dict[str, Any]]) -> None:
+    assert len(docs_low_seeds) == 4
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+def test_workers_for_the_high_hash_seeds_and_clock_b_ran(
+    docs_high_seeds_and_clock_b: list[dict[str, Any]],
+) -> None:
+    assert len(docs_high_seeds_and_clock_b) == 5
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
 def test_capture_keeps_anchors_and_floor(full_capture: dict[str, Any]) -> None:
     _check_anchors_and_floor(full_capture)
 
@@ -299,10 +333,12 @@ def test_diff_has_one_branch_per_kind() -> None:
     assert output_lock.diff_locales(old, flipped)["no longer calendar-dependent"]
 
 
-def _fake_runner(by_seed: dict[int, str]) -> Any:
+def _fake_runner(by_seed: dict[int, str], seen: list[tuple[str, int]] | None = None) -> Any:
     """A worker stand-in: one locale, one provider whose digest depends on the hash seed."""
 
     def run(clock: str, seed: int, locales: Any = None, stub: Any = None, py: Any = None) -> Any:
+        if seen is not None:
+            seen.append((clock, seed))
         digest = by_seed.get(seed, "9" * 64)
         cell = {"kwargs": [], "per_seed": digest, "sequential": digest}
         return {
@@ -310,38 +346,56 @@ def _fake_runner(by_seed: dict[int, str]) -> Any:
                 "resolved": "en_US",
                 "reflected": {"passport_gender": cell},
                 "adapter": {},
+                "raw": {},
             }
         }
 
     return run
 
 
-def _unstable_baseline() -> dict[str, Any]:
+def _baseline_with(digest: str) -> dict[str, Any]:
     base = _minimal_lock()["locales"]
     base["en_US"]["reflected"] = {
         "passport_gender": {
             "kwargs": [],
-            "per_seed": "unstable",
-            "sequential": "unstable",
+            "per_seed": digest,
+            "sequential": digest,
             "calendar": False,
         }
     }
     return base
 
 
-def test_unstable_cell_that_agrees_on_two_seeds_is_rechecked() -> None:
-    # Seeds 0 and 1 agree by chance; one of the recheck seeds disagrees, so it is still unstable.
-    chance = _fake_runner({0: "1" * 64, 1: "1" * 64, 2: "1" * 64, 5: "2" * 64})
-    seen = output_lock.capture((0, 1), baseline=_unstable_baseline(), runner=chance)["en_US"][
-        "reflected"
-    ]["passport_gender"]
+def test_capture_runs_every_one_of_eight_hash_seeds_for_every_locale() -> None:
+    seen: list[tuple[str, int]] = []
+    output_lock.capture(runner=_fake_runner({s: "1" * 64 for s in range(8)}, seen))
+    assert sorted(s for c, s in seen if c == output_lock.CLOCK_A) == list(range(8))
+    assert [s for c, s in seen if c == output_lock.CLOCK_B] == [0]
+    assert tuple(range(8)) == output_lock.A_SEEDS
+
+
+@pytest.mark.parametrize("odd_seed", range(8))
+def test_a_stable_cell_that_differs_on_any_one_seed_is_caught(odd_seed: int) -> None:
+    # The cell holds the locked digest on seven seeds and moves on one: interpreter-dependent
+    # output that a two-seed capture would approve whenever the odd seed was not among the two.
+    locked = "1" * 64
+    by_seed = {s: locked for s in range(8)} | {odd_seed: "2" * 64}
+    observed = output_lock.capture(runner=_fake_runner(by_seed))
+    assert observed["en_US"]["reflected"]["passport_gender"]["per_seed"] == "unstable"
+    diff = output_lock.diff_locales(_baseline_with(locked), observed)
+    assert "en_US reflected passport_gender per_seed" in diff["newly unstable"]
+
+
+def test_unstable_cell_that_agrees_on_most_seeds_is_still_unstable() -> None:
+    chance = _fake_runner({s: "1" * 64 for s in range(8)} | {5: "2" * 64})
+    seen = output_lock.capture(runner=chance)["en_US"]["reflected"]["passport_gender"]
     assert seen["per_seed"] == "unstable" and seen["calendar"] is False
 
 
 def test_unstable_cell_that_agrees_on_every_seed_is_newly_reproducible() -> None:
     steady = _fake_runner({s: "1" * 64 for s in range(8)})
-    observed = output_lock.capture((0, 1), baseline=_unstable_baseline(), runner=steady)
-    diff = output_lock.diff_locales(_unstable_baseline(), observed)
+    observed = output_lock.capture(runner=steady)
+    diff = output_lock.diff_locales(_baseline_with("unstable"), observed)
     assert "en_US reflected passport_gender per_seed" in diff["newly reproducible"]
 
 
@@ -455,7 +509,7 @@ def test_removed_kwarg_is_removed(small_baseline: dict[str, Any]) -> None:
     # The locked copy names a keyword argument that the installed provider does not have.
     lock = copy.deepcopy(small_baseline)
     lock["en_US"]["reflected"]["first_name"]["kwargs"] = ["gender_probe"]
-    observed = output_lock.capture((0, 1), locales=SMALL)
+    observed = output_lock.capture(locales=SMALL)
     diff = output_lock.diff_locales(lock, observed)
     assert "en_US reflected first_name keyword argument gender_probe" in diff["removed"]
 
@@ -471,7 +525,7 @@ def test_clock_a_hash_seed_disagreement_is_unstable(
         "from faker.providers.person.en_US import Provider as P\n"
         "P.first_name = lambda self: os.environ['PYTHONHASHSEED']\n",
     )
-    observed = output_lock.capture((0, 1), locales=SMALL, stub=stub)
+    observed = output_lock.capture(locales=SMALL, stub=stub)
     assert observed["en_US"]["reflected"]["first_name"]["per_seed"] == "unstable"
     diff = output_lock.diff_locales(small_baseline, observed)
     assert "en_US reflected first_name per_seed" in diff["newly unstable"]
@@ -494,7 +548,7 @@ def test_raise_is_recorded_by_class(small_baseline: dict[str, Any], tmp_path: Pa
         "    raise ValueError('SECRET-MESSAGE')\n"
         "P.first_name = boom\n",
     )
-    observed = output_lock.capture((0, 1), locales=SMALL, stub=stub)
+    observed = output_lock.capture(locales=SMALL, stub=stub)
     cell = observed["en_US"]["reflected"]["first_name"]
     assert cell["per_seed"] == "raises:ValueError" and cell["sequential"] == "raises:ValueError"
     assert observed["en_US"]["adapter"]["person_first_name"]["batch"] == (
@@ -542,7 +596,7 @@ def test_lock_covers_engine_surface(small_baseline: dict[str, Any], tmp_path: Pa
         "from decoy_engine.internal.faker_setup import register_faker_provider\n"
         "register_faker_provider('custom_probe_name', lambda fake: 'x')\n",
     )
-    observed = output_lock.capture((0, 1), locales=SMALL, stub=stub)
+    observed = output_lock.capture(locales=SMALL, stub=stub)
     import _engine_access as access
 
     for loc in SMALL:
@@ -552,3 +606,49 @@ def test_lock_covers_engine_surface(small_baseline: dict[str, Any], tmp_path: Pa
         assert "custom_probe_name" not in got
         assert not {"binary", "profile", "image"} & got
         assert got == set(small_baseline[loc]["reflected"])
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+def test_seed_dependent_output_that_starts_at_a_later_seed_is_caught(
+    small_baseline: dict[str, Any], tmp_path: Path
+) -> None:
+    # Equal to the locked output on seeds 0 and 1, different from seed 2 on.
+    stub = _stub(
+        tmp_path,
+        "import os\n"
+        "from faker.providers.person.en_US import Provider as P\n"
+        "_orig = P.first_name\n"
+        "P.first_name = lambda self: _orig(self) + ('x' if int(os.environ['PYTHONHASHSEED']) > 1 "
+        "else '')\n",
+    )
+    diff = _small_diff(small_baseline, stub)
+    assert "en_US reflected first_name per_seed" in diff["newly unstable"]
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+def test_raw_text_mask_address_shape_is_locked(
+    small_baseline: dict[str, Any], tmp_path: Path
+) -> None:
+    # Faker starts returning "A, B" for "A\nB". The reflected provider joins lines itself, so its
+    # digest holds; the raw call text_mask makes changes, and only the raw cell can show it.
+    stub = _stub(
+        tmp_path,
+        "import faker.providers.address as a\n"
+        "_orig = a.Provider.address\n"
+        "a.Provider.address = lambda self: _orig(self).replace(chr(10), ', ')\n",
+    )
+    diff = _small_diff(small_baseline, stub)
+    assert "en_US raw text_mask.address draws" in diff["changed"]
+    assert "en_US reflected address per_seed" not in diff["changed"]
+    assert "en_US raw text_mask.person_name draws" not in diff["changed"]
+
+
+@pytest.mark.faker_output_lock
+@pytest.mark.timeout(180)
+def test_raw_shapes_are_in_the_capture(small_baseline: dict[str, Any]) -> None:
+    want = {f"text_mask.{d}" for d in output_lock.TEXT_MASK_DETECTORS} | {"dob_anchored"}
+    assert set(small_baseline["en_US"]["raw"]) == want
+    assert set(small_baseline["pt_BR"]["raw"]) == {"dob_anchored"}
+    assert small_baseline["en_US"]["raw"] == _load_lock()["locales"]["en_US"]["raw"]
