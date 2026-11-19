@@ -187,11 +187,6 @@ _CMP = {
 }
 
 
-class _LegacyPath(Exception):  # noqa: N818 -- control flow, never leaves this module
-    """A predicate the exact integer evaluator does not take (a string or bool literal against
-    an integer column): the pandas evaluator reads the whole predicate instead."""
-
-
 def _is_number(x: object) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
@@ -225,6 +220,21 @@ def _normalized_bound(op: str, x: int | float) -> tuple[str, int] | bool:
     return op, bound
 
 
+def _numeric_literals_only(node: WhenExpr, ints: set[str]) -> bool:
+    """False when an integer column meets a string or bool literal: pandas reads that predicate."""
+    if isinstance(node, (Compare, InList)):
+        values = node.values if isinstance(node, InList) else (node.value,)
+        return node.ref not in ints or all(_is_number(x) for x in values)
+    if isinstance(node, Not):
+        return _numeric_literals_only(node.operand, ints)
+    return all(_numeric_literals_only(o, ints) for o in node.operands)
+
+
+def _pandas_eval(pdf: pd.DataFrame, expression: str, engine: str) -> Any:
+    """The one pandas evaluation: the engine is pinned and both scopes are empty."""
+    return pdf.eval(expression, engine=engine, local_dict={}, global_dict={})
+
+
 def _int_leaf(col: pd.Series, node: Compare | InList, wide_col: bool) -> np.ndarray:
     """One comparison or membership test on an integer column, exact, as a plain bool array.
 
@@ -233,8 +243,6 @@ def _int_leaf(col: pd.Series, node: Compare | InList, wide_col: bool) -> np.ndar
     or an integer literal beyond 2**53 is compared as Python integers.
     """
     values = node.values if isinstance(node, InList) else (node.value,)
-    if not all(_is_number(x) for x in values):
-        raise _LegacyPath
     nums = [x for x in values if isinstance(x, (int, float))]
     if isinstance(node, InList):
         op, null_out = ("in", node.negated)
@@ -288,6 +296,8 @@ def _exact_int_mask(pdf: pd.DataFrame, ast: WhenExpr, strategy_leaf: Any) -> pd.
     }
     if not ints or any(c in pdf.columns and not isinstance(pdf[c], pd.Series) for c in refs):
         return None
+    if not _numeric_literals_only(ast, ints):
+        return None
     wide = {c: _is_wide(pdf[c]) for c in ints}
 
     def walk(node: WhenExpr) -> pd.Series:
@@ -303,10 +313,7 @@ def _exact_int_mask(pdf: pd.DataFrame, ast: WhenExpr, strategy_leaf: Any) -> pd.
             out = (out & nxt) if node.op == "and" else (out | nxt)
         return out
 
-    try:
-        return walk(ast)
-    except _LegacyPath:
-        return None
+    return walk(ast)
 
 
 def _leaf_text(node: Compare | InList) -> str:
@@ -356,9 +363,7 @@ def _eval_predicate(
             mask = _exact_int_mask(
                 source,
                 ast,
-                lambda leaf: source.eval(
-                    _leaf_text(leaf), engine="numexpr", local_dict={}, global_dict={}
-                ),
+                lambda leaf: _pandas_eval(source, _leaf_text(leaf), "numexpr"),
             )
             if mask is None:
                 pdf = when_eval_frame(source, when_column_refs(ast), when_literals_by_ref(ast))
@@ -368,12 +373,7 @@ def _eval_predicate(
                     for c in pdf.columns
                     if c in source.columns and isinstance(pdf[c], pd.Series)
                 )
-                mask = pdf.eval(
-                    expression,
-                    engine="python" if exact else "numexpr",
-                    local_dict={},
-                    global_dict={},
-                )
+                mask = _pandas_eval(pdf, expression, "python" if exact else "numexpr")
         for _w in _caught:
             if issubclass(_w.category, RuntimeWarning):
                 _log.warning(
