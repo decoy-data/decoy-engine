@@ -524,6 +524,73 @@ def build_cases() -> list[Case]:
     return cases
 
 
+def _dt64_series(*values: str, tz: str | None = None) -> pd.Series:
+    return pd.Series(pd.to_datetime(list(values), utc=tz is not None))
+
+
+def build_range_cases() -> list[Case]:
+    """Anchors outside the supported range whose offset returns them into it, on both edges.
+
+    Kept apart from `build_cases` so the pinned base digest does not move. Every shape of anchor
+    is covered, because each input class has its own parse path.
+    """
+    low, high = "1699-12-31", "2201-01-01"
+    shapes: dict[str, Callable[[str], pd.Series]] = {
+        "str": lambda v: _obj([v]),
+        "date": lambda v: _obj([dt.date.fromisoformat(v)]),
+        "datetime": lambda v: _obj([dt.datetime.fromisoformat(v)]),
+        "timestamp": lambda v: _obj([pd.Timestamp(v)]),
+        "dt64": lambda v: _dt64_series(v),
+    }
+    cases: list[Case] = []
+    for shape, make in shapes.items():
+        for dist in DISTS:
+            cases.append(
+                Case(
+                    f"range_{shape}_below_{dist}",
+                    partial(make, low),
+                    min_days=1,
+                    max_days=1,
+                    distribution=dist,
+                    expect_error=True,
+                )
+            )
+            cases.append(
+                Case(
+                    f"range_{shape}_above_{dist}",
+                    partial(make, high),
+                    min_days=-1,
+                    max_days=-1,
+                    distribution=dist,
+                    expect_error=True,
+                )
+            )
+        # The nearest anchors that are still inside the range keep working.
+        cases.append(
+            Case(f"range_{shape}_edge_in_low", partial(make, "1700-01-01"), min_days=0, max_days=0)
+        )
+        cases.append(
+            Case(f"range_{shape}_edge_in_high", partial(make, "2200-12-31"), min_days=0, max_days=0)
+        )
+    cases.append(
+        Case(
+            "range_dt64_mixed_rows",
+            lambda: _dt64_series("2000-01-01", "1699-12-31", "2001-01-01"),
+            min_days=1,
+            max_days=1,
+            expect_error=True,
+        )
+    )
+    cases.append(
+        Case(
+            "range_dt64_tz_aware",
+            lambda: _dt64_series("2000-01-01", tz="UTC"),
+            expect_error=True,
+        )
+    )
+    return cases
+
+
 Outcome = tuple[Any, ...]
 
 

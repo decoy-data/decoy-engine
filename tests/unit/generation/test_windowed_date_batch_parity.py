@@ -29,6 +29,7 @@ from tests.unit.generation._windowed_date_corpus import (
     SEED32,
     MyDate,
     build_cases,
+    build_range_cases,
     corpus_digest,
     outcome,
     reference_apply_windowed_date,
@@ -38,6 +39,7 @@ BASE_DIGEST = "efd24e5746f20b24f5ced9a4656a2d4125f363e05742b641d60c4091fdae6d7b"
 
 CASES = build_cases()
 CASE_IDS = [c.name for c in CASES]
+RANGE_CASES = build_range_cases()
 
 
 # --- Step 0: the premise, on base -------------------------------------------------------------
@@ -106,6 +108,14 @@ def test_error_parity() -> None:
         # The error is raised outside any except block: no cause, no context (value-free).
         assert got[3] is True and want[3] is True, case.name
     assert n_err >= 40
+
+
+@pytest.mark.parametrize("case", RANGE_CASES, ids=lambda c: c.name)
+def test_out_of_range_anchor_never_shifts_back_into_range(case: Any) -> None:
+    """An anchor outside the supported range raises, even when its offset lands inside it."""
+    want = outcome(reference_apply_windowed_date, case)
+    assert (want[0] == "err") == case.expect_error
+    assert outcome(apply_windowed_date, case) == want
 
 
 class _SpyParse:
@@ -199,7 +209,11 @@ _CELL = st.one_of(
 
 @st.composite
 def _batches(draw: st.DrawFn) -> dict[str, Any]:
-    shape = draw(st.sampled_from(["str", "str_typed_noise", "date", "datetime", "timestamp"]))
+    shape = draw(
+        st.sampled_from(
+            ["str", "str_typed_noise", "date", "datetime", "timestamp", "dt64", "dt64_tz"]
+        )
+    )
     n = draw(st.integers(0, 12))
     if shape == "str":
         cells = draw(st.lists(st.one_of(_ISO_POOL, st.none()), min_size=n, max_size=n))
@@ -229,6 +243,14 @@ def _batches(draw: st.DrawFn) -> dict[str, Any]:
                 max_size=n,
             )
         )
+    elif shape in ("dt64", "dt64_tz"):
+        # Near both supported edges as well as inside, so a shift can cross back into range.
+        edge = st.sampled_from([dt.datetime(1700, 1, 1), dt.datetime(2200, 12, 31)])
+        near = st.builds(lambda e, d: e + dt.timedelta(days=d), edge, st.integers(-5, 5))
+        anywhere = st.datetimes(
+            min_value=dt.datetime(1678, 1, 1), max_value=dt.datetime(2260, 1, 1)
+        )
+        cells = draw(st.lists(st.one_of(near, anywhere, st.none()), min_size=n, max_size=n))
     else:
         cells = [
             None if c is None else pd.Timestamp(c)
@@ -252,6 +274,7 @@ def _batches(draw: st.DrawFn) -> dict[str, Any]:
     if use_pos:
         pos = draw(st.lists(st.integers(-2, 2**40), min_size=n, max_size=n))
     return {
+        "shape": shape,
         "cells": cells,
         "lo": lo,
         "hi": hi,
@@ -264,7 +287,13 @@ def _batches(draw: st.DrawFn) -> dict[str, Any]:
 
 def _run(fn: Callable[..., Any], b: dict[str, Any]) -> tuple[Any, ...]:
     cfg = WindowedDateConfig(anchor="a", min_days=b["lo"], max_days=b["hi"], distribution=b["dist"])
-    df = pd.DataFrame({"a": pd.Series(b["cells"], dtype=object)})
+    if b["shape"] == "dt64":
+        column = pd.Series(pd.to_datetime(b["cells"]))
+    elif b["shape"] == "dt64_tz":
+        column = pd.Series(pd.to_datetime(b["cells"], utc=True))
+    else:
+        column = pd.Series(b["cells"], dtype=object)
+    df = pd.DataFrame({"a": column})
     try:
         return (
             "ok",

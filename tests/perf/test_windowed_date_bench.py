@@ -10,6 +10,7 @@ Run with `-m benchmark`. `DECOY_BENCH_OUT` names a directory that receives the r
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import statistics
@@ -44,21 +45,26 @@ def _anchors(shape: str) -> list[object]:
     return cells
 
 
+def _digest(out: list[str | None]) -> str:
+    return hashlib.sha256("\n".join("\0" if v is None else v for v in out).encode()).hexdigest()
+
+
 def worker(dist: str, shape: str) -> dict[str, object]:
     import pandas as pd
 
     from decoy_engine.transforms.windowed_date import WindowedDateConfig, apply_windowed_date
+    from tests.unit.generation._windowed_date_corpus import reference_apply_windowed_date
 
     cfg = WindowedDateConfig(anchor="a", min_days=-30, max_days=90, distribution=dist)
     df = pd.DataFrame({"a": pd.Series(_anchors(shape), dtype=object)})
     apply_windowed_date(cfg, df, SEED, "windowed_date/bench")
     samples = []
-    digest = 0
+    digest = ""
     for _ in range(TIMED_CALLS):
         t0 = time.perf_counter()
         out = apply_windowed_date(cfg, df, SEED, "windowed_date/bench")
         samples.append((time.perf_counter() - t0) / ROWS * 1e6)
-        digest = hash(tuple(out[:1000]))
+        digest = _digest(out)
     ordered = sorted(samples)
     q = statistics.quantiles(ordered, n=4)
     return {
@@ -70,7 +76,8 @@ def worker(dist: str, shape: str) -> dict[str, object]:
         "max_us": ordered[-1],
         "iqr_us": q[2] - q[0],
         "samples_us": samples,
-        "head_hash_is_stable": digest != 0,
+        "output_digest": digest,
+        "base_digest": _digest(reference_apply_windowed_date(cfg, df, SEED, "windowed_date/bench")),
     }
 
 
@@ -88,8 +95,11 @@ def test_windowed_date_us_per_row(dist: str, shape: str) -> None:
     out_dir = os.environ.get("DECOY_BENCH_OUT")
     if out_dir:
         Path(out_dir, f"windowed_date_{dist}_{shape}.json").write_text(json.dumps(result))
+    # The timed output is byte-identical to the verbatim base loop on the same input.
+    assert result["output_digest"] == result["base_digest"], result
     assert result["median_us"] <= TARGET_US_PER_ROW, result
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     print(json.dumps(worker(sys.argv[1], sys.argv[2])))

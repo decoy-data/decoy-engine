@@ -305,10 +305,6 @@ def _vector_parse(cells: list[Any], kind: type) -> npt.NDArray[np.datetime64] | 
     values = parsed.to_numpy()
     if values.dtype != np.dtype("datetime64[ns]") or bool(np.isnat(values).any()):
         return None
-    if values.size and (
-        values.min() < SUPPORTED_MIN.to_datetime64() or values.max() > SUPPORTED_MAX.to_datetime64()
-    ):
-        return None
     return values
 
 
@@ -339,7 +335,15 @@ def _prepare_batch(
         values = (
             _vector_parse(kept, next(iter(kinds))) if kinds else np.empty(0, dtype="datetime64[ns]")
         )
-    if values is None:
+    # One range check for every input class: an out-of-range anchor must raise as the per-row loop
+    # does, not shift back into range.
+    if values is None or (
+        values.size
+        and (
+            values.min() < SUPPORTED_MIN.to_datetime64()
+            or values.max() > SUPPORTED_MAX.to_datetime64()
+        )
+    ):
         return None
     if positions is None:
         rows = [row_offset + int(k) for k in keep]
