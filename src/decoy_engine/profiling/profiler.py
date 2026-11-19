@@ -29,6 +29,7 @@ from decoy_engine.detection.types import (
     DetectorMatch,
 )
 from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.profiling._basis import read_basis
 from decoy_engine.profiling._classification import (
     _classify_alphabet,
     _classify_numeric_range,
@@ -308,6 +309,12 @@ def profile_columns(
 ) -> ColumnProfile:
     """Scan a DataFrame and produce a ColumnProfile.
 
+    `basis` on the result is `whole` when the strategy is `full`, there is no cap, or the frame
+    is shorter than the cap. Two edges are the caller's statement: a frame that is already a
+    sample but declared `sample_strategy="full"` reads as `whole`, and a frame of exactly
+    `sample_row_cap` rows reads as `sample`, because the frame alone cannot prove the source
+    ended there. `scan_sources` stamps the basis from the reader instead.
+
     The DataFrame is the only place raw data lives in this call. The returned
     ColumnProfile is JSON-serializable and the ONLY thing FORECAST sees.
 
@@ -461,6 +468,11 @@ def _profile_columns_inner(
             reid_risk_score=reid_score,
             quasi_identifier_groups=qi_groups,
             k_anonymity=k_anonymity,
+            basis=read_basis(
+                sample_strategy,
+                sample_row_cap,
+                sample_row_cap is not None and len(df) < sample_row_cap,
+            ),
         )
     except Exception as exc:
         if logger is not None:
