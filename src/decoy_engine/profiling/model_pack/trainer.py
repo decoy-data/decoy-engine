@@ -72,18 +72,13 @@ try:
     # only (no loading from arbitrary external sources).  This is the same
     # posture used by every sklearn model-persistence workflow.
     import joblib
-
-    # sklearn first: its wheel carries the OpenMP runtime (vcomp140.dll) that lib_lightgbm.dll
-    # needs, and a Windows host without the VC++ redistributable finds it only if sklearn
-    # already loaded it. `from lightgbm import ...` before this fails there with a missing DLL.
-    import sklearn  # noqa: F401
-    from lightgbm import LGBMClassifier
     from sklearn.calibration import CalibratedClassifierCV, calibration_curve
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.metrics import (
         balanced_accuracy_score,
         brier_score_loss,
     )
+    from lightgbm import LGBMClassifier  # isort: skip  (after sklearn: it loads vcomp140.dll)
 except (ImportError, OSError) as _err:  # OSError: lightgbm dlopen fails without libomp/libgomp
     raise ImportError(
         "scikit-learn and lightgbm failed to import. They are base dependencies: reinstall "
