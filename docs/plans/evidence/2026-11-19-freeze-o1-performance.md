@@ -2,7 +2,7 @@ Status: record
 
 # FREEZE-OUTPUT O1: build record (performance, mutations, goldens)
 
-Plan: `docs/plans/2026-11-18-freeze-batch.md` rev 3.2, section 14 ("O1 used too much memory") and AT-O1a to AT-O1f. Slice head for the code measured here: `ad4f86303` on `feat/freeze-o1`. This file and the data files beside it were added after that head and change no source or test.
+Plan: `docs/plans/2026-11-18-freeze-batch.md` rev 3.2, section 14 ("O1 used too much memory") and AT-O1a to AT-O1f. Code heads measured here: `ad4f86303` (mutations, round 3 perf) and `ca7326afc` (final) on `feat/freeze-o1`. This file and the data files beside it were added after that head and change no source or test.
 
 ## 1. Performance
 
@@ -60,7 +60,7 @@ A float literal now costs what it did on main (0.13 to 0.26 s eval) and adds no 
 
 ## 2. Mutations on the final code head
 
-Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-19-freeze-o1-mutate.py` to `src/`, runs the O1 owners with `-x`, restores `src/`). The unmutated owner set passes. Code head `ad4f86303`; every mutation below was run on it. The first rows were retargeted in round 3 because the object and float64 conversions moved into `_int_leaf`.
+Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-19-freeze-o1-mutate.py` to `src/`, runs the O1 owners with `-x`, restores `src/`). The unmutated owner set passes. Every mutation below was run on code head `ad4f86303`. The last source commit (`ca7326afc`) only moved the one pandas call into `_pandas_eval` (the audited eval site) and replaced a private exception with a literal precheck; no mutation target changed, and the owner tests pass on it, but the mutations were not rerun on that commit. The first rows were retargeted in round 3 because the object and float64 conversions moved into `_int_leaf`.
 
 | Mutation | Plan row | Result |
 |---|---|---|
