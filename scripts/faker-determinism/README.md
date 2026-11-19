@@ -87,10 +87,15 @@ per-seed digest, a sequential-draw digest) and the adapter surface (the masking 
 a batch digest through `FakerAdapter.generate_batch`), plus a `raw` surface for the calls the
 engine makes outside the reflected provider set: the text-mask calls (`text_mask.<detector>`, en_US
 only, through `_mask_faker`, which returns the raw method output without the reflected provider's
-newline joining) and the anchored date of birth (`dob_anchored`, every locale). An `argumented` surface runs a fixed grid of explicit-argument calls for every Faker method the formula helpers expose (`ARGUMENT_GRID` in `argument_grid.py`: `date_between`, `date_this_*`, `future_date`, `past_date`, `date_of_birth`), and stores each case's argument descriptor beside its digest, so a changed argument is a reviewed diff. A sentry derives the helper methods from `_formula_scope` and fails when one has no grid case. It holds digests and exception class names
+newline joining) and the anchored date of birth (`dob_anchored`, every locale). An `argumented` surface covers the arguments callers can pass: YAML `faker_kwargs` into the
+reflected and `address` wrappers, `ProviderSpec.extra` into the V2 adapter, and the formula
+helpers. `argument_grid.py` derives the targets and their rows from the runtime callables and
+their signatures (a parameter name it cannot classify fails closed), stores the row list once as
+`argument_grid`, and the lock keeps one digest per locale and row. A sentry fails when a discovered
+parameter has no row. It holds digests and exception class names
 only, never a generated value or exception text. A cell is a 64-hex digest, `unstable` (processes
 disagree at one clock), or `raises:<Class>[/<Cause>]`. `calendar: true` marks a pair whose digest
-differs between the two frozen clocks (2026-10-16 and 2027-11-20): it is stable only because the
+differs between the two frozen clocks (2026-10-16 and 2030-01-16, which crosses a month, a year and a decade): it is stable only because the
 clock is frozen.
 
 - Write it: `python scripts/faker-determinism/output_lock.py --write`. This runs only under
