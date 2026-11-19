@@ -330,9 +330,11 @@ def test_the_blank_bearing_integer_is_int64_under_every_gated_strategy(
     assert result.outputs["t"].schema.field("v").type == pa.int64(), (strategy, route)
 
 
-@pytest.mark.parametrize(
-    "strategy", sorted(set(ALL_GATED) - {"text_mask"})
-)  # text_mask+when: refused
+# text_mask+when: refused; formula and shuffle are not chunk-safe, so no chunked oracle runs them.
+CHUNKED_GATED = sorted(set(ALL_GATED) - {"text_mask", "formula", "shuffle"})
+
+
+@pytest.mark.parametrize("strategy", CHUNKED_GATED)
 def test_the_chunked_oracle_keeps_int64_under_every_gated_strategy(
     tmp_path: Path, strategy: str
 ) -> None:
