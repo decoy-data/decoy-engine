@@ -32,13 +32,13 @@ Other routes at 10M rows: unified plain +1717 MB (main) against +2010 MB (head),
 
 Chunked oracle leg, 65,536-row chunks, 10M rows: `+MB` is 0 on both sides because the source build mark is above the run mark, so the chunked route adds no memory above the table it reads. Eval time sums over 153 chunks: plain 0.69 s against 0.83 s, anchor 0.38 s against 0.88 s. FK and declared chunked cells were not measured: the chunked route refuses a passthrough FK parent key (`chunked_fk_parent_strategy_not_self_mask_safe`) and the declared text source fails the same way on main and head (`when_expression_error`, a limit of this probe).
 
-Reading.
+Reading (round 2 numbers, before the exact integer evaluator; round 3 follows).
 - The common path (an in-range value and an in-range int literal) keeps the old memory: 0 to 24 MB over main on plain, FK and declared at 10M, 68 MB on anchor, and its extra eval time is 0.11 to 0.23 s on runs of 15 to 195 s.
 - The round-2 object path (a value or integer literal beyond `2**53`, or any float literal against an integer column) cost 1.0 to 1.9 s of eval at 10M rows, and its conversion alone is 0.4 to 0.8 s. The temporary object array adds up to about 0.55 GB, but the run peak only moves when no row is selected (plain `object_literal`: 339 to 888 MB). When rows are selected the peak is set later in the run and does not change. The `object_literal` peak (888 MB) stays below the same data's `numexpr` peak (1594 MB).
 - The unified plain route at 10M is the largest measured move: +293 MB and +1.9 s eval, 17.4 s to 19.6 s wall. Unified keeps one full frame and now builds a float64 eval copy of the nullable column.
 - The four classes cost the same within noise, as in the r1 note on the PR.
 
-Stop line. The plan states no number: "a regression beyond the existing route budget". The route budget is the governor slot budget, which is a per-slot byte limit set at run time. No measured run raised its peak above what a same-size run of the same route reached before this change, except unified plain at 10M (+293 MB). This record gives the numbers and does not claim a pass or a fail for that cell. The owner call, if wanted, is whether the unified route's extra float64 copy at 10M rows and the 1 to 2 s object-path cost for float literals are acceptable. Semantics were not changed to avoid them.
+Stop line (round 2; the two cells it names are fixed in round 3). The plan states no number: "a regression beyond the existing route budget". The route budget is the governor slot budget, which is a per-slot byte limit set at run time. No measured run raised its peak above what a same-size run of the same route reached before this change, except unified plain at 10M (+293 MB). This record gives the numbers and does not claim a pass or a fail for that cell. The owner call, if wanted, is whether the unified route's extra float64 copy at 10M rows and the 1 to 2 s object-path cost for float literals are acceptable. Semantics were not changed to avoid them.
 
 ### Round 3: exact integer evaluator
 
