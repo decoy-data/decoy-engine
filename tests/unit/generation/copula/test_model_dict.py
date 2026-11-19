@@ -53,6 +53,12 @@ def _not_definite(d: dict[str, Any]) -> None:
     d["correlation"] = [0.99, -0.99, 0.99]
 
 
+def _duplicate_on_a_zero_row(d: dict[str, Any]) -> None:
+    # Variable 0 has a zero row, so only the uniqueness rule can refuse the repeat.
+    d["correlation"] = [0.0, 0.0, 0.5]
+    d["suppressed"] = [{"variable": 0, "reason": "pair_rows"}] * 2
+
+
 CASES: dict[str, Mutation] = {
     "missing schema_version": _delete(["schema_version"]),
     "next major version": _set(["schema_version"], "decoy-gaussian-copula/v2"),
@@ -74,6 +80,7 @@ CASES: dict[str, Mutation] = {
     "counts not summing": _bump_first_count,
     "decreasing edges": _decreasing_edges,
     "row counts disagree": _set(["columns", 0, "null_count"], 3),
+    "row_count disagrees with every column": _set(["row_count"], 401),
     "row_count below floor": _set(["row_count"], 99),
     "correlation too short": _set(["correlation"], [0.1]),
     "correlation too long": _set(["correlation"], [0.1, 0.1, 0.1, 0.1]),
@@ -90,6 +97,7 @@ CASES: dict[str, Mutation] = {
         ["suppressed"],
         [{"variable": 0, "reason": "pair_rows"}, {"variable": 0, "reason": "pair_rows"}],
     ),
+    "suppressed duplicate on a zero row": _duplicate_on_a_zero_row,
     "not a mapping": lambda d: d.clear(),
 }
 

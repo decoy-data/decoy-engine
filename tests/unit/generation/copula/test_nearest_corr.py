@@ -87,3 +87,15 @@ def test_rejects_non_square_and_non_finite() -> None:
         nearest_correlation(np.ones((2, 3)))
     with pytest.raises(ValueError, match="non-finite"):
         nearest_correlation(np.array([[1.0, np.nan], [np.nan, 1.0]]))
+
+
+@pytest.mark.parametrize("floor", [1e-8, 1e-3, 0.01, 0.1])
+def test_repair_reaches_the_requested_floor(floor: float) -> None:
+    for case in range(20):
+        rng = np.random.default_rng(100 + case)
+        a = rng.uniform(-1, 1, (8, 8))
+        a = (a + a.T) / 2
+        np.fill_diagonal(a, 1.0)
+        out = nearest_correlation(a, floor=floor)
+        assert min_eigenvalue(out) >= floor
+        assert np.all(np.diag(out) == 1.0)
