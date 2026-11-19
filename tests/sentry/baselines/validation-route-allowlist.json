@@ -1,0 +1,18 @@
+{
+ "sentry_id": "validation-route-allowlist",
+ "created_in": "EW1",
+ "entries": {
+  "execution/_transforms_table.py::_transform_ops": {
+   "reason": "existing entry of defects/test_validation_sites.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profile/_fixed_width_reader.py::_resolve_layout": {
+   "reason": "existing entry of defects/test_validation_sites.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profiling/scan_set.py::_table_core": {
+   "reason": "existing entry of defects/test_validation_sites.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profiling/scan_set.py::scan_set_to_dict": {
+   "reason": "existing entry of defects/test_validation_sites.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  }
+ }
+}

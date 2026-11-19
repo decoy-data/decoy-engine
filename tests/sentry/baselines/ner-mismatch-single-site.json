@@ -1,0 +1,9 @@
+{
+ "sentry_id": "ner-mismatch-single-site",
+ "created_in": "EW1",
+ "entries": {
+  "execution/_strategies/_ner_config.py::enforce_ner_model_version": {
+   "reason": "existing entry of defects/test_ner_mismatch_single_site.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  }
+ }
+}

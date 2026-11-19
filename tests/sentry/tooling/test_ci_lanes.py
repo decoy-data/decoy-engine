@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.sentry import _ci_lock_scan as scan
 from tests.sentry.parallel._resources import parse_marker_expr
 from tests.sentry.tooling import _ci_lanes as lanes
 
@@ -513,3 +514,98 @@ def test_pg_gate_seeded_failures() -> None:
     t = seeded()
     only_lane(t, ("ci.yml", "pg-gate"), "pytest tests/connectors/test_postgres_snapshot.py")
     assert has(pg_gate_findings(t, sites), "-m pg_integration")
+
+
+# --- FAKER-MIGRATE AT-L12: the required faker-output-lock matrix job -------------------------
+
+
+# Selected by marker over the whole sentry directory, so a marked cell in any lock module runs.
+FAKER_LOCK_RUN = "pytest tests/sentry/dependencies -m faker_output_lock --tb=short"
+
+
+def faker_lock_findings(tree: lanes.Tree) -> list[str]:
+    """The Faker lock lane: required, matrixed on three minors, fail-fast off, import-smoke apart."""
+    out: list[str] = []
+    jobs = tree.workflows["ci.yml"]["jobs"]
+    fl = jobs.get("faker-output-lock")
+    if fl is None:
+        return ["no faker-output-lock job"]
+    if "faker-output-lock" not in tree.required["merge"][0]["jobs"]:
+        out.append("faker-output-lock is not a required merge job")
+    if fl.get("strategy", {}).get("fail-fast") is not False:
+        out.append("faker-output-lock must set strategy.fail-fast: false")
+    if fl.get("strategy", {}).get("matrix", {}).get("python") != ["3.10.20", "3.11.9", "3.12.7"]:
+        out.append("faker-output-lock must run CPython 3.10.20, 3.11.9 and 3.12.7")
+    marked = [i for i, s in enumerate(fl["steps"]) if "-m faker_output_lock" in s.get("run", "")]
+    if len(marked) != 1:
+        out.append("faker-output-lock does not run the marked cells in exactly one step")
+    elif fl["steps"][marked[0]]["run"].strip() != FAKER_LOCK_RUN:
+        out.append(f"faker-output-lock must run exactly `{FAKER_LOCK_RUN}`")
+    # The shared hidden-failure scanner: `||`, `exit 0`, `set +e`, `if`, `continue-on-error`.
+    out += scan.hiding_findings(
+        fl, marked[0] if len(marked) == 1 else None, "Faker lock", "a red Faker lock"
+    )
+    smoke = jobs["import-smoke"]
+    if any(s.get("with", {}).get("extras") for s in smoke["steps"]):
+        out.append("import-smoke must install no extras")
+    runs = [s["run"] for s in smoke["steps"] if "run" in s]
+    if len(runs) != 2 or any("pytest" in r for r in runs):
+        out.append("import-smoke must keep only its Import and Probe checks")
+    return out
+
+
+def test_faker_output_lock_lane_is_required_and_independent() -> None:
+    assert faker_lock_findings(TREE) == []
+
+
+def test_removing_the_required_faker_job_is_caught() -> None:
+    t = seeded()
+    del t.workflows["ci.yml"]["jobs"]["faker-output-lock"]
+    assert has(faker_lock_findings(t), "no faker-output-lock job")
+    assert has(lanes.marker_findings(t), "'faker_output_lock'")
+    t = seeded()
+    t.required["merge"][0]["jobs"].remove("faker-output-lock")
+    assert has(faker_lock_findings(t), "not a required merge job")
+
+
+def test_faker_lane_run_line_is_pinned() -> None:
+    t = seeded()
+    j = job(t, "ci.yml", "faker-output-lock")
+    k = next(i for i, s in enumerate(j["steps"]) if "-m faker_output_lock" in s.get("run", ""))
+    j["steps"][k]["run"] = (
+        "pytest tests/sentry/dependencies/test_faker_output_lock.py -m faker_output_lock --tb=short"
+    )
+    assert has(faker_lock_findings(t), "must run exactly")
+
+
+def test_faker_lane_rules_are_each_seeded() -> None:
+    t = seeded()
+    job(t, "ci.yml", "faker-output-lock")["strategy"]["fail-fast"] = True
+    assert has(faker_lock_findings(t), "fail-fast")
+    t = seeded()
+    job(t, "ci.yml", "faker-output-lock")["strategy"]["matrix"]["python"].pop()
+    assert has(faker_lock_findings(t), "3.12.7")
+    t = seeded()
+    job(t, "ci.yml", "import-smoke")["steps"].append({"run": "pytest tests/sentry"})
+    assert has(faker_lock_findings(t), "import-smoke")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expect"),
+    [
+        (lambda j, k: j["steps"][k].update(run=j["steps"][k]["run"] + " || true"), "bare command"),
+        (lambda j, k: j["steps"][k].update(run=j["steps"][k]["run"] + "\nexit 0"), "exits 0"),
+        (lambda j, k: j["steps"][k].update(run="set +e\n" + j["steps"][k]["run"]), "set +e"),
+        (lambda j, k: j["steps"][k].update(**{"continue-on-error": True}), "continue-on-error"),
+        (lambda j, k: j.update(**{"continue-on-error": True}), "continue-on-error"),
+        (lambda j, k: j.update(**{"if": "always()"}), "job-level"),
+        (lambda j, k: j["steps"][k].update(**{"if": "always()"}), "step-level"),
+    ],
+    ids=["or-true", "exit-0", "set+e", "step-coe", "job-coe", "job-if", "step-if"],
+)
+def test_faker_lane_hiding_forms_are_each_caught(mutate: Any, expect: str) -> None:
+    t = seeded()
+    j = job(t, "ci.yml", "faker-output-lock")
+    k = next(i for i, s in enumerate(j["steps"]) if "-m faker_output_lock" in s.get("run", ""))
+    mutate(j, k)
+    assert has(faker_lock_findings(t), expect)

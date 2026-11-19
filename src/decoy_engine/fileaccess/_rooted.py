@@ -4,7 +4,8 @@ Pattern: Capsicum and WASI preopens (a process reaches files only through direct
 descriptors it was granted), with `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS |
 RESOLVE_NO_MAGICLINKS)` as the confinement, as in `cap-std` and Go 1.24 `os.Root`.
 There is no symlink opt-in. Off Linux it refuses to construct unless
-`allow_portable_fallback=True`, which is racy and documented as such.
+`allow_portable_fallback=True`, which is racy and documented as such. Where the platform has no
+directory descriptors (Windows) it refuses even then.
 
 The handles a strict policy issues live here too: a handle over an authorized descriptor has
 `library_path()` of `/proc/self/fd/<n>`, a reopen of the same inode with no further name
@@ -23,7 +24,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import BinaryIO, TextIO
 
-from decoy_engine.fileaccess import _openat2
+from decoy_engine.fileaccess import _openat2, _osflags
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._types import (
     Access,
@@ -38,7 +39,7 @@ from decoy_engine.fileaccess._types import (
 _MAX_LOCATOR = 4096
 _FD_DIR = "/proc/self/fd" if sys.platform.startswith("linux") else "/dev/fd"
 
-_READ_FLAGS = os.O_RDONLY | os.O_NOCTTY | os.O_NONBLOCK
+_READ_FLAGS = _osflags.RDONLY | _osflags.NOCTTY | _osflags.NONBLOCK
 
 
 def _close_quietly(fd: int) -> None:
@@ -156,7 +157,7 @@ def open_checked(
     """`openat2` confined beneath `dir_fd`, then `fstat`: a regular file (or a directory
     when `want` is `dir`), not a denylisted inode. Every failure is the one denial; its
     optional `kind` is computed here from the errno or the `fstat` already in hand."""
-    flags = _READ_FLAGS | (os.O_DIRECTORY if want == "dir" else 0)
+    flags = _READ_FLAGS | (_osflags.DIRECTORY if want == "dir" else 0)
     fd = -1
     kind: DenialKind = "unreadable"
     try:
@@ -280,6 +281,11 @@ class RootedFileAccess:
         deny_inodes: Iterable[tuple[int, int]] = (),
         allow_portable_fallback: bool = False,
     ) -> None:
+        if not _osflags.DIR_FD:
+            raise FileAccessUnavailable(
+                "RootedFileAccess confines through directory descriptors, which this platform "
+                "does not have; the portable fallback needs them too"
+            )
         if not _openat2.usable() and not allow_portable_fallback:
             raise FileAccessUnavailable(
                 "RootedFileAccess needs openat2 (Linux 5.6+); pass allow_portable_fallback=True "
