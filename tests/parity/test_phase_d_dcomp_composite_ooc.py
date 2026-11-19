@@ -409,19 +409,19 @@ def test_g6_timestamp_child_component_is_widened_to_nanoseconds_by_the_oracle_on
 
 
 @pytest.mark.parametrize("policy", [P, R])
-def test_g7_large_string_parent_component_keeps_its_width_out_of_core_only(
+def test_g7_large_string_parent_component_is_string_on_both_routes(
     policy: OrphanPolicy,
 ) -> None:
     shape = o.large_string_component_shape(policy)
     oracle, run = s.run_full(shape), o.run_ooc(shape)
-    assert o.strict(oracle, run) == {"P": _WIDTH_DIMS, "C": o.METADATA_ONLY}
+    assert o.strict(oracle, run) == {"P": o.METADATA_ONLY, "C": o.METADATA_ONLY}
     assert o.strict_modulo_pandas(oracle, run)["C"] == d.ALL_TRUE
-    assert _signatures(oracle, run, "P") == ("k:string,n:string", "k:string,n:large_string")
+    assert _signatures(oracle, run, "P") == ("k:string,n:string", "k:string,n:string")
     control = o.scalar_control_shape(
         policy, pa.large_string(), parent_n=["x", "y"], child_n=["x", "w"]
     )
     co, cr = s.run_full(control), o.run_ooc(control)
-    assert _signatures(co, cr, "P") == ("n:string", "n:large_string")
+    assert _signatures(co, cr, "P") == ("n:string", "n:string")
     assert _signatures(co, cr, "C") == ("n:string", "n:string")
 
 

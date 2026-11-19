@@ -1,0 +1,9 @@
+{
+ "sentry_id": "dir-fd-readers",
+ "created_in": "EW1",
+ "entries": {
+  "decoy_engine/fileaccess/_rooted.py": {
+   "reason": "EW1 capability probe reader: this module may read _osflags.DIR_FD; may only shrink"
+  }
+ }
+}

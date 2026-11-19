@@ -197,6 +197,14 @@ eight identities, only the `rules` field and only this exact old and new value. 
 still fails. `REGISTRY_VERSION` stays `1.29.0`, so a consumer that keys on the outcome or retry of these codes sees
 the new values under the same registry version until the next release recaptures the pin.
 
+**Pre-GA corrections taken with the freeze batch (X0, 2026-11-18).** The engine gets a third tier. Section 3.4
+froze `__init__.py` and `sdk.py` whole, so every name in `sdk.py` was frozen by default. Section 3.6 moves these names to
+experimental: the connector SDK objects defined in `decoy_engine.sdk` and their root re-exports, the `CAP_*` flags and
+`SDK_VERSION`, and the six provider registration functions. `ConfigError` and `ConnectorError` stay frozen because
+`sdk` only re-exports them from `errors`. No name is removed or renamed. A public subpackage that section 3.4 does not
+name now defaults to documented internal. Later slices of the batch add their own lines here: the `FormulaStrategy`
+base removal, the public renames, and the `when:`, compressed-CSV and pass-through output changes.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
@@ -602,6 +610,19 @@ No `SEED_PROTOCOL_VERSION` change.
 
 ### 3.4 The public API + CLI contract
 
+- **Pass-through text width (O3, 2026-11):** a pass-through `large_string` column leaves
+  every route as `string` when its values fit 32-bit offsets, and as `large_string` after
+  one value that cannot fit. Each batch is judged from its own offsets: a batch whose total
+  exceeds the limit is split at row boundaries into ordered `string` slices, and the source is
+  never pre-scanned or reread. A value that cannot fit promotes the column to `large_string`
+  for the rest of the run: the CSV writer keeps the value, and resident output widens its
+  earlier chunks. Parquet cannot store a single value of 2 GiB or more on any head: the raw
+  writer raises `ArrowInvalid` and a strict file-access write raises `FileAccessReadError`.
+  O3 adds no earlier refusal. A sink whose writer schema is fixed before the first batch
+  keeps the source `large_string` field, byte-equal to the previous release: the out-of-core
+  sink, the streamed `run_auto_chunk` sink and any `TransactionalSink`. Narrowing to `string`
+  applies to resident results, `run_mask_chunked` chunks, whole-frame output and CSV.
+
 - **Python:** the symbols re-exported from `decoy_engine/__init__.py` and
   `decoy_engine/sdk.py`, with their signatures and output-affecting defaults.
   As of 2026-09-30 this includes `read_fixed_width` and `FixedWidthParseError`
@@ -667,7 +688,9 @@ No `SEED_PROTOCOL_VERSION` change.
   nullable integer above 2^53, comes back exact; a read passthrough column that
   pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
   or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
-  string-redact and native-admissible deterministic categorical columns, the source type for passthrough), no pandas
+  string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
+  that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
+  "Pass-through text width" in §3.4), no pandas
   metadata on yielded chunks, and identical validation on both routes. A column
   that is `null`-typed in the first chunk and typed in a later one raises
   `chunked_leading_null_type` on both routes. Its error codes are
@@ -853,6 +876,17 @@ No `SEED_PROTOCOL_VERSION` change.
   dispatcher's contract (passthrough columns are the source column exactly, string-output
   columns are `string`, no schema metadata) and may differ from the full-frame and
   unified-slice routes. Converging those routes is roadmap item ROUTE-OUTPUT-CONTRACT.
+  Output Parquet key/value metadata (OUTPUT-METADATA-LEAK, 2026-11-19): on every route, a
+  published Parquet file carries no field metadata at any depth (this ends "passthrough
+  field metadata kept"), writes an extension-type column as its storage type (except
+  `arrow.uuid`, `arrow.bool8`, `arrow.json` and the pandas period and interval types) and
+  carries one schema key at most, `b"pandas"`, rebuilt from the output schema
+  (see `docs/security/output-metadata.md`). The schema metadata difference between routes
+  narrows to "a sanitized pandas blob or none". Output bytes change only for a source with
+  custom metadata, `attrs`, field metadata, a column-index name or a range index; masked
+  values, column names, other Arrow types, nullability and row-group layout do not change. The
+  public names `output_schema` and `output_table` are additive. In-memory results returned
+  to a caller are outside this promise.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now
@@ -1036,6 +1070,8 @@ staging or spawn, and the child `run_pipeline` rechecks. The refusals are `sourc
 position and a count, never a column) and `source_file.undeclared_table`.
 `DeclarationRequest.for_validate` is the offline form for `decoy validate`: it reads only local file headers, never opens an `s3`, `gcs` or other non-file source, and names those sources in `remote_sources` so the caller can report them as not checked (additive, 2026-11-16, QA-GATE G-eng).
 
+`DeclarationRequest.for_scan(config, tables=None)` is the scan form (additive, SCAN-MULTI E-S1c, 2026-11-19). It reads `sources`, `relationships` and `version` of a sources-only file or a full pipeline, checks the inputs with the one `scan_sources` validator and opens no data file. A `column_names_file` is read once. `scan_sources` takes the additive keyword `relationship_positions`. The capability's `scan_declaration` property is a frozen `ScanDeclaration`; on a capability from any other request it raises `TypeError`.
+
 **Declaration gate on the chunked entries (CONFIG-EXPLICIT E2d).** `run_mask_pipeline_chunked`,
 `run_mask_chunked` and `run_native_or_oracle_chunked` call `prepare_declared_sources`
 (`DeclarationRequest.for_chunks`) after the subset refusal and before `chunks` is touched, then
@@ -1095,6 +1131,69 @@ bundle set.
 
 **Rule:** **never edit a released disguise version.** Add a new dated version.
 Review enforces this until a test does; do not "fix" a shipped disguise in place.
+
+### 3.6 Experimental surfaces
+
+Every public engine name has one of three tiers. **Frozen** names follow sections 3.1 to 3.5 and section 4. An
+**experimental** name may change or be removed in any minor release; the change gets a `Changed` or `Removed`
+changelog fragment that starts with "Experimental:", and no deprecation window is promised. **Internal** names may
+change in any release. The registry is `src/decoy_engine/contracts/stability.py`, and
+`tests/sentry/release/test_public_census.py` gives every exported name exactly one tier.
+
+- Section 3.4 freezes `decoy_engine/__init__.py` and `decoy_engine/sdk.py` whole, plus the subpackage names it lists
+  one by one. A public subpackage that section 3.4 does not name defaults to internal, unless one of its objects
+  is exported by a frozen path or the registry lists the name as frozen or experimental. No name is unclassified:
+  each export matches one explicit registry row or one package rule.
+  Inside a subpackage that section 3.4 names, a name it does not list is internal too (for example
+  `detection.load_detectors`).
+- The tier belongs to the object and applies to every path that exports it. A constant is matched by its name and
+  its object identity, so `SEED_PROTOCOL_VERSION` has one tier wherever it is exported. Only the paths that section
+  3.4 names are a stability promise. Another path to a frozen object, such as `decoy_engine.execution.ExecutionResult`,
+  is an internal import path to a frozen object: the object does not change incompatibly, but the path may move.
+  `decoy_engine.FileSource` and `decoy_engine.sdk.FileSource` are one experimental object; `sdk.ConfigError` and
+  `sdk.ConnectorError` are the frozen `errors` objects.
+- Everything `sdk.py` defines is experimental: each class or function whose `__module__` is `decoy_engine.sdk`, and
+  each constant assigned there, so a new `sdk` name starts experimental. The Faker provider registration functions
+  live elsewhere and are listed in the registry by identity.
+- Determinism is never experimental. Output bytes made through an experimental surface (a custom provider's values,
+  a connector's rows once masked) follow section 3.3. Stored records are frozen whatever the tier of the code that
+  wrote them.
+- An experimental class or function starts its docstring with `Experimental:`. An experimental constant has no
+  docstring, so the docstring of its module starts with the marker and names it. The documentation page for an
+  experimental surface carries the marker in its first paragraph. A sentry checks the marker against the registry
+  both ways.
+- A public package that needs an optional extra may fail to import only for that extra. The census then reads its
+  declared names from source and fails on any other import error, on an `__all__` it cannot read, and on a public
+  package without `__all__` that is not on the registry's counted list. The census floors are 59 packages and
+  1,186 names.
+- An experimental surface becomes frozen by moving its registry row and dropping the marker in a minor release. A
+  frozen name never goes back to experimental inside a major.
+
+The experimental names at 1.0, one per line (the sentry compares this list with the registry):
+
+```text
+CAP_DRY_RUN
+CAP_INTROSPECTION
+CAP_MULTIPART
+CAP_RESUMABLE
+CAP_SIGNED_URL
+CAP_STREAMING
+CheckResult
+ConnectorConfig
+FileMeta
+FileSink
+FileSource
+PermanentError
+SDK_VERSION
+TransientError
+WriteResult
+atomic_swap_db_providers
+load_custom_providers
+register_faker_list_provider
+register_faker_provider
+register_faker_provider_v2
+unregister_faker_provider
+```
 
 ## 4. The rules for adding a feature without breaking anyone
 

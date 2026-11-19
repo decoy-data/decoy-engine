@@ -13,13 +13,14 @@ import os
 import secrets
 from pathlib import Path
 
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._output import _call, _close, make_parent_dir_at, make_stage_dir_at
 
 
 def _open_dir(directory: Path) -> int:
     """Open an existing directory by path, following links as the ambient policy always has.
     A failure keeps only its errno: the stock text names the path."""
-    return _call(os.open, directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    return _call(os.open, directory, _osflags.RDONLY | _osflags.DIRECTORY | _osflags.CLOEXEC)
 
 
 def _open_dir_creating(directory: Path, created: list[str] | None = None) -> int:

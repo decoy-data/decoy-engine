@@ -158,3 +158,43 @@ baseline = "tests/sentry/baselines/post-scan-route-coverage.json"
 [[sentry]]
 id = "strategy-docs-agree"
 baseline = "tests/sentry/baselines/strategy-docs-agree.json"
+
+[[sentry]]
+id = "win32-import-surface"
+baseline = "tests/sentry/baselines/win32-import-surface.json"
+
+[[sentry]]
+id = "platform-census"
+baseline = "tests/sentry/baselines/platform-census.json"
+
+[[sentry]]
+id = "dir-fd-readers"
+baseline = "tests/sentry/baselines/dir-fd-readers.json"
+
+[[sentry]]
+id = "physical-seam-scoped"
+baseline = "tests/sentry/baselines/physical-seam-scoped.json"
+
+[[sentry]]
+id = "ci-write-scopes"
+baseline = "tests/sentry/baselines/ci-write-scopes.json"
+
+[[sentry]]
+id = "canonical-json-choke-point"
+baseline = "tests/sentry/baselines/canonical-json-choke-point.json"
+
+[[sentry]]
+id = "ner-mismatch-single-site"
+baseline = "tests/sentry/baselines/ner-mismatch-single-site.json"
+
+[[sentry]]
+id = "validation-route-allowlist"
+baseline = "tests/sentry/baselines/validation-route-allowlist.json"
+
+[[sentry]]
+id = "snapshot-parse-single-owner"
+baseline = "tests/sentry/baselines/snapshot-parse-single-owner.json"
+
+[[sentry]]
+id = "parquet-intermediate-writers"
+baseline = "tests/sentry/baselines/parquet-intermediate-writers.json"

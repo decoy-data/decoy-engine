@@ -30,7 +30,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
 import pandas as pd
 from pydantic import TypeAdapter
@@ -148,6 +148,7 @@ def scan_sources(
     sample_rows: int | None = 10_000,
     strategy: Strategy = "head",
     relationships: Sequence[Mapping[str, Any]] = (),
+    relationship_positions: Sequence[int] | None = None,
     integrity: bool = True,
     spill_dir: Path | None = None,
     file_access: FileAccess | None = None,
@@ -165,6 +166,8 @@ def scan_sources(
     key, null and orphan counts (`RelationshipFacts`), read from key columns only and spilled to
     a protected directory under `spill_dir` (default: the system temp directory). The tables
     they name must be in `sources` but need not be selected. Nothing is inferred.
+    `relationship_positions` gives each entry's place in the caller's own file, so a refusal
+    names that place (default: 1, 2, ... in the order given).
 
     `pre_scan` adds model detectors to the regex ones (`None`: regex only). They load strictly,
     once, before the first table; an unavailable model raises `ModelUnavailableError` first.
@@ -177,15 +180,12 @@ def scan_sources(
         isinstance(sample_rows, bool) or not isinstance(sample_rows, int) or sample_rows < 1
     ):
         raise PipelineConfigError("sample_rows must be a positive integer or None")
-    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
-    selected = list(descriptors) if tables is None else list(tables)
-    if repeated_names(selected):
-        raise PipelineConfigError("tables selects the same table more than once")
-    unknown = [t for t in selected if t not in descriptors]
-    if unknown:
-        raise PipelineConfigError("tables names a table that is not in sources")
-
-    declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
+    descriptors, selected, declared, _ = validate_scan_inputs(
+        sources,
+        tables,
+        relationships if integrity else (),
+        positions=relationship_positions if integrity else None,
+    )
 
     models, runs = load_pre_scan(pre_scan, file_access)
 
@@ -211,6 +211,45 @@ def scan_sources(
         engine_version=__version__,
         scanned_at=datetime.now(timezone.utc).isoformat(),
         detectors=runs,
+    )
+
+
+class ScanInputs(NamedTuple):
+    """What `validate_scan_inputs` found: the validated descriptors, the selected names in
+    order, the declared relationships and the count of full-pipeline relationships set aside."""
+
+    descriptors: dict[str, dict[str, Any]]
+    selected: list[str]
+    declared: tuple[_scan_integrity.DeclaredRelationship, ...]
+    unchecked: int = 0
+
+
+def validate_scan_inputs(
+    sources: Mapping[str, Mapping[str, Any]],
+    tables: Sequence[str] | None,
+    relationships: Sequence[Mapping[str, Any]],
+    *,
+    positions: Sequence[int] | None = None,
+    full_pipeline: bool = False,
+) -> ScanInputs:
+    """The one check of a scan's inputs: every descriptor, the `tables` selection and the
+    declared relationships. Reads no data.
+
+    `full_pipeline` is for a config that is a whole pipeline: a relationship with a generate
+    end (a table not in `sources`) is counted in `unchecked`, not refused, and positions are
+    the entries' own. Otherwise every relationship must name sources; `positions` renumbers."""
+    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
+    selected = list(descriptors) if tables is None else list(tables)
+    if repeated_names(selected):
+        raise PipelineConfigError("tables selects the same table more than once")
+    unknown = [t for t in selected if t not in descriptors]
+    if unknown:
+        raise PipelineConfigError("tables names a table that is not in sources")
+    if full_pipeline:
+        declared, unchecked = _scan_integrity.declare_pipeline(descriptors, relationships)
+        return ScanInputs(descriptors, selected, declared, unchecked)
+    return ScanInputs(
+        descriptors, selected, _scan_integrity.declare(descriptors, relationships, positions)
     )
 
 

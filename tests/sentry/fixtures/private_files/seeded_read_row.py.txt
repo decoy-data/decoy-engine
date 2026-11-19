@@ -1,6 +1,8 @@
 # Seeded corpus: a row marked `read` whose call writes (P1), directly and through `_call`.
 import os
 
+from decoy_engine.fileaccess import _osflags
+
 
 def _call(fn, *args, **kwargs):
     return fn(*args, **kwargs)
@@ -16,3 +18,11 @@ def wrapped_write(target):
 
 def wrapped_read(target):
     return _call(os.open, target, os.O_RDONLY | os.O_DIRECTORY)
+
+
+def osflags_write(target):
+    return os.open(target, _osflags.WRONLY | _osflags.CREAT)
+
+
+def osflags_read(target):
+    return os.open(target, _osflags.RDONLY | _osflags.DIRECTORY)
