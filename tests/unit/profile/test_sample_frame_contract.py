@@ -339,3 +339,21 @@ def test_at0d_profile_source_sees_the_requested_rows(env: Env, kind: str) -> Non
     table = profile_source(_profile_config(kind)).tables[0]
     assert all(c.sampled and not c.is_candidate_key_sampled for c in table.columns)
     assert {c.name: c.distinct_count for c in table.columns}["id"] == 10_000
+
+
+# Row n + 1 proves the end of the source but never feeds the sample's type inference.
+_LATE_CELLS = {"text_after_ints": "outside", "empty_after_ints": ""}
+
+
+def _typed_csv(late: str, n: int = 10) -> bytes:
+    rows = [f"{i},{i}" for i in range(1, n + 1)] + [f"{n + 1},{late}"]
+    return ("id,v\n" + "\n".join(rows) + "\n").encode()
+
+
+@pytest.mark.parametrize("kind", ["s3", "gcs"])
+@pytest.mark.parametrize("late", sorted(_LATE_CELLS))
+def test_cloud_csv_sample_dtype_ignores_row_n_plus_1(env: Env, kind: str, late: str) -> None:
+    make = _s3 if kind == "s3" else _gcs_source
+    frame = make(env, _typed_csv(_LATE_CELLS[late]), "csv").sample_frame(10)
+    assert len(frame) == 10
+    assert str(frame["v"].dtype) == "int64"

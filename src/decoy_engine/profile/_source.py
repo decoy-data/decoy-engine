@@ -246,17 +246,15 @@ def _profile_one_source(
         effective_sample_rows = sample_rows
 
     row_count = reader.row_count()
-    # An estimated row count (CSV) can undershoot the sample, so ask for one row
-    # past the cap: under the `sample_frame` contract a read that returns more than
-    # the cap proves the source holds more rows. An exact count already says so,
-    # and keeps the read at the cap.
-    probe = 0 if row_count.exact else 1
-    sample_df = reader.sample_frame(effective_sample_rows + probe)
-    if len(sample_df) > effective_sample_rows:
-        sample_df = sample_df.head(effective_sample_rows)
-        proven_total = effective_sample_rows + 1
-    else:
-        proven_total = len(sample_df)
+    # The profiled frame is parsed from exactly the cap, so no later row can change a
+    # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
+    # when the cap is filled a second read asks for one row more. That frame is only
+    # counted, never profiled. An exact count already says the source is larger.
+    sample_df = reader.sample_frame(effective_sample_rows)
+    proven_total = len(sample_df)
+    if not row_count.exact and proven_total == effective_sample_rows:
+        if len(reader.sample_frame(effective_sample_rows + 1)) > effective_sample_rows:
+            proven_total = effective_sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts

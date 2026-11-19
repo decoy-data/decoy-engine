@@ -179,8 +179,13 @@ def _csv_rows_from_ranges(
             if whole:
                 raise
         else:
-            if whole or len(frame) > n:
-                return frame.iloc[:n]
+            if len(frame) <= n:
+                if whole:
+                    return frame
+            else:
+                # Row `n + 1` only proved row `n` complete; the sample is parsed again from
+                # `n` rows so that row cannot change a column's inferred type.
+                return _csv_sample_from_window(buffer, size, n, lexeme_columns)
         window *= 2
 
 
