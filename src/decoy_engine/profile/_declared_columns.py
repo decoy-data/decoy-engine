@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
 from decoy_engine.config import PipelineConfig, PipelineConfigError
+from decoy_engine.config._csv_dialect import CsvDialect
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect, source_refusal
 from decoy_engine.profile._readers import build_declared_source
@@ -247,6 +248,8 @@ def _run_schemas(
 # Keys a sources-only scan file may carry; any other `PipelineConfig` field marks a full pipeline.
 _SCAN_KEYS = frozenset({"sources", "relationships", "version"})
 _PIPELINE_ONLY = frozenset(PipelineConfig.model_fields) - _SCAN_KEYS
+# What a resolved dialect writes back into a descriptor: its own fields and the names file.
+_DIALECT_KEYS = frozenset({*(f.name for f in dataclasses.fields(CsvDialect)), "column_names_file"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -313,18 +316,27 @@ def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -
     )
 
 
+def _csv_inline(name: str, descriptor: Mapping[str, Any], file_access: FileAccess | None) -> Any:
+    """A CSV descriptor rewritten from its resolved dialect: a `column_names_file` is read here
+    and its names written inline, the same dialect. Any other descriptor is returned as it is."""
+    if descriptor.get("type") != "file" or descriptor.get("format") != "csv":
+        return descriptor
+    dialect = resolve_csv_dialect(descriptor, table=name, file_access=file_access)
+    resolved = {k: v for k, v in dataclasses.asdict(dialect).items() if v is not None}
+    kept = {k: v for k, v in descriptor.items() if k not in _DIALECT_KEYS}
+    return (
+        kept
+        | resolved
+        | ({"column_names": list(dialect.column_names)} if dialect.column_names else {})
+    )
+
+
 def _inline_names(scan: ScanDeclaration, file_access: FileAccess | None) -> ScanDeclaration:
-    """`scan` with each `column_names_file` read once and inlined; no data file is opened."""
+    """`scan` with each CSV dialect resolved once under the bound file access; no data file is
+    opened, and the scan never reads a names file again."""
     from decoy_engine.profiling.scan_set import validate_scan_inputs
 
-    sources: dict[str, dict[str, Any]] = {}
-    for name, descriptor in scan.descriptors.items():
-        source = dict(descriptor)
-        if source.get("column_names_file") is not None:
-            dialect = resolve_csv_dialect(source, table=name, file_access=file_access)
-            del source["column_names_file"]
-            source.update(has_header=False, column_names=list(dialect.column_names or ()))
-        sources[name] = source
+    sources = {n: _csv_inline(n, d, file_access) for n, d in scan.descriptors.items()}
     descriptors, _, _ = validate_scan_inputs(sources, scan.tables, scan.relationships)
     return dataclasses.replace(scan, descriptors=_frozen_descriptors(descriptors))
 
