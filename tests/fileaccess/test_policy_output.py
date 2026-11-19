@@ -115,8 +115,20 @@ def test_context_manager_aborts_unless_published(rooted: RootedFileAccess, root_
 def test_publish_and_abort_close_every_descriptor_they_opened(
     rooted: RootedFileAccess, root_dir: Path
 ) -> None:
-    def fds() -> int:
-        return len(os.listdir("/proc/self/fd"))
+    import gc
+
+    def fds() -> dict[str, str]:
+        # Descriptor number -> target, after a collection. An earlier test in the same xdist
+        # worker can leave an unreferenced file object whose descriptor the collector frees
+        # at any allocation, so a bare count drops by one at a random point.
+        gc.collect()
+        table = {}
+        for name in os.listdir("/proc/self/fd"):
+            try:
+                table[name] = os.readlink(f"/proc/self/fd/{name}")
+            except OSError:  # the listing's own descriptor is already closed
+                pass
+        return table
 
     out = _out(rooted)
     baseline = fds()
