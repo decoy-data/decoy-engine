@@ -109,6 +109,13 @@ def test_at7_profile_columns_stamps_the_basis_and_the_document_keeps_it() -> Non
         assert list(profile.to_dict())[-1] == "basis"
 
 
+def test_at7_a_profile_built_without_a_basis_fails_closed_as_a_sample() -> None:
+    from decoy_engine.profiling.types import ColumnProfile
+
+    bare = ColumnProfile(source_label="t", row_count=3, sample_strategy="head")
+    assert bare.basis == "sample" and claim_keys(bare) == ()
+
+
 def test_read_basis_is_one_rule() -> None:
     assert read_basis("full", 10, False) == "whole"
     assert read_basis("head", None, False) == "whole"
