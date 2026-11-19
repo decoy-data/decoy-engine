@@ -32,6 +32,12 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.1", "`decoy_engine.validation.finding_review` adds `finding_edits"): (
+        "new experimental names; the refusals named are their own and no 1.0 command calls them"
+    ),
+    ("0.28.1", "A table in `scan-set/v1` now has `basis` (`whole` or `sample"): (
+        "the Breaking bullet on `scan_sources` and `basis` covers it"
+    ),
     ("0.28.1", "Every open flag the engine uses now comes from one module, `"): (
         "Windows-only; the engine did not import there before, and POSIX behavior is unchanged"
     ),

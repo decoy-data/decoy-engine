@@ -13,7 +13,47 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ### Breaking for consumers
 
+- `scan_sources` no longer lists `key_candidates` for a sampled scan, and `scan-set/v1` tables and `profile_document` gain `basis` (and `scanned_rows` on the table).
+- a pass-through `large_string` column is now written as `string` (32-bit offsets) when its values fit; a value that cannot fit keeps `large_string`
 - published Parquet files no longer carry the source file's custom metadata, field metadata or pandas `attrs`, and extension-type columns (opaque, tensors, custom types) are written as their storage type
+
+### Changed (the multi-table split is decided with the route, NONFK-OOM S4a, 2026-11-19)
+
+`run_pipeline` now decides which mask tables of an independent multi-table job dispatch alone while it decides the route, and stores the result on `RouteDecision.split`. The executor reads it instead of deciding after the route is published. Output is unchanged.
+
+### Added (post-scan review: `finding_edits`, INIT-WIZARD E2, 2026-11-17)
+
+`decoy_engine.validation.finding_review` adds `finding_edits(config, report, decisions)`, with `FindingDecision`, `ConfigEdit`, `ReviewDismissRefusedError`, `ReviewIntegrityOffError` and `ReviewConflictError`. These names are experimental: no 1.0 command calls them, and they are outside the frozen surface. It reads a `post-scan-integrity` v2 or v3 report and returns the edits that carry out one decision per finding: at most one replacement entry per column, and one `post_scan.dismissed` entry per rejected finding, bound to the column's final strategy. Only a `warning` from a detector match (or a promoted NER finding) can be dismissed. The result does not depend on the order of the decisions. A relationship key column keeps its namespace and takes only a join-safe strategy. `decoy_engine.profiling` exports `detector_entry`. A dismissal needs `post_scan.integrity: true` in the config; without it the call refuses with `post_scan/review_integrity_off` and writes nothing. The edits are applied to a copy and validated before they are returned, and a report with two rows of one finding identity is refused. New reasons, pending: `post_scan/dismiss_refused`, `post_scan/review_conflict` and `post_scan/review_integrity_off`.
+
+### Fixed (package init back within its size budget, RED-MAIN-INIT, 2026-11-19)
+
+`decoy_engine/__init__.py` drops a redundant filename comment so it is back at 600 lines. No behavior change.
+
+### Changed (partial-read profiles are labelled samples, PROFILE-SAMPLE-LABELS E2, 2026-11-19)
+
+A first-chunk profile of a chunked mask run now marks every column `sampled` and sets no candidate-key flag, because the chunk is only the head of the source. `profile_source` on a CSV now reads one row past the sample size, so a file whose row estimate falls below the sample no longer reads as the whole table. Its columns are marked `sampled` and carry no key flag. The `profile_hash` of such a partial profile changes. The hash of a profile read to the end of its source does not change, and masked output does not change.
+
+### Changed (profile basis labels, PROFILE-SAMPLE-LABELS E1, 2026-11-19)
+
+A table in `scan-set/v1` now has `basis` (`whole` or `sample`) and `scanned_rows`, and a profile document has `basis`. `whole` means the read reached the end of the source; the head scan reads one row past the cap to prove it, and a head scan of a file with exactly the cap rows is `whole` with an exact `row_count`. `key_candidates` is empty on a `sample` basis, because a key needs counts over every row. The scan-set write model refuses a sampled key claim, and reading an older record (or an unknown basis) drops its stored key candidates. A record written before this change reads as `sample` with no `scanned_rows` and still exports. A `basis` value a later minor adds reads as `sample`.
+
+`ColumnProfile` gains a last field, `basis`, default `sample`. The scan-set read models are now derived by the one central deriver (`_value_free.derive_read`); the table row counts and basis are checked together on write and read.
+
+### Changed (PyNaCl is a base dependency, F09 E-DEP, 2026-11-19)
+
+The engine now requires `pynacl>=1.6.2,<2`. It was already in the lock through `paramiko` (the `sftp` extra). Nothing imports it yet; the vault v3 format uses it in a later change. The dev/CI lock profile has a new certified DP row, and `NOTICE` lists PyNaCl as a runtime package.
+
+### Added (starter-config review: `column_entry` and `apply_review`, INIT-WIZARD E1, 2026-11-17)
+
+`decoy_engine.validation.starter_review` exports `column_entry`, `apply_review`, `ReviewDecision`, `ReviewVerdict`, `SuggestionRef` and `ReviewInputError`. `column_entry` builds one column entry and checks it against `strategy_catalog` (strategy, option names, exact types, choices, required options, namespace). `apply_review` folds one verdict per column (`confirm`, `reject`, `edit`, `skip`, `drop`) into a new `StarterConfig`. `drop` removes the column and lists it in the table's one `drop_column` transform. A column of a declared relationship keeps that relationship's namespace, takes only a join-safe strategy and cannot be dropped.  `apply_review` is a declared file-access entry point (keyword-only `file_access` and `base_dir`), because it runs the profile-free plan checks. `ColumnSuggestion` gains `source`, `detector_id`, `model`, `band`, `confidence_bucket`, `entry` and `live` (all defaulted), and `StarterDecision` gains `detector_id` and `confidence_bucket`. `decoy_engine.profiling` exports `build_entry`, `check_starter_config`, `declared_key_namespaces`, `detector_entry` and `swap_placeholder_namespaces`. `decoy_engine.execution` re-exports `strategy_catalog`, `StrategyInfo` and `StrategyOption`. New reasons, pending: `pre_scan/review_unknown_column`, `pre_scan/review_duplicate`, `pre_scan/review_stale`, `pre_scan/review_empty_table`, `config/entry_invalid` and `config/key_column_not_join_safe`. These names are experimental: no 1.0 command calls them, and they are outside the frozen surface.
+
+### Added (scan declaration, ROW27-E-S1c, 2026-11-19)
+
+`DeclarationRequest.for_scan(config, tables=None)` turns a sources-only file or a full pipeline into the inputs of `scan_sources`, before any data row is read. `prepare_declared_sources` returns a `PreparedDeclaredSources` whose new `scan_declaration` property is a frozen `ScanDeclaration`: validated `descriptors`, the selected `tables`, the `relationships` to check, `relationship_positions` (each kept relationship's place in the file), `unchecked_relationships` (a count of full-pipeline relationships that touch a generate table) and `ignored_keys`. A `column_names_file` is read once and carried inline. `scan_sources` takes the new keyword `relationship_positions` so a refusal names the relationship's place in the user's file; without it the numbering is unchanged.
+
+### Changed (pass-through text width, FREEZE-O3, 2026-11-19)
+
+Pass-through text columns used to keep the source's `large_string` type on `run_mask_chunked` chunks and resident results, so a Parquet schema or Arrow consumer saw `large_string` where the whole-frame route wrote `string`. One width state per column now decides per batch from the offsets, without a source pre-scan: values that fit leave as `string`, a batch over the 32-bit limit is split by rows, and one value that cannot fit promotes the column to `large_string` for the rest of the run. A sink whose writer schema is fixed before the first batch (the out-of-core sink, the streamed `run_auto_chunk` sink, any `TransactionalSink`) keeps the source `large_string` field, byte-equal to the previous release. CSV text is unchanged. Parquet still cannot store a value of 2 GiB or more.
 
 ### Security (output Parquet metadata allow-list, OUTPUT-METADATA-LEAK E1, 2026-11-19)
 
@@ -55,7 +95,7 @@ Cloud CSV `profile_source` now profiles the requested 10,000 rows when available
 
 ### Fixed (DP certified row for the CLI runtime profile, CERT-ROW, 2026-11-19)
 
-The 0.28.0 release certified the CLI runtime profile from the 0.27.0 pin file, which lacks `joserfc` and `rfc8785`. Engine 0.28.0 needs both, so no real 0.28.0 install had a certified row and `fit_dp_snapshot` refused with `dp_stack_uncertified`. 0.28.1 adds the row for the 69-pin profile (the 0.27.0 closure plus `joserfc==1.7.7` and `rfc8785==0.1.4`). Every earlier row stays.
+The 0.28.0 release certified the CLI runtime profile from the 0.27.0 pin file, which lacks `joserfc` and `rfc8785`. Engine 0.28.0 needs both, so no real 0.28.0 install had a certified row and `fit_dp_snapshot` refused with `dp_stack_uncertified`. 0.28.1 adds the row for the 70-pin profile (the 0.27.0 closure plus `joserfc==1.7.7`, `rfc8785==0.1.4` and `pynacl==1.6.2`, which became a base dependency in this release). Every earlier row stays.
 
 Release prep now refuses a CLI pin file that leaves out any package of the engine's own base requirements closure in `uv.lock`, so a new engine dependency cannot be missed again.
 
