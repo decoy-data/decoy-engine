@@ -86,6 +86,12 @@ def test_derived_argument_grid_is_closed_and_bounded() -> None:
         {"date": "2000-01-01", "x": 1},
         {"when": "2000-01-01"},
         {"tuple": "ab"},
+        {"tz": "Europe/Paris"},
+        {"tz": 1},
+        {"callable": "os.system"},
+        {"class": "json.JSONEncoder"},
+        {"types": ["str", "object"]},
+        {"types": "str"},
         {"mapping": {1: 2}},
         {"mapping": {"a": {"when": 1}}},
         {"tuple": [{"tuple": [{"tuple": [{"tuple": [{"tuple": []}]}]}]}]},
@@ -111,6 +117,11 @@ def test_descriptor_codec_round_trips_every_tagged_form() -> None:
         {"datetime": "2001-03-04T05:06:07"},
         {"tuple": ["a", 1, {"date": "2001-03-04"}]},
         {"mapping": {"a": {"tuple": [1]}}},
+        {"tz": "utc"},
+        {"tz": "plus0530"},
+        {"callable": "int"},
+        {"class": "sorted_keys_encoder"},
+        {"types": ["str", "int"]},
     ):
         assert ag.descriptor_ok(d)
         assert ag.encode_descriptor(ag.decode_descriptor(d)) == d

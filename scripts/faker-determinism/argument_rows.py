@@ -108,13 +108,18 @@ def argumented_cells(
         runner = _RowRunner(locale, access, faker_mod)
         for case_id, row in derive_grid(access, [locale]).items():
             values: list[Any] = []
-            err = ""
-            try:
-                with _isolated_random():
-                    for seed in ARGUMENT_SEEDS:
+            errs: list[str] = []
+            # Each seed has its own boundary, so a seed-0 raise cannot skip seed 7.
+            for seed in ARGUMENT_SEEDS:
+                try:
+                    with _isolated_random():
                         values += runner.draw(row, seed)
-            except Exception as exc:
-                suffix = f"/{cls(exc.__cause__)}" if row["family"] == "adapter" else ""
-                err = f"raises:{cls(exc)}{suffix}"
+                except Exception as exc:
+                    suffix = f"/{cls(exc.__cause__)}" if row["family"] == "adapter" else ""
+                    errs.append(f"raises:{cls(exc)}{suffix}")
+                    values.append(errs[-1])
+            # Both seeds raised the same way: the stored cell is that error; a mixed outcome is
+            # digested with the error markers so either seed changing moves the cell.
+            err = errs[0] if len(errs) == len(ARGUMENT_SEEDS) and len(set(errs)) == 1 else ""
             cells[case_id] = {"draws": err or digest([norm(v) for v in values])}
     return cells

@@ -379,8 +379,7 @@ EXPECTED_CALENDAR: dict[tuple[str, str], Entry] = {
         "reflected.past_datetime.start_date_relative reflected.past_datetime.start_date_typed "
         "reflected.past_datetime.tzinfo_set "
         "reflected.unix_time.start_datetime_end_datetime_relative reflected.uuid1.cast_to_set "
-        "reflected.uuid7.cast_to_set reflected.xml.allowed_types_set "
-        "reflected.xml.nb_elements_set reflected.xml.value_types_set "
+        "reflected.uuid7.cast_to_set reflected.xml.nb_elements_set "
         "reflected.xml.variable_nb_elements_true ",
     ),
     ("argumented", "adapter.person_email.domain_set"): (("bg_BG",), ARG_CALENDAR_REASON),

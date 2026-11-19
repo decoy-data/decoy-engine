@@ -10,11 +10,37 @@ lock stores them in. Engine seams arrive as the `access` argument (`_engine_acce
 from __future__ import annotations
 
 import inspect
+import json
 import math
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+
+# Objects and types Faker accepts that no JSON scalar can carry. The wire format names an entry of
+# one of these fixed tables; it never imports, constructs or evaluates anything.
+_TZ_BY_NAME: dict[str, Any] = {
+    "utc": timezone.utc,
+    "plus0530": timezone(timedelta(hours=5, minutes=30)),
+}
+_CALLABLE_BY_NAME: dict[str, Any] = {"str": str, "int": int, "float": float}
+_TYPE_BY_NAME: dict[str, Any] = {"bool": bool, "int": int, "float": float, "str": str}
+
+
+class _SortedKeysEncoder(json.JSONEncoder):
+    """A named `cls` representative whose output differs from the default encoder's."""
+
+    def __init__(self, **kw: Any) -> None:
+        kw["sort_keys"] = True
+        super().__init__(**kw)
+
+
+_CLASS_BY_NAME: dict[str, Any] = {"sorted_keys_encoder": _SortedKeysEncoder}
+_NAMED_TABLES: dict[str, dict[str, Any]] = {
+    "tz": _TZ_BY_NAME,
+    "callable": _CALLABLE_BY_NAME,
+    "class": _CLASS_BY_NAME,
+}
 
 FAMILIES = ("reflected", "address_override", "adapter", "formula")
 ARGUMENT_SEEDS = (0, 7)
@@ -56,6 +82,10 @@ def descriptor_ok(d: object, depth: int = 0) -> bool:
             and _DATETIME_RE.fullmatch(body) is not None
             and _parses(datetime, body)
         )
+    if tag in _NAMED_TABLES:
+        return type(body) is str and body in _NAMED_TABLES[tag]
+    if tag == "types":
+        return type(body) is list and all(type(x) is str and x in _TYPE_BY_NAME for x in body)
     if tag == "tuple":
         return type(body) is list and all(descriptor_ok(x, depth + 1) for x in body)
     if tag == "mapping":
@@ -83,6 +113,10 @@ def decode_descriptor(d: Any) -> Any:
         return date.fromisoformat(body)
     if tag == "datetime":
         return datetime.fromisoformat(body)
+    if tag in _NAMED_TABLES:
+        return _NAMED_TABLES[tag][body]
+    if tag == "types":
+        return tuple(_TYPE_BY_NAME[x] for x in body)
     if tag == "tuple":
         return tuple(decode_descriptor(x) for x in body)
     return {k: decode_descriptor(v) for k, v in body.items()}
@@ -95,6 +129,12 @@ def encode_descriptor(value: Any) -> Any:
         return {"datetime": value.isoformat(timespec="seconds")}
     if isinstance(value, date):
         return {"date": value.isoformat()}
+    for tag, table in _NAMED_TABLES.items():
+        for name, obj in table.items():
+            if value is obj or (tag == "tz" and isinstance(value, timezone) and value == obj):
+                return {tag: name}
+    if isinstance(value, tuple) and value and all(x in _TYPE_BY_NAME.values() for x in value):
+        return {"types": [next(n for n, t in _TYPE_BY_NAME.items() if t is x) for x in value]}
     if isinstance(value, tuple):
         return {"tuple": [encode_descriptor(x) for x in value]}
     if isinstance(value, dict):
@@ -120,7 +160,7 @@ def arguments_ok(v: object) -> bool:
 # table. A name missing here fails discovery, so a new parameter is a reviewed edit.
 # fmt: off
 PARAMETER_KIND_BY_NAME: dict[str, str] = {
-    "tzinfo": "none", "cast_to": "none", "cls": "none", "card_type": "str",
+    "tzinfo": "tz", "cast_to": "callable", "cls": "class", "card_type": "str",
     "ext_word_list": "seq", "header": "seq", "schemes": "seq", "data_columns": "seq",
     "hue": "str", "luminosity": "str", "gender": "str", "category": "str", "domain": "str",
     "state_abbr": "str", "province_abbr": "str", "region_name": "str", "address_class": "str",
@@ -132,8 +172,8 @@ PARAMETER_KIND_BY_NAME: dict[str, str] = {
     "leading_zero": "bool", "birthdate": "date", "end_datetime": "datetime",
     "start_datetime": "datetime", "date_start": "date", "date_end": "date",
     "datetime_start": "date", "datetime_end": "date", "min_chars": "int", "digits": "int",
-    "min": "int", "max": "int", "use_weighting": "bool", "value": "str", "value_types": "none",
-    "allowed_types": "none", "province_prefix": "str", "bank_code": "int", "dob": "str",
+    "min": "int", "max": "int", "use_weighting": "bool", "value": "str", "value_types": "types",
+    "allowed_types": "types", "province_prefix": "str", "bank_code": "int", "dob": "str",
     "date_of_birth": "datetime", "sex": "str", "pesel": "str", "x": "seq", "birthday": "str",
 }
 # fmt: on
@@ -165,7 +205,9 @@ _DATE_REP = {
 class Param:
     name: str
     kind: str  # the inspect kind name
-    shape: str  # bool, int, float, str, seq, map, date, datetime or none
+    shape: (
+        str  # bool, int, float, str, seq, map, date, datetime, tz, callable, class, types or none
+    )
     default_is: str  # the default's type name ("" when it has none)
 
 
@@ -202,7 +244,7 @@ def _shape(p: inspect.Parameter) -> str:
             if isinstance(d, typ):
                 return shape
         if callable(d):
-            return "none"
+            return PARAMETER_KIND_BY_NAME.get(p.name, "none")
     if p.name in PARAMETER_KIND_BY_NAME:
         return PARAMETER_KIND_BY_NAME[p.name]
     raise OutputLockError(f"parameter {p.name!r} has no entry in PARAMETER_KIND_BY_NAME")
@@ -296,6 +338,14 @@ def _scalar_rep(p: Param) -> Any:
         return "-30d"
     if p.shape == "datetime":
         return {"datetime": "2001-03-04T05:06:07"}
+    if p.shape == "tz":
+        return {"tz": "plus0530"}
+    if p.shape == "callable":
+        return {"callable": "int"}
+    if p.shape == "class":
+        return {"class": "sorted_keys_encoder"}
+    if p.shape == "types":
+        return {"types": ["str", "int"]}
     return None
 
 

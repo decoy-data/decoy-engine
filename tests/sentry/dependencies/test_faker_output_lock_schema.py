@@ -78,6 +78,8 @@ def test_every_stored_field_refuses_wrong_types(path: tuple[Any, ...]) -> None:
         lambda d: d.update(samples=8.0),
         lambda d: d.update(samples="8"),
         lambda d: d.update(clocks=["a", 1]),
+        lambda d: d.update(clocks=["2026-10-16T12:00:00Z", "2030-01-17T12:00:00Z"]),
+        lambda d: d.update(clocks=["2030-01-16T12:00:00Z", "2026-10-16T12:00:00Z"]),
         lambda d: d.update(argument_samples=3),
         lambda d: d.update(argument_samples=2.0),
         lambda d: d["argument_grid"]["reflected.random_int.min_max_equal"].update(family="nope"),

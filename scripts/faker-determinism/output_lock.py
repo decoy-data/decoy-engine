@@ -365,9 +365,7 @@ def check_lock_shape(doc: object) -> list[str]:
     fv = doc.get("faker_version")
     need(type(fv) is str and re.fullmatch(r"\d+\.\d+\.\d+", fv) is not None, "faker_version")
     clocks = doc.get("clocks")
-    need(
-        type(clocks) is list and len(clocks) == 2 and all(type(c) is str for c in clocks), "clocks"
-    )
+    need(clocks == [CLOCK_A, CLOCK_B], "clocks")
     grid = doc.get("argument_grid")
     if need(isinstance(grid, dict), "argument_grid") and isinstance(grid, dict):
         for case_id, row in grid.items():

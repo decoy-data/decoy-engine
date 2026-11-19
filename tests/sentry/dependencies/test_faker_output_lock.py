@@ -394,6 +394,23 @@ _DATE_BETWEEN_POSITIONAL = (
     "    return out.replace(year=out.year - 1) if a else out\n"
     "P.date_between = _w\n"
 )
+
+
+def _non_none_only(module: str, method: str, param: str, tail: str) -> str:
+    """A stub that changes `method`'s output only when `param` is not None (an object or type
+    argument a no-argument or `None` row cannot reach)."""
+    return (
+        "import functools, datetime\n"
+        f"from faker.providers.{module} import Provider as P\n"
+        f"_o = P.{method}\n"
+        "@functools.wraps(_o)\n"
+        "def _w(self, *a, **k):\n"
+        "    out = _o(self, *a, **k)\n"
+        f"    return {tail} if k.get({param!r}) is not None else out\n"
+        f"P.{method} = _w\n"
+    )
+
+
 _STUBS = {
     "reflected_random_int": (_RANDOM_INT, "reflected.random_int.min_max_equal"),
     "address_override_drops_keys": (
@@ -402,6 +419,22 @@ _STUBS = {
     ),
     "adapter_extra": (_ADAPTER_EXTRA, "adapter.random_int_range.min_max_equal"),
     "formula_positional": (_DATE_BETWEEN_POSITIONAL, "formula.date_between.positional_"),
+    "tzinfo_only": (
+        _non_none_only("date_time", "date_time", "tzinfo", "out - datetime.timedelta(days=366)"),
+        "reflected.date_time.tzinfo_set",
+    ),
+    "cast_to_only": (
+        _non_none_only("misc", "uuid4", "cast_to", "str(out) + 'x'"),
+        "reflected.uuid4.cast_to_set",
+    ),
+    "cls_only": (
+        _non_none_only("misc", "json", "cls", "str(out) + ' '"),
+        "reflected.json.cls_set",
+    ),
+    "value_types_only": (
+        _non_none_only("misc", "xml", "value_types", "str(out) + ' '"),
+        "reflected.xml.value_types_set",
+    ),
 }
 
 
@@ -440,7 +473,9 @@ def test_argument_only_changes_are_locked(
 @pytest.mark.faker_output_lock
 @pytest.mark.timeout(180)
 def test_decade_relative_case_crosses_clock_boundary() -> None:
-    assert output_lock.CLOCK_A.startswith("2026-10-") and output_lock.CLOCK_B.startswith("2030-01-")
+    # The exact instants plan AT-L2 names: the same day and time, across month, year and decade.
+    assert output_lock.CLOCK_A == "2026-10-16T12:00:00Z"
+    assert output_lock.CLOCK_B == "2030-01-16T12:00:00Z"
     cells = output_lock.capture(locales=["en_US"])["en_US"]["argumented"]
     for helper in ("date_this_decade", "date_this_year", "date_this_month"):
         assert cells[f"formula.{helper}.after_today_true"]["calendar"] is True, helper
