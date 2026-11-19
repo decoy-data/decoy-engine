@@ -5,8 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from decoy_engine.generation.copula._marginals import numeric_inverse
-from decoy_engine.generation.copula._model import KIND_NUMERIC, ColumnMarginal
+from decoy_engine.generation.copula._marginals import intervals_for, numeric_inverse
+from decoy_engine.generation.copula._model import (
+    KIND_CATEGORICAL,
+    KIND_NUMERIC,
+    ROLE_NULL,
+    ROLE_STATE,
+    ColumnMarginal,
+)
 from decoy_engine.generation.copula._normal import ndtri
 from decoy_engine.generation.copula._rng import raw_to_uniform
 
@@ -65,3 +71,24 @@ def test_integer_draws_stay_in_their_bin_and_cover_it() -> None:
         2,
         3,
     ]  # the first bin is [1, 2): an integer edge belongs to the next
+
+
+def test_every_state_takes_its_snapshot_share() -> None:
+    # Null sits between two labels here, so a wrong null share would move every state after it.
+    column = ColumnMarginal(
+        "c", KIND_CATEGORICAL, "object", 30, 170, top_values=(("a", 100), ("b", 20)), other_count=50
+    )
+    states = intervals_for(column, ROLE_STATE)
+    assert [(s.kind, s.label, w) for s, w in zip(states.states, states.width, strict=True)] == [
+        ("label", "a", 0.5),
+        ("null", "", 0.15),
+        ("label", "b", 0.1),
+        ("other", "", 0.25),
+    ]
+    assert states.lower.tolist() == pytest.approx([0.0, 0.5, 0.65, 0.75])
+    assert states.other_share == 0.25
+    null = intervals_for(column, ROLE_NULL)
+    assert [(s.kind, w) for s, w in zip(null.states, null.width, strict=True)] == [
+        ("present", 0.85),
+        ("null", 0.15),
+    ]
