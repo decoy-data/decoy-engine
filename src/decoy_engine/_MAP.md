@@ -19,7 +19,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `run_result/` | The `decoy-run-result/v1` run record: write and read models, value-free types, `derive_outcome`, `_project.py` (`project_tables`, the per-table projection) |
 | `records/` | The local record library's engine side: `decoy-record/v1` envelope, `build`/`encode`/`decode`, the kind registry, canonical form and ids, the `decoy-library-export/v1` codec, the `decoy-job-log/v1` header and reader (no filesystem access) |
 | `reason_adapter.py` | `reason_from_exception`, `reasons_from_report`, the per-run failure scope |
-| `generation/` | The generation core (resident and streamed), pinned generation, pools, Gaussian copula model (`copula/`, library only) |
+| `generation/` | The generation core (resident and streamed), pinned generation, pools, statistical sampling, Gaussian copula (`copula/`, library only) |
 | `generators/` | `ColumnGenerator` (formula and cardinality bounds the V2 core reuses) |
 | `kernel/` | Backend-neutral Arrow masking kernels (hash, redact, truncate, passthrough) |
 | `transforms/` | Transform implementations the strategy handlers reuse (fpe, text_mask, code_set, derived, joint_mask, geo_generalize, group_key, windowed_date) |
