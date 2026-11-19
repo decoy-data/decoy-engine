@@ -244,17 +244,15 @@ def _run_schemas(
     return merged
 
 
-# The top-level keys a sources-only scan file may carry. Every other `PipelineConfig` field
-# marks the mapping as a full pipeline, derived from the model so a new field joins by existing.
+# Keys a sources-only scan file may carry; any other `PipelineConfig` field marks a full pipeline.
 _SCAN_KEYS = frozenset({"sources", "relationships", "version"})
 _PIPELINE_ONLY = frozenset(PipelineConfig.model_fields) - _SCAN_KEYS
 
 
 @dataclasses.dataclass(frozen=True)
 class ScanDeclaration:
-    """What `scan_sources` is given for a scan config: validated descriptors, the selected
-    tables in order, the relationships to check, how many full-pipeline relationships were set
-    aside (a generate table has no rows to count) and which pipeline-only keys were ignored."""
+    """What `scan_sources` is given for a scan config. `unchecked_relationships` counts
+    full-pipeline relationships set aside (a generate end has no rows to count)."""
 
     descriptors: Mapping[str, Mapping[str, Any]]
     tables: tuple[str, ...]
@@ -270,8 +268,7 @@ def _frozen_descriptors(descriptors: Mapping[str, Mapping[str, Any]]) -> Mapping
 
 
 def _scan_shape(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[Mapping[str, Any]]]:
-    """The raw `sources` and `relationships` of a scan config, refused by name when their
-    shape is wrong. Never echoes a value."""
+    """The raw `sources` and `relationships`; a wrong shape is refused by name, never value."""
     if not isinstance(config, Mapping):
         raise PipelineConfigError("scan config must be a mapping")
     version = config.get("version", 2)
@@ -280,9 +277,8 @@ def _scan_shape(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[Mapping
     sources = config.get("sources")
     if not isinstance(sources, Mapping) or not sources:
         raise PipelineConfigError("scan config sources must be a non-empty mapping")
-    for name, raw in sources.items():
-        if not isinstance(raw, Mapping):
-            raise PipelineConfigError(f"source for table {name!r} must be a mapping")
+    for name in (n for n, raw in sources.items() if not isinstance(raw, Mapping)):
+        raise PipelineConfigError(f"source for table {name!r} must be a mapping")
     relationships = config.get("relationships", [])
     if not isinstance(relationships, list):
         raise PipelineConfigError("scan config relationships must be a list")
@@ -318,8 +314,7 @@ def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -
 
 
 def _inline_names(scan: ScanDeclaration, file_access: FileAccess | None) -> ScanDeclaration:
-    """`scan` with each `column_names_file` read once and its names inline, so the scan never
-    opens the names file again. No data file is opened."""
+    """`scan` with each `column_names_file` read once and inlined; no data file is opened."""
     from decoy_engine.profiling.scan_set import validate_scan_inputs
 
     sources: dict[str, dict[str, Any]] = {}
@@ -369,8 +364,8 @@ class DeclarationRequest:
     def for_scan(
         cls, config: Mapping[str, Any], tables: Sequence[str] | None = None
     ) -> DeclarationRequest:
-        """A scan of a sources-only file or a full pipeline. It reads no data and checks no
-        columns: a scan is what finds them. Every refusal is raised here or by `prepare`."""
+        """A scan of a sources-only file or a full pipeline. It checks no columns: the scan
+        finds them. Shape refusals are raised here, a names-file refusal by `prepare`."""
         return cls(config, (), (), _scan=_scan_declaration(config, tables))
 
     @classmethod
