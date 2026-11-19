@@ -1,3 +1,0 @@
-### Added (connector retry executor and S3 resume, F02-E1, 2026-11-18)
-
-Connector reads now have one retry executor, `connectors/_retry.py`, with bounded backoff (3 attempts, 1 s base, 2x, plus or minus 25 percent jitter, 120 s deadline). An S3 object read that fails mid-stream resumes at the byte it reached, pinned to the first ETag with a conditional `Range` request. If the object changed, the read stops with the new connector error kind `source_changed`. `digest_mismatch` and `host_key_rejected` join the closed kind set for later F02 slices. Retry progress reports now keep one attempt floor per retried operation. The object store gains `size(key)` for S3 and GCS. No output changes.

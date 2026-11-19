@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # `decoy-engine`. The CLI dist renamed to `decoy-cli`; the engine
 # library dist did not.
 name = "decoy-engine"
-version = "0.27.0"
+version = "0.28.0"
 description = "Data masking and synthetic generation engine. Validates pipeline configs, compiles execution plans, runs masking + generate jobs on a pandas substrate. Used by the decoy-cli CLI and the decoy-platform commercial product."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -544,9 +544,6 @@ ignore = [
 # explaining a balanced-categoricals fixture; ASCII would obscure the
 # product semantics.
 "tests/unit/test_scan_reid_risk.py" = ["RUF003"]
-# Empty-hook base classes intentionally swallow their body for
-# subclasses to override.
-"src/decoy_engine/internal/base.py" = ["B027"]
 # Late-import-to-break-cycle pattern, documented in the module header.
 "src/decoy_engine/internal/validator.py" = ["E402"]
 "src/decoy_engine/sdk.py" = ["E402"]
@@ -1013,11 +1010,6 @@ disable_error_code = ["attr-defined", "index"]
 # internal.* type-debt allowlist. V2.0-C split internal/helpers.py into
 # crypto/fs/faker_setup (now strict-gated). What remains in internal/
 # is the V1 legacy stack that V2.1 hard-deletes.
-
-# V1 legacy IOHandler base class. V2.1 delete with the Masker stack.
-[[tool.mypy.overrides]]
-module = ["decoy_engine.internal.base"]
-disable_error_code = ["import-untyped"]
 
 # consultant-2026-07-09 F8: internal.large_file_processor was removed by
 # the S9.5 V1 bulk-delete; override left dangling.

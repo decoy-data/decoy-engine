@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -409,7 +409,7 @@ POST_SCAN_DISTRIBUTION_DEFERRED = _d(
     "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 # A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
 # (a publication outcome) would name the wrong stage.
@@ -417,5 +417,5 @@ SPOOL_DISK_FULL = _d(
     "spool_disk_full",
     "The disk or quota for the local copy of a remote source is too small.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
-    since=UNRELEASED,
+    since="1.30.0",
 )

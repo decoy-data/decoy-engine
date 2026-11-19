@@ -1,9 +1,0 @@
-### Added (post_scan.distribution config and report section, DI-1b, 2026-11-18)
-
-`post_scan.distribution: {tolerance_pct, on_breach}` turns on the distribution check of row 31. With `post_scan.integrity: true`, each mask table's masking input is compared with its output on the facts its strategy keeps (`row_count`, `null_rate`, `distinct_ratio`, `mean`, `std`), and a fact that moved by more than `tolerance_pct` is a `warning` row in a new optional `distribution` section of the `post-scan-integrity/v3` report. The section holds table and column names, the fact, a severity and a rounded percent change, never a value. The `post_scan_integrity` check of the run result is `warned` when a row breaches.
-
-`tolerance_pct` must be a number above 0 and at most 100. `on_breach` accepts `warn` only, so no release takes a strict setting that cannot block yet; `fail` is refused at config load. The block needs `post_scan.integrity: true`. A config without it keeps its dump and plan hash; a set block changes both.
-
-A run that asks for the check is refused before any route read when a mask table declares transforms (`post_scan_integrity_transforms_unsupported`) or when the run reads its sources through a loader or another deferred gate (`runtime/post_scan_distribution_deferred`, new). Rows quarantined by D8 are subtracted from the expected `row_count`. The output-side null counts and moments are tallied only when the check is configured, and only for columns with a checked fact.
-
-A declared-cast table with a quarantine-policy column may now give fewer rows on a read-back than its footer declares (the cast drops the quarantined rows). The stream-length check accepts that for such a table only, so an integrity run that used to fail the column suite for it now completes without the positional source comparison. Tables with a `fail` or null policy keep the exact check.
