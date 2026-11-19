@@ -898,3 +898,17 @@ def test_argument_grid_is_fixed_and_strict() -> None:
         broken = copy.deepcopy(good)
         _set_at(broken, path, bad)
         assert output_lock.check_lock_shape(broken), bad
+
+
+def test_a_changed_argument_descriptor_is_a_named_change() -> None:
+    old = _minimal_lock()["locales"]
+    new = copy.deepcopy(old)
+    cell = new["en_US"]["argumented"]["date_between.date_objects"]
+    cell["arguments"]["kwargs"]["end_date"] = "-1y"
+    diff = output_lock.diff_locales(old, new)
+    assert diff["changed"] == ["en_US argumented date_between.date_objects arguments"]
+    del new["en_US"]["argumented"]["date_between.date_objects"]
+    new["en_US"]["argumented"]["date_between.other"] = cell
+    diff = output_lock.diff_locales(old, new)
+    assert diff["removed"] == ["en_US argumented date_between.date_objects"]
+    assert diff["added"] == ["en_US argumented date_between.other"]
