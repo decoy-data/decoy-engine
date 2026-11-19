@@ -388,13 +388,70 @@ def test_gates_expression_must_equal_the_hosted_one() -> None:
     assert has(lanes.marker_findings(t), "M5 gates.sh has no single")
 
 
+def _gate_steps(t: lanes.Tree) -> tuple[dict[str, Any], dict[str, Any]]:
+    steps = [
+        s
+        for s in job(t, "ci.yml", "regression-gate")["steps"]
+        if "pytest tests" in s.get("run", "")
+    ]
+    assert len(steps) == 2  # the shipped split: parallel pass, then serial pass
+    return steps[0], steps[1]
+
+
+def test_regression_gate_split_is_valid_as_shipped() -> None:
+    assert not has(lanes.marker_findings(seeded()), "M5")
+
+
 def test_regression_gate_split_needs_both_passes() -> None:
-    """The parallel and serial passes together select what gates.sh selects; either alone does not."""
     t = seeded()
     gate = job(t, "ci.yml", "regression-gate")
-    steps = [s for s in gate["steps"] if "pytest tests" in s.get("run", "")]
-    assert len(steps) == 2  # the shipped split
-    gate["steps"] = [s for s in gate["steps"] if s is not steps[1]]
+    _, ser = _gate_steps(t)
+    gate["steps"] = [s for s in gate["steps"] if s is not ser]
+    assert has(lanes.marker_findings(t), "M5")
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("pytest tests ", "pytest tests/unit ", 1)
+            ),
+            id="serial-narrowed",
+        ),
+        pytest.param(
+            lambda par, ser: par.update(
+                run=par["run"].replace("pytest tests ", "pytest tests/unit ", 1)
+            ),
+            id="parallel-narrowed",
+        ),
+        pytest.param(lambda par, ser: ser.pop("if"), id="serial-no-condition"),
+        pytest.param(
+            lambda par, ser: ser.update({"if": "${{ success() }}"}), id="serial-other-condition"
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(run=ser["run"].replace("--tb=short", "-n 4 --tb=short", 1)),
+            id="serial-xdist",
+        ),
+        pytest.param(
+            lambda par, ser: par.update(run=par["run"].replace("-n 4 --dist loadfile", "")),
+            id="parallel-no-xdist",
+        ),
+        pytest.param(
+            lambda par, ser: par.update({"if": "${{ always() }}"}), id="parallel-conditioned"
+        ),
+        pytest.param(
+            lambda par, ser: ser.update(
+                run=ser["run"].replace("--ignore=tests/sentry/layout/test_import_layers.py", "")
+            ),
+            id="ignores-differ",
+        ),
+    ],
+)
+def test_regression_gate_split_rejects_a_weakened_pass(mutate: Any) -> None:
+    t = seeded()
+    par, ser = _gate_steps(t)
+    mutate(par, ser)
     assert has(lanes.marker_findings(t), "M5")
 
 

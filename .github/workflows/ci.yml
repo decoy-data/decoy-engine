@@ -137,9 +137,9 @@ jobs:
     # Single-process pytest took 66m44s on 2026-11-05 and 72m on 2026-11-15 (last green nightly),
     # then hit the old 75 minute cap every night from 2026-11-16. With xdist on the 4 vCPU
     # runner (2026-11-19, same commit range): parallel pass 29m and 41m, serial pass 4.5m and 8m,
-    # so the job takes 35 to 50m depending on the runner. The cap leaves headroom over that.
+    # so the job takes 35 to 50m depending on the runner. The cap only guards against a hang.
     # See the ruff job note on why a cap is needed.
-    timeout-minutes: 65
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:

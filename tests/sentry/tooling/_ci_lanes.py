@@ -238,31 +238,86 @@ def marker_findings(tree: Tree) -> list[str]:
         if has and m in unlaned:
             out.append(f"M3 marker {m!r} has a lane but is still in ci/unlaned.toml")
     out += _agreement_findings(
-        tree.gates, [ln for ln in all_lanes if ln[:2] == ("ci.yml", "regression-gate")]
+        tree, [ln for ln in all_lanes if ln[:2] == ("ci.yml", "regression-gate")]
     )
     return out
 
 
-def _agreement_findings(gates: str, gate_lanes: list[Lane]) -> list[str]:
-    """M5: gates.sh and the hosted full suite select the same tests."""
+_PASS_OPTS = ("-m", "-n", "--dist", "--junitxml")  # the options the two passes may differ in
+SERIAL_STEP_IF = "${{ !cancelled() }}"
+
+
+def _gate_passes(tree: Tree) -> list[tuple[dict[str, Any], list[str]]]:
+    """(step, pytest args) of each pytest step of the ci.yml regression-gate job."""
+    out = []
+    for step in tree.workflows["ci.yml"]["jobs"]["regression-gate"].get("steps", []):
+        for cmd in commands(step.get("run", "")):
+            args = _pytest_args(cmd)
+            if args is not None:
+                out.append((step, args))
+    return out
+
+
+def _has_xdist(args: list[str]) -> bool:
+    return any(a == "-n" or (a.startswith("-n") and not a.startswith("--")) for a in args)
+
+
+def _rest(args: list[str]) -> list[str]:
+    """The args without the options the two passes may differ in (and their values)."""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        if a in _PASS_OPTS:
+            i += 2
+        elif a.startswith(("--dist=", "--junitxml=")) or (
+            a.startswith(("-m", "-n")) and not a.startswith("--")
+        ):
+            i += 1
+        else:
+            out.append(a)
+            i += 1
+    return out
+
+
+def _agreement_findings(tree: Tree, gate_lanes: list[Lane]) -> list[str]:
+    """M5: gates.sh and the hosted full suite select the same tests.
+
+    One whole-suite lane with the gates.sh expression, or the two-pass split gates.sh itself
+    runs: a parallel pass (`not serial`, the only one with xdist) and a serial pass (`serial`,
+    no xdist, `if: !cancelled()`), both over the whole suite with the same paths and options.
+    """
     try:
-        pinned = parse_marker_expr(gates)
+        pinned = parse_marker_expr(tree.gates)
     except ValueError as e:
         return [f"M5 {e}"]
+    bad = ["M5 gates.sh PYTEST_ARGS and the ci.yml regression-gate -m expression differ"]
 
     def norm(e: str | None) -> str:
         return " ".join((e or "").split())
 
     want = norm(pinned)
-    # One lane with the gates.sh expression, or the two-pass split gates.sh itself runs: the
-    # parallel pass adds `not serial` and the serial pass adds `serial`.
-    ok_one = len(gate_lanes) == 1 and norm(gate_lanes[0].expr) == want
-    ok_two = len(gate_lanes) == 2 and sorted(norm(ln.expr) for ln in gate_lanes) == sorted(
-        [f"{want} and not serial", f"{want} and serial"]
+    if any(not ln.whole_suite for ln in gate_lanes):
+        return bad
+    if len(gate_lanes) == 1:
+        return [] if norm(gate_lanes[0].expr) == want else bad
+    if len(gate_lanes) != 2:
+        return bad
+    passes = _gate_passes(tree)
+    if len(passes) != 2:
+        return bad
+    by_expr = {norm(ln.expr): i for i, ln in enumerate(gate_lanes)}
+    if set(by_expr) != {f"{want} and not serial", f"{want} and serial"}:
+        return bad
+    par, ser = passes[by_expr[f"{want} and not serial"]], passes[by_expr[f"{want} and serial"]]
+    ok = (
+        _has_xdist(par[1])
+        and not _has_xdist(ser[1])
+        and "--dist" not in ser[1]
+        and "if" not in par[0]
+        and str(ser[0].get("if", "")).strip() == SERIAL_STEP_IF
+        and _rest(par[1]) == _rest(ser[1])
     )
-    if not (ok_one or ok_two):
-        return ["M5 gates.sh PYTEST_ARGS and the ci.yml regression-gate -m expression differ"]
-    return []
+    return [] if ok else bad
 
 
 def _closed(doc: dict[str, Any], label: str, tables: dict[str, dict[str, type]]) -> list[str]:
