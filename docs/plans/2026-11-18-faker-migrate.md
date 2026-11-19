@@ -1,4 +1,4 @@
-Status: plan (revision 3.4, 2026-11-19; FAKER-REPRO R1 outputs and the marker-selected Faker CI job added; S1 review round 4 caller-argument and calendar findings addressed; Dennis round 2 GO-WITH-FIXES addressed; owner Q1 settled; owner Q11 and questions A to D decided 2026-11-18 (recommended); final Codex gate GO-WITH-FIXES addressed)
+Status: plan (revision 3.5, 2026-11-19; FAKER-REPRO R1 owns the CI run line and lane-coverage rule; FAKER-REPRO R1 outputs added; S1 review round 4 caller-argument and calendar findings addressed; Dennis round 2 GO-WITH-FIXES addressed; owner Q1 settled; owner Q11 and questions A to D decided 2026-11-18 (recommended); final Codex gate GO-WITH-FIXES addressed)
 
 # FAKER-MIGRATE: move the launch engine from Faker 40.23.0 to 40.54.0 before the 1.0 freeze, and lock Faker output after it
 
@@ -14,6 +14,10 @@ Rules consulted: dev-rules `README.md` (routing), `00-universal.md`, `risk-and-e
 
 Risk: R2. No engine logic changes, but the change moves deterministic output for some provider and locale pairs, changes the dependency lock twice (S1 adds a test-only tool, S2 moves Faker), and re-pins the DP certified rows. Approver: Cam (owner) for the post-1.0 rule, Q11 and questions A to D; Dennis then Codex for the plan gate and the S1 and S2 code gates.
 
+### Revision 3.5 changes
+
+Dennis H1 resolved by owner choice: FAKER-REPRO R1 owns the CI run-line expansion and lane-coverage rule, so S1 keeps its correct single-file `faker_output_lock` lane.
+
 ### Revision 3.4 changes
 
 Carried by FAKER-REPRO revision 2 (`docs/plans/2026-11-19-faker-reproducible.md` on `plan/faker-reproducible`), Dennis round 1 findings H1 and H3 there. Plan text only; no S1 code is named beyond the CI run line and its lane cell.
@@ -21,7 +25,7 @@ Carried by FAKER-REPRO revision 2 (`docs/plans/2026-11-19-faker-reproducible.md`
 | Finding | Closed in |
 |---|---|
 | FAKER-REPRO R1 adds a route golden and a data-order audit that this plan did not own, so a red cell under 40.54.0 would stop S2 under FM-4 | 5.6 two rows (route golden with `python -m tests.integration.faker_repro._routes --write`; `_CANONICAL_ORDER` table); FM-4; FM-17; G-2; G-3; 12 S0 addendum and Order |
-| The `faker-output-lock` job names one test file, but S1 splits the lock sentry into three modules and FAKER-REPRO adds marked files elsewhere; `addopts` and the regression gate deselect the marker, so those cells would run in no job | 4.1 CI paragraph: the job runs `pytest tests -m faker_output_lock --tb=short`; AT-L12 cell (b) lane coverage; 9 Placement |
+| The `faker-output-lock` job names one test file, but S1 splits the lock sentry into three modules and FAKER-REPRO adds marked files elsewhere; `addopts` and the regression gate deselect the marker, so those cells would run in no job | FAKER-REPRO R1 owns the CI run-line expansion and lane-coverage rule |
 
 ### Revision 3.3 changes
 
@@ -263,7 +267,7 @@ Runtime and size budget: the old fresh-instance-per-provider prototype costs abo
 
 Only cells that spawn a real or stub worker carry both `@pytest.mark.faker_output_lock` and an explicit `@pytest.mark.timeout(180)`. Static schema, list and surface-coverage cells are unmarked and remain in the ordinary sentry gate. S1 adds `faker_output_lock` to the pytest marker registry and to the default `addopts` deselection. It adds all three Faker output-lock sentry files to `SENTRIES` in `tests/sentry/test_sentry_manifest.py`, so the static cells cannot fall outside the gate.
 
-The required, no-path-filter `faker-output-lock` CI matrix job sets `strategy.fail-fast: false` and runs the marked worker cells on CPython 3.10.20, 3.11.9 and 3.12.7 with the `dev` extra. It selects them by marker over the whole tree, `pytest tests -m faker_output_lock --tb=short`, never by a file list: the lock sentry is three modules, and later plans (FAKER-REPRO) add marked files under `tests/integration/` and `tests/sentry/dependencies/`, which `addopts` and the regression gate both deselect. The 3.11 and 3.12 checks live only in this matrix job. The existing `import-smoke` job remains a no-extras install and keeps only its 10-minute Import and Probe checks. `ci/required-jobs.toml` makes the Faker job required on every change.
+The required, no-path-filter `faker-output-lock` CI matrix job sets `strategy.fail-fast: false` and runs the marked worker cells on CPython 3.10.20, 3.11.9 and 3.12.7 with the `dev` extra. It runs `pytest tests/sentry/dependencies/test_faker_output_lock.py -m faker_output_lock --tb=short`, the only file with marked worker cells on the S1 head. The 3.11 and 3.12 checks live only in this matrix job. The existing `import-smoke` job remains a no-extras install and keeps only its 10-minute Import and Probe checks. `ci/required-jobs.toml` makes the Faker job required on every change.
 
 Platform scope (owner question A, recommended): Linux (CI) is blocking. S1 runs the sentry once on the Mac and records the result in the PR; a Mac difference is a finding for the owner. When WIN-RUNNER (row 6) lands, a Windows leg runs the sentry and becomes blocking; a Windows-only difference is fixed in the engine, not excluded from the lock.
 
@@ -429,7 +433,7 @@ Each test is written first and fails on the slice base for the stated reason, th
 | AT-L9 | `::test_removed_kwarg_is_removed`: a stub drops one keyword argument from a provider's signature; the failure names it as "removed" | no `kwargs` field | leave `kwargs` out of the comparison | S1 |
 | AT-L10 | unmarked `::test_anchors_and_floor`: every `ANCHORS` pair is a digest; `en_US` reflected digests are at least `EN_US_DIGEST_FLOOR` | no sentry | the writer marks every pair unstable | S1 |
 | AT-L11 | marked `::test_adapter_surface_covered`: for `en_US` and `pt_BR`, the `adapter` names equal the public default registry's `faker_providers()` names, `generate_batch` is the exercised call, and adapter digests are compared | no adapter surface | `FakerAdapter` drops `_FAKER_DEFAULT_KWARGS` | S1 |
-| AT-L12 | `tests/sentry/tooling/test_ci_lanes.py` asserts a required, no-path-filter `faker-output-lock` matrix job has `strategy.fail-fast: false` and runs the marked cells on 3.10.20, 3.11.9 and 3.12.7, while `import-smoke` still installs no extras and contains only Import and Probe; (b) every test file that carries `faker_output_lock` lies under the positional paths of that job's lane (the job runs `pytest tests -m faker_output_lock`), with a seeded cell where the run line names one file and a marked file sits elsewhere | no job | remove the required Faker job; (b) narrow the run line to `tests/sentry/dependencies/test_faker_output_lock.py` | S1 |
+| AT-L12 | `tests/sentry/tooling/test_ci_lanes.py` asserts a required, no-path-filter `faker-output-lock` matrix job has `strategy.fail-fast: false` and runs `tests/sentry/dependencies/test_faker_output_lock.py` marked cells on 3.10.20, 3.11.9 and 3.12.7, while `import-smoke` still installs no extras and contains only Import and Probe | no job | remove the required Faker job | S1 |
 | AT-L13 | marked stub `::test_lock_covers_engine_surface` runs only `en_US` and `pt_BR`; before capture the stub registers a custom provider, then proves reflected names equal `get_faker_providers(make_faker(locale), provider_snapshot={})`, denylisted and custom names are absent, and every admitted name is present | no lock | pass the live provider snapshot instead of `{}` | S1 |
 | AT-L14 | `tests/physical/test_faker_determinism_driver.py` asserts `check_determinism.py` and `output_lock.py` import the same `worker_env.py`, its environment matches the prior contract, and the helper's import graph contains no `decoy_engine` edge | duplicated builder | restore the environment literal in either tool | S1 |
 | AT-L15 | `tests/physical/test_faker_determinism_driver.py::test_engine_access_is_only_internal_import` parses every Python file under `scripts/faker-determinism/` with `ast`, recognizes both `import decoy_engine.internal...` and `from decoy_engine.internal... import ...` with aliases, and permits that edge only in `_engine_access.py`. It also asserts `check_determinism.py`, `pool_determinism_worker.py` and `output_lock.py` obtain their engine-internal names from `_engine_access.py`. A seeded direct import in a scratch file proves the walk fails | private imports are split between the existing harness and the new tool | add `from decoy_engine.internal.faker_setup import make_faker` to `output_lock.py` | S1 |
@@ -482,7 +486,7 @@ The round-4 head has 12 direct files in `scripts/faker-determinism/` and 5 in `t
 | `pyproject.toml`, `uv.lock` | changed (S1: `time-machine` floor, exact lock resolution, marker registration/deselection; S2: Faker) | | |
 | `NOTICE` | checked and unchanged in S1; changed by its owner in S2 only if the shipped Faker repin requires it | | |
 | `src/decoy_engine/quality/dp_provenance.py` | changed (S1 and S2, one row each with its comment line) | Quality | the other rows |
-| `.github/workflows/ci.yml` | changed (S1: new 3.10/3.11/3.12 `faker-output-lock` matrix job running `pytest tests -m faker_output_lock --tb=short`; `import-smoke` unchanged) | Lightweight automatic PR checks | |
+| `.github/workflows/ci.yml` | changed (S1: new 3.10/3.11/3.12 `faker-output-lock` matrix job running `pytest tests/sentry/dependencies/test_faker_output_lock.py -m faker_output_lock --tb=short`; `import-smoke` unchanged) | Lightweight automatic PR checks | |
 | `ci/required-jobs.toml` | changed (S1: required Faker job, no path filter) | CI lane registries | |
 | `tests/sentry/test_sentry_manifest.py`, `tests/sentry/tooling/test_ci_lanes.py`, `tests/physical/test_faker_determinism_driver.py` | changed (S1): list all four new sentries including pin agreement, guard the job, shared environment builder and sole engine-internal access module | Test and CI sentries | existing manifest, lane and driver tests |
 | moved goldens of 5.6 | changed (S2, by tool) | their existing places | |
