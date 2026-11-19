@@ -37,7 +37,7 @@ from decoy_engine.validation.starter_review import (
     ReviewVerdict,
     column_entry,
 )
-from decoy_engine.verification.postmask import ResidualPIIFinding
+from decoy_engine.verification.postmask import V3_ADDED_FIELDS, ResidualPIIFinding
 from tests._ner import needs_ner
 
 V = ReviewVerdict
@@ -387,7 +387,7 @@ def test_a_stale_report_cannot_dismiss_under_a_strategy_nobody_reviewed() -> Non
 
 
 def test_a_v2_report_row_without_source_or_model_reads_as_regex() -> None:
-    row = {k: v for k, v in EMAIL.items() if k not in ("source", "model", "dismissed", "promoted")}
+    row = {k: v for k, v in EMAIL.items() if k not in V3_ADDED_FIELDS}
     report = {"schema_version": "post-scan-integrity/v2", "residual_pii": [row]}
     decision = FindingDecision("customers", "email", "email", "regex", None, V.REJECT)
     config = _config(post_scan={"integrity": True})
