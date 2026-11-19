@@ -13,7 +13,6 @@ import pytest
 
 from decoy_engine.verification.postmask import (
     V3_ADDED_FIELDS,
-    MalformedFindingError,
     ResidualPIIFinding,
     read_residual_finding,
 )
@@ -53,8 +52,7 @@ def test_the_v3_added_fields_are_the_last_defaulted_fields() -> None:
 @pytest.mark.parametrize("missing", _FIELDS)
 def test_a_v3_row_must_carry_every_field(missing: str) -> None:
     row = {k: v for k, v in _v3().items() if k != missing}
-    with pytest.raises(MalformedFindingError):
-        read_residual_finding(row, version=V3)
+    assert read_residual_finding(row, version=V3) is None
 
 
 def test_a_v2_row_gets_the_writer_defaults() -> None:
@@ -69,19 +67,17 @@ def test_a_v2_row_gets_the_writer_defaults() -> None:
 
 @pytest.mark.parametrize("required", list(_BASE))
 def test_a_v2_row_must_carry_the_required_fields(required: str) -> None:
-    with pytest.raises(MalformedFindingError):
-        read_residual_finding({k: v for k, v in _BASE.items() if k != required}, version=V2)
+    assert (
+        read_residual_finding({k: v for k, v in _BASE.items() if k != required}, version=V2) is None
+    )
 
 
 def test_a_null_match_rate_is_v3_only() -> None:
-    with pytest.raises(MalformedFindingError):
-        read_residual_finding({**_BASE, "match_rate": None}, version=V2)
+    assert read_residual_finding({**_BASE, "match_rate": None}, version=V2) is None
     assert read_residual_finding({**_v3(), "match_rate": None}, version=V3)["match_rate"] is None
 
 
 @pytest.mark.parametrize("bad", [None, "x", [1], 3])
 def test_a_row_that_is_not_a_mapping_or_has_an_unreadable_version_is_refused(bad: Any) -> None:
-    with pytest.raises(MalformedFindingError):
-        read_residual_finding(bad, version=V3)
-    with pytest.raises(MalformedFindingError):
-        read_residual_finding(_v3(), version="post-scan-integrity/v9")
+    assert read_residual_finding(bad, version=V3) is None
+    assert read_residual_finding(_v3(), version="post-scan-integrity/v9") is None

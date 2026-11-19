@@ -38,7 +38,6 @@ from decoy_engine.validation.starter_review import (
 )
 from decoy_engine.verification.postmask import (
     READABLE_SCHEMA_VERSIONS,
-    MalformedFindingError,
     ResidualPIIFinding,
     read_residual_finding,
 )
@@ -254,12 +253,7 @@ def _report_rows(report: Mapping[str, Any]) -> dict[_Identity, Mapping[str, Any]
 
 def _read_finding(raw: object, *, version: str) -> dict[str, Any]:
     """One finding row through the postmask reader, or a value-free refusal."""
-    row: dict[str, Any] | None = None
-    try:
-        row = read_residual_finding(raw, version=version)
-    except MalformedFindingError:
-        pass
-    # Raised outside the handler so the reader's error is not implicit context.
+    row = read_residual_finding(raw, version=version)
     if row is None:
         raise _malformed()
     return row

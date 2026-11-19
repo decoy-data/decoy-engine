@@ -67,7 +67,6 @@ from decoy_engine.verification.postmask._stream_input import (
 )
 from decoy_engine.verification.postmask.finding_reader import (
     V3_ADDED_FIELDS,
-    MalformedFindingError,
     read_residual_finding,
 )
 from decoy_engine.verification.postmask.residual_pii import is_source_identity_finding
@@ -89,7 +88,6 @@ __all__ = [
     "FKPreservationFinding",
     "KeyCounts",
     "KeyResult",
-    "MalformedFindingError",
     "PolicyValidationFinding",
     "PostMaskReport",
     "PostScanBlockedError",

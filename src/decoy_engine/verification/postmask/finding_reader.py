@@ -21,17 +21,13 @@ from decoy_engine.verification.postmask.types import (
     Severity,
 )
 
-__all__ = ["V3_ADDED_FIELDS", "MalformedFindingError", "read_residual_finding"]
+__all__ = ["V3_ADDED_FIELDS", "read_residual_finding"]
 
 # The fields v3 added to the writer. A v2 row lacks them and reads their defaults.
 V3_ADDED_FIELDS: tuple[str, ...] = ("source", "model", "band", "dismissed", "promoted")
 
 _SEVERITIES = frozenset(get_args(Severity))
 _FIELDS = {f.name: f for f in dataclasses.fields(ResidualPIIFinding)}
-
-
-class MalformedFindingError(ValueError):
-    """A finding row does not have the versioned shape. The message holds no value."""
 
 
 def _text(value: object) -> bool:
@@ -86,25 +82,26 @@ FIELD_CHECKS: dict[str, Callable[[object], bool]] = {
 }
 
 
-def read_residual_finding(raw: object, *, version: str) -> dict[str, Any]:
+def read_residual_finding(raw: object, *, version: str) -> dict[str, Any] | None:
     """The finding row `raw` of a report at `version`, with defaults filled in.
 
-    Raises `MalformedFindingError` for a row that is not a mapping, lacks a required field, or has
-    a field of the wrong type, and for an unreadable `version`.
+    Returns None for a row that is not a mapping, lacks a required field, or has a field of the
+    wrong type, and for an unreadable `version`. The caller names the refusal; nothing here holds a
+    value.
     """
     if version not in READABLE_SCHEMA_VERSIONS or not isinstance(raw, Mapping):
-        raise MalformedFindingError("the finding row is not readable")
+        return None
     current = version == SCHEMA_VERSION
     row: dict[str, Any] = dict(raw)
     for name, field in _FIELDS.items():
         if name in row:
             continue
         if field.default is dataclasses.MISSING or current:
-            raise MalformedFindingError("the finding row lacks a field")
+            return None
         row[name] = field.default
     if not all(FIELD_CHECKS[name](row[name]) for name in _FIELDS):
-        raise MalformedFindingError("the finding row has a field of the wrong type")
+        return None
     if not current and row["match_rate"] is None:
         # `None` is the classifier finding's marker, which only v3 reports carry.
-        raise MalformedFindingError("the finding row has a field of the wrong type")
+        return None
     return row
