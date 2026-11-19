@@ -180,6 +180,10 @@ dependencies = [
     # corpus green.
     "joserfc>=1.7.7,<2",
     "rfc8785>=0.1.4,<0.2",
+    # F09 vault v3 (docs/plans/2026-11-18-f09-vault-header-v1.md): libsodium secretstream through
+    # PyNaCl's nacl.bindings (Apache-2.0, bundles libsodium under ISC). Upper bound as for the
+    # other crypto dependencies: a major release can change the bindings.
+    "pynacl>=1.6.2,<2",
 ]
 
 [project.optional-dependencies]
