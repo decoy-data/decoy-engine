@@ -11,6 +11,48 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [0.28.1] - 2026-11-19
 
+### Breaking for consumers
+
+- published Parquet files no longer carry the source file's custom metadata, field metadata or pandas `attrs`, and extension-type columns (opaque, tensors, custom types) are written as their storage type
+
+### Security (output Parquet metadata allow-list, OUTPUT-METADATA-LEAK E1, 2026-11-19)
+
+Out-of-core output files written from pandas-made sources change bytes: the source's pandas metadata is replaced by a cleaned copy, and custom keys and field metadata are removed.
+
+Before, the out-of-core route copied the source schema's key/value metadata into the masked file. A custom key such as `table_comment`, the field metadata of a column and the pandas blob, including the frame's `attrs`, reached the output footer. Now every Parquet file the engine publishes carries only an allow-list. In 1.0 the list holds one schema key, `b"pandas"`, rebuilt from the output schema, the running pyarrow and pandas versions and one descriptor table. No field has metadata at any nesting depth. An extension-type column other than `arrow.uuid`, `arrow.bool8`, `arrow.json` and the pandas period and interval types is written as its storage type, because its type name or parameters can hold source text. Masked values, column names, other Arrow types, nullability and row groups do not change, and an output from a source with no custom metadata is byte-identical to before.
+
+`output_schema` and `output_table` are new public names. The Arrow adapter gains `write_output_table` and `output_parquet_writer`, and the engine sinks and `publish_tables` write through them. A new sentry fails on a Parquet write that skips them. The in-memory tables a run returns are unchanged. See `docs/security/output-metadata.md`.
+
+### Changed (experimental tier and public census, freeze batch X0, 2026-11-18)
+
+The compatibility contract gets section 3.6. Every public engine name now has one tier: frozen,
+experimental or documented internal. These names are experimental and may change in any minor
+release: the connector SDK objects in `decoy_engine.sdk` (`FileSource`, `FileSink`, `ConnectorConfig`,
+`FileMeta`, `CheckResult`, `WriteResult`, `TransientError`, `PermanentError`), `SDK_VERSION`, the
+`CAP_*` flags, and the provider registration functions (`register_faker_provider`,
+`register_faker_provider_v2`, `register_faker_list_provider`, `unregister_faker_provider`,
+`load_custom_providers`, `atomic_swap_db_providers`). Their docstrings start with `Experimental:`.
+`ConfigError` and `ConnectorError` stay frozen. No name is removed or renamed. The registry is
+`decoy_engine.contracts.stability`, and new sentries check it against the exports and the map.
+
+### Fixed (engine imports and opens files on Windows, EW1, 2026-11-18)
+
+Every open flag the engine uses now comes from one module, `fileaccess/_osflags.py`. On POSIX the
+values are the same as before. On Windows the POSIX-only flags are 0, and file descriptors open in
+binary mode and are not inherited, so a file with the bytes 0x0A, 0x0D or 0x1A reads back as
+written. `import decoy_engine` no longer fails on Windows. `RootedFileAccess` raises
+`FileAccessUnavailable` where the platform has no directory descriptors.
+
+### Added (Faker output lock and test-only clock freeze, FAKER-MIGRATE, 2026-11-18)
+
+`scripts/faker-determinism/output_lock.json` now records digests of what Faker returns for every locale on the two surfaces the engine uses, and a required CI job fails when a Faker release changes them. The lock is captured under Faker 40.23.0, so the later repin shows exactly which provider and locale pairs move. `time-machine` joins the `dev` extra to freeze the clock in the lock's worker processes, and `_CERTIFIED_STACKS` gains the matching dev/CI row. No runtime behavior changes.
+
+### Changed (sample_frame end-of-source contract, PROFILE-SAMPLE-LABELS E0, 2026-11-19)
+
+`ProfileSource.sample_frame(n)` now returns exactly `n` rows when the source holds that many, and fewer only at the end of the source. S3 and GCS CSV readers fetch more ranged windows until they hold `n` rows or the object ends, instead of parsing only the first 1 MiB.
+
+Cloud CSV `profile_source` now profiles the requested 10,000 rows when available. Null counts, distinct counts and profile hashes can change from first-window results.
+
 ### Fixed (DP certified row for the CLI runtime profile, CERT-ROW, 2026-11-19)
 
 The 0.28.0 release certified the CLI runtime profile from the 0.27.0 pin file, which lacks `joserfc` and `rfc8785`. Engine 0.28.0 needs both, so no real 0.28.0 install had a certified row and `fit_dp_snapshot` refused with `dp_stack_uncertified`. 0.28.1 adds the row for the 69-pin profile (the 0.27.0 closure plus `joserfc==1.7.7` and `rfc8785==0.1.4`). Every earlier row stays.
