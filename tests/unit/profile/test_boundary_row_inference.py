@@ -61,3 +61,21 @@ def test_local_csv_sample_frame_dtype_ignores_row_n_plus_1(tmp_path: Path, late:
     frame = source.sample_frame(N)
     assert len(frame) == N
     assert str(frame["v"].dtype) == "int64"
+
+
+def _with_malformed_row_n_plus_1() -> bytes:
+    rows = [f"{i},{i}" for i in range(1, N + 1)] + ["11,1,2,3"]
+    return ("id,v\n" + "\n".join(rows) + "\n").encode()
+
+
+def test_malformed_row_n_plus_1_still_profiles_and_reads_as_a_sample(tmp_path: Path) -> None:
+    """The proof read only asks whether a row exists past n. A row there that does not
+    parse counts as a row, and it never fails a profile whose first n rows are valid."""
+    path = tmp_path / "f.csv"
+    path.write_bytes(_with_malformed_row_n_plus_1())
+    table = profile_source(_config(path), sample_rows=N, seed=0).tables[0]
+    assert [c.name for c in table.columns] == ["id", "v"]
+    for column in table.columns:
+        assert column.sampled is True
+        assert column.is_candidate_key_sampled is False
+        assert column.dtype == "int64"

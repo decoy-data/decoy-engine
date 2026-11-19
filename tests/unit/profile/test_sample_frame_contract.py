@@ -357,3 +357,33 @@ def test_cloud_csv_sample_dtype_ignores_row_n_plus_1(env: Env, kind: str, late: 
     frame = make(env, _typed_csv(_LATE_CELLS[late]), "csv").sample_frame(10)
     assert len(frame) == 10
     assert str(frame["v"].dtype) == "int64"
+
+
+@pytest.mark.parametrize("kind", ["s3", "gcs"])
+def test_cloud_malformed_row_n_plus_1_still_profiles_and_reads_as_a_sample(
+    env: Env, kind: str
+) -> None:
+    """Wide rows put row n + 1 inside the parser's read-ahead for the n-row sample, so the
+    sample must be cut at its own last row before parsing, not parsed with `nrows`."""
+    from decoy_engine.profile import profile_source
+
+    n = 1_000
+    rows = [f"{i},{PAD}" for i in range(1, n + 1)] + [f"{n + 1},{PAD},extra,cells"]
+    rows += [f"{i},{PAD}" for i in range(n + 2, n + 6)]
+    data = ("id,pad\n" + "\n".join(rows) + "\n").encode()
+    if kind == "s3":
+        env.s3.put_object(Bucket=BUCKET, Key="wide.csv", Body=data)
+    else:
+        _gcs(env, data)
+    table = profile_source(_profile_config(kind), sample_rows=n).tables[0]
+    assert [c.name for c in table.columns] == ["id", "pad"]
+    assert all(c.sampled and not c.is_candidate_key_sampled for c in table.columns)
+    assert {c.name: c.distinct_count for c in table.columns}["id"] == n
+
+
+@pytest.mark.parametrize("kind", ["s3", "gcs"])
+def test_cloud_malformed_row_inside_the_sample_still_raises(env: Env, kind: str) -> None:
+    rows = [f"{i},{i}" for i in range(1, 5)] + ["5,1,2,3"] + [f"{i},{i}" for i in range(6, 12)]
+    source, _ = _stub(env, kind, ("a,b\n" + "\n".join(rows) + "\n").encode())
+    with pytest.raises(pd.errors.ParserError):
+        source.sample_frame(8)

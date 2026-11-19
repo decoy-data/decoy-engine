@@ -27,6 +27,7 @@ import pyarrow.parquet as pq
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
 from decoy_engine.profile._readers import (
+    PROOF_READ_ERRORS,
     ProfileSource,
     RowCount,
     estimate_csv_rows,
@@ -175,9 +176,12 @@ def _csv_rows_from_ranges(
         whole = len(buffer) >= size
         try:
             frame = _csv_sample_from_window(buffer, size, n + 1, lexeme_columns)
-        except pd.errors.ParserError:
+        except PROOF_READ_ERRORS:
             if whole:
-                raise
+                # Row `n + 1` is on the object and does not parse: a row exists past `n`,
+                # which is all the proof asks. The `n` rows themselves must still parse,
+                # and an error there is raised as `to_frame` would.
+                return _csv_sample_from_window(buffer, size, n, lexeme_columns)
         else:
             if len(frame) <= n:
                 if whole:
