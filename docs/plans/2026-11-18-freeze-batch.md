@@ -59,6 +59,7 @@ The O3 builder measured that a fixed-schema Parquet sink cannot keep the `origin
 | Change | Closed in |
 |---|---|
 | A Parquet sink whose writer schema is fixed at construction (out-of-core sink, streamed chunked Parquet sink) keeps the source pass-through `large_string` field as on `origin/main`. Narrow batches are widened back to `large_string` at the sink boundary by copying offsets only. That sink's file bytes and every failure stay identical to main. Narrowing still applies to in-memory results, resident collectors, CSV, and `run_mask_chunked` chunks. | 4 (O3 paragraph), 5.5, 5.6, 7, AT-O3a, AT-O3f |
+| Round 3 rule: a fixed-schema sink also keeps the source batch boundaries. `iter_source_batches` splits a batch for width only when the sink does not fix its schema, so row groups and file bytes stay equal to main. AT-O3a adds byte-parity cells for the batch-join and reorder out-of-core sinks, with a mutation that restores the split. | 4 (O3 paragraph), AT-O3a |
 | AT-O3a: the fixed-schema Parquet sink cells assert `large_string` and byte equality with `origin/main`; every other cell asserts `string`. A new mutation: narrow the fixed-schema sink field, and the 2 GiB parity cell goes red. | 8 |
 | Whole-frame Parquet writes (schema built from the complete result) narrow as before, because their schema is chosen after every batch is seen. | 5.6 |
 
