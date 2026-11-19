@@ -70,7 +70,7 @@ not rows here.
 
 | Surface | Completeness source | Owning code | Pinning test or snapshot |
 |---|---|---|---|
-| Run entry point: `ExecutionResult`, `run_pipeline` | `decoy_engine.__all__` | `src/decoy_engine/execution/`, `src/decoy_engine/__init__.py` | `tests/unit/execution/test_r3_public_signature_freeze.py`, `tests/unit/test_public_api.py` |
+| Run entry point and published output: `ExecutionResult`, `output_schema`, `output_table`, `run_pipeline` | `decoy_engine.__all__` | `src/decoy_engine/execution/`, `src/decoy_engine/safe_output/_file_metadata.py`, `src/decoy_engine/__init__.py` | `tests/unit/execution/test_r3_public_signature_freeze.py`, `tests/unit/safe_output/test_file_metadata.py`, `tests/unit/test_public_api.py` |
 | Pipeline config model: `PipelineConfig` | `decoy_engine.__all__` | `src/decoy_engine/config/` | `tests/snapshots/test_frozen_schemas.py`, `tests/snapshots/frozen_schemas/pipeline-config.schema.json`, `tests/unit/test_public_api.py` |
 | Run result: `RUN_RESULT_SCHEMA`, `RunResult`, `RunResultRead`, `derive_outcome` | `decoy_engine.__all__` | `src/decoy_engine/run_result/` | `tests/snapshots/test_frozen_schemas.py`, `tests/unit/run_result/test_model_shapes.py`, `tests/unit/run_result/test_outcome.py`, `tests/unit/test_public_api.py` |
 | Subpackage names section 3.4 lists: `detection.DetectorRun`, `detection.ModelRef`, `detection.NerRate`, `detection.log_detector_models`, `detection.log_detector_run`, `detection.ner_rates`, `plan.checks.StrategyRequirement`, `profile.profile_relationships_from_config`, `profiling.ModelHit` | contract 3.4 | `src/decoy_engine/detection/`, `src/decoy_engine/plan/checks/`, `src/decoy_engine/profile/`, `src/decoy_engine/profiling/` | `tests/sentry/release/test_public_census.py`, `accepted-known-limit: RGF1-KL-4` |
@@ -110,6 +110,7 @@ names as the registry, both ways.
 | Disguise registry (every disguise spec) | contract 3.5 | `src/decoy_engine/disguises/` | `tests/unit/test_disguises_loader.py`, `accepted-known-limit: RGF1-KL-3` |
 | Reason registry | contract 3.4 | `src/decoy_engine/reasons/` | `tests/unit/test_reason_registry.py`, `tests/sentry/test_reason_baseline_frozen.py`, `tests/unit/test_reason_release_pin.py` |
 | Signed evidence: the `decoy.evidence.statement/v1` statement, the detached signature object, the trust policy, `expectations` version 1 and the wire result tokens | F33 V1 plan, section 10 | `src/decoy_engine/signed_evidence/`, `src/decoy_engine/reasons/evidence/` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/unit/signed_evidence/test_expectations.py`, `tests/unit/reasons/test_signed_evidence_codes.py` |
+| Output Parquet key/value metadata: the allow-list (version 1: schema key `b"pandas"` in its sanitized form and nothing else, no field metadata at any depth) | OUTPUT-METADATA-LEAK plan | `src/decoy_engine/safe_output/_file_metadata.py`, `src/decoy_engine/fileaccess/adapters/arrow.py`, `src/decoy_engine/_pandas_meta/` | `tests/unit/safe_output/test_file_metadata.py`, `tests/security/test_output_metadata_canary.py`, `tests/sentry/defects/test_output_metadata_choke_point.py` |
 | Engine version literal | `pyproject.toml` | `src/decoy_engine/release.py` | `tests/unit/test_version_agreement.py` |
 
 The schema snapshots pin field names, types and declared defaults; descriptions (the model

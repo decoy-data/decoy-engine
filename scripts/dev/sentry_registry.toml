@@ -194,3 +194,7 @@ baseline = "tests/sentry/baselines/validation-route-allowlist.json"
 [[sentry]]
 id = "snapshot-parse-single-owner"
 baseline = "tests/sentry/baselines/snapshot-parse-single-owner.json"
+
+[[sentry]]
+id = "parquet-intermediate-writers"
+baseline = "tests/sentry/baselines/parquet-intermediate-writers.json"

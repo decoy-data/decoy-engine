@@ -296,6 +296,15 @@ SOURCES: tuple[Source, ...] = (
         },
     ),
     Source(  # keys of the ratchet-schema baseline itself
+        "parquet-intermediate-writers",
+        "tests/sentry/baselines/parquet-intermediate-writers.json",
+        lambda: set(
+            json.loads(
+                (BASELINES / "parquet-intermediate-writers.json").read_text(encoding="utf-8")
+            )["entries"]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
         "serial-resources",
         "tests/sentry/baselines/serial-resources.json",
         lambda: set(
