@@ -37,7 +37,6 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.declared_casting._boundary import declared_integer_columns
 from decoy_engine.execution._adapter import (
     ExecutionAdapter,
     ExecutionResult,
@@ -51,9 +50,9 @@ from decoy_engine.execution._faker_degenerate_pin import apply_degenerate_faker_
 from decoy_engine.execution._fk_key_compat import _fk_key_value
 from decoy_engine.execution._fk_keys import (
     fk_all_null_array,
-    fk_columns_for_table,
     fk_nullable_int_array,
     lossless_fk_int_values,
+    lossless_int_columns,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -67,10 +66,8 @@ from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
-    group_key_group_by_columns,
     order_work,
     source_anchor_columns,
-    top_code_columns,
 )
 from decoy_engine.execution._sequential import run_sequential as _run_sequential
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
@@ -192,36 +189,14 @@ class PandasExecutionAdapter:
         # children are exempt (resolved via the edge, not masked).
         run_chunk_ingest_guards(plan, sources, registry, relationship_graph)
         t0 = time.perf_counter()
-        # DE-10: FK parent/child key columns route through the lossless-typing
-        # contract (execution/_fk_keys.py) instead of a bare `to_pandas()`, so a
-        # null-bearing integer FK column never silently widens to float64 and
-        # rounds a key beyond 2**53. Every other column is unaffected.
-        # HC-3a (Codex R1 P1 #2): a date_shift group_by anchor column has the
-        # same lossless requirement -- an int+null entity id must not widen to
-        # float64, or `_canonicalize_source` rejects the valid id -- so union
-        # those columns into the FK-safe set per table. Cross-column V1 folds
-        # `joint_mask` key_by source keys into the same set (`source_anchor_columns`):
-        # both read an immutable source sibling through the pre-mask snapshot below.
+        # DE-10 and its successors: every column that must stay an exact integer (FK keys, source
+        # anchors, top_code, group_key siblings, declared integers, columns a `when:` reads) is
+        # named by the ONE `lossless_int_columns`, so a null never widens it to float64 and rounds
+        # a value beyond 2**53. Every other column is unaffected.
         group_anchor_cols = source_anchor_columns(plan, registry)
-        # HC-3b (Codex R2): a top_code column has the same lossless-typing need
-        # as an FK key -- an int+null column must not widen to float64, or a
-        # value >= 2**53 rounds and the masked output becomes chunk-boundary
-        # dependent (whether a chunk widens turns on whether it carries a null).
-        top_code_cols = top_code_columns(plan, registry)
-        # Phase 4 slice 2: a group_key `group_by` sibling has the identical
-        # lossless-typing need (see `group_key_group_by_columns`'s docstring).
-        group_key_cols = group_key_group_by_columns(plan, registry)
-        declared_int_cols = declared_integer_columns(plan)  # F06: typed ints stay exact
+        lossless = lossless_int_columns(plan, registry, relationship_graph)
         frames: dict[str, pd.DataFrame] = {
-            t: to_pandas_fk_safe(
-                tbl,
-                fk_columns_for_table(relationship_graph.edges, t)
-                | group_anchor_cols.get(t, set())
-                | top_code_cols.get(t, set())
-                | group_key_cols.get(t, set())
-                | declared_int_cols.get(t, set()),
-            )
-            for t, tbl in sources.items()
+            t: to_pandas_fk_safe(tbl, lossless.for_table(t, tbl)) for t, tbl in sources.items()
         }
         conversion_ms = (time.perf_counter() - t0) * 1000.0
         # HC-3a P1 #1: snapshot each group_by anchor column PRE-MASK (before the

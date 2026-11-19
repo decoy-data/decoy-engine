@@ -75,6 +75,14 @@ only be written under a secret of at least 32 bytes; from that vault on, the v2 
 32-byte vault key length and `VAULT_KEY_LABEL` are permanent, per this contract's own pre-GA to GA rule
 (section 1).
 
+**Pre-GA correction (freeze batch O1, `when:` on integer columns, 2026-11-18).** Breaking, no shim: a
+`when:` predicate over an integer column compares exactly beyond 2**53, for a value or an integer
+literal, on every route, and uses one NaN-style rule for a blank cell on every route and column class:
+`!=`, `not in` and `not (...)` select a blank row; `==`, `in` and the ordering tests do not. FK keys,
+declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings used the pandas
+`NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
+that passes through is written as `int64` instead of `double`.
+
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
 SubsetRequest | Literal["config", "skip"] = "config")` is keyword-only (46 frozen parameters). `"config"`
 applies a `subset:` block, `"skip"` runs the full sources, a `SubsetRequest` replaces the block; any other
