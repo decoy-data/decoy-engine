@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, overload
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -33,15 +33,7 @@ def _array_to_pylist(values: pa.Array | pa.ChunkedArray | list[Any]) -> list[Any
     return list(values)
 
 
-@overload
-def passthrough_array(values: pa.Array | pa.ChunkedArray, width: None = None) -> pa.Array: ...
-@overload
-def passthrough_array(values: pa.Array, width: TextWidthState) -> pa.Array: ...
-@overload
-def passthrough_array(values: pa.ChunkedArray, width: TextWidthState) -> pa.ChunkedArray: ...
-def passthrough_array(
-    values: pa.Array | pa.ChunkedArray, width: TextWidthState | None = None
-) -> pa.Array | pa.ChunkedArray:
+def passthrough_array(values: Any, width: TextWidthState | None = None) -> Any:
     """Return values without changing logical values.
 
     With a width state, each chunk of a text column is narrowed from its offsets and the
