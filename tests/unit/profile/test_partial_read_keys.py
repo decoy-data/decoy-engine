@@ -58,11 +58,11 @@ def _skewed(path: Path) -> Path:
 
 
 @pytest.mark.parametrize("build", [_hostile, _wide, _skewed], ids=["hostile", "wide", "skewed"])
-@pytest.mark.parametrize("cap", [10, 1_000, 10_000])
-def test_profile_source_partial_read_claims_no_key(tmp_path: Path, build: Any, cap: int) -> None:
+@pytest.mark.parametrize("limit", [10, 1_000, 10_000])
+def test_profile_source_partial_read_claims_no_key(tmp_path: Path, build: Any, limit: int) -> None:
     path = build(tmp_path / "f.csv")
-    assert cap < ROWS  # every cell is a partial read of the 25,000-row source
-    table = profile_source(_config(path), sample_rows=cap, seed=0).tables[0]
+    assert limit < ROWS  # every cell is a partial read of the 25,000-row source
+    table = profile_source(_config(path), sample_rows=limit, seed=0).tables[0]
     for col in table.columns:
         assert col.sampled is True, col.name
         assert col.is_candidate_key_sampled is False, col.name
@@ -85,8 +85,8 @@ _WHOLE_READ_HASH = "58fd3b5435491ac108d987426c64dd2613d3aea44d1670b37f7c292f1450
 
 
 @pytest.mark.parametrize("fmt", ["csv", "parquet"])
-@pytest.mark.parametrize("cap", [10_000, 500])
-def test_fully_read_source_hash_is_unchanged(tmp_path: Path, fmt: str, cap: int) -> None:
+@pytest.mark.parametrize("limit", [10_000, 500])
+def test_fully_read_source_hash_is_unchanged(tmp_path: Path, fmt: str, limit: int) -> None:
     from decoy_engine.profile import profile_hash
 
     rows = 500
@@ -108,5 +108,5 @@ def test_fully_read_source_hash_is_unchanged(tmp_path: Path, fmt: str, cap: int)
     config = declare_rest(
         {"global_settings": {"seed": 0}, "sources": {"t": descriptor}, "relationships": []}
     )
-    profile = profile_source(config, sample_rows=cap, seed=0)
+    profile = profile_source(config, sample_rows=limit, seed=0)
     assert profile_hash(profile) == _WHOLE_READ_HASH
