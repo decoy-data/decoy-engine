@@ -27,7 +27,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,14 +41,21 @@ ROOT = HERE.parent.parent
 if str(HERE) not in sys.path:  # loaded by file path in tests: the sibling modules need this
     sys.path.insert(0, str(HERE))
 
+import argument_grid  # noqa: E402,F401
 from argument_grid import (  # noqa: E402,F401
-    ARGUMENT_GRID,
+    ARGUMENT_SEEDS,
+    FAMILIES,
     OutputLockError,
+    arguments_ok,
+    check_caps,
     decode_descriptor,
+    derive_grid,
     descriptor_ok,
     encode_descriptor,
-    grid_cells,
+    grid_row_ok,
+    text_within_limit,
 )
+from argument_rows import KINDS, argumented_cells, diff_grid  # noqa: E402
 from digest_codec import CODEC_VERSION, _pool_digest  # noqa: E402
 from worker_env import worker_env  # noqa: E402
 
@@ -56,7 +63,7 @@ LOCK_PATH = HERE / "output_lock.json"
 LOCK_VERSION = 2
 SAMPLES = 8
 CLOCK_A = "2026-10-16T12:00:00Z"  # the F0 parity oracle instant (tests/parity/_f0_fixtures.py)
-CLOCK_B = "2027-11-20T12:00:00Z"  # A plus 400 days: a different calendar date and year
+CLOCK_B = "2030-01-16T12:00:00Z"  # same day and time as A, across month, year and decade
 WRITER_PYTHON = (3, 10, 20)
 WORKER_TIMEOUT_S = 150
 A_SEEDS = tuple(range(8))  # PYTHONHASHSEED values of the clock-A workers; never fewer than 8
@@ -67,15 +74,6 @@ RAW_SEEDS = (0, 1, 2, 255, 65537, 2**31, 123456789, 2**32 - 1)
 TEXT_MASK_DETECTORS = ("person_name", "first_name", "last_name", "address", "location")
 
 DIGEST_RE = re.compile(r"[0-9a-f]{64}|unstable|raises:[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)?")
-KINDS = (
-    "changed",
-    "removed",
-    "added",
-    "newly reproducible",
-    "newly unstable",
-    "newly calendar-dependent",
-    "no longer calendar-dependent",
-)
 _REFLECTED_FIELDS = ("per_seed", "sequential")
 SURFACE_FIELDS = {
     "reflected": _REFLECTED_FIELDS,
@@ -182,28 +180,13 @@ def _raw_cells(locale: str, fake: Any, access: Any) -> dict[str, Any]:
     return cells
 
 
-def _argumented_cells(fake: Any, access: Any) -> dict[str, Any]:
-    """Each grid case run at seeds 0 to 7. The stored `arguments` is the descriptor, not a value."""
-    cells: dict[str, Any] = {}
-    for (method, case), (args, kwargs) in grid_cells().items():
-        call_args = [decode_descriptor(a) for a in args]
-        call_kwargs = {k: decode_descriptor(v) for k, v in kwargs.items()}
-        values: list[Any] = []
-        err = ""
-        try:
-            for i in range(SAMPLES):
-                fake.seed_instance(i)
-                if method == "date_of_birth":
-                    values.append(access.anchored_date_of_birth(fake, *call_args, **call_kwargs))
-                else:
-                    values.append(getattr(fake, method)(*call_args, **call_kwargs))
-        except Exception as exc:
-            err = f"raises:{_cls(exc)}"
-        cells[f"{method}.{case}"] = {
-            "arguments": {"args": args, "kwargs": kwargs},
-            "draws": err or _digest(values),
-        }
-    return cells
+def _norm(value: Any) -> Any:
+    """A value the codec cannot encode (UUID, timedelta, containers) is hashed as its text."""
+    if value is None or isinstance(value, (bool, int, float, str, bytes, bytearray, date)):
+        return value
+    from decimal import Decimal
+
+    return value if isinstance(value, Decimal) else f"{type(value).__name__}:{value!r}"
 
 
 def run_worker_in_process(
@@ -234,7 +217,9 @@ def run_worker_in_process(
             "reflected": _reflected_cells(fake_ps, fake_seq, access),
             "adapter": _adapter_cells(locale, faker.Faker(locale), names, faker),
             "raw": _raw_cells(locale, fake_ps, access),
-            "argumented": _argumented_cells(access.make_faker(locale), access),
+            "argumented": argumented_cells(
+                locale, access, faker, digest=_digest, cls=_cls, norm=_norm
+            ),
         }
     return out
 
@@ -265,8 +250,6 @@ def classify(a_docs: list[dict[str, Any]], b_doc: dict[str, Any]) -> dict[str, A
                     calendar = calendar or (b_cell is not None and b_cell[f] != values[0])
                 if surface == "reflected":
                     merged["kwargs"] = cell["kwargs"]
-                if surface == "argumented":
-                    merged["arguments"] = cell["arguments"]
                 merged["calendar"] = calendar
                 out[surface][name] = merged
         locales[loc] = out
@@ -307,8 +290,6 @@ def _diff_cell(
             out["removed"].append(f"{label} keyword argument {kwarg}")
         elif kwarg not in old_kw:
             out["added"].append(f"{label} keyword argument {kwarg}")
-    if old.get("arguments") != new.get("arguments"):
-        out["changed"].append(f"{label} arguments")
     for f in (*_REFLECTED_FIELDS, "batch", "draws"):
         if f not in old:
             continue
@@ -323,6 +304,10 @@ def _diff_cell(
         out["newly calendar-dependent"].append(label)
     elif old["calendar"] is True and new["calendar"] is False:
         out["no longer calendar-dependent"].append(label)
+
+
+def merge_diffs(*diffs: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {k: [n for d in diffs for n in d[k]] for k in KINDS}
 
 
 def render_diff(diff: dict[str, list[str]]) -> str:
@@ -358,12 +343,22 @@ def check_lock_shape(doc: object) -> list[str]:
 
     if not need(isinstance(doc, dict), "$") or not isinstance(doc, dict):
         return problems
-    top = {"lock_version", "faker_version", "codec_version", "samples", "clocks", "locales"}
+    top = {
+        "lock_version",
+        "faker_version",
+        "codec_version",
+        "samples",
+        "argument_samples",
+        "clocks",
+        "argument_grid",
+        "locales",
+    }
     need(set(doc) == top, "$ keys")
     for key, want in (
         ("lock_version", LOCK_VERSION),
         ("codec_version", CODEC_VERSION),
         ("samples", SAMPLES),
+        ("argument_samples", len(ARGUMENT_SEEDS)),
     ):
         v = doc.get(key)
         need(type(v) is int and v == want, key)
@@ -373,6 +368,10 @@ def check_lock_shape(doc: object) -> list[str]:
     need(
         type(clocks) is list and len(clocks) == 2 and all(type(c) is str for c in clocks), "clocks"
     )
+    grid = doc.get("argument_grid")
+    if need(isinstance(grid, dict), "argument_grid") and isinstance(grid, dict):
+        for case_id, row in grid.items():
+            need(grid_row_ok(row), f"argument_grid.{case_id}")
     locales = doc.get("locales")
     if not need(isinstance(locales, dict), "locales") or not isinstance(locales, dict):
         return problems
@@ -386,7 +385,7 @@ def check_lock_shape(doc: object) -> list[str]:
             ("reflected", ("kwargs", "per_seed", "sequential", "calendar")),
             ("adapter", ("batch", "calendar")),
             ("raw", ("draws", "calendar")),
-            ("argumented", ("arguments", "draws", "calendar")),
+            ("argumented", ("draws", "calendar")),
         ):
             cells = entry[surface]
             if not need(isinstance(cells, dict), f"{base}.{surface}"):
@@ -399,26 +398,12 @@ def check_lock_shape(doc: object) -> list[str]:
                     v = cell[f]
                     if f == "calendar":
                         need(type(v) is bool, f"{path}.calendar")
-                    elif f == "arguments":
-                        need(_arguments_ok(v), f"{path}.arguments")
                     elif f == "kwargs":
                         ok = type(v) is list and all(type(k) is str for k in v)
                         need(ok, f"{path}.kwargs")
                     else:
                         need(type(v) is str and DIGEST_RE.fullmatch(v) is not None, f"{path}.{f}")
     return problems
-
-
-def _arguments_ok(v: object) -> bool:
-    if not isinstance(v, dict) or set(v) != {"args", "kwargs"}:
-        return False
-    args, kwargs = v["args"], v["kwargs"]
-    return (
-        type(args) is list
-        and all(descriptor_ok(a) for a in args)
-        and isinstance(kwargs, dict)
-        and all(type(k) is str and descriptor_ok(x) for k, x in kwargs.items())
-    )
 
 
 def canonical_text(doc: dict[str, Any]) -> str:
@@ -520,8 +505,10 @@ def pinned_faker() -> str:
     return pins[0]
 
 
-def build_lock(locales: dict[str, Any], faker_version: str) -> dict[str, Any]:
+def build_lock(locales: dict[str, Any], faker_version: str, grid: dict[str, Any]) -> dict[str, Any]:
     return {
+        "argument_samples": len(ARGUMENT_SEEDS),
+        "argument_grid": grid,
         "lock_version": LOCK_VERSION,
         "faker_version": faker_version,
         "codec_version": CODEC_VERSION,
@@ -541,15 +528,27 @@ def write_lock(path: Path = LOCK_PATH) -> int:
             file=sys.stderr,
         )
         return 1
+    import _engine_access as access
+    from faker.config import AVAILABLE_LOCALES
+
     try:
+        grid = derive_grid(access, sorted(AVAILABLE_LOCALES))
+        check_caps(grid)
         observed = capture()
     except OutputLockError:
-        print("output_lock: refused: a worker failed", file=sys.stderr)
+        print("output_lock: refused: a worker failed or the grid is over its cap", file=sys.stderr)
+        return 1
+    text = canonical_text(build_lock(observed, pinned, grid))
+    if not text_within_limit(text):
+        print("output_lock: refused: the lock is over its byte cap", file=sys.stderr)
         return 1
     previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-    path.write_text(canonical_text(build_lock(observed, pinned)), encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     if previous is not None:
-        diff = diff_locales(previous["locales"], observed)
+        diff = merge_diffs(
+            diff_locales(previous["locales"], observed),
+            diff_grid(previous.get("argument_grid", {}), grid),
+        )
         print(f"faker {previous['faker_version']} -> {pinned}")
         print(render_diff(diff))
         for line in changelog_changed_lines(diff):

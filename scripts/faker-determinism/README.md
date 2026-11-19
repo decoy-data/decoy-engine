@@ -98,7 +98,7 @@ clock is frozen.
   removed, added, newly reproducible, newly unstable, newly calendar-dependent, no longer
   calendar-dependent. Commit the file in the same PR as the pin change.
 - Check it: `tests/sentry/dependencies/test_faker_output_lock.py`. The cells marked
-  `faker_output_lock` spawn nine workers (clock A at hash seeds 0 to 7, clock B at seed 0). Each
+  `faker_output_lock` (all in that one file; the schema and caller-argument sentries are static) spawn nine workers (clock A at hash seeds 0 to 7, clock B at seed 0). Each
   takes about 55 CPU seconds, so a full capture is about 170 to 185 seconds on four CPUs. The cells run
   them as two batches, so no cell holds more than about half. They are the required
   `faker-output-lock` CI job on CPython 3.10.20, 3.11.9 and 3.12.7. The reviewed lists in that
