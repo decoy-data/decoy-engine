@@ -133,8 +133,8 @@ def test_row_problems_reports_each_bad_cell() -> None:
     table = (
         "| S | C | Code | Test |\n|---|---|---|---|\n"
         "| `a` | x | `pkg` | `tests/unit/test_public_api.py` |\n"
-        "| `b` | x | `src/decoy_engine/vault.py` | `tests/unit/` |\n"
-        "| `c` | x | `src/decoy_engine/vault.py` | `accepted-known-limit: KL-9` |\n"
+        "| `b` | x | `src/decoy_engine/unmask.py` | `tests/unit/` |\n"
+        "| `c` | x | `src/decoy_engine/unmask.py` | `accepted-known-limit: KL-9` |\n"
         "| `d` | x | `src/decoy_engine/gone.py` | `tests/unit/test_vault.py` |\n"
     )
     assert row_problems(table, {"KL-1"}) == [
