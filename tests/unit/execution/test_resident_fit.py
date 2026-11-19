@@ -191,15 +191,19 @@ def test_a_buffer_shared_between_a_column_and_a_struct_child_counts_once() -> No
     assert _assert_between_largest_buffer_and_held(build) == 8000
 
 
+def _ree(ends: list[int], values: list[int]) -> pa.Array:
+    # pyarrow 14 accepts only Python sequences here; typed arrays raise TypeError.
+    return pa.RunEndEncodedArray.from_arrays(
+        ends, values, type=pa.run_end_encoded(pa.int32(), pa.int64())
+    )
+
+
 def test_a_run_end_encoded_array_shared_by_two_columns_counts_once() -> None:
     def build() -> pa.Table:
-        ends = pa.array([10, 20, 30], pa.int32())
-        encoded = pa.RunEndEncodedArray.from_arrays(ends, pa.array([1, 2, 3], pa.int64()))
+        encoded = _ree([10, 20, 30], [1, 2, 3])
         return pa.table({"r": encoded, "s": encoded})
 
-    one = pa.RunEndEncodedArray.from_arrays(
-        pa.array([10, 20, 30], pa.int32()), pa.array([1, 2, 3], pa.int64())
-    )
+    one = _ree([10, 20, 30], [1, 2, 3])
     assert _assert_between_largest_buffer_and_held(build) == sum(b.size for b in _buffers(one))
 
 
