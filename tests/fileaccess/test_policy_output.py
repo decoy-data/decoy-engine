@@ -115,20 +115,21 @@ def test_context_manager_aborts_unless_published(rooted: RootedFileAccess, root_
 def test_publish_and_abort_close_every_descriptor_they_opened(
     rooted: RootedFileAccess, root_dir: Path
 ) -> None:
-    import gc
+    # Count only descriptors that point inside this test's root. A process-wide count also
+    # moves when earlier tests' objects are collected and close their own descriptors, which
+    # happens in a full xdist run and made this test flaky.
+    real_root = os.path.realpath(root_dir)
 
-    def fds() -> dict[str, str]:
-        # Descriptor number -> target, after a collection. An earlier test in the same xdist
-        # worker can leave an unreferenced file object whose descriptor the collector frees
-        # at any allocation, so a bare count drops by one at a random point.
-        gc.collect()
-        table = {}
+    def fds() -> list[str]:
+        held = []
         for name in os.listdir("/proc/self/fd"):
             try:
-                table[name] = os.readlink(f"/proc/self/fd/{name}")
-            except OSError:  # the listing's own descriptor is already closed
-                pass
-        return table
+                target = os.readlink(f"/proc/self/fd/{name}")
+            except OSError:
+                continue
+            if target == real_root or target.startswith(real_root + os.sep):
+                held.append(target)
+        return sorted(held)
 
     out = _out(rooted)
     baseline = fds()
