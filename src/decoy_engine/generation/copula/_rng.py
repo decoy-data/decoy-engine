@@ -35,6 +35,7 @@ def check_seed(seed: object) -> None:
             raise TypeError("copula: seed must be bytes.")
         if len(seed) < MIN_SEED_BYTES:
             raise ValueError(f"copula: seed must be at least {MIN_SEED_BYTES} bytes.")
+        seed = None  # checked; this frame keeps no reference to it
     except BaseException:
         del seed
         raise

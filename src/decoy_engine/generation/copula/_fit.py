@@ -106,6 +106,7 @@ def fit_gaussian_copula(
                 )
             )
         )
+        seed = b""  # the stream is derived; the frame keeps no seed for the rest of the fit
         stats = _PairStats(latent_scores(frame, columns, layout, bitgen))
         suppressed = suppression(stats, columns, layout)
         raw = raw_correlation(stats, layout)

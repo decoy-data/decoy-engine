@@ -83,6 +83,7 @@ def sample_gaussian_copula(
                 )
             )
         )
+        seed = b""  # the stream is derived; the frame keeps no seed while it draws
         u = correlated_uniforms(model, n, bitgen, start)
         position = {(v.column, v.role): j for j, v in enumerate(model.latent)}
         data: dict[str, pd.Series] = {}
