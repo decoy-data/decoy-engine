@@ -5,18 +5,17 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from decoy_engine.generation.copula import GaussianCopulaModel, fit_gaussian_copula
-
-from ._fixtures import numeric_frame, seed_bytes, snapshot
+from decoy_engine.generation.copula import GaussianCopulaModel
 
 SENTINEL = "zz-planted-value-7731"
-_FRAME = numeric_frame(1, n=400)
-_MODEL = fit_gaussian_copula(_FRAME, snapshot(_FRAME), seed=seed_bytes(5))
-_VALID = json.loads(json.dumps(_MODEL.to_dict()))
+# A fit's output (three numeric columns, 400 rows), recorded so the validator is tested without fit.
+_VALID = json.loads((Path(__file__).parent / "_model_v1.json").read_text(encoding="utf-8"))
+_MODEL = GaussianCopulaModel.from_dict(copy.deepcopy(_VALID))
 
 Mutation = Callable[[dict[str, Any]], None]
 
@@ -54,6 +53,12 @@ def _not_definite(d: dict[str, Any]) -> None:
     d["correlation"] = [0.99, -0.99, 0.99]
 
 
+def _duplicate_on_a_zero_row(d: dict[str, Any]) -> None:
+    # Variable 0 has a zero row, so only the uniqueness rule can refuse the repeat.
+    d["correlation"] = [0.0, 0.0, 0.5]
+    d["suppressed"] = [{"variable": 0, "reason": "pair_rows"}] * 2
+
+
 CASES: dict[str, Mutation] = {
     "missing schema_version": _delete(["schema_version"]),
     "next major version": _set(["schema_version"], "decoy-gaussian-copula/v2"),
@@ -75,6 +80,7 @@ CASES: dict[str, Mutation] = {
     "counts not summing": _bump_first_count,
     "decreasing edges": _decreasing_edges,
     "row counts disagree": _set(["columns", 0, "null_count"], 3),
+    "row_count disagrees with every column": _set(["row_count"], 401),
     "row_count below floor": _set(["row_count"], 99),
     "correlation too short": _set(["correlation"], [0.1]),
     "correlation too long": _set(["correlation"], [0.1, 0.1, 0.1, 0.1]),
@@ -91,12 +97,14 @@ CASES: dict[str, Mutation] = {
         ["suppressed"],
         [{"variable": 0, "reason": "pair_rows"}, {"variable": 0, "reason": "pair_rows"}],
     ),
+    "suppressed duplicate on a zero row": _duplicate_on_a_zero_row,
     "not a mapping": lambda d: d.clear(),
 }
 
 
-def test_valid_dict_loads() -> None:
+def test_valid_dict_loads_and_round_trips() -> None:
     assert GaussianCopulaModel.from_dict(copy.deepcopy(_VALID)) == _MODEL
+    assert json.loads(json.dumps(_MODEL.to_dict())) == _VALID
 
 
 @pytest.mark.parametrize("name", sorted(CASES))

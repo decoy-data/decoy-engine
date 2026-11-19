@@ -199,7 +199,7 @@ def _validate_column(column: object, index: int, row_count: int) -> None:
         raise _value_error(f"{path}.kind", "is not a known kind")
     _check_count(column.null_count, f"{path}.null_count")
     _check_count(column.non_null_count, f"{path}.non_null_count")
-    if column.null_count + column.non_null_count != row_count:
+    if column.non_null_count != row_count - column.null_count:
         raise _value_error(path, "null_count plus non_null_count must equal row_count")
     if column.kind == KIND_NUMERIC:
         _validate_numeric(column, path)

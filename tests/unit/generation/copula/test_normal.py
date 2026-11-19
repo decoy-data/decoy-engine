@@ -45,25 +45,25 @@ def test_ndtr_relative_error_scaled_by_conditioning() -> None:
     z, ref = _cdf_table()
     got = ndtr(z)
     normal = ref >= _TINY
-    bound = 2e-15 * np.maximum(1.0, z**2)
+    tolerance = 2e-15 * np.maximum(1.0, z**2)
     rel = np.abs(got[normal] - ref[normal]) / ref[normal]
-    assert np.all(rel <= bound[normal]), float(np.max(rel / bound[normal]))
+    assert np.all(rel <= tolerance[normal]), float(np.max(rel / tolerance[normal]))
     assert np.all(np.abs(got[~normal] - ref[~normal]) <= 1e-320)
 
 
 def test_ndtri_error_scaled_by_conditioning() -> None:
     p, ref = _inv_table()
     got = ndtri(p)
-    bound = 2e-15 * np.maximum(1.0, np.abs(ref)) + 1e-300
-    assert np.all(np.abs(got - ref) <= bound), float(np.max(np.abs(got - ref) / bound))
+    tolerance = 2e-15 * np.maximum(1.0, np.abs(ref)) + 1e-300
+    assert np.all(np.abs(got - ref) <= tolerance), float(np.max(np.abs(got - ref) / tolerance))
 
 
 def test_round_trip_within_tail_conditioning() -> None:
     p, ref = _inv_table()
     interior = p < 0.5  # the upper half is limited by the spacing of doubles near 1, not the code
     back = ndtr(ndtri(p[interior]))
-    bound = 4e-15 * np.maximum(1.0, ref[interior] ** 2) * p[interior]
-    assert np.all(np.abs(back - p[interior]) <= bound)
+    tolerance = 4e-15 * np.maximum(1.0, ref[interior] ** 2) * p[interior]
+    assert np.all(np.abs(back - p[interior]) <= tolerance)
 
 
 def test_ndtri_is_a_faithful_as241_port() -> None:
