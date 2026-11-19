@@ -2,7 +2,7 @@ Status: record
 
 # FREEZE-OUTPUT O1: build record (performance, mutations, goldens)
 
-Plan: `docs/plans/2026-11-18-freeze-batch.md` rev 3.2, section 14 ("O1 used too much memory") and AT-O1a to AT-O1f. Slice head for the code measured here: `0579ff77e` on `feat/freeze-o1`. This file and the data files beside it were added after that head and change no source or test.
+Plan: `docs/plans/2026-11-18-freeze-batch.md` rev 3.2, section 14 ("O1 used too much memory") and AT-O1a to AT-O1f. Slice head for the code measured here: `ad4f86303` on `feat/freeze-o1`. This file and the data files beside it were added after that head and change no source or test.
 
 ## 1. Performance
 
@@ -34,23 +34,43 @@ Chunked oracle leg, 65,536-row chunks, 10M rows: `+MB` is 0 on both sides becaus
 
 Reading.
 - The common path (an in-range value and an in-range int literal) keeps the old memory: 0 to 24 MB over main on plain, FK and declared at 10M, 68 MB on anchor, and its extra eval time is 0.11 to 0.23 s on runs of 15 to 195 s.
-- The object path (a value or integer literal beyond `2**53`, or any float literal against an integer column) costs 1.0 to 1.9 s of eval at 10M rows, and its conversion alone is 0.4 to 0.8 s. The temporary object array adds up to about 0.55 GB, but the run peak only moves when no row is selected (plain `object_literal`: 339 to 888 MB). When rows are selected the peak is set later in the run and does not change. The `object_literal` peak (888 MB) stays below the same data's `numexpr` peak (1594 MB).
+- The round-2 object path (a value or integer literal beyond `2**53`, or any float literal against an integer column) cost 1.0 to 1.9 s of eval at 10M rows, and its conversion alone is 0.4 to 0.8 s. The temporary object array adds up to about 0.55 GB, but the run peak only moves when no row is selected (plain `object_literal`: 339 to 888 MB). When rows are selected the peak is set later in the run and does not change. The `object_literal` peak (888 MB) stays below the same data's `numexpr` peak (1594 MB).
 - The unified plain route at 10M is the largest measured move: +293 MB and +1.9 s eval, 17.4 s to 19.6 s wall. Unified keeps one full frame and now builds a float64 eval copy of the nullable column.
 - The four classes cost the same within noise, as in the r1 note on the PR.
 
 Stop line. The plan states no number: "a regression beyond the existing route budget". The route budget is the governor slot budget, which is a per-slot byte limit set at run time. No measured run raised its peak above what a same-size run of the same route reached before this change, except unified plain at 10M (+293 MB). This record gives the numbers and does not claim a pass or a fail for that cell. The owner call, if wanted, is whether the unified route's extra float64 copy at 10M rows and the 1 to 2 s object-path cost for float literals are acceptable. Semantics were not changed to avoid them.
 
+### Round 3: exact integer evaluator
+
+Codex round 2 asked for the exact comparison to be done on the integers instead of through an object or float64 copy. `_eval_predicate` now walks the parsed predicate. A comparison or membership test on an integer column runs on the integers where they are: a nullable array through its own mask, a NumPy array as is. A float bound is rounded (`v > 18.5` is `v >= 19`, `v <= 18.5` is `v <= 18`, `v > -18.5` is `v >= -18`); a non-integral `==` is never true and `!=` is always true; a blank is selected only by `!=` and `not in`. The object path stays for a column holding a value beyond 2**53 and for an integer literal beyond 2**53 (an `int` literal such as `9007199254740993`). Other columns are read by the pandas evaluator one comparison at a time, and a string or bool literal against an integer column hands the whole predicate to the old path. Probe `2026-11-19-freeze-o1-perf-matrix-r3.sh`, rows in `...-perf-head-r3.jsonl`, same method and box as above, 10M rows, full frame (+MB over the build, eval seconds):
+
+| Class, variant | main | round 2 | round 3 |
+|---|---|---|---|
+| plain, float_literal | 1595, 0.075 | 1618, 1.890 | 1547, 0.135 |
+| FK, float_literal | 2514, 0.128 | 2514, 1.722 | 2511, 0.128 |
+| declared, float_literal | 1281, 0.273 | 1198, 2.026 | 1136, 0.264 |
+| anchor, float_literal | 2730, 0.092 | 2790, 1.956 | 2732, 0.129 |
+| unified plain, numexpr | 1717, 0.59 | 2010, 2.457 | 1940, 0.366 |
+| plain, object_literal | 339, 0.166 | 888, 1.215 | 659, 1.352 |
+| FK, object_literal | 1852, 0.122 | 1848, 1.434 | 1768, 1.305 |
+| declared, object_literal | 489, 0.251 | 561, 1.222 | 493, 1.523 |
+| anchor, object_literal | 2798, 0.068 | 2798, 1.131 | 2786, 1.515 |
+
+A float literal now costs what it did on main (0.13 to 0.26 s eval) and adds no memory. Unified plain no longer makes the float64 copy: eval is 0.37 s against 0.59 s on main, and the run peak is 1940 MB (round 2: 2010, main 1717; the remaining +223 MB is not from the `when:` evaluation and was not traced). The `object_literal` cells stay on the object path by design (an integer literal beyond 2**53): about 1.3 to 1.5 s and, for plain, +320 MB over main at 10M rows. Those are the only measured cells that still cost more than 1 s.
+
 ## 2. Mutations on the final code head
 
-Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-19-freeze-o1-mutate.py` to `src/`, runs the O1 owners with `-x`, restores `src/`). Unmutated, the same owner set passes (673 passed with the manifest sentry). Head `0579ff77e`.
+Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-19-freeze-o1-mutate.py` to `src/`, runs the O1 owners with `-x`, restores `src/`). The unmutated owner set passes. Code head `ad4f86303`; every mutation below was run on it. The first rows were retargeted in round 3 because the object and float64 conversions moved into `_int_leaf`.
 
 | Mutation | Plan row | Result |
 |---|---|---|
-| object path never taken | AT-O1a, AT-O1c | red: `test_generated_frames_equal_the_python_integer_reference` |
-| integer-literal range check removed | AT-O1b, AT-O1c | red: same test |
-| value range check removed | AT-O1c | red: same test |
-| float literal no longer forces the object path | AT-O1b | red: `test_a_float_literal_against_an_integer_column_takes_the_object_path`. Before this round it survived: with in-range values the answer is identical either way, so only the dtype shows the rule. The dtype test was added. |
-| nullable integer left as `pd.NA` (no NaN conversion) | AT-O1b | red: same reference test |
+| object path never taken (`_int_leaf`) | AT-O1a, AT-O1c | red: `test_generated_frames_equal_the_python_integer_reference` |
+| integer-literal range check removed | AT-O1b, AT-O1c | red: `test_the_object_path_is_taken_only_for_wide_values_or_integer_literals[v > 9007199254740993]` (it first survived: with the exact integer compare the answer is the same, so the left operand dtype witnesses the rule) |
+| value range check removed | AT-O1c | red: reference test |
+| float bound rounds the wrong way (`>= floor`, not `floor + 1`) | AT-O1b | red: reference test, and `test_non_integral_bounds_keep_the_blank_rule` |
+| non-integral `!=` returns false | AT-O1b | red: `test_float_bounds_round_exactly_and_never_build_a_frame[!=-18.5]` |
+| a blank is never selected (`!=`, `not in`) | AT-O1b | red: reference test |
+| integer path disabled (old float64 or object frame returns) | round 3 | red: `test_float_bounds_round_exactly_and_never_build_a_frame` (the frame builder is replaced by a function that raises) |
 | FK columns dropped from the set | AT-O1d | red: `test_only_allowlisted_functions_call_the_helper[fk_columns_for_table]` |
 | anchor columns dropped | AT-O1b | red: `test_the_adapter_ingests_with_the_union_of_every_role[anchor]` |
 | `top_code` columns dropped | AT-O1b | red: `...[top_code]` |
@@ -59,9 +79,11 @@ Run with `2026-11-19-freeze-o1-mutations.sh` (applies one change from `2026-11-1
 | `when:`-read columns dropped | AT-O1f | red: `...[plain]` |
 | set built by hand in `_chunked_carry.py` | AT-O1e | red: `test_only_allowlisted_functions_call_the_helper[fk_columns_for_table]` |
 | new function calls `to_pandas_fk_safe` | AT-O1e | red: `...[to_pandas_fk_safe]` |
-| `group_by_sibling` returns `None` | this round | red, run without `-x`: plan side `test_the_plan_side_set_names_the_sibling`; config side `test_the_unified_config_set_equals_the_plan_set[group_key-id == 5]`; runtime `TestEndToEndParity::test_chunked_equals_full_frame_across_chunk_sizes` (all sizes), `TestIntNullGroupBy`, `TestNullSentinelPerDtype`, and about 40 other tests in `test_group_key_chunked.py` |
+| `group_by_sibling` returns `None` | round 2 | red, run without `-x`: plan side `test_the_plan_side_set_names_the_sibling`, config side `test_the_unified_config_set_equals_the_plan_set[group_key-id == 5]`, and the runtime parity tests in `test_group_key_chunked.py` |
 
-Test-side mutations (drop the route witness, drop the fallback assertion) are changes to the tests themselves and are not run by this script.
+Not run: the two test-side mutations the plan names (accept a missing or wrong route witness, drop the fallback assertion). They change the tests, not `src/`, and this script only edits `src/`. They are not claimed as red.
+
+Tests that injected a pandas result through `DataFrame.eval` (non-boolean result, missing numexpr, scope clamps) now use a text or float column, because an integer comparison no longer goes through pandas' evaluator. The evaluator branches they cover are unchanged.
 
 ## 3. Coverage limits
 
