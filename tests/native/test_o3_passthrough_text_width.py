@@ -424,6 +424,59 @@ def test_o3f_state_is_monotonic_and_aligns_analytic_and_fk_types(small_limit: No
     )
 
 
+@pytest.mark.parametrize("policy", [OrphanPolicy.PRESERVE, OrphanPolicy.REMAP])
+def test_o3b_promoted_parent_state_reaches_the_out_of_core_joiner(
+    policy: OrphanPolicy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One-row batches: `x` narrows, `yyy` cannot, so the parent column promotes mid-run and the
+    joiner resolves its key type from that same state."""
+    from decoy_engine.execution.out_of_core import _batch_join
+
+    monkeypatch.setattr(_arrow_types, "_OFFSET_LIMIT", 2)
+    seen: list[tuple[Any, ...]] = []
+    real = _batch_join._resolve_output_types
+    monkeypatch.setattr(
+        _batch_join,
+        "_resolve_output_types",
+        lambda **kw: (seen.append(kw["text_widths"]), real(**kw))[1],
+    )
+    shape = o.component_shape(
+        policy, pa.large_string(), parent_n=["x", "yyy"], child_k=["a", "q"], child_n=["x", "yyy"]
+    )
+    oracle, run = s.run_full(shape), o.run_ooc(shape, batch_rows=1)
+    for table in ("P", "C"):
+        got, want = run.outputs[table].column("n"), oracle.outputs[table].column("n")
+        assert got.to_pylist() == want.to_pylist()
+    assert run.outputs["P"].schema.field("n").type == pa.large_string()
+    assert any(st is not None and st.wide for states in seen for st in states)
+
+
+def test_o3e_analytic_fk_routing_receives_the_run_width_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decoy_engine.execution import _pipeline_routing_fk_dtype as routing
+    from decoy_engine.execution.out_of_core import _batch_join
+    from tests.unit.execution import test_pipeline_routing_fk_dtype as fk
+
+    seen: list[Any] = []
+    real = _batch_join._resolve_output_types
+    monkeypatch.setattr(
+        _batch_join,
+        "_resolve_output_types",
+        lambda **kw: (seen.append(kw["text_widths"]), real(**kw))[1],
+    )
+    state = _arrow_types.TextWidthState()
+    state.wide = True
+    big = pa.array(["a"], pa.large_string())
+    routing.fk_out_of_core_dtype_hazard(
+        fk._plan("passthrough"),
+        fk._graph(),
+        caller_sources=fk._sources(big, big),
+        text_widths={"parent": {"pk": state}},
+    )
+    assert seen == [(state,)]
+
+
 def _sparse_2gib_table(tmp_path: Path) -> pa.Table:
     size = 2**31
     path = tmp_path / "sparse.bin"
