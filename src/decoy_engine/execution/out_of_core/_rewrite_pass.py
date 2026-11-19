@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine._arrow_types import TextWidthState, split_wide_batch
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
@@ -87,6 +88,7 @@ def _stream_table(
     vault_config: Mapping[str, Any] | None = None,
     validators: Any = None,
     cast_run: Any = None,
+    run_widths: dict[str, dict[str, TextWidthState]] | None = None,
 ) -> None:
     """Rewrite pass for one table: mask + join per batch, then emit.
 
@@ -137,6 +139,8 @@ def _stream_table(
         # aggregate (never per-batch, which would fragment one column's notice
         # across however many batches the stream happened to use).
         text_mask_sub_floor_totals: dict[str, dict[str, int]] = {}
+        # One width state per pass-through text column, shared by every batch of the table.
+        text_widths = (run_widths if run_widths is not None else {}).setdefault(table_name, {})
         # Phase-local caps (Part A + HIGH): a resident-path joiner stays live
         # through this table's own build, so it opens at the build's cap; sink-ness
         # selects the joiner cap here since memory_limit is fixed at open.
@@ -162,6 +166,7 @@ def _stream_table(
                         Path(temp_dir.create_dir(f"edge_{idx}").local_path()),
                         joiner_memory_limit,
                         mask_key=mask_key,
+                        parent_widths=(run_widths or {}).get(edge.parent_table),
                     )
                 )
             for edge, joiner in zip(incoming_edges, joiners, strict=True):
@@ -214,6 +219,7 @@ def _stream_table(
                         code_set_corpus_records=code_set_corpus_records,
                         sub_floor_totals=text_mask_sub_floor_totals,
                         hash_plan=hash_plan,
+                        text_widths=text_widths,
                     )
                     # Before the join: FK child keys are not yet remapped here (they decline admission).
                     collect_batch_vault(vault_config, table_name, raw_batch, out, vault_writer)
@@ -328,10 +334,13 @@ def _raise_on_total_orphans(
 
 
 def _iter_source_batches(src: TableSource, batch_rows: int) -> Iterator[pa.RecordBatch]:
-    if isinstance(src, LazySource):
-        yield from src.iter_batches(batch_rows)
-        return
-    yield from src.to_batches(max_chunksize=batch_rows)
+    batches = (
+        src.iter_batches(batch_rows)
+        if isinstance(src, LazySource)
+        else src.to_batches(max_chunksize=batch_rows)
+    )
+    for batch in batches:
+        yield from split_wide_batch(batch)
 
 
 def _fk_component_map(

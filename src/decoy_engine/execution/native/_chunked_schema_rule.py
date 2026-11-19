@@ -59,6 +59,7 @@ schema metadata.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -66,6 +67,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 
@@ -240,6 +242,10 @@ class SchemaRule:
     # The first chunk's field (metadata and nullability included), reused for a
     # later null-typed chunk so both routes yield the same field on every chunk.
     passthrough_fields: dict[str, pa.Field]
+    # One width state per pass-through `large_string` column, shared by every chunk of the call:
+    # a chunk whose values fit 32-bit offsets leaves as `string`; a value that cannot fit
+    # promotes the column to `large_string` from then on.
+    text_widths: dict[str, TextWidthState] = dataclasses.field(default_factory=dict)
 
 
 def build_schema_rule(
@@ -319,6 +325,14 @@ def _safe_cast(column: Any, target: pa.DataType, *, table: str, name: str, chunk
         ) from exc
 
 
+def _narrow_passthrough(
+    rule: SchemaRule, name: str, column: pa.ChunkedArray, field: pa.Field
+) -> tuple[pa.ChunkedArray, pa.Field]:
+    state = rule.text_widths.setdefault(name, TextWidthState())
+    parts = [part for chunk in column.chunks for part in state.observe(chunk)]
+    return pa.chunked_array(parts, type=state.arrow_type), field.with_type(state.arrow_type)
+
+
 def normalize_chunk(
     rule: SchemaRule, produced: pa.Table, source: pa.Table, *, table: str, chunk_index: int
 ) -> pa.Table:
@@ -337,6 +351,8 @@ def normalize_chunk(
             if column.type != declared:
                 column = column.cast(declared)
             field = rule.passthrough_fields[name]
+            if pa.types.is_large_string(declared):
+                column, field = _narrow_passthrough(rule, name, column, field)
         elif name in rule.string_columns and column.type != pa.string():
             column = _safe_cast(
                 column, pa.string(), table=table, name=name, chunk_index=chunk_index

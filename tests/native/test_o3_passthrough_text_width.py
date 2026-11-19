@@ -9,6 +9,8 @@ sizes below are small on purpose.
 
 from __future__ import annotations
 
+import copy
+import os
 import subprocess
 import sys
 import textwrap
@@ -22,15 +24,18 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import _arrow_types, run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.execution import _chunked
+from decoy_engine.execution import ParquetTransactionalSink, _chunked, run_pipeline
+from decoy_engine.execution import _chunked_output_sink as sink_mod
 from decoy_engine.execution._pipeline_auto_chunk import join_dispatcher_chunks
 from decoy_engine.execution.native import _chunked_entry
 from decoy_engine.execution.out_of_core import _mask
 from decoy_engine.execution.out_of_core._batch_join import _resolve_output_types
 from decoy_engine.execution.out_of_core._mask import masked_output_type
+from decoy_engine.fileaccess._types import FileAccessReadError
+from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.kernel import passthrough_array
 from decoy_engine.relationships._graph import OrphanPolicy
-from tests._declared_schema import chunked_entry_kwargs
+from tests._declared_schema import chunked_entry_kwargs, declare_rest
 from tests.native._chunked_categorical_support import cat_col, make_config, passthrough
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
@@ -39,9 +44,9 @@ from tests.native._chunked_entry_support import (
     key_provider,
     split,
 )
-from tests.native.test_chunked_entry_values_schema import _full_frame
 from tests.parity import _d2b_shapes as s
 from tests.parity import _dcomp_ooc_shapes as o
+from tests.unit.execution import _r3_scenarios as r3
 
 # Every route in plan 5.3 has a cell below. There is no route registry, so a new route must add
 # itself here (known limit, docs/frozen-surfaces.md route-list row).
@@ -111,20 +116,125 @@ def test_o3a_run_mask_pipeline_chunked_writes_string() -> None:
     assert column_values(got, "keep") == KEEP
 
 
+def _pipeline(tmp_path: Path, source: pa.Table, **kwargs: Any) -> Any:
+    path = str(tmp_path / "source.parquet")
+    pq.write_table(source, path)
+    config = copy.deepcopy(CFG)
+    config["sources"][TABLE] = {"type": "file", "format": "parquet", "path": path}
+    config["targets"][TABLE] = {"type": "file", "format": "parquet", "path": path + ".out"}
+    declare_rest(config, {TABLE: source})
+    return run_pipeline(
+        config,
+        {TABLE: source},
+        engine_version=ENGINE_VERSION,
+        auto_chunk=False,
+        key_provider=key_provider(),
+        use_byte_estimate_routing=False,
+        use_probe_routing=False,
+        **kwargs,
+    )
+
+
 def test_o3a_whole_frame_writes_string(tmp_path: Path) -> None:
-    out = _full_frame(CFG, _source(KEEP), tmp_path)
+    got = _pipeline(
+        tmp_path, _source(KEEP), execution_mode="full_frame", unified_slice_enabled=False
+    )
+    out = got.outputs[TABLE]
+    assert "unified_slice_activation" not in got.quality_metrics
     assert out.schema.field("keep").type == pa.string()
     assert out.column("keep").to_pylist() == KEEP
 
 
-@pytest.mark.parametrize("mode", ["resident", "sink-batch"])
-def test_o3a_out_of_core_writes_string(
-    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _large_text(table: pa.Table) -> pa.Table:
+    return pa.table(
+        {
+            n: table.column(n).cast(pa.large_string())
+            if pa.types.is_string(table.schema.field(n).type)
+            else table.column(n)
+            for n in table.column_names
+        }
+    )
+
+
+def _no_large_text(outputs: dict[str, pa.Table]) -> None:
+    for name, table in outputs.items():
+        assert all(not pa.types.is_large_string(f.type) for f in table.schema), name
+
+
+def test_o3a_unified_slice_declines_large_string_and_writes_string(tmp_path: Path) -> None:
+    """The slice admits `string` sources only, so a `large_string` source takes the pandas
+    fallback; the control run shows the slice is otherwise live for this shape."""
+    cfg, table = r3.single_table(tmp_path, hash_column=False)
+    control = r3._go(cfg, {"t": table}, key_provider=r3.key_provider())
+    assert "unified_slice_activation" in control.quality_metrics
+    got = r3._go(cfg, {"t": _large_text(table)}, key_provider=r3.key_provider())
+    assert "unified_slice_activation" not in got.quality_metrics
+    assert got.outputs["t"].schema.field("p").type == pa.string()
+    assert got.outputs["t"].column("p").to_pylist() == table.column("p").to_pylist()
+
+
+def test_o3a_sequential_writes_string(tmp_path: Path) -> None:
+    cfg, tables = r3.fk_job(tmp_path)
+    want = r3._go(cfg, tables, execution_mode="sequential", **r3._ROW_ROUTING)
+    got = r3._go(
+        cfg,
+        {n: _large_text(t) for n, t in tables.items()},
+        execution_mode="sequential",
+        **r3._ROW_ROUTING,
+    )
+    assert got.quality_metrics["execution"]["execution_mode"] == "sequential"
+    _no_large_text(got.outputs)
+    for name, table in want.outputs.items():
+        assert got.outputs[name].to_pydict() == table.to_pydict()
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("resident", pa.string()), ("sink-batch", pa.large_string())],
+)
+def test_o3a_out_of_core_writes_string_but_a_fixed_schema_sink_keeps_large_string(
+    mode: str, expected: pa.DataType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The Parquet sink fixes its schema before batch one, so it keeps main's field (plan 3.3)."""
     calls = _spy(monkeypatch, _mask, "passthrough_array")
     run = o.run_ooc(o.large_string_component_shape(OrphanPolicy.PRESERVE), mode, tmp_path=tmp_path)
     assert calls
-    assert run.outputs["P"].schema.field("n").type == pa.string()
+    assert run.outputs["P"].schema.field("n").type == expected
+
+
+def test_o3a_streamed_chunked_sink_keeps_the_large_string_field() -> None:
+    chunks = [
+        pa.table({"keep": pa.array(["ab", None], pa.string())}),
+        pa.table({"keep": pa.array(["cd"], pa.string())}),
+    ]
+    seen: list[pa.Table] = []
+
+    class _Sink:
+        def write_batches(self, table: str, batches: Any, *, schema: pa.Schema) -> None:
+            seen.append(pa.Table.from_batches(list(batches), schema=schema))
+
+    widened = _arrow_types.widen_text_columns(chunks, frozenset({"keep"}))
+    sink_mod.stream_table(_Sink(), "t", widened, fixed_columns=frozenset({"keep"}))  # type: ignore[arg-type]
+    assert seen[0].schema.field("keep").type == pa.large_string()
+    assert seen[0].column("keep").to_pylist() == ["ab", None, "cd"]
+
+
+def test_o3a_streamed_chunked_parquet_sink_file_keeps_large_string(tmp_path: Path) -> None:
+    cfg, table = r3.single_table(tmp_path, hash_column=False)
+    out = tmp_path / "sink_out"
+    got = r3._go(
+        cfg,
+        {"t": _large_text(table)},
+        sink=ParquetTransactionalSink(out),
+        key_provider=r3.key_provider(),
+        auto_chunk=True,
+        chunk_size_rows=7,
+        auto_chunk_threshold_rows=1,
+    )
+    assert got.quality_metrics["auto_chunk"]["mode"] != "full_frame"
+    written = pq.read_table(out / "t.parquet")
+    assert written.schema.field("p").type == pa.large_string()
+    assert written.column("p").to_pylist() == table.column("p").to_pylist()
 
 
 # AT-O3b: an FK key passed through as large_string joins the same rows as the oracle.
@@ -214,6 +324,21 @@ def test_o3e_oversized_chunk_with_fitting_rows_splits_and_succeeds(
     assert column_values(got, "keep") == values
 
 
+def test_o3e_the_source_is_not_pre_scanned(small_limit: None) -> None:
+    """The first chunk is produced before the second is read: no pass over the source decides
+    the width up front."""
+    consumed: list[int] = []
+    run = run_mask_chunked(
+        CFG,
+        _one_shot(split(_source(["abcd", "efgh", "ijkl", "mnop"]), 2), consumed),
+        table=TABLE,
+        engine_version=ENGINE_VERSION,
+        key_provider=key_provider(),
+    )
+    next(iter(run))
+    assert consumed == [2]
+
+
 def test_o3e_ooc_batch_over_the_limit_is_split_by_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_arrow_types, "_OFFSET_LIMIT", 1)
     shape = o.large_string_component_shape(OrphanPolicy.PRESERVE)
@@ -271,8 +396,8 @@ def test_o3f_state_is_monotonic_and_aligns_analytic_and_fk_types(small_limit: No
     (after,) = state.observe(pa.array(["ab"], pa.large_string()))
     assert after.type == pa.large_string()  # never narrows again
     seed: Any = SimpleNamespace(strategy="passthrough", provider_config={}, namespace=None)
-    assert masked_output_type(seed, pa.large_string(), state) == pa.large_string()
-    assert masked_output_type(seed, pa.large_string(), _arrow_types.TextWidthState()) == pa.string()
+    # The analytic type fixes a Parquet sink's field before batch one: the source type, as on main.
+    assert masked_output_type(seed, pa.large_string()) == pa.large_string()
     edge: Any = SimpleNamespace(orphan_policy=OrphanPolicy.PRESERVE, child_columns=("k",))
     kwargs: dict[str, Any] = {
         "edge": edge,
@@ -286,14 +411,53 @@ def test_o3f_state_is_monotonic_and_aligns_analytic_and_fk_types(small_limit: No
     )
 
 
-def test_o3f_parquet_still_refuses_one_2gib_value(tmp_path: Path) -> None:
-    """Parquet cannot store the value on origin/main or here; O3 adds no earlier refusal."""
+def _sparse_2gib_table(tmp_path: Path) -> pa.Table:
     size = 2**31
     path = tmp_path / "sparse.bin"
     with path.open("wb") as fh:
         fh.truncate(size)
     buf = pa.memory_map(str(path)).read_buffer(size)
     offsets = pa.py_buffer(b"".join(v.to_bytes(8, "little") for v in (0, size)))
-    big = pa.Array.from_buffers(pa.large_string(), 1, [None, offsets, buf])
+    return pa.table({"keep": pa.Array.from_buffers(pa.large_string(), 1, [None, offsets, buf])})
+
+
+class _Stage:
+    """The two things `arrow_adapter.write_table` reads from a stage, for either policy."""
+
+    display = "target"
+
+    def __init__(self, root: Path, *, strict: bool) -> None:
+        self.root, self.strict = root, strict
+
+    def create_file(self, component: str) -> int:
+        return os.open(self.root / component, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+
+
+def test_o3f_parquet_local_writer_still_refuses_one_2gib_value(tmp_path: Path) -> None:
+    """Same on origin/main and here: O3 adds no earlier refusal."""
+    stage: Any = _Stage(tmp_path, strict=False)
     with pytest.raises(pa.ArrowInvalid, match="Parquet cannot store strings with size 2GB"):
-        pq.write_table(pa.table({"keep": big}), str(tmp_path / "out.parquet"))
+        arrow_adapter.write_table(_sparse_2gib_table(tmp_path), stage, "out.parquet")
+
+
+def test_o3f_parquet_strict_writer_still_raises_file_access_read_error(tmp_path: Path) -> None:
+    stage: Any = _Stage(tmp_path, strict=True)
+    with pytest.raises(FileAccessReadError, match="file could not be read: target"):
+        arrow_adapter.write_table(_sparse_2gib_table(tmp_path), stage, "out.parquet")
+
+
+def test_o3e_pandas_routes_succeed_under_a_small_limit(small_limit: None, tmp_path: Path) -> None:
+    values = ["abcd", "efgh", "ijkl", None, "mnop", "q"]
+    got = _pipeline(
+        tmp_path, _source(values), execution_mode="full_frame", unified_slice_enabled=False
+    )
+    assert got.outputs[TABLE].schema.field("keep").type == pa.string()
+    assert got.outputs[TABLE].column("keep").to_pylist() == values
+    cfg, tables = r3.fk_job(tmp_path)
+    seq = r3._go(
+        cfg,
+        {n: _large_text(t) for n, t in tables.items()},
+        execution_mode="sequential",
+        **r3._ROW_ROUTING,
+    )
+    _no_large_text(seq.outputs)

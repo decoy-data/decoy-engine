@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import unify_text_widths, widen_text_columns
 from decoy_engine.execution import _chunked_input
 from decoy_engine.execution import _chunked_output_sink as _output_sink
 from decoy_engine.execution._adapter import ExecutionResult
@@ -148,6 +149,10 @@ def _target_field(chunks: list[pa.Table], index: int, table: str) -> pa.Field:
     if not typed:
         return first
     if any(f.type != typed[0].type for f in typed):
+        # A pass-through text column promoted to `large_string` after earlier `string` chunks.
+        widest = unify_text_widths({f.type for f in typed})
+        if len(widest) == 1:
+            return next(f for f in typed if f.type == next(iter(widest)))
         types = sorted({str(f.type) for f in typed})
         raise _mismatch(table, f"column {first.name!r} has disagreeing types {types}")
     return typed[0]
@@ -340,6 +345,7 @@ def _run_streamed(
     """The dispatcher lane with the chunks streamed into `sink`; returns the `output` and
     `input` blocks. A `LazySource` is read as batches (B6b) and its handle is closed on every
     exit."""
+    from decoy_engine.execution import _transactional_sink
     from decoy_engine.execution.native._chunked_schema_rule import build_schema_rule
     from decoy_engine.execution.native.chunked import _core
 
@@ -374,7 +380,16 @@ def _run_streamed(
         stats = _output_sink.stream_table(
             sink,
             table,
-            chunks,
+            # A real sink fixes its writer schema before chunk one, so it keeps the source
+            # `large_string` field as on main; the in-memory collector keeps the narrowed type.
+            chunks
+            if isinstance(sink, _transactional_sink._CallableSinkAdapter)
+            else widen_text_columns(
+                chunks,
+                frozenset(
+                    n for n, t in rule.passthrough_types.items() if pa.types.is_large_string(t)
+                ),
+            ),
             fixed_columns=rule.string_columns | frozenset(rule.passthrough_types),
             align_row_groups=align_row_groups,
             empty_schema=first.schema if first.num_rows == 0 else None,

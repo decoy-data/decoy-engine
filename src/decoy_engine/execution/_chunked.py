@@ -165,6 +165,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import unify_text_widths
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.execution._guards import (  # re-exported: the core's declaration-gate seam
     prepare_declared_execution_sources as prepare_declared_execution_sources,
@@ -568,6 +569,9 @@ def concat_masked_chunks(chunks: list[pa.Table], *, table: str) -> pa.Table:
             t = chunk.schema.field(idx).type
             if not pa.types.is_null(t) and t not in non_null_types:
                 non_null_types.append(t)
+        if len(non_null_types) > 1:
+            # A pass-through text column promoted to `large_string` after earlier `string` chunks.
+            non_null_types = list(unify_text_widths(set(non_null_types)))
         if len(non_null_types) > 1:
             raise ExecutionError(
                 code=reasons.runtime.CHUNKED_SCHEMA_MISMATCH,

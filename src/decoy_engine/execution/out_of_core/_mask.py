@@ -18,11 +18,13 @@ up-front type resolution).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution.out_of_core._categorical_native import native_categorical_array
@@ -121,6 +123,7 @@ def mask_column(
     text_redact_native: NativeTextRedact | None = None,
     text_mask_native: NativeTextMask | None = None,
     faker_native: NativeFaker | None = None,
+    text_width: TextWidthState | None = None,
 ) -> pa.Array:
     """Apply one admitted strategy to one column (or column slice).
 
@@ -211,6 +214,8 @@ def mask_column(
                 values, native=faker_native, mask_key=mask_key, namespace=seed.namespace
             )
         if seed.strategy == "passthrough":
+            if text_width is not None and isinstance(values, pa.Array):
+                return passthrough_array(values, text_width)
             return passthrough_array(values)
         if seed.strategy == "redact":
             return redact_array(values, redact_with=cfg.get("redact_with", "REDACTED"))
@@ -366,6 +371,24 @@ def mask_table(
         raise
 
 
+def _narrow_unmasked(
+    batch: pa.RecordBatch,
+    arrays: list[pa.Array],
+    fields: list[pa.Field],
+    touched: Iterable[str],
+    widths: dict[str, TextWidthState],
+) -> pa.RecordBatch:
+    """Narrow the `large_string` columns the plan does not mask, then rebuild the batch."""
+    skip = set(touched)
+    for idx, field in enumerate(batch.schema):
+        if field.name in skip or not pa.types.is_large_string(field.type):
+            continue
+        state = widths.setdefault(field.name, TextWidthState())
+        arrays[idx] = passthrough_array(arrays[idx], state)
+        fields[idx] = field.with_type(state.arrow_type)
+    return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+
+
 def mask_batch(
     plan: Plan,
     table_name: str,
@@ -376,6 +399,7 @@ def mask_batch(
     code_set_corpus_records: dict[str, _CorpusRecord] | None = None,
     sub_floor_totals: dict[str, dict[str, int]] | None = None,
     hash_plan: TableHashPlan | None = None,
+    text_widths: dict[str, TextWidthState] | None = None,
 ) -> pa.RecordBatch:
     """Mask one RecordBatch's non-FK columns per the plan.
 
@@ -405,11 +429,18 @@ def mask_batch(
 
     `hash_plan` carries the table's per-column hash decisions (resolved once before
     the first batch); `None` leaves every hash column on the Python kernel unrecorded.
+
+    `text_widths` holds the table's width state per pass-through text column, shared by every
+    batch of the table so a later unsplittable value promotes the column (no state: each call
+    narrows on its own). A `large_string` column no strategy touches is narrowed the same way.
     """
     try:
+        widths = text_widths if text_widths is not None else {}
         seed = table_seed(plan, table_name)
         if seed is None:
-            return batch
+            if not any(pa.types.is_large_string(f.type) for f in batch.schema):
+                return batch
+            return _narrow_unmasked(batch, list(batch.columns), list(batch.schema), (), widths)
         mask_key = mask_key if mask_key is not None else plan.seed_envelope.job_seed
         records = code_set_corpus_records or {}
         fields = list(batch.schema)
@@ -474,12 +505,18 @@ def mask_batch(
                 text_redact_native=text_redact_native,
                 text_mask_native=text_mask_native,
                 faker_native=faker_native,
+                text_width=(
+                    widths.setdefault(column, TextWidthState())
+                    if column_seed.strategy == "passthrough"
+                    else None
+                ),
             )
             arrays[idx] = masked
             # Same field semantics as Table.set_column with a bare name: the field
             # type follows the masked array, prior field metadata is not carried.
             fields[idx] = pa.field(column, masked.type)
-        return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+        touched = {column for column, _ in seed.per_column} | set(skip_columns)
+        return _narrow_unmasked(batch, arrays, fields, touched, widths)
     except BaseException:
         del mask_key
         raise

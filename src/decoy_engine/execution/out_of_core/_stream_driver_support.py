@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._compat import _column_seed
@@ -186,6 +187,7 @@ def open_joiner(
     memory_limit: str | None,
     *,
     mask_key: bytes | None = None,
+    parent_widths: Mapping[str, TextWidthState] | None = None,
 ) -> _J:
     """Open one edge's FK joiner (`ChildFkBatchJoiner` or `StreamFkJoiner`, the two drivers'),
     after checking the child columns and, under REMAP, the parent seeds."""
@@ -216,6 +218,8 @@ def open_joiner(
             memory_limit=memory_limit,
             remap_seeds=remap_seeds,
             job_seed=mask_key if mask_key is not None else plan.seed_envelope.job_seed,
+            # The parent's width state per key column: a promoted parent keeps the FK type wide.
+            text_widths=tuple((parent_widths or {}).get(c) for c in edge.parent_columns),
         )
     except BaseException:
         del mask_key
