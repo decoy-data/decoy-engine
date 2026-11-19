@@ -207,13 +207,10 @@ class _Deriver:
             tagged = any(has_kind(info.metadata, k) for k in self.required_kinds)
             # A tag's writer default must not stand in for a document that never stated it.
             default: Any = ... if tagged or info.is_required() else info.default
-            if default is PydanticUndefined:
+            factory = info.default_factory
+            if default is PydanticUndefined and factory is not None:
                 # A default_factory field: the reader keeps the writer's factory.
-                spec = Field(
-                    default_factory=info.default_factory,
-                    alias=info.alias,
-                    exclude_if=info.exclude_if,
-                )
+                spec = Field(default_factory=factory, alias=info.alias, exclude_if=info.exclude_if)
             else:
                 spec = Field(default, alias=info.alias, exclude_if=info.exclude_if)
             # Only a Literal is held exact: a field of the same name that is a model still derives.

@@ -286,11 +286,11 @@ def _read_and_profile(
 
     reader = src.build_declared_source(name, descriptor)
     whole = strategy == "full" or sample_rows is None
-    if whole or strategy == "random":
+    if sample_rows is None or whole or strategy == "random":
         frame = reader.to_frame()
         total, exact = len(frame), True
         # A random read keeps everything when the source fits the cap: no sampling happened.
-        reached_end = whole or sample_rows is None or len(frame) <= sample_rows
+        reached_end = sample_rows is None or whole or len(frame) <= sample_rows
         if not whole and sample_rows is not None and len(frame) > sample_rows:
             frame = frame.sample(n=sample_rows, random_state=_RANDOM_SEED).reset_index(drop=True)
     else:
