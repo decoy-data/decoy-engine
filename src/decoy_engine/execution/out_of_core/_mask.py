@@ -214,9 +214,8 @@ def mask_column(
                 values, native=faker_native, mask_key=mask_key, namespace=seed.namespace
             )
         if seed.strategy == "passthrough":
-            if text_width is not None and isinstance(values, pa.Array):
-                return narrow_passthrough(values, text_width)
-            return passthrough_array(values)
+            passed = passthrough_array(values)
+            return passed if text_width is None else narrow_passthrough(passed, text_width)
         if seed.strategy == "redact":
             return redact_array(values, redact_with=cfg.get("redact_with", "REDACTED"))
         if seed.strategy == "truncate":

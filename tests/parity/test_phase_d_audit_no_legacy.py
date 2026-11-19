@@ -817,9 +817,9 @@ def _install_ooc_marks(mp: pytest.MonkeyPatch, *, mutant: bool) -> dict[str, lis
         mp.setattr(_mask, name, entry)
     real_pt = _mask.passthrough_array
 
-    def noop(values: Any, *width: Any) -> pa.Array:  # O3: text columns pass a width state
+    def noop(values: Any) -> pa.Array:
         log["passthrough"].append(len(values))
-        return real_pt(values, *width)
+        return real_pt(values)
 
     mp.setattr(_mask, "passthrough_array", noop)
     return log
