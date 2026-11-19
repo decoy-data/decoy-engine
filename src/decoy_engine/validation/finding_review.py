@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 from decoy_engine import reasons
-from decoy_engine.config import Dismissal
+from decoy_engine.config import Dismissal, PipelineConfigError
 from decoy_engine.detection.types import DETECTOR_ORDER, DetectorSource, ModelRef
-from decoy_engine.profiling import declared_key_namespaces, detector_entry
+from decoy_engine.profiling import check_starter_config, declared_key_namespaces, detector_entry
 from decoy_engine.validation.starter_review import (
     ReviewDecision,
     ReviewDuplicateError,
@@ -32,7 +32,6 @@ from decoy_engine.validation.starter_review import (
     ReviewVerdict,
     _edited_entry,
     _index_of,
-    _validation_problems,
     column_entry,
     pin_key_entry,
 )
@@ -203,7 +202,13 @@ def _check_applied(config: Mapping[str, Any], edits: Sequence[ConfigEdit]) -> No
             target.append(copy.deepcopy(dict(edit.value)))
         else:
             parent[last] = copy.deepcopy(dict(edit.value))
-    problems = _validation_problems(applied, None, None)
+    problems = ""
+    try:
+        check_starter_config(applied)
+    except PipelineConfigError as err:
+        shown = "; ".join(f"{p.code} at {p.location or '(root)'}" for p in err.problems[:5])
+        problems = shown or "no detail"
+    # Raised outside the handler so the config error is not implicit context.
     if problems:
         raise ReviewEntryError(f"the edited config fails validation ({problems})")
 

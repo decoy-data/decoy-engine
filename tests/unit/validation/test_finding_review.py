@@ -232,7 +232,9 @@ def test_an_address_finding_on_redact_at_a_low_identity_rate_is_not_dismissible(
 
 def test_an_edit_that_leaves_the_config_invalid_is_refused_by_code() -> None:
     config = _config()
-    config["tables"][0]["columns"].append({"name": "x", "strategy": "hash"})
+    config["tables"][0]["columns"].append(
+        {"name": "x", "strategy": "hash", "namespace": "n", "no_such_field": 1}
+    )
     row = _row("email", "email")
     err = _refusal(lambda: finding_edits(config, _report(row), [_decision(row, V.CONFIRM)]))
     assert isinstance(err, ReviewEntryError)
