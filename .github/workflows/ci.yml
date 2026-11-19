@@ -134,9 +134,11 @@ jobs:
   regression-gate:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    # Measured 2026-11-05 on the pip install: job 66m44s, pytest 1:05:34 (run 42026173384).
+    # Single-process pytest took 66m44s on 2026-11-05 and 72m on 2026-11-15 (last green nightly),
+    # then hit the old 75 minute cap every night from 2026-11-16. With xdist on the 4 vCPU
+    # runner (run 44580230671, 2026-11-19): parallel pass 29m, serial pass 4.5m, job about 35m.
     # See the ruff job note on why a cap is needed.
-    timeout-minutes: 75
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v7
         with:

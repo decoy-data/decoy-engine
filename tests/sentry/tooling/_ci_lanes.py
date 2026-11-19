@@ -47,7 +47,7 @@ CONCURRENCY = {
 # pytest options that take a value, so the value is not read as a test path.
 _VALUE_OPTS = {
     "-k", "-p", "-n", "-c", "-W", "--tb", "--junitxml", "--durations", "--ignore", "--ignore-glob",
-    "--deselect", "--maxfail", "--rootdir", "--basetemp", "--timeout", "--cov",
+    "--deselect", "--dist", "--maxfail", "--rootdir", "--basetemp", "--timeout", "--cov",
 }  # fmt: skip
 _ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)
 _PYTHON = re.compile(r"python[0-9.]*")
@@ -249,9 +249,18 @@ def _agreement_findings(gates: str, gate_lanes: list[Lane]) -> list[str]:
         pinned = parse_marker_expr(gates)
     except ValueError as e:
         return [f"M5 {e}"]
-    if len(gate_lanes) != 1 or " ".join((gate_lanes[0].expr or "").split()) != " ".join(
-        pinned.split()
-    ):
+
+    def norm(e: str | None) -> str:
+        return " ".join((e or "").split())
+
+    want = norm(pinned)
+    # One lane with the gates.sh expression, or the two-pass split gates.sh itself runs: the
+    # parallel pass adds `not serial` and the serial pass adds `serial`.
+    ok_one = len(gate_lanes) == 1 and norm(gate_lanes[0].expr) == want
+    ok_two = len(gate_lanes) == 2 and sorted(norm(ln.expr) for ln in gate_lanes) == sorted(
+        [f"{want} and not serial", f"{want} and serial"]
+    )
+    if not (ok_one or ok_two):
         return ["M5 gates.sh PYTEST_ARGS and the ci.yml regression-gate -m expression differ"]
     return []
 

@@ -388,6 +388,16 @@ def test_gates_expression_must_equal_the_hosted_one() -> None:
     assert has(lanes.marker_findings(t), "M5 gates.sh has no single")
 
 
+def test_regression_gate_split_needs_both_passes() -> None:
+    """The parallel and serial passes together select what gates.sh selects; either alone does not."""
+    t = seeded()
+    gate = job(t, "ci.yml", "regression-gate")
+    steps = [s for s in gate["steps"] if "pytest tests" in s.get("run", "")]
+    assert len(steps) == 2  # the shipped split
+    gate["steps"] = [s for s in gate["steps"] if s is not steps[1]]
+    assert has(lanes.marker_findings(t), "M5")
+
+
 def test_gates_excludes_the_harness_that_its_own_lane_owns() -> None:
     expr = parse_marker_expr(TREE.gates)
     assert not lanes.selects(expr, frozenset({"determinism_harness"}))
