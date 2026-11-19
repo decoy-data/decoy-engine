@@ -197,6 +197,14 @@ eight identities, only the `rules` field and only this exact old and new value. 
 still fails. `REGISTRY_VERSION` stays `1.29.0`, so a consumer that keys on the outcome or retry of these codes sees
 the new values under the same registry version until the next release recaptures the pin.
 
+**Pre-GA corrections taken with the freeze batch (X0, 2026-11-18).** The engine gets a third tier. Section 3.4
+froze `__init__.py` and `sdk.py` whole, so every name in `sdk.py` was frozen by default. Section 3.6 moves these names to
+experimental: the connector SDK objects defined in `decoy_engine.sdk` and their root re-exports, the `CAP_*` flags and
+`SDK_VERSION`, and the six provider registration functions. `ConfigError` and `ConnectorError` stay frozen because
+`sdk` only re-exports them from `errors`. No name is removed or renamed. A public subpackage that section 3.4 does not
+name now defaults to documented internal. Later slices of the batch add their own lines here: the `FormulaStrategy`
+base removal, the public renames, and the `when:`, compressed-CSV and pass-through output changes.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
@@ -1095,6 +1103,69 @@ bundle set.
 
 **Rule:** **never edit a released disguise version.** Add a new dated version.
 Review enforces this until a test does; do not "fix" a shipped disguise in place.
+
+### 3.6 Experimental surfaces
+
+Every public engine name has one of three tiers. **Frozen** names follow sections 3.1 to 3.5 and section 4. An
+**experimental** name may change or be removed in any minor release; the change gets a `Changed` or `Removed`
+changelog fragment that starts with "Experimental:", and no deprecation window is promised. **Internal** names may
+change in any release. The registry is `src/decoy_engine/contracts/stability.py`, and
+`tests/sentry/release/test_public_census.py` gives every exported name exactly one tier.
+
+- Section 3.4 freezes `decoy_engine/__init__.py` and `decoy_engine/sdk.py` whole, plus the subpackage names it lists
+  one by one. A public subpackage that section 3.4 does not name defaults to internal, unless one of its objects
+  is exported by a frozen path or the registry lists the name as frozen or experimental. No name is unclassified:
+  each export matches one explicit registry row or one package rule.
+  Inside a subpackage that section 3.4 names, a name it does not list is internal too (for example
+  `detection.load_detectors`).
+- The tier belongs to the object and applies to every path that exports it. A constant is matched by its name and
+  its object identity, so `SEED_PROTOCOL_VERSION` has one tier wherever it is exported. Only the paths that section
+  3.4 names are a stability promise. Another path to a frozen object, such as `decoy_engine.execution.ExecutionResult`,
+  is an internal import path to a frozen object: the object does not change incompatibly, but the path may move.
+  `decoy_engine.FileSource` and `decoy_engine.sdk.FileSource` are one experimental object; `sdk.ConfigError` and
+  `sdk.ConnectorError` are the frozen `errors` objects.
+- Everything `sdk.py` defines is experimental: each class or function whose `__module__` is `decoy_engine.sdk`, and
+  each constant assigned there, so a new `sdk` name starts experimental. The Faker provider registration functions
+  live elsewhere and are listed in the registry by identity.
+- Determinism is never experimental. Output bytes made through an experimental surface (a custom provider's values,
+  a connector's rows once masked) follow section 3.3. Stored records are frozen whatever the tier of the code that
+  wrote them.
+- An experimental class or function starts its docstring with `Experimental:`. An experimental constant has no
+  docstring, so the docstring of its module starts with the marker and names it. The documentation page for an
+  experimental surface carries the marker in its first paragraph. A sentry checks the marker against the registry
+  both ways.
+- A public package that needs an optional extra may fail to import only for that extra. The census then reads its
+  declared names from source and fails on any other import error, on an `__all__` it cannot read, and on a public
+  package without `__all__` that is not on the registry's counted list. The census floors are 59 packages and
+  1,186 names.
+- An experimental surface becomes frozen by moving its registry row and dropping the marker in a minor release. A
+  frozen name never goes back to experimental inside a major.
+
+The experimental names at 1.0, one per line (the sentry compares this list with the registry):
+
+```text
+CAP_DRY_RUN
+CAP_INTROSPECTION
+CAP_MULTIPART
+CAP_RESUMABLE
+CAP_SIGNED_URL
+CAP_STREAMING
+CheckResult
+ConnectorConfig
+FileMeta
+FileSink
+FileSource
+PermanentError
+SDK_VERSION
+TransientError
+WriteResult
+atomic_swap_db_providers
+load_custom_providers
+register_faker_list_provider
+register_faker_provider
+register_faker_provider_v2
+unregister_faker_provider
+```
 
 ## 4. The rules for adding a feature without breaking anyone
 
