@@ -593,7 +593,8 @@ def test_released_sections_match_their_pins() -> None:
 
 def test_the_ratchet_catches_a_break_filed_outside_the_list() -> None:
     text = CHANGELOG.read_text(encoding="utf-8")
-    newest = _releases(text)[0][0]
+    # A patch release may carry no Breaking list; the ratchet only reads releases that do.
+    newest = next(v for v, sec in _releases(text) if _entries_outside_breaking(sec) is not None)
     marker = f"## [{newest}]"
     head, tail = text.split(marker, 1)
     planted = "\n### Changed (planted)\n\n- A planted option now fails with `planted_code`.\n"
