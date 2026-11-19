@@ -63,3 +63,21 @@ def test_a_pre_basis_scan_set_record_decodes_exports_and_reads_back() -> None:
     assert payload["tables"][0]["key_candidates"] == []
     again = records.decode(canonical_bytes(exported.record.raw))
     assert isinstance(again, records.DecodedRecord) and again.id == exported.record.id
+
+
+def test_a_pre_basis_scan_set_exports_no_key_candidates_even_with_keep_paths() -> None:
+    from tests.unit.records._helpers import PRODUCER, T0
+
+    got = records.decode((CORPUS / "scan-set-v1.json").read_bytes())
+    assert isinstance(got, records.DecodedRecord)
+    assert got.raw["payload"]["tables"][0]["key_candidates"] != []
+    lines = list(
+        records.export_lines([got.raw], producer=PRODUCER, exported_at=T0, keep_paths=True)
+    )
+    items = list(records.read_export(lines))
+    exported = items[1].record.raw
+    assert exported["payload"]["tables"][0]["key_candidates"] == []
+    # Paths stay with keep_paths; only the unproven claim goes, and the id follows the payload.
+    assert exported["payload"]["tables"][0]["descriptor"]["path"] == "/work/data/claims.csv"
+    assert items[0].paths_stripped is False
+    assert items[1].source_id == got.id and exported["id"] != got.id

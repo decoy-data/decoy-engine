@@ -193,6 +193,22 @@ class ScanSetCore(_Core):
     detectors: list[_DetectorRunCore] = Field(default_factory=list)
 
 
+def without_unproven_keys(data: Any) -> Any:
+    """`data` (a scan-set core dict) with `key_candidates` emptied on every table whose basis is
+    not exactly `whole`. The one place that applies the key rule to a stored core."""
+    tables = data.get("tables") if isinstance(data, dict) else None
+    if not isinstance(tables, list):
+        return data
+    fixed = [
+        {**t, "key_candidates": []}
+        if isinstance(t, dict)
+        and not key_claim_allowed(t.get("basis") == "whole", bool(t.get("key_candidates")))
+        else t
+        for t in tables
+    ]
+    return {**data, "tables": fixed}
+
+
 # A table whose basis is not exactly `whole` (an older record, or a value a later minor added)
 # reads with no key candidates: they were never proven.
 class ScanSetCoreRead(
@@ -201,14 +217,4 @@ class ScanSetCoreRead(
     @model_validator(mode="before")
     @classmethod
     def _drop_unproven_keys(cls, data: Any) -> Any:
-        tables = data.get("tables") if isinstance(data, dict) else None
-        if not isinstance(tables, list):
-            return data
-        fixed = [
-            {**t, "key_candidates": []}
-            if isinstance(t, dict)
-            and not key_claim_allowed(t.get("basis") == "whole", bool(t.get("key_candidates")))
-            else t
-            for t in tables
-        ]
-        return {**data, "tables": fixed}
+        return without_unproven_keys(data)
