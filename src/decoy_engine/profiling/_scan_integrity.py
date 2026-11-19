@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final, Literal
 
@@ -170,7 +171,7 @@ def declare(
 def _usable_positions(positions: Sequence[Any], count: int) -> bool:
     """Facts are keyed by position, so a repeat would merge two relationships into one."""
     ints = all(type(p) is int and p > 0 for p in positions)
-    return ints and len(positions) == count and all(a < b for a, b in zip(positions, positions[1:]))
+    return ints and len(positions) == count and all(a < b for a, b in pairwise(positions))
 
 
 def declare_pipeline(
