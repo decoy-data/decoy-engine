@@ -443,14 +443,14 @@ def _physical_lines(path: Path) -> int:
 
 
 def test_output_lock_sentries_are_split_and_bounded() -> None:
-    manifest = (ENGINE_ROOT / "tests" / "sentry" / "test_sentry_manifest.py").read_text(
-        encoding="utf-8"
-    )
+    # The manifest is a glob (tests/sentry/**/test_*.py), so a sentry is registered by
+    # existing under that glob, not by being listed by path.
+    globbed = {p.name for p in (ENGINE_ROOT / "tests" / "sentry").rglob("test_*.py")}
     for name in _LOCK_SENTRIES:
         path = _DEPENDENCY_SENTRIES / name
         assert path.is_file(), name
         assert _physical_lines(path) < 600, name
-        assert f'"tests/sentry/dependencies/{name}"' in manifest, name
+        assert name in globbed, name
     assert _physical_lines(_DEPENDENCY_SENTRIES / "_faker_lock_lists.py") < 600
     support = _DEPENDENCY_SENTRIES / "_faker_output_lock_support.py"
     assert _physical_lines(support) < 250

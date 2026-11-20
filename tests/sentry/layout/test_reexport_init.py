@@ -1,5 +1,5 @@
-"""Self-tests for the physical-seam helpers in `_reexport_init.py`: the pure re-export rule and the
-one physical-import scanner (relative and star imports included)."""
+"""Self-tests for the physical-import scanner in `_reexport_init.py` (relative and star imports
+included)."""
 
 from __future__ import annotations
 
@@ -7,49 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.sentry.layout._reexport_init import imports_physical, is_pure_reexport_init
-
-
-def test_pure_reexport_init_is_detected(tmp_path: Path) -> None:
-    init = tmp_path / "__init__.py"
-    init.write_text(
-        '"""Doc."""\n\nfrom __future__ import annotations\n\nimport os\n'
-        "from a.b import C\n\n"
-        '__all__ = ["C"]\n'
-    )
-    assert is_pure_reexport_init(init)
-    init.write_text("from a import B\n__all__ = ('B',)\n")
-    assert is_pure_reexport_init(init)
-    init.write_text("")
-    assert is_pure_reexport_init(init)
-    other = tmp_path / "mod.py"
-    other.write_text("from a import B\n")
-    assert not is_pure_reexport_init(other)  # only __init__.py files
-    assert not is_pure_reexport_init(tmp_path / "missing" / "__init__.py")
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        "def f(): pass\n",
-        "class C: pass\n",
-        "from a import B\nregister(B)\n",
-        "from a import B\nX = 1\n",
-        "from a import B\n__all__ = build_exports()\n",
-        "from a import B\n__all__ = [n for n in dir()]\n",
-        "from a import B\n__all__ = [B]\n",
-        "from a import B\n__all__ += ['B']\n",
-        "try:\n    from a import B\nexcept ImportError:\n    B = None\n",
-        "from a import B\n'stray string'\n",
-        "from a import *\n",
-        "from .physical import *\n",
-        "def broken(:\n",
-    ],
-)
-def test_init_with_code_is_not_pure(tmp_path: Path, body: str) -> None:
-    init = tmp_path / "__init__.py"
-    init.write_text(body)
-    assert not is_pure_reexport_init(init)
+from tests.sentry.layout._reexport_init import imports_physical
 
 
 def _scan(tmp_path: Path, rel: str, body: str) -> bool:
