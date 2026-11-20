@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 193 (asserted by the sentry).
+# Count: 201 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -1849,3 +1849,83 @@ ordinal = 0
 rule = "a non-directory name just listed under the held descriptor being removed; a link is unlinked, never followed"
 owner = "cam"
 reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_same_entry"
+sink = "os.stat"
+ordinal = 0
+disposition = "read"
+rule = "a name under a held scope or temp-root descriptor, not followed"
+owner = "cam"
+reason = "F26 G1(g): the post-lock recheck that the litter name is still the locked inode"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_is_empty"
+sink = "os.scandir"
+ordinal = 0
+disposition = "read"
+rule = "a held, proven and exclusively locked reclaim-named directory descriptor"
+owner = "cam"
+reason = "F26 empty-only fallback: a reclaim name without proof may go only when empty; read-only test"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_open_scope"
+sink = "os.open"
+ordinal = 0
+disposition = "read"
+rule = "O_RDONLY|O_DIRECTORY|O_NOFOLLOW: the caller's scope directory, after `require_ambient`; its last component is never a link"
+owner = "cam"
+reason = "F26 `reclaim_stages`: opens the one directory it judges; any failure is `scope_unavailable`"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_list"
+sink = "os.scandir"
+ordinal = 0
+disposition = "read"
+rule = "the held scope descriptor"
+owner = "cam"
+reason = "F26 `reclaim_stages`: lists the scope once; only exact litter names are judged"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_judge"
+sink = "os.stat"
+ordinal = 0
+disposition = "read"
+rule = "an exact litter name (`re.fullmatch`) under the held scope descriptor, not followed"
+owner = "cam"
+reason = "F26 G1(b): type, owner and mode before any open; another uid is `foreign` and never opened"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_judge"
+sink = "os.open"
+ordinal = 0
+disposition = "read"
+rule = "O_RDONLY|O_DIRECTORY|O_NOFOLLOW: an exact litter name under the held scope descriptor, already classified as an owned 0700 directory"
+owner = "cam"
+reason = "F26 G1(c): the descriptor the proof, lock and recheck are taken on"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_scan_one"
+sink = "os.scandir"
+ordinal = 0
+disposition = "read"
+rule = "a held stage descriptor or a subdirectory opened below it without following"
+owner = "cam"
+reason = "F26 G1(e): the age of a pending stage is the newest time over its whole tree"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_reclaim.py"
+function = "_push_dir"
+sink = "os.open"
+ordinal = 0
+disposition = "read"
+rule = "O_RDONLY|O_DIRECTORY|O_NOFOLLOW: a directory just listed under a held stage descriptor"
+owner = "cam"
+reason = "F26 G1(e): walks the stage tree by descriptor; a link is never followed"
