@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -235,11 +234,11 @@ ENTRY_INVALID = _d(
     "entry_invalid",
     "A column entry names an unknown strategy or option, or gives an option the wrong type or "
     "a value outside its choices, or leaves a required setting out.",
-    since=UNRELEASED,
+    since="1.31.0",
 )
 KEY_COLUMN_NOT_JOIN_SAFE = _d(
     "key_column_not_join_safe",
     "A column of a declared relationship cannot take a strategy that is not join-safe, or be "
     "dropped.",
-    since=UNRELEASED,
+    since="1.31.0",
 )

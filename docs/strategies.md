@@ -199,7 +199,11 @@ parse as a date records a `format_error` row error and is never written to the
 output as it came in. Needs a namespace.
 
 - `min_days` / `max_days`: the offset range (defaults -365 and 365). If
-  reversed, they are swapped.
+  reversed, they are swapped. Each must be a whole number of days within
+  +/- 106,751.
+- `jitter_days`: `N` means the range `[-N, N]`. A non-negative integer up to
+  106,751. It cannot be combined with `min_days` or `max_days`; the plan is
+  refused (`date_shift_window_invalid`) if it is.
 - `date_format`: a strftime format; auto-detected from the column if omitted.
 - `preserve_values`: a list of ISO dates (`YYYY-MM-DD`) that pass through
   unchanged, for sentinels such as `9999-12-31` ("never expires") that
@@ -1347,7 +1351,10 @@ follows the rule in the next paragraph, whatever its role. A name that pandas wo
 read as a column is reserved and refused as a reference: the numexpr function
 names (`sin`, `abs`, `where` and the rest), the pandas eval names (`inf`, `nan`,
 `index`, `columns`, `Timestamp`, `datetime`, `list`, `tuple`) and the Python
-keywords. Rename the column or compare it through another one.
+keywords. Nine more words are held back for later grammar and are refused too: `null`,
+`true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`, `endswith`. Matching
+is exact and case-sensitive, so `NULL` and `Between` stay ordinary columns. Rename the
+column or compare it through another one.
 
 An integer column compares exactly on every route, including values and literals beyond
 2**53, and a blank integer cell is treated as `NaN`: `!=`, `not in` and `not (...)` around a

@@ -55,6 +55,35 @@ def test_unparseable_commit_subject_is_not_exempt(repo, capsys) -> None:
     assert _run(repo, capsys)[0] == 1
 
 
+_LOG = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-11-01\n\n### Added (a, S, 2026-11-01)\n\nA.\n"
+
+
+def test_a_release_that_adds_a_dated_section_passes(repo, capsys) -> None:
+    repo.commit({"CHANGELOG.md": _LOG}, "chore: changelog")
+    repo.git("checkout", "-q", "-b", "release")
+    stamped = _LOG.replace(
+        "## [0.1.0]", "## [0.1.1] - 2026-11-19\n\n### Fixed (b, S, 2026-11-19)\n\nB.\n\n## [0.1.0]"
+    )
+    repo.commit({SRC: "x = 2\n", "CHANGELOG.md": stamped}, "fix(release): refuse it")
+    code, out = (
+        check_fragment.main(["--base", "feature", "--repo", str(repo.path)]),
+        capsys.readouterr(),
+    )
+    assert code == 0, out
+
+
+def test_editing_an_existing_release_section_still_needs_a_fragment(repo, capsys) -> None:
+    repo.commit({"CHANGELOG.md": _LOG}, "chore: changelog")
+    repo.git("checkout", "-q", "-b", "edit")
+    repo.commit(
+        {SRC: "x = 2\n", "CHANGELOG.md": _LOG.replace("A.", "A, reworded.")},
+        "fix(thing): change it",
+    )
+    code = check_fragment.main(["--base", "feature", "--repo", str(repo.path)])
+    assert code == 1
+    assert "no changelog fragment" in capsys.readouterr().err
+
+
 def test_feat_with_a_fragment_passes(repo, capsys) -> None:
     repo.commit({SRC: "x = 2\n", "changelog.d/thing.md": fragment()}, "feat: change it")
     assert _run(repo, capsys)[0] == 0
