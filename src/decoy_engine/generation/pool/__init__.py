@@ -58,7 +58,7 @@ from decoy_engine.generation.pool._events import (
 )
 from decoy_engine.generation.pool._identity import effective_pool_size
 from decoy_engine.generation.pool._pool_adapter import PoolAdapter
-from decoy_engine.generation.pool._sampler import PoolSampler
+from decoy_engine.generation.pool._sampler import PoolSampler, derive_validated_indices
 from decoy_engine.generation.pool._validate import check_pool_capacity_pre_flight
 from decoy_engine.generation.pool._value_pool import ValuePool
 
@@ -75,6 +75,7 @@ __all__ = [
     "QualityWarning",
     "ValuePool",
     "check_pool_capacity_pre_flight",
+    "derive_validated_indices",
     "effective_pool_size",
     "emit_generation_warning",
     "get_default_pool_cache",

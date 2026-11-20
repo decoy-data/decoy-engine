@@ -712,8 +712,8 @@ class SamplerWitness:
             sink=self.events,
             shift=shift,
         )
-        mp.setattr(_sampler, "_compiled_index_kernel", lambda: self._compiled)
-        mp.setattr(_sampler, "_reference_index_kernel", lambda: self._reference)
+        mp.setattr(_sampler, "compiled_index_kernel", lambda: self._compiled)
+        mp.setattr(_sampler, "reference_index_kernel", lambda: self._reference)
 
     def sample(self, pool: Any, source: pd.Series, namespace: str, seed: bytes) -> pd.Series:
         from decoy_engine.generation.pool._cardinality import CardinalityMode

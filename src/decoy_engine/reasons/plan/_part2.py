@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "DERIVED_BOUNDS_INVERTED",
@@ -111,6 +112,7 @@ __all__ = [
     "WINDOWED_DATE_MAX_DAYS_MISSING",
     "WINDOWED_DATE_MIN_EXCEEDS_MAX",
     "WINDOWED_DATE_MISSING_ANCHOR_REF",
+    "WINDOWED_DATE_WINDOW_OUT_OF_RANGE",
 ]
 
 _d = _catalog.plan("PlanCompileError")
@@ -316,6 +318,11 @@ WINDOWED_DATE_MIN_EXCEEDS_MAX = _d(
 )
 WINDOWED_DATE_MISSING_ANCHOR_REF = _d(
     "windowed_date_missing_anchor_ref", "Windowed date missing anchor ref."
+)
+WINDOWED_DATE_WINDOW_OUT_OF_RANGE = _d(
+    "windowed_date_window_out_of_range",
+    "A windowed_date min_days or max_days is beyond the supported date range.",
+    since=UNRELEASED,
 )
 
 _d = _catalog.plan("StatisticalSpecError")

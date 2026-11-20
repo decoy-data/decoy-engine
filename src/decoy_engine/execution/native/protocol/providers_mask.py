@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from decoy_engine.determinism import derive
+from decoy_engine.determinism import derive, derive_index
 from decoy_engine.execution.native.protocol.providers_base import DrawSiteProvider
 
 # ---------------------------------------------------------------------------
@@ -316,41 +316,54 @@ class GroupedSeriesWalkProvider(DrawSiteProvider):
 
 
 class WindowedDateProvider(DrawSiteProvider):
-    """``mask.windowed_date``: fresh per-row numpy Generator seeded by row index.
+    """``mask.windowed_date``: keyed index draws on ``2 * row + k``.
 
-    Per row ``i``: seed
-    ``int.from_bytes(derive(mask_key, namespace, i.to_bytes(8, "big"))[:8], "big")``,
-    then ``default_rng(row_seed).integers(min_days, max_days + 1)`` (1 draw for
-    ``uniform``, 2 for ``early``/``late``). Keys on the GLOBAL row index, so
-    partitionable only when the native executor pins ``i`` to a global row number.
+    For global row ``r`` and draw ``k`` (0, or 1 for the second draw of ``early`` and
+    ``late``) the offset is ``min_days + derive_index(mask_key, namespace, source,
+    pool_size=span + 1)``, where ``source`` is the length-prefixed signed big-endian encoding of
+    ``2 * r + k`` (the same canonical int the pool sampler uses; reproduced inline here, and
+    pinned to the shipped helper by a drift test). ``early`` takes the smaller of the two
+    offsets, ``late`` the larger. A zero-width window draws nothing. The offset keys on the
+    GLOBAL row number only, so any split of the rows reproduces it.
     """
 
     draw_site_id = "mask.windowed_date"
 
-    def row_seed_int(self, mask_key: bytes, namespace: str, global_row_index: int) -> int:
-        try:
-            source = global_row_index.to_bytes(8, "big")
-            return int.from_bytes(derive(mask_key, namespace, source)[:8], "big")
-        except BaseException:
-            del mask_key
-            raise
-
-    def row_generator(
-        self, mask_key: bytes, namespace: str, global_row_index: int
-    ) -> np.random.Generator:
-        try:
-            return np.random.default_rng(self.row_seed_int(mask_key, namespace, global_row_index))
-        except BaseException:
-            del mask_key
-            raise
+    def draw_source(self, global_row_index: int, draw: int) -> bytes:
+        n = 2 * global_row_index + draw
+        body = n.to_bytes((n.bit_length() + 8) // 8, "big", signed=True)
+        return len(body).to_bytes(4, "big") + body
 
     def partitioned_draw(
-        self, mask_key: bytes, namespace: str, global_row_index: int
-    ) -> np.random.Generator:
-        """A partition reproduces row ``i`` from its GLOBAL index, unchanged."""
+        self,
+        mask_key: bytes,
+        namespace: str,
+        global_row_index: int,
+        *,
+        min_days: int,
+        max_days: int,
+        distribution: str,
+    ) -> int:
+        """One row's offset from its GLOBAL index: a partition reproduces it unchanged."""
         try:
             self.assert_partitionable()
-            return self.row_generator(mask_key, namespace, global_row_index)
+            span = max_days - min_days
+            if span == 0:
+                return min_days
+            pool_size = span + 1
+            draws = [
+                min_days
+                + derive_index(
+                    mask_key,
+                    namespace,
+                    self.draw_source(global_row_index, k),
+                    pool_size=pool_size,
+                )
+                for k in range(1 if distribution == "uniform" else 2)
+            ]
+            if len(draws) == 1:
+                return draws[0]
+            return min(draws) if distribution == "early" else max(draws)
         except BaseException:
             del mask_key
             raise

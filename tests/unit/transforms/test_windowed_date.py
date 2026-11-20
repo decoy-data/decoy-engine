@@ -187,12 +187,12 @@ class TestWindowedDateBounds:
 
     def test_deterministic_output_is_the_pinned_known_answer(self) -> None:
         # The existing determinism test only checks run1 == run2; a mutated
-        # per-row seed (i.to_bytes(8) -> to_bytes(9), or [:8] -> [:9]) stays
-        # self-consistent, so it survives that. Pin the exact seeded output so
-        # any change to the seed derivation or the uniform draw fails here.
+        # draw source (2 * row -> row, or a changed pool size) stays self-consistent,
+        # so it survives that. Pin the exact seeded output so any change to the
+        # derivation or the uniform draw fails here.
         anchors = ["2024-01-01", "2024-03-15", "2023-12-31", "2024-06-01", "2024-09-10"]
         result = self._apply(anchors, min_days=0, max_days=100)
-        assert result == ["2024-02-07", "2024-03-26", "2024-01-09", "2024-08-03", "2024-09-21"]
+        assert result == ["2024-01-14", "2024-04-21", "2024-01-14", "2024-09-05", "2024-10-07"]
 
     def test_late_distribution_output_is_the_pinned_known_answer(self) -> None:
         # Uniform returns the first draw and never touches the second (`b`); only
@@ -202,16 +202,15 @@ class TestWindowedDateBounds:
         # split and miss those.
         anchors = ["2024-01-01", "2024-03-15", "2023-12-31", "2024-06-01", "2024-09-10"]
         result = self._apply(anchors, min_days=0, max_days=100, distribution="late")
-        assert result == ["2024-03-11", "2024-05-15", "2024-04-07", "2024-08-03", "2024-10-28"]
+        assert result == ["2024-02-25", "2024-04-21", "2024-03-28", "2024-09-05", "2024-10-07"]
 
     def test_late_distribution_nonzero_min_known_answer(self) -> None:
         # min_days=20 (non-zero) so the b draw's LOWER bound matters: a
-        # min-dropped `rng.integers(max_days + 1)` mutant draws from [0, max]
-        # instead of [min, max] and shifts the sequence. (The min=0 KAT above
-        # cannot see it, since integers(0, max+1) == integers(min, max+1) there.)
+        # min-dropped mutant (offset = index, no `min_days +`) shifts the
+        # sequence. (The min=0 KAT above cannot see it.)
         anchors = ["2024-01-01", "2024-03-15", "2023-12-31", "2024-06-01", "2024-09-10"]
         result = self._apply(anchors, min_days=20, max_days=100, distribution="late")
-        assert result == ["2024-03-17", "2024-05-23", "2024-04-07", "2024-08-10", "2024-11-08"]
+        assert result == ["2024-03-24", "2024-06-10", "2024-03-28", "2024-07-11", "2024-11-20"]
 
     def test_both_window_endpoints_are_reachable(self) -> None:
         # A mutated sampling bound (rng.integers(min, max - 1) or a dropped

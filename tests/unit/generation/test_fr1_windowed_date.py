@@ -178,7 +178,7 @@ def test_pinned_oracle_digest() -> None:
     assert fingerprints(out)["w"]["table"] == PINNED_PLAIN
 
 
-PINNED_PLAIN = "50eadb5c8acbabff812b125bdba8b7f95ec739d7b4f2819b9d50562f00a9b06f"
+PINNED_PLAIN = "5eb2f38ac86b8b4ffeb02ebb40a4f38aa0542df17bee9bd58be0af6961e7b1f1"
 
 
 # ---- null anchor: propagate, no draw ----------------------------------------------------------
@@ -270,8 +270,6 @@ def test_error_message_does_not_echo_the_value() -> None:
     [
         ("2200-12-30", 5, 5),  # lands past SUPPORTED_MAX
         ("1700-01-02", -5, -5),  # lands before SUPPORTED_MIN
-        ("2000-01-01", 10**12, 10**12),  # Timedelta overflow
-        ("2000-01-01", -(10**12), -(10**12)),
     ],
 )
 def test_window_overflow_and_out_of_range_result_raise(
@@ -282,6 +280,16 @@ def test_window_overflow_and_out_of_range_result_raise(
         run_resident(cfg)
     with pytest.raises(WindowedDateError):
         _generate_tables_from_config(prepared_config(cfg), None, None)
+
+
+@pytest.mark.parametrize("days", [10**12, -(10**12)])
+def test_window_beyond_timedelta_is_refused_at_plan_compile(days: int) -> None:
+    from decoy_engine.plan._errors import PlanCompileError
+
+    cfg = _cfg(4, _anchor_values(["2000-01-01"]), _win(min_days=days, max_days=days))
+    with pytest.raises(PlanCompileError) as exc:
+        _generate_tables_from_config(prepared_config(cfg), None, None)
+    assert exc.value.code == "windowed_date_window_out_of_range"
 
 
 def test_supported_range_boundaries_are_inclusive() -> None:
