@@ -27,20 +27,39 @@ UV = shutil.which("uv")
 _ROW = re.compile(r'^\s+"([0-9a-f]{64})",$', re.M)
 _CLI_MARK = "# decoy-cli pristine RUNTIME profile"
 
-BASE = """# the previous certified pin file
+pytestmark = pytest.mark.skipif(UV is None, reason="uv computes the dev row from uv.lock")
+
+# The engine's own base-requirements closure from uv.lock: every candidate must name all of it, so
+# the fixtures carry it as plain pins (names are what the guard reads; the versions are arbitrary).
+_CLOSURE = sorted(dp_rows.base_closure(REPO, dp_rows.lock_profile_python(REPO), UV)) if UV else []
+_CLOSURE_LINES = "".join(f"{name}==1.0.0\n" for name in _CLOSURE)
+_CLOSURE_PINS = {(name, "1.0.0") for name in _CLOSURE}
+
+BASE = (
+    """# the previous certified pin file
 alpha==1.0.0
 beta-pkg==2.0.0
 gamma_pkg==3.1.0
 delta==4.0.0 ; python_version >= "3.10"
 omega==9.9.9 ; sys_platform == "win32"
 """
+    + _CLOSURE_LINES
+)
 CAND_A = BASE
 CAND_B = BASE.replace("alpha==1.0.0", "alpha==1.0.1").replace("delta==4.0.0", "delta==4.0.1")
 # The certified platform evaluates each marker; omega is off it. Names are canonical.
-_A_PINS = {("alpha", "1.0.0"), ("beta-pkg", "2.0.0"), ("gamma-pkg", "3.1.0"), ("delta", "4.0.0")}
-_B_PINS = {("alpha", "1.0.1"), ("beta-pkg", "2.0.0"), ("gamma-pkg", "3.1.0"), ("delta", "4.0.1")}
-
-pytestmark = pytest.mark.skipif(UV is None, reason="uv computes the dev row from uv.lock")
+_A_PINS = {
+    ("alpha", "1.0.0"),
+    ("beta-pkg", "2.0.0"),
+    ("gamma-pkg", "3.1.0"),
+    ("delta", "4.0.0"),
+} | _CLOSURE_PINS
+_B_PINS = {
+    ("alpha", "1.0.1"),
+    ("beta-pkg", "2.0.0"),
+    ("gamma-pkg", "3.1.0"),
+    ("delta", "4.0.1"),
+} | _CLOSURE_PINS
 
 
 def _fp(pins: set[tuple[str, str]]) -> str:
@@ -180,6 +199,11 @@ def _fewer_names(text: str) -> str:
     return text.replace("beta-pkg==2.0.0\n", "")
 
 
+def _lacks_a_closure_name(text: str) -> str:
+    """The 0.28.0 situation: the previous pin file kept as is while the engine gained requirements."""
+    return text.replace(f"{_CLOSURE[0]}==1.0.0\n", "")
+
+
 REFUSALS = {
     "missing-base": lambda p: ({}, ["--cli-pins-base"]),
     "missing-candidates": lambda p: ({}, ["--cli-pins"]),
@@ -191,6 +215,11 @@ REFUSALS = {
     "candidate-requirement": lambda p: ({"b": _bad_requirement(CAND_B)}, []),
     "candidate-adds-a-name": lambda p: ({"b": _more_names(CAND_B)}, []),
     "candidate-drops-a-name": lambda p: ({"a": _fewer_names(CAND_A)}, []),
+    # base and candidate agree (both lack the name), so only the closure guard can refuse this.
+    "candidate-lacks-an-engine-requirement": lambda p: (
+        {k: _lacks_a_closure_name(t) for k, t in (("base", BASE), ("a", CAND_A), ("b", CAND_B))},
+        [],
+    ),
     "missing-file": lambda p: ({}, []),
 }
 
@@ -213,6 +242,17 @@ def test_refusals_exit_1_and_leave_the_tree_unchanged(
     assert _git(clone, "status", "--porcelain", "--untracked-files=all") == ""
     assert _git(clone, "rev-parse", "HEAD") == head
     assert (clone / PROVENANCE).read_bytes() == before
+
+
+def test_the_refusal_names_the_missing_engine_requirement(
+    clone: Path, pins: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name, text in (("base", BASE), ("a", CAND_A), ("b", CAND_B)):
+        pins[name].write_text(_lacks_a_closure_name(text), encoding="utf-8")
+    assert _run(clone, _args(pins)) == 1
+    err = capsys.readouterr().err
+    assert "lacks the engine's base requirements" in err
+    assert _CLOSURE[0] in err
 
 
 def test_a_late_refusal_leaves_the_tree_unchanged(clone: Path, pins: dict[str, Path]) -> None:

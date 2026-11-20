@@ -120,6 +120,14 @@ with `when_outside_closed_grammar`). It is listed on every interpreter rather th
 `keyword.softkwlist`, so a config validates identically on every supported Python. The list is frozen
 on purpose; after GA any further addition is a breaking change.
 
+**Pre-GA correction (FREEZE-S5, 2026-11-20).** `RESERVED_NAMES` of the `when` closed grammar gains nine
+words: `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` and `endswith`. They are held
+back for later grammar (SQL-style literals and string operators), so adding one to the grammar is not a second
+breaking change. A config whose `when:` reads a column with one of these names now fails with
+`when_outside_closed_grammar`; rename the column. Reserved names match exactly and case-sensitively, so `NULL`
+and `Between` stay columns. The set is pinned by an exact snapshot, and a sentry checks that every keyword
+literal in `when_grammar.lark` is reserved.
+
 **Pre-GA correction (SUB-STOP, 2026-11-05).** A config with `subset:` set is refused by every run entry
 (`run_pipeline`, `run_pipeline_isolated`, `run_mask_pipeline_chunked`, `run_mask_chunked`, `run_native_or_oracle_chunked`) and by `compile_plan`,
 with `config.subset_run_unsupported` (registry 1.6.0). Before, the block validated and the run silently masked
@@ -213,6 +221,16 @@ experimental: the connector SDK objects defined in `decoy_engine.sdk` and their 
 name now defaults to documented internal. Later slices of the batch add their own lines here: the `FormulaStrategy`
 base removal, the public renames, and the `when:`, compressed-CSV and pass-through output changes.
 
+**Pre-GA output change (date_shift `jitter_days`, DATE-SHIFT-JITTER, 2026-11-19).** `date_shift` now reads
+`jitter_days: N` as the window `[-N, N]` on every route. Before, no route read the key and a config with it shifted by
+up to a year. Output changes for every config that sets `jitter_days` (the shipped disguises when a client applies
+them, the recommendations default, platform fixtures). `jitter_days` together with `min_days` or `max_days` is refused
+at plan compile, as is a `jitter_days` that is not an integer, is negative or exceeds 106,751, and any `min_days` or
+`max_days` that `int()` coerces to a value outside [-106751, 106751]. Configs that set `min_days` and `max_days` keep
+today's `int()` coercion and window. One new plan reason, `date_shift_window_invalid`. Re-pin checklist: the platform
+fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
+`build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
@@ -249,7 +267,27 @@ decoy-job-log/v1
 scan-set/v1             scan-diff/v1
 decoy-resume-run/v1    decoy-resume-table/v1
 lock/v1
+decoy-publication/v1    immutable_directory/v1    publication/v1    checkpoint-index/v1
+pinned-plan/v1          decoy-safe-output/v1      decoy-quarantine/v1
+decoy-support-bundle/v1 decoy-reasons/v1          decoy-model-pack/v1
+dps-marginal/v3         post-scan-integrity/v2    canary-span-report/v1
+flagged-redacted/v1     phase-result/v1           phase-event/v1
+decoy.evidence.statement/v1    decoy.trust-policy/v1    decoy.required-catalog/v1
 ```
+
+**Tags added with the freeze batch (FREEZE-S7a, 2026-11-20).** Every `"<name>/vN"` literal in engine source
+is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 19 tags
+after `lock/v1` above were persisted or exported with no listing before. Ten are pinned without reading a
+written artifact, and the map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are
+older versions the engine still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with
+no model yet; `decoy-support-bundle/v1`, `decoy-reasons/v1` and `canary-span-report/v1` name a typed constant
+the engine does not write to a file itself; `dps-marginal/v3` has a writer that needs the `opendp` extra.
+`phase-result/v1` and `phase-event/v1` are frozen because the wire form `to_wire` builds carries the tag; no
+engine code calls `to_wire` yet, so they have no engine writer either. The other nine are read from a written
+artifact by a sentry. The census reads Python string and bytes constants under `src/decoy_engine`. Tags built
+with f-strings or concatenation, and tags in Rust or YAML files, are out of its scope (`S7A-KL-2`). A tag that never leaves the process is internal
+(`decoy_engine.contracts.stability.INTERNAL_TAGS`, with a reason), and a
+sentry scans written artifacts to confirm no internal tag appears in one. Derivation labels are in 3.3.
 
 A user runs `decoy fit`, keeps the `distribution-snapshot/v1` artifact, and
 feeds it to a later engine version. That artifact is a **contract**.
@@ -435,6 +473,21 @@ with an update — expecting the new rows to join to the old output (same person
 same pseudonym across runs) — is relying on the derivation (HKDF-SHA256 `derive`,
 FPE keying, Faker seeding) being unchanged. Change any of it and you break that
 user with **zero error message.**
+
+**Derivation labels (frozen).** These tags are inputs to a key, a digest or a seed. Changing one changes
+output bytes or a stored digest with no error, so each is part of the determinism guarantee. The list equals
+`decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
+3.1, a declared-casting format id (`docs/declared-casting.md`) nor internal. The 14 declared-casting ids (`string/exact/v1`,
+`cobol/comp-3/v1` and the rest) name a format a user declares in config; the F06 parse and output registries own them.
+`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
+
+```
+canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/keyprovider/v1
+decoy-engine/protected-quarantine/v1   decoy-probe/v1            decoy-resume-key-check/v1
+decoy.shuffle.unkeyed/v1       joint_mask/gen_row/v1     joint_mask/keyed_row/v1
+joint_mask/null_fallback/v1    name_email/v1             pinned-plan-fingerprint/v1
+policy-expansion/v1            secret-provider/v1        tokenize-key/v1
+```
 
 **Rules:**
 
