@@ -177,7 +177,7 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
     (_DURABLE, "dir-fd"): (9, "EW2", "directory-descriptor fsync walk, POSIX arm lands in EW2"),
     (_DURABLE, "geteuid"): (1, "EW2", "the chain owner walk is skipped on win32 by EW2"),
     (_FDTREE, "dir-fd"): (
-        4,
+        5,
         "EW5",
         "stage marker read and tree removal by descriptor; EW5 gives it a win32 arm",
     ),
