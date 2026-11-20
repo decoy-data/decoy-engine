@@ -220,7 +220,8 @@
       "reason": "os.open on a local path, not a GCS Blob"
     },
     "decoy_engine/fileaccess/_fdtree.py::_rmtree_fd::open::0": {
-      "reason": "os.open on a local path, not a GCS Blob"
+      "reason": "os.open on a local path, not a GCS Blob",
+      "moved_from": "decoy_engine/fileaccess/_output.py::_rmtree_fd::open::0"
     },
     "decoy_engine/fileaccess/_local.py::LocalHandle.fileno::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
