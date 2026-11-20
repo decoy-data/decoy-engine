@@ -83,12 +83,13 @@ def _section(version: str) -> str:
 # and shipped in 0.16.0; the custom provider variable is written up under 0.25.0 and shipped in
 # 0.24.0. Keyed by the row's first old name to (release from the tags, section holding the entry);
 # the row's `since` must equal the pinned release, so these rows cannot drift to the CHANGELOG one.
+_PKG = "decoy_engine"
 RECORDED_UNDER = {
-    f"decoy_engine.{RETIRED_NAME}": ("0.16.0", "0.11.0"),
-    f"decoy_engine.run_{RETIRED_NAME}": ("0.16.0", "0.11.0"),
-    f"decoy_engine.{RETIRED_NAME.title()}Profile": ("0.16.0", "0.11.0"),
-    f"decoy_engine.run_{RETIRED_NAME}_post_mask": ("0.16.0", "0.11.0"),
-    f"decoy_engine.{RETIRED_NAME.title()}PostMaskReport": ("0.16.0", "0.11.0"),
+    f"{_PKG}.{RETIRED_NAME}": ("0.16.0", "0.11.0"),
+    f"{_PKG}.run_{RETIRED_NAME}": ("0.16.0", "0.11.0"),
+    f"{_PKG}.{RETIRED_NAME.title()}Profile": ("0.16.0", "0.11.0"),
+    f"{_PKG}.run_{RETIRED_NAME}_post_mask": ("0.16.0", "0.11.0"),
+    f"{_PKG}.{RETIRED_NAME.title()}PostMaskReport": ("0.16.0", "0.11.0"),
     "CUSTOM_PROVIDERS_DIR": ("0.24.0", "0.25.0"),
 }
 
