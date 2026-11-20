@@ -416,6 +416,38 @@ jobs:
       - name: Guard -- the harness actually executed (passed>0, none skipped/errored/failed)
         run: python scripts/dev/junit_ran.py determinism.xml
 
+  # duckdb2-gate: uv.lock pins duckdb 1.5.4 but pyproject allows >=0.10.0, so a user install can
+  # resolve 2.x. DuckDB 2 rejects conn.register() while an earlier SELECT result is unfinished,
+  # which made the post-scan gate report check_error on every run. This lane overrides the lock
+  # with duckdb 2.x on Python 3.12 (2.x needs 3.11+) and runs the DuckDB-touching suites.
+  duckdb2-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          extras: "dev"
+          python: "3.12"
+      - name: Override the lock with duckdb 2.x
+        run: |
+          uv pip install --python "$RUNNER_TEMP/venv/bin/python" "duckdb>=2,<3"
+          python -c "import duckdb; assert duckdb.__version__.startswith('2.'), duckdb.__version__"
+      - name: DuckDB-touching suites on duckdb 2.x
+        run: >
+          pytest tests/unit/profiling/test_scan_integrity.py
+          tests/unit/profiling/test_scan_integrity_duckdb_result.py
+          tests/unit/execution/test_out_of_core_batch_join.py
+          tests/unit/execution/test_out_of_core_join_chunked.py
+          tests/unit/execution/test_out_of_core_stream_join.py
+          tests/unit/execution/test_out_of_core_stream_join_unordered.py
+          tests/unit/execution/test_out_of_core_relation_split_dedup.py
+          tests/unit/execution/test_ooc_spill_reader_lifecycle.py
+          tests/unit/execution/test_slim_sort_reorder_acceptance.py
+          tests/connectors/test_postgres_session.py
+          tests/connectors/test_postgres_snapshot.py
+          --tb=short -p no:cacheprovider
+
   # pg-gate: the pg_integration suites against a Postgres service container. The default marker
   # expression still selects them, but they skip without a server, so this job is their lane.
   # DECOY_REQUIRE_PG=1 turns a missing server or extension into a failure, and junit_ran.py fails

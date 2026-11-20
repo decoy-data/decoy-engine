@@ -63,10 +63,11 @@ import pyarrow.parquet as pq
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, promoted_text_type
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import FK_KEY_DTYPE_UNSUPPORTED_CODE, NULL_FK_KEY, fk_key_value
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.execution.out_of_core._join import (
     _append_output_batch,
     _child_key_batches,

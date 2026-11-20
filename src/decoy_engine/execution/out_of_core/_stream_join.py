@@ -44,13 +44,14 @@ import pyarrow.parquet as pq
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._batch_join import (
     _cast_chunks,
     _resolve_output_types,
     mint_remap_values,
 )
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.execution.out_of_core._external_sort import BoundedExternalSorter
 from decoy_engine.execution.out_of_core._join import (
     _append_output_batch,

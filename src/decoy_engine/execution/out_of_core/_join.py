@@ -17,6 +17,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import exact_key_cast
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import (
     FK_KEY_DTYPE_UNSUPPORTED_CODE,
@@ -25,7 +26,7 @@ from decoy_engine.execution._fk_keys import (
     fk_key_value,
 )
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge
 

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
+from decoy_engine._duckdb_read import fetch_scalar
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.profiling._scan_integrity import KeyBatches, key_facts
 
 

@@ -39,6 +39,7 @@ from typing import Any, Final, Literal
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.config import PipelineConfigError, RelationshipConfig, parse_relationship_config
 from decoy_engine.profiling._key_loading import (
     JOIN_KEY_KIND,
@@ -429,10 +430,8 @@ def _count(conn: Any, sql: str, *, probe: bool = False) -> int:
     cursor = conn.execute(sql)
     if probe:
         _before_fetch(conn)
-    # fetchall, not fetchone: fetchone leaves the result unfinished, and DuckDB 2.x then
-    # rejects the next conn.register() (the child load after the parent counts) with
-    # ResourceInUseException, which the post-scan gate reported as check_error.
-    return int(cursor.fetchall()[0][0])
+    # Drained read: a fetchone() here makes DuckDB 2.x reject the next conn.register().
+    return int(fetch_scalar(cursor))
 
 
 def _complete(alias: str, width: int) -> str:

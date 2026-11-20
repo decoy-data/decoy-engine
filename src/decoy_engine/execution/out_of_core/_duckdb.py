@@ -82,16 +82,6 @@ def current_duckdb_run() -> DuckDBRunRecorder | None:
     return _RUN.get()
 
 
-def fetch_scalar(cursor):
-    """The first column of the single row `cursor` holds, with the result drained.
-
-    `fetchone()` leaves a SELECT result unfinished. DuckDB 2.x then refuses the next
-    `conn.register()` on that connection (ResourceInUseException); 1.x allowed it. Reading
-    every row finishes the result. Use this for any one-row query on a connection that
-    registers more Arrow data afterwards."""
-    return cursor.fetchall()[0][0]
-
-
 def connect_duckdb(*, temp_dir: ScratchArena | Path, memory_limit: str | None = None):
     """Open an in-memory DuckDB connection that spills into ``temp_dir``: an arena child, or a
     path adopted as one (transition arm (c)). Building it goes through the native boundary."""

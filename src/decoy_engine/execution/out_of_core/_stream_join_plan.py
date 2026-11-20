@@ -18,8 +18,8 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution.out_of_core._duckdb import fetch_scalar
 from decoy_engine.execution.out_of_core._join import _q
 
 if TYPE_CHECKING:
