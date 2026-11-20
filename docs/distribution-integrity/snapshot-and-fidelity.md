@@ -183,7 +183,8 @@ The report is label-free. Joint entries name the column pair, not cell keys.
 ## Policy (`quality/policy.py`)
 
 `apply_quality_policy(report, policy_config, *, strategy_map=None)` returns
-`quality-policy/v1`: `verdict`, `mode`, `violations`. `strategy_map` is
+`quality-policy/v1`: `verdict`, `mode`, `violations`, `intended_columns`,
+`intended_joints`, and `pairwise_skipped` when it applies. `strategy_map` is
 keyword-only.
 
 ```yaml
@@ -211,7 +212,22 @@ strategy expectation from `strategy_map`, then no check.
 
 Default value-identity expectations are tuned to what `compute_fidelity`
 actually reports for each strategy: identity 1.00, shuffle 0.85, date_shift
-0.50, bucketize 0.30, generate 0.30, hash 0.05, faker 0.05, redact 0.05.
+0.50, bucketize 0.30, generate 0.30.
+
+Intended columns: a strategy whose class in the distribution-behavior table
+(`contracts/distribution_behavior.py`) is `preserves_cardinality_only`,
+`destroys_frequency` or `collapses` replaces values by design (today `hash`,
+`fpe`, `tokenize`, `group_key`, `faker`, `grouped_series`, `redact`,
+`text_redact`; `categorical` is left out because its class depends on provider
+config). Such a column has no default minimum, so a correct mask does not fail
+a value-identity check, and it is listed in `intended_columns`. An explicit
+column threshold or a `strategy_expectations` entry for the strategy still sets
+a minimum and wins. A `--joint` pair that names an intended column is listed in
+`intended_joints` and is left out of the pairwise minimum; the minimum is then
+checked against `mean_comparable_similarity` of the other joints. When every
+joint is intended, the check is skipped and `pairwise_skipped` is
+`all_joints_intended`. `marginal.score`, `overall_score` and the grade still
+count intended columns, so a minimum on them can fail a correct mask.
 
 Two behaviors to know:
 
