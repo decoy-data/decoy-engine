@@ -132,6 +132,7 @@ SENTRIES = (
     "tests/sentry/defects/test_split_decision_choke_point.py",
     "tests/sentry/defects/test_strategy_docs_agree.py",
     "tests/sentry/defects/test_target_destination_choke_point.py",
+    "tests/sentry/defects/test_reference_pool_choke_point.py",
     "tests/sentry/defects/test_validation_sites.py",
     "tests/sentry/generation/test_pooled_read_choke_point.py",
     "tests/sentry/generation/test_snapshot_parse_single_owner.py",
