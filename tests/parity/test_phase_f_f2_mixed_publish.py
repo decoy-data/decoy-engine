@@ -18,6 +18,7 @@ from decoy_engine.execution import ExecutionError
 from decoy_engine.execution import _chunked_output_sink as output_sink
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution.native.chunked import _core as _native_core
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRefused
 from tests.parity._f2_mixed_support import (
     CHILD,
@@ -111,6 +112,7 @@ def test_the_real_sink_publishes_both_tables_atomically(tmp_path: Path) -> None:
     target = tmp_path / "published"
     run(config, {CHILD: child}, sink=ParquetTransactionalSink(target))
     assert sorted(p.name for p in target.iterdir()) == [
+        STAGE_MARKER,
         DESCRIPTOR_NAME,
         f"{CHILD}.parquet",
         f"{PARENT}.parquet",

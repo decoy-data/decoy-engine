@@ -27,6 +27,7 @@ from decoy_engine.generation.composite._address import (
     CompositeAddress,
     composite_address,
 )
+from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._city_state_zip import (
     CompositeCityStateZip,
@@ -58,6 +59,7 @@ from decoy_engine.generation.composite._provider import (
 from decoy_engine.generation.composite._validate import composite_wiring_consistent
 
 __all__ = [
+    "COMPOSITE_BACKEND",
     "BundlePool",
     "CompositeAdapter",
     "CompositeAddress",

@@ -267,9 +267,9 @@ class TestUnsupportedLocale:
     def test_mrn_non_en_us_passes(self) -> None:
         """MRN is locale-agnostic (per-site format; no SSA-style restriction).
 
-        supported_locales=('en_US',) in capability_matrix is an advisory
-        declaration; MRN's generate_random() intentionally ignores locale.
-        Non-en_US inputs produce valid MRNs without raising.
+        supported_locales in capability_matrix is every engine locale, and
+        MRN's generate_random() ignores the locale inside that scope. Non-en_US
+        inputs produce valid MRNs without raising.
         """
         spec = ProviderSpec(locale="fr_FR", deterministic=False, namespace=None, seed=None)
         out = MrnAdapter().generate("synthetic_mrn", spec=spec)

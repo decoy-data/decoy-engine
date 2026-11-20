@@ -3,7 +3,7 @@
 Needs the abi-3 companion; skipped (not weakened) on a box without it, where the companion-absent
 case covers the Python path. Compared here: the OOC native route vs the full-frame pandas oracle
 on the strict parity contract, vs the per-cell Python reference, across batch sizes and drivers;
-the redaction/passthrough/token/fpe-span/faker-span/date-span configs; the aggregate sub-floor
+the redaction/passthrough/token/fpe-span configs; the aggregate sub-floor
 warning totals; and the consumption witness that the compiled path (not the per-cell mask_cell
 loop) drove the output. Each consumption assertion fails main's per-cell loop.
 """
@@ -51,15 +51,15 @@ pytestmark = pytest.mark.skipif(
 MODES = ["resident", "sink-batch", "sink-reorder"]
 
 # Config variants that stay native: default redaction, an explicit detector set, the two unmatched
-# policies, and the keyed span strategies (faker/date_shift/fpe). CORPUS holds no value that drives
+# policies, and the keyed fpe span strategy. E-F0: faker and date_shift need a person_name or date
+# span, which no config produces on this route; the direct kernel cells in
+# tests/unit/plan/test_text_mask_strategy_check.py cover them. CORPUS holds no value that drives
 # an fpe span below the FF1 floor, so the fpe-span config masks it without a sub-floor policy.
 _CONFIGS: dict[str, dict[str, Any]] = {
     "redact": {},
     "detectors": {"detectors": ["email"]},
     "passthrough": {"unmatched_span_policy": "passthrough"},
     "token": {"unmatched_span_policy": "replace_with_token", "token": "<X>"},
-    "faker-span": {"per_detector_strategy": {"ssn": "faker", "email": "faker"}},
-    "date-span": {"per_detector_strategy": {"ssn": "date_shift"}, "min_days": -10, "max_days": 10},
     "fpe-span": {"per_detector_strategy": {"ssn": "fpe", "us_phone": "fpe"}},
 }
 
@@ -110,7 +110,7 @@ def test_native_matches_the_python_route_with_the_companion_hidden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _payload(list(CORPUS))
-    seeds = _seeds(_CONFIGS["faker-span"])
+    seeds = _seeds(_CONFIGS["fpe-span"])
     native = run_chain(payload, seeds, batch_rows=3).tables["t"].column("a").to_pylist()
     hide_text_mask_companion(monkeypatch)
     python_run = run_chain(payload, seeds, batch_rows=3)

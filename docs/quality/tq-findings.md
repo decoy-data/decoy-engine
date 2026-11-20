@@ -369,7 +369,7 @@ guard working as designed). Triage of the substrate tier by subprocess/isolated
 reference count:
 - **Gradeable in-process (pure logic, 0 subprocess refs):** `_planner`, `_sequential`,
   `_chunked`, `_chunked_fk`, `_pandas_adapter`, `capacity`, `_technique_class`,
-  `_distribution_behavior`, `_mem_estimate_schema`. These are the sweep's in-process
+  `distribution_behavior` (now `contracts/`), `_mem_estimate_schema`. These are the sweep's in-process
   targets.
 - **UN-gradeable in-process (subprocess / isolated-run heavy):** `_isolated_run` (72),
   `_governor` (59), `_mem_telemetry` (19), `_probe` (17), `_isolated_worker` (8),

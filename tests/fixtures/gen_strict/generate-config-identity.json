@@ -759,6 +759,12 @@
        "pooled": null,
        "codeset": "icd10",
        "value_column": "code"
+      },
+      {
+       "name": "pv",
+       "type": "provider",
+       "pooled": null,
+       "provider": "synthetic_npi"
       }
      ],
      "transforms": []
@@ -840,6 +846,7 @@
    "t1.cn": "5474f20182b631dc224f7bab649d0688a8262ff779f8430fa2bb979dea770f8d",
    "t1.ds": "ae8a2133d95c8948ea5c7c1088c70913192211b34aac6f13bb271100c3485d5c",
    "t1.lk": "bd7cea34b57c192a32810ad9940499dc1bdd771842970ca20a98cb8248751839",
+   "t1.pv": "ed1de023a891f1d354e6950650935d8e2b380f981775273f81fc5f7a6a9775f2",
    "t2.r1": "ad719105118ece5004ed92bd8e3cfbc1fe9ff119b94447ae71ce719f9a97d44e",
    "t2.r2": "fed50788ad83ee8b55a9bb8a7f792dff1d7ffd74b0ce47314b99a817125bb5c4",
    "t2.r3": "4da13208780f85255779ada2859faab8e505ad807ea3a69677989799b66375ca"
@@ -979,6 +986,11 @@
        "type": "lookup",
        "codeset": "icd10",
        "value_column": "code"
+      },
+      {
+       "name": "pv",
+       "type": "provider",
+       "provider": "synthetic_npi"
       }
      ],
      "name": "t1",
