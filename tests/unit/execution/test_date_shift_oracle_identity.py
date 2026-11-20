@@ -298,7 +298,5 @@ def test_tz_naive_datetime_source_fails_identically() -> None:
     with pytest.raises(GenerationError) as ref:
         _ReferenceDateShift().run(df.copy(), "d", _plan(date_format=None), _ctx())
     with pytest.raises(GenerationError) as new:
-        DateShiftStrategyHandler().run(
-            df.copy(), "d", _plan(date_format=None), _ctx(declared=True)
-        )
+        DateShiftStrategyHandler().run(df.copy(), "d", _plan(date_format=None), _ctx(declared=True))
     assert new.value.code == ref.value.code

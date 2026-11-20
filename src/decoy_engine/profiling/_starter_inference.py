@@ -79,7 +79,9 @@ class StarterDecision:
 _FALLBACK = StarterDecision(strategy="redact", review=_FALLBACK_REVIEW)
 
 
-def detected_date_config(choice: recommendations.StarterChoice, match: Any) -> dict[str, Any] | None:
+def detected_date_config(
+    choice: recommendations.StarterChoice, match: Any
+) -> dict[str, Any] | None:
     """The choice's settings with the scan's date format, or None when no format can be written.
 
     None for a match with no variant, a variant that covers only part of the hits, or any hit

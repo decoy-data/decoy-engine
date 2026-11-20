@@ -208,7 +208,12 @@ class TestChunkParityGroupBy:
             "name": "dob",
             "strategy": "date_shift",
             "namespace": "dob_ns",
-            "provider_config": {"min_days": -30, "max_days": 30, "group_by": "patient_id", "date_format": "%Y-%m-%d"},
+            "provider_config": {
+                "min_days": -30,
+                "max_days": 30,
+                "group_by": "patient_id",
+                "date_format": "%Y-%m-%d",
+            },
         },
         {"name": "patient_id", "strategy": "passthrough"},
     ]

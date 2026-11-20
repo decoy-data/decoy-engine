@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
     StrategyRequirement,
@@ -22,8 +24,6 @@ from decoy_engine.contracts.strategy_requirements import (
     requirement_applies,
     requirements_for,
 )
-from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.relationships import composite_bindings
 
@@ -49,7 +49,9 @@ def _declared_date_format(col: dict[str, Any]) -> bool:
     )
 
 
-def _missing_in_nested(table: Any, col: dict[str, Any]) -> Iterator[tuple[StrategyRequirement, str]]:
+def _missing_in_nested(
+    table: Any, col: dict[str, Any]
+) -> Iterator[tuple[StrategyRequirement, str]]:
     """Each requirement a nested column's child leaves out, with its config path.
 
     Only descriptors rooted at `provider_config` apply: a child takes its parent's namespace

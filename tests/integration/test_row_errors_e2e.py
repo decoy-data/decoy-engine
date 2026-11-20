@@ -60,7 +60,14 @@ def _date_shift_config(
         "tables": [
             {
                 "name": "t",
-                "columns": [{"name": "dob", "strategy": "date_shift", "namespace": "ns1", "provider_config": {"date_format": "%Y-%m-%d"}}],
+                "columns": [
+                    {
+                        "name": "dob",
+                        "strategy": "date_shift",
+                        "namespace": "ns1",
+                        "provider_config": {"date_format": "%Y-%m-%d"},
+                    }
+                ],
             }
         ],
         "relationships": [],

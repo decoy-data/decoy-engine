@@ -631,7 +631,11 @@ def _self_fk_config(
                     {
                         "name": "id",
                         "strategy": "date_shift",
-                        "provider_config": {"min_days": 1, "max_days": 30, "date_format": "%Y-%m-%d"},
+                        "provider_config": {
+                            "min_days": 1,
+                            "max_days": 30,
+                            "date_format": "%Y-%m-%d",
+                        },
                         "namespace": "employee_ns",
                     },
                     _faker_col("manager_id", "employee_ns"),
@@ -829,7 +833,11 @@ def _dupwhen_config(tmp_path: Path) -> dict[str, Any]:
                         {
                             "name": "id",
                             "strategy": "date_shift",
-                            "provider_config": {"min_days": 1, "max_days": 30, "date_format": "%Y-%m-%d"},
+                            "provider_config": {
+                                "min_days": 1,
+                                "max_days": 30,
+                                "date_format": "%Y-%m-%d",
+                            },
                             "namespace": "dup_ns",
                             "when": "keep == 1",
                         },

@@ -615,9 +615,7 @@ def test_no_note_or_descriptor_copy_names_the_retired_product_word(starter: Star
 
 def _date_starter(tmp_path: Path) -> StarterConfig:
     path = tmp_path / "d.csv"
-    pd.DataFrame({"born": ["15.01.2024", "16.02.2024", "17.03.2024"] * 4}).to_csv(
-        path, index=False
-    )
+    pd.DataFrame({"born": ["15.01.2024", "16.02.2024", "17.03.2024"] * 4}).to_csv(path, index=False)
     src = {"d": {"type": "file", "format": "csv", "path": str(path), "has_header": True}}
     return starter_config(scan_sources(src))
 
