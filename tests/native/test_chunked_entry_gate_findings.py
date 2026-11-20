@@ -13,6 +13,7 @@ from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution.native._dispatch import NativeRouteEvidence
 from decoy_engine.providers_v2 import get_default_registry
+from tests._declared_schema import declared_schema
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
     NEEDS_COMPANION,
@@ -63,7 +64,13 @@ def test_caller_registry_non_string_provider_output_routes_to_the_oracle() -> No
     )
     source = pa.table({"f": pa.array(["a", "b", None, "c", "d"], pa.string())})
     config = make_config([faker_col("f")])
-    expected = _run(run_mask_pipeline_chunked, config, split(source, 2), registry=registry)
+    expected = _run(
+        run_mask_pipeline_chunked,
+        config,
+        split(source, 2),
+        registry=registry,
+        source_schema=declared_schema(config, TABLE),
+    )
     evidence: list[NativeRouteEvidence] = []
     actual = _run(
         run_mask_chunked,
