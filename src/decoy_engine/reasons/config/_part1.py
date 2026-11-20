@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, RetryClass, Severity
+from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, RetryClass, Severity
 
 __all__ = [
     "CLOUD_IO_UNSUPPORTED_FORMAT",
@@ -343,10 +343,10 @@ _d = _catalog.config("PipelineValidationError")
 MASK_TEXT_MASK_DETECTOR_UNKNOWN = _d(
     "mask.text_mask_detector_unknown",
     "A text_mask detector id is not one this field accepts.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 MASK_TEXT_MASK_STRATEGY_UNSUPPORTED = _d(
     "mask.text_mask_strategy_unsupported",
     "A text_mask strategy cannot be applied to this detector.",
-    since="1.32.0",
+    since=UNRELEASED,
 )

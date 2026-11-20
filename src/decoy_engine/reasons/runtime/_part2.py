@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -334,27 +334,27 @@ _d = _catalog.runtime("GenerationError")
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
     "generate_fitted_reference_bounds_conflict",
     "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 REFERENCE_BOUNDS_UNSATISFIED = _d(
     "reference_bounds_unsatisfied",
     "Reference column per-parent bounds did not hold after the repair.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 REFERENCE_PARENT_POOL_EMPTY = _d(
     "reference_parent_pool_empty",
     "Reference column has rows to fill but its parent column has no keys.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
     "reference_weights_length_mismatch",
     "Reference column weights count does not match its parent key count.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("GenerationUnboundedError")

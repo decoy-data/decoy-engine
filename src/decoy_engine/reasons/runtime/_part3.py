@@ -135,7 +135,7 @@ DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING = _d(
 )
 DATE_SHIFT_INVALID_CONFIG = _d("date_shift_invalid_config", "Date shift invalid config.")
 DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
-    "date_shift_requires_date_format", "Date shift requires date format.", since="1.32.0"
+    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
 )
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace."

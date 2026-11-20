@@ -275,9 +275,10 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
             # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
             # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
-            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd..., 0.18.0 reproduces 31ecf945...;
-            # 7d1c1a2a... is the 0.19.0 lock (77), 78af2b5a... adds xdist, 5253dc79... timeout, then PyNaCl.
-            "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
+            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0) with
+            # certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces 31ecf945....
+            # 7d1c1a2a... is the 0.19.0 lock (77); 78af2b5a... adds xdist (79), 5253dc79... timeout, then
+            # time-machine and PyNaCl.
             "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
             "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
             "b2d12cff2b9b1cb32a7fdd14227befe5b7767a389de47a8d1b3ebd70822c9be1",
@@ -303,7 +304,6 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
             # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
             # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc, 00f45dee... pynacl.
-            "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
             "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
             "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
             "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",

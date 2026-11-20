@@ -325,11 +325,11 @@ def test_raw_flagged_and_generation_paths_are_unchanged() -> None:
 # AT-26
 
 
-def test_the_reason_is_registered_in_the_right_catalog() -> None:
+def test_the_reason_is_registered_as_unreleased() -> None:
     spec = reasons.find("quality", "numeric_bins_invalid")
     assert spec is not None
     assert spec.owner == "DistributionSnapshotError"
-    assert spec.since == "1.32.0"
+    assert spec.since == reasons.UNRELEASED
     assert reasons.quality.NUMERIC_BINS_INVALID == "numeric_bins_invalid"
     from decoy_engine.reasons.quality import _part1
 
