@@ -10,7 +10,8 @@ import importlib
 import re
 from pathlib import Path
 
-CONTRACT = Path(__file__).resolve().parents[2] / "docs" / "compatibility-contract.md"
+ROOT = Path(__file__).resolve().parents[2]
+CONTRACT = ROOT / "docs" / "compatibility-contract.md"
 COLUMNS = ["old", "new", "kind", "since", "note"]
 KINDS = {"symbol", "wire key", "config key", "reason code", "CLI-visible label"}
 BLOCK = re.compile(r"<!-- renames-table:start -->\n(.*?)<!-- renames-table:end -->", re.S)
@@ -66,3 +67,41 @@ def test_symbol_rows_resolve() -> None:
             assert _resolves(new), f"new symbol does not import: {new}"
         for old in _names(r["old"]):
             assert not _resolves(old), f"retired symbol still imports: {old}"
+
+
+def _section(version: str) -> str:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    m = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
+    assert m, f"CHANGELOG has no section for {version}"
+    return re.sub(r"[\s`'\"]", "", m.group(1))
+
+
+# Released CHANGELOG sections are pinned, so two renames stay recorded under the wrong release
+# (the tags show where they first shipped): the STORM taxonomy split is written up under 0.11.0
+# and shipped in 0.16.0; the custom provider variable is written up under 0.25.0 and shipped in
+# 0.24.0. Keyed by (since, first old name of the row) to the section that holds the entry.
+RECORDED_UNDER = {
+    ("0.16.0", "decoy_engine.storm"): "0.11.0",
+    ("0.16.0", "decoy_engine.run_storm"): "0.11.0",
+    ("0.16.0", "decoy_engine.StormProfile"): "0.11.0",
+    ("0.16.0", "decoy_engine.run_storm_post_mask"): "0.11.0",
+    ("0.16.0", "decoy_engine.StormPostMaskReport"): "0.11.0",
+    ("0.24.0", "CUSTOM_PROVIDERS_DIR"): "0.25.0",
+}
+
+
+def test_since_matches_the_changelog_section() -> None:
+    # A row that points at the wrong release fails: the section for `since` (or the section
+    # that holds a known misplaced entry) must name the old or the new name. A reason code may
+    # appear without its namespace.
+    for r in _rows():
+        recorded = RECORDED_UNDER.get((r["since"], _names(r["old"])[0]), r["since"])
+        section = _section(recorded)
+        names = _names(r["old"]) + _names(r["new"])
+        if r["kind"] == "reason code":
+            names += [n.rsplit("/", 1)[-1] for n in names]
+        if r["kind"] == "symbol":
+            names += [n.rsplit(".", 1)[-1] for n in names]
+        assert any(re.sub(r"[\s`'\"]", "", n) in section for n in names), (
+            f"CHANGELOG {recorded} names neither side of: {r['old']}"
+        )
