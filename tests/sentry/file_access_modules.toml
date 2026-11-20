@@ -85,3 +85,27 @@ variables = ["VAULT_CACERT", "VAULT_CLIENT_CERT", "VAULT_CLIENT_KEY"]
 owner = "cam"
 reason = "Vault KV TLS CA bundle and client certificate/key paths: hvac/requests open them; set by the operator, like VAULT_ADDR and VAULT_TOKEN"
 removal = "remove when the Vault adapter takes TLS material through FileRole handles (or when a policy-issued SSLContext is passed in)"
+
+# Library-resolved form: boto3 opens these paths itself, resolved from the operator's process
+# environment and home directory (owner decision 2026-11-17). The sentry checks the named function
+# is live, the module imports the library, the function calls its constructor, and every variable
+# is documented in docs/security/secret-providers.md.
+[[operator_environment]]
+module = "decoy_engine/secret_providers/aws.py"
+function = "aws_provider_from_env"
+resolved_by = "boto3"
+constructor = "Session"
+variables = ["AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CA_BUNDLE"]
+owner = "cam"
+reason = "AWS config, shared credentials, web identity token and CA bundle paths: boto3 opens them through the standard credential chain; set by the operator, never by a job config or caller argument"
+removal = "remove when the AWS adapter takes credentials and TLS material through FileRole handles"
+
+[[operator_environment]]
+module = "decoy_engine/secret_providers/aws.py"
+function = "_read_client"
+resolved_by = "boto3"
+constructor = "Session"
+variables = ["AWS_CONFIG_FILE", "AWS_CA_BUNDLE"]
+owner = "cam"
+reason = "AWS_PROFILE selects the profile whose config file boto3 reads here. The read client is built from frozen explicit credentials and a frozen CA bundle path that boto3 opens; the path came from the operator's environment at construction"
+removal = "remove when the AWS adapter takes TLS material through FileRole handles"

@@ -24,9 +24,23 @@ row is read**. This page describes shipped behavior; the design record is
 | `env:` | `env:NAME[?encoding=<base64\|hex\|raw>&key_version=<v>]` | Legacy `env:NAME` still works for the mask root. |
 | `file:` | `file:/PATH[?encoding=...&key_version=...]` | The file is read as bytes. |
 | `vault:` | `vault://<mount>/<path>?version=<N>&field=<f>&encoding=<e>` | Version, field and encoding are all required; `latest`, `0`, aliases, userinfo, fragments, duplicate keys and traversal segments are rejected. |
+| `aws-sm:` | `aws-sm://<region>/<secret-name>?version=<uuid>&field=<f>&encoding=<e>` | Version id (lowercase UUID), field and encoding are all required; `AWSCURRENT` and every other stage label, ARNs, userinfo, ports, fragments, duplicate keys and traversal segments are rejected. The region must look like `us-east-1` (no dots), so a reference cannot choose the endpoint host. |
 
 The default logical `key_version` of `env:`/`file:` is `v1`; change it to rotate output identity
-intentionally. Vault derives `key_version` from the pinned KV version (`v3`).
+intentionally. Vault derives `key_version` from the pinned KV version (`v3`), AWS from the pinned
+version id (`v<uuid>`).
+
+### Key version label
+
+The `key_version` label is part of the key derivation (it is the HKDF `info`), so the same secret
+bytes under a different label give different masked output. Moving a dataset from `env:` to a
+remote store keeps its output only if the `env:` reference already carried `?key_version=v<id>`
+with the same bytes and the same label. A new version id (a rotation) changes every masked value
+even when the bytes are unchanged, as rotating the bytes does. Plain `env:NAME` has the label `v1`.
+
+A raw control character (any code below 0x20, or 0x7f) anywhere in a `vault:` or `aws-sm:` reference
+is rejected. `urlsplit` silently drops tab, newline and carriage return, so without this check
+`vault://kv/a<LF>b` would read the secret `kv/ab`. Before this check such a reference parsed.
 Every component of a `vault:` reference (mount, path, field) is percent-decoded exactly once and
 strictly: `%25ff` names the literal field `%ff`, an undecodable escape (`%ff`, an overlong or
 truncated UTF-8 sequence), a malformed escape (a `%` not followed by two hex digits) and a control
@@ -54,7 +68,8 @@ rejected with `bad_secret_ref`. Pattern and entropy scans never certify key stre
 
 All provider failures are registered F29 reasons in the `runtime` namespace (phase `resolve`),
 mapped by exception *type* with fixed text: `secret_provider_unknown`, `secret_provider_unavailable`,
-`secret_access_denied`, `secret_version_unavailable`, `secret_expired`, `secret_lease_unsupported`,
+`secret_provider_unconfigured` (a provider client could not be built safely from the operator's
+settings: a missing `VAULT_ADDR`, a set `VAULT_SKIP_VERIFY`, no AWS credential), `secret_access_denied`, `secret_version_unavailable`, `secret_expired`, `secret_lease_unsupported`,
 `secret_material_invalid`, plus the existing `bad_secret_ref`, `missing_mask_secret`,
 `weak_mask_secret`, `keyed_strategy_requires_secret`, and `secret_file_permissions_unsafe` (below).
 The provider exception is not retained as `__cause__`/`__context__`, and neither is an exception the
@@ -158,7 +173,62 @@ register_secret_provider(VaultKV2Provider(client_from_env()))
 - **Not live-verified.** The in-process fakes prove the adapter's mapping and ordering, not the
   real `hvac` wire format, TLS verification, namespace header routing or the KV v2 metadata
   envelope. The five live tests in `tests/secret_providers/test_vault_live.py` are skipped
-  without a Vault service and have not been run.
+  without a Vault service. The run is recorded as NOT RUN in `docs/records/2026-11-18-f13-vault-live.md`.
+
+## AWS Secrets Manager
+
+Optional dependency: `pip install "decoy-engine[cloud]"` (`boto3`, already part of the cloud
+extra; no other library is added). The base install and `env:`/`file:` work without it.
+
+```python
+from decoy_engine.secret_providers import register_secret_provider
+from decoy_engine.secret_providers.aws import aws_provider_from_env
+
+register_secret_provider(aws_provider_from_env())
+```
+
+- The provider is built from boto3's standard credential chain: environment variables, the shared
+  config and credentials files (`~/.aws/config`, `~/.aws/credentials`, or the files named by
+  `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`), a named profile (`AWS_PROFILE`), web identity
+  (`AWS_WEB_IDENTITY_TOKEN_FILE`), container credentials and instance metadata. `AWS_CA_BUNDLE`
+  or a profile `ca_bundle` selects the CA bundle. boto3 opens these paths; they come only from the
+  operator's environment, never from a job config. `tests/sentry/file_access_modules.toml` lists
+  them.
+- The provider is immutable. Construction freezes the credentials, the configured endpoint (a
+  global `AWS_ENDPOINT_URL`, a service-specific one, or a profile `endpoint_url`) and the CA bundle.
+  It builds two throwaway clients in a placeholder region to find out whether an endpoint is
+  configured. Each read then builds a fresh client from the frozen values with the SDK's own
+  endpoint lookup switched off. Endpoint, credentials and CA bundle are frozen; other SDK settings
+  are read per call. Frozen credentials can expire, so build the provider per run. botocore logs
+  response bodies at DEBUG, so the adapter installs a filter on `botocore.parsers` that drops them;
+  the secret never reaches a log handler. With no configured endpoint, the read uses the public endpoint of the reference's region.
+- An assume-role profile (`role_arn` with `mfa_serial`) makes botocore prompt on stdin. When stdin is not
+  interactive the factory refuses such a profile with `secret_provider_unconfigured` instead of
+  waiting. Unattended jobs use pre-issued session credentials or a workload identity.
+- Any failure while building the provider (missing profile, unreadable file, no credential, an STS
+  error) is `secret_provider_unconfigured` with fixed text; the vendor text and exception are not
+  kept.
+- One provider round trip: `GetSecretValue` with the pinned `VersionId`. The returned `VersionId`
+  must equal it.
+- V1 reads one field of a JSON `SecretString` (the console's key/value form). `SecretBinary`,
+  plain text, a JSON non-object, a duplicate key, a missing or an empty field fail
+  `secret_material_invalid`. A moved or deleted version, and a secret scheduled for deletion, fail
+  `secret_version_unavailable`; an access or KMS denial fails `secret_access_denied`; network,
+  throttling and other SDK failures fail `secret_provider_unavailable`.
+- Minimum IAM policy: `secretsmanager:GetSecretValue` on the one secret, plus `kms:Decrypt` on its
+  customer-managed key if it uses one.
+- Rotation: store a new version and change the reference's `version=`. The output identity
+  (`key_version`, see above) changes with it.
+- A secret name that ends in a hyphen and six characters can be matched by AWS as a partial ARN of
+  another secret. The pinned version id still fixes the bytes that are read, and the read fails if
+  that secret does not have the version.
+- Verified under `moto` (real SDK request shapes), not against a real AWS account.
+
+### Secrets in GCP and Azure
+
+Google Secret Manager and Azure Key Vault have no native adapter. Use each vendor's Secrets Store
+CSI driver provider, which renders the secret to an owner-only file (mode `0400`), and point
+`file:` at it. The engine reads the file through its owner-only check.
 
 ## Consumers
 
@@ -177,9 +247,10 @@ provider to the engine entries it calls; `report vault` passes the admitted prov
   `defaultMode: 0400`) render the key to an owner-only file and point `file:` at it; the engine
   never talks to Vault in this setup.
 - `env:` suits CI, where the runner injects a masked variable.
-- `vault://` is refused with `secret_provider_unknown`: the CLI registers no Vault provider in V1.
-  The refusal text is constant, never repeats the reference, and no output, vault or evidence file
-  is written. Direct Vault, AWS, GCP and Azure adapters in the CLI are roadmap row 83.
+- `vault://` and `aws-sm://` are read directly once the CLI registers the provider (CLI extras
+  `hashicorp-vault` and `aws`). Without the extra the CLI refuses with `secret_provider_unknown`.
+  Every refusal text is constant, never repeats the reference, and no output, vault or evidence
+  file is written.
 
 The CLI may report a usage or source error before it admits the secret, so a bad flag or a
 missing input file can surface first. Admission still comes before output, vault and evidence
@@ -192,8 +263,8 @@ with platform V1. Nothing in this engine depends on it.
 
 ## Not shipped
 
-AWS Secrets Manager, Google Secret Manager, Azure Key Vault, 1Password, systemd credentials and
-SOPS/age are demand-gated and have no stub here.
+Google Secret Manager, Azure Key Vault, 1Password, systemd credentials and SOPS/age are
+demand-gated and have no stub here. Use the CSI-driver `file:` path for GCP and Azure.
 
 ## Dependency decision (`hvac`)
 

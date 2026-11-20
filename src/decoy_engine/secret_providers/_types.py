@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -41,6 +42,11 @@ _PROCESS_SALT = os.urandom(32)
 
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):")
 _VERSION_RE = re.compile(r"^[1-9][0-9]{0,9}\Z")
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+# AWS Secrets Manager: a region like us-east-1 or us-gov-west-1 (no dots, so a ref cannot steer
+# the SDK's endpoint host) and the documented secret-name charset.
+_AWS_REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}\Z")
+_AWS_NAME_RE = re.compile(r"^[A-Za-z0-9/_+=.@\-]{1,512}\Z")
 _LOGICAL_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}\Z")
 # RFC 3986 §2.1: "%" only ever starts a two-hex-digit escape. Python's ``unquote`` passes a
 # malformed one through unchanged; the Vault grammar rejects it instead.
@@ -92,7 +98,8 @@ class SecretRef:
 
 
 def parse_ref(text: object) -> SecretRef:
-    """Parse ``env:NAME[?..]``, ``file:/PATH[?..]`` or ``vault://mount/path?version=N&field=F&encoding=E``.
+    """Parse ``env:NAME[?..]``, ``file:/PATH[?..]``, ``vault://mount/path?version=N&field=F&encoding=E``
+    or ``aws-sm://region/name?version=<uuid>&field=F&encoding=E``.
 
     Any other well-formed ``scheme:locator[?encoding=..&key_version=..]`` parses with the local
     grammar so the registry, not the parser, owns the "unknown provider" decision. Anything
@@ -123,13 +130,14 @@ def _parse(text: str) -> SecretRef:
     if match is None:
         raise _bad_ref()
     scheme = match.group(1).lower()
-    if scheme == "vault":
-        return _parse_vault(text)
+    rule = _REMOTE_RULES.get(scheme)
+    if rule is not None:
+        return _parse_pinned_remote(text, rule)
     return _parse_local(scheme, text[match.end() :])
 
 
 def _control_chars(value: str) -> bool:
-    return any(ord(c) < 32 for c in value)
+    return any(ord(c) < 32 or ord(c) == 127 for c in value)
 
 
 def _encoding(value: str) -> str:
@@ -162,11 +170,49 @@ def _parse_local(scheme: str, rest: str) -> SecretRef:
     return SecretRef(scheme=scheme, locator=locator, encoding=encoding, key_version=key_version)
 
 
-def _parse_vault(text: str) -> SecretRef:
-    """Each component is percent-decoded exactly once, strictly (UTF-8): the mount and the path
-    here, the query values by ``parse_qsl``. A second decode would read ``%25ff`` as ``%ff``."""
-    if _MALFORMED_ESCAPE_RE.search(text):
+@dataclass(frozen=True)
+class RemoteRefRule:
+    """The per-scheme facts of a pinned remote reference ``scheme://authority/path?version=..``."""
+
+    scheme: str
+    authority_re: re.Pattern[str]
+    version_re: re.Pattern[str]
+    locator_check: Callable[[str], bool]
+
+
+def _any_locator(_: str) -> bool:
+    return True
+
+
+_REMOTE_RULES: dict[str, RemoteRefRule] = {
+    "vault": RemoteRefRule(
+        scheme="vault",
+        authority_re=re.compile(r"(?s:.+)\Z"),
+        version_re=_VERSION_RE,
+        locator_check=_any_locator,
+    ),
+    "aws-sm": RemoteRefRule(
+        scheme="aws-sm",
+        authority_re=_AWS_REGION_RE,
+        version_re=_UUID_RE,
+        locator_check=lambda name: _AWS_NAME_RE.match(name) is not None,
+    ),
+}
+
+
+def _parse_pinned_remote(text: str, rule: RemoteRefRule) -> SecretRef:
+    """Each component is percent-decoded exactly once, strictly (UTF-8): the authority and the
+    path here, the query values by ``parse_qsl``. A second decode would read ``%25ff`` as ``%ff``.
+
+    ``urlsplit`` silently drops ``\\t``, ``\\n`` and ``\\r`` (CPython bpo-43882), so a raw
+    control character is refused before it runs. Every refusal is raised after any ``except``
+    block has closed, so no chained exception can hold part of the reference.
+    """
+    if _control_chars(text) or _MALFORMED_ESCAPE_RE.search(text):
         raise _bad_ref()
+    split_failed = False
+    parts = urlsplit("")
+    query: list[tuple[str, str]] = []
     try:
         parts = urlsplit(text)
         query = parse_qsl(
@@ -176,7 +222,9 @@ def _parse_vault(text: str) -> SecretRef:
             errors="strict",
         )
     except ValueError:
-        raise _bad_ref() from None
+        split_failed = True
+    if split_failed:
+        raise _bad_ref()
     if parts.fragment or "@" in parts.netloc or ":" in parts.netloc or not parts.netloc:
         raise _bad_ref()
     keys = [k for k, _ in query]
@@ -186,24 +234,29 @@ def _parse_vault(text: str) -> SecretRef:
     version, fld, encoding = params.get("version"), params.get("field"), params.get("encoding")
     if version is None or fld is None or encoding is None:
         raise _bad_ref()
-    if not _VERSION_RE.match(version) or not fld:
+    if not rule.version_re.match(version) or not fld:
         raise _bad_ref()
+    decode_failed = False
+    decoded = mount = ""
     try:
         decoded = unquote(parts.path, errors="strict")
         mount = unquote(parts.netloc, errors="strict")
     except UnicodeDecodeError:
-        raise _bad_ref() from None
+        decode_failed = True
+    if decode_failed:
+        raise _bad_ref()
     segments = decoded.split("/")[1:]
-    if not decoded.startswith("/") or not segments:
+    if not decoded.startswith("/") or not segments or not rule.authority_re.match(mount):
         raise _bad_ref()
     for seg in (mount, *segments):
         if seg in ("", ".", "..") or "\\" in seg or _control_chars(seg):
             raise _bad_ref()
-    if _control_chars(fld):
+    locator = mount + "/" + "/".join(segments)
+    if _control_chars(fld) or not rule.locator_check("/".join(segments)):
         raise _bad_ref()
     return SecretRef(
-        scheme="vault",
-        locator=mount + "/" + "/".join(segments),
+        scheme=rule.scheme,
+        locator=locator,
         version=version,
         field=fld,
         encoding=_encoding(encoding),
