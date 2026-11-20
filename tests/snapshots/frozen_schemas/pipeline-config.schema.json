@@ -1111,6 +1111,37 @@
           "if": {
             "properties": {
               "type": {
+                "const": "inherit"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "column": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "via": {}
+            },
+            "required": [
+              "via",
+              "column"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "group_key"
               }
             },
@@ -1298,7 +1329,8 @@
             "group_key",
             "constant",
             "distribution",
-            "lookup"
+            "lookup",
+            "inherit"
           ],
           "title": "Type",
           "type": "string"
