@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, ReasonCode, RetryClass
 
 __all__ = [
+    "DISMISS_REFUSED",
     "FINDING_BLOCKED",
     "FOREIGN_KEY_ORPHANS_INTRODUCED",
     "FOREIGN_KEY_ORPHANS_QUARANTINED",
@@ -14,6 +15,8 @@ __all__ = [
     "KEY_TYPE_MISMATCH",
     "PRIMARY_KEY_DUPLICATES_INTRODUCED",
     "PRIMARY_KEY_NULLS_INTRODUCED",
+    "REVIEW_CONFLICT",
+    "REVIEW_INTEGRITY_OFF",
 ]
 
 _d = _catalog.post_scan("decoy_engine.verification.postmask._keys")
@@ -69,4 +72,34 @@ FINDING_BLOCKED = _verdict(
     "A post-scan column check found a failing finding in the output, so the run is withheld.",
     retry=_repair,
     since="1.25.0",
+)
+
+# INIT-WIZARD E2: a post-scan review the engine cannot turn into config edits. The caller repairs
+# its decisions; each names a table or column, never a value.
+_review_declare = _catalog.post_scan("ReviewInputError")
+
+
+def _review(code: str, summary: str) -> ReasonCode:
+    return _review_declare(
+        code,
+        summary,
+        phases=(Phase.CONFIGURATION,),
+        outcome=Outcome.CONFIGURATION,
+        retry=RetryClass.CONFIGURATION_REPAIR,
+        since="1.31.0",
+    )
+
+
+DISMISS_REFUSED = _review(
+    "dismiss_refused",
+    "A finding that failed a mask check, or that came from source-identity evidence, cannot be "
+    "dismissed.",
+)
+REVIEW_CONFLICT = _review(
+    "review_conflict",
+    "Decisions for findings on one column propose different entries.",
+)
+REVIEW_INTEGRITY_OFF = _review(
+    "review_integrity_off",
+    "A dismissal needs the post-scan integrity checks turned on in the config.",
 )

@@ -2,6 +2,8 @@
 
 Each scenario's result (tables, schema, pandas metadata, warnings, row errors and quality
 metrics) is recorded in `c5c_a_unchanged_jobs.json`, captured from the tree before the fix.
+The `predicate_reads_faker_column` entry was re-pinned for FREEZE-O1: `n` is read by a `when:` and
+holds a null, so it is `int64` (not `double`) in the output.
 Regenerate only on purpose: `C5C_A_WRITE_GOLDENS=1 pytest <this file>`.
 
 The row values of the four faker/hash scenarios were re-pinned under F13 because job_seed keying

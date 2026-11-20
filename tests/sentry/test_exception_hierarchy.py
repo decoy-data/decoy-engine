@@ -22,7 +22,7 @@ from decoy_engine.errors import DecoyError
 # (module, class, stdlib ancestor that must be kept, or None)
 _REPARENTED_ROOTS: tuple[tuple[str, str, type | None], ...] = (
     ("decoy_engine.errors", "ValidationError", None),
-    ("decoy_engine.vault", "VaultError", None),
+    ("decoy_engine.vault._format", "VaultError", None),
     ("decoy_engine.keyprovider", "MaskSecretError", None),
     ("decoy_engine.keyprovider", "KeyedStrategyRequiresSecret", None),
     ("decoy_engine.keyprovider", "MissingMaskSecret", None),

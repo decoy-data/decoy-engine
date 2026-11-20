@@ -82,6 +82,9 @@ def test_all_lists_every_public_name():
         "PipelineConfig",
         # VALUE-FREE-ERRORS A1: the value-free config parse route and its error vocabulary.
         "parse_pipeline_config",
+        # OUTPUT-METADATA-LEAK E1: the one rule for output Parquet key/value metadata.
+        "output_schema",
+        "output_table",
         "ConfigProblem",
         "ConfigRuleError",
         # S9: Masker + DataGenerator removed from the public surface. The
@@ -225,6 +228,8 @@ def test_all_lists_every_public_name():
         "StrategyInfo",
         "StrategyOption",
         "strategy_catalog",
+        # Public read-only view of the shipped code set registry (GEN-CATALOG GC3-E).
+        "code_set_catalog",
         # engine-v2 S10 (Validator: compile consolidator + post-validation).
         "PlanCheckError",
         "PlanValidationResult",
@@ -331,6 +336,7 @@ def test_all_lists_every_public_name():
         "prepare_declared_sources",
         "source_columns",
         # SCAN-MULTI S1a: the multi-table scan and its scan-set/v1 document.
+        "ScanDeclaration",
         "ScanSet",
         "ScanSetCore",
         "TableScan",
@@ -459,7 +465,7 @@ class TestV2BehaviorRegressionPinsS11:
             backend_version="v",
             cardinality_mode=cardinality_mode,
             deterministic=deterministic,
-            provider_config=(),
+            provider_config=(("date_format", "%Y-%m-%d"),) if strategy == "date_shift" else (),
             coherent_with=(),
         )
 

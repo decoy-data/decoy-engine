@@ -31,6 +31,7 @@ from decoy_engine.execution._operator_registry import (
     OPERATORS,
     POSITIONAL_FAKER_SOURCE_TYPES,
 )
+from decoy_engine.execution._runner import group_by_sibling
 from decoy_engine.execution.native._capabilities import capabilities_for
 from decoy_engine.execution.native._categorical_prepared import (
     prepare_categorical,
@@ -286,8 +287,8 @@ def execution_binding_for_slice_node(
     # row-local, non-global); a future strategy added to SLICE_STRATEGIES
     # without updating the shadow coordinator's "no prepasses" contract
     # (C1) must fail loudly here rather than bind silently. date_shift declares
-    # `format_detect` only without an explicit date_format, and that config is
-    # rejected by `date_shift_config_rejection`, so it returned above.
+    # no prepass: plan compile requires its date_format, and the declared-casting column that
+    # may lack one is rejected by `date_shift_config_rejection`, so it returned above.
     if (
         requirements.required_prepasses
     ):  # pragma: no cover - unreachable while SLICE_STRATEGIES stays prepass-free
@@ -367,8 +368,7 @@ def execution_binding_for_slice_node(
     elif strategy == "group_key":
         # group_key keys on a SIBLING column, not the target; `group_key_config_rejection`
         # already proved group_by is present and `length` is a valid even int in range.
-        group_by = cfg.get("group_by")
-        if not isinstance(group_by, str) or not group_by:
+        if group_by_sibling(cfg) is None:
             return None  # pragma: no cover - config gate guarantees a group_by
         if caps.key_source is None:
             return None  # pragma: no cover - group_key is mask-keyed

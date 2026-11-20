@@ -105,6 +105,7 @@ from decoy_engine.execution._planner import (
 from decoy_engine.execution._probe import ProbePoint, ProbeResult, probe_fits, probe_peak_bytes
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.execution._runner import WorkNode, build_work_list, order_work
+from decoy_engine.execution._strategies import StrategyInfo, StrategyOption, strategy_catalog
 from decoy_engine.execution._substrate import select_execution_adapter
 from decoy_engine.execution._transactional_sink import (
     ParquetTransactionalSink,
@@ -157,6 +158,8 @@ __all__ = [
     "StrategyContext",
     "StrategyError",
     "StrategyHandler",
+    "StrategyInfo",
+    "StrategyOption",
     "TransactionalSink",
     "WorkNode",
     "build_work_list",
@@ -178,4 +181,5 @@ __all__ = [
     "run_pipeline",
     "run_pipeline_isolated",
     "select_execution_adapter",
+    "strategy_catalog",
 ]

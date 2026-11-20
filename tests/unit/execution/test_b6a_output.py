@@ -17,6 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine import output_table
 from decoy_engine.execution import ExecutionError
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_matrix as matrix
@@ -45,13 +46,26 @@ def _companion_state(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
 def _check_case(cfg: dict[str, Any], src: pa.Table, tmp_path: Path, **extra: Any) -> None:
     """Test 1's per-case assertions: a recording sink forwarding to a real Parquet sink."""
     expected = b6a.reference(cfg, src, **extra)[support.TABLE]
+    # O3: the resident reference narrows a pass-through `large_string` column to `string`, while a
+    # fixed-schema Parquet sink keeps the source `large_string` (same values, same file bytes as main).
+    for i, field in enumerate(expected.schema):
+        if pa.types.is_string(field.type) and pa.types.is_large_string(
+            src.schema.field(field.name).type
+        ):
+            expected = expected.set_column(
+                i, field.with_type(pa.large_string()), expected.column(i).cast(pa.large_string())
+            )
     sink, target = b6a.real_sink(tmp_path)
     result = b6a.run_streamed(cfg, src, sink, **extra)
     assert result.outputs == {}
     assert sink.calls == [("write_batches", support.TABLE), ("commit",)]
     b6a.assert_streamed_equals(sink, expected)
     published = (target / f"{support.TABLE}.parquet").read_bytes()
-    assert published == b6a.parquet_bytes(expected, tmp_path / "reference.parquet")
+    # A published file carries no field metadata (OUTPUT-METADATA-LEAK), so the byte-identity
+    # reference is the resident table under the same output rule; the in-memory comparison above
+    # keeps `check_metadata=True`.
+    reference = b6a.parquet_bytes(output_table(expected), tmp_path / "reference.parquet")
+    assert published == reference
     assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, f"{support.TABLE}.parquet"]
 
 

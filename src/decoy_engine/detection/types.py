@@ -92,6 +92,11 @@ class DetectorMatch:
     # Detectors with variants (SSN dash/no-dash, phone separator styles,
     # date strptime, ZIP 5/9) write the winning variant's label here.
     format_pattern: str | None = None
+    # True only for a strptime-labelled date match whose every hit has the winning shape and
+    # parses under `pd.to_datetime(raw_hit, format=format_pattern, errors="coerce")`, the call
+    # date_shift runs. A shape-only match (`31.02.2024`) or a padded value is False. The default
+    # keeps older profiles readable and never opts one into a date_shift.
+    format_pattern_complete: bool = False
     # Detection sprint (V1): three-bucket confidence so the UI can render
     # "detected" / "needs review" / "low signal" without re-deriving from
     # match_rate. 'high' is the safe-to-auto-apply bucket; 'medium' asks

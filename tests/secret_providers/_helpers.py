@@ -34,6 +34,13 @@ ENGINE_VERSION = "f13-accept"
 GOOD_SECRET = b"f13-throwaway-secret-0123456789ab"  # 33 bytes
 
 
+def _column(strategy: str) -> dict:
+    column: dict = {"name": "email", "strategy": strategy, "namespace": "e"}
+    if strategy == "date_shift":
+        column["provider_config"] = {"date_format": "%Y-%m-%d"}
+    return column
+
+
 def keyed_config(
     tmp_path: Any,
     *,
@@ -59,7 +66,7 @@ def keyed_config(
             "tables": [
                 {
                     "name": "t",
-                    "columns": [{"name": "email", "strategy": strategy, "namespace": "e"}],
+                    "columns": [_column(strategy)],
                 }
             ],
             "targets": {"t": {"type": "file", "format": "csv", "path": str(tmp_path / "o.csv")}},

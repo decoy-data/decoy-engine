@@ -1,0 +1,24 @@
+{
+ "sentry_id": "group-by-single-reader",
+ "created_in": "RED-MAIN-BASELINE",
+ "entries": {
+  "execution/_runner.py::group_by_sibling": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  },
+  "execution/_strategies/_date_shift.py::DateShiftStrategyHandler.run": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  },
+  "execution/_transforms.py::_structured_references": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  },
+  "execution/native/_operator_config_rejections.py::date_shift_config_rejection": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  },
+  "execution/native/_operator_config_rejections.py::group_key_config_rejection": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  },
+  "execution/native/_operator_params.py::resolve_operator_params": {
+   "reason": "existing entry of defects/test_group_by_single_reader.py, registered when the baseline scan found it unregistered; may only shrink"
+  }
+ }
+}

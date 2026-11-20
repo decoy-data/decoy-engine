@@ -88,6 +88,8 @@ config whose column list contains a non-dict entry kills the dict-guard
 
 ### `_whole_column_state_rejections` (38 of 48)
 
+S4b removed the undated `date_shift` chunk decline (`date_shift_requires_explicit_format`); plan compile now refuses a missing format, so the date_shift lines below describe the retired decline.
+
 - Two `when` columns + two undated `date_shift` columns on one table: asserting
   the two codes plus the sorted comma-joined name lists (`wa, wb` / `da, db`)
   kills the `_table_column_entries(table=None)` delegation break, the

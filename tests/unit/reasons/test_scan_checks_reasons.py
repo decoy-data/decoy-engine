@@ -7,7 +7,6 @@ import re
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.reasons import UNRELEASED
 
 NEW = (
     ("pre_scan", "drift_detected", "warning", "warning"),
@@ -23,7 +22,7 @@ def test_the_code_is_registered_pending_with_fixed_value_free_text(
 ) -> None:
     spec = reasons.find(namespace, code)
     assert spec is not None
-    assert spec.since == UNRELEASED
+    assert spec.since == "1.30.0"
     assert spec.kind.value == kind
     assert all(rule.severity.value == severity for rule in spec.rules)
     assert not re.search(r"[{}%]", spec.summary)
@@ -56,11 +55,11 @@ def test_f15_t9_the_bound_baseline_codes_are_pending_with_fixed_text(
 ) -> None:
     spec = reasons.find(namespace, code)
     assert spec is not None
-    assert spec.since == UNRELEASED
+    assert spec.since == "1.30.0"
     assert spec.kind.value == kind
     assert not re.search(r"[{}%]", spec.summary)
     assert spec.context == ()
 
 
-def test_f15_t9_the_registry_version_is_not_bumped_by_the_new_codes() -> None:
-    assert reasons.REGISTRY_VERSION == "1.29.0"
+def test_f15_t9_the_registry_version_is_stamped_by_the_release() -> None:
+    assert reasons.REGISTRY_VERSION == "1.31.0"

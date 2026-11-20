@@ -616,10 +616,11 @@ def test_a_read_when_column_keeps_a_big_int_passthrough_exact() -> None:
     assert [r.quality_metrics["chunked_route"]["pandas_read_passthrough"] for r in sink] == [
         ["big"]
     ] * 2
-    # The unchanged public oracle rounds it through float64; only characterized here.
+    # FREEZE-O1: the public oracle reads a `when:` column losslessly too, so it no longer rounds
+    # the value through float64.
     public = run_public_below_gate(_when_config(_READ_BIG), chunks)
-    assert public[0].schema.field("big").type == pa.float64()
-    assert public[0].column("big").to_pylist()[0] == float(2**53)
+    assert public[0].schema.field("big").type == pa.int64()
+    assert public[0].column("big").to_pylist() == [big, None, 3]
     # Every row is selected, as the replaced bytes comparison selected every row.
     assert [o.column("r").to_pylist() for o in out] == [["REDACTED"] * 3] * 2
 
