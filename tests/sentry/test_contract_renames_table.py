@@ -79,23 +79,28 @@ def _section(version: str) -> str:
 # Released CHANGELOG sections are pinned, so two renames stay recorded under the wrong release
 # (the tags show where they first shipped): the STORM taxonomy split is written up under 0.11.0
 # and shipped in 0.16.0; the custom provider variable is written up under 0.25.0 and shipped in
-# 0.24.0. Keyed by (since, first old name of the row) to the section that holds the entry.
+# 0.24.0. Keyed by the row's first old name to (release from the tags, section holding the entry);
+# the row's `since` must equal the pinned release, so these rows cannot drift to the CHANGELOG one.
 RECORDED_UNDER = {
-    ("0.16.0", "decoy_engine.storm"): "0.11.0",
-    ("0.16.0", "decoy_engine.run_storm"): "0.11.0",
-    ("0.16.0", "decoy_engine.StormProfile"): "0.11.0",
-    ("0.16.0", "decoy_engine.run_storm_post_mask"): "0.11.0",
-    ("0.16.0", "decoy_engine.StormPostMaskReport"): "0.11.0",
-    ("0.24.0", "CUSTOM_PROVIDERS_DIR"): "0.25.0",
+    "decoy_engine.storm": ("0.16.0", "0.11.0"),
+    "decoy_engine.run_storm": ("0.16.0", "0.11.0"),
+    "decoy_engine.StormProfile": ("0.16.0", "0.11.0"),
+    "decoy_engine.run_storm_post_mask": ("0.16.0", "0.11.0"),
+    "decoy_engine.StormPostMaskReport": ("0.16.0", "0.11.0"),
+    "CUSTOM_PROVIDERS_DIR": ("0.24.0", "0.25.0"),
 }
 
 
 def test_since_matches_the_changelog_section() -> None:
-    # A row that points at the wrong release fails: the section for `since` (or the section
-    # that holds a known misplaced entry) must name the old or the new name. A reason code may
-    # appear without its namespace.
+    # A row that points at the wrong release fails: the section for `since` (or, for a known
+    # misplaced entry, its pinned release and section) must name the old or the new name. A
+    # reason code may appear without its namespace.
     for r in _rows():
-        recorded = RECORDED_UNDER.get((r["since"], _names(r["old"])[0]), r["since"])
+        recorded = r["since"]
+        pinned = RECORDED_UNDER.get(_names(r["old"])[0])
+        if pinned is not None:
+            assert r["since"] == pinned[0], f"{r['old']} first shipped in {pinned[0]}"
+            recorded = pinned[1]
         section = _section(recorded)
         names = _names(r["old"]) + _names(r["new"])
         if r["kind"] == "reason code":
