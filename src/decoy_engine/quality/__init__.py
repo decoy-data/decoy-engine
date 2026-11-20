@@ -40,6 +40,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "snapshot_null_fraction": "diagnostic",
     "QUALITY_FIDELITY_SCHEMA_VERSION": "fidelity",
     "compute_fidelity": "fidelity",
+    "mean_comparable_similarity": "fidelity",
     "QUALITY_POLICY_SCHEMA_VERSION": "policy",
     "apply_quality_policy": "policy",
     "QUALITY_REPORT_SCHEMA_VERSION": "report",
@@ -100,6 +101,7 @@ __all__ = [
     "compute_new_row_synthesis",
     "compute_quality_report",
     "compute_shape_fidelity",
+    "mean_comparable_similarity",
     "score_to_grade",
     "snapshot_null_fraction",
 ]

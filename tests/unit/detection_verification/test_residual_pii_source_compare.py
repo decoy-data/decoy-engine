@@ -182,3 +182,35 @@ class TestNonComparablePathsDegrade:
         source, output = _frames(_EMAILS, _EMAILS)
         finding = _one(check_residual_pii(output, _cfg("hash"), source_frames=source))
         assert finding.severity == "fail"
+
+
+class TestUnknownTableWording:
+    """DI-CLOSE E2: with no config entry for the table, the engine cannot say a column was not
+    configured; the wording says what it knows. Severity is unchanged."""
+
+    def test_table_absent_hit_says_the_config_has_no_entry_for_the_table(self):
+        out_vals = [f"fake{i}@masked.example" for i in range(100)]
+        source, output = _frames(_EMAILS, out_vals)
+        finding = _one(
+            check_residual_pii(output, {"version": 2, "tables": []}, source_frames=source)
+        )
+        assert finding.severity == "warning"
+        assert "has no entry for its table" in finding.message
+        assert "not configured to be masked" not in finding.message
+
+    def test_table_absent_leak_stays_fail_with_the_new_wording(self):
+        source, output = _frames(_EMAILS, _EMAILS)
+        finding = _one(check_residual_pii(output, {}, source_frames=source))
+        assert finding.severity == "fail"
+        assert "has no entry for its table" in finding.message
+        assert "not configured to be masked" not in finding.message
+
+    def test_table_present_column_absent_keeps_the_old_wording(self):
+        source, output = _frames(_EMAILS, _EMAILS)
+        finding = _one(check_residual_pii(output, _cfg(None), source_frames=source))
+        assert finding.severity == "fail"
+        assert "was not configured to be masked" in finding.message
+        synthetic = [f"fake{i}@masked.example" for i in range(100)]
+        source, output = _frames(_EMAILS, synthetic)
+        finding = _one(check_residual_pii(output, _cfg(None), source_frames=source))
+        assert "was not configured to be masked" in finding.message
