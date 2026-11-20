@@ -7,6 +7,7 @@ the count came from (`explicit`, `auto`, `auto_fallback`).
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -314,10 +315,13 @@ def test_source_on_every_route(route: str, tmp_path: Path, monkeypatch: pytest.M
 _RSS_CHILD = """
 import resource, sys, tempfile
 from pathlib import Path
+from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 from tests.parity import _gap9_jobs as jobs
 tmp = Path(tempfile.mkdtemp())
 config, paths = jobs.ooc_job(tmp, rows=20000)
-kwargs = {} if sys.argv[1] == "auto" else {"native_threads": 1}
+kwargs = {"key_provider": THROWAWAY_KEY_PROVIDER}
+if sys.argv[1] != "auto":
+    kwargs["native_threads"] = 1
 jobs.run_ooc(config, paths, tmp / "out", lane="batch", **kwargs)
 print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 """
@@ -337,6 +341,7 @@ def test_out_of_core_rss_under_memory_limit(monkeypatch: pytest.MonkeyPatch) -> 
         out = subprocess.run(  # noqa: S603
             [sys.executable, "-c", _RSS_CHILD, mode],
             cwd=repo,
+            env={**os.environ, "PYTHONPATH": str(repo)},
             check=True,
             capture_output=True,
             text=True,
