@@ -135,16 +135,30 @@ class Body:
         self.close()
 
 
+class DeadBody(Body):
+    """The resumed body of a connection that stays down: it fails before its first chunk."""
+
+    def iter_chunks(self, chunk_size: int = 0) -> Iterator[bytes]:
+        raise self.exc
+        yield b""
+
+
 class Client:
     def __init__(self, body: Body) -> None:
         self.body = body
 
-    def get_object(self, **_kw: Any) -> dict:
-        return {"Body": self.body}
+    def get_object(self, **kw: Any) -> dict:
+        # A resume (F02-E1) carries `Range`; the dropped connection is still down.
+        if "Range" in kw:
+            return {"ETag": '"e"', "Body": DeadBody(self.body.exc)}
+        return {"ETag": '"e"', "Body": self.body}
 
 
 @pytest.mark.parametrize("name", sorted(STREAM_ERRORS))
 def test_open_translates_a_mid_stream_failure(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
     make, kind = STREAM_ERRORS[name]
     body = Body(make())
     monkeypatch.setattr(_clients, "s3_client", lambda **_kw: Client(body))

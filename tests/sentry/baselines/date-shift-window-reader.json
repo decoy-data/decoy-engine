@@ -1,0 +1,48 @@
+{
+ "sentry_id": "date-shift-window-reader",
+ "created_in": "DATE-SHIFT-JITTER",
+ "entries": {
+  "config/_generate_options.py::None": {
+   "reason": "generate column option schema"
+  },
+  "execution/_strategies/_date_shift.py::DateShiftStrategyHandler": {
+   "reason": "wizard option defaults, not a window read"
+  },
+  "execution/_strategies/_text_mask.py::None": {
+   "reason": "text_mask per-span bounds (TEXT-MASK-DATE-BOUNDS)"
+  },
+  "execution/native/_operator_params.py::resolve_operator_params": {
+   "reason": "the text_mask branch; the date_shift branch calls shift_window"
+  },
+  "execution/out_of_core/_mask_group_c.py::_text_mask_array": {
+   "reason": "text_mask per-span bounds"
+  },
+  "execution/out_of_core/_text_mask_native.py::None": {
+   "reason": "text_mask per-span bounds"
+  },
+  "generation/_column_streams.py::None": {
+   "reason": "windowed_date generation stream"
+  },
+  "generation/_grouped_windowed_generators.py::None": {
+   "reason": "grouped windowed_date generation"
+  },
+  "generation/_window_admission.py::None": {
+   "reason": "windowed_date anchor admission"
+  },
+  "plan/checks/_generate_columns.py::None": {
+   "reason": "generate column option parsing"
+  },
+  "profiling/recommendations.py::None": {
+   "reason": "recommendation descriptors, not a window read"
+  },
+  "transforms/date_shift.py::None": {
+   "reason": "the date_shift resolver and validator"
+  },
+  "transforms/text_mask.py::None": {
+   "reason": "text_mask per-span bounds (TEXT-MASK-DATE-BOUNDS)"
+  },
+  "transforms/windowed_date.py::None": {
+   "reason": "windowed_date config, a different strategy"
+  }
+ }
+}

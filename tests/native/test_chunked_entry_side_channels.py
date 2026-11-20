@@ -189,16 +189,16 @@ def test_public_oracle_runs_through_the_same_shared_functions(
 
 @NEEDS_COMPANION
 def test_registry_reaches_native_pool_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    from decoy_engine.execution.native import _chunked_entry
+    from decoy_engine.execution.native import _chunked_pools
 
     seen: list[Any] = []
-    real = _chunked_entry._resolve_faker_pools
+    real = _chunked_pools._resolve_faker_pools
 
     def _spy(*a: Any, **k: Any) -> Any:
         seen.append(k.get("registry"))
         return real(*a, **k)
 
-    monkeypatch.setattr(_chunked_entry, "_resolve_faker_pools", _spy)
+    monkeypatch.setattr(_chunked_pools, "_resolve_faker_pools", _spy)
     registry = copy.copy(get_default_registry())
     source = pa.table({"f": pa.array(["a", "b", None, "c"], pa.string())})
     evidence: list[NativeRouteEvidence] = []

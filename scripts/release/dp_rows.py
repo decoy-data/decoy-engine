@@ -178,6 +178,15 @@ def checked_pins(label: str, text: str, python_full: str) -> dict[str, str]:
     return out
 
 
+def base_closure(root: Path, python_full: str, uv: str | None) -> set[str]:
+    """Canonical names the engine installs with no extra: its base requirements and their closure.
+
+    A CLI runtime installs the engine plus these, so a certified CLI pin file that lacks one names
+    a set the real install never has (the 0.28.0 row was stamped without `joserfc` and `rfc8785`).
+    """
+    return {name for name, _ in profile_pins(root, [], python_full, uv)}
+
+
 def cli_rows(
     base: Path,
     candidates: list[Path],
@@ -185,8 +194,10 @@ def cli_rows(
     cli_version: str,
     python_full: str,
     allow_delta: list[str],
+    closure: set[str],
 ) -> list[str]:
-    """One row per candidate pin file, each refused unless its package names match `base`."""
+    """One row per candidate pin file, each refused unless its package names match `base` and it
+    covers `closure`, the engine's own base-requirements closure from `uv.lock`."""
     reference = set(checked_pins("--cli-pins-base", _read("--cli-pins-base", base), python_full))
     allowed = {_canonical(n) for n in allow_delta}
     rows: list[str] = []
@@ -196,6 +207,9 @@ def cli_rows(
         delta = sorted((reference ^ set(pins)) - allowed)
         if delta:
             raise DpRowError(f"{label}: package names differ from the base: {', '.join(delta)}")
+        missing = sorted(closure - set(pins))
+        if missing:
+            raise DpRowError(f"{label}: lacks the engine's base requirements: {', '.join(missing)}")
         rows.append(_fingerprint({*pins.items(), (ENGINE, engine_version), (CLI, cli_version)}))
     return rows
 
@@ -257,7 +271,8 @@ def plan_rows(
     """The new text of dp_provenance.py with this release's rows, or a `DpRowError`."""
     py = lock_profile_python(root)
     key = f"{py}.final"
-    cli = cli_rows(base, candidates, engine_version, cli_version, py, allow_delta)
+    closure = base_closure(root, py, shutil.which("uv"))
+    cli = cli_rows(base, candidates, engine_version, cli_version, py, allow_delta, closure)
     new = insert_rows(text, key, [dev_row(root, engine_version)], cli)
     old_rows, new_rows = rows_in(text, key), rows_in(new, key)
     if [r for r in new_rows if r in old_rows] != old_rows:

@@ -1,0 +1,15 @@
+{
+ "sentry_id": "ci-write-scopes",
+ "created_in": "EW1",
+ "entries": {
+  "benchmark.yml::": {
+   "reason": "existing entry of _ci_lock_scan.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "docs.yml::deploy": {
+   "reason": "existing entry of _ci_lock_scan.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "native-companion-release.yml::sign-publish": {
+   "reason": "existing entry of _ci_lock_scan.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  }
+ }
+}

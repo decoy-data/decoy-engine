@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
 from decoy_engine.detection import ModelStatus, ner_min_rate, ner_model_state, qualified, refuse
+from decoy_engine.detection.ner import NerSurface
 from decoy_engine.detection.types import (
     DETECTOR_ORDER,
     DetectorRun,
@@ -77,8 +78,9 @@ def _classifier(file_access: FileAccess | None = None) -> tuple[ModelStatus, dic
     if disabled:
         return down("disabled")
     try:  # a missing libomp raises OSError here, not ImportError
-        import lightgbm
-        import sklearn  # noqa: F401
+        from decoy_engine.profiling.model_pack._mlstack import import_ml_stack
+
+        lightgbm = import_ml_stack()
     except Exception:
         return down("import")
     try:
@@ -108,6 +110,7 @@ def load_detectors(
     sources: Sequence[DetectorSource],
     *,
     ner_model: str,
+    surface: NerSurface | None = None,
     file_access: FileAccess | None = None,
 ) -> DetectorSet:
     """Strictly load every requested model; raise `ModelUnavailableError` if any cannot run.
@@ -129,7 +132,7 @@ def load_detectors(
         validate_ner_model_name(ner_model)  # a bad name is a config error, not an absent model
         status, ref = ner_model_state(ner_model)
         if not status.available:
-            refuse(status)
+            refuse(status, surface)
         if ner_min_rate(ner_model) is None:
             # A scan scores a column at the model's own rate; with none, a hit would be a guess.
             refuse(replace(status, reason=qualified(reasons.provider.NER_MODEL_UNCALIBRATED)))

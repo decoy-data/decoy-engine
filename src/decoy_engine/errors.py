@@ -507,9 +507,8 @@ class FixedWidthWriteError(DecoyError):
     Mirrors `FixedWidthParseError`'s PII-safe contract: the message carries only
     the 0-based row index, column name and rendered value length -- never the
     cell value -- and every raise happens from a frame that holds no cell value,
-    with the caught caster exception never attached as `__cause__`/`__context__`,
-    because the file being written may itself carry the PII this is a masking
-    product for. See docs/security/error-reporting-and-data-exposure.md.
+    with the caught caster exception never attached as `__cause__`/`__context__`
+    (the file may carry PII). See docs/security/error-reporting-and-data-exposure.md.
     """
 
 
@@ -554,6 +553,7 @@ CAPACITY_EXCLUSIONS: Final[Mapping[str, str]] = types.MappingProxyType(
         reasons.runtime.POOL_CAPACITY_UNVERIFIABLE_NO_PROFILE: _UNKNOWN,
         reasons.plan.POOL_CAPACITY_PRE_FLIGHT_UNIQUE: _POOL_SHORT,
         reasons.decoy.STORAGE_CAPACITY_EXHAUSTED: _DISK,
+        reasons.runtime.SPOOL_DISK_FULL: _DISK,
         reasons.plan.DP_BUDGET_EXCEEDED: _NOT_MEMORY,
         reasons.plan.DP_BUDGET_DECLARATION_MALFORMED: _MALFORMED,
         reasons.quality.DP_BUDGET_INFEASIBLE: _NOT_MEMORY,

@@ -17,13 +17,14 @@ from tests.fileaccess.support import RecordingFileAccess, RootRelative
 
 def _open_fds(root: Path) -> int:
     """Descriptors that point into the test tree: unrelated interpreter fds come and go."""
+    top = os.path.realpath(root)
     count = 0
     for name in os.listdir("/proc/self/fd"):
         try:
             target = os.readlink(f"/proc/self/fd/{name}")
         except OSError:
             continue
-        count += target.startswith(str(root))
+        count += target == top or target.startswith(top + os.sep)
     return count
 
 

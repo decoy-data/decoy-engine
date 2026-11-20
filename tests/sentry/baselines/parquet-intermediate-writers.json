@@ -1,0 +1,46 @@
+{
+  "sentry_id": "parquet-intermediate-writers",
+  "created_in": "OUTPUT-METADATA-LEAK-E1",
+  "entries": {
+    "decoy_engine/connectors/postgres_snapshot.py::_export_relation": {
+      "category": "intermediate",
+      "max": 1,
+      "reason": "DuckDB COPY of a Postgres relation into a source snapshot under the stage dir; a source copy that is read back, never a published output"
+    },
+    "decoy_engine/declared_casting/_stream.py::stage_typed_sources": {
+      "category": "intermediate",
+      "max": 4,
+      "reason": "typed source staging into private scratch files that the run reads back: two ParquetWriter writes plus two staged adapter writes in the same function; never a published output"
+    },
+    "decoy_engine/execution/_isolated_commit.py::stage_sources": {
+      "category": "intermediate",
+      "max": 1,
+      "reason": "source handoff to the isolated child, written into the private work root; the child reads its metadata on purpose and nothing here is published"
+    },
+    "decoy_engine/execution/native/_pool_quality.py::measure_pool_quality": {
+      "category": "intermediate",
+      "max": 1,
+      "reason": "source and masked value pairs spooled for a quality measure inside a 0700 temp dir and unlinked after use; never published"
+    },
+    "decoy_engine/execution/out_of_core/_multi_parent.py::merge_parent_relations": {
+      "category": "intermediate",
+      "max": 3,
+      "reason": "DuckDB COPY of merged parent keys into private scratch files for the out-of-core join; never published"
+    },
+    "decoy_engine/execution/out_of_core/_relation.py::_build_relation": {
+      "category": "intermediate",
+      "max": 3,
+      "reason": "DuckDB COPY of parent keys and winners into private scratch files for the out-of-core join; never published"
+    },
+    "decoy_engine/execution/out_of_core/_stage.py::MaskedKeyStager._open": {
+      "category": "intermediate",
+      "max": 1,
+      "reason": "masked-key stage read back by the out-of-core runner; scratch inside the run, never a published output"
+    },
+    "decoy_engine/vault/_writer.py::VaultWriter.serialize": {
+      "category": "intermediate",
+      "max": 1,
+      "reason": "Parquet segment written to an in-memory buffer that is encrypted into the vault file; never a Parquet file on disk"
+    }
+  }
+}

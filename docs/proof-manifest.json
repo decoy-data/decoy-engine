@@ -1,5 +1,5 @@
 {
-  "engine_version": "0.27.0",
+  "engine_version": "0.28.1",
   "generated_at": "2026-06-14",
   "surface": {
     "mask": 24,
@@ -472,7 +472,7 @@
       "kind": "mask",
       "title": "Date shifting",
       "column": "dob",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: dob\n    strategy: date_shift\n    namespace: dob\n    provider_config:\n      min_days: 30\n      max_days: 90",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: dob\n    strategy: date_shift\n    namespace: dob\n    provider_config:\n      min_days: 30\n      max_days: 90\n      date_format: '%Y-%m-%d'",
       "input": [
         {
           "dob": "1980-01-15"

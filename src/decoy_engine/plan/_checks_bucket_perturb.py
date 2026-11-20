@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.bucket_perturb import bucket_perturb_date_format_problem
 from decoy_engine.transforms.date_preserve import preserve_config_problem
@@ -76,11 +77,17 @@ def check_bucket_perturb_config(config: dict[str, Any]) -> None:
                 _reject_if_unwritable(
                     pc, column=col_name, table=table_name, path_prefix=prefix, where=""
                 )
-            elif isinstance(pc, dict) and pc.get("strategy") == "bucket_perturb":
-                _reject_if_unwritable(
-                    pc.get("strategy_config"),
-                    column=col_name,
-                    table=table_name,
-                    path_prefix=f"{prefix}.strategy_config",
-                    where=" (nested child)",
-                )
+            elif isinstance(pc, dict):
+                for child in nested_children(pc):
+                    if child.strategy != "bucket_perturb":
+                        continue
+                    _reject_if_unwritable(
+                        child.strategy_config,
+                        column=col_name,
+                        table=table_name,
+                        path_prefix=(
+                            f"tables.{table_name}.columns.{col_name}"
+                            f".{child.config_path}.strategy_config"
+                        ),
+                        where=" (nested child)",
+                    )

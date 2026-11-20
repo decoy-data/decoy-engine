@@ -61,13 +61,15 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
+from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core import _join as _join_ooc
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
@@ -76,9 +78,7 @@ from decoy_engine.execution.out_of_core._emit import (
     reconcile_batch,
 )
 from decoy_engine.execution.out_of_core._hash_run import OocHashRun
-from decoy_engine.execution.out_of_core._join import orphan_fk_warning
 from decoy_engine.execution.out_of_core._mask import mask_batch, table_seed
-from decoy_engine.execution.out_of_core._mask_group_c import text_mask_sub_floor_warning
 from decoy_engine.execution.out_of_core._memory_estimate import resolve_phase_memory_limits
 from decoy_engine.execution.out_of_core._payload_store import (
     PayloadStore,
@@ -95,6 +95,9 @@ from decoy_engine.execution.out_of_core._stream_driver_support import (
     _payload_schema,
     _replace_fk_columns,
     open_joiner,
+)
+from decoy_engine.execution.out_of_core._stream_driver_support import (
+    iter_source_batches as _iter_source_batches,
 )
 from decoy_engine.execution.out_of_core._stream_join import (
     ChildKeyLockstepCursor,
@@ -150,6 +153,7 @@ def stream_table(
     vault_config: Mapping[str, Any] | None = None,
     validators: Any = None,
     cast_run: Any = None,
+    run_widths: dict[str, dict[str, TextWidthState]] | None = None,
 ) -> None:
     """Rewrite one table via the three-phase sequential reorder driver.
 
@@ -227,6 +231,8 @@ def stream_table(
         # aggregate `text_mask_sub_floor_span_handled` QualityWarning covers the
         # whole stream, matching the full-frame handler's per-column aggregate.
         text_mask_sub_floor_totals: dict[str, dict[str, int]] = {}
+        # One width state per pass-through text column, shared by every batch of the table.
+        text_widths = (run_widths if run_widths is not None else {}).setdefault(table_name, {})
         # Phase-local caps (Part A + HIGH): a resident-path joiner stays live
         # through this table's own build, so it opens at the build's cap; sink-ness
         # selects the joiner cap here since memory_limit is fixed at open.
@@ -295,6 +301,7 @@ def stream_table(
                     temp_dir / f"edge_{idx}",
                     joiner_memory_limit,
                     mask_key=mask_key,
+                    parent_widths=(run_widths or {}).get(edge.parent_table),
                 )
                 # Register for cleanup BEFORE begin_staging so a DDL/temp-dir failure
                 # there cannot leak the just-opened DuckDB connection.
@@ -321,7 +328,7 @@ def stream_table(
                     extra_known=frozenset(fk_components),
                 )
             )
-            for raw_batch in _iter_source_batches(raw, batch_rows):
+            for raw_batch in _iter_source_batches(raw, batch_rows, fixed_schema=sink is not None):
                 for joiner in joiners:
                     joiner.stage_batch(raw_batch)
                 if raw_parent_spill is not None and raw_batch.num_rows:
@@ -359,6 +366,8 @@ def stream_table(
                     code_set_corpus_records=code_set_corpus_records,
                     sub_floor_totals=text_mask_sub_floor_totals,
                     hash_plan=hash_plan,
+                    text_widths=text_widths,
+                    fixed_schema=sink is not None,
                 )
                 # Aligned source/masked pair, before the reorder and the type reconcile.
                 collect_batch_vault(vault_config, table_name, raw_batch, masked_batch, vault_writer)
@@ -519,7 +528,9 @@ def stream_table(
                         policy = cfg.get("sub_floor_span")
                         warnings.append(
                             text_mask_sub_floor_warning(
-                                column, str(policy) if policy is not None else None, by_detector
+                                by_detector,
+                                policy=str(policy) if policy is not None else None,
+                                column=column,
                             )
                         )
         finally:
@@ -562,13 +573,6 @@ def stream_table(
     except BaseException:
         del mask_key
         raise
-
-
-def _iter_source_batches(src: TableSource, batch_rows: int) -> Iterator[pa.RecordBatch]:
-    if isinstance(src, LazySource):
-        yield from src.iter_batches(batch_rows)
-        return
-    yield from src.to_batches(max_chunksize=batch_rows)
 
 
 __all__ = ["stream_table"]

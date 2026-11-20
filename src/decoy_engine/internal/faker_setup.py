@@ -62,7 +62,7 @@ _PROVIDER_LOCK = threading.Lock()
 
 
 def register_faker_provider(name: str, fn: Callable[[Faker], Any]) -> None:
-    """Register a custom faker provider so `faker_type: <name>` resolves to
+    """Experimental: register a custom faker provider so `faker_type: <name>` resolves to
     `fn(faker_instance)`. Lets enterprise users add domain-specific providers
     (medical record numbers in a known shape, internal employee IDs, regional
     bank routing numbers, etc.) without forking the engine. Names overwrite
@@ -79,7 +79,7 @@ def register_faker_provider(name: str, fn: Callable[[Faker], Any]) -> None:
 
 
 def unregister_faker_provider(name: str) -> None:
-    """Remove a previously registered custom provider. No-op if the name was
+    """Experimental: remove a previously registered custom provider. No-op if the name was
     never registered. Mostly useful in tests."""
     with _PROVIDER_LOCK:
         _CUSTOM_FAKER_PROVIDERS.pop(name, None)
@@ -104,7 +104,7 @@ def list_custom_faker_list_providers() -> list[str]:
 
 
 def register_faker_list_provider(name: str, values: list[str]) -> None:
-    """Register a custom Faker provider backed by a fixed list of values."""
+    """Experimental: register a custom Faker provider backed by a fixed list of values."""
     if not isinstance(values, list):
         raise TypeError("custom faker provider values must be a list")
     frozen = [str(v) for v in values if v is not None]
@@ -119,7 +119,7 @@ def atomic_swap_db_providers(
     new_fn_map: dict[str, Callable[[Faker], Any]],
     new_val_map: dict[str, list[Any]],
 ) -> None:
-    """Atomically replace a set of DB-backed custom providers.
+    """Experimental: atomically replace a set of DB-backed custom providers.
 
     QA-internal-synth-providers F1 + F4 (2026-06-01, CRITICAL + HIGH):
     the previous platform-side `sync_db_custom_faker_providers` flow
@@ -201,7 +201,7 @@ def has_custom_faker_override(
 def load_custom_providers(
     custom_dir: Path | None = None, *, file_access: FileAccess | None = None
 ) -> dict[str, list[str]]:
-    """Scan *custom_dir* for user-supplied word lists and register them as
+    """Experimental: scan *custom_dir* for user-supplied word lists and register them as
     custom Faker providers under the ``custom.<stem>`` namespace.
 
     Supported file formats:

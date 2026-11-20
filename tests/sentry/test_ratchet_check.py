@@ -501,3 +501,152 @@ def test_moved_from_must_keep_the_bound_name(repo: Path) -> None:
     _write(repo, "src/p/new.py", "def g(signing_key):\n    pass\n")
     _census(repo, {new: MOVED})
     _assert_red(repo, new)
+
+
+# --- ordinal-suffixed keys (``<file>.py::<qualname>::<name>::<n>``) of gcs-call-kwargs ------
+
+G_ID, G = "gcs-call-kwargs", "tests/sentry/baselines/g.json"
+G_OLD = "p/old.py::f::update::0"
+G_NEW = "p/new.py::g::update::0"
+CALL_F = "def f(x):\n    return x.update(1)\n"
+CALL_G = "def g(x):\n    return x.update(1)\n"
+
+
+def _gcs(repo: Path, entries: dict[str, dict[str, object]]) -> None:
+    _write(repo, REG, _registry({"a": A, G_ID: G}))
+    body = {k: {"reason": REASON, **v} for k, v in entries.items()}
+    _write(repo, G, json.dumps({"sentry_id": G_ID, "created_in": "X4d", "entries": body}))
+
+
+def _commit_gcs(repo: Path) -> None:
+    _write(repo, "src/p/old.py", CALL_F)
+    _gcs(repo, {G_OLD: {}})
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "gcs")
+
+
+def test_an_ordinal_key_moving_with_its_file_passes(repo: Path) -> None:
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {"moved_from": G_OLD}})
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"re-homed {G_OLD} -> {G_NEW}" in res.stdout
+
+
+def test_an_ordinal_key_without_moved_from_fails(repo: Path) -> None:
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {}})
+    _assert_red(repo, G_NEW)
+
+
+def test_an_ordinal_key_whose_old_site_still_exists_fails(repo: Path) -> None:
+    _commit_gcs(repo)
+    _write(repo, "src/p/new.py", CALL_G)
+    _gcs(repo, {G_NEW: {"moved_from": G_OLD}})
+    _assert_red(repo, G_NEW)
+
+
+def test_an_ordinal_move_must_keep_the_method_name(repo: Path) -> None:
+    new = "p/new.py::g::open::0"
+    _commit_gcs(repo)
+    (repo / "src/p/old.py").unlink()
+    _write(repo, "src/p/new.py", "def g(x):\n    return x.open()\n")
+    _gcs(repo, {new: {"moved_from": G_OLD}})
+    _assert_red(repo, new)
+
+
+# -- approved_growth: the one recorded way to admit a key the merge base lacks -------------------
+
+DECISION = "owner 2026-11-17 F33 census rows for sign_signing_input"
+
+
+def _approve(repo: Path, rows: list[tuple[str, str]], sid: str = "a", path: str = A) -> None:
+    lines = ", ".join(f'{{ key = "{k}", decision = "{d}" }}' for k, d in rows)
+    _write(
+        repo, REG, f'[[sentry]]\nid = "{sid}"\nbaseline = "{path}"\napproved_growth = [{lines}]\n'
+    )
+
+
+def _grow(repo: Path, *keys: str) -> None:
+    _write(repo, A, _baseline("a", ["m::f", "m::g", *keys]))
+
+
+def test_unlisted_growth_still_fails(repo: Path) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::other", DECISION)])
+    _assert_red(repo, "m::new")
+
+
+def test_listed_growth_passes_and_reports_the_decision(repo: Path) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::new", DECISION)])
+    res = _run(repo)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "approved growth m::new" in res.stdout
+
+
+def test_only_the_listed_key_is_exempt(repo: Path) -> None:
+    _grow(repo, "m::new", "m::new2")
+    _approve(repo, [("m::new", DECISION)])
+    res = _run(repo)
+    assert res.returncode == 1 and "m::new2" in res.stdout + res.stderr
+
+
+@pytest.mark.parametrize("key", ["m::*", "m::ne?", "m::[nx]ew"])
+def test_a_glob_entry_is_refused(repo: Path, key: str) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [(key, DECISION)])
+    _assert_red(repo, "pattern")
+
+
+def test_a_prefix_entry_does_not_exempt_a_longer_key(repo: Path) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::ne", DECISION)])
+    res = _run(repo)
+    out = res.stdout + res.stderr
+    assert res.returncode == 1 and "stale approved_growth" in out and "m::new" in out
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        "",
+        "approved",
+        "owner 2026-11-17",
+        "owner 2026-1-17 enough text here",
+        "cam 2026-11-17 enough text here",
+        "owner 2026-99-99 enough text here",
+        "owner 2026-02-30 enough text here",
+    ],
+)
+def test_a_bad_decision_is_refused(repo: Path, decision: str) -> None:
+    _grow(repo, "m::new")
+    _approve(repo, [("m::new", decision)])
+    _assert_red(repo, "needs a decision")
+
+
+def test_a_listed_key_missing_from_the_baseline_fails(repo: Path) -> None:
+    _approve(repo, [("m::absent", DECISION)])
+    _assert_red(repo, "stale approved_growth")
+
+
+def test_a_row_on_another_baseline_gives_no_exemption(repo: Path) -> None:
+    b = "tests/sentry/baselines/b.json"
+    _write(repo, b, _baseline("b", ["x::y"]))
+    _write(repo, REG, _registry({"a": A, "b": b}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "b")
+    _grow(repo, "m::new")
+    _write(
+        repo,
+        REG,
+        _registry({"a": A})
+        + f'[[sentry]]\nid = "b"\nbaseline = "{b}"\napproved_growth = [{{ key = "m::new", decision = "{DECISION}" }}]\n',
+    )
+    res = _run(repo)
+    out = res.stdout + res.stderr
+    assert res.returncode == 1 and "a: baseline gained key(s)" in out and "m::new" in out

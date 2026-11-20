@@ -4,6 +4,7 @@ Detection is the base layer shared by the Pre-scan (profiling) and Post-scan
 (verification) phases: both depend on it, never the reverse.
 """
 
+from decoy_engine.detection._hint_gated import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection._model_status import (
     ModelStatus,
     ModelUnavailableError,
@@ -29,6 +30,7 @@ from decoy_engine.detection.types import (
 
 __all__ = [
     "DOMAIN_BY_DETECTOR",
+    "NAME_HINT_GATED_DETECTORS",
     "REGISTERED_DETECTORS",
     "CustomDetectorSpec",
     "DetectionSignal",

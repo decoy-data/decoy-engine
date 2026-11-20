@@ -1,7 +1,7 @@
 """Descriptor primitives shared by publication stages, scratch arenas and their reclaim.
 
-A leaf module: standard library only, so `_output.py`, `_local_chain.py`, `_scratch.py` and the
-reclaimer can all import it without a cycle, and `fcntl` only off win32, so the package still
+A leaf module: standard library and `_osflags` only, so `_output.py`, `_local_chain.py`, `_scratch.py` and the
+reclaimer can all import it without a cycle, and `fcntl` is optional, so the package still
 imports where it is missing.
 
 Patterns: the liveness lock `systemd-tmpfiles(8)` honours (an owner holds a shared BSD `flock` on
@@ -18,12 +18,15 @@ import errno
 import os
 import re
 import stat
-import sys
 
-if sys.platform != "win32":
+from decoy_engine.fileaccess import _osflags
+
+try:
     import fcntl
+except ImportError:  # win32 has no fcntl: the lock is skipped there
+    fcntl = None  # type: ignore[assignment]
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC
 # Longer than any magic plus token plus newline: a read of this size that fills it is not a marker.
 _MARKER_MAX = 128
 
@@ -45,7 +48,7 @@ def hold_stage_lock(fd: int) -> bool:
     Blocking: a cleaner that holds the exclusive lock first is waited for. `EINTR` is retried.
     Any other `OSError` returns False and the caller carries on unlocked: the errno set differs
     by platform and filesystem, and a lock that cannot be taken must not fail a run."""
-    if sys.platform == "win32":
+    if fcntl is None:
         return False
     while True:
         try:
@@ -72,7 +75,9 @@ def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> s
     try:
         # Literal read-only flags at each open, so the private-file sentry can read them.
         fd = os.open(
-            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd
+            name,
+            _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
+            dir_fd=dir_fd,
         )
     except OSError:
         return None
@@ -94,7 +99,7 @@ def _rmtree_fd(dir_fd: int) -> None:
         if entry.is_dir(follow_symlinks=False):
             child = os.open(
                 entry.name,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
                 dir_fd=dir_fd,
             )
             try:

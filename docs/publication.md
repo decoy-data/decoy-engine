@@ -4,9 +4,8 @@ How the engine creates, stages and binds an output directory, and what it promis
 result. This page grows with the F22 publication work (plan
 `docs/plans/2026-10-30-f22-publication-replan.md`); each section says what is in place today.
 The reference sink commits through `publish_unit` on every route that uses it, and so does
-the isolated route (`run_pipeline_isolated`, both modes; below). The vault half of
-vault-before-output ordering is in place (below); the rule inside `publish_unit` is a later part,
-and until it exists here the engine does not claim that an output is bound only after its vault.
+the isolated route (`run_pipeline_isolated`, both modes; below). A unit published with a vault
+is bound only after its vault is durable (vault before output, below).
 
 Platforms: Linux and macOS, on both the ambient policy (`LocalFileAccess`, the CLI default) and
 the strict policies (`RootedFileAccess`, `PreopenedFileAccess`). Windows keeps its plain path
@@ -144,9 +143,12 @@ call. `write` fsyncs the chain too. When the leaf already exists (`vault_exists`
 fsyncs the leaf and its chain, then `same_rows` opens the bytes under the writer's key
 (`BytesHandle`, constant display `<vault>`) and compares the rows and the dropped-key count.
 Equal rows give `VaultCommit(..., adopted=True)` and the leaf is never rewritten. A leaf that
-cannot be read or made durable raises `VaultError` with `vault_commit_failed`; other rows,
-another key's data or a leaf over twice this vault's size plus 64 KiB returns `None`, and the
-caller refuses with `publication_vault_conflict`. No error text carries a path, key or row.
+cannot be read or made durable (an fsync failure, or a leaf deleted out of band) raises
+`VaultError` with `vault_commit_failed`; other rows, another key's data, a leaf over twice this
+vault's size plus 64 KiB, or a leaf that is not an adoptable file (`ELOOP`, `EINVAL`, `ENOTDIR`,
+`EISDIR`) returns a `VaultConflict`
+(never `None`, which `adopt_file` uses for an absent leaf), and `publish_unit` refuses with
+`publication_vault_conflict`. No error text carries a path, key or row.
 
 ## The `decoy-publication/v1` descriptor
 
@@ -222,20 +224,22 @@ Under the destination lock, held from the first read to the bind:
 | At the leaf | Same `result_id` | Same `operation_id` | Outcome |
 |---|---|---|---|
 | nothing, or an empty directory | - | - | bind |
-| a valid descriptor | yes | any | `already_committed`, after the unit tree and its chain to the anchor are fsynced |
+| a valid descriptor | yes | any | `already_committed`, after the vault check (below) and after the unit tree and its chain to the anchor are fsynced |
 | a valid descriptor | no | yes | `operation_conflict` |
 | a valid descriptor | no | no | refused, `publication_target_occupied` |
 | anything else: files without a descriptor, a descriptor that is unreadable, over 1 MiB or refused by the reader, a file or link at the leaf | - | - | refused, `publication_target_occupied` |
 
-3. only a bind verdict writes the descriptor into the stage and publishes it durably (the steps
-   of the `publication` label above).
+3. only a bind verdict commits the request's vault (below), then writes the descriptor into the
+   stage and publishes it durably (the steps of the `publication` label above).
 
 The engine never replaces or merges into a bound unit: a different result is refused and the
 unit, its bytes and its inode numbers are unchanged. A zero-table publish binds a unit holding
 only its descriptor, so an empty unit is never silently replaced either. Every exit but a bind
 aborts the stage.
 
-Every exit is a `CommitReceipt`:
+Every exit is a `CommitReceipt`, except two. Each raises after the stage is aborted, with nothing
+bound: a `VaultError` (below), or a file-access error from the vault's `OutputDir` before anything
+is linked:
 
 | Exit | `outcome` | `reason_code` | `visible` | `durable` |
 |---|---|---|---|---|
@@ -245,16 +249,50 @@ Every exit is a `CommitReceipt`:
 | bound, an fsync of the chain after the rename failed | `commit_uncertain` | `publication_commit_uncertain` | yes | no |
 | same `operation_id`, different result | `operation_conflict` | `publication_operation_conflict` | no | no |
 | a different result, or anything else at the leaf | `refused` | `publication_target_occupied` | no | no |
-| the same result bound with a vault, this request without one | `refused` | `publication_vault_mismatch` | no | no |
+| the same result bound, its vault not this request's (presence, digest or rows; below) | `refused` | `publication_vault_mismatch` | no | no |
+| a bind verdict, and the vault at the request's vault leaf holds other rows | `refused` | `publication_vault_conflict` | no | no |
 | `flock` unsupported or the lock file cannot be opened | `refused` | `publication_lock_unavailable` | no | no |
 | the lock held past `lock_timeout_s` | `refused` | `publication_lock_timeout` | no | no |
 | a staged table unreadable or not Parquet, the descriptor write, the stage fsync walk or the rename failed | `failed` | `publication_failed` | no | no |
 
 `os_error` carries the errno name where an operating-system call failed. `result_id`,
 `descriptor_digest` and `artifacts` describe the bound unit for `published`, `already_committed`
-and `commit_uncertain`, and this attempt's measured result otherwise. A request that carries a
-vault is not accepted yet (vault-before-output ordering is a later part); the engine never binds
-an output whose vault is not durable.
+and `commit_uncertain`, and this attempt's measured result otherwise. `vault_digest` is the
+bound vault's SHA-256 when the unit has one.
+
+### Vault before output
+
+A `PublicationRequest` may carry `vault=VaultBinding(writer, out)`: the `VaultWriter` and the
+vault's own `OutputDir`. `publish_unit` then orders the vault before the output (rule V; the
+write-ahead order of PostgreSQL's WAL), all under the destination lock and after a bind verdict:
+
+1. `writer.publish(out)` writes the vault durably and returns a `VaultCommit` (above).
+2. When a vault is already at the leaf (`vault_exists`, for example one a killed attempt linked),
+   `adopt_vault` fsyncs it and its chain and adopts it in place when it holds this writer's rows;
+   other rows are refused with `publication_vault_conflict`, and the vault is untouched.
+3. Any other vault failure, `vault_commit_failed` included, is raised as the vault module raises
+   it (`VaultError`, fixed text) after the stage is aborted: nothing is bound, and a vault that
+   was linked is kept, so the retry adopts it at step 2.
+4. Only then is the descriptor written, with `vault` = the commit's `{sha256, size,
+   entry_count}`, and the unit bound.
+
+The bind needs the `VaultCommit`, which only the vault module issues after the vault's chain was
+fsynced, so the order is by construction: a crash at any step leaves either no bound unit or a
+bound unit whose descriptor names a durable vault. A bound unit whose vault is gone can come
+only from an out-of-band delete, and a republish reports it.
+
+A republish (the same `result_id` already bound) checks the vault before reporting
+`already_committed`, and writes nothing: the request and the descriptor must both have a vault
+or both have none; the vault leaf is read through `adopt_file` (fsynced with its chain first), and
+its size and SHA-256 must be the descriptor's and its rows this writer's (equal output can carry
+a different reverse map). Absent, larger, another digest, other rows or another key's data:
+`publication_vault_mismatch`, as is a leaf that is not an adoptable file (`ELOOP`, `EINVAL`,
+`ENOTDIR`, `EISDIR`). An fsync failure: `commit_uncertain`. One reader,
+`publication._vault_order.read_vault_leaf`, classifies the leaf for both this check and adoption. `writer.publish` is never
+called on a republish, so a retry makes no second vault.
+
+Engine sinks still refuse a request with a vault (rule B0): a vault job publishes resident output
+through `publish_tables(..., request)` with `request.vault` set.
 
 A caller that wants an exception passes the receipt to `raise_for_outcome`, which returns it for
 `published` and `already_committed` and otherwise raises `PublicationRefused` (`refused`,

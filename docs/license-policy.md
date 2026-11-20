@@ -25,6 +25,7 @@ neither list fails the gate.
   PSF-2.0, Unlicense, and BSD-family metadata that names no clause count
   (`BSD-family-unspecified-clause`). The committed list is `allowed` in
   `scripts/dev/license_policy.json`.
+- **PyNaCl** (Apache-2.0, bundles libsodium under ISC) is a base dependency since F09 E-DEP. It needs no exception.
 - **Named exceptions**, each pinned to a package name, its exact license expression and a
   scope (`runtime`, or `extra` for a package that must stay reachable only through an
   optional extra), with a written reason (`exceptions` in the same file):

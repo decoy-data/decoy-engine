@@ -16,8 +16,9 @@ from pathlib import Path
 
 import pyarrow as pa
 
+from decoy_engine.execution._fk_resolve import orphan_fk_warning
 from decoy_engine.execution.out_of_core._batch_join import _remap_values
-from decoy_engine.execution.out_of_core._join import mask_child_fk, orphan_fk_warning
+from decoy_engine.execution.out_of_core._join import mask_child_fk
 from decoy_engine.execution.out_of_core._stream_join import (
     ChildKeyLockstepCursor,
     JoinRowCursor,

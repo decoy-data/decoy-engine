@@ -1,0 +1,54 @@
+{
+ "sentry_id": "platform-census",
+ "created_in": "EW1",
+ "entries": {
+  "decoy_engine/execution/_isolated_commit.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/execution/_isolated_common.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/fileaccess/_local.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 11
+  },
+  "decoy_engine/fileaccess/_openat2.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 2
+  },
+  "decoy_engine/fileaccess/_osflags.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/fileaccess/_output.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/fileaccess/_protected_dir.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 4
+  },
+  "decoy_engine/fileaccess/_rooted.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/fileaccess/_scratch.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 2
+  },
+  "decoy_engine/quality/dp_provenance.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/secret_providers/_local.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  },
+  "decoy_engine/signed_evidence/_artifacts.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 1
+  }
+ }
+}

@@ -37,6 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _f4a_gen
 from _supervisor import classify_failure, run_worker
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV
+
 SCHEMA = "fr0-gen-bounded/v1"
 F4A_SCHEMA = "f4a-gen-capacity/v1"
 PARENT_ROWS = 100_000  # fixed across tiers so the parent key pool does not scale with the tier
@@ -183,7 +185,14 @@ def supervise(args: argparse.Namespace) -> dict[str, Any]:
     work = Path(tempfile.mkdtemp(prefix="fr0-gen-", dir=args.work_root))
     scratch = work / "scratch"
     scratch.mkdir()
-    env = {**os.environ, "TMPDIR": str(scratch), "ARROW_DEFAULT_MEMORY_POOL": "system"}
+    # A run that declares an RSS ceiling gets the engine's one capped env (allocator and BLAS
+    # pins); a run without one keeps its own env so bench numbers stay comparable.
+    env = {
+        **os.environ,
+        **(CAPPED_ENV if args.rss_ceiling_mb else {}),
+        "TMPDIR": str(scratch),
+        "ARROW_DEFAULT_MEMORY_POOL": "system",
+    }
     result_path = work / "result.json"
     cmd = [
         sys.executable, str(Path(__file__).resolve()), "--child",

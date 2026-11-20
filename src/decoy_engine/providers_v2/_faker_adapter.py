@@ -252,7 +252,7 @@ def register_faker_provider_v2(
     name: str,
     fn: Callable[[Any], Any],
 ) -> None:
-    """[V2] Register a custom faker-backed provider against the V2 adapter.
+    """Experimental: [V2] register a custom faker-backed provider against the V2 adapter.
 
     Distinct from V1's `register_faker_provider` on `decoy_engine.providers`;
     the V1 table stays in place per the B1 PO call. V2 callers (S5 pool
@@ -274,6 +274,6 @@ def _unregister_faker_provider_v2(name: str) -> None:
     _V2_CUSTOM_PROVIDERS.pop(name, None)
 
 
-def _v2_custom_provider_names() -> frozenset[str]:
-    """Test-only: snapshot of V2 custom-provider names."""
+def custom_provider_names() -> frozenset[str]:
+    """Snapshot of the V2 custom-provider names; the one public reader of that process-global table."""
     return frozenset(_V2_CUSTOM_PROVIDERS.keys())

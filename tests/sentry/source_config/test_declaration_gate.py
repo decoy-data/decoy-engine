@@ -84,6 +84,9 @@ READERS: dict[tuple[str, str, str], str] = {
     ("profile/_declared_columns.py", "source_columns", "resolve_csv_dialect"): (
         "the gate itself: the dialect and any `column_names_file` for the header read"
     ),
+    ("profile/_declared_columns.py", "_csv_inline", "resolve_csv_dialect"): (
+        "a scan request reads a column_names_file once; no data row is opened"
+    ),
     ("profile/_lazy_build.py", "_resident_csv", "resolve_csv_dialect"): (
         "reads a `column_names_file` only; no data row, and the factory's callers are listed here"
     ),
@@ -102,6 +105,22 @@ READERS: dict[tuple[str, str, str], str] = {
     ),
     ("profile/_lazy_csv.py", "preflight", "read_csv_source"): (
         "header-only read behind a built source, reached only after a route's gate"
+    ),
+    ("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "resolve_csv_dialect"): (
+        "the estimate's bounded sample read (the dialect for the sample read); `estimate_job._estimate` runs "
+        "`prepare_declared_execution_sources` and `profile_source` (the gate) first"
+    ),
+    ("execution/pipeline/_lifecycle_inputs.py", "_read_csv", "read_csv_source"): (
+        "the estimate's bounded sample read (at most 10,000 rows); `estimate_job._estimate` runs "
+        "`prepare_declared_execution_sources` and `profile_source` (the gate) first"
+    ),
+    ("execution/pipeline/_lifecycle_inputs.py", "_read_parquet", "build_lazy_source"): (
+        "the estimate's bounded sample read (first batch only); `estimate_job._estimate` runs "
+        "`prepare_declared_execution_sources` and `profile_source` (the gate) first"
+    ),
+    ("execution/pipeline/_lifecycle_inputs.py", "_read_fixed_width", "build_profile_source"): (
+        "the estimate's bounded sample read (`sample_frame(10_000)`); `estimate_job._estimate` runs "
+        "`prepare_declared_execution_sources` and `profile_source` (the gate) first"
     ),
     ("profile/_readers.py", "build_declared_source", "build_profile_source"): (
         "the factory that builds the reader; its callers are the sites listed here"

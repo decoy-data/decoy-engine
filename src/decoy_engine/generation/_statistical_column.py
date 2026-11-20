@@ -20,7 +20,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.generation.kinds import cast_output_columns, output_types
-from decoy_engine.generation.pool import QualityWarning, emit_generation_warning
+from decoy_engine.generation.pool import DetailValue, QualityWarning, emit_generation_warning
 from decoy_engine.generation.statistical import StatisticalSpec, conditional_fallback_counts
 from decoy_engine.generators.derivation import GenDeriveContext
 
@@ -143,7 +143,7 @@ def warn_on_unseen_parents(
     counts = conditional_fallback_counts(spec, data.get(spec.condition_on) or [], n)
     if counts.rows == 0:
         return
-    detail = {
+    detail: dict[str, DetailValue] = {
         "table": table_name,
         "column": spec.column,
         "condition_on": spec.condition_on,

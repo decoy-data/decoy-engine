@@ -20,6 +20,7 @@ Pre-scan phase: the profiling entrypoint is `profile_columns`, returning a
 
 from decoy_engine.profiling._model_pass import ModelHit
 from decoy_engine.profiling._profile_document import profile_document, redact_profile_dict
+from decoy_engine.profiling._scan_core import ScanSetCore, ScanSetCoreRead
 from decoy_engine.profiling._scan_integrity import (
     KEY_BATCH_ROWS,
     MEMORY_LIMIT,
@@ -38,15 +39,29 @@ from decoy_engine.profiling._snapshot_values import (
 from decoy_engine.profiling._starter_config import (
     ColumnSuggestion,
     StarterConfig,
+    build_entry,
+    check_starter_config,
+    declared_key_namespaces,
+    detector_entry,
     starter_config,
+    swap_placeholder_namespaces,
 )
 from decoy_engine.profiling._value_redaction import (
     MIN_RELEASE_COUNT,
     POLICY_RAW,
     POLICY_REDACTED,
     REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
     VALUE_POLICY_KEY,
     is_value_sensitive,
+)
+from decoy_engine.profiling.bound_baseline import (
+    BaselineBindingError,
+    BoundBaseline,
+    DriftFinding,
+    DriftVerdict,
+    bind_baseline,
+    evaluate_drift,
 )
 from decoy_engine.profiling.profiler import profile_columns
 from decoy_engine.profiling.recommendations import (
@@ -74,8 +89,6 @@ from decoy_engine.profiling.scan_diff import (
 from decoy_engine.profiling.scan_set import (
     SCAN_SET_SCHEMA,
     ScanSet,
-    ScanSetCore,
-    ScanSetCoreRead,
     ScanSourceError,
     TableScan,
     passes_through,
@@ -100,15 +113,20 @@ __all__ = [
     "POLICY_RAW",
     "POLICY_REDACTED",
     "REDACTED_COLUMNS_KEY",
+    "REDACTED_POLICIES",
     "SCAN_DIFF_SCHEMA",
     "SCAN_SET_SCHEMA",
     "VALUE_POLICY_KEY",
+    "BaselineBindingError",
+    "BoundBaseline",
     "ChildFacts",
     "ChildKeyFacts",
     "ColumnProfile",
     "ColumnSuggestion",
     "DetectorDescriptor",
     "Distribution",
+    "DriftFinding",
+    "DriftVerdict",
     "FieldChange",
     "FieldPresence",
     "FieldStats",
@@ -131,10 +149,16 @@ __all__ = [
     "TableDiff",
     "TableScan",
     "TopValue",
+    "bind_baseline",
+    "build_entry",
+    "check_starter_config",
     "column_distinct",
+    "declared_key_namespaces",
+    "detector_entry",
     "diff_scan_documents",
     "diff_scan_tables",
     "distribution_snapshot_document",
+    "evaluate_drift",
     "get_default_strategy",
     "is_value_sensitive",
     "key_facts",
@@ -150,4 +174,5 @@ __all__ = [
     "scan_sources",
     "snapshot_joint_warnings",
     "starter_config",
+    "swap_placeholder_namespaces",
 ]

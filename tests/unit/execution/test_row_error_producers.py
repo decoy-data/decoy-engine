@@ -21,7 +21,7 @@ import pandas as pd
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
 from decoy_engine.execution._strategies._date_shift import DateShiftStrategyHandler
-from decoy_engine.execution._strategies._nested import NestedStrategyHandler
+from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
@@ -51,7 +51,11 @@ def _col(
         backend_version="v",
         cardinality_mode="reuse",
         deterministic=namespace is not None,
-        provider_config=provider_config,
+        provider_config=(
+            (*provider_config, ("date_format", "%Y-%m-%d"))
+            if strategy == "date_shift" and not dict(provider_config).get("date_format")
+            else provider_config
+        ),
         coherent_with=(),
     )
 
