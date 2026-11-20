@@ -55,6 +55,11 @@ class StarterChoice:
     provider: str | None = None
     provider_config: Mapping[str, Any] = field(default_factory=_empty_mapping)
     review: str = ""
+    # The strategy needs `provider_config.date_format`, and the starter writes the variant the scan
+    # detected. No fixed format is right for a detector (iso_date has seven variants), so a
+    # descriptor with this set never carries one; without a complete detected variant the starter
+    # falls back to redact.
+    detected_date_format: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,14 +163,14 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
         default=("date_shift", {"jitter_days": 15}),
         starter=StarterChoice(
             strategy="date_shift",
-            provider_config={"min_days": -365, "max_days": 365},
             review=(
                 "The scan detected ISO-format dates. date_shift shifts each date by an "
                 "independent per-value offset in [min_days, max_days] (same source "
                 "value always gets the same shift, but shifts are NOT globally order-"
-                "preserving across rows). Defaults are min_days: -365 / max_days: 365; "
-                "tune via provider_config."
+                "preserving across rows). The window defaults to -365/+365 days and the "
+                "date_format is the one the scan detected; tune via provider_config."
             ),
+            detected_date_format=True,
         ),
     ),
     DetectorDescriptor(
@@ -173,18 +178,28 @@ _DESCRIPTORS: tuple[DetectorDescriptor, ...] = (
         default=("date_shift", {"jitter_days": 15}),
         starter=StarterChoice(
             strategy="date_shift",
-            provider_config={"min_days": -365, "max_days": 365},
             review=(
                 "The scan detected US-format dates. date_shift shifts each date by an "
                 "independent per-value offset in [min_days, max_days] (not order-"
-                "preserving across rows). Defaults are -365/+365 days; tune via "
-                "provider_config."
+                "preserving across rows). The window defaults to -365/+365 days and the "
+                "date_format is the one the scan detected; tune via provider_config."
             ),
+            detected_date_format=True,
         ),
     ),
     DetectorDescriptor(
         detector_id="eu_date",
         default=("date_shift", {"jitter_days": 15}),
+        starter=StarterChoice(
+            strategy="date_shift",
+            review=(
+                "The scan detected EU-format dates. date_shift shifts each date by an "
+                "independent per-value offset in [min_days, max_days] (not order-"
+                "preserving across rows). The window defaults to -365/+365 days and the "
+                "date_format is the one the scan detected; tune via provider_config."
+            ),
+            detected_date_format=True,
+        ),
     ),
     # ── geolocation ─────────────────────────────────────────────────────
     DetectorDescriptor(

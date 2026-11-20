@@ -18,7 +18,7 @@ Namespaces: `config`, `plan`, `runtime`, `provider`, `quality`, `connector`, `su
 
 ### Versioning
 
-`registry_version` (`1.29.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
+`registry_version` (`1.31.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
 
 Codes are append-only: a code never disappears or changes meaning. A retired code stays as a tombstone with its replacement link.
 
@@ -126,6 +126,16 @@ except Exception as exc:
 | Publication | Operation, an approved storage alias, `publication_state` and `cleanup_state`. |
 
 `StructuredEventsSink` stays a documented lossy adapter for the old logger signatures. A consumer that needs the complete record binds a `CallbackSink` and reads `event_to_dict`.
+
+## Consumers
+
+Three consumers read the registry. None keeps its own code list.
+
+**CLI `--json` failure envelope.** When a run fails, the CLI adds a `reason` field to the `--json` failure envelope. It holds the payload of `reason_adapter.reason_from_exception(exc).to_payload()` for the exception as the engine raised it, before the CLI rewrites a missing extra or the NER message. Only exceptions of a registered engine family reach it, so only registered codes appear, for example `reasons.runtime.KEYED_STRATEGY_REQUIRES_SECRET` and `reasons.runtime.WEAK_MASK_SECRET`. The field is absent when the CLI owns the refusal: a usage error that is not an engine family, a vault write failure (exit 3), and a pre-run gate refusal (exit 1 or 5). Any error while building the reason drops the field and never changes the exit code. The source is `_failure_reason` in the CLI's `cli/run/_errors.py` (CLI #229).
+
+**Platform job failures.** The platform projects a failed job into a fixed sentence with `APPROVED_ERROR_MESSAGES` in `api/persistence/error_projection.py`. A code outside that map gets the generic sentence plus the exception type name, never the exception text. The map includes `keyed_strategy_requires_secret` and `weak_mask_secret`, so a job that fails for a missing or short mask key shows a fixed message. A new engine reason does not appear there until someone adds its entry.
+
+**Platform reason record.** Carrying the full `ReasonRecord` through the platform API (F29 P1 and P2) is parked with the platform. Until it lands, the platform reads codes only through `APPROVED_ERROR_MESSAGES`.
 
 ## What this does not do
 

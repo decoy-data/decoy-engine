@@ -73,6 +73,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._adapter import provider_config_to_dict
+from decoy_engine.execution._runner import group_by_sibling
 from decoy_engine.execution._strategies._text_redact import _DEFAULT_TOKEN
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed
@@ -234,8 +235,8 @@ def group_by_effective_type(
     plan_slice = group_key_node.plan_slice
     if not isinstance(plan_slice, ColumnSeed):
         return None
-    group_by = provider_config_to_dict(plan_slice.provider_config).get("group_by")
-    if not isinstance(group_by, str) or not group_by:
+    group_by = group_by_sibling(provider_config_to_dict(plan_slice.provider_config))
+    if group_by is None:
         return None
     field_index = source_schema.get_field_index(group_by)
     if field_index < 0:

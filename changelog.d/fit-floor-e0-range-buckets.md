@@ -1,3 +1,0 @@
-### Changed (datetime snapshot buckets read through one decoder, fit E0, 2026-11-16)
-
-A distribution snapshot may now store a datetime column as year ranges, `distribution-snapshot/v2` entries `{start_year, end_year, count}`, so a run of sparse years folds into one bucket. Every reader (spec loading, window admission, the sampler and both fidelity scorers) goes through `decoy_engine.contracts.distribution_snapshot`, which also reads the existing v1 `{year, count}` entries unchanged. No writer emits v2 yet, and v1 scores do not move. A malformed, inverted, overlapping or out-of-range bucket list is refused with a fixed-text error that quotes no snapshot value.

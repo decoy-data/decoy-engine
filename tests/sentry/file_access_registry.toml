@@ -1304,7 +1304,7 @@ owner = "cam"
 reason = "existence check of a shipped corpus"
 
 [[entry]]
-module = "decoy_engine/vault.py"
+module = "decoy_engine/vault/_writer.py"
 function = "VaultWriter.serialize"
 sink = "pyarrow.parquet.write_table"
 ordinal = 0
@@ -1314,7 +1314,7 @@ owner = "cam"
 reason = "serializes a chunk to bytes; the file itself goes through the OutputDir or FileHandle"
 
 [[entry]]
-module = "decoy_engine/vault.py"
+module = "decoy_engine/vault/_reader.py"
 function = "load_vault"
 sink = "pyarrow.parquet.read_table"
 ordinal = 0

@@ -53,11 +53,9 @@ def fk_out_of_core_dtype_hazard(
 ) -> bool:
     """True when out-of-core could reject (or cannot pin the type of) a relationship
     key of this job although the oracle completes it."""
-    from decoy_engine.execution.out_of_core._batch_join import (
-        _python_roundtrip_type,
-        _resolve_output_types,
-    )
+    from decoy_engine.execution.out_of_core._batch_join import _resolve_output_types
     from decoy_engine.execution.out_of_core._compat import _column_seed
+    from decoy_engine.execution.out_of_core._join import _python_roundtrip_type
     from decoy_engine.execution.out_of_core._mask import masked_output_type
     from decoy_engine.relationships._graph import OrphanPolicy
 

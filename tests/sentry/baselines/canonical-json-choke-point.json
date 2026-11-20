@@ -1,0 +1,45 @@
+{
+ "sentry_id": "canonical-json-choke-point",
+ "created_in": "EW1",
+ "entries": {
+  "declared_casting/_catalog.py::_key": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "declared_casting/_catalog.py::_resolve": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "declared_casting/_quarantine_local.py::LocalProtectedQuarantineSink._write_header": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "declared_casting/_quarantine_local.py::LocalProtectedQuarantineSink.seal": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "declared_casting/_quarantine_local.py::LocalProtectedQuarantineSink.write_row": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "generation/_pinned_compile.py::compile_pinned_plan_with_generation": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "plan/_generation.py::build_generation_plan": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profile/_serialize.py::profile_to_json": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profiling/model_pack/_packio.py::write_json": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profiling/model_pack/provenance.py::sign_pack": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "profiling/model_pack/trainer.py::train_and_evaluate": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "subset/_api.py::run_subset": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "vault/_writer.py::VaultWriter.serialize": {
+   "reason": "existing entry of defects/test_canonical_json_choke_point.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  }
+ }
+}

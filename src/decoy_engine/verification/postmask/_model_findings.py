@@ -46,7 +46,7 @@ from decoy_engine.verification.postmask.residual_pii import (
     _PRODUCES_PII_LIKE_VALUES,
     _REUSES_SOURCE_VALUES,
     configured_columns,
-    is_source_identity_finding,
+    dismissible,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
@@ -247,7 +247,7 @@ def review(
     used: set[int] = set()
     out: list[ResidualPIIFinding] = []
     for finding in findings:
-        if finding.severity == "warning" and not is_source_identity_finding(finding):
+        if dismissible(finding):
             hits = [i for i, d in enumerate(dismissals) if _matches(d, finding)]
             if hits:
                 used |= set(hits)
