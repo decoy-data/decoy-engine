@@ -583,8 +583,11 @@ def test_every_starter_choice_matches_what_the_entry_writer_builds() -> None:
                 if (choice.strategy, k) not in _NOT_OFFERED
             }
         )
+        date_format = "%Y-%m-%d" if choice.detected_date_format else None
+        if date_format:
+            options["date_format"] = date_format
         built = column_entry(choice.strategy, "c", options=options)
-        starter_entry = detector_entry(detector_id, "c")
+        starter_entry = detector_entry(detector_id, "c", date_format=date_format)
         assert starter_entry is not None
         for entry in (built, starter_entry):
             entry.pop("namespace", None)
@@ -605,3 +608,49 @@ def test_no_note_or_descriptor_copy_names_the_retired_product_word(starter: Star
     texts += [d.starter.review for d in DETECTOR_DESCRIPTORS.values() if d.starter is not None]
     assert texts
     assert [t for t in texts if RETIRED_NAME in t.lower()] == []
+
+
+# S4b --------------------------------------------------------------------------------------
+
+
+def _date_starter(tmp_path: Path) -> StarterConfig:
+    path = tmp_path / "d.csv"
+    pd.DataFrame({"born": ["15.01.2024", "16.02.2024", "17.03.2024"] * 4}).to_csv(path, index=False)
+    src = {"d": {"type": "file", "format": "csv", "path": str(path), "has_header": True}}
+    return starter_config(scan_sources(src))
+
+
+def test_starter_review_keeps_required_format(tmp_path: Path) -> None:
+    starter = _date_starter(tmp_path)
+    (suggestion,) = starter.suggestions
+    assert suggestion.strategy == "date_shift"
+    entry = starter.config["tables"][0]["columns"][0]
+    assert entry["provider_config"]["date_format"] == "%d.%m.%Y"
+    assert detector_entry("eu_date", "born", date_format="%d.%m.%Y") == entry
+    ref = SuggestionRef(
+        suggestion.source, suggestion.detector_id, suggestion.model, suggestion.strategy
+    )
+    confirm = ReviewDecision("d", "born", V.CONFIRM, confirmed=ref)
+    skip = ReviewDecision("d", "born", V.SKIP)
+    for decision in (confirm, skip):
+        out = apply_review(starter, [decision])
+        assert out.config["tables"][0]["columns"][0] == entry
+    # EDIT without a format is refused; a valid EDIT passes the config-only checks.
+    with pytest.raises(ReviewInputError):
+        apply_review(
+            starter,
+            [ReviewDecision("d", "born", V.EDIT, entry={"strategy": "date_shift"})],
+        )
+    edited = apply_review(
+        starter,
+        [
+            ReviewDecision(
+                "d", "born", V.EDIT, entry={"strategy": "date_shift", "date_format": "%d-%m-%Y"}
+            )
+        ],
+    )
+    assert edited.config["tables"][0]["columns"][0]["provider_config"]["date_format"] == "%d-%m-%Y"
+    # The static descriptor never builds a date_shift without a detected format.
+    for detector in ("iso_date", "us_date", "eu_date"):
+        assert detector_entry(detector, "born") is None
+        assert detector_entry(detector, "born", date_format="  ") is None
