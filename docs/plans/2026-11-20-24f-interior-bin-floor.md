@@ -83,7 +83,8 @@ unflagged numeric column that the floor keeps (at least 2K finite cells, parent 
   `numeric_bins` asks for, at which that rule passes and the edges can be written. The float-max
   fallback releases one bin `[-1.5, 1.5]` holding every finite cell and pops a shape block that
   would lie outside those public bounds.
-- G2 (parent, now without exceptions). Replacing any of the K-1 smallest cells by another value
+- G2 (parent, now without exceptions, within one branch: a tail swap can move a column between the
+  shape branch and the no-shape branch, so G2 compares outputs of the same branch). Replacing any of the K-1 smallest cells by another value
   below `a`, or any of the K-1 largest by another value above `b`, changes no `min`, `max`,
   `bin_edges` or `bin_counts`. In the one-bin shape branch, the edges depend only on `a` and `b`
   and the count is the finite count. In the no-shape branch, the widened grid is gone. This holds

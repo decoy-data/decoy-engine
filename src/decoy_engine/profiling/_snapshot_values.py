@@ -7,9 +7,10 @@ Every column the profiler did not flag gets a floor (`SNAPSHOT_FLOOR_STATS`): no
 cell or year range is held by fewer than `MIN_RELEASE_COUNT` rows, and a numeric range is top and
 bottom coded. A column too small to floor is flagged and listed. Minimum frequency rule, top and
 bottom coding, global recoding: Hundepool et al., Statistical Disclosure Control (Wiley 2012),
-sections 3.4 and 4.2; R sdcMicro `topBotCoding` and `globalRecode`.
-
+sections 3.4 and 4.2; R sdcMicro `topBotCoding` and `globalRecode`; R synthpop `sdc()`.
 Pattern: statistical disclosure control global recoding; HIPAA Safe Harbor year-only dates.
+The 1, 2, 5 step ladder: Heckbert, "Nice numbers for graph labels" (Graphics Gems, 1990). The
+finest level that passes is searched for as in ARX and Samarati's lattice of recodings.
 
 A flagged numeric column is one coarse interval on a power-of-ten grid strictly outside its
 cells; near float max the bounds are the fixed (-1.5, 1.5). Datetimes are bounded by the years
@@ -69,8 +70,7 @@ from decoy_engine.quality.snapshot import (
 _FLOOR: Final = Decimal(1).scaleb(-12)
 _PRECISION: Final = 80
 _FALLBACK_DOMAIN: Final = (-1.5, 1.5)
-# Heckbert's nice steps are 1, 2 or 5 times a power of ten.
-_NICE_MANTISSAS: Final = (1, 2, 5)
+_NICE_MANTISSAS: Final = (1, 2, 5)  # Heckbert steps
 _MAX_STEP_TRIES: Final = 64
 _SHAPE_BLOCKS: Final = ("quantile_grid", "exact_values")  # a fallback domain pops these
 # A string column whose median label has this many words reads as sentences, so it is free text.

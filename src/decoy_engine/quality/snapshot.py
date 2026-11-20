@@ -17,8 +17,7 @@ compare on edges that follow the data range; SDV's per-column kind drives which 
 the kind is recorded so fidelity scoring can refuse a kind mismatch; NIST SP 800-188 Sec. 4 on
 marginal and pairwise utility metrics.
 
-What this module does NOT do: score fidelity (D1c, fidelity.py), run structural checks (D1b,
-diagnostic.py) or persist snapshots to a job record (D2).
+Not done here: fidelity scoring (fidelity.py), structural checks (diagnostic.py), persistence.
 
 Sensitive artifact: a categorical column's `top_values` already carries
 REAL source values (gated by the consumer-side `allow_real_categories`
@@ -49,6 +48,7 @@ from decoy_engine.internal.pandas_compat import (
     numeric_cells,
     utc_naive_datetimes,
 )
+from decoy_engine.quality._histogram import histogram_for_range
 
 # Single source of truth for the DP schema version is the pandas-free
 # `dp_schema` module (guide section 3.8), re-exported here for the existing
@@ -450,7 +450,7 @@ def numeric_stats(
         bin_edges = [lo, hi]
         bin_counts = [int(finite.size)]
     else:
-        counts, edges = np.histogram(hist_input, bins=bins, range=(lo, hi))
+        counts, edges = histogram_for_range(hist_input, bins, lo, hi)
         bin_edges = [_round(float(e)) for e in edges]
         bin_counts = [int(c) for c in counts]
 
