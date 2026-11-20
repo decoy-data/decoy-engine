@@ -93,6 +93,9 @@ def execute_route(
         else:
             result = _pipeline_full_frame.run_full_frame_route(ctx, decision)
         result = settle(gate, ctx, result)
+        execution_block = result.quality_metrics.setdefault("execution", {})
+        execution_block["native_threads"] = ctx.native_threads
+        execution_block["native_threads_source"] = ctx.native_threads_source
         block = result.quality_metrics.get("resources", {}).get("out_of_core")
         if block is not None:
             block["applied"] = [asdict(pair) for pair in recorder.applied()]

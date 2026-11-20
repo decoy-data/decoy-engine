@@ -137,7 +137,7 @@ def run_pipeline(
     auto_chunk: bool = _pipeline_finalize.AUTO_CHUNK_DEFAULT,
     chunk_size_rows: int = _pipeline_finalize.CHUNK_SIZE_ROWS_DEFAULT,
     auto_chunk_threshold_rows: int = _pipeline_finalize.AUTO_CHUNK_THRESHOLD_DEFAULT,
-    native_threads: int = 1,
+    native_threads: int | None = None,
     chunked_dispatcher_enabled: bool = True,
     stream_chunked_output: bool = True,
     multi_table_dispatch_enabled: bool = True,
@@ -220,7 +220,8 @@ def run_pipeline(
     documented in full on `_pipeline_routing` (the decisions, in a fixed order:
     relationship routing with SC2's fail-closed reject-before-read, then
     auto-chunk routing) and `_pipeline_auto_chunk` (the chunked lane: `native_threads`
-    is its kernel thread budget, `chunked_dispatcher_enabled=False` its kill switch;
+    is its kernel thread budget (`None`, the default, is the usable cores capped at 1024, or 1 if
+    detection fails; `execution.pipeline._host.native_threads_for_run`), `chunked_dispatcher_enabled=False` its kill switch;
     `multi_table_dispatch_enabled=False` keeps multi-table jobs whole; with a `sink` the lane
     and a fully dispatched split stream into it, `stream_chunked_output=False` opts out, see
     `_chunked_output_sink`). They are runtime kwargs, never `config` fields: resource policies

@@ -41,6 +41,7 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
+from decoy_engine.execution.pipeline._host import native_threads_for_run
 from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
 from decoy_engine.execution.pipeline._route_decision import decide_split
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
@@ -127,6 +128,7 @@ class PipelineRunContext:
     chunk_size_rows: int
     auto_chunk_threshold_rows: int
     native_threads: int
+    native_threads_source: str
     chunked_dispatcher_enabled: bool
     multi_table_dispatch_enabled: bool
     out_of_core_threshold_rows: int
@@ -199,7 +201,7 @@ def build_run_context(
     auto_chunk: bool,
     chunk_size_rows: int,
     auto_chunk_threshold_rows: int,
-    native_threads: int,
+    native_threads: int | None,
     chunked_dispatcher_enabled: bool,
     stream_chunked_output: bool,
     multi_table_dispatch_enabled: bool,
@@ -263,6 +265,7 @@ def build_run_context(
     require_positive_int("chunk_size_rows", chunk_size_rows)
     require_positive_int("auto_chunk_threshold_rows", auto_chunk_threshold_rows)
     _pipeline_auto_chunk.require_lane_knobs(native_threads, chunked_dispatcher_enabled)
+    threads = native_threads_for_run(native_threads)
     publish = OutputPublish(sink, stream_chunked_output, post_validation)  # B6a; validates the knob
     require_bool("multi_table_dispatch_enabled", multi_table_dispatch_enabled)
     # SC2 out-of-core routing thresholds share the same fail-early contract.
@@ -435,7 +438,8 @@ def build_run_context(
         auto_chunk=auto_chunk,
         chunk_size_rows=chunk_size_rows,
         auto_chunk_threshold_rows=auto_chunk_threshold_rows,
-        native_threads=native_threads,
+        native_threads=threads.count,
+        native_threads_source=threads.source,
         chunked_dispatcher_enabled=chunked_dispatcher_enabled,
         multi_table_dispatch_enabled=multi_table_dispatch_enabled,
         out_of_core_threshold_rows=out_of_core_threshold_rows,
