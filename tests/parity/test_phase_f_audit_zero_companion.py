@@ -57,7 +57,7 @@ def _spy(mp: pytest.MonkeyPatch, companion: str) -> DeterministicIndexSpy:
     if companion == "installed" and not _companion_installed():
         pytest.skip("native companion not installed")
     if companion == "absent":
-        mp.setattr(_sampler, "_compiled_index_kernel", lambda: None)
+        mp.setattr(_sampler, "compiled_index_kernel", lambda: None)
     return DeterministicIndexSpy().install(mp)
 
 
