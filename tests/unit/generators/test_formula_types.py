@@ -127,13 +127,13 @@ def test_every_generate_type_has_an_example_or_a_reason() -> None:
 
 def test_a_provider_column_is_planned_as_text_and_a_text_formula_runs_on_it() -> None:
     cols = [
-        {"name": "x", "type": "provider", "provider": "random_int_range", "null_probability": 0.3},
+        {"name": "x", "type": "provider", "provider": "random_int_range"},
         fml("y", "'ORD-' + x", ["x"]),
     ]
     table = compile_and_generate(cfg(cols, rows=40))["t"]
     assert table.schema.field("x").type == pa.string()
     for x, y in zip(table.column("x").to_pylist(), table.column("y").to_pylist(), strict=True):
-        assert (y is None) if x is None else (y == "ORD-" + x)
+        assert y == "ORD-" + x
 
 
 def _check_fidelity(cols: list[dict[str, Any]], null_p: float, tables: list[dict] | None = None):
@@ -376,3 +376,45 @@ def test_co_reader_float_faker_formula_equals_twice_the_output_text() -> None:
     assert table.schema.field("amount").type == pa.string()
     texts, m = table.column("amount").to_pylist(), table.column("m").to_pylist()
     assert m == [float(t) * 2 for t in texts]
+
+
+def _provider_tables(rows: int, null_p: float) -> dict:
+    parent = {
+        "name": "p",
+        "row_count": rows,
+        "generate_columns": [
+            {
+                "name": "id",
+                "type": "provider",
+                "provider": "random_int_range",
+                "null_probability": null_p,
+            }
+        ],
+    }
+    child = {
+        "name": "t",
+        "row_count": rows,
+        "generate_columns": [
+            {
+                "name": "ref",
+                "type": "reference",
+                "reference_table": "p",
+                "reference_column": "id",
+            }
+        ],
+    }
+    return {
+        "version": 2,
+        "global_settings": {"seed": 1},
+        "sources": {},
+        "tables": [parent, child],
+    }
+
+
+@pytest.mark.parametrize(("rows", "null_p"), [(0, 0.0), (5, 1.0)])
+def test_provider_and_reference_to_provider_stay_text_with_no_values(
+    rows: int, null_p: float
+) -> None:
+    tables = compile_and_generate(_provider_tables(rows, null_p))
+    assert tables["p"].schema.field("id").type == pa.string()
+    assert tables["t"].schema.field("ref").type == pa.string()

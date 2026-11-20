@@ -281,6 +281,21 @@ def reader_types(
     return out
 
 
+def provider_text_columns(config: Mapping[str, Any]) -> dict[str, set[str]]:
+    """``{table: {column}}`` for each generated column whose root is a ``provider`` column.
+
+    Arrow cannot infer a type from zero rows or all-null rows, so the table build types these
+    columns as text explicitly, the type the plan reports for them.
+    """
+    tables, cols = _generate_columns(config)
+    out: dict[str, set[str]] = {}
+    for key in cols:
+        root = cols.get(_reference_root(tables, key))
+        if root is not None and root.get("type") == "provider":
+            out.setdefault(key[0], set()).add(key[1])
+    return out
+
+
 def numeric_plan(
     config: Mapping[str, Any],
     *,

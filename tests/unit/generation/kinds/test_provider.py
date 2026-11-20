@@ -388,3 +388,19 @@ def test_the_draw_site_catalogue_gains_no_site() -> None:
     from decoy_engine.execution.native._determinism_protocol import PROVIDER_IDENTIFIER_SITES
 
     assert set(PROVIDER_IDENTIFIER_SITES.values()) == {"gen.identifier_deterministic"}
+
+
+def test_a_value_whose_str_raises_becomes_the_value_free_error(monkeypatch) -> None:
+    from decoy_engine.generation.kinds import _provider
+
+    class Leaky:
+        def __str__(self) -> str:
+            raise RuntimeError("SECRET-CELL")
+
+    monkeypatch.setattr(_provider, "_draw", lambda *a, **k: [Leaky()])
+    col = {"name": "c", "type": "provider", "provider": "random_int_range"}
+    with pytest.raises(GenerationError) as info:
+        provider_generate(col, 1, None, None, "en_US")  # type: ignore[arg-type]
+    exc = info.value
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert "SECRET-CELL" not in str(exc)

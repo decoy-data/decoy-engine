@@ -79,7 +79,7 @@ def provider_generate(
     failed = False
     values: list[Any] = []
     try:
-        values = _draw(col, n, gen_ctx, registry, locale)
+        values = [_as_text(v) for v in _draw(col, n, gen_ctx, registry, locale)]
     except Exception:
         # Any failure inside the provider, whatever its type, can quote a name or a value.
         failed = True
@@ -91,7 +91,12 @@ def provider_generate(
                 f"At table {col.get(TABLE_KEY)!r}, column {col.get('name')!r}."
             ),
         )
-    return [v if v is None or isinstance(v, str) else str(v) for v in values]
+    return values
+
+
+def _as_text(value: Any) -> str | None:
+    """The value as text; a ``__str__`` that raises is a draw failure, caught by the caller."""
+    return value if value is None or isinstance(value, str) else str(value)
 
 
 def _draw(
