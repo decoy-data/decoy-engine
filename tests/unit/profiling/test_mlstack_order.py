@@ -49,3 +49,20 @@ def test_both_import_sites_go_through_the_helper(module: str) -> None:
         if isinstance(node, ast.ImportFrom) and node.level == 0
     }
     assert "decoy_engine.profiling.model_pack._mlstack" in imported
+
+
+def test_importing_mlstack_has_no_side_effect_when_lightgbm_is_a_stub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import must not touch lightgbm: a stub without `LGBMClassifier` is not an import error."""
+    import sys
+
+    stub = ModuleType("lightgbm")
+    monkeypatch.setitem(sys.modules, "lightgbm", stub)
+    monkeypatch.delitem(sys.modules, "decoy_engine.profiling.model_pack._mlstack", raising=False)
+    mod = importlib.import_module("decoy_engine.profiling.model_pack._mlstack")
+    assert not hasattr(mod, "LGBMClassifier")
+    with pytest.raises(AttributeError):
+        mod.lgbm_classifier()
+    stub.LGBMClassifier = object  # type: ignore[attr-defined]
+    assert mod.lgbm_classifier() is object
