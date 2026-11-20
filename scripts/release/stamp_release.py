@@ -66,6 +66,7 @@ CONTRACT = f"{F29}/consumer-contract.json"
 README = "README.md"
 TYPES = ("Added", "Changed", "Fixed", "Deprecated", "Removed", "Security")
 PIN_FILE = Path("tests") / "fixtures" / "changelog_released_sections.json"
+CHANGELOG = "CHANGELOG.md"
 BREAKING_HEADING = "### Breaking for consumers"
 
 _BREAKING_LINE = re.compile(r"Breaking: (?P<text>\S.*)")
@@ -291,7 +292,7 @@ def _remove(path: Path) -> None:
 
 
 def _owned_paths() -> list[str]:
-    return ["CHANGELOG.md", PIN_FILE.as_posix(), FRAGMENT_DIR]
+    return [CHANGELOG, PIN_FILE.as_posix(), FRAGMENT_DIR]
 
 
 def _dirty(root: Path, owned: list[str]) -> list[str]:
@@ -378,7 +379,7 @@ def _changelog_plan(
     if problem is not None:
         raise FragmentError(problem)
 
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / CHANGELOG
     before = changelog_path.read_text(encoding="utf-8")
     if any(v == version for v, _ in release_sections(before)):
         raise FragmentError("CHANGELOG.md already has a section for this version")
@@ -392,7 +393,7 @@ def _changelog_plan(
         **{k: v for k, v in pins.items() if k != prev_version},
     }
 
-    writes = {PIN_FILE.as_posix(): json.dumps(pins, indent=2) + "\n", "CHANGELOG.md": text}
+    writes = {PIN_FILE.as_posix(): json.dumps(pins, indent=2) + "\n", CHANGELOG: text}
     return writes, [f"{FRAGMENT_DIR}/{name}" for name in ordered], fragments
 
 
