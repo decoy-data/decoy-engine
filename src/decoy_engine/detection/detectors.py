@@ -828,7 +828,6 @@ _STREET_ADDRESS_RE = re.compile(
 # Map from detector_id to (compiled_regex, optional_validator). Validators
 # are the same per-value functions that `_evaluate` already calls; reusing
 # them here keeps the column-level + span-level detector behavior in sync.
-# Mirrors the existing module-level `_*_RE` constants.
 #
 # `person_name` / name-hint-only detectors (license_num,
 # health_plan_id, device_id, biometric_id, vehicle_id, mrn) are intentionally
@@ -852,6 +851,7 @@ _SPAN_DETECTORS: dict[str, tuple[re.Pattern[str], Callable[[str], bool] | None]]
     "url": (_URL_RE, None),
     "street_address": (_STREET_ADDRESS_RE, None),
 }
+SPAN_DETECTOR_IDS: frozenset[str] = frozenset(_SPAN_DETECTORS)  # what text_mask `detectors:` takes
 
 
 def iter_spans(

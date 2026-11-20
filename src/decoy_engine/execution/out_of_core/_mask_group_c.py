@@ -83,9 +83,13 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._errors import ExecutionError, StrategyError
+from decoy_engine.execution._errors import (
+    ExecutionError,
+    StrategyError,
+    text_mask_unsupported_pair_error,
+)
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
 from decoy_engine.execution._strategies._ner_config import (
     enforce_ner_model_version,
@@ -196,7 +200,7 @@ def _text_mask_array(
     resolution (detectors, per_detector_strategy, unmatched_span_policy, token,
     min_days/max_days, sub_floor_span, TX-2 `ner`), same non-string -> str
     coercion, and the same reused `mask_cell` primitive. An unparseable date
-    still passes through unchanged; an fpe span whose domain FF1 cannot cover
+    span becomes the redaction token; an fpe span whose domain FF1 cannot cover
     (or whose checksum fails validation) now fails closed via
     `FpeUnencryptableError` when no `sub_floor_span` policy is configured
     (Task 5.2 plan P3-final removed the old catch-all token fallback), so this
@@ -260,6 +264,7 @@ def _text_mask_array(
 
             ner_spans_by_pos = iter_ner_spans_batch(texts, model=ner_model, entities=ner_entities)
 
+        unsupported = False
         try:
             for i, pos in enumerate(non_null_positions):
                 out[pos] = mask_cell(
@@ -274,6 +279,10 @@ def _text_mask_array(
                     sub_floor_span_policy=sub_floor_span_policy,
                     sub_floor_notices=sub_floor_notices,
                 )
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             # Matches the full-frame handler's fail-closed mapping
             # (`_strategies/_text_mask.TextMaskHandler.run`) so a consumer keying
@@ -286,6 +295,9 @@ def _text_mask_array(
                     "silently choose a sub_floor_span fallback."
                 ),
             ) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
         return pa.array(out, type=pa.string())
     except BaseException:
         del job_seed
