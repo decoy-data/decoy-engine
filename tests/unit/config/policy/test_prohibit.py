@@ -154,9 +154,9 @@ def test_unknown_strategy_in_a_prohibition_is_refused():
         assert exc.errors()[0]["loc"] == ("policy", "prohibit", 0, mode)
 
 
-def test_prohibited_code_is_registered_unreleased():
+def test_prohibited_code_is_registered_in_1_30():
     spec = reasons.find("config", "policy_prohibited")
-    assert spec is not None and spec.since == reasons.UNRELEASED
+    assert spec is not None and spec.since == "1.30.0"
     assert not re.search(r"[{}%]", spec.summary)
 
 

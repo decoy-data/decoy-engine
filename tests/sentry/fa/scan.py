@@ -450,7 +450,10 @@ class ModuleScanner:
         ):
             self._record(info, "LocalFileAccess", "localfa", node)
             return
-        if target.endswith(("engine_handle", "engine_dir_handle")) and "fileaccess" in target:
+        if (
+            target.endswith(("engine_handle", "engine_dir_handle", "open_ambient_tree"))
+            and "fileaccess" in target
+        ):
             self._record(info, target.rsplit(".", 1)[-1], "engine_handle", node)
             return
         if target == "threading.Thread" and any(kw.arg == "target" for kw in node.keywords):

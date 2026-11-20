@@ -72,6 +72,16 @@ class FileRequest:
     field_key: str
 
 
+#: The closed, value-free reasons a no-follow open reports. ``None`` is every other denial.
+DenialKind = Literal["absent", "link", "not_regular", "unreadable"]
+_DENIAL_KINDS = ("absent", "link", "not_regular", "unreadable")
+
+
+def _rebuild_denied(encoded_key: str, kind: DenialKind | None) -> object:
+    """Unpickle helper for a denial: the key is already encoded and the kind is kept."""
+    return FileAccessDenied(encoded_key, encoded=True, kind=kind)
+
+
 def _rebuild(cls: type, encoded_key: str) -> object:
     """Unpickle helper: rebuild a file-access error around a key that is already encoded."""
     return cls(encoded_key, encoded=True)
@@ -80,17 +90,26 @@ def _rebuild(cls: type, encoded_key: str) -> object:
 class FileAccessDenied(DecoyError):  # noqa: N818 - the plan's name for the one denial
     """The one denial. `str()` is `file access denied: <encoded field key>` and nothing else.
 
-    Raised `from None` so no cause, context or locator rides with it across a boundary."""
+    Raised `from None` so no cause, context or locator rides with it across a boundary.
 
-    def __init__(self, field_key: str, *, encoded: bool = False) -> None:
+    `kind` is an optional closed word (`absent`, `link`, `not_regular`, `unreadable`) a no-follow
+    open sets from the errno it already holds. It is not part of `str()`; every other denial
+    leaves it `None`."""
+
+    def __init__(
+        self, field_key: str, *, encoded: bool = False, kind: DenialKind | None = None
+    ) -> None:
         from decoy_engine.fileaccess._errors import encode_field_key
 
+        if kind is not None and kind not in _DENIAL_KINDS:
+            raise ValueError("unknown denial kind")
         self.field_key: str = field_key if encoded else encode_field_key(field_key)
+        self.kind: DenialKind | None = kind
         super().__init__(f"file access denied: {self.field_key}")
 
-    def __reduce__(self) -> tuple[object, tuple[type, str]]:
+    def __reduce__(self) -> tuple[object, tuple[str, DenialKind | None]]:
         # The stored key is already encoded; a rebuild must not escape it again.
-        return (_rebuild, (FileAccessDenied, self.field_key))
+        return (_rebuild_denied, (self.field_key, self.kind))
 
 
 class FileAccessReadError(DecoyError):

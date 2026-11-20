@@ -62,8 +62,8 @@ def mutate_second_batch(
 ) -> None:
     real = module._iter_source_batches
 
-    def patched(src: Any, batch_rows: int) -> Iterator[pa.RecordBatch]:
-        for i, batch in enumerate(real(src, batch_rows)):
+    def patched(src: Any, batch_rows: int, **kwargs: Any) -> Iterator[pa.RecordBatch]:
+        for i, batch in enumerate(real(src, batch_rows, **kwargs)):
             yield change(batch) if i == 1 else batch
 
     monkeypatch.setattr(module, "_iter_source_batches", patched)

@@ -18,7 +18,6 @@ from pydantic import ValidationError
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig, post_scan_distribution_tolerance
 from decoy_engine.plan._compile import _hash_config
-from decoy_engine.reasons import UNRELEASED
 
 BASE: dict[str, Any] = {
     "version": 2,
@@ -135,7 +134,7 @@ def test_the_frozen_schema_holds_distribution_with_its_bounds_and_enum() -> None
 
 def test_the_deferred_refusal_is_registered_pending_with_fixed_value_free_text() -> None:
     spec = reasons.get("runtime", "post_scan_distribution_deferred")
-    assert spec.since == UNRELEASED
+    assert spec.since == "1.30.0"
     assert reasons.runtime.POST_SCAN_DISTRIBUTION_DEFERRED == "post_scan_distribution_deferred"
     assert not any(c in spec.summary for c in "{}%")
     assert {r.outcome.value for r in spec.rules} == {"configuration"}

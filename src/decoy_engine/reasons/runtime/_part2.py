@@ -464,7 +464,7 @@ KEY_VERSION_INVALID = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("MissingMaskSecret")
@@ -530,7 +530,7 @@ PROBE_FAILED = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.EXECUTION,
     retry=RetryClass.UNKNOWN,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("RowExceedsMaxRowBytes")

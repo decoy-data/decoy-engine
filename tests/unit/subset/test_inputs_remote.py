@@ -68,7 +68,7 @@ def test_new_codes_are_registered_unreleased() -> None:
         ("warning", reasons.warning.SFTP_LOCK_NOT_REMOVED),
     ):
         spec = reasons.get(ns, code)
-        assert spec.since == reasons.UNRELEASED
+        assert spec.since == "1.30.0"
     assert reasons.config.REMOTE_URI_INVALID == "remote_uri_invalid"
     assert reasons.runtime.SPOOL_DISK_FULL == "spool_disk_full"
     assert reasons.warning.SFTP_LOCK_NOT_REMOVED == "sftp_lock_not_removed"
