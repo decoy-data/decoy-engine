@@ -56,6 +56,25 @@ pinning test says `accepted-known-limit: <id>`, and the id is listed under
 | `decoy-resume-run/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-run-v1.json` |
 | `decoy-resume-table/v1` | contract 3.1 | `src/decoy_engine/delivery/resume/_records.py` | `tests/unit/delivery/resume/test_records.py`, `tests/integration/compat_corpus/resume/resume-table-v1.json` |
 | `lock/v1` | contract 3.1 | `src/decoy_engine/support/_runtime_lock.py` | `tests/unit/support/test_runtime_lock.py`, `tests/unit/support/test_probe.py`, `tests/integration/compat_corpus/runtime-lock/lock-v1.json`, `tests/integration/compat_corpus/runtime-lock/lock-v1-probe.json` |
+| `decoy-publication/v1` | contract 3.1 | `src/decoy_engine/publication/_descriptor.py` | `tests/unit/publication/test_descriptor_strict.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `immutable_directory/v1` | contract 3.1 | `src/decoy_engine/publication/_types.py` | `tests/unit/publication/test_descriptor_schema_snapshot.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `publication/v1` | contract 3.1 | `src/decoy_engine/records/_kinds.py` | `tests/unit/records/test_opaque.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `checkpoint-index/v1` | contract 3.1 | `src/decoy_engine/records/_kinds.py` | `tests/unit/records/test_kinds.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `pinned-plan/v1` | contract 3.1 | `src/decoy_engine/generation/_pinned_plan.py` | `tests/unit/generation/test_pinned_with_generation.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy-safe-output/v1` | contract 3.1 | `src/decoy_engine/safe_output/_event.py` | `tests/unit/safe_output/test_event_fields.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy-quarantine/v1` | contract 3.1 | `src/decoy_engine/declared_casting/_quarantine_local.py` | `tests/unit/declared_casting/test_quarantine_short_write.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy-support-bundle/v1` | contract 3.1 | `src/decoy_engine/support/_shape.py` | `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `decoy-reasons/v1` | contract 3.1 | `src/decoy_engine/reasons/_identity.py` | `tests/unit/phase/test_phase_contract.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `decoy-model-pack/v1` | contract 3.1 | `src/decoy_engine/profiling/model_pack/types.py` | `tests/unit/test_ml_model_pack.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `dps-marginal/v3` | contract 3.1 | `src/decoy_engine/quality/dp_schema.py` | `tests/unit/generation/test_generate_dp_contract.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `post-scan-integrity/v2` | contract 3.1 | `src/decoy_engine/verification/postmask/types.py` | `tests/unit/detection_verification/test_finding_reader.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `canary-span-report/v1` | contract 3.1 | `src/decoy_engine/verification/canary/_types.py` | `tests/unit/verification/canary/test_canonical_golden.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `flagged-redacted/v1` | contract 3.1 | `src/decoy_engine/profiling/_value_redaction.py` | `tests/unit/profiling/test_snapshot_floor.py`, `tests/sentry/release/test_tag_artifacts.py`, `accepted-known-limit: S7A-KL-1` |
+| `phase-result/v1` | contract 3.1 | `src/decoy_engine/phase.py` | `tests/unit/phase/test_phase_contract.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `phase-event/v1` | contract 3.1 | `src/decoy_engine/phase.py` | `tests/unit/phase/test_phase_contract.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy.evidence.statement/v1` | contract 3.1 | `src/decoy_engine/signed_evidence/_statement.py` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy.trust-policy/v1` | contract 3.1 | `src/decoy_engine/signed_evidence/_trust.py` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/sentry/release/test_tag_artifacts.py` |
+| `decoy.required-catalog/v1` | contract 3.1 | `src/decoy_engine/signed_evidence/_catalog.py` | `tests/unit/signed_evidence/test_conformance_corpus.py`, `tests/sentry/release/test_tag_artifacts.py` |
 
 ## Public names (contract 3.4)
 
@@ -127,3 +146,4 @@ reviewed change; `--check` prints the file and the first differing JSON pointer,
 | `RGF1-KL-2` | determinism golden files | `tests/snapshots/golden/mask_faker_seeded`, `mask_hash_only` and `mask_redact` have no reader since the V1 graph runner and its test were deleted (commit `b9b73e19e`). The files stay. The row's tests pin the derivation (a reference vector and HKDF), each draw site's provider output by stored digest, and the shipped handlers' output against those providers for the sites in `expected_sites` of `tests/native/test_determinism_goldens.py`. The other provider sites (for example `mask.tokenize`, `mask.formula`, `gen.lookup`) are pinned only at the provider: no test checks their shipped code against it. `tests/integration/golden/test_determinism_invariants.py` only compares two runs of the current code. |
 | `RGF1-KL-3` | disguise registry | No test refuses an edit to a released disguise version. The loader tests pin the dated version field and the bundle set only. |
 | `RGF1-KL-4` | public names | Signatures and fields are not pinned except where a row names a signature or shape test. |
+| `S7A-KL-1` | format tags with no engine writer | Eight tags are pinned as public constants, reserved record kinds or reader-only versions, because the engine writes no file for them (`publication/v1`, `checkpoint-index/v1`, `decoy-support-bundle/v1`, `decoy-reasons/v1`, `dps-marginal/v3`, `post-scan-integrity/v2`, `canary-span-report/v1`, `flagged-redacted/v1`). A file a caller writes with one of these tags is checked by the owning reader tests, not by a written artifact here. |

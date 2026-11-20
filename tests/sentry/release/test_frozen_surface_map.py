@@ -27,7 +27,7 @@ NAMES_HEADING = "## Public names (contract 3.4)"
 EXPERIMENTAL_HEADING = "## Experimental surfaces (contract 3.6)"
 OTHER_HEADING = "## Other frozen surfaces"
 LIMITS_HEADING = "## Known limits"
-_TAG = re.compile(r"[a-z0-9-]+/v\d+")
+_TAG = re.compile(r"[a-z][a-z0-9._-]*/v\d+")
 _SPAN = re.compile(r"`([^`]+)`")
 _LIMIT = re.compile(r"accepted-known-limit: ([^\s`]+)`")
 # Design note 1 sources with no list to read from code: each must keep its one row.

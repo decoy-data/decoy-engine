@@ -100,3 +100,33 @@ OPTIONAL_EXTRAS: Final[dict[str, str]] = {"providers_v2.mimesis": "mimesis"}
 def package_tier(module: str) -> str:
     """The tier a name exported by `module` gets when no other rule applies."""
     return PACKAGE_TIERS.get(module, INTERNAL)
+
+
+# Every `"<name>/vN"` literal under `src/` is one of three things (contract 3.1, 3.3, this table):
+# a frozen format named in contract 3.1, a frozen derivation label listed in contract 3.3, or an
+# internal tag listed here. The rule: a tag that reaches disk, `--json`, a signed or hashed
+# record or a derivation input is frozen; a tag that never leaves the process is internal and
+# needs a reason. `tests/sentry/release/test_tag_census.py` holds the three sets disjoint and
+# complete, and scans written artifacts for every tag in this table. Tags built with f-strings
+# are a known limit of the census.
+INTERNAL_TAGS: Final[dict[str, tuple[str, str]]] = {
+    "decoy-telemetry/v1": (
+        "telemetry/_vocab.py",
+        "names the closed span vocabulary; no span attribute, file or --json carries it",
+    ),
+}
+
+# Derivation labels: the tag is an input to a key, a digest or a seed, so changing it changes
+# output bytes or a stored digest. Contract 3.3 lists the same set. Value: the owning module.
+DERIVATION_LABELS: Final[dict[str, str]] = {
+    "canary-span-normalization/v1": "verification/canary/_types.py",
+    "decoy-probe/v1": "support/_probe.py",
+    "decoy-resume-key-check/v1": "delivery/resume/_fingerprint.py",
+    "decoy.shuffle.unkeyed/v1": "execution/_strategies/_shuffle.py",
+    "fpe-key/v1": "determinism/_derive.py",
+    "name_email/v1": "generation/composite/_name_email.py",
+    "pinned-plan-fingerprint/v1": "generation/_pinned_plan.py",
+    "policy-expansion/v1": "config/policy/_expand.py",
+    "secret-provider/v1": "secret_providers/_types.py",
+    "tokenize-key/v1": "execution/_strategies/_tokenize.py",
+}

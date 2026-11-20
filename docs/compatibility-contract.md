@@ -249,7 +249,25 @@ decoy-job-log/v1
 scan-set/v1             scan-diff/v1
 decoy-resume-run/v1    decoy-resume-table/v1
 lock/v1
+decoy-publication/v1    immutable_directory/v1    publication/v1    checkpoint-index/v1
+pinned-plan/v1          decoy-safe-output/v1      decoy-quarantine/v1
+decoy-support-bundle/v1 decoy-reasons/v1          decoy-model-pack/v1
+dps-marginal/v3         post-scan-integrity/v2    canary-span-report/v1
+flagged-redacted/v1     phase-result/v1           phase-event/v1
+decoy.evidence.statement/v1    decoy.trust-policy/v1    decoy.required-catalog/v1
 ```
+
+**Tags added with the freeze batch (FREEZE-S7a, 2026-11-20).** Every `"<name>/vN"` literal in engine source
+is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 19 tags
+after `lock/v1` above were persisted or exported with no listing before. Eight have no engine writer, and the
+map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are older versions the engine
+still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with no model yet;
+`decoy-support-bundle/v1`, `decoy-reasons/v1`, `dps-marginal/v3` and `canary-span-report/v1` name a typed
+constant the engine does not write to a file itself. The other eleven are read from a written artifact by a
+sentry. `phase-result/v1` and `phase-event/v1` are frozen because `to_wire` writes them into the exported JSON.
+Tags built with f-strings are a known limit of the census. A tag that never leaves the process is internal
+(`decoy_engine.contracts.stability.INTERNAL_TAGS`, with a reason), and a
+sentry scans written artifacts to confirm no internal tag appears in one. Derivation labels are in 3.3.
 
 A user runs `decoy fit`, keeps the `distribution-snapshot/v1` artifact, and
 feeds it to a later engine version. That artifact is a **contract**.
@@ -435,6 +453,18 @@ with an update — expecting the new rows to join to the old output (same person
 same pseudonym across runs) — is relying on the derivation (HKDF-SHA256 `derive`,
 FPE keying, Faker seeding) being unchanged. Change any of it and you break that
 user with **zero error message.**
+
+**Derivation labels (frozen).** These tags are inputs to a key, a digest or a seed. Changing one changes
+output bytes or a stored digest with no error, so each is part of the determinism guarantee. The list equals
+`decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
+3.1, nor internal. `ff1-key/v1` is the one label that 3.1 lists too.
+
+```
+canary-span-normalization/v1   decoy-probe/v1            decoy-resume-key-check/v1
+decoy.shuffle.unkeyed/v1       fpe-key/v1                name_email/v1
+pinned-plan-fingerprint/v1     policy-expansion/v1       secret-provider/v1
+tokenize-key/v1
+```
 
 **Rules:**
 
