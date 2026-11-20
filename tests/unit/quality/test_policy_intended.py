@@ -242,3 +242,26 @@ def test_mean_comparable_similarity_formula() -> None:
         {"comparable": False, "similarity": 0.9},
     ]
     assert mean_comparable_similarity(records) == round(0.5 / 3, 6)
+
+
+def test_at_e2_8_report_aggregate_counts_a_hashed_column() -> None:
+    """The marginal mean in V1 includes the intended (hashed) column, so no frozen number moves."""
+    import hashlib
+
+    import pandas as pd
+
+    from decoy_engine.quality.fidelity import compute_fidelity
+    from decoy_engine.quality.snapshot import compute_distribution_snapshot
+
+    ids = [f"p{i % 20}" for i in range(200)]
+    source = pd.DataFrame({"patient_id": ids, "tier": ["a", "b"] * 100})
+    masked = source.assign(
+        patient_id=[hashlib.sha256(v.encode()).hexdigest()[:10] for v in ids],
+    )
+    result = compute_fidelity(
+        compute_distribution_snapshot(source), compute_distribution_snapshot(masked)
+    )
+    by_col = {c["column"]: c["similarity"] for c in result["marginal"]["columns"]}
+    assert by_col["patient_id"] < 0.05
+    assert result["marginal"]["score"] == round(sum(by_col.values()) / len(by_col), 6)
+    assert result["marginal"]["score"] < by_col["tier"]
