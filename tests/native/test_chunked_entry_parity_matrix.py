@@ -22,9 +22,10 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine import run_mask_chunked
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution._adapter import ExecutionResult
+from decoy_engine.execution._chunked_oracle import _mask_pipeline_chunked
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.execution.native._chunked_entry import aggregate_chunked_route_evidence
 from decoy_engine.execution.native._dispatch import (
@@ -35,6 +36,7 @@ from decoy_engine.execution.native._dispatch import (
 # A vault writer goes through the internal entry: the public one refuses it (B-6 B0).
 from decoy_engine.execution.native.chunked._core import mask_chunked as _run_mask_chunked
 from decoy_engine.vault import VaultWriter
+from tests._declared_schema import declared_schema
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
     NEEDS_COMPANION,
@@ -49,6 +51,14 @@ from tests.native._chunked_entry_support import (
     truncate,
     vault_key,
 )
+
+
+def _oracle(config: dict[str, Any], chunks: Any, **kw: Any) -> Any:
+    """The oracle through its internal entry (the public one refuses a vault writer, B-6 B0)
+    with the declared source schema the current contract requires."""
+    return _mask_pipeline_chunked(
+        config, chunks, source_schema=declared_schema(config, TABLE), **kw
+    )
 
 
 @dataclass
@@ -152,9 +162,9 @@ def test_entry_matches_oracle_for_every_strategy_and_source_type(
 ) -> None:
     config = make_config([_STRATEGIES[strategy]])
     chunks = _SOURCES[source_name]
-    expected = _drive(run_mask_pipeline_chunked, config, chunks)
+    expected = _drive(_oracle, config, chunks)
     evidence: list[NativeRouteEvidence] = []
-    actual = _drive(run_mask_chunked, config, chunks, evidence)
+    actual = _drive(_run_mask_chunked, config, chunks, evidence)
     assert actual == expected
     assert len(evidence) == 1
     if source_name == "string" and strategy in _MUST_RUN_NATIVE:
@@ -169,7 +179,7 @@ def test_entry_matches_oracle_for_every_strategy_and_source_type(
 def test_null_bearing_int_in_a_later_chunk_fails_like_the_oracle(strategy: str) -> None:
     config = make_config([_STRATEGIES[strategy]])
     chunks = _SOURCES["int_null_in_chunk_2"]
-    actual = _drive(run_mask_chunked, config, chunks)
+    actual = _drive(_run_mask_chunked, config, chunks)
     assert actual.code == "null_bearing_int_unsupported"
     assert actual.chunks_yielded == 1
     assert actual.sink_len == 1
@@ -476,8 +486,8 @@ def test_int_column_with_a_later_null_typed_chunk_is_masked_like_the_oracle(
         pa.table({"c": pa.nulls(4)}),
         pa.table({"c": pa.array([50, 60, 70, 80], pa.int64())}),
     ]
-    expected = _drive(run_mask_pipeline_chunked, config, chunks)
-    actual = _drive(run_mask_chunked, config, chunks)
+    expected = _drive(_oracle, config, chunks)
+    actual = _drive(_run_mask_chunked, config, chunks)
     assert expected.code is None
     assert actual == expected
 
