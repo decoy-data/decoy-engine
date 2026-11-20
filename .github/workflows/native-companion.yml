@@ -278,7 +278,7 @@ jobs:
       # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
       # route, and the gap9 grant wiring; the per-route cells skip without the companion.
       - name: Thread default and grant parity (companion-present case)
-        run: pytest tests/unit/execution/test_native_threads_default.py tests/parity/test_gap9_native_thread_grant.py -v --tb=short
+        run: pytest tests/unit/execution/test_native_threads_default.py tests/unit/execution/test_native_threads_capped.py tests/parity/test_gap9_native_thread_grant.py -v --tb=short
       - name: Native ABI test (companion-present case)
         run: pytest tests/native/test_native_ext_abi.py -v --tb=short
       - name: Compiled-kernel-vs-live-reference parity harness
