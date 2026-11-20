@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -33,7 +33,7 @@ def _canary_source(table: pa.Table) -> pa.Table:
     return mc.canary_table({n: table[n].combine_chunks() for n in table.column_names})
 
 
-def _run_fk(tmp_path: Path, mode: str, *, lazy: bool) -> dict[str, pa.Table]:
+def _run_fk(tmp_path: Path, mode: Any, *, lazy: bool) -> dict[str, pa.Table]:
     parent, child = fk_tables()
     cfg = fk_config(tmp_path, parent, child)
     paths = {n: Path(cfg["sources"][n]["path"]) for n in ("parent", "child")}
@@ -138,7 +138,7 @@ def test_the_stream_payload_schema_drops_a_skipped_fk_column(
 ) -> None:
     src = _source_schema()
     monkeypatch.setattr(_stream_driver_support, "table_seed", lambda plan, name: None)
-    out = _stream_driver_support._payload_schema(None, "t", src, frozenset({"kept"}))
+    out = _stream_driver_support._payload_schema(cast(Any, None), "t", src, frozenset({"kept"}))
     assert not out.field("kept").metadata
     assert out.field("kept_nested").metadata == {FIELD_KEY: b"keep"}
 

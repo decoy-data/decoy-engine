@@ -124,6 +124,9 @@ def _callee(call: ast.Call, imports: dict[str, str]) -> tuple[str | None, bool]:
     pyarrow. `from pyarrow import schema as s; s(...)` is `schema`; `x.cast(...)` is `cast`."""
     chain = scan.attr_chain(call.func)
     if not chain:
+        # A method on a call result (`pa.field(...).with_metadata(m)`): the name is the attribute.
+        if isinstance(call.func, ast.Attribute):
+            return call.func.attr, False
         return None, False
     dotted = ".".join([imports.get(chain[0], chain[0]), *chain[1:]])
     return dotted.rsplit(".", 1)[-1], dotted.split(".")[0] == "pyarrow"
