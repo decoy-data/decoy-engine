@@ -16,11 +16,13 @@ _SECRET = "bob@example.com"
 
 
 def _nullable_frame() -> pd.DataFrame:
-    # Extension dtypes make pandas fall back from numexpr, which triggers the log line.
+    # Extension dtypes make pandas fall back from numexpr, which triggers the log line. `Float64`,
+    # not `Int64`: the `when:` frame turns a nullable integer into a plain float64 (FREEZE-O1), so
+    # an integer column no longer reaches numexpr as an extension array.
     return pd.DataFrame(
         {
             "email": pd.array([_SECRET, "x@y.z", None], dtype="string"),
-            "age": pd.array([10, 20, 30], dtype="Int64"),
+            "age": pd.array([10, 20, 30], dtype="Float64"),
         }
     )
 

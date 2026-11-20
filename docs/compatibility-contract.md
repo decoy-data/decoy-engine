@@ -75,6 +75,14 @@ only be written under a secret of at least 32 bytes; from that vault on, the v2 
 32-byte vault key length and `VAULT_KEY_LABEL` are permanent, per this contract's own pre-GA to GA rule
 (section 1).
 
+**Pre-GA correction (freeze batch O1, `when:` on integer columns, 2026-11-18).** Breaking, no shim: a
+`when:` predicate over an integer column compares exactly beyond 2**53, for a value or an integer
+literal, on every route, and uses one NaN-style rule for a blank cell on every route and column class:
+`!=`, `not in` and `not (...)` select a blank row; `==`, `in` and the ordering tests do not. FK keys,
+declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings used the pandas
+`NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
+that passes through is written as `int64` instead of `double`.
+
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
 SubsetRequest | Literal["config", "skip"] = "config")` is keyword-only (46 frozen parameters). `"config"`
 applies a `subset:` block, `"skip"` runs the full sources, a `SubsetRequest` replaces the block; any other
@@ -292,6 +300,14 @@ that looks like data, the core writes positional names (`c0..cn`) instead. A mis
 the guard cannot recognise (a person name, an address) is the stated limit. The core holds no
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
+
+Each table also holds `basis` (`whole` or `sample`) and `scanned_rows`, the rows the field counts were taken over
+(PROFILE-SAMPLE-LABELS). `whole` is written only when the read reached the end of the source, with an exact
+`row_count` equal to `scanned_rows`; `key_candidates` is empty on a `sample`: the write model refuses a sampled key claim, and a read of a core with no `basis`, or any `basis` other than `whole`, drops its stored `key_candidates` (they were never proven by a whole read), so that core stays readable and exportable. Both members have read defaults, so a
+core written before them reads as `basis: "sample"` with `scanned_rows: null`. A `basis` string outside the two
+values reads as `sample`, so a third value added in a later minor is not a break. `basis`, `scanned_rows` and the two
+values are frozen at 1.0. A plain profile document (`profile_document`, `ColumnProfile`) gains the same `basis` key, the
+last field of the dataclass.
 
 `scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
 `diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields

@@ -300,6 +300,11 @@ jobs:
       # ordering, malformed-result fail-closed); companion-present only.
       - name: Faker route integration (companion-present case)
         run: pytest tests/parity/native/test_c1_faker_parity.py tests/native/test_dispatch_faker.py tests/native/test_index_ext.py -v --tb=short
+      # PROFILE-SAMPLE-LABELS E2 (AT-14): the native lane of the chunked mask run is
+      # byte-identical at two chunk sizes after the first-chunk profile is labelled a
+      # sample; the cell skips without the companion, so this job runs it.
+      - name: First-chunk profile label characterization (companion-present case)
+        run: pytest tests/native/test_chunked_profile_label_characterization.py -v --tb=short
       # Task 3.1 D3: decoy_engine_native.__version__ resolves via importlib.metadata and
       # parses as PEP 440; companion-present only (the package must be installed for its
       # own metadata to resolve).

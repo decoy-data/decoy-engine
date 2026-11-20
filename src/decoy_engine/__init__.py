@@ -1,4 +1,3 @@
-# decoy_engine/__init__.py
 """
 decoy_engine -- data masking and synthetic generation library.
 
