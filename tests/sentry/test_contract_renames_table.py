@@ -10,6 +10,8 @@ import importlib
 import re
 from pathlib import Path
 
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME
+
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / "docs" / "compatibility-contract.md"
 COLUMNS = ["old", "new", "kind", "since", "note"]
@@ -49,7 +51,7 @@ def _resolves(path: str) -> bool:
 
 def test_table_shape() -> None:
     rows = _rows()
-    assert len(rows) >= 12 and {"run_storm: true", "storm.scan"} <= {
+    assert len(rows) >= 12 and {f"run_{RETIRED_NAME}: true", f"{RETIRED_NAME}.scan"} <= {
         n for r in rows for n in _names(r["old"])
     }
     for r in rows:
@@ -77,16 +79,16 @@ def _section(version: str) -> str:
 
 
 # Released CHANGELOG sections are pinned, so two renames stay recorded under the wrong release
-# (the tags show where they first shipped): the STORM taxonomy split is written up under 0.11.0
+# (the tags show where they first shipped): the profiler taxonomy split is written up under 0.11.0
 # and shipped in 0.16.0; the custom provider variable is written up under 0.25.0 and shipped in
 # 0.24.0. Keyed by the row's first old name to (release from the tags, section holding the entry);
 # the row's `since` must equal the pinned release, so these rows cannot drift to the CHANGELOG one.
 RECORDED_UNDER = {
-    "decoy_engine.storm": ("0.16.0", "0.11.0"),
-    "decoy_engine.run_storm": ("0.16.0", "0.11.0"),
-    "decoy_engine.StormProfile": ("0.16.0", "0.11.0"),
-    "decoy_engine.run_storm_post_mask": ("0.16.0", "0.11.0"),
-    "decoy_engine.StormPostMaskReport": ("0.16.0", "0.11.0"),
+    f"decoy_engine.{RETIRED_NAME}": ("0.16.0", "0.11.0"),
+    f"decoy_engine.run_{RETIRED_NAME}": ("0.16.0", "0.11.0"),
+    f"decoy_engine.{RETIRED_NAME.title()}Profile": ("0.16.0", "0.11.0"),
+    f"decoy_engine.run_{RETIRED_NAME}_post_mask": ("0.16.0", "0.11.0"),
+    f"decoy_engine.{RETIRED_NAME.title()}PostMaskReport": ("0.16.0", "0.11.0"),
     "CUSTOM_PROVIDERS_DIR": ("0.24.0", "0.25.0"),
 }
 
