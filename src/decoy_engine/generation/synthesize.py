@@ -386,8 +386,11 @@ def _generate_column(
             kind, col, n, seed, generated or {}, reference_date=reference_date
         )
     elif kind == "provider":
+        ctx = GenDeriveContext.for_column(
+            derive_key=derive_key, column_config=col, fallback_seed=seed
+        )
         values = provider_column_values(
-            col, n, derive_key, seed, instance_default_locale, get_default_registry()
+            col, n, ctx, get_default_registry(), instance_default_locale
         )
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
