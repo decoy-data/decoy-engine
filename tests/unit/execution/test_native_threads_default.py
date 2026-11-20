@@ -129,6 +129,23 @@ def test_isolated_run_resolves_in_the_child(tmp_path: Path) -> None:
     assert block["native_threads"]["count"] >= 1
 
 
+def test_a_memory_capped_isolated_run_keeps_one_thread(tmp_path: Path) -> None:
+    """The Rust pool is sized to the host and its stacks count against RLIMIT_DATA, so a capped
+    run with no thread request resolves to one thread (recorded as explicit)."""
+    from decoy_engine.execution import run_pipeline_isolated
+    from tests.unit.execution.test_isolated_run import _mask_config, _mask_sources
+
+    cfg = _mask_config(tmp_path, n_cols=2)
+    sources = _mask_sources(tmp_path, n_rows=50, n_cols=2)
+    result = run_pipeline_isolated(
+        cfg, sources, engine_version=ENGINE, mem_cap_bytes=8 * 1024**3, rlimit_kind="data"
+    )
+    assert result.outcome == "completed", result.error
+    assert _pair(_block(result)) == (1, "explicit")
+    omitted = run_pipeline_isolated(cfg, sources, engine_version=ENGINE)
+    assert _block(omitted)["native_threads"]["source"] == "auto"
+
+
 # -- every route -------------------------------------------------------------------------------
 
 Outputs = dict[str, pa.Table]

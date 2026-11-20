@@ -38,7 +38,13 @@ from decoy_engine.execution.pipeline._cgroup import (
     select_mount,
 )
 
-__all__ = ["RunThreads", "detect_usable_cpus", "native_thread_clamp", "native_threads_for_run"]
+__all__ = [
+    "RunThreads",
+    "ThreadSource",
+    "detect_usable_cpus",
+    "native_thread_clamp",
+    "native_threads_for_run",
+]
 
 
 def _unreadable(detail: str) -> ExecutionError:

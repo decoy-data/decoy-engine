@@ -41,7 +41,7 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
-from decoy_engine.execution.pipeline._host import native_threads_for_run
+from decoy_engine.execution.pipeline._host import ThreadSource, native_threads_for_run
 from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
 from decoy_engine.execution.pipeline._route_decision import decide_split
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
@@ -128,7 +128,7 @@ class PipelineRunContext:
     chunk_size_rows: int
     auto_chunk_threshold_rows: int
     native_threads: int
-    native_threads_source: str
+    native_threads_source: ThreadSource
     chunked_dispatcher_enabled: bool
     multi_table_dispatch_enabled: bool
     out_of_core_threshold_rows: int
