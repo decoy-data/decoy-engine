@@ -40,6 +40,8 @@ class InCode:
     masks: tuple[str, ...] = ()
     # When each value is a tuple, the index of its integer count (the entry's ``max``).
     count_at: int | None = None
+    # When the constant maps each guarded name to its own allowlist, key by ``name::site``.
+    nested: bool = False
 
     def _module(self) -> object:
         path = SENTRY / self.test_file
@@ -54,8 +56,11 @@ class InCode:
     def __call__(self) -> set[str]:
         mod = self._module()
         tokens = [getattr(mod, name) for name in self.masks]
+        table = getattr(mod, self.constant)
+        if self.nested:
+            table = [f"{name}::{_flat(site)}" for name, sites in table.items() for site in sites]
         out = set()
-        for k in getattr(mod, self.constant):
+        for k in table:
             key = _flat(k)
             for token in tokens:
                 key = key.replace(token, "<removed-surface>")
@@ -205,6 +210,16 @@ SOURCES: tuple[Source, ...] = (
         "ner-mismatch-single-site",
         "defects/test_ner_mismatch_single_site.py",
         in_code("defects/test_ner_mismatch_single_site.py", "ALLOWED"),
+    ),
+    Source(
+        "group-by-single-reader",
+        "defects/test_group_by_single_reader.py",
+        in_code("defects/test_group_by_single_reader.py", "ALLOWED"),
+    ),
+    Source(
+        "lossless-int-columns",
+        "defects/test_lossless_int_columns.py",
+        in_code("defects/test_lossless_int_columns.py", "ALLOWED", nested=True),
     ),
     Source(
         "validation-route-allowlist",
