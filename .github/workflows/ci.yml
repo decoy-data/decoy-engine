@@ -143,12 +143,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # fetch-depth: 0 so origin/main is reachable in the checkout.
-          # tests/sentry/test_physical_seam_disconnection.py's byte-identical
-          # diff gate (Part 2) diffs against merge-base(origin/main, HEAD) and
-          # SKIPS when origin/main is absent; the default depth-1 checkout made
-          # it skip on every run, so the refactor-safety gate never actually
-          # ran in CI (§SEAM-SENTRY-CI). Matches compat-preflight / regression-proof.
+          # fetch-depth: 0 so origin/main is reachable in the checkout:
+          # scripts/dev/ratchet_check.py compares the baselines against the merge
+          # base with origin/main and fails with no merge base. Matches
+          # compat-preflight / regression-proof.
           fetch-depth: 0
       # The Mac gate's profile (bootstrap.sh): dev, lint, vault, cloud. cloud: tests/unit/test_v2_cloud_sources.py
       # mocks google.cloud.storage and boto3 directly; lint: scripts/dev/gates.sh needs ruff. No mimesis, ner, geo, ml or perf.

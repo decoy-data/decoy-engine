@@ -1763,3 +1763,18 @@ class TestCheckDpFitRequest:
         fit = inspect.signature(dp.fit_dp_snapshot).parameters
         assert set(check) == set(fit) - {"source"}
         assert check["numeric_bins"].default == fit["numeric_bins"].default
+
+
+def test_dp_numeric_bins_has_the_shared_ceiling() -> None:
+    """24f E2: the DP route reads the same MAX_NUMERIC_BINS as the plain snapshot."""
+    from decoy_engine.quality.snapshot import MAX_NUMERIC_BINS
+
+    _validate_fit_params(epsilon=1.0, delta=1e-6, numeric_bins=MAX_NUMERIC_BINS)
+    for bad in (MAX_NUMERIC_BINS + 1, 1):
+        with pytest.raises(DpError) as exc:
+            _validate_fit_params(epsilon=1.0, delta=1e-6, numeric_bins=bad)
+        assert exc.value.code == "dp_numeric_bins_invalid"
+    assert str(exc.value).endswith(f"from 2 to {MAX_NUMERIC_BINS}; got 1.")
+    with pytest.raises(DpError) as over:
+        _validate_fit_params(epsilon=1.0, delta=1e-6, numeric_bins=1001)
+    assert str(over.value).endswith("from 2 to 1000; got 1001.")

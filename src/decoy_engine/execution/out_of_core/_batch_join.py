@@ -83,6 +83,7 @@ from decoy_engine.execution.out_of_core._join import (
 from decoy_engine.execution.out_of_core._mask import mask_column, masked_output_type
 from decoy_engine.execution.out_of_core._relation import _column_seed
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -362,7 +363,13 @@ class ChildFkBatchJoiner:
             # Same field semantics as Table.set_column with a bare name (the
             # whole-child path): the field follows the new array's type.
             fields[idx] = pa.field(child_col, dtype)
-        return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+        carried = [n for n in batch.schema.names if n not in self._edge.child_columns]
+        return pa.record_batch(
+            arrays,
+            schema=attach_output_metadata(
+                pa.schema(fields), batch.schema.metadata, carried=carried
+            ),
+        )
 
 
 def _resolve_output_types(

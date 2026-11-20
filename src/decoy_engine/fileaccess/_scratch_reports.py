@@ -60,4 +60,45 @@ class CleanupReport:
         _check(self.disposition, self.retained_bytes, self.retained_inodes)
 
 
-__all__ = ["CleanupReport", "Disposition", "QuotaReport"]
+class ReclaimOutcome(str, enum.Enum):
+    """What one reclaim pass did with one exact-named entry. Closed: nothing maps to `REMOVED`
+    except a removal that happened, and every other code leaves the entry as it was."""
+
+    REMOVED = "removed"
+    ELIGIBLE = "eligible"
+    LIVE = "live"
+    YOUNG = "young"
+    FOREIGN = "foreign"
+    UNPROVEN = "unproven"
+    KEPT = "kept"
+    LOCK_UNAVAILABLE = "lock_unavailable"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReclaimReport:
+    """Counts of one `reclaim_stages` or `sweep_scratch` pass: one per outcome, plus
+    `scope_unavailable` when the scope itself could not be opened or listed. No path, name,
+    token, errno or message is held, so `str()` and `repr()` are value-free (F26 G5)."""
+
+    removed: int = 0
+    eligible: int = 0
+    live: int = 0
+    young: int = 0
+    foreign: int = 0
+    unproven: int = 0
+    kept: int = 0
+    lock_unavailable: int = 0
+    failed: int = 0
+    scope_unavailable: int = 0
+
+    def __post_init__(self) -> None:
+        counts = [getattr(self, o.value) for o in ReclaimOutcome] + [self.scope_unavailable]
+        if any(type(c) is not int or c < 0 for c in counts):
+            raise ValueError("a reclaim report takes only non-negative int counts")
+
+    def count(self, outcome: ReclaimOutcome) -> int:
+        return int(getattr(self, ReclaimOutcome(outcome).value))
+
+
+__all__ = ["CleanupReport", "Disposition", "QuotaReport", "ReclaimOutcome", "ReclaimReport"]

@@ -33,6 +33,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import ENGINE_LOCALES, require_locale
 
 # Canonical Faker test prefix (Visa-shaped, 4xxx). The first digit is
 # the Major Industry Identifier (MII); 4 is the bank/financial MII.
@@ -94,7 +95,11 @@ class PanValidator:
         return _is_valid_pan(value)
 
 
+_SUPPORTED_LOCALES = ENGINE_LOCALES
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
+    require_locale("PAN", locale, _SUPPORTED_LOCALES)
     rest9 = int(rng.integers(0, 1_000_000_000))
     return _generate_pan_from_body(f"{rest9:09d}")
 
@@ -160,7 +165,7 @@ class PanAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_PAN_REGEX,
             blocklist_validators=("luhn_check",),

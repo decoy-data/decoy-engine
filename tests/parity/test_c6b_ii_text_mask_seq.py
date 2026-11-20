@@ -106,12 +106,7 @@ def test_a4_the_disposition_key_reports_text_mask_alone() -> None:
         {"detectors": ["email"]},
         {"unmatched_span_policy": "passthrough"},
         {"unmatched_span_policy": "replace_with_token", "token": "<X>"},
-        {"per_detector_strategy": {"ssn": "faker", "email": "faker"}},
-        {
-            "per_detector_strategy": {"ssn": "date_shift"},
-            "min_days": -10,
-            "max_days": 10,
-        },
+        {"per_detector_strategy": {"ssn": "fpe", "us_phone": "fpe"}},
     ],
     ids=[
         "default",
@@ -120,8 +115,7 @@ def test_a4_the_disposition_key_reports_text_mask_alone() -> None:
         "subset",
         "passthrough",
         "replace",
-        "faker",
-        "date_shift",
+        "fpe",
     ],
 )
 def test_a4_configs_match_the_oracle_on_the_seq_route(
