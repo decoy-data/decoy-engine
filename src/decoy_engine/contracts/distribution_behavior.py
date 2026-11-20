@@ -175,6 +175,11 @@ NULLS_NOT_PRESERVED: frozenset[str] = frozenset(
 )
 
 
+def static_strategy_names() -> frozenset[str]:
+    """Every strategy the static behaviour table names, for derivations that walk the table."""
+    return frozenset(_STATIC_BEHAVIOR)
+
+
 def distribution_behavior_for(
     strategy: str | None,
     provider_config: tuple[tuple[str, Any], ...] | None = None,

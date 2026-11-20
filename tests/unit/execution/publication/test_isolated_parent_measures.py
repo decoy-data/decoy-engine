@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from decoy_engine.execution import _isolated_worker, run_pipeline_isolated
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRequest
 from tests.unit.execution.publication._isolated_support import (
     ENGINE_VERSION,
@@ -85,7 +86,7 @@ def test_isolated_parent_measures_the_bound_bytes(
     assert result.outcome == "completed", result.error
     receipt = result.publication_receipt
     assert receipt is not None and receipt.outcome == "published"
-    assert entries(out) == [DESCRIPTOR_NAME, "t.parquet"]
+    assert entries(out) == [STAGE_MARKER, DESCRIPTOR_NAME, "t.parquet"]
     data = (out / "t.parquet").read_bytes()
     (artifact,) = receipt.artifacts
     assert (artifact.size, artifact.sha256, artifact.rows) == (
@@ -140,4 +141,4 @@ def test_isolated_publish_leaves_only_the_unit_and_its_lock(tmp_path: Path) -> N
     assert result.publication_receipt is not None  # non-vacuity: published through the parent
     assert result.publication_receipt.outcome == "published"
     assert entries(parent) == [".out.decoy-lock", "out"]
-    assert entries(out) == [DESCRIPTOR_NAME, "t.parquet"]
+    assert entries(out) == [STAGE_MARKER, DESCRIPTOR_NAME, "t.parquet"]

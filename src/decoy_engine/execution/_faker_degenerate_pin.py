@@ -21,7 +21,6 @@ unified routes (a cast alone leaves pandas' `pandas_type` float64/empty, so it a
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -32,6 +31,7 @@ from decoy_engine.execution.native._faker_deterministic_admission import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
     is_effective_deterministic_faker,
 )
+from decoy_engine.safe_output import attach_output_metadata
 
 # The string-output provider allowlist: only these providers draw guaranteed-string values, so
 # only they are pinned (a non-string-output provider like person_dob over an int source must keep
@@ -170,25 +170,6 @@ def apply_degenerate_faker_pin(
     return pin_frame_outputs(outputs, plan, sources, relationship_graph=relationship_graph)
 
 
-def _patched_pandas_metadata(
-    metadata: Mapping[bytes, bytes] | None, names: set[str]
-) -> dict[bytes, bytes] | None:
-    """Rewrite the `b"pandas"` schema-metadata entry of each column in `names` to the string
-    shape (`pandas_type: unicode`, `numpy_type: object`), leaving all other metadata untouched.
-    No-op when there is no pandas metadata (the chunked route)."""
-    if not metadata or b"pandas" not in metadata:
-        return dict(metadata) if metadata else None
-    meta = dict(metadata)
-    # from_pandas emits well-formed JSON here; a parse failure would be a pyarrow regression.
-    obj = json.loads(meta[b"pandas"])
-    for entry in obj.get("columns", []):
-        if isinstance(entry, dict) and entry.get("name") in names:
-            entry["pandas_type"] = "unicode"
-            entry["numpy_type"] = "object"
-    meta[b"pandas"] = json.dumps(obj).encode("utf-8")
-    return meta
-
-
 def pin_degenerate_to_string(table: pa.Table, columns: frozenset[str]) -> pa.Table:
     """Retype each column in `columns` whose output is all-null or empty to Arrow `string`,
     rewriting its `b"pandas"` metadata to the string shape. Value-bearing columns (already
@@ -203,14 +184,16 @@ def pin_degenerate_to_string(table: pa.Table, columns: frozenset[str]) -> pa.Tab
             degenerate.append(i)
     if not degenerate:
         return table
-    pinned_names: set[str] = set()
     for i in degenerate:
         field = table.schema.field(i)
-        pinned_names.add(field.name)
         column = table.column(i).cast(pa.string())
         table = table.set_column(
             i, pa.field(field.name, pa.string(), nullable=field.nullable), column
         )
-    return table.replace_schema_metadata(
-        _patched_pandas_metadata(table.schema.metadata, pinned_names)
+    # The sanitizer rebuilds the blob from the output schema: a column now `string` takes the
+    # string pair, so no hand patch of the source blob is left.
+    # Cast columns were rebuilt bare above; every other column is the source field.
+    schema = attach_output_metadata(
+        table.schema.remove_metadata(), table.schema.metadata, carried=table.schema.names
     )
+    return table.cast(schema)

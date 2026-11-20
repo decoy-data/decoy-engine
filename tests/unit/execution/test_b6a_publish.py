@@ -20,6 +20,7 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRefused
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6a_support as b6a
@@ -99,7 +100,7 @@ def test_nothing_is_visible_until_the_single_rename(
     assert len(seen["staging"]) == 1 and seen["staging"][0].startswith(
         "._decoy_publication_pending_"
     )
-    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, "t.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [STAGE_MARKER, DESCRIPTOR_NAME, "t.parquet"]
     assert b6a.leftovers(tmp_path) == []
     assert sink.calls == [("write_batches", "t"), ("commit",)]
 

@@ -96,7 +96,7 @@ from decoy_engine.quality.dp_schema import (
     DP_RELEASE_SCOPE,
     DP_SNAPSHOT_SCHEMA_VERSION,
 )
-from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION
+from decoy_engine.quality.snapshot import DISTRIBUTION_SNAPSHOT_SCHEMA_VERSION, MAX_NUMERIC_BINS
 
 if TYPE_CHECKING:
     # Annotation-only: the direct-`CarrierTable` path must not import pandas,
@@ -178,10 +178,14 @@ def _validate_fit_params(*, epsilon: float, delta: float, numeric_bins: int) -> 
                 "delta>=1 is not a meaningful failure probability."
             ),
         )
-    if not isinstance(numeric_bins, int) or isinstance(numeric_bins, bool) or numeric_bins < 2:
+    if (
+        not isinstance(numeric_bins, int)
+        or isinstance(numeric_bins, bool)
+        or not 2 <= numeric_bins <= MAX_NUMERIC_BINS
+    ):
         raise DpError(
             code=reasons.quality.DP_NUMERIC_BINS_INVALID,
-            message=f"numeric_bins must be an int >= 2; got {numeric_bins!r}.",
+            message=f"numeric_bins must be an int from 2 to {MAX_NUMERIC_BINS}; got {numeric_bins!r}.",
         )
 
 

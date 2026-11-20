@@ -109,6 +109,8 @@ class TestRunConfigOnlyChecks:
             "fpe_charset_config",
             # Row 26 (DE-03): faker-without-provider rejection.
             "faker_requires_provider",
+            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
+            "text_mask_strategies",
         )
 
     def test_raises_on_unknown_provider(self):

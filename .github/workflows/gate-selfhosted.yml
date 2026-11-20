@@ -14,6 +14,10 @@
 # sentry and licence steps. Runners are an owner ops step. The scripts stay bash 3.2 clean
 # because the Mac still runs them.
 #
+# Verdict: a dispatch also posts the commit status engine-gate/verdict on its sha (job
+# gate-verdict). required_checks.py verify requires it before a merge, so dispatch the gate once
+# per PR head; a later push is a new sha with no status. See docs/ci-regression-gate.md.
+#
 # Tree proof: a dispatch can ask for mode=full, the same whole suite a main push runs. When a main
 # push's tree is byte-identical to the head tree of a green full dispatch run (both shards), the
 # tree-proof job finds that run and the main gate is skipped; any doubt or lookup error runs it.
@@ -152,3 +156,32 @@ jobs:
           if [ "${{ matrix.shard }}" = 1 ]; then steps=; else steps="--steps tests"; fi
           if [ "$GATE_MODE" = full ]; then mode=--full; else mode=--baseline; fi
           flock ~/.cache/pytest-one.lock scripts/dev/gates.sh --keep-going $mode $steps --shard "${{ matrix.shard }}/2"
+
+  gate-verdict:
+    # Dispatch only, on a hosted runner. Posts the commit status `engine-gate/verdict` on the
+    # dispatched sha: success only when both gate shards succeeded. It is a status and not this
+    # job's check run because a skipped job reports a passing check run, which branch protection
+    # would count; a status that only a dispatch posts cannot be satisfied by a skip.
+    # scripts/dev/required_checks.py verify reads it; ci/required-jobs.toml names the context.
+    # always() so a red, cancelled or timed-out gate posts `failure` over an earlier `success`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: gate
+    if: "always() && github.event_name == 'workflow_dispatch' && github.repository_owner == 'decoy-data' && github.actor == 'louiskeep' && !github.event.repository.fork"
+    permissions:
+      statuses: write
+    steps:
+      - name: Post the verdict status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTEXT: engine-gate/verdict
+          STATE: ${{ needs.gate.result == 'success' && 'success' || 'failure' }}
+          MODE: ${{ inputs.mode == 'full' && 'full' || 'baseline' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state="$STATE" \
+            -f context="$CONTEXT" \
+            -f description="gate-selfhosted $MODE dispatch: $STATE" \
+            -f target_url="$RUN_URL"

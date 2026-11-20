@@ -20,7 +20,7 @@ import pytest
 
 from decoy_engine.checksums import validate as _checksum_validate
 from decoy_engine.detection.detectors import _SPAN_DETECTORS, Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import ConfigError, FpeUnencryptableError
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.text_mask import (
     _DEFAULT_TOKEN,
@@ -789,11 +789,11 @@ class TestMaskFpeDispatch:
         ssn = "123-45-6789"
         assert _mask_fpe(ssn, _SEED, "ssn") == "178-87-3971"
 
-    def test_unknown_detector_uses_digits_default(self) -> None:
-        """A detector absent from _FPE_CONFIG falls back to ("digits", None) and
-        still FPE-encrypts (kills default-key/charset mutants that break the fallback)."""
-        val = "12345678"
-        assert _mask_fpe(val, _SEED, "unknown_det_xyz") == "16863636"
+    def test_unknown_detector_has_no_digits_default(self) -> None:
+        """E-F0: a detector absent from _FPE_CONFIG no longer runs a digits cipher; the
+        compile check and `_mask_span` refuse the pair before this is reached."""
+        with pytest.raises(KeyError):
+            _mask_fpe("12345678", _SEED, "unknown_det_xyz")
 
     def test_all_out_of_charset_span_fails_closed(self) -> None:
         """An all-separator match has no in-charset content to FF1 at all (DE-01);
@@ -912,10 +912,10 @@ class TestMaskFakerDispatch:
     def test_location_maps_to_city(self) -> None:
         assert _mask_faker("Boston", _span_key(_SEED, "Boston"), "location") == "New Connieville"
 
-    def test_unknown_detector_falls_back_to_name(self) -> None:
-        """Unknown detector -> "name" default; returns a real name, never raises."""
-        out = _mask_faker("x", _span_key(_SEED, "x"), "unknown_det")
-        assert isinstance(out, str) and out.strip()
+    def test_unknown_detector_has_no_name_fallback(self) -> None:
+        """E-F0: a detector with no Faker method no longer writes a person name."""
+        with pytest.raises(KeyError):
+            _mask_faker("x", _span_key(_SEED, "x"), "unknown_det")
 
     def test_faker_seed_uses_first_four_bytes(self) -> None:
         """Same span_key -> same synthetic value (seed = span_key[:4])."""
@@ -948,8 +948,10 @@ class TestMaskDateShift:
         d = "2001-09-11"
         assert _mask_date_shift(d, _span_key(_SEED, d), -365, 365) == "2001-02-22"
 
-    def test_unparseable_date_passes_through(self) -> None:
-        assert _mask_date_shift("nope", _span_key(_SEED, "nope"), -365, 365) == "nope"
+    def test_unparseable_date_becomes_the_token(self) -> None:
+        """E-F0: an unparseable span comes back as the token, never its real text."""
+        assert _mask_date_shift("nope", _span_key(_SEED, "nope"), -365, 365) == _DEFAULT_TOKEN
+        assert _mask_date_shift("nope", _span_key(_SEED, "nope"), -365, 365, "[X]") == "[X]"
 
     def test_format_is_preserved(self) -> None:
         from datetime import datetime
@@ -991,9 +993,11 @@ class TestMaskSpanDispatch:
         sp = Span("ssn", 0, 11, "123-45-6789")
         assert _mask_span(sp, _SEED, "redact", {}) == _DEFAULT_TOKEN
 
-    def test_unknown_strategy_falls_back_to_redact(self) -> None:
+    def test_unknown_strategy_is_refused(self) -> None:
+        """E-F0: an unknown strategy name no longer falls to the redact token."""
         sp = Span("ssn", 0, 11, "123-45-6789")
-        assert _mask_span(sp, _SEED, "no_such_strategy", {"token": "[X]"}) == "[X]"
+        with pytest.raises(ConfigError):
+            _mask_span(sp, _SEED, "no_such_strategy", {"token": "[X]"})
 
     def test_fpe_all_out_of_charset_span_fails_closed(self) -> None:
         """An all-separator match has no in-charset content to FF1 (DE-01); this
