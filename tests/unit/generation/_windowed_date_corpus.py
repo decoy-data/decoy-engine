@@ -1,8 +1,11 @@
 """Parity corpus and reference oracle for `apply_windowed_date` (GEN-WINDOWED-BATCH).
 
-`reference_apply_windowed_date` is the per-row loop of origin/main 75fba3d855d71e3980a62afc3ce7f1187b72073d,
-copied here with its helpers so a change to the module cannot move the oracle. The corpus is
-data only; the tests live in `test_windowed_date_batch_parity.py`.
+`reference_apply_windowed_date` is a per-row loop with its own copies of the anchor parse and
+the shift, so a change to the module cannot move the oracle. Its offsets come from the pure
+Python `derive_index` on the canonical integer `2 * row + k`, one call per row and draw, with
+no kernel and no batching. Before S2 the oracle drew from a per-row numpy Generator; the
+digest in `test_windowed_date_batch_parity.py` moved with that change. The corpus is data
+only; the tests live in `test_windowed_date_batch_parity.py` and `test_windowed_date_offsets.py`.
 """
 
 from __future__ import annotations
@@ -19,8 +22,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from decoy_engine.determinism._derive import derive
-from decoy_engine.transforms.windowed_date import WindowedDateConfig, WindowedDateError
+from decoy_engine.determinism._derive import derive, derive_index
+from decoy_engine.generation.pool._canonicalize import _canonicalize_source
+from decoy_engine.transforms.windowed_date import (
+    WindowedDateConfig,
+    WindowedDateError,
+    WindowedDateRowNumberError,
+)
 
 _UTC = dt.timezone.utc
 _DATE_FMT = "%Y-%m-%d"
@@ -32,17 +40,29 @@ _ISO = re.compile(
 )
 
 
-def _sample_offset(rng: np.random.Generator, lo: int, hi: int, distribution: str) -> int:
+_ROW_LIMIT = 2**62
+
+
+def _ref_offset(seed: bytes, namespace: str, row: int, lo: int, hi: int, distribution: str) -> int:
+    """The offset of one global row, one `derive_index` call per draw."""
+    if row < 0 or row >= _ROW_LIMIT:
+        raise WindowedDateRowNumberError(
+            "windowed_date global row number is outside 0 to 2**62 - 1"
+        )
+    derive(seed, namespace, b"")  # the seed and namespace refusals, with `derive`'s own text
     span = hi - lo
     if span == 0:
         return lo
-    a = int(rng.integers(lo, hi + 1))
+
+    def draw(k: int) -> int:
+        source = _canonicalize_source(2 * row + k)
+        return lo + derive_index(seed, namespace, source, pool_size=span + 1)
+
+    first = draw(0)
     if distribution == "uniform":
-        return a
-    b = int(rng.integers(lo, hi + 1))
-    if distribution == "early":
-        return min(a, b)
-    return max(a, b)
+        return first
+    second = draw(1)
+    return min(first, second) if distribution == "early" else max(first, second)
 
 
 def _is_null(raw: Any) -> bool:
@@ -122,9 +142,9 @@ def reference_apply_windowed_date(
             result.append(None)
             continue
         anchor_ts = _parse(raw_anchor, int(i))
-        row_seed_int = int.from_bytes(derive(seed, namespace, int(i).to_bytes(8, "big"))[:8], "big")
-        row_rng = np.random.default_rng(row_seed_int)
-        offset = _sample_offset(row_rng, config.min_days, config.max_days, config.distribution)
+        offset = _ref_offset(
+            seed, namespace, int(i), config.min_days, config.max_days, config.distribution
+        )
         result.append(_shift(anchor_ts, offset, int(i)))
     return result
 
@@ -325,8 +345,11 @@ def build_cases() -> list[Case]:
 
     # Row numbering.
     n_main = 2000
-    for off in (65_536, 2**32, 2**63 - 1 - n_main):
+    for off in (65_536, 2**32, 2**62 - 1 - n_main):
         cases.append(Case(f"row_offset_{off}", _iso_main, row_offset=off, admitted=True))
+    # S2 narrowed the row domain from below 2**64 to below 2**62; these were successes in S1.
+    for off in (2**62 - 1000, 2**63 - 1 - n_main):
+        cases.append(Case(f"row_offset_{off}", _iso_main, row_offset=off, expect_error=True))
     cases.append(Case("row_offset_past_u64", _iso_main, row_offset=2**64 - 10, expect_error=True))
     cases.append(
         Case(

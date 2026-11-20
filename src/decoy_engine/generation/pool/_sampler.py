@@ -48,7 +48,7 @@ _COMPILED_INDEX_KERNEL_LOADED = False
 _REFERENCE_INDEX_KERNEL: IndexDerivationKernel | None = None
 
 
-def _compiled_index_kernel() -> IndexDerivationKernel | None:
+def compiled_index_kernel() -> IndexDerivationKernel | None:
     """The compiled `derive_index_batch` kernel if the native companion is
     installed, else None. Selected once. The reference kernel below is a
     byte-identical fallback for the None case (the index KAT proves equality),
@@ -67,7 +67,7 @@ def _compiled_index_kernel() -> IndexDerivationKernel | None:
     return _COMPILED_INDEX_KERNEL
 
 
-def _reference_index_kernel() -> IndexDerivationKernel:
+def reference_index_kernel() -> IndexDerivationKernel:
     """The pure-Python reference derivation: byte-identical to the former per-row
     loop by construction (same `_canonicalize_source` + `derive_index`)."""
     global _REFERENCE_INDEX_KERNEL
@@ -78,7 +78,7 @@ def _reference_index_kernel() -> IndexDerivationKernel:
     return _REFERENCE_INDEX_KERNEL
 
 
-def _validated_index_array(idx: Any, *, expected_len: int, pool_size: int) -> np.ndarray[Any, Any]:
+def validated_index_array(idx: Any, *, expected_len: int, pool_size: int) -> np.ndarray[Any, Any]:
     """Fail-closed checks on the kernel's own result before it indexes a pool.
 
     Adapted from the native masking gather (`execution/native/_chunk_masking.
@@ -135,7 +135,7 @@ def _derive_pool_indices(
     """
     try:
         raw_values = nonnull_source.tolist()
-        compiled = _compiled_index_kernel()
+        compiled = compiled_index_kernel()
         if compiled is not None:
             try:
                 arrow_values: pa.Array | None = pa.Array.from_pandas(nonnull_source)
@@ -148,7 +148,7 @@ def _derive_pool_indices(
                     idx = compiled.derive_index_batch(
                         arrow_values, mask_key=seed, namespace=namespace, pool_size=pool_size
                     )
-                    return _validated_index_array(
+                    return validated_index_array(
                         idx, expected_len=len(raw_values), pool_size=pool_size
                     )
                 except GenerationError as exc:
@@ -157,10 +157,10 @@ def _derive_pool_indices(
                     # (or raises the same per-value error the per-row path raised).
                     if exc.code != "native_type_not_admitted":
                         raise
-        idx = _reference_index_kernel().derive_index_batch(
+        idx = reference_index_kernel().derive_index_batch(
             raw_values, mask_key=seed, namespace=namespace, pool_size=pool_size
         )
-        return _validated_index_array(idx, expected_len=len(raw_values), pool_size=pool_size)
+        return validated_index_array(idx, expected_len=len(raw_values), pool_size=pool_size)
     except BaseException:
         del seed
         raise

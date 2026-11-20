@@ -48,16 +48,16 @@ partitionable.
   the out-of-core batched path, the delegation handlers, and the 9 identifier
   provider adapters).
 - 23 partitionable, 19 not.
-- Family breakdown: `source_keyed_hmac` 15, `numpy_pcg64` 11, `faker_seed_instance`
+- Family breakdown: `source_keyed_hmac` 16, `numpy_pcg64` 10, `faker_seed_instance`
   5, `python_mt19937` 7, `per_row_reseed` 2, `per_group_stream` 1,
   `gen_derive_context` 1.
 - GP2 (2026-09-17) added `gen.faker_pool_build` / `gen.faker_pool_selection`: a
   generation-local pool bridge for a closed allowlist of scalar `faker_type`
   columns (`generation/_faker_pool.py`), separate from the V2 PoolBuilder seam
   `gen.pool_build_faker` / `gen.pool_nondeterministic` serve.
-- 1 site flagged uncertain: `mask.windowed_date` (per-row seed keys on the
-  enumerate index, so partitionability depends on the native executor pinning a
-  global row number; see that section).
+- 1 site flagged uncertain: `mask.windowed_date` (the draw keys on the row number,
+  so partitionability depends on the native executor pinning a global row number;
+  see that section).
 
 ### Three keyed primitives
 
@@ -93,7 +93,7 @@ both named honestly in the catalog's `entropy_root` field.
 
 ---
 
-## Family: source_keyed_hmac (15 sites)
+## Family: source_keyed_hmac (16 sites)
 
 The HMAC/HKDF digest IS the pseudo-randomness. There is no RNG object and no
 stream position. Every site keys on the source value (or, for `code_set` in
@@ -242,14 +242,28 @@ valid `derive` IKM lengths. Wired into output via the provider registry
 `composite/_provider.py` imports `NpiDomain`). Mirrors: the other 8 adapters'
 `derive_value` call.
 
+### mask.windowed_date (UNCERTAIN)
+`transforms/windowed_date.py::_index_draw`, called from `_draw_offsets`. For global row
+number `r` and draw `k` (0, or 1 for the second draw of `early`/`late`) the offset is
+`min_days + derive_index(seed, namespace, encode_int(2 * r + k), pool_size=span + 1)`,
+one batch call per draw through the pool sampler's index kernel (compiled when the
+companion is installed, the reference kernel otherwise, same bytes). `early` takes the
+smaller of the two offsets, `late` the larger. A zero-width window draws nothing. The
+draw index is part of the source, never of the namespace, and `(r, k) -> 2r + k` is
+injective. `r` must be in `[0, 2**62)`, so `2r + 1` fits int64; anything else raises
+`windowed_date_row_number_out_of_range`. Before GEN-WINDOWED-BATCH S2 this site built a
+fresh `default_rng` per row from `derive(seed, namespace, i.to_bytes(8, "big"))`; output
+changed once, pre-GA, with `SEED_PROTOCOL_VERSION` unchanged. Partitionable ONLY if the
+native executor preserves the same global row number under partitioning. The out-of-core
+mirror (`execution/out_of_core/_mask_group_c.py`) already feeds a row index into the
+derive seed. Flagged uncertain for that reason.
+
 ---
 
-## Family: numpy_pcg64 (11 sites)
+## Family: numpy_pcg64 (10 sites)
 
 Draws from a `numpy.random.Generator` (`default_rng`, PCG64). Most are
-whole-column vector draws and are therefore NOT partitionable. The exception is
-`mask.windowed_date`, which builds a fresh per-row Generator seeded by an
-HMAC of the row index.
+whole-column vector draws and are therefore NOT partitionable.
 
 ### mask.shuffle
 `execution/_strategies/_shuffle.py:80`. Whole-column, multiset-preserving
@@ -263,18 +277,6 @@ drawn from the mask key: namespace `UNKEYED_SHUFFLE_NAMESPACE`, source
 `<len>:<current_table>/<len>:<nested_outer_column or column>`, the same one
 non-deterministic Faker's default selection namespace uses (`execution/_adapter.py`),
 and an empty `current_table` fails closed with `faker_positional_table_unknown`.
-
-### mask.windowed_date (UNCERTAIN)
-`transforms/windowed_date.py:209`. Per-row seed:
-`int.from_bytes(derive(seed, namespace, i.to_bytes(8, "big"))[:8], "big")`, then a
-fresh `default_rng(row_seed)` drawing `integers(min_days, max_days + 1)` (one
-draw for `uniform`, two for `early`/`late`). The seed keys on the enumerate
-index `i`, NOT the source value. This is partitionable ONLY if the native
-executor preserves the same global row index `i` under partitioning; if `i`
-resets per batch, the sequence diverges. The out-of-core mirror
-(`execution/out_of_core/_mask_group_c.py`) already feeds a row index into the
-derive seed, which is the proof of concept. Task 0.3 must pin `i` to a global
-row number. Flagged uncertain for that reason.
 
 ### gen.null_probability
 `generation/synthesize.py:516`.
@@ -626,7 +628,6 @@ from `DRAW_SITES`.
 | mask.joint_mask_null_fallback     | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.joint_mask_gen_row           | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.shuffle                      | numpy_pcg64         | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
-| mask.windowed_date                | numpy_pcg64         | yes           | seed_protocol_v7; numpy NEP-19 PCG64 |
 | mask.grouped_series_monotone_walk | per_group_stream    | no            | seed_protocol_v7; numpy NEP-19 PCG64 |
 | gen.formula_per_row               | per_row_reseed      | yes           | seed_protocol_v7 (GenDeriveContext); CPython MT + Faker |
 | gen.statistical_per_row           | per_row_reseed      | yes           | CPython Mersenne Twister (no numpy; bit-stable inverse-CDF) |
@@ -652,6 +653,7 @@ from `DRAW_SITES`.
 | mask.tokenize                     | source_keyed_hmac   | yes           | seed_protocol_v7 (fresh token; vault reuse is external state) |
 | mask.joint_mask_keyed_row         | source_keyed_hmac   | yes           | seed_protocol_v7 |
 | mask.text_mask_date_shift         | source_keyed_hmac   | yes           | seed_protocol_v7 |
+| mask.windowed_date                | source_keyed_hmac   | yes           | seed_protocol_v7; windowed_date keyed index draws (2026-11-20) |
 
 ## References
 

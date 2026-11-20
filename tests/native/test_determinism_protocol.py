@@ -123,18 +123,42 @@ class TestGroupedSeriesWalkEmulation:
 
 
 class TestWindowedDateEmulation:
-    def test_row_seed_matches_shipped_expression(self) -> None:
+    def test_draw_source_matches_shipped_canonicalization(self) -> None:
+        from decoy_engine.generation.pool._canonicalize import _canonicalize_source
+
+        p = provider_for("mask.windowed_date")
+        for r in (0, 1, 7, 1000, 2**31, 2**40 + 7, 2**62 - 1):
+            for k in (0, 1):
+                assert p.draw_source(r, k) == _canonicalize_source(2 * r + k)
+
+    def test_offsets_match_shipped_index_derivation(self) -> None:
         p = provider_for("mask.windowed_date")
         for i in (0, 1, 7, 1000):
-            expected = int.from_bytes(derive(_MASK_KEY, _NS, i.to_bytes(8, "big"))[:8], "big")
-            assert p.row_seed_int(_MASK_KEY, _NS, i) == expected
+            expected = -5 + derive_index(_MASK_KEY, _NS, p.draw_source(i, 0), pool_size=11)
+            got = p.partitioned_draw(
+                _MASK_KEY, _NS, i, min_days=-5, max_days=5, distribution="uniform"
+            )
+            assert got == expected
 
-    def test_row_generator_draw_matches(self) -> None:
+    def test_early_and_late_take_the_min_and_max_of_two_draws(self) -> None:
         p = provider_for("mask.windowed_date")
-        i = 42
-        expected = np.random.default_rng(p.row_seed_int(_MASK_KEY, _NS, i)).integers(-5, 6)
-        got = p.row_generator(_MASK_KEY, _NS, i).integers(-5, 6)
-        assert got == expected
+        for i in range(40):
+            draws = [
+                -5 + derive_index(_MASK_KEY, _NS, p.draw_source(i, k), pool_size=11) for k in (0, 1)
+            ]
+            early = p.partitioned_draw(
+                _MASK_KEY, _NS, i, min_days=-5, max_days=5, distribution="early"
+            )
+            late = p.partitioned_draw(
+                _MASK_KEY, _NS, i, min_days=-5, max_days=5, distribution="late"
+            )
+            assert (early, late) == (min(draws), max(draws))
+
+    def test_zero_width_window_draws_nothing(self) -> None:
+        p = provider_for("mask.windowed_date")
+        assert (
+            p.partitioned_draw(_MASK_KEY, _NS, 9, min_days=4, max_days=4, distribution="early") == 4
+        )
 
 
 class TestCategoricalEmulation:
@@ -411,12 +435,14 @@ class TestPartitionContract:
     def test_windowed_date_whole_column_equals_batched(self) -> None:
         p = provider_for("mask.windowed_date")
         n, k = 50, 17
-        whole = [p.row_seed_int(_MASK_KEY, _NS, i) for i in range(n)]
-        batched = [p.partitioned_draw(_MASK_KEY, _NS, i).integers(-5, 6) for i in range(n)]
-        whole_draws = [p.row_generator(_MASK_KEY, _NS, i).integers(-5, 6) for i in range(n)]
-        # The seed schedule keys on the GLOBAL index, so any split reproduces it.
-        assert whole[:k] + whole[k:] == whole
-        assert batched == whole_draws
+        kw = {"min_days": -5, "max_days": 5, "distribution": "early"}
+        whole = [p.partitioned_draw(_MASK_KEY, _NS, i, **kw) for i in range(n)]
+        batched = [p.partitioned_draw(_MASK_KEY, _NS, i, **kw) for i in range(n)]
+        # The draw keys on the GLOBAL index, so any split reproduces the whole column.
+        split = [p.partitioned_draw(_MASK_KEY, _NS, i, **kw) for i in range(k)] + [
+            p.partitioned_draw(_MASK_KEY, _NS, i, **kw) for i in range(k, n)
+        ]
+        assert batched == whole == split
 
     def test_faker_per_row_batches_concatenate(self) -> None:
         ctx = _gen_ctx()

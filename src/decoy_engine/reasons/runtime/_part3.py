@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -100,6 +100,7 @@ __all__ = [
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
     "WHEN_PREDICATE_READS_MASKED_COLUMN",
     "WINDOWED_DATE_POSITION_OUT_OF_DOMAIN",
+    "WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE",
 ]
 
 _d = _catalog.runtime("StrategyError")
@@ -418,4 +419,15 @@ SPOOL_DISK_FULL = _d(
     "The disk or quota for the local copy of a remote source is too small.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
     since="1.30.0",
+)
+
+_d = _catalog.runtime("decoy_engine.transforms.windowed_date")
+
+# The draw keys on `2 * row + draw`, so a row number must leave room for the odd draw in int64.
+# `windowed_date_position_out_of_domain` (the wider 0 to 2**64 - 1 position domain of the mask
+# route) is a different check: this one guards the draw's own domain.
+WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE = _d(
+    "windowed_date_row_number_out_of_range",
+    "A windowed_date global row number is below 0 or at or above 2**62.",
+    since=UNRELEASED,
 )

@@ -1,8 +1,10 @@
-"""Byte parity of the batched `apply_windowed_date` against the per-row base loop.
+"""Parity of the batched `apply_windowed_date` against the per-row oracle.
 
-The oracle and the corpus live in `_windowed_date_corpus.py`. The digest below was recorded from
-origin/main 75fba3d855d71e3980a62afc3ce7f1187b72073d before any fast-path code existed. A failure in
-this file is a stop, never an edit to the digest or the corpus.
+The oracle and the corpus live in `_windowed_date_corpus.py`. The digest below was recorded
+from origin/main 75fba3d855d71e3980a62afc3ce7f1187b72073d before any fast-path code existed
+(S1, byte-identical). S2 changed the offset derivation on purpose, so the digest and the
+oracle's draws moved once, in the S2 commit that moves the draw site. A failure in this file
+is a stop, never an edit to the digest or the corpus.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ from hypothesis import strategies as st
 
 from decoy_engine.determinism._derive import DeriveContext, derive
 from decoy_engine.generation._column_streams import WindowedDateStream
-from decoy_engine.generation.pool._sampler import _derive_pool_indices
 from decoy_engine.generators.derivation import with_table
 from decoy_engine.transforms import windowed_date as wd
 from decoy_engine.transforms.windowed_date import WindowedDateConfig, apply_windowed_date
@@ -35,7 +36,7 @@ from tests.unit.generation._windowed_date_corpus import (
     reference_apply_windowed_date,
 )
 
-BASE_DIGEST = "efd24e5746f20b24f5ced9a4656a2d4125f363e05742b641d60c4091fdae6d7b"
+DIGEST = "3f127bc623219b200c6737a1f06997799f800374c29257f23e6f9067be936ea0"
 
 CASES = build_cases()
 CASE_IDS = [c.name for c in CASES]
@@ -58,30 +59,8 @@ def test_batched_derive_matches_per_row(seed: bytes) -> None:
     assert batched == [derive(seed, ns, r.to_bytes(8, "big")) for r in rows]
 
 
-def test_pool_index_batch_is_not_byte_identical() -> None:
-    """Records that the pool index kernel cannot stand in for the per-row draw (S2 deletes it)."""
-    ns = "windowed_date/ev"
-    rows = _row_corpus()
-    span = 120
-    pool = _derive_pool_indices(
-        pd.Series(rows, dtype="int64"), seed=SEED8, namespace=ns, pool_size=span + 1
-    )
-    per_row = [
-        wd._sample_offset(
-            np.random.default_rng(
-                int.from_bytes(derive(SEED8, ns, r.to_bytes(8, "big"))[:8], "big")
-            ),
-            0,
-            span,
-            "uniform",
-        )
-        for r in rows
-    ]
-    assert [int(x) for x in pool] != per_row
-
-
 def test_output_digest_pinned() -> None:
-    assert corpus_digest(apply_windowed_date) == BASE_DIGEST
+    assert corpus_digest(apply_windowed_date) == DIGEST
 
 
 # --- The corpus against the oracle ------------------------------------------------------------
