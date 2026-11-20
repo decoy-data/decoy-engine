@@ -421,7 +421,7 @@ SPOOL_DISK_FULL = _d(
     since="1.30.0",
 )
 
-_d = _catalog.runtime("decoy_engine.transforms.windowed_date")
+_d = _catalog.runtime("WindowedDateRowNumberError")
 
 # The draw keys on `2 * row + draw`, so a row number must leave room for the odd draw in int64.
 # `windowed_date_position_out_of_domain` (the wider 0 to 2**64 - 1 position domain of the mask

@@ -63,7 +63,7 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24zb: mask.date_shift metadata (call site, seed text, notes) only.
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
-_CATALOGUE_DIGEST = "44d5ba9bc05e7282a2c2140ae2c4e950d2bfba1b228a88ec7411d3fc6c1b55ca"
+_CATALOGUE_DIGEST = "8b361f346ee022a4597a80190cc040db92cd27f18af9fb1edd297151b0803c06"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -126,7 +126,7 @@ _ENTRY_DIGESTS = [
     "707f1f95424d98e829d7a6257d344515d801f77f6b52a7733e300ebd445ac4d8",  # mask.text_mask_date_shift
     "568b337638c888c7dfd5cc616c5924d9827319202d43382ea821a884efe401c4",  # mask.text_mask_faker
     "2c7733e97f6e0dab2366a8d80b147025b26b19cf8c358fe51a0e815683476efc",  # mask.grouped_series_monotone_walk
-    "c9670fb41fc4918305aed08308b0cb1e7f388c65f3e730997e5ff422df85b14e",  # mask.windowed_date
+    "be681b808e8b20697ba82f1eca89d9b9e9973bb56c16fa54de62c35bdc5b664b",  # mask.windowed_date
     "b22ab37e973ad02b943c741bf53e598e9e213a56df6e184144ad95adeca516fd",  # gen.faker_per_row
     "c26b56c364cecf593b15abddab6bb7a4ca9ada7a578b0748f714e4637cd4c7fa",  # gen.categorical
     "83ea59b060a74b12e6c29c84f33178e809babeebdd3856deb5ff5257652061ce",  # gen.reference
