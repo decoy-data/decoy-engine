@@ -150,6 +150,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("profile/_csv_reader.py", "source_refusal"): _HELPER,
     ("publication/_publish.py", "_receipt"): _HELPER,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _HELPER,
+    ("quality/snapshot.py", "_check_int_param"): _HELPER,
     # -- re-wraps of an already-registered exception code ------------------------------------
     ("execution/_chunked_when_guard.py", "PositionalWhenGuard.check_schema"): _REWRAP,
     ("execution/native/_fpe_route.py", "fpe_fail_closed_error"): _REWRAP,

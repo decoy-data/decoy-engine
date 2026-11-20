@@ -75,6 +75,8 @@ WRITE_ALLOWLIST: dict[tuple[str, str], frozenset[str]] = {
     ("benchmark.yml", ""): frozenset({"pull-requests"}),  # posts the regression comment
     ("docs.yml", "deploy"): frozenset({"pages", "id-token"}),  # Pages deploy, main push only
     ("native-companion-release.yml", "sign-publish"): frozenset({"contents"}),  # makes the release
+    # Posts the engine-gate/verdict commit status; dispatch only, owner-guarded (owner 2026-11-17).
+    ("gate-selfhosted.yml", "gate-verdict"): frozenset({"statuses"}),
 }
 # The one self-hosted job that may bootstrap without the lock-env action: the merge gate, which runs
 # on any decoy-gate runner (the Mac or the Linux GCP runner).

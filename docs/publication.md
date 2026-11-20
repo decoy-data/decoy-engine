@@ -74,6 +74,24 @@ ambient policy, a directory the engine cannot open ends the walk only when anoth
 read is refused, because it may be the remains of an earlier attempt (named limit L1u). The
 operator restores its owner bits.
 
+### Stage liveness lock and stage marker (F26 E1)
+
+Before a `publication` stage is handed to its caller, both POSIX policies:
+
+- take `flock(LOCK_SH)` on the stage's own directory descriptor and hold it until the stage is
+  bound, its `abort()` has removed the name, or the transaction is collected. The call blocks
+  (a cleaner holding the exclusive lock is waited for) and retries `EINTR`; any other `OSError`
+  leaves the stage unlocked and the run carries on, publishing the same unit;
+- write `.decoy-publication-stage`, a `0600` regular file holding `decoy-publication-stage-v1:`,
+  the stage name's 12-hex token and a newline, and read it back through the one proof reader.
+  A marker that does not prove fails the `begin` and the stage is removed.
+
+The marker is reserved metadata: it stays inside the bound unit, is fsynced with it, and is not
+listed in the descriptor (a file left in the stage but not named is bound without being described,
+above). Its leading dot keeps Arrow and pandas directory reads from treating it as a table. A
+later `decoy cleanup` (F26) needs both: a stage whose lock it cannot take exclusively is live, and
+only a stage with a valid marker can be removed. The win32 arm takes no lock and writes no marker.
+
 Other labels (`table_sink`, `hold`, `quarantine` and the rest) publish as before.
 
 ## Destination lock and reading a bound unit
@@ -386,9 +404,10 @@ out-of-core routes the pipeline rebuilds the route's result and the field is `No
 receipt is on the sink the caller passed (`sink.receipt`). A route whose commit raises fails
 the run with that error, and nothing of this attempt is bound.
 
-**On disk.** Every unit the reference sink publishes holds `_decoy_publication.json` beside
-its Parquet files, and the target's parent holds the empty lock file `.<leaf>.decoy-lock`
-(never removed). A consumer that lists every file of an output directory sees both. Unit
+**On disk.** Every unit the reference sink publishes holds `_decoy_publication.json` and the reserved
+stage marker `.decoy-publication-stage` beside its Parquet files, and the target's parent holds
+the empty lock file `.<leaf>.decoy-lock` (never removed). A consumer that lists every file of
+an output directory sees all of these. Unit
 files are `0600` and unit directories `0700`.
 
 ## The isolated route on `publish_unit`
@@ -405,7 +424,8 @@ vault is refused with `ValueError` before anything runs.
   envelope, not as a file. When the child reports `completed`, the parent, not the child,
   decides what is staged: the envelope's table names must each be one path component (no
   separator, no `..`, no repeat), and the stage must hold exactly those files, each a regular
-  file. A child-written `_decoy_publication.json`, an extra file, a directory, a link or a
+  file, besides the reserved `.decoy-publication-stage` marker the parent wrote
+  (`fileaccess.stage_entries` lists a stage without it). A child-written `_decoy_publication.json`, an extra file, a directory, a link or a
   missing table is refused (`failed`, `publication_failed`) and nothing is bound. The parent
   sets the stage to `0700` and each admitted file to `0600` through the entry's own descriptor
   (no link followed) before reading it; a file its owner cannot read is refused, not repaired.
@@ -444,8 +464,10 @@ admits and reads the tables back the same way, and nothing is published.
   root) is durable by deployment, as is a directory another uid owns and left unsynced. No macOS
   CI row runs these paths yet.
 - **L2, stages left by a killed attempt.** A SIGKILL leaves the attempt's
-  `._decoy_publication_pending_<token>` stage beside the destination. Nothing reclaims it: it is
-  never read as output and never bound, and each attempt uses a fresh token, so it blocks nothing.
+  `._decoy_publication_pending_<token>` stage beside the destination. It is never read as output
+  and never bound, and each attempt uses a fresh token, so it blocks nothing. A caller can find it
+  with `fileaccess.reclaim_stages` (F26, below the file-access policy's "Reclaiming dead stages");
+  `publish_unit` itself never reclaims.
 - **The destination lock.** The lock name adds 12 bytes to the leaf (`.` before it,
   `.decoy-lock` after it), so a publication destination leaf longer than 243 bytes
   (`MAX_PUBLICATION_LEAF_BYTES` in `fileaccess/_component.py`, 255 less those 12) is refused up

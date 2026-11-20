@@ -26,6 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import PublicationFailed, PublicationRefused, SinkState
 from decoy_engine.reasons import CleanupState
 from tests.unit.execution.publication._sink_support import (
@@ -164,7 +165,7 @@ def test_sink_transition_cells_sealed_commit_does_no_io(
             monkeypatch.setattr(out, name, spy)
         assert sink.commit() == receipt
         assert calls == []
-    assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR]
+    assert sorted(os.listdir(tmp_path / "out")) == sorted([DESCRIPTOR, STAGE_MARKER])
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -230,11 +231,14 @@ def test_sink_transition_cells_writing_ok_returns_to_open(policy: str, tmp_path:
         assert sink.state is S.OPEN
         sink.write("orders", table("B"))
         sink.commit()
-    assert sorted(os.listdir(tmp_path / "out")) == [
-        DESCRIPTOR,
-        "customers.parquet",
-        "orders.parquet",
-    ]
+    assert sorted(os.listdir(tmp_path / "out")) == sorted(
+        [
+            DESCRIPTOR,
+            STAGE_MARKER,
+            "customers.parquet",
+            "orders.parquet",
+        ]
+    )
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -463,4 +467,6 @@ def test_sink_transition_cells_an_invalid_name_is_refused_before_the_state_moves
         assert sink.state is S.OPEN
         sink.write("customers", table("A"))
         sink.commit()
-    assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR, "customers.parquet"]
+    assert sorted(os.listdir(tmp_path / "out")) == sorted(
+        [DESCRIPTOR, STAGE_MARKER, "customers.parquet"]
+    )
