@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, ReasonCode, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, ReasonCode, RetryClass
 
 __all__ = [
     "DISMISS_REFUSED",
@@ -86,7 +86,7 @@ def _review(code: str, summary: str) -> ReasonCode:
         phases=(Phase.CONFIGURATION,),
         outcome=Outcome.CONFIGURATION,
         retry=RetryClass.CONFIGURATION_REPAIR,
-        since=UNRELEASED,
+        since="1.31.0",
     )
 
 

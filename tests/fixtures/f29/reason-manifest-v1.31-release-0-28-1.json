@@ -1,0 +1,187 @@
+{
+  "entries": [
+    {
+      "code": "entry_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A column entry names an unknown strategy or option, or gives an option the wrong type or a value outside its choices, or leaves a required setting out.",
+      "symbol": "ENTRY_INVALID"
+    },
+    {
+      "code": "key_column_not_join_safe",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A column of a declared relationship cannot take a strategy that is not join-safe, or be dropped.",
+      "symbol": "KEY_COLUMN_NOT_JOIN_SAFE"
+    },
+    {
+      "code": "dismiss_refused",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "post_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A finding that failed a mask check, or that came from source-identity evidence, cannot be dismissed.",
+      "symbol": "DISMISS_REFUSED"
+    },
+    {
+      "code": "review_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "post_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "Decisions for findings on one column propose different entries.",
+      "symbol": "REVIEW_CONFLICT"
+    },
+    {
+      "code": "review_integrity_off",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "post_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A dismissal needs the post-scan integrity checks turned on in the config.",
+      "symbol": "REVIEW_INTEGRITY_OFF"
+    },
+    {
+      "code": "review_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "Two review decisions name the same column.",
+      "symbol": "REVIEW_DUPLICATE"
+    },
+    {
+      "code": "review_empty_table",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "The review drops every column of a table, and a mask table needs at least one column.",
+      "symbol": "REVIEW_EMPTY_TABLE"
+    },
+    {
+      "code": "review_stale",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A confirmed suggestion no longer matches the starter config's suggestion for that column.",
+      "symbol": "REVIEW_STALE"
+    },
+    {
+      "code": "review_unknown_column",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "ReviewInputError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.31.0",
+      "summary": "A review decision names a column that is not in the starter config.",
+      "symbol": "REVIEW_UNKNOWN_COLUMN"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.31.0"
+}

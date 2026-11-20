@@ -25,7 +25,7 @@ from tests.security.test_f29_remediation import _decide
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _subset_run_support as subset_sup
 from tests.unit.execution._auto_chunk_support import NEEDS_COMPANION
-from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _run
+from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _fail_row, _run
 from tests.unit.execution.run_stream import _support as rs
 from tests.unit.execution.test_auto_chunk_routing import _single_column_job
 
@@ -36,7 +36,6 @@ MODEL_ASKS = {
         "post_scan": {"integrity": True, "detectors": ["regex", "ner"], "ner_findings": "fail"}
     },
 }
-FAIL = {"severity": "fail"}
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +49,10 @@ def _code(reason: Any) -> str | None:
 
 def _failing_suite(table: str, column: str) -> Any:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        finding = {"table": table, "column": column, "detector_id": "email"}
-        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
+        return {
+            "schema_version": "post-scan-integrity/v3",
+            "residual_pii": [_fail_row(table, column)],
+        }
 
     return failing
 
