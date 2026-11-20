@@ -223,7 +223,8 @@ def _generated_type(
 ) -> pa.DataType | None:
     """The type of the values a column's generator makes, through its reference root.
 
-    A sequence or faker root is its candidate type while it is in *numeric*, else text.
+    A sequence or faker root is its candidate type while it is in *numeric*, else text. A provider
+    root is always text (`config.generated_arrow_type`).
     """
     root = reference_root(tables, key)
     if root in numeric:
@@ -256,6 +257,21 @@ def reader_types(
         dtype = _generated_type(cols, tables, base, base.keys(), key)
         if dtype is not None:
             out[key] = dtype
+    return out
+
+
+def provider_text_columns(config: Mapping[str, Any]) -> dict[str, set[str]]:
+    """``{table: {column}}`` for each generated column whose root is a ``provider`` column.
+
+    Arrow cannot infer a type from zero rows or all-null rows, so the table build types these
+    columns as text explicitly, the type the plan reports for them.
+    """
+    tables, cols = _generate_columns(config)
+    out: dict[str, set[str]] = {}
+    for key in cols:
+        root = cols.get(reference_root(tables, key))
+        if root is not None and root.get("type") == "provider":
+            out.setdefault(key[0], set()).add(key[1])
     return out
 
 

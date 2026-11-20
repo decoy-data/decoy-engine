@@ -161,7 +161,7 @@ def test_none_and_en_us_build_the_same_pool_under_the_same_seeds() -> None:
         ),
         fallback_seed=1,
     )
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
 
     values_none, exact_none, custom_none = _faker_pool.build_pool_values(
         "first_name_female", None, build_seed, 50, {}

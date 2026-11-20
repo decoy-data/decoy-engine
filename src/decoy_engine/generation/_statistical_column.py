@@ -13,13 +13,18 @@ Behavior is unchanged: this is a pure code move, not a rewrite.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.generation.kinds import cast_output_columns, conditional_tables, output_types
+from decoy_engine.generation.kinds import (
+    cast_output_columns,
+    conditional_tables,
+    lookup_digests,
+    output_types,
+)
 from decoy_engine.generation.pool import DetailValue, QualityWarning, emit_generation_warning
 from decoy_engine.generation.statistical import (
     StatisticalSpec,
@@ -100,6 +105,7 @@ def arrow_table(
     table_name: str,
     statistical_specs: Mapping[tuple[str, str], StatisticalSpec],
     columns: Sequence[Mapping[str, Any]] | None = None,
+    text_columns: Collection[str] = (),
 ) -> pa.Table:
     """The table for `data`, with each fitted statistical column typed by its spec.
 
@@ -109,7 +115,8 @@ def arrow_table(
     Inference over drawn values would give `null` to a fitted column whose rows are all None
     (a small table, a narrow window) and `int64` to the same column in a full run, so the type
     comes from the spec. Every other column keeps Arrow's inference. Runs after the generic
-    `null_probability` post-pass, so a column nulled to the last row keeps its type too.
+    `null_probability` post-pass, so a column nulled to the last row keeps its type too. A column
+    of `text_columns` (a provider column, or a reference to one) is text for the same reason.
     """
     from decoy_engine.generation.statistical import cell_format_arrow_type
 
@@ -120,6 +127,8 @@ def arrow_table(
         spec = statistical_specs.get((table_name, name))
         if name in declared:
             arrays[name] = pa.array(values, type=declared[name].arrow_type)
+        elif name in text_columns:
+            arrays[name] = pa.array(values, type=pa.string())
         elif spec is not None and spec.cell_format is not None:
             arrays[name] = pa.array(values, type=cell_format_arrow_type(spec))
         else:
@@ -159,6 +168,36 @@ def warn_on_table_fidelity(
         snapshot_artifacts=snapshot_artifacts,
         on_warning=on_warning,
     )
+
+
+def null_seed_digests(
+    col: Mapping[str, Any],
+    table_name: str,
+    pinned: bool,
+    statistical_specs: Mapping[tuple[str, str], StatisticalSpec] | None,
+    reference_fanouts: Mapping[tuple[str, str], Any] | None,
+    lookup_lists: Mapping[tuple[str, str], Any] | None,
+) -> dict[tuple[str, str], str] | None:
+    """The content digests the null mask's seed derivation takes instead of reopening a file.
+
+    Pinned plans store `snapshot_file` as `sha256:<digest>`, not a path. Passing the digest keeps
+    `for_column` from trying to open that string as a file. The ordinary path gets None and
+    derives the null seed exactly as before.
+    """
+    key = (table_name, str(col.get("name")))
+    kind = col.get("type")
+    spec = (statistical_specs or {}).get(key)
+    digests: dict[tuple[str, str], str] | None = None
+    if pinned and kind == "statistical" and spec is not None and spec.snapshot_digest:
+        digests = {("statistical", "snapshot_file"): f"sha256:{spec.snapshot_digest}"}
+    if kind == "reference" and col.get("distribution") == "fitted":
+        # The null mask derives its seed through `for_column` too; the pinned digest keeps
+        # it from reopening `snapshot_file`. A missing spec already raised in `_reference`.
+        fanout = (reference_fanouts or {}).get(key)
+        digests = {("reference", "snapshot_file"): fanout.seed_digest} if fanout else None
+    elif kind == "lookup":
+        digests = lookup_digests(col, (lookup_lists or {}).get(key))
+    return digests
 
 
 def warn_on_unseen_parents(

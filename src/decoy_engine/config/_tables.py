@@ -295,6 +295,7 @@ class GenerateColumnConfig(BaseModel):
         "constant",
         "distribution",
         "lookup",
+        "provider",
     ]
 
     # GP2 (Codex round-2 spec A/G7): the ONLY validated `type: faker` knob.
