@@ -328,6 +328,10 @@ jobs:
       # (skipif no companion), so this is the one job that runs them.
       - name: native FPE (FF1) on both routes (companion-present case)
         run: pytest tests/native/test_c6a_fpe_chunked.py tests/native/test_fpe_ext_loader.py tests/physical/test_shadow_fpe.py -v --tb=short
+      # date_shift on the chunked native lane (parity, admission, type errors, jitter window):
+      # every case is companion-gated and skips elsewhere, so this is the one job that runs them.
+      - name: date_shift chunked native lane (companion-present case)
+        run: pytest tests/native/test_chunked_date_shift_parity.py tests/native/test_chunked_date_shift_admission.py tests/native/test_chunked_date_shift_types_errors.py tests/native/test_date_shift_jitter_chunked.py -v --tb=short
       # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
       # it, so this is the one job that can prove the chunked route leaks no source metadata.
       # A skip here would hide that, so the step fails on any SKIPPED line and on an empty
