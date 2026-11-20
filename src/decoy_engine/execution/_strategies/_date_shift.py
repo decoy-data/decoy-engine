@@ -80,7 +80,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.date_preserve import preserve_set_from_config
-from decoy_engine.transforms.date_shift import _detect_format
+from decoy_engine.transforms.date_shift import _detect_format, shift_window
 
 
 class DateShiftStrategyHandler:
@@ -115,10 +115,7 @@ class DateShiftStrategyHandler:
                 message=f"column {column!r} uses date_shift but has no namespace.",
             )
         cfg = provider_config_to_dict(plan.provider_config)
-        min_days = int(cfg.get("min_days", -365))
-        max_days = int(cfg.get("max_days", 365))
-        if min_days > max_days:
-            min_days, max_days = max_days, min_days
+        min_days, max_days = shift_window(cfg)
         range_size = max_days - min_days + 1
         try:
             preserve = preserve_set_from_config(cfg)
