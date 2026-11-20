@@ -1072,10 +1072,11 @@ No `SEED_PROTOCOL_VERSION` change.
   run records `quality_metrics["execution"]["native_threads"] = {"count": int, "source": str}`,
   where `source` is one of `explicit`, `auto` or `auto_fallback` (a closed set). `count` is the
   requested value; the native kernels apply at most their own knee (4 threads), which
-  `auto_chunk["native_thread_clamp"]` reports. `run_pipeline_isolated` (and so
-  `run_job_with_governor`) with a `mem_cap_bytes` and no `native_threads` forwards
-  `native_threads=1`, because the Rust shared pool is sized to the host's cores and its thread
-  stacks count against RLIMIT_DATA; that run records source `explicit`. The thread count now
+  `auto_chunk["native_thread_clamp"]` reports. `run_pipeline_isolated` with a `mem_cap_bytes`
+  and no `native_threads` forwards `native_threads=1`, because the Rust shared pool is sized to
+  the host's cores and its thread stacks count against RLIMIT_DATA. `run_job_with_governor` with
+  no `native_threads` also forwards 1, because a governed job shares the host with other slots.
+  Both runs record source `explicit`. The thread count now
   differs by host for library callers, as it already does for the CLI. Re-pin checklist: the
   platform passes its own thread grant; check any platform call that omits `native_threads`.
 
