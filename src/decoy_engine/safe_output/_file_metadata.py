@@ -276,21 +276,21 @@ def attach_output_metadata(schema: pa.Schema, meta: Mapping[bytes, bytes] | None
 
     Field metadata is left as it is: this is the entry for in-memory tables, where a passthrough
     column is the source field by contract. The writers strip field metadata."""
-    key = tuple(meta.items()) if meta else ()
-    kept = _kept_metadata(key, tuple((f.name, f.type) for f in schema))
+    source_items = tuple(meta.items()) if meta else ()
+    kept = _kept_metadata(source_items, tuple((f.name, f.type) for f in schema))
     return schema.with_metadata(dict(kept)) if kept else schema.remove_metadata()
 
 
 @lru_cache(maxsize=256)
 def _kept_metadata(
-    key: tuple[tuple[bytes, bytes], ...], columns: tuple[tuple[str, pa.DataType], ...]
+    source_items: tuple[tuple[bytes, bytes], ...], columns: tuple[tuple[str, pa.DataType], ...]
 ) -> tuple[tuple[bytes, bytes], ...]:
     """The sanitized schema metadata for one (source metadata, output schema) pair, computed once.
 
     The out-of-core builders call `attach_output_metadata` for every batch; the blob only changes
     with the source metadata or the output schema, so a table pays the JSON rebuild once."""
     bare = pa.schema([pa.field(name, typ) for name, typ in columns])
-    kept = sanitized_schema_metadata(dict(key), for_schema=bare)
+    kept = sanitized_schema_metadata(dict(source_items), for_schema=bare)
     return tuple(kept.items()) if kept else ()
 
 
