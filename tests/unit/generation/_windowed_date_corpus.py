@@ -20,7 +20,12 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine.determinism._derive import derive
-from decoy_engine.transforms.windowed_date import WindowedDateConfig, WindowedDateError
+from decoy_engine.transforms.windowed_date import (
+    WindowedDateAnchorRangeError,
+    WindowedDateConfig,
+    WindowedDateError,
+    WindowedDateOffsetRangeError,
+)
 
 _UTC = dt.timezone.utc
 _DATE_FMT = "%Y-%m-%d"
@@ -51,44 +56,46 @@ def _is_null(raw: Any) -> bool:
     return isinstance(raw, float) and raw != raw
 
 
+def _names_a_real_instant(raw: str) -> bool:
+    try:
+        dt.date(int(raw[0:4]), int(raw[5:7]), int(raw[8:10]))
+    except ValueError:
+        return False
+    clock = [int(part) for part in re.findall(r"\d+", raw[11:19])]
+    return all(value < top for value, top in zip(clock, (24, 60, 60), strict=False))
+
+
 def _parse(raw: Any, position: int) -> pd.Timestamp:
     ts: pd.Timestamp
     failed = False
     if isinstance(raw, str):
         if _ISO.match(raw) is None:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is not an ISO date or datetime "
-                "without a timezone"
-            )
+            raise WindowedDateError()
         try:
             ts = pd.Timestamp(raw)
         except (ValueError, OverflowError):
             failed = True
         if failed:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is not a valid calendar date"
-            ) from None
+            # pandas refuses an impossible date and an in-calendar date beyond its bounds with
+            # one error; the stdlib calendar tells them apart.
+            if _names_a_real_instant(raw):
+                raise WindowedDateAnchorRangeError() from None
+            raise WindowedDateError() from None
     elif isinstance(raw, (pd.Timestamp, dt.datetime, dt.date)):
         if getattr(raw, "tzinfo", None) is not None:
-            raise WindowedDateError(f"windowed_date anchor at row {position} carries a timezone")
+            raise WindowedDateError()
         try:
             ts = pd.Timestamp(raw)
         except (ValueError, OverflowError):
             failed = True
         if failed:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is outside the supported range"
-            ) from None
+            raise WindowedDateAnchorRangeError() from None
     else:
-        raise WindowedDateError(
-            f"windowed_date anchor at row {position} has unsupported type {type(raw).__name__}"
-        )
+        raise WindowedDateError()
     if ts is pd.NaT or pd.isna(ts):
-        raise WindowedDateError(f"windowed_date anchor at row {position} parses to NaT")
+        raise WindowedDateError()
     if not (_MIN <= ts <= _MAX):
-        raise WindowedDateError(
-            f"windowed_date anchor at row {position} is outside the supported range"
-        )
+        raise WindowedDateAnchorRangeError()
     return ts
 
 
@@ -99,9 +106,7 @@ def _shift(anchor: pd.Timestamp, offset: int, position: int) -> str:
             return str(out.strftime(_DATE_FMT))
     except (OverflowError, ValueError):
         pass
-    raise WindowedDateError(
-        f"windowed_date result at row {position} is outside the supported range"
-    ) from None
+    raise WindowedDateOffsetRangeError() from None
 
 
 def reference_apply_windowed_date(
