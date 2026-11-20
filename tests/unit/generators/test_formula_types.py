@@ -127,13 +127,16 @@ def test_every_generate_type_has_an_example_or_a_reason() -> None:
 
 def test_a_provider_column_is_planned_as_text_and_a_text_formula_runs_on_it() -> None:
     cols = [
-        {"name": "x", "type": "provider", "provider": "random_int_range"},
+        {"name": "x", "type": "provider", "provider": "random_int_range", "null_probability": 0.3},
         fml("y", "'ORD-' + x", ["x"]),
     ]
     table = compile_and_generate(cfg(cols, rows=40))["t"]
     assert table.schema.field("x").type == pa.string()
-    for x, y in zip(table.column("x").to_pylist(), table.column("y").to_pylist(), strict=True):
-        assert y == "ORD-" + x
+    xs = table.column("x").to_pylist()
+    assert None in xs
+    # strategies.md formula row rules: a missing cell in a non-number reference binds as "".
+    for x, y in zip(xs, table.column("y").to_pylist(), strict=True):
+        assert y == "ORD-" + (x or "")
 
 
 def _check_fidelity(cols: list[dict[str, Any]], null_p: float, tables: list[dict] | None = None):
