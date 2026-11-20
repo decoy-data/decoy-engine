@@ -1355,7 +1355,10 @@ follows the rule in the next paragraph, whatever its role. A name that pandas wo
 read as a column is reserved and refused as a reference: the numexpr function
 names (`sin`, `abs`, `where` and the rest), the pandas eval names (`inf`, `nan`,
 `index`, `columns`, `Timestamp`, `datetime`, `list`, `tuple`) and the Python
-keywords. Rename the column or compare it through another one.
+keywords. Nine more words are held back for later grammar and are refused too: `null`,
+`true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`, `endswith`. Matching
+is exact and case-sensitive, so `NULL` and `Between` stay ordinary columns. Rename the
+column or compare it through another one.
 
 An integer column compares exactly on every route, including values and literals beyond
 2**53, and a blank integer cell is treated as `NaN`: `!=`, `not in` and `not (...)` around a
