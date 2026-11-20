@@ -1008,6 +1008,7 @@
             "properties": {
               "column": {},
               "determinism": {},
+              "from_table": {},
               "name": {},
               "null_probability": {},
               "op": {},
@@ -1016,7 +1017,8 @@
                 "type": "null"
               },
               "type": {},
-              "unique": {}
+              "unique": {},
+              "via": {}
             },
             "required": [
               "op",
