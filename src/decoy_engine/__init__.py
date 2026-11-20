@@ -36,7 +36,6 @@ Public exceptions (also in decoy_engine.errors):
     DecoyError, ConfigError, PipelineValidationError,
     ConnectorError, ConnectorAuthError, LicenseError, LicenseExpiredError,
     FlagPauseSignal, FixedWidthParseError
-
 Anything not in __all__, and anything under decoy_engine.internal, is private.
 
 V2 NOTE: the V1 surface (``Masker``, ``DataGenerator``, ``run_graph``) was removed in S22; the
