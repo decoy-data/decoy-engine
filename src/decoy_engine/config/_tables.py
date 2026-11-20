@@ -43,6 +43,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError, ValidationError
 
 from decoy_engine import reasons
+from decoy_engine._field_names import repeated_names
 from decoy_engine.config._generate_option_catalog import POOLED_TYPE, closed_key_schema
 from decoy_engine.config._generate_options import option_problems, problem_details
 from decoy_engine.config._generate_unique import (
@@ -391,19 +392,25 @@ class TableConfig(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _generate_names_unique(self) -> TableConfig:
-        """Two generate columns with one name would silently drop one at run time."""
-        seen: set[str] = set()
+    def _column_names_unique(self) -> TableConfig:
+        """One name twice in a table's column list: the later entry would win on every lane.
+
+        For a mask table that silently drops the user's mask entry and ships the column
+        unmasked; for a generate table it drops a generated column. Exact-name match, the
+        same rule the source-schema guards use (`repeated_names`).
+        """
         problems: list[tuple[tuple[str | int, ...], str]] = []
-        for index, col in enumerate(self.generate_columns):
-            if col.name in seen:
-                problems.append(
-                    (
-                        ("generate_columns", index, "name"),
-                        str(reasons.config.GENERATE_COLUMN_DUPLICATE),
-                    )
-                )
-            seen.add(col.name)
+        for field, code in (
+            ("columns", reasons.config.COLUMN_DUPLICATE),
+            ("generate_columns", reasons.config.GENERATE_COLUMN_DUPLICATE),
+        ):
+            entries = getattr(self, field)
+            repeated = repeated_names(c.name for c in entries)
+            seen: set[str] = set()
+            for index, col in enumerate(entries):
+                if col.name in repeated and col.name in seen:
+                    problems.append(((field, index, "name"), str(code)))
+                seen.add(col.name)
         if problems:
             raise ValidationError.from_exception_data("TableConfig", problem_details(problems))
         return self
