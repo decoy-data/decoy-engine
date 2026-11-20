@@ -45,7 +45,11 @@ def _col(strategy: str, namespace: str | None, pc: tuple[tuple[str, Any], ...] =
         backend_version="v",
         cardinality_mode="reuse",
         deterministic=namespace is not None,
-        provider_config=pc,
+        provider_config=(
+            (*pc, ("date_format", "%Y-%m-%d"))
+            if strategy == "date_shift" and not dict(pc).get("date_format")
+            else pc
+        ),
         coherent_with=(),
     )
 

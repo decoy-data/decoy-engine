@@ -231,6 +231,18 @@ today's `int()` coercion and window. One new plan reason, `date_shift_window_inv
 fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
 `build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
 
+**Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
+without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
+compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
+column whose own declared parse format supplies the date shape is exempt; a nested child, including one under a
+declared parent, is not. A runtime reason with the same code backs the handler. `starter_config` and the starter
+review write the detected variant only when every detector hit parses with it (`format_pattern_complete`, new on
+`DetectorMatch` and `FieldStats`, default false) and write `redact` otherwise; the starter now offers `date_shift` for
+`eu_date` too, and iso_date and us_date starters lose the fixed `min_days`/`max_days`. Re-pin checklist: the platform
+disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templates/upload_csv_mask_to_s3.yaml`, the
+platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
+(DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

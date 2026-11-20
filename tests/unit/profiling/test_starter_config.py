@@ -505,7 +505,7 @@ def test_a_misshapen_relationship_is_refused_before_output(
     [
         ("hash", {}),
         ("fpe", {}),
-        ("date_shift", {}),
+        ("date_shift", {"provider_config": {"date_format": "%Y-%m-%d"}}),
         ("bucket_perturb", {}),
         ("categorical", {}),
         ("tokenize", {}),

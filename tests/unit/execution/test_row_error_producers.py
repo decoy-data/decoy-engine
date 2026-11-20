@@ -51,7 +51,11 @@ def _col(
         backend_version="v",
         cardinality_mode="reuse",
         deterministic=namespace is not None,
-        provider_config=provider_config,
+        provider_config=(
+            (*provider_config, ("date_format", "%Y-%m-%d"))
+            if strategy == "date_shift" and not dict(provider_config).get("date_format")
+            else provider_config
+        ),
         coherent_with=(),
     )
 
