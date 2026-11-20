@@ -308,19 +308,22 @@ decoy-support-bundle/v1 decoy-reasons/v1          decoy-model-pack/v1
 dps-marginal/v3         post-scan-integrity/v2    canary-span-report/v1
 flagged-redacted/v1     phase-result/v1           phase-event/v1
 decoy.evidence.statement/v1    decoy.trust-policy/v1    decoy.required-catalog/v1
+policy-expansion/v1     secret-provider/v1
 ```
 
 **Tags added with the freeze batch (FREEZE-S7a, 2026-11-20).** Every `"<name>/vN"` literal in engine source
-is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 19 tags
-after `lock/v1` above were persisted or exported with no listing before. Ten are pinned without reading a
+is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 21 tags
+after `lock/v1` above were persisted, exported or reserved with no listing before. Twelve are pinned without reading a
 written artifact, and the map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are
 older versions the engine still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with
 no model yet; `decoy-support-bundle/v1`, `decoy-reasons/v1` and `canary-span-report/v1` name a typed constant
 the engine does not write to a file itself; `dps-marginal/v3` has a writer that needs the `opendp` extra.
 `phase-result/v1` and `phase-event/v1` are frozen because the wire form `to_wire` builds carries the tag; no
-engine code calls `to_wire` yet, so they have no engine writer either. The other nine are read from a written
-artifact by a sentry. The census reads Python string and bytes constants under `src/decoy_engine`. Tags built
-with f-strings or concatenation, and tags in Rust or YAML files, are out of its scope (`S7A-KL-2`). A tag that never leaves the process is internal
+engine code calls `to_wire` yet, so they have no engine writer either. `policy-expansion/v1` is the `schema` field
+`expansion_to_dict` writes (the policy fingerprint excludes it), and `secret-provider/v1` is the `api_version` field of
+`SecretDescriptor.to_dict()`; both are pinned at the constant. The other nine are read from a written
+artifact by a sentry. The census reads Python string and bytes constants under `src/decoy_engine`. Tags formatted in
+the middle or built by concatenation, and tags in Rust or YAML files, are out of its scope (`S7A-KL-2`). A tag that never leaves the process is internal
 (`decoy_engine.contracts.stability.INTERNAL_TAGS`, with a reason), and a
 sentry scans written artifacts to confirm no internal tag appears in one. Derivation labels are in 3.3.
 
@@ -521,7 +524,7 @@ canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/ke
 decoy-engine/protected-quarantine/v1   decoy-probe/v1            decoy-resume-key-check/v1
 decoy.shuffle.unkeyed/v1       joint_mask/gen_row/v1     joint_mask/keyed_row/v1
 joint_mask/null_fallback/v1    name_email/v1             pinned-plan-fingerprint/v1
-policy-expansion/v1            secret-provider/v1        tokenize-key/v1
+tokenize-key/v1                decoy-publication-result/v1   fpe-sub-floor-synthetic/v1
 ```
 
 **Rules:**
