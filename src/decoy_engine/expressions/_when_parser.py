@@ -77,10 +77,8 @@ RESERVED_NAMES: frozenset[str] = frozenset(
         "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if",
         "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
         "return", "try", "while", "with", "yield", "match", "case", "_", "type",
-        # Words the grammar may grow into. Lowercase only: `NULL` or `Between` stays a column.
-        "null", "true", "false", "between", "like", "ilike", "matches", "startswith", "endswith",
     }
-)  # fmt: skip
+) | _GRAMMAR_HELD_NAMES  # fmt: skip
 
 Scalar = Union[int, float, str, bool]  # noqa: UP007 -- evaluated at import on 3.10
 
