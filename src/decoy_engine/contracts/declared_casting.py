@@ -232,6 +232,19 @@ CONTRACT_FIELDS = (
 )
 
 
+def date_shift_owns_declared_format(
+    *, nested: bool, logical_type: Any, has_parse_format: bool
+) -> bool:
+    """Whether a ``date_shift`` column takes its format from its own declared parse format.
+
+    True only for a top-level column that declares ``logical_type: date`` with a ``parse_format``.
+    A nested child never qualifies: it runs on the parent's text leaves, so a parent's declared
+    contract says nothing about the child's cells. Compile and the handler backstop both call this,
+    each supplying what it knows (config fields, or the plan's declared column set).
+    """
+    return not nested and logical_type == "date" and has_parse_format
+
+
 class ProtectedQuarantineConfig(BaseModel):
     """The one top-level protected-quarantine declaration. There is deliberately no path or key."""
 

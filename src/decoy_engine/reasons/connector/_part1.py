@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, RetryClass
+from decoy_engine.reasons._types import Outcome, RetryClass
 
 __all__ = [
     "AMBIGUOUS_NAME",
@@ -39,7 +39,7 @@ COLUMN_NAME_UNSUPPORTED = _d(
     "Column name unsupported.",
     outcome=_USAGE,
     retry=_FIX,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 COLUMN_NOT_FOUND = _d("column_not_found", "Column not found.", outcome=_USAGE, retry=_FIX)
 DEADLINE_EXCEEDED = _d("deadline_exceeded", "Deadline exceeded.")
@@ -62,7 +62,7 @@ RELATION_SHAPE_CHANGED = _d(
     "Relation shape changed.",
     outcome=_USAGE,
     retry=_FIX,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 SOURCE_UNREACHABLE = _d("source_unreachable", "Source unreachable.")
 UNSUPPORTED_COLUMN_TYPE = _d(

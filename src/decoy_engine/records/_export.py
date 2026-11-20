@@ -184,6 +184,13 @@ def export_lines(
                 # This version cannot tell which fields are paths, so the record stays out.
                 withheld_records.append(raw["id"])
                 continue
+        unclaimed: dict[str, Any] | None = None
+        if keep_paths:
+            # Paths stay, but a claim the payload cannot back never leaves in an export.
+            spec = kind_spec(raw["kind"])
+            if spec is not None and spec.claim_rule is not None:
+                candidate = spec.claim_rule(copy.deepcopy(raw["payload"]))
+                unclaimed = candidate if candidate != raw["payload"] else None
         rec = copy.deepcopy(dict(raw))
         links = []
         for link in rec["links"]:
@@ -198,6 +205,10 @@ def export_lines(
             rec["payload"] = reduced[0]
             rec["payload_digest"] = payload_digest(reduced[0])
             changed = stripped_any = True
+        if unclaimed is not None:
+            rec["payload"] = unclaimed
+            rec["payload_digest"] = payload_digest(unclaimed)
+            changed = True
         pipeline = rec["labels"].get("pipeline")
         if not keep_paths and isinstance(pipeline, str) and file_name(pipeline) != pipeline:
             rec["labels"]["pipeline"] = file_name(pipeline)

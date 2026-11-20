@@ -78,3 +78,39 @@ Determinism-approved is not the same claim as reuse-safe: this harness
 proves ONLY that a pool builds and selects identically across processes
 and time. Whether reusing a value across rows is semantically acceptable
 for a given type is a separate judgment the addition slice still owes.
+
+## The Faker output lock
+
+`output_lock.json` records what Faker gives the engine, for every Faker locale, on both
+surfaces the engine uses: the reflected surface (`faker_type` columns: keyword-argument names, a
+per-seed digest, a sequential-draw digest) and the adapter surface (the masking `faker` strategy:
+a batch digest through `FakerAdapter.generate_batch`), plus a `raw` surface for the calls the
+engine makes outside the reflected provider set: the text-mask calls (`text_mask.<detector>`, en_US
+only, through `_mask_faker`, which returns the raw method output without the reflected provider's
+newline joining) and the anchored date of birth (`dob_anchored`, every locale). An `argumented` surface covers the arguments callers can pass: YAML `faker_kwargs` into the
+reflected and `address` wrappers, `ProviderSpec.extra` into the V2 adapter, and the formula
+helpers. `argument_grid.py` derives the targets and their rows from the runtime callables and
+their signatures (a parameter name it cannot classify fails closed), stores the row list once as
+`argument_grid`, and the lock keeps one digest per locale and row. A sentry fails when a discovered
+parameter has no row. It holds digests and exception class names
+only, never a generated value or exception text. A cell is a 64-hex digest, `unstable` (processes
+disagree at one clock), or `raises:<Class>[/<Cause>]`. `calendar: true` marks a pair whose digest
+differs between the two frozen clocks (2026-10-16 and 2030-01-16, which crosses a month, a year and a decade): it is stable only because the
+clock is frozen.
+
+- Write it: `python scripts/faker-determinism/output_lock.py --write`. This runs only under
+  CPython 3.10.20 with the pinned Faker. Read the printed diff, which has seven kinds: changed,
+  removed, added, newly reproducible, newly unstable, newly calendar-dependent, no longer
+  calendar-dependent. Commit the file in the same PR as the pin change.
+- Check it: `tests/sentry/dependencies/test_faker_output_lock*.py`. The cells marked
+  `faker_output_lock` (all in `test_faker_output_lock.py`; the schema and caller-argument
+  sentries are static) spawn nine workers: clock A at hash seeds 0 to 7, clock B at seed 0. Each
+  takes about 55 CPU seconds, so a full capture is about 170 to 185 seconds on four CPUs. The
+  cells run them as two batches, so no cell holds more than about half. The CI job runs
+  `pytest tests/sentry/dependencies -m faker_output_lock` and is required on CPython 3.10.20,
+  3.11.9 and 3.12.7. The reviewed lists in `_faker_lock_lists.py` (`EXPECTED_UNSTABLE`,
+  `EXPECTED_RAISES`, `EXPECTED_CALENDAR`, `ANCHORS`) must equal the lock; changing a list needs a
+  reason in the same diff.
+- After 1.0: a Faker bump may ship in a 1.x release only when the diff holds added providers or
+  locales, newly reproducible pairs, or pairs that stop depending on the calendar. Anything else
+  is a 2.0 change. See the compatibility contract, section 3.3.

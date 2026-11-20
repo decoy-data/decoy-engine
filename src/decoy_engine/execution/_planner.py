@@ -408,27 +408,15 @@ def _whole_column_state_rejections(
     """
     reasons: list[str] = []
     when_cols: list[str] = []
-    undated_cols: list[str] = []
     for col_entry in _table_column_entries(config, table=table):
         name = str(col_entry.get("name", "?"))
         if col_entry.get("when") and name not in relaxed_when:
             when_cols.append(name)
-        if col_entry.get("strategy") == "date_shift" and not (
-            col_entry.get("provider_config") or {}
-        ).get("date_format"):
-            undated_cols.append(name)
     if when_cols:
         reasons.append(
             f"when_predicate_not_chunk_stable: column(s) {', '.join(sorted(when_cols))} "
             "carry a `when` predicate, which is evaluated per frame; per-chunk "
             "evaluation is a different scope than the whole frame"
-        )
-    if undated_cols:
-        reasons.append(
-            f"date_shift_requires_explicit_format: column(s) {', '.join(sorted(undated_cols))} "
-            "use date_shift without provider_config.date_format; format detection "
-            "samples the whole column, so per-chunk detection can lock a different "
-            "format"
         )
     return reasons
 

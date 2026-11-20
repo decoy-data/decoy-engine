@@ -21,6 +21,8 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.execution._runner import group_by_sibling
+
 
 def group_by_columns(config: dict[str, Any], table: str) -> dict[str, str]:
     """`{group_key column: its group_by column}` for `table`, read from the config.
@@ -34,11 +36,8 @@ def group_by_columns(config: dict[str, Any], table: str) -> dict[str, str]:
         for col in table_cfg.get("columns") or ():
             if not isinstance(col, dict) or col.get("strategy") != "group_key":
                 continue
-            provider_config = col.get("provider_config")
-            group_by = (
-                provider_config.get("group_by") if isinstance(provider_config, dict) else None
-            )
-            if isinstance(col.get("name"), str) and isinstance(group_by, str) and group_by:
+            group_by = group_by_sibling(col.get("provider_config"))
+            if isinstance(col.get("name"), str) and group_by is not None:
                 out[col["name"]] = group_by
     return out
 
