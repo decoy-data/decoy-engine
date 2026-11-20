@@ -164,6 +164,9 @@ def test_nested_child_does_not_inherit_the_declared_exemption() -> None:
         "strategy": "nested",
         "namespace": "ns",
         "provider_config": {"strategy": "date_shift", "target": "$.a"},
+        # The parent itself declares a date parse format; its child must still name a format.
+        "logical_type": "date",
+        "parse_format": ISO_DATE,
     }
     cfg = {"tables": [{"name": "t", "columns": [_declared(), nested]}]}
     with pytest.raises(PlanCompileError) as exc:
