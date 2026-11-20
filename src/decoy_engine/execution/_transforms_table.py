@@ -40,6 +40,7 @@ from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._transforms_gate import find_table_config
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._readers import LazySource
+from decoy_engine.safe_output import attach_output_metadata
 
 __all__ = [
     "apply_resident_table",
@@ -113,13 +114,13 @@ def _apply_ops(table: pa.Table, ops: Sequence[TransformOp]) -> pa.Table:
                 ) from exc
             arrays.append(derived)
             fields.append(pa.field(name, derived.type))
-    out = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
-    # Schema-only: the pandas metadata `from_pandas` would write, without
-    # materializing a second Arrow copy of the data.
+    # The pandas blob is derived from the columns this table really has (`fresh` names the dtypes
+    # the transform frame gave them); no other source key, and no source `attributes`, is kept.
     fresh = pa.Schema.from_pandas(frame, preserve_index=False)
-    meta = {k: v for k, v in (table.schema.metadata or {}).items() if k != b"pandas"}
-    meta[b"pandas"] = (fresh.metadata or {})[b"pandas"]
-    return out.replace_schema_metadata(meta)
+    # Only a column read straight from the source table is the source field; a derived one is new.
+    carried = [name for name, origin in bindings if origin == _SOURCE]
+    schema = attach_output_metadata(pa.schema(fields), fresh.metadata, carried=carried)
+    return pa.Table.from_arrays(arrays, schema=schema)
 
 
 def _transform_ops(config: Mapping[str, Any], table_name: str) -> list[TransformOp]:

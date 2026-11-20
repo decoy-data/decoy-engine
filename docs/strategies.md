@@ -471,11 +471,23 @@ so the output is more useful than blanket redaction for columns such as
 clinical notes or support tickets.
 
 - `detectors` (list or null): detector IDs to run. Null or absent runs all
-  built-in span detectors. Unknown IDs are skipped silently.
+  built-in span detectors. Only the built-in span detector IDs are accepted
+  (`email`, `ssn`, `us_phone`, `us_zip`, `pan`, `iban`, `ipv4`, `icd10`, `npi`,
+  `url`, `street_address`). Any other ID is refused at compile and in
+  `decoy validate` with `mask.text_mask_detector_unknown`.
 - `per_detector_strategy` (dict): per-detector strategy overrides. Keys are
   detector IDs; values are `fpe`, `faker`, `date_shift`, `redact`, or
   `passthrough`. Unspecified detectors fall back to the built-in
-  `DETECTOR_DEFAULTS` table.
+  `DETECTOR_DEFAULTS` table. A key that is not a known detector ID, and a
+  detector and strategy pair that cannot run, are refused at compile with
+  `mask.text_mask_detector_unknown` or `mask.text_mask_strategy_unsupported`.
+  The supported pairs are:
+  `fpe` on `ssn`, `us_phone`, `us_zip`, `pan`, `npi`, `fax_number`;
+  `faker` on `person_name`, `first_name`, `last_name`, `address`, `location`;
+  `date_shift` on `iso_date`, `us_date`, `eu_date`;
+  `redact` and `passthrough` on any known detector ID.
+  A date span that does not parse (for example `2024-02-30`) is replaced by
+  `token`, never written through.
 - `unmatched_span_policy` (str, default `redact`): controls text in each cell
   not covered by any detector match. See the policy table below.
 - `token` (str, default `[REDACTED]`): replacement token for the `redact`
@@ -2022,7 +2034,11 @@ every column, not only the columns the profiler flags.
   column keeps its labels.
 - A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
   cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
-  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+  side of it. The histogram has one bin when the column also releases an `exact_values` or
+  `quantile_grid` block. Otherwise `numeric_bins` sets the finest grid step, and the step widens
+  until every non-empty bin holds at least 10 rows, so the histogram can have fewer bins than
+  requested. `numeric_bins` is an int from 1 to 1000; any other value is refused with
+  `quality.numeric_bins_invalid` before any histogram is computed.
 - A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
   10 rows each. A flagged column gets the same ranges.
 - A short string column whose labels read as sentences (median of 3 or more words) is written as

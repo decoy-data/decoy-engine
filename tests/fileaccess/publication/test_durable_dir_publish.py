@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import (
     OSMARK,
     STAGE_GLOB,
@@ -62,7 +63,7 @@ def test_durable_dir_publish_fsync_order(
         rec = Recorder(monkeypatch)
         txn.publish()
         leaf = base / "x" / "y" / "out"
-        tree = [leaf / "sub" / "g", leaf / "sub", leaf / UNIT_FILE, leaf]
+        tree = [leaf / "sub" / "g", leaf / "sub", leaf / UNIT_FILE, leaf / STAGE_MARKER, leaf]
         synced = rec.synced()
         assert ("rename", key(leaf)) in rec.events  # non-vacuity: the spy saw the bind
         cut = rec.events.index(("rename", key(leaf)))

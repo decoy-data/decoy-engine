@@ -167,6 +167,7 @@
   "src/decoy_engine/detection/detectors.py": [
    "DetectorFn",
    "REGISTERED_DETECTORS",
+   "SPAN_DETECTOR_IDS",
    "Span",
    "_SPAN_DETECTORS",
    "_STREET_ADDRESS_RE",

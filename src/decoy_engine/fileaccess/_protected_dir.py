@@ -39,6 +39,7 @@ from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._entry import require_ambient
+from decoy_engine.fileaccess._fdtree import _owned
 
 _MODE = 0o700
 _REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: junction, mount point, placeholder
@@ -106,7 +107,7 @@ def _unregister(path: str | os.PathLike[str]) -> None:
 
 def _owned_private(found: os.stat_result) -> bool:
     """Owned by the effective user with no group or other access (POSIX mode bits)."""
-    return found.st_uid == os.geteuid() and not stat.S_IMODE(found.st_mode) & 0o077
+    return _owned(found) and not stat.S_IMODE(found.st_mode) & 0o077
 
 
 # -- filesystem calls, each with OS text and context stripped ----------------------------------
@@ -174,7 +175,7 @@ def _check(path: str, found: os.stat_result, *, tighten: bool) -> None:
         owned, closed = _win_state(path)
     else:
         closed = _owned_private(found)
-        owned = closed or found.st_uid == os.geteuid()
+        owned = closed or _owned(found)
     if not owned:
         raise ProtectedDirUnsafe
     if closed:
