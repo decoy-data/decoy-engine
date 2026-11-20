@@ -98,7 +98,7 @@ def _required_format(cfg: Mapping[str, Any], column: str, ctx: StrategyContext) 
     fmt = cfg.get("date_format")
     if isinstance(fmt, str) and fmt.strip():
         return fmt
-    declared = (ctx.current_table, column) in ctx.declared_date_columns
+    declared = (ctx.current_table, ctx.nested_outer_column or column) in ctx.declared_date_columns
     if date_shift_owns_declared_format(
         nested=bool(ctx.nested_outer_column),
         logical_type="date" if declared else None,
