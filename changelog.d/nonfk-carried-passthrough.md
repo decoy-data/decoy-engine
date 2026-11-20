@@ -4,9 +4,10 @@ Under `auto`, a large non-FK table whose only non-chunk-stable columns are passt
 that nothing reads now takes the chunked lane. Those columns come back as the source column,
 type and values exact: integers with nulls above 2^53 stay `int64`, `decimal128(p, s)` keeps its
 declared precision, dictionary columns keep their index width, and binary, list and struct
-columns pass through unchanged. A map column is carried on the chunked lane only; below the size
-threshold the full-frame route still fails on it (follow-up). The full-frame route is otherwise
-unchanged, so the output type of these columns now depends on table size. With
+columns pass through unchanged. A map column keeps its map type: the chunked lane carries it, and the full-frame
+and sequential adapters rebuild it from the source's declared type instead of failing on it. The
+full-frame route is otherwise unchanged, so the output type of the other columns now depends on
+table size. With
 `chunked_dispatcher_enabled=False` the legacy lane converts every column to pandas, so no column
 is exempt and the table runs full-frame as before.
 

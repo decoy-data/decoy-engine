@@ -53,6 +53,7 @@ from decoy_engine.execution._fk_keys import (
     fk_nullable_int_array,
     lossless_fk_int_values,
     lossless_int_columns,
+    table_from_pandas_keeping_maps,
     to_pandas_fk_safe,
 )
 from decoy_engine.execution._fk_resolve import (
@@ -310,7 +311,10 @@ class PandasExecutionAdapter:
 
         t1 = time.perf_counter()
         outputs = apply_degenerate_faker_pin(
-            {t: pa.Table.from_pandas(f, preserve_index=False) for t, f in frames.items()},
+            {
+                t: table_from_pandas_keeping_maps(f, sources[t].schema if t in sources else None)
+                for t, f in frames.items()
+            },
             plan,
             sources,
             relationship_graph=relationship_graph,

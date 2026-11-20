@@ -144,7 +144,11 @@ from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
-from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
+from decoy_engine.execution._fk_keys import (
+    lossless_int_columns,
+    table_from_pandas_keeping_maps,
+    to_pandas_fk_safe,
+)
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
@@ -423,6 +427,7 @@ def run_sequential(
                 faker_pin = deterministic_faker_pin_columns_from_plan(
                     plan, table, src.schema, relationship_graph=graph
                 )
+                src_schema = src.schema  # kept for the output conversion; `src` is released
                 del src
 
                 # Snapshot this table's parent-key columns pre-mask, for its outgoing
@@ -511,7 +516,7 @@ def run_sequential(
                 from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
                 out = pin_degenerate_to_string(
-                    pa.Table.from_pandas(frames[table], preserve_index=False), faker_pin
+                    table_from_pandas_keeping_maps(frames[table], src_schema), faker_pin
                 )
                 conversion_ms += (time.perf_counter() - t1) * 1000.0
                 if cast_run is not None:  # after the parent maps were built from the typed frame

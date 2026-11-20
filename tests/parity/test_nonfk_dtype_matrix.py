@@ -200,7 +200,7 @@ def test_g3_read_set_has_one_production_caller() -> None:
 
 # -- kill switch, physical plan, stream and lazy legs (Dennis r1 on #725) -----------------------
 
-LEGACY_TYPES = [t for t in CARRIED_TYPES if t != "map"]
+LEGACY_TYPES = list(CARRIED_TYPES)
 
 
 @pytest.mark.parametrize("type_class", LEGACY_TYPES)
@@ -260,16 +260,54 @@ def test_at_a5_the_auto_lane_hands_run_mask_chunked_the_stock_adapter(
     assert all(is_stock_adapter(a) for a in seen)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pa.ArrowTypeError,
-    reason="follow-up: the full-frame adapter cannot rebuild a map column from pandas",
-)
-def test_at_a9_small_map_table_on_full_frame(tmp_path: Path) -> None:
+def test_at_a9_small_map_table_on_full_frame_is_exact(tmp_path: Path) -> None:
+    """The full-frame adapter rebuilds a map column with the source's map type."""
     table = source_table("map", "later_mixed").slice(0, 8)
     cfg = _cfg(tmp_path, table, support.pass_col("p"))
     got = support.run_default(cfg, table, auto_chunk_threshold_rows=10_000)
-    assert got.outputs[support.TABLE].column("p").to_pylist() == table.column("p").to_pylist()
+    assert got.quality_metrics["auto_chunk"]["mode"] == "full_frame"
+    out = got.outputs[support.TABLE]
+    assert out.schema.field("p").type == table.schema.field("p").type
+    assert out.column("p").to_pylist() == table.column("p").to_pylist()
+
+
+@pytest.mark.parametrize(
+    ("route", "knobs"),
+    [
+        ("sequential", {"execution_mode": "sequential"}),
+        ("full_frame", {"execution_mode": "full_frame"}),
+        ("out_of_core", {}),
+    ],
+)
+def test_a_map_column_on_an_fk_job_is_exact(
+    tmp_path: Path, route: str, knobs: dict[str, Any]
+) -> None:
+    """An FK job keeps a map column on every route it can take: the sequential and full-frame
+    conversions rebuild it from the source type, out-of-core never leaves Arrow."""
+    import pyarrow.parquet as pq
+
+    from decoy_engine.config import PipelineConfig
+    from decoy_engine.execution import run_pipeline
+    from tests.unit.execution.run_stream import _support as rs
+
+    cfg, _lazy, tables = rs.fk_job(tmp_path)
+    orders = tables["orders"].append_column(
+        "m", source_table("map", "later_mixed").column("p").slice(0, 31).combine_chunks()
+    )
+    pq.write_table(orders, cfg["sources"]["orders"]["path"])
+    next(t for t in cfg["tables"] if t["name"] == "orders")["columns"].append(support.pass_col("m"))
+    cfg = PipelineConfig.model_validate(cfg).model_dump()
+    result = run_pipeline(
+        cfg,
+        sources={"customers": tables["customers"], "orders": orders},
+        engine_version=rs.ENGINE_VERSION,
+        auto_chunk_threshold_rows=1,
+        **knobs,
+    )
+    assert result.quality_metrics["execution"]["execution_mode"] == route
+    out = result.outputs["orders"]
+    assert out.schema.field("m").type == orders.schema.field("m").type
+    assert out.column("m").to_pylist() == orders.column("m").to_pylist()
 
 
 LEG_TYPES = ["int64_nulls", "uint64", "decimal128", "binary", "dictionary", "list", "map"]
