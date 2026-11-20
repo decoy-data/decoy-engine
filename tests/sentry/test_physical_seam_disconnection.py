@@ -954,10 +954,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_strategies/__init__.py",
             "src/decoy_engine/execution/_strategies/_tokenize.py",
             "src/decoy_engine/execution/_technique_class.py",
-            # MG-5 follow-up (B-6 regression-gate green-up): tokenize's distribution-behavior
-            # label (preserves_cardinality_only, like hash and fpe) in the static behavior map.
-            # A pure label addition; imports nothing from `execution.physical`.
-            "src/decoy_engine/execution/_distribution_behavior.py",
             # MG-5 module-size remediation: the `_fk_key_value` compat wrapper split out of
             # `_pandas_adapter.py`, and the `mask.tokenize` DrawSite + provider-primitive data
             # siblings split out of the capped `native/_determinism_protocol.py` /
@@ -998,6 +994,11 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/_strategies/_grouped_series.py",
             "src/decoy_engine/execution/_strategies/_passthrough.py",
             "src/decoy_engine/execution/_strategies/_redact.py",
+            # GEN-REL E1: the capacity probe loosens a bounded `reference` column's per-parent
+            # bounds to the scaled row counts, so a scaled config stays feasible, and reads a
+            # table's generate columns through `config.generate_columns_of` and the bounds
+            # through `config.per_parent_bounds`. It imports nothing from `execution.physical`.
+            "src/decoy_engine/execution/_probe_scale.py",
         }
     )
     # Files allowed to change ONLY by these exact line replacements (path -> {removed: added}).

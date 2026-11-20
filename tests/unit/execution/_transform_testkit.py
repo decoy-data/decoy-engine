@@ -12,6 +12,7 @@ dedupe, derive and drop_column mean) are shared with production.
 from __future__ import annotations
 
 import copy
+import json
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -269,6 +270,18 @@ def reference_bindings(table: pa.Table, ops: Sequence[dict[str, Any]]) -> list[t
     return bindings
 
 
+def comparable_pandas_blob(blob: bytes) -> dict[str, Any]:
+    """The members of a pandas blob that pandas itself fixes, for comparing an engine output with
+    the reference. The output rule rebuilds `numpy_type` from the Arrow type and never carries the
+    data-derived `num_categories` (docs/security/output-metadata.md), so both are left out."""
+    obj = json.loads(blob)
+    for col in obj["columns"]:
+        col.pop("numpy_type", None)
+        if isinstance(col.get("metadata"), dict):
+            col["metadata"].pop("num_categories", None)
+    return obj
+
+
 def reference_transform(table: pa.Table, ops: Sequence[dict[str, Any]]) -> pa.Table:
     """R: the table a reference implementation produces from T and the ops."""
     df = reference_frame(table)
@@ -287,11 +300,10 @@ def reference_transform(table: pa.Table, ops: Sequence[dict[str, Any]]) -> pa.Ta
             arr = pa.array(df[name], from_pandas=True)
             arrays.append(arr)
             fields.append(pa.field(name, arr.type))
-    out = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+    # Only the pandas blob is carried; source custom keys are not (OUTPUT-METADATA-LEAK E2).
     fresh = pa.Table.from_pandas(df.reset_index(drop=True), preserve_index=False)
-    meta = {k: v for k, v in (table.schema.metadata or {}).items() if k != b"pandas"}
-    meta[b"pandas"] = fresh.schema.metadata[b"pandas"]
-    return out.replace_schema_metadata(meta)
+    meta = {b"pandas": fresh.schema.metadata[b"pandas"]}
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields)).replace_schema_metadata(meta)
 
 
 def tables_equal(actual: pa.Table, expected: pa.Table) -> None:

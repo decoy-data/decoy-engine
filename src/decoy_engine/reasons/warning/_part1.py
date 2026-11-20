@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CARDINALITY_COLLISIONS",
@@ -25,6 +26,7 @@ __all__ = [
     "OUT_OF_CORE_CALLER_MANAGED_RESIDENCY",
     "POOL_DOMINATES_CACHE",
     "POST_SCAN_OUTPUT_UNREADABLE",
+    "REFERENCE_PARENT_POOL_EMPTY",
     "SCAN_BASELINE_MISSING",
     "SCAN_CRASHED",
     "SCAN_HEADER_SUSPECT",
@@ -74,6 +76,11 @@ POST_SCAN_OUTPUT_UNREADABLE = _d(
     "The run wrote to a sink the post-scan gate cannot read back, so declared keys were not "
     "checked on the output.",
     since="1.27.0",
+)
+REFERENCE_PARENT_POOL_EMPTY = _d(
+    "reference_parent_pool_empty",
+    "Reference column is null because its parent column has no keys.",
+    since=UNRELEASED,
 )
 # SCAN-CHECKS: `--evidence-out` asked to hash the pipeline's scan baseline and the file is gone. The
 # run continues and the manifest records the path with a null fingerprint. Fixed, value-free text.

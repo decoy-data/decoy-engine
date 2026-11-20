@@ -20,6 +20,7 @@ from decoy_engine.execution._chunked_output_sink import decide_output_mode
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.verification.postmask import PostScanBlockedError
 from tests.security.test_f29_remediation import _decide
 from tests.unit.execution import _auto_chunk_support as support
@@ -133,6 +134,7 @@ def test_regex_integrity_takes_the_bounded_route_with_a_staged_sink(
     )
     assert routes == [route]
     assert sorted(p.name for p in out.iterdir()) == [
+        STAGE_MARKER,
         "_decoy_publication.json",
         "child.parquet",
         "parent.parquet",
