@@ -36,7 +36,6 @@ Public exceptions (also in decoy_engine.errors):
     DecoyError, ConfigError, PipelineValidationError,
     ConnectorError, ConnectorAuthError, LicenseError, LicenseExpiredError,
     FlagPauseSignal, FixedWidthParseError
-
 Anything not in __all__, and anything under decoy_engine.internal, is private.
 
 V2 NOTE: the V1 surface (``Masker``, ``DataGenerator``, ``run_graph``) was removed in S22; the
@@ -318,6 +317,7 @@ from decoy_engine.secret_providers import (
     keyed_columns_for_config,
     register_secret_provider,
 )
+from decoy_engine.transforms.code_set import code_set_catalog
 from decoy_engine.unmask import UnmaskColumnReport, UnmaskResult, unmask_pipeline
 from decoy_engine.validation import validate_config
 from decoy_engine.validation.post import (
@@ -360,7 +360,6 @@ _F9_KEPT_BINDINGS = (
     SsnDomain,
     SsnValidator,
 )
-
 
 __all__ = [
     "CAP_DRY_RUN",
@@ -520,6 +519,7 @@ __all__ = [
     "check_orphan_fk_policy_completeness",
     "classifier_status",
     "classify_table_kinds",
+    "code_set_catalog",
     "compile_plan",
     "composite_address",
     "composite_custom",
