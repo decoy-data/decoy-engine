@@ -15,8 +15,9 @@ bytes depend on the machine; every other non-JSON type is refused. An unpaired s
 string or an object key is refused before encoding: the ASCII form would otherwise escape it and
 the UTF-8 form would crash on it with codec text.
 
-``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity and
-an over-long integer, and names the defect as a closed token, never as input text.
+``strict_json_loads`` is the matching strict reader: it refuses a duplicate key, NaN or Infinity
+(including a literal that overflows to infinity, such as ``1e999``) and an over-long integer, and
+names the defect as a closed token, never as input text.
 ``strict_json_read`` is the same reader with bounds (bytes, depth) and a number-lexeme mode for the
 nested strategy; ``strict_json_write`` writes such a tree back without changing a number.
 
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
@@ -36,8 +38,10 @@ from decoy_engine import reasons
 from decoy_engine._error_base import DecoyError
 
 __all__ = [
+    "ALL_STRICT_JSON_TOKENS",
     "MASK_CELL_BYTES",
     "MASK_MAX_DEPTH",
+    "PROFILE_JSON_TOKENS",
     "STRICT_JSON_TOKENS",
     "CanonicalJsonError",
     "CanonicalStringError",
@@ -179,10 +183,16 @@ STRICT_JSON_TOKENS = (
     "oversized",
     "too_deep",
 )
+#: Tokens only a profile that turns on ``forbid_float``, ``forbid_negative_zero`` or
+#: ``forbid_lone_surrogate`` can raise. A default read, such as the nested strategy's, never
+#: raises them, so they stay out of ``STRICT_JSON_TOKENS`` and a row-error handler built from
+#: that set has no dead entries.
+PROFILE_JSON_TOKENS = ("negative_zero", "float", "invalid_unicode")
+ALL_STRICT_JSON_TOKENS = STRICT_JSON_TOKENS + PROFILE_JSON_TOKENS
 
 
 class StrictJsonError(CanonicalJsonError):
-    """Strict JSON was refused. ``token`` is one of ``STRICT_JSON_TOKENS``; no input text.
+    """Strict JSON was refused. ``token`` is one of ``ALL_STRICT_JSON_TOKENS``; no input text.
 
     It sits under ``CanonicalJsonError`` so it is a ``DecoyError`` and a ``ValueError`` in the
     registered config family, with no new exception family to classify.
@@ -243,13 +253,24 @@ def strict_json_read(
     non_finite: Literal["refuse", "keep"] = "refuse",
     keep_lexemes: bool = False,
     max_int_digits: int | None = 20,
+    forbid_float: bool = False,
+    forbid_negative_zero: bool = False,
+    forbid_lone_surrogate: bool = False,
 ) -> Any:
     """Parse JSON under bounds, refusing a duplicate key and a lone surrogate in the text.
 
     ``max_bytes`` and ``max_depth`` bound the cell (``oversized``, ``too_deep``); ``None`` sets no
     bound. ``non_finite="keep"`` accepts ``NaN``, ``Infinity`` and ``-Infinity`` as floats and
-    ``"refuse"`` names them ``non_finite``. ``keep_lexemes`` returns every number as a
+    ``"refuse"`` names them ``non_finite``, and also a literal that overflows to infinity, such as
+    ``1e999``, unless ``keep_lexemes`` is set. ``keep_lexemes`` returns every number as a
     ``JsonNumber``; an integer too long for ``int`` then has ``value=None`` instead of failing.
+
+    Two opt-in options serve profiles with no float and no ``-0``: ``forbid_float`` records
+    ``float`` for any fraction or exponent number and ``forbid_negative_zero`` records
+    ``negative_zero`` for the integer text ``-0``. ``forbid_lone_surrogate`` records
+    ``invalid_unicode`` for an escaped lone surrogate (``"\\ud800"``) in a string or key; a raw one is
+    always refused. All default off, so the defaults read as before. A number can record more than
+    one defect; the first one recorded is raised, so ``1e999`` under ``forbid_float`` is ``float``.
 
     The hooks only record a defect and parsing goes on, so nothing raises inside the handler. The
     error is raised after it, with no ``__context__`` and no input text. Raises ``StrictJsonError``.
@@ -269,6 +290,9 @@ def strict_json_read(
         return None
 
     def integer(text: str) -> Any:
+        if forbid_negative_zero and text == "-0":
+            found.append("negative_zero")
+            return None
         if max_int_digits is not None and len(text.lstrip("-")) > max_int_digits:
             found.append("out_of_range")
             return None
@@ -280,8 +304,18 @@ def strict_json_read(
             return JsonNumber(None, text)
         return number if str(number) == text else JsonNumber(number, text)
 
+    # A literal such as `1e999` reads as infinity without passing through `parse_constant`, so the
+    # float hook refuses it too. A lexeme read keeps the literal text, so it does not refuse.
+    refuse_overflow = non_finite == "refuse" and not keep_lexemes
+
     def real(text: str) -> Any:
+        if forbid_float:
+            found.append("float")
         number = float(text)
+        if refuse_overflow and not math.isfinite(number):
+            found.append("non_finite")
+        if not keep_lexemes:
+            return number
         return number if json.dumps(number) == text else JsonNumber(number, text)
 
     parsed: Any = None
@@ -307,12 +341,13 @@ def strict_json_read(
                 lexemes = keep_lexemes and (
                     max_int_digits is not None or bool(_LOSSY_HINT.search(text))
                 )
+                hooked = lexemes or forbid_float or forbid_negative_zero
                 parsed = json.loads(
                     text,
                     object_pairs_hook=pairs,
                     parse_constant=constant,
-                    parse_int=integer if lexemes or not keep_lexemes else None,
-                    parse_float=real if lexemes else None,
+                    parse_int=integer if hooked or not keep_lexemes else None,
+                    parse_float=real if hooked or refuse_overflow else None,
                 )
     except (UnicodeError, ValueError):
         malformed = True
@@ -325,17 +360,32 @@ def strict_json_read(
         raise StrictJsonError("not_json")
     if too_deep or (walk_depth and max_depth is not None and _deeper_than(parsed, max_depth)):
         raise StrictJsonError("too_deep")
+    if forbid_lone_surrogate and _has_surrogate(parsed):
+        found.append("invalid_unicode")
     if found:
         raise StrictJsonError(found[0])
     return parsed
 
 
-def strict_json_loads(data: bytes | str, *, max_int_digits: int | None = 20) -> Any:
+def strict_json_loads(
+    data: bytes | str,
+    *,
+    max_int_digits: int | None = 20,
+    forbid_float: bool = False,
+    forbid_negative_zero: bool = False,
+    forbid_lone_surrogate: bool = False,
+) -> Any:
     """Parse JSON, refusing a duplicate key, a non-finite number, a raw lone surrogate in the text
     and an integer longer than ``max_int_digits`` digits (``None`` sets no digit limit).
     Raises ``StrictJsonError``.
     """
-    return strict_json_read(data, max_int_digits=max_int_digits)
+    return strict_json_read(
+        data,
+        max_int_digits=max_int_digits,
+        forbid_float=forbid_float,
+        forbid_negative_zero=forbid_negative_zero,
+        forbid_lone_surrogate=forbid_lone_surrogate,
+    )
 
 
 _SCALARS = frozenset({str, int, float, bool, type(None)})

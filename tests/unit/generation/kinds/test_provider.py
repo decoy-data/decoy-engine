@@ -197,10 +197,19 @@ def test_an_unrelated_column_changes_nothing() -> None:
     assert all(plain[p] == more[p] for p in SCALARS)
 
 
-def test_every_live_provider_matches_its_committed_digest(big: pa.Table) -> None:
+# The Faker and Mimesis backed providers pin Faker output, so their digests live with the Faker
+# output lock (`tests/sentry/dependencies/test_faker_output_lock_providers.py`). Only the keyed
+# identifiers, which draw no Faker output, are pinned in the default loop.
+NATIVE_SCALARS = sorted(
+    p for p in SCALARS if REGISTRY.get_capabilities(p).backend_type == "decoy_native"
+)
+
+
+def test_every_native_provider_matches_its_committed_digest(big: pa.Table) -> None:
     committed = json.loads(FIXTURE.read_text())["scalars"]
-    assert sorted(committed) == SCALARS
-    assert _digests(big) == committed
+    assert sorted(committed) == NATIVE_SCALARS
+    got = _digests(big)
+    assert {p: got[p] for p in NATIVE_SCALARS} == committed
 
 
 # ---- null mask -------------------------------------------------------------------------------
@@ -350,6 +359,26 @@ def test_a_capability_that_drops_the_locale_fails_with_the_same_code(caplog: Any
     with caplog.at_level(logging.DEBUG), pytest.raises(GenerationError) as info:
         _direct("synthetic_npi", registry)
     _assert_fixed_failure(info, caplog)
+
+
+def _npi(locale: str | None, instance_default: str | None = None) -> list[Any]:
+    col = prov("synthetic_npi", "x", **({"locale": locale} if locale else {}))
+    return synthesize._generate_column(
+        col, 20, SEED, table_name="t", instance_default_locale=instance_default
+    )
+
+
+def test_a_column_locale_and_the_instance_default_reach_the_draw() -> None:
+    """No scalar provider's output depends on the locale (every multi-locale one ignores it), so
+    the locale is observable only as the draw's supported-locale refusal. `synthetic_npi` is
+    `en_US` only: the column locale, then the instance default, then `en_US`, in that order."""
+    ok = _npi(None)
+    assert _npi("en_US", "de_DE") == _npi("en_US")
+    assert _npi(None, "en_US") == ok
+    with pytest.raises(GenerationError):
+        _npi("de_DE")
+    with pytest.raises(GenerationError):
+        _npi(None, "de_DE")
 
 
 # ---- draw sites ------------------------------------------------------------------------------

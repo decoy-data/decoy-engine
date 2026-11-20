@@ -796,16 +796,16 @@ def test_adapt_ooc_result_preserves_identity() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_diag_key_canonicalizes_nested_quality_warning_detail() -> None:
+def test_diag_key_canonicalizes_quality_warning_detail() -> None:
     warning_a = QualityWarning(
         code="orphan_fk",
         provider="ns_fk",
         column="fk",
         detail={
             "parent_table": "parent",
-            "parent_columns": ["pk"],
+            "parent_columns": "pk",
             "child_table": "child",
-            "child_columns": ["fk"],
+            "child_columns": "fk",
             "orphan_rows": 2,
         },
     )
@@ -817,9 +817,9 @@ def test_diag_key_canonicalizes_nested_quality_warning_detail() -> None:
         column="fk",
         detail={
             "orphan_rows": 2,
-            "child_columns": ["fk"],
+            "child_columns": "fk",
             "child_table": "child",
-            "parent_columns": ["pk"],
+            "parent_columns": "pk",
             "parent_table": "parent",
         },
     )
@@ -829,9 +829,9 @@ def test_diag_key_canonicalizes_nested_quality_warning_detail() -> None:
         column="fk",
         detail={
             "parent_table": "parent",
-            "parent_columns": ["pk"],
+            "parent_columns": "pk",
             "child_table": "child",
-            "child_columns": ["fk"],
+            "child_columns": "fk",
             "orphan_rows": 3,  # differs
         },
     )

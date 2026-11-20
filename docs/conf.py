@@ -216,6 +216,14 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
+    # Owner 2026-11-19: the experimental review functions import StarterConfig
+    # from its public package; listed here for the same CI-E1 reason.
+    ("py:class", "decoy_engine.profiling.StarterConfig"),
+    # F15-E2: `OnDrift` and `ScanBaselineConfig` are defined in the private
+    # `config._scan_baseline` and re-exported by `decoy_engine.config`, which
+    # `bound_baseline` imports from. Same class as the entries above.
+    ("py:class", "decoy_engine.config.OnDrift"),
+    ("py:class", "decoy_engine.config.ScanBaselineConfig"),
     # CI-E1: bare aliases and a Literal that autoapi renders as a class.
     ("py:class", "ReasonRecord"),
     ("py:class", "Phase"),

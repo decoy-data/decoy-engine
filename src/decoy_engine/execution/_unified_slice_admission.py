@@ -50,10 +50,9 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine._field_names import repeated_names
-from decoy_engine._lexeme import integer_columns_by_table
 from decoy_engine.config import post_scan_model_setting
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution._fk_keys import to_pandas_fk_safe
+from decoy_engine.execution._fk_keys import lossless_int_columns_from_config, to_pandas_fk_safe
 from decoy_engine.execution._guards import (
     reject_gated_hash_on_integer,
     reject_null_bearing_int,
@@ -346,22 +345,11 @@ def cheap_admission(
     # `schema.equals(check_metadata=True)`. Mirroring the oracle's per-column
     # routing keeps every non-group_key table on the plain path unchanged (the
     # sibling set is empty then).
-    group_key_sibling_cols: set[str] = set()
-    for col in columns_cfg:
-        if col.get("strategy") != "group_key":
-            continue
-        pcfg = col.get("provider_config")
-        # Mirror the oracle's non-empty guard (`_runner.py` `and group_by`): an
-        # empty `""` group_by is never a real sibling column, so it must not
-        # enter the routing set even though `to_pandas_fk_safe` would skip it.
-        group_by = pcfg.get("group_by") if isinstance(pcfg, dict) else None
-        if isinstance(group_by, str) and group_by:
-            group_key_sibling_cols.add(group_by)
     conversion_t0 = time.perf_counter()
     try:
-        # F06: a declared integer stays exact on the oracle, so it must here too.
-        declared_ints = integer_columns_by_table(config).get(table, frozenset())
-        frame = to_pandas_fk_safe(source, group_key_sibling_cols | declared_ints)
+        # Declared integers, group_key siblings and the columns a `when:` reads stay exact on the
+        # oracle, so they must here too (one construction, shared with the adapter).
+        frame = to_pandas_fk_safe(source, lossless_int_columns_from_config(config, table, source))
     except Exception:
         # Total-to-decline: any Arrow->pandas failure declines to the legacy
         # route rather than raising a different error than legacy's own coded

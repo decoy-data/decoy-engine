@@ -51,7 +51,11 @@ from decoy_engine.generation.pool._errors import (
     PoolCapacityError,
     raise_uniqueness_impossible,
 )
-from decoy_engine.generation.pool._events import QualityWarning, emit_generation_warning
+from decoy_engine.generation.pool._events import (
+    DetailValue,
+    QualityWarning,
+    emit_generation_warning,
+)
 from decoy_engine.generation.pool._identity import effective_pool_size
 from decoy_engine.generation.pool._pool_adapter import PoolAdapter
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
@@ -63,6 +67,7 @@ __all__ = [
     "DEFAULT_POOL_SIZE",
     "CacheStats",
     "CardinalityMode",
+    "DetailValue",
     "GenerationError",
     "PoolAdapter",
     "PoolBuilder",

@@ -91,7 +91,11 @@ def test_type_catalogue_carried_passthrough_is_yielded_exactly(
         assert refusal is not None and type(exc) is type(refusal), repr(exc)
         return
     assert len(out) == 2
-    assert all(_exact(o.column("x"), chunks[0].column("x")) for o in out)
+    # O3: a pass-through large_string column leaves the native route as string.
+    carried = chunks[0].column("x")
+    if pa.types.is_large_string(carried.type):
+        carried = carried.cast(pa.string())
+    assert all(_exact(o.column("x"), carried) for o in out)
     assert all(r.quality_metrics["chunked_route"]["pandas_read_passthrough"] == [] for r in sink)
     if refusal is None:
         expected = run_public(make_config(cols), chunks)

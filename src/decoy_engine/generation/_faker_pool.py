@@ -44,11 +44,12 @@ from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generation.pool._value_pool import ValuePool, _freeze_array
-from decoy_engine.generators.derivation import (
+from decoy_engine.generators.derivation import (  # noqa: F401  (the families are re-exported)
     POOL_BUILD_FAMILY,
     POOL_SELECTION_FAMILY,
     GenDeriveContext,
 )
+from decoy_engine.generators.derivation import pool_seeds as _pool_seeds
 from decoy_engine.internal.faker_setup import make_faker, resolve_pool_provider
 
 # Codex round-2 spec C, ROUND-3 confirmed: an IMMUTABLE closed allowlist, not
@@ -432,20 +433,6 @@ def _build_and_sample_returning_pool(
         raise
 
 
-def _pool_seeds(gen_ctx: GenDeriveContext) -> tuple[bytes, bytes]:
-    build_seed = gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8]
-    if build_seed == selection_seed:
-        # Astronomically unlikely for distinct HMAC labels; a real collision
-        # here means family_bytes stopped being label-disjoint, which would
-        # silently collapse the build and selection draws onto one stream.
-        raise RuntimeError(
-            "faker_pool_build/faker_pool_selection HMAC domains collided -- "
-            "GenDeriveContext.family_bytes is no longer label-disjoint"
-        )
-    return build_seed, selection_seed
-
-
 class PooledSelector:
     """One pooled column's selection as a persistent stream, for batched generation.
 
@@ -527,16 +514,7 @@ def build_and_sample(
     `tests/unit/generation/test_faker_pool_seam_characterization.py` for the
     pre-extraction byte-identical proof.
     """
-    build_seed = gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8]
-    if build_seed == selection_seed:
-        # Astronomically unlikely for distinct HMAC labels; a real collision
-        # here means family_bytes stopped being label-disjoint, which would
-        # silently collapse the build and selection draws onto one stream.
-        raise RuntimeError(
-            "faker_pool_build/faker_pool_selection HMAC domains collided -- "
-            "GenDeriveContext.family_bytes is no longer label-disjoint"
-        )
+    build_seed, selection_seed = _pool_seeds(gen_ctx)
 
     _pool_values, sampled_output, _exact_name_available, _custom_override_present = (
         _build_and_sample_returning_pool(

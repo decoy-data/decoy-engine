@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from decoy_engine import reasons, records
-from decoy_engine.profiling import scan_set
+from decoy_engine.profiling import _scan_core
 from decoy_engine.records import _kinds, _registry
 from decoy_engine.records._errors import _CODES
 from decoy_engine.records._registry import KindSpec
@@ -54,8 +54,8 @@ def test_scan_set_points_at_the_scan_core_model() -> None:
     spec = records.kind_spec("scan-set")
     assert spec is not None
     assert not spec.reserved
-    assert spec.write_model is scan_set.ScanSetCore
-    assert spec.read_model is scan_set.ScanSetCoreRead
+    assert spec.write_model is _scan_core.ScanSetCore
+    assert spec.read_model is _scan_core.ScanSetCoreRead
 
 
 def test_a_kind_is_registered_once() -> None:

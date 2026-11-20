@@ -53,6 +53,9 @@ _PHRASE: dict[ConnectorErrorKind, str] = {
     "conflict": "conflicting write",
     "wrong_region": "bucket is in another region",
     "pointer_invalid": "pointer object is invalid",
+    "source_changed": "object changed during read",
+    "digest_mismatch": "content check failed",
+    "host_key_rejected": "host key not trusted",
     "unexpected": "unexpected error",
 }
 
@@ -62,6 +65,11 @@ def _classified(provider: str, kind: ConnectorErrorKind) -> ConnectorError:
     text = f"Unexpected {provider} error" if kind == "unexpected" else f"{provider} {_PHRASE[kind]}"
     cls = TransientError if kind == "transient" else PermanentError
     return cls(text, kind=kind)
+
+
+def source_changed(provider: str) -> ConnectorError:
+    """The error for an object that changed between a read and its resume: fixed text, final."""
+    return _classified(provider, "source_changed")
 
 
 def gcs_retry() -> Any:
@@ -356,7 +364,13 @@ def s3_call(call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 
 
 def s3_put(
-    client: Any, bucket: str, key: str, chunks: Iterator[bytes], conditions: Mapping[str, str]
+    client: Any,
+    bucket: str,
+    key: str,
+    chunks: Iterator[bytes],
+    conditions: Mapping[str, str],
+    *,
+    part_client: Any = None,
 ) -> int:
     """Write ``chunks`` to one object and return the bytes written: the one S3 put path.
 
@@ -364,8 +378,11 @@ def s3_put(
     multipart upload of exact 5 MiB parts plus a short final part. ``conditions`` (for
     example ``{"IfNoneMatch": "*"}``) ride on the call that creates the object, the single
     PUT or ``complete_multipart_upload``. A failure after the upload starts aborts it, best
-    effort, so an abort error never masks the write error.
+    effort, so an abort error never masks the write error. ``part_client`` (default
+    ``client``) sends ``upload_part``, which is idempotent per part number and so may use the
+    two-attempt client while the conditional calls stay on a one-attempt ``client``.
     """
+    parts_on = client if part_client is None else part_client
     buffer = bytearray()
     upload_id: str | None = None
     parts: list[dict[str, Any]] = []
@@ -375,7 +392,7 @@ def s3_put(
         nonlocal total
         number = len(parts) + 1
         response = s3_call(
-            client.upload_part,
+            parts_on.upload_part,
             Bucket=bucket,
             Key=key,
             UploadId=upload_id,

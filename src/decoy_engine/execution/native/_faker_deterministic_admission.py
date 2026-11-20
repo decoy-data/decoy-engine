@@ -29,6 +29,7 @@ from typing import Any, Final
 import pyarrow as pa
 
 from decoy_engine._canonical import StrictJsonError, strict_json_loads
+from decoy_engine._pandas_meta import COLUMN_INDEX_ENTRY, PLAIN_PAIRS
 from decoy_engine.execution._operator_registry import (
     DETERMINISTIC_FAKER_SOURCE_TYPES,
     OPERATORS,
@@ -109,26 +110,13 @@ SCHEMA_NOT_GUARANTEED = "faker_conversion_schema_not_guaranteed"
 # Coded decline reason: the guaranteed schema's metadata shape is outside the closed allowlist.
 METADATA_NOT_ALLOWLISTED = "faker_conversion_metadata_not_allowlisted"
 
-# The explicit physical-Arrow-type -> (pandas_type, numpy_type) table (section 10). A physical
-# field whose type is absent here makes the whole pandas-metadata shape ineligible: an unlisted
+# The explicit physical-Arrow-type -> (pandas_type, numpy_type) table (section 10), held by the
+# descriptor registry (`_pandas_meta`) that the output sanitizer also reads. A physical field
+# whose type is absent here makes the whole pandas-metadata shape ineligible: an unlisted
 # companion type (timestamp, decimal, ...) is not proven convertible, so the shape declines.
 # The float and string rows permit ORDINARY COMPANION columns; they do not expand the Faker
 # target domain (the caller gates the target type separately via DETERMINISTIC_FAKER_SOURCE_TYPES).
-_PANDAS_TYPE_TABLE: Final[dict[pa.DataType, tuple[str, str]]] = {
-    pa.bool_(): ("bool", "bool"),
-    pa.int8(): ("int8", "int8"),
-    pa.int16(): ("int16", "int16"),
-    pa.int32(): ("int32", "int32"),
-    pa.int64(): ("int64", "int64"),
-    pa.uint8(): ("uint8", "uint8"),
-    pa.uint16(): ("uint16", "uint16"),
-    pa.uint32(): ("uint32", "uint32"),
-    pa.uint64(): ("uint64", "uint64"),
-    pa.float32(): ("float32", "float32"),
-    pa.float64(): ("float64", "float64"),
-    pa.string(): ("unicode", "object"),
-    pa.large_string(): ("unicode", "object"),
-}
+_PANDAS_TYPE_TABLE: Final = PLAIN_PAIRS
 
 _REQUIRED_PANDAS_KEYS: Final = frozenset(
     {"index_columns", "column_indexes", "columns", "creator", "pandas_version"}
@@ -136,13 +124,7 @@ _REQUIRED_PANDAS_KEYS: Final = frozenset(
 _REQUIRED_COLUMN_KEYS: Final = frozenset(
     {"name", "field_name", "pandas_type", "numpy_type", "metadata"}
 )
-_COLUMN_INDEX_SHAPE: Final = {
-    "name": None,
-    "field_name": None,
-    "pandas_type": "unicode",
-    "numpy_type": "object",
-    "metadata": {"encoding": "UTF-8"},
-}
+_COLUMN_INDEX_SHAPE: Final = COLUMN_INDEX_ENTRY
 
 
 def _strict_json_object(raw: bytes) -> dict[str, Any] | None:

@@ -58,6 +58,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
+from decoy_engine._nested_json import nested_children
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -142,9 +143,9 @@ class NestedStrategyHandler:
         # SCALAR_HANDLERS dict imports nested strategy at module load).
         from decoy_engine.execution._strategies import SCALAR_HANDLERS
 
-        cfg = provider_config_to_dict(plan.provider_config)
-        child_strategy_name = cfg.get("strategy")
-        child_strategy_config = cfg.get("strategy_config") or {}
+        (child,) = nested_children(provider_config_to_dict(plan.provider_config))
+        child_strategy_name = child.strategy
+        child_strategy_config = child.strategy_config or {}
         column_suffix = f" (column={column!r})" if column is not None else ""
 
         if not isinstance(child_strategy_name, str) or not child_strategy_name:
@@ -239,8 +240,8 @@ class NestedStrategyHandler:
         plan: ColumnSeed,
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
-        cfg = provider_config_to_dict(plan.provider_config)
-        target_path = cfg.get("target")
+        (nested_child,) = nested_children(provider_config_to_dict(plan.provider_config))
+        target_path = nested_child.target
 
         # QA-3 F12 (2026-05-31, security): config errors below promote to
         # StrategyError so the runner fails the job. Pre-fix they returned

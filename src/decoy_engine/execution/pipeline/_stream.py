@@ -197,6 +197,7 @@ def _lane_decision(ctx: PipelineRunContext, mask_tables: list[str], fk: bool) ->
         keep_lazy=keep_lazy,
         ooc_declined=None,
         stream=replace(verdict, split=split),
+        split=split,
     )
 
 

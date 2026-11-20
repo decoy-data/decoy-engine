@@ -20,6 +20,8 @@ Requires the optional [geo] extra (h3 library) when type="lat_lng".
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pandas as pd
 
 from decoy_engine import reasons
@@ -97,19 +99,19 @@ class GeoGeneralizeHandler:
 
         warnings: list[QualityWarning] = []
         if any(d != non_top_label for d in evidence.decisions):
-            # Surface cascade decisions as a frozen evidence snapshot.
+            # Surface the cascade decisions as counts per decision (scalars only; a per-row map
+            # would carry row positions).
             # Only emit when at least one row was generalized past the highest level.
-            decisions_map = {
-                f"row_{i}": decision
-                for i, decision in enumerate(evidence.decisions)
-                if decision != non_top_label
-            }
+            cascaded = Counter(d for d in evidence.decisions if d != non_top_label)
             warnings.append(
                 QualityWarning(
                     code=reasons.warning.GEO_GENERALIZE_CASCADE,
                     provider="geo_generalize",
                     column=column,
-                    detail={"cascade_decisions": decisions_map},
+                    detail={
+                        "rows_generalized": sum(cascaded.values()),
+                        **{f"rows_{decision}": count for decision, count in cascaded.items()},
+                    },
                 )
             )
 

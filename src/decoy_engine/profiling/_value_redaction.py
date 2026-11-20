@@ -30,7 +30,7 @@ import math
 import numbers
 import types
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Final, TypeGuard, Union, get_args, get_origin, get_type_hints
+from typing import Any, Final, Literal, TypeGuard, Union, get_args, get_origin, get_type_hints
 
 from decoy_engine.profiling.types import ColumnProfile
 
@@ -51,6 +51,15 @@ class Rule(enum.Enum):
     KEPT_YEAR_START = "kept_year_start"  # first instant of the first folded range
     KEPT_YEAR_END = "kept_year_end"  # last instant of the last folded range
     FOLD_UNDER_K = "fold_under_k"  # labels and cells under K rows move into other_count
+    # The floor rules for a column the profiler did not flag, in a plain profile document
+    # (`PROFILE_FLOOR_FIELDS`). Each needs counts from the same document.
+    HELD_BY_K = "held_by_k"  # kept when the top values prove K rows hold the text
+    UNDER_K_PLACEHOLDER = "under_k_placeholder"  # a text no count proves K rows hold
+    AGGREGATE_2K = "aggregate_2k"  # kept when the column has 2K non-null cells
+    FOLD_DECADES = "fold_decades"  # decade buckets coded at the K-th row, then merged to K rows
+    DECADE_START = "decade_start"  # first day of the first folded decade
+    DECADE_END = "decade_end"  # last day of the last folded decade
+    SENTINEL_TABLE = "sentinel_table"  # kept only when it is the fixed table text
 
 
 REDACTED: Final = "[redacted]"
@@ -101,21 +110,22 @@ VALUE_FREE_FIELDS: Final[frozenset[tuple[str, str]]] = frozenset(
         "ColumnProfile",
         "source_label", "row_count", "sample_strategy", "sample_row_cap", "fields",
         "reid_risk_columns", "reid_risk_score", "quasi_identifier_groups", "k_anonymity",
-        "engine_version", "generated_at",
+        "engine_version", "generated_at", "basis",
     )
     | _free(
         "FieldStats",
         "name", "inferred_type", "dtype_raw", "row_count", "null_count", "null_rate",
         "distinct_count", "unique_rate", "is_likely_unique", "min_length",
         "max_length", "avg_length", "date_format", "invalid_count", "casing_pattern",
-        "format_pattern", "alphabet", "value_set_size_class", "numeric_range_class",
+        "format_pattern", "format_pattern_complete", "alphabet", "value_set_size_class", "numeric_range_class",
         "mode_freq", "top_values", "detector_matches", "sentinels", "pii_score",
         "distribution", "detection_trail", "domain",
     )
     | _free("TopValue", "count", "pct")
     | _free(
         "DetectorMatch",
-        "detector_id", "match_rate", "format_pattern", "confidence", "domain",
+        "detector_id", "match_rate", "format_pattern", "format_pattern_complete", "confidence",
+        "domain",
     )
     | _free("Distribution", "kind", "data")
     | _free("SentinelFlag", "kind", "count")
@@ -209,8 +219,79 @@ DATA_RULES: Final = frozenset(
         Rule.KEPT_YEAR_START,
         Rule.KEPT_YEAR_END,
         Rule.FOLD_UNDER_K,
+        Rule.HELD_BY_K,
+        Rule.UNDER_K_PLACEHOLDER,
+        Rule.AGGREGATE_2K,
+        Rule.FOLD_DECADES,
+        Rule.DECADE_START,
+        Rule.DECADE_END,
+        Rule.SENTINEL_TABLE,
     }
 )
+# Rules for a column the profiler did not flag, in a plain profile document. The flagged table
+# withholds a slot; this one keeps it only when a count in the same document proves K rows
+# behind it (Hundepool et al., Statistical Disclosure Control, Wiley 2012, sections 3.4 and 4.2).
+# A distribution is keyed `Distribution.<kind>`; an unknown kind gets the flagged rules.
+PROFILE_DISTRIBUTION_KINDS: Final = frozenset(
+    {"numeric", "date", "categorical", "pattern", "freetext"}
+)
+
+
+def _floor(scope: str, **rules: Rule) -> dict[tuple[str, str], Rule]:
+    return {(scope, name): rule for name, rule in rules.items()}
+
+
+_NULLS: Final = {"min": Rule.NULL, "max": Rule.NULL, "mean": Rule.NULL}
+PROFILE_FLOOR_FIELDS: Final[Mapping[tuple[str, str], Rule]] = types.MappingProxyType(
+    {
+        **_floor(
+            "FieldStats",
+            min_value=Rule.HELD_BY_K,
+            max_value=Rule.HELD_BY_K,
+            mode_value=Rule.HELD_BY_K,
+            mean_value=Rule.AGGREGATE_2K,
+            date_min=Rule.DECADE_START,
+            date_max=Rule.DECADE_END,
+            sample_invalid=Rule.EMPTY_LIST,
+        ),
+        **_floor("DetectorMatch", sample_misses=Rule.EMPTY_LIST),
+        **_floor("TopValue", value=Rule.UNDER_K_PLACEHOLDER),
+        **_floor("Distribution.categorical", labels=Rule.UNDER_K_PLACEHOLDER, **_NULLS),
+        **_floor(
+            "Distribution.numeric",
+            labels=Rule.PLACEHOLDER_EACH,
+            **{**_NULLS, "mean": Rule.AGGREGATE_2K},
+        ),
+        **_floor(
+            "Distribution.date",
+            labels=Rule.FOLD_DECADES,
+            min=Rule.DECADE_START,
+            max=Rule.DECADE_END,
+            mean=Rule.NULL,
+        ),
+        **_floor("Distribution.pattern", labels=Rule.PLACEHOLDER_EACH, **_NULLS),
+        **_floor("SentinelFlag", value=Rule.SENTINEL_TABLE, note=Rule.SENTINEL_TABLE),
+    }
+)
+# Slots an unflagged column keeps as they are: free-text length buckets and length statistics.
+PROFILE_FLOOR_KEEP: Final = frozenset(
+    ("Distribution.freetext", name) for name in ("labels", "min", "max", "mean")
+)
+
+
+def profile_floor_slots(type_name: str, kind: Any = None) -> tuple[dict[str, Rule], frozenset[str]]:
+    """(rule by slot, slots kept as they are) for one value-bearing type of an unflagged column."""
+    scope = type_name
+    if isinstance(kind, str) and kind in PROFILE_DISTRIBUTION_KINDS:
+        scope = f"Distribution.{kind}"
+    names = [name for t, name in VALUE_FIELDS if t == type_name]
+    kept = frozenset(name for name in names if (scope, name) in PROFILE_FLOOR_KEEP)
+    rules = {
+        name: PROFILE_FLOOR_FIELDS.get((scope, name), VALUE_FIELDS[(type_name, name)])
+        for name in names
+        if name not in kept
+    }
+    return rules, kept
 
 
 def snapshot_rules(scope: str) -> Mapping[str, Rule]:
@@ -270,7 +351,12 @@ def _checkable(hint: Any) -> bool:
     origin = get_origin(hint)
     if origin in (Union, types.UnionType, list):
         return all(_checkable(a) for a in get_args(hint))
-    return hint is type(None) or hint in _SCALARS or dataclasses.is_dataclass(hint)
+    return (
+        hint is type(None)
+        or hint in _SCALARS
+        or get_origin(hint) is Literal
+        or dataclasses.is_dataclass(hint)
+    )
 
 
 def _conforms(value: Any, hint: Any) -> bool:
@@ -285,6 +371,9 @@ def _conforms(value: Any, hint: Any) -> bool:
         return True
     if hint is type(None):
         return value is None
+    if origin is Literal:
+        # Exactly one of the declared strings: a near miss or another type may be a cell.
+        return type(value) is str and value in get_args(hint)
     if isinstance(value, bool):
         return hint is bool  # a bool is not a count or a score
     if hint is float:
@@ -425,9 +514,16 @@ def _containers(node: Any, steps: _Steps, parent: Any, key: Any) -> Iterator[dic
         yield from _containers(node[step], rest, node, step)
 
 
+@dataclasses.dataclass(frozen=True)
+class PlaceholderAt:
+    """Replace only these entries of a list slot, so a floor keeps the labels K rows hold."""
+
+    indexes: frozenset[int]
+
+
 def _apply(
     container: dict[str, Any],
-    rules: Mapping[str, Rule],
+    rules: Mapping[str, Rule | PlaceholderAt],
     keep: Callable[[str, Any], bool],
     *,
     denied_value: Any = REDACTED,
@@ -440,7 +536,14 @@ def _apply(
         if name not in container or container[name] is None:
             continue
         current = container[name]
-        if rule is Rule.NULL:
+        if isinstance(rule, PlaceholderAt):
+            if isinstance(current, list):
+                container[name] = [
+                    REDACTED if i in rule.indexes else v for i, v in enumerate(current)
+                ]
+            else:
+                container[name] = REDACTED
+        elif rule is Rule.NULL:
             container[name] = None
         elif rule is Rule.EMPTY_LIST:
             container[name] = []

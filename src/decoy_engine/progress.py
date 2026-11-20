@@ -173,7 +173,7 @@ class ProgressChannel:
         self._started = time.perf_counter()
         self._sequence = 0
         self._lock = threading.Lock()
-        self._retry_floor: dict[str, int] = {}
+        self._retry_floor: dict[tuple[str, int | None], int] = {}
         self._checkpoint_floor = -1
         self.sink_failures = 0
         # Owner reports refused for going backwards; observational, never an exception.
@@ -304,18 +304,21 @@ class ProgressChannel:
         *,
         table: str | None = None,
         reason: ReasonRecord | None = None,
+        operation: int | None = None,
     ) -> bool:
         """Report a retry owner's schedule. Only the owner of the schedule calls this.
 
-        Attempt numbers never go backwards within a scope; a report that would is refused and
-        counted in `rejected_reports`. Returns whether the report was emitted. A channel with no
+        Attempt numbers never go backwards within a scope and operation (`operation` is the
+        owner's id for one retried call; None is the scope's own sequence); a report that would
+        is refused and counted in `rejected_reports`. Returns whether the report was emitted. A channel with no
         sink bound keeps no state at all (the shared no-op channel is never a run's record)."""
         if self._sink is None:
             return False
-        if retry.attempt < self._retry_floor.get(retry.scope, 1):
+        floor_key = (retry.scope, operation)
+        if retry.attempt < self._retry_floor.get(floor_key, 1):
             self.rejected_reports += 1
             return False
-        self._retry_floor[retry.scope] = retry.attempt
+        self._retry_floor[floor_key] = retry.attempt
         self.emit(RetryEvent(table=table, retry=retry, reason=reason, object_ref=_ident(table)))
         return True
 

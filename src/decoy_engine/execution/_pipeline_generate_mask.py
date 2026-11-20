@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from decoy_engine.execution._adapter import ExecutionAdapter
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
+    from decoy_engine.execution._pipeline_multi_table import MultiTableSplit
     from decoy_engine.execution._planner import ExecutionPlan
     from decoy_engine.execution.pipeline._stream import StreamVerdict
     from decoy_engine.generation.pool import PoolCache
@@ -85,9 +86,9 @@ def run_generate_and_mask_steps(
     instance_default_locale: str | None,
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None,
     resident_sources: dict[str, Any],
-    caller_sources: Mapping[str, Any],
     keep_lazy: Mapping[str, _chunked_input.SourceFacts],
     route_chunked: bool,
+    split: MultiTableSplit | None,
     table_kinds: dict[str, str],
     config: dict[str, Any],
     engine_version: str,
@@ -166,31 +167,6 @@ def run_generate_and_mask_steps(
         merged_sources.update(resident_sources)
         merged_sources.update(generate_outputs)
 
-        # B7: an independent multi-table job runs each table on the route it would take
-        # alone. `None` leaves the branches below exactly as they were.
-        split = (
-            None
-            if route_chunked
-            else stream.split
-            if stream is not None
-            else _multi_table.decide_multi_table_split(
-                config,
-                plan=plan,
-                registry=registry,
-                graph=graph,
-                substrate=resolved_substrate,
-                caller_sources=caller_sources,
-                table_kinds=table_kinds,
-                auto_chunk=auto_chunk,
-                source_facts=keep_lazy,
-                auto_chunk_threshold_rows=auto_chunk_threshold_rows,
-                dispatcher_enabled=chunked_dispatcher_enabled,
-                # F06: a declared job keeps one route for the whole job, so every table's
-                # companion rows stay aligned with its rendered output.
-                split_enabled=multi_table_dispatch_enabled and cast_run is None,
-                vault_writer_present=vault_writer is not None,
-            )
-        )
         if cast_run is not None and multi_table_dispatch_enabled and not route_chunked:
             _multi_table.note_declared_split_exclusion(
                 config,
