@@ -49,9 +49,17 @@ _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
 _INTEGER_CHARS = frozenset("-0123456789")
 
-# numexpr.expressions.functions (48 names), pandas' DEFAULT_GLOBALS, the names pandas
-# eval resolves from the frame itself, and the Python keywords. Frozen on purpose: `type` (a 3.12
-# soft keyword) is listed on every interpreter so validation does not depend on the running Python.
+# The nine words held back for later grammar. pandas eval would read them as columns, so the
+# refusal reason must not say otherwise.
+_GRAMMAR_HELD_NAMES = frozenset(
+    {"null", "true", "false", "between", "like", "ilike", "matches", "startswith", "endswith"}
+)
+
+# numexpr.expressions.functions (48 names), pandas' DEFAULT_GLOBALS, the names pandas eval
+# resolves from the frame itself, the Python keywords, and nine words held back for later
+# grammar (`null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`,
+# `endswith`). Frozen on purpose: `type` (a 3.12 soft keyword) is listed on every interpreter
+# so validation does not depend on the running Python.
 RESERVED_NAMES: frozenset[str] = frozenset(
     {
         # numexpr function names
@@ -70,7 +78,7 @@ RESERVED_NAMES: frozenset[str] = frozenset(
         "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
         "return", "try", "while", "with", "yield", "match", "case", "_", "type",
     }
-)  # fmt: skip
+) | _GRAMMAR_HELD_NAMES  # fmt: skip
 
 Scalar = Union[int, float, str, bool]  # noqa: UP007 -- evaluated at import on 3.10
 
@@ -113,6 +121,8 @@ def _name(token: Any) -> str:
     name = str(token)
     if name.startswith("__") or name.endswith("__"):
         raise _RejectError("dunder identifiers are not column references")
+    if name in _GRAMMAR_HELD_NAMES:
+        raise _RejectError(f"{name!r} is a reserved word of the when grammar; rename the column")
     if name in RESERVED_NAMES:
         raise _RejectError(f"{name!r} is reserved (pandas eval would not read it as a column)")
     return name

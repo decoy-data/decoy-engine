@@ -120,6 +120,14 @@ with `when_outside_closed_grammar`). It is listed on every interpreter rather th
 `keyword.softkwlist`, so a config validates identically on every supported Python. The list is frozen
 on purpose; after GA any further addition is a breaking change.
 
+**Pre-GA correction (FREEZE-S5, 2026-11-20).** `RESERVED_NAMES` of the `when` closed grammar gains nine
+words: `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` and `endswith`. They are held
+back for later grammar (SQL-style literals and string operators), so adding one to the grammar is not a second
+breaking change. A config whose `when:` reads a column with one of these names now fails with
+`when_outside_closed_grammar`; rename the column. Reserved names match exactly and case-sensitively, so `NULL`
+and `Between` stay columns. The set is pinned by an exact snapshot, and a sentry checks that every keyword
+literal in `when_grammar.lark` is reserved.
+
 **Pre-GA correction (SUB-STOP, 2026-11-05).** A config with `subset:` set is refused by every run entry
 (`run_pipeline`, `run_pipeline_isolated`, `run_mask_pipeline_chunked`, `run_mask_chunked`, `run_native_or_oracle_chunked`) and by `compile_plan`,
 with `config.subset_run_unsupported` (registry 1.6.0). Before, the block validated and the run silently masked
