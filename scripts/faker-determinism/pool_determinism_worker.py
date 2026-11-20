@@ -123,8 +123,8 @@ def main() -> None:
         column_config=with_table(col, FAKER_POOL_PROBE_TABLE),
         fallback_seed=_FALLBACK_SEED,
     )
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(_faker_pool._SELECTION_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
+    selection_seed = gen_ctx.family_bytes(_faker_pool.POOL_SELECTION_FAMILY)[:8]
 
     # Read-only metadata probe: which locale Faker actually resolved to.
     # `make_faker` falls back to en_US on an invalid locale string; this

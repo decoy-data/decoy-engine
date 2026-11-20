@@ -39,6 +39,7 @@ __all__ = [
     "FPE_UNENCRYPTABLE_LENGTH",
     "FPE_UNENCRYPTABLE_VALUE",
     "GENERATION_NOT_REPRODUCIBLE",
+    "GENERATION_PROVIDER_FAILED",
     "INVALID_SUBSTRATE",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISSING",
@@ -422,4 +423,13 @@ SPOOL_DISK_FULL = _d(
     "The disk or quota for the local copy of a remote source is too small.",
     retry=RetryClass.ENVIRONMENT_REPAIR,
     since="1.30.0",
+)
+
+_d = _catalog.runtime("GenerationError")
+
+# The one fixed-text translation of an adapter or pool failure on a provider column.
+GENERATION_PROVIDER_FAILED = _d(
+    "generation_provider_failed",
+    "A provider column could not be generated.",
+    since=UNRELEASED,
 )
