@@ -116,6 +116,7 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/_sequential.py",
     "execution/_chunked.py",
     "execution/chunked/_progress.py",
+    "execution/chunked/_source_dtype_gate.py",
     "execution/_adapter.py",
     "execution/_substrate.py",
     "execution/_runner.py",
@@ -524,6 +525,8 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # The chunked entries' progress helper (new sub-package); it is in GUARDED_MODULES,
             # so it imports nothing from `execution.physical`.
             "src/decoy_engine/execution/chunked/_progress.py",
+            # The planner's dtype gate (moved out of `_planner.py`); in GUARDED_MODULES too.
+            "src/decoy_engine/execution/chunked/_source_dtype_gate.py",
             "src/decoy_engine/execution/_chunked_adapter_gate.py",
             "src/decoy_engine/execution/_planner.py",
             "src/decoy_engine/execution/_strategies/_top_code.py",

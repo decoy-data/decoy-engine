@@ -196,6 +196,19 @@ def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]
     return [c for c in table_cfg.get("columns") or [] if isinstance(c, dict)]
 
 
+def carried_columns(
+    config: Mapping[str, Any], *, table: str, names: Sequence[str], registry: Any
+) -> frozenset[str]:
+    """The columns of `table` the stock adapter never converts to pandas: the passthrough
+    columns minus the read set. The planner's dtype gate and `plan_carry` both call this,
+    so the auto route and the lane cannot disagree on which columns are carried."""
+    if repeated_names(names):
+        # Carrying addresses columns by name; with duplicates it carries nothing.
+        return frozenset()
+    passthrough = passthrough_columns(config, table=table, names=names, registry=registry)
+    return frozenset(passthrough) - read_set(_table_columns(config, table), passthrough, registry)
+
+
 def plan_carry(
     config: Mapping[str, Any], *, table: str, first_schema: pa.Schema, adapter: Any, registry: Any
 ) -> CarryPlan:
@@ -208,8 +221,8 @@ def plan_carry(
         # Carrying addresses columns by name. With duplicate names it carries nothing,
         # so the profile walk raises its own duplicate-name refusal, as on the oracle.
         return CarryPlan(stock=False, carried=frozenset(), read=tuple(sorted(passthrough)))
-    read = read_set(_table_columns(config, table), passthrough, registry)
-    return CarryPlan(stock=True, carried=frozenset(passthrough) - read, read=tuple(sorted(read)))
+    carried = carried_columns(config, table=table, names=first_schema.names, registry=registry)
+    return CarryPlan(stock=True, carried=carried, read=tuple(sorted(set(passthrough) - carried)))
 
 
 def adapter_fk_safe_columns(plan: Any, registry: Any, graph: Any, table: str) -> set[str]:
@@ -226,6 +239,7 @@ __all__ = [
     "PASSTHROUGH_UNREPRESENTABLE_CODE",
     "CarryPlan",
     "adapter_fk_safe_columns",
+    "carried_columns",
     "has_when",
     "is_stock_adapter",
     "passthrough_columns",

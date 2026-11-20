@@ -1,0 +1,199 @@
+"""NONFK-OOM part (a): a carried passthrough column keeps a non-FK table on the chunked lane.
+
+AT-A1, AT-A2, AT-A3, AT-A4, AT-A5, AT-A6, AT-A7, AT-A8, AT-A9 and the guards G-1 (passthrough
+rows) and G-3 of docs/plans/2026-11-19-nonfk-oom.md. Do not delete a cell, skip one or loosen
+an equality to pass.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pytest
+
+from decoy_engine.execution import _chunked_carry as carry
+from decoy_engine.execution._chunked_carry import is_stock_adapter
+from tests.parity._nonfk_dtype_cases import CARRIED_TYPES, LAYOUTS, source_table
+from tests.unit.execution import _auto_chunk_support as support
+
+CELLS = [(t, lay) for t in CARRIED_TYPES for lay in LAYOUTS]
+IDS = [f"{t}-{lay}" for t, lay in CELLS]
+
+
+def _cfg(
+    tmp_path: Path,
+    table: pa.Table,
+    p_entry: dict[str, Any] | None,
+    extra: list[dict[str, Any]] | None = None,
+    *,
+    s_entry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The config for `table`; the Parquet file `profile_source` reads is written after the
+    config is built, so the source stays undeclared (no declared casting)."""
+    cols = [s_entry or support.redact_col("s"), *(extra or [])]
+    if p_entry is not None:
+        cols.append(p_entry)
+    path = tmp_path / "src.parquet"
+    cfg = support.make_cfg(cols, path=str(path))
+    support.write_source(table, path)
+    return cfg
+
+
+def _run(table: pa.Table, cfg: dict[str, Any], **kwargs: Any) -> Any:
+    return support.run_default(cfg, table, **kwargs)
+
+
+def _oracle(table: pa.Table, cfg: dict[str, Any]) -> Any:
+    return support.run_full_frame(cfg, table, execution_mode="full_frame")
+
+
+@pytest.mark.parametrize(("type_class", "layout"), CELLS, ids=IDS)
+def test_at_a1_configured_passthrough_is_carried_exactly(
+    tmp_path: Path, type_class: str, layout: str
+) -> None:
+    table = source_table(type_class, layout)
+    got = _run(table, _cfg(tmp_path, table, support.pass_col("p")))
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "chunked", block["reason"]
+    out = got.outputs[support.TABLE]
+    assert out.schema.field("p").type == table.schema.field("p").type
+    assert out.column("p").to_pylist() == table.column("p").to_pylist()
+
+
+def test_at_a2_unconfigured_columns_are_carried() -> None:
+    """A file source must declare every column, so the unconfigured shape is reachable only
+    through the shared carried-set function the planner and the lane both call."""
+    from decoy_engine.providers_v2 import get_default_registry
+
+    cfg = {"tables": [{"name": "t", "columns": [support.redact_col("s")]}]}
+    got = carry.carried_columns(
+        cfg, table="t", names=["s", "p", "q"], registry=get_default_registry()
+    )
+    assert got == {"p", "q"}
+    assert (
+        carry.carried_columns(
+            cfg, table="t", names=["s", "p", "p"], registry=get_default_registry()
+        )
+        == frozenset()
+    )
+
+
+@pytest.mark.parametrize("type_class", ["int64_nulls", "decimal128", "list"])
+def test_at_a3_non_carried_columns_equal_the_full_frame_oracle(
+    tmp_path: Path, type_class: str
+) -> None:
+    table = source_table(type_class, "later_mixed")
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    got = _run(table, cfg)
+    base = _oracle(table, cfg)
+    assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    a, b = got.outputs[support.TABLE], base.outputs[support.TABLE]
+    assert a.schema.field("s").type == b.schema.field("s").type
+    assert a.column("s").to_pylist() == b.column("s").to_pylist()
+
+
+def _when_read_run(tmp_path: Path) -> dict[str, Any]:
+    table = pa.table(
+        {
+            "s": pa.array([f"n{i}" for i in range(200)]),
+            "p": pa.array([None if i % 5 == 0 else i for i in range(200)], pa.int64()),
+        }
+    )
+    cfg = _cfg(
+        tmp_path,
+        table,
+        support.pass_col("p"),
+        s_entry={**support.redact_col("s"), "when": "p > 3"},
+    )
+    return _run(table, cfg).quality_metrics["auto_chunk"]
+
+
+def test_at_a4_a_column_read_by_when_stays_full_frame(tmp_path: Path) -> None:
+    block = _when_read_run(tmp_path)
+    assert block["mode"] == "full_frame"
+    assert "non-chunk-stable pandas round-trip dtypes" in block["reason"]
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_a5_the_auto_lane_hands_the_stock_adapter() -> None:
+    from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
+
+    assert is_stock_adapter(None)
+    assert is_stock_adapter(PandasExecutionAdapter())
+
+    class Custom(PandasExecutionAdapter):
+        pass
+
+    assert not is_stock_adapter(Custom())
+
+
+def test_at_a6_nested_columns_profile_without_error_and_carry(tmp_path: Path) -> None:
+    import random
+
+    from decoy_engine.profile import profile_source  # noqa: F401  (import check only)
+    from decoy_engine.profile._readers_resident import ResidentTableSource
+    from decoy_engine.profile._source import _profile_one_source
+
+    table = source_table("list", "later_mixed").append_column(
+        "q", source_table("struct", "later_mixed").column("p")
+    )
+    profile = _profile_one_source(
+        ResidentTableSource(table),
+        table_name="t",
+        declared_pk_cols=frozenset(),
+        fk_specs={},
+        sample_rows=None,
+        residency="full",
+        rng=random.Random(0),
+    )
+    by_name = {c.name: c for c in profile.columns}
+    assert by_name["p"].distinct_count is None
+    assert by_name["q"].distinct_count is None
+    cfg = _cfg(tmp_path, table, support.pass_col("p"), extra=[support.pass_col("q")])
+    got = _run(table, cfg)
+    assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    out = got.outputs[support.TABLE]
+    assert out.column("p").to_pylist() == table.column("p").to_pylist()
+    assert out.column("q").to_pylist() == table.column("q").to_pylist()
+
+
+def test_at_a7_the_decline_carries_a_registered_code(tmp_path: Path) -> None:
+    from decoy_engine.execution.physical._reasons import (
+        CODE_CHUNKED_SOURCE_DTYPE_UNSTABLE,
+        translate_chunked_rejection,
+    )
+
+    codes = translate_chunked_rejection(_when_read_run(tmp_path)["reason"])
+    assert CODE_CHUNKED_SOURCE_DTYPE_UNSTABLE in codes
+    assert not any(c.startswith("unclassified") for c in codes)
+
+
+def test_at_a9_small_nested_table_on_full_frame_is_exact(tmp_path: Path) -> None:
+    table = source_table("list", "later_mixed").slice(0, 8)
+    table = table.append_column("q", source_table("struct", "later_mixed").column("p").slice(0, 8))
+    cfg = _cfg(tmp_path, table, support.pass_col("p"), extra=[support.pass_col("q")])
+    got = support.run_default(cfg, table, auto_chunk_threshold_rows=10_000)
+    assert got.quality_metrics["auto_chunk"]["mode"] == "full_frame"
+    out = got.outputs[support.TABLE]
+    assert out.column("p").to_pylist() == table.column("p").to_pylist()
+    assert out.column("q").to_pylist() == table.column("q").to_pylist()
+
+
+def test_g3_read_set_has_one_production_caller() -> None:
+    root = Path(carry.__file__).resolve().parents[1]
+    callers: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Call):
+                    f = node.func
+                    name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
+                    if name == "read_set":
+                        callers.append(f"{path.name}:{fn.name}")
+    assert callers == ["_chunked_carry.py:carried_columns"]

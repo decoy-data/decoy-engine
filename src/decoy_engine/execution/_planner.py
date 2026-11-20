@@ -69,11 +69,13 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine.declared_casting._eligibility import chunk_stability, declared_rejection
 from decoy_engine.execution import _chunked_input as _ci
+from decoy_engine.execution._chunked_carry import carried_columns
 from decoy_engine.execution._planner_columns import (
     _bucketize_columns,
     _fpe_join_group_columns,
     _table_column_entries,
 )
+from decoy_engine.execution.chunked._source_dtype_gate import unstable_source_columns
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
@@ -243,6 +245,7 @@ def classify_job(
         registry=registry,
         source_facts=facts,
         ignore_size_threshold=ignore_size_threshold,
+        carry_exempt=not has_fk,
     ) or declared_rejection("chunked", plan=plan)  # F06: declared casting is full-frame only
     if chunked_rejection is None:
         reason = (
@@ -292,6 +295,7 @@ def _chunked_rejection(
     registry: ProviderRegistry,
     source_facts: dict[str, _ci.SourceFacts],
     ignore_size_threshold: bool = False,
+    carry_exempt: bool = False,
 ) -> str | None:
     """None when the job is admissible for chunked streaming; else why not.
 
@@ -381,6 +385,7 @@ def _chunked_rejection(
                     source_facts=source_facts,
                     declared=chunk_stability(config, table),
                     ignore_size_threshold=ignore_size_threshold,
+                    carry_inputs=(config, registry) if carry_exempt else None,
                 )
             )
     return "; ".join(reasons) if reasons else None
@@ -443,6 +448,7 @@ def _runtime_source_rejections(
     source_facts: dict[str, _ci.SourceFacts] | None = None,
     declared: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset()),
     ignore_size_threshold: bool = False,
+    carry_inputs: tuple[Mapping[str, Any], ProviderRegistry] | None = None,
 ) -> list[str]:
     """Runtime (loaded-source) gates: presence, size threshold, dtypes,
     and the bucketize source shape.
@@ -478,29 +484,18 @@ def _runtime_source_rejections(
     if gap:
         reasons.append(gap)
     stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
-    unstable: list[str] = [f"{n} (declared, no output_format)" for n in sorted(bad)]
-    for schema_field in schema:
-        t = schema_field.type
-        if schema_field.name in stable | bad:
-            continue
-        if pat.is_integer(t):
-            # pandas widens int+null to float PER FRAME, so a null-free
-            # chunk keeps int64 while a null-bearing one becomes float64;
-            # only a null-free integer column round-trips chunk-stably.
-            if (facts.null_count(schema_field.name) or 0) > 0:
-                unstable.append(f"{schema_field.name} (integer with nulls)")
-        elif not (
-            pat.is_string(t)
-            or pat.is_large_string(t)
-            or pat.is_floating(t)
-            or pat.is_boolean(t)
-            or pat.is_temporal(t)
-            or pat.is_null(t)
-        ):
-            unstable.append(f"{schema_field.name} ({t})")
+    # FK jobs keep their routing: only a job with no FK edge exempts its carried columns.
+    carried: frozenset[str] = frozenset()
+    if carry_inputs is not None:
+        carried = carried_columns(
+            carry_inputs[0], table=table, names=schema.names, registry=carry_inputs[1]
+        )
+    unstable = unstable_source_columns(
+        facts, declared_stable=stable, declared_bad=bad, carried=carried
+    )
     if unstable:
         reasons.append(
-            "column(s) with non-chunk-stable pandas round-trip dtypes: "
+            f"column(s) with non-chunk-stable pandas round-trip dtypes: "
             f"{', '.join(sorted(unstable))}"
         )
     # bucketize output dtype depends on chunk content: null / non-numeric
