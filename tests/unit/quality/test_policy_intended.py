@@ -12,7 +12,6 @@ import copy
 import pytest
 
 from decoy_engine.contracts import distribution_behavior as table
-from decoy_engine.quality.fidelity import mean_comparable_similarity
 from decoy_engine.quality.policy import apply_quality_policy
 
 _FAIL = {"mode": "fail"}
@@ -232,6 +231,8 @@ def test_at_e2_9_a_new_replacing_strategy_is_intended_without_editing_policy(mon
 
 
 def test_mean_comparable_similarity_formula() -> None:
+    from decoy_engine.quality.fidelity import mean_comparable_similarity
+
     assert mean_comparable_similarity([]) is None
     assert mean_comparable_similarity([{"comparable": False, "similarity": None}]) is None
     records = [
