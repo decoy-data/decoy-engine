@@ -9,6 +9,119 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-19
+
+### Breaking for consumers
+
+- a `when:` predicate over an integer column now selects blank rows with one rule on every route and column class (`!=`, `not in` and `not (...)` select them), so FK keys, declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings mask more rows than before.
+- `scan_sources` no longer lists `key_candidates` for a sampled scan, and `scan-set/v1` tables and `profile_document` gain `basis` (and `scanned_rows` on the table).
+- a pass-through `large_string` column is now written as `string` (32-bit offsets) when its values fit; a value that cannot fit keeps `large_string`
+- published Parquet files no longer carry the source file's custom metadata, field metadata or pandas `attrs`, and extension-type columns (opaque, tensors, custom types) are written as their storage type
+
+### Added (resident lower bound, NONFK-OOM S1, 2026-11-19)
+
+`decoy_engine.execution.pipeline` exports `lower_bound_bytes`, `TableBytesSpec`, `resident_spec` and `lazy_spec`: a pure strict lower bound on the bytes a full-frame run holds resident (input tables plus one pandas copy). Nothing in the run path calls it yet; the NONFK-OOM baseline bench does.
+
+### Changed (`when:` on integer columns is exact and has one blank-row rule, FREEZE-O1, 2026-11-18)
+
+Integer comparisons in `when:` are exact beyond 2**53. A value or an integer literal outside the range a float64 holds exactly, and any comparison of an integer column with a float literal, is compared as Python integers. Before, a plain integer column with a blank was widened to float64 and `id == 9007199254740993` also selected `9007199254740992`.
+
+A blank integer cell is `NaN` for the predicate on the whole-frame, sequential, chunked, native and unified routes. `!=`, `not in` and a `not` around a comparison that is false for the blank select it; `==`, `in` and the ordering tests do not. FK keys, declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings used the pandas `NA` rule, which selected no blank row for `!=`, so they now mask more rows.
+
+`lossless_int_columns` in `execution/_fk_keys.py` is the one construction of the columns every ingestion site reads as exact integers. It adds the columns a `when:` reads. A null-bearing integer column that a `when:` reads and that passes through is written as `int64` instead of `double` on every route (CSV text `5`, not `5.0`). A job with such a column can now take the unified full-frame route.
+
+### Changed (windowed_date batches its date work, GEN-WINDOWED-BATCH, 2026-11-19)
+
+`windowed_date` now derives the per-row keys in one batch, parses the anchors and formats the dates as vectors, and keeps the per-row numpy draw. Output is the same as before for every input: same dates, same errors, same messages. It is faster for string, `date`, naive `datetime` and naive `Timestamp` anchors. Anything else (mixed types, subclasses, time zones, windows past the nanosecond range) runs the earlier per-row loop.
+
+### Changed (the multi-table split is decided with the route, NONFK-OOM S4a, 2026-11-19)
+
+`run_pipeline` now decides which mask tables of an independent multi-table job dispatch alone while it decides the route, and stores the result on `RouteDecision.split`. The executor reads it instead of deciding after the route is published. Output is unchanged.
+
+### Added (post-scan review: `finding_edits`, INIT-WIZARD E2, 2026-11-17)
+
+`decoy_engine.validation.finding_review` adds `finding_edits(config, report, decisions)`, with `FindingDecision`, `ConfigEdit`, `ReviewDismissRefusedError`, `ReviewIntegrityOffError` and `ReviewConflictError`. These names are experimental: no 1.0 command calls them, and they are outside the frozen surface. It reads a `post-scan-integrity` v2 or v3 report and returns the edits that carry out one decision per finding: at most one replacement entry per column, and one `post_scan.dismissed` entry per rejected finding, bound to the column's final strategy. Only a `warning` from a detector match (or a promoted NER finding) can be dismissed. The result does not depend on the order of the decisions. A relationship key column keeps its namespace and takes only a join-safe strategy. `decoy_engine.profiling` exports `detector_entry`. A dismissal needs `post_scan.integrity: true` in the config; without it the call refuses with `post_scan/review_integrity_off` and writes nothing. The edits are applied to a copy and validated before they are returned, and a report with two rows of one finding identity is refused. New reasons, pending: `post_scan/dismiss_refused`, `post_scan/review_conflict` and `post_scan/review_integrity_off`.
+
+### Fixed (package init back within its size budget, RED-MAIN-INIT, 2026-11-19)
+
+`decoy_engine/__init__.py` drops a redundant filename comment so it is back at 600 lines. No behavior change.
+
+### Changed (partial-read profiles are labelled samples, PROFILE-SAMPLE-LABELS E2, 2026-11-19)
+
+A first-chunk profile of a chunked mask run now marks every column `sampled` and sets no candidate-key flag, because the chunk is only the head of the source. `profile_source` on a CSV now reads one row past the sample size, so a file whose row estimate falls below the sample no longer reads as the whole table. Its columns are marked `sampled` and carry no key flag. The `profile_hash` of such a partial profile changes. The hash of a profile read to the end of its source does not change, and masked output does not change.
+
+### Changed (profile basis labels, PROFILE-SAMPLE-LABELS E1, 2026-11-19)
+
+A table in `scan-set/v1` now has `basis` (`whole` or `sample`) and `scanned_rows`, and a profile document has `basis`. `whole` means the read reached the end of the source; the head scan reads one row past the cap to prove it, and a head scan of a file with exactly the cap rows is `whole` with an exact `row_count`. `key_candidates` is empty on a `sample` basis, because a key needs counts over every row. The scan-set write model refuses a sampled key claim, and reading an older record (or an unknown basis) drops its stored key candidates. A record written before this change reads as `sample` with no `scanned_rows` and still exports. A `basis` value a later minor adds reads as `sample`.
+
+`ColumnProfile` gains a last field, `basis`, default `sample`. The scan-set read models are now derived by the one central deriver (`_value_free.derive_read`); the table row counts and basis are checked together on write and read.
+
+### Changed (PyNaCl is a base dependency, F09 E-DEP, 2026-11-19)
+
+The engine now requires `pynacl>=1.6.2,<2`. It was already in the lock through `paramiko` (the `sftp` extra). Nothing imports it yet; the vault v3 format uses it in a later change. The dev/CI lock profile has a new certified DP row, and `NOTICE` lists PyNaCl as a runtime package.
+
+### Added (starter-config review: `column_entry` and `apply_review`, INIT-WIZARD E1, 2026-11-17)
+
+`decoy_engine.validation.starter_review` exports `column_entry`, `apply_review`, `ReviewDecision`, `ReviewVerdict`, `SuggestionRef` and `ReviewInputError`. `column_entry` builds one column entry and checks it against `strategy_catalog` (strategy, option names, exact types, choices, required options, namespace). `apply_review` folds one verdict per column (`confirm`, `reject`, `edit`, `skip`, `drop`) into a new `StarterConfig`. `drop` removes the column and lists it in the table's one `drop_column` transform. A column of a declared relationship keeps that relationship's namespace, takes only a join-safe strategy and cannot be dropped.  `apply_review` is a declared file-access entry point (keyword-only `file_access` and `base_dir`), because it runs the profile-free plan checks. `ColumnSuggestion` gains `source`, `detector_id`, `model`, `band`, `confidence_bucket`, `entry` and `live` (all defaulted), and `StarterDecision` gains `detector_id` and `confidence_bucket`. `decoy_engine.profiling` exports `build_entry`, `check_starter_config`, `declared_key_namespaces`, `detector_entry` and `swap_placeholder_namespaces`. `decoy_engine.execution` re-exports `strategy_catalog`, `StrategyInfo` and `StrategyOption`. New reasons, pending: `pre_scan/review_unknown_column`, `pre_scan/review_duplicate`, `pre_scan/review_stale`, `pre_scan/review_empty_table`, `config/entry_invalid` and `config/key_column_not_join_safe`. These names are experimental: no 1.0 command calls them, and they are outside the frozen surface.
+
+### Added (scan declaration, ROW27-E-S1c, 2026-11-19)
+
+`DeclarationRequest.for_scan(config, tables=None)` turns a sources-only file or a full pipeline into the inputs of `scan_sources`, before any data row is read. `prepare_declared_sources` returns a `PreparedDeclaredSources` whose new `scan_declaration` property is a frozen `ScanDeclaration`: validated `descriptors`, the selected `tables`, the `relationships` to check, `relationship_positions` (each kept relationship's place in the file), `unchecked_relationships` (a count of full-pipeline relationships that touch a generate table) and `ignored_keys`. A `column_names_file` is read once and carried inline. `scan_sources` takes the new keyword `relationship_positions` so a refusal names the relationship's place in the user's file; without it the numbering is unchanged.
+
+### Changed (pass-through text width, FREEZE-O3, 2026-11-19)
+
+Pass-through text columns used to keep the source's `large_string` type on `run_mask_chunked` chunks and resident results, so a Parquet schema or Arrow consumer saw `large_string` where the whole-frame route wrote `string`. One width state per column now decides per batch from the offsets, without a source pre-scan: values that fit leave as `string`, a batch over the 32-bit limit is split by rows, and one value that cannot fit promotes the column to `large_string` for the rest of the run. A sink whose writer schema is fixed before the first batch (the out-of-core sink, the streamed `run_auto_chunk` sink, any `TransactionalSink`) keeps the source `large_string` field, byte-equal to the previous release. CSV text is unchanged. Parquet still cannot store a value of 2 GiB or more.
+
+### Security (output Parquet metadata allow-list, OUTPUT-METADATA-LEAK E1, 2026-11-19)
+
+Out-of-core output files written from pandas-made sources change bytes: the source's pandas metadata is replaced by a cleaned copy, and custom keys and field metadata are removed.
+
+Before, the out-of-core route copied the source schema's key/value metadata into the masked file. A custom key such as `table_comment`, the field metadata of a column and the pandas blob, including the frame's `attrs`, reached the output footer. Now every Parquet file the engine publishes carries only an allow-list. In 1.0 the list holds one schema key, `b"pandas"`, rebuilt from the output schema, the running pyarrow and pandas versions and one descriptor table. No field has metadata at any nesting depth. An extension-type column other than `arrow.uuid`, `arrow.bool8`, `arrow.json` and the pandas period and interval types is written as its storage type, because its type name or parameters can hold source text. Masked values, column names, other Arrow types, nullability and row groups do not change, and an output from a source with no custom metadata is byte-identical to before.
+
+`output_schema` and `output_table` are new public names. The Arrow adapter gains `write_output_table` and `output_parquet_writer`, and the engine sinks and `publish_tables` write through them. A new sentry fails on a Parquet write that skips them. The in-memory tables a run returns are unchanged. See `docs/security/output-metadata.md`.
+
+### Changed (experimental tier and public census, freeze batch X0, 2026-11-18)
+
+The compatibility contract gets section 3.6. Every public engine name now has one tier: frozen,
+experimental or documented internal. These names are experimental and may change in any minor
+release: the connector SDK objects in `decoy_engine.sdk` (`FileSource`, `FileSink`, `ConnectorConfig`,
+`FileMeta`, `CheckResult`, `WriteResult`, `TransientError`, `PermanentError`), `SDK_VERSION`, the
+`CAP_*` flags, and the provider registration functions (`register_faker_provider`,
+`register_faker_provider_v2`, `register_faker_list_provider`, `unregister_faker_provider`,
+`load_custom_providers`, `atomic_swap_db_providers`). Their docstrings start with `Experimental:`.
+`ConfigError` and `ConnectorError` stay frozen. No name is removed or renamed. The registry is
+`decoy_engine.contracts.stability`, and new sentries check it against the exports and the map.
+
+### Fixed (engine imports and opens files on Windows, EW1, 2026-11-18)
+
+Every open flag the engine uses now comes from one module, `fileaccess/_osflags.py`. On POSIX the
+values are the same as before. On Windows the POSIX-only flags are 0, and file descriptors open in
+binary mode and are not inherited, so a file with the bytes 0x0A, 0x0D or 0x1A reads back as
+written. `import decoy_engine` no longer fails on Windows. `RootedFileAccess` raises
+`FileAccessUnavailable` where the platform has no directory descriptors.
+
+### Added (Faker output lock and test-only clock freeze, FAKER-MIGRATE, 2026-11-18)
+
+`scripts/faker-determinism/output_lock.json` now records digests of what Faker returns for every locale on the two surfaces the engine uses, and a required CI job fails when a Faker release changes them. The lock is captured under Faker 40.23.0, so the later repin shows exactly which provider and locale pairs move. `time-machine` joins the `dev` extra to freeze the clock in the lock's worker processes, and `_CERTIFIED_STACKS` gains the matching dev/CI row. No runtime behavior changes.
+
+### Changed (sample_frame end-of-source contract, PROFILE-SAMPLE-LABELS E0, 2026-11-19)
+
+`ProfileSource.sample_frame(n)` now returns exactly `n` rows when the source holds that many, and fewer only at the end of the source. S3 and GCS CSV readers fetch more ranged windows until they hold `n` rows or the object ends, instead of parsing only the first 1 MiB.
+
+Cloud CSV `profile_source` now profiles the requested 10,000 rows when available. Null counts, distinct counts and profile hashes can change from first-window results.
+
+### Fixed (DP certified row for the CLI runtime profile, CERT-ROW, 2026-11-19)
+
+The 0.28.0 release certified the CLI runtime profile from the 0.27.0 pin file, which lacks `joserfc` and `rfc8785`. Engine 0.28.0 needs both, so no real 0.28.0 install had a certified row and `fit_dp_snapshot` refused with `dp_stack_uncertified`. 0.28.1 adds the row for the 70-pin profile (the 0.27.0 closure plus `joserfc==1.7.7`, `rfc8785==0.1.4` and `pynacl==1.6.2`, which became a base dependency in this release). Every earlier row stays.
+
+Release prep now refuses a CLI pin file that leaves out any package of the engine's own base requirements closure in `uv.lock`, so a new engine dependency cannot be missed again.
+
+### Removed (unused strategy base modules, FREEZE-S1, 2026-11-18)
+
+`decoy_engine.internal.base` (`MaskingStrategy`, the config validator and IO handler base classes) and `decoy_engine.transforms.base` (`BaseMaskingStrategy`) are removed. Nothing in the engine or the CLI used them. `decoy_engine.transforms.__all__` is now empty. `FormulaStrategy` keeps its name, module path and output; it is now a plain class that logs through its module logger.
+
+Importing `decoy_engine` no longer sets the `decoy_engine` logger to INFO as a side effect; a host that wants engine INFO lines sets that level itself.
+
 ## [0.28.0] - 2026-11-18
 
 ### Breaking for consumers
