@@ -442,6 +442,19 @@ _GEN_ONLY: dict[str, _Ortho] = {
             "from the file. Resident route only, non-partitionable like categorical generation."
         ),
     ),
+    "provider": _Ortho(
+        False,
+        True,
+        True,
+        True,
+        False,
+        gen=True,
+        notes=(
+            "Registry provider. Three branches: a keyed identifier draw per row ordinal, a pooled "
+            "Faker sample, and a seeded Faker batch. Classified conservatively as python-only "
+            "because the whole-column branches are not partitionable."
+        ),
+    ),
     "distribution": _Ortho(
         False,
         True,

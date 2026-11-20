@@ -37,9 +37,15 @@ import pyarrow as pa
 from faker import Faker
 
 from decoy_engine.generation import _faker_pool
-from decoy_engine.generation._numeric_typing import numeric_plan, reader_types, restore_declared
+from decoy_engine.generation._numeric_typing import (
+    numeric_plan,
+    provider_text_columns,
+    reader_types,
+    restore_declared,
+)
 from decoy_engine.generation._statistical_column import (
     arrow_table,
+    null_seed_digests,
     statistical_generate,
     warn_on_unseen_parents,
 )
@@ -47,14 +53,15 @@ from decoy_engine.generation._synthesize_derived import _derived_generate, _form
 from decoy_engine.generation.kinds import (
     LookupList,
     constant_values,
-    lookup_digests,
     parametric_values,
+    provider_column_values,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
 if TYPE_CHECKING:
@@ -211,7 +218,13 @@ def _generate_tables_from_config(
             )
 
             fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
-        tbl = arrow_table(data, table_name=name, statistical_specs=statistical_specs, columns=gcols)
+        tbl = arrow_table(
+            data,
+            table_name=name,
+            statistical_specs=statistical_specs,
+            columns=gcols,
+            text_columns=provider_text_columns(config).get(name, ()),
+        )
         # Generation-time fidelity warn-gate (deferred follow-up 5,
         # 2026-06-12): score statistical columns against their source
         # snapshot and warn below global_settings.fidelity_warn_threshold.
@@ -378,40 +391,27 @@ def _generate_column(
     elif kind == "derived_aggregate":
         values = generate_derived_aggregate_column(col, n, generated or {})
     elif kind in ("grouped_series", "windowed_date", "group_key"):
-        from decoy_engine.generation._grouped_windowed_generators import (
-            _group_key_generate,
-            _grouped_series_generate,
-            _windowed_date_generate,
-        )
+        from decoy_engine.generation._grouped_windowed_generators import grouped_windowed_values
 
-        if kind == "grouped_series":
-            values = _grouped_series_generate(col, n, seed, generated or {})
-        elif kind == "windowed_date":
-            values = _windowed_date_generate(
-                col, n, seed, generated or {}, reference_date=reference_date
-            )
-        else:
-            values = _group_key_generate(col, n, seed, generated or {})
+        values = grouped_windowed_values(
+            kind, col, n, seed, generated or {}, reference_date=reference_date
+        )
+    elif kind == "provider":
+        ctx = GenDeriveContext.for_column(
+            derive_key=derive_key, column_config=col, fallback_seed=seed
+        )
+        values = provider_column_values(
+            col, n, ctx, get_default_registry(), instance_default_locale
+        )
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that
         # bypass validation (e.g. an unvalidated dict).
         raise ValueError(f"generate column {col.get('name')!r}: unexpected generator type {kind!r}")
     values = restore_declared(col, values, numeric_type)
-    # Pinned plans store `snapshot_file` as `sha256:<digest>`, not a path. Passing the digest keeps
-    # for_column from trying to open that string as a file. The ordinary path passes None and
-    # derives the null seed exactly as before.
-    pinned_spec = (statistical_specs or {}).get((table_name, str(col.get("name"))))
-    digests: dict[tuple[str, str], str] | None = None
-    if pinned and kind == "statistical" and pinned_spec is not None and pinned_spec.snapshot_digest:
-        digests = {("statistical", "snapshot_file"): f"sha256:{pinned_spec.snapshot_digest}"}
-    if kind == "reference" and col.get("distribution") == "fitted":
-        # The null mask derives its seed through `for_column` too; the pinned digest keeps
-        # it from reopening `snapshot_file`. A missing spec already raised in `_reference`.
-        fanout = (reference_fanouts or {}).get((table_name, str(col.get("name"))))
-        digests = {("reference", "snapshot_file"): fanout.seed_digest} if fanout else None
-    elif kind == "lookup":
-        digests = lookup_digests(col, (lookup_lists or {}).get((table_name, str(col.get("name")))))
+    digests = null_seed_digests(
+        col, table_name, pinned, statistical_specs, reference_fanouts, lookup_lists
+    )
     return _apply_null_probability(values, col, seed, derive_key, content_digests=digests)
 
 
