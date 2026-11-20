@@ -5,6 +5,7 @@ Detection is the base layer shared by the Pre-scan (profiling) and Post-scan
 """
 
 from decoy_engine.detection._hint_gated import NAME_HINT_GATED_DETECTORS
+from decoy_engine.detection._hints import hits_name_hint, name_hint_extras
 from decoy_engine.detection._model_status import (
     ModelStatus,
     ModelUnavailableError,
@@ -45,9 +46,11 @@ __all__ = [
     "RateBucket",
     "Span",
     "domain_for",
+    "hits_name_hint",
     "load_name_hint_terms",
     "log_detector_models",
     "log_detector_run",
+    "name_hint_extras",
     "ner_min_rate",
     "ner_model_state",
     "ner_rates",

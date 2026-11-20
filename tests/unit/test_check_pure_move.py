@@ -281,6 +281,41 @@ def test_rejects_manifest_over_file_bound():
     assert tags(with_importers(paths, {p: ("X = 1\n", "X = 1\n") for p in paths})) == {"6"}
 
 
+FACADE = "src/decoy_engine/detection/__init__.py"
+FACADE_BASE = (
+    'from decoy_engine.detection.types import DetectorMatch\n\n__all__ = ["DetectorMatch"]\n'
+)
+FACADE_HEAD = (
+    "from decoy_engine.detection._hints import _hint\n"
+    "from decoy_engine.detection.types import DetectorMatch\n\n"
+    '__all__ = ["DetectorMatch", "_hint"]\n'
+)
+VIA_OLD = "from decoy_engine.detection.detectors import _hint\n\nH = _hint\n"
+VIA_FACADE = "from decoy_engine.detection import _hint\n\nH = _hint\n"
+
+
+def with_facade(facade_head: str, consumer_head: str, facades: list[str]) -> list[str]:
+    man = manifest()
+    man["importers"], man["facades"] = [IMPORTERS["consumer"]["path"]], facades
+    consumer = IMPORTERS["consumer"]["path"]
+    base = {OLD: EXCERPT, FACADE: FACADE_BASE, consumer: VIA_OLD}
+    head = {**split(), FACADE: facade_head, consumer: consumer_head}
+    return check_move(man, base.get, head.get, sorted(head), only=None)
+
+
+def test_accepts_import_through_a_facade_reexport():
+    assert with_facade(FACADE_HEAD, VIA_FACADE, [FACADE]) == []
+
+
+def test_detects_facade_hunk_beyond_reexports():
+    assert tags(with_facade(FACADE_HEAD + "EXTRA = 1\n", VIA_FACADE, [FACADE])) == {"5"}
+
+
+def test_detects_import_through_an_unlisted_or_silent_facade():
+    assert tags(with_facade(FACADE_HEAD, VIA_FACADE, [])) == {"5"}
+    assert tags(with_facade(FACADE_BASE, VIA_FACADE, [FACADE])) == {"5"}
+
+
 RED_TAGS = {
     "reorder_isolated": {"1a"},
     "reorder_span": {"1a"},
