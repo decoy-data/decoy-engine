@@ -168,7 +168,7 @@ def stage_sources(work_root: Path, sources: dict[str, pa.Table]) -> dict[str, st
 
 
 def _admit(stage: Path, names: list[str]) -> bool:
-    """True when the stage holds exactly `<name>.parquet` for each name, each a regular file,
+    """True when the stage holds exactly `<name>.parquet` for each name (its reserved marker aside), each a regular file,
     made owner-only (the stage 0700, each file 0600) before anything reads it: the child's
     umask decided its modes. A link or a directory under a table's name raises."""
     posix = sys.platform != "win32"
@@ -176,7 +176,7 @@ def _admit(stage: Path, names: list[str]) -> bool:
         own_entry(stage, 0o700, directory=True)
     listing = FileRequest(FileRole.TARGET_OUTPUT, "read_dir", str(stage), _FIELD_KEY)
     with fileaccess.capture().open_dir(listing) as handle:
-        found = sorted(entry.name for entry in handle.entries())
+        found = fileaccess.stage_entries(handle)
     expected = sorted(f"{name}.parquet" for name in names)
     if found != expected:
         return False

@@ -123,6 +123,7 @@ Out of scope (later sub-sprints own these):
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from decoy_engine.contracts.distribution_snapshot import with_year_weights
@@ -139,6 +140,18 @@ QUALITY_FIDELITY_SCHEMA_VERSION = "quality-fidelity/v1"
 # the last few bits of the inputs, and we want the output JSON to be
 # byte-stable across machines.
 _SCORE_PRECISION = 6
+
+
+def mean_comparable_similarity(records: Iterable[Mapping[str, Any]]) -> float | None:
+    """Mean similarity of the comparable records, rounded; `None` when none is comparable.
+
+    The one formula behind the report's marginal and pairwise aggregates and the policy's
+    pairwise recomputation over non-intended joints, so the two cannot drift apart.
+    """
+    scores = [r["similarity"] for r in records if r.get("comparable")]
+    if not scores:
+        return None
+    return float(round(sum(scores) / len(scores), _SCORE_PRECISION))
 
 
 def compute_fidelity(
@@ -176,15 +189,7 @@ def compute_fidelity(
         result = _column_similarity(src_cols[col], out_cols[col], score_missing=score_missing)
         column_results.append({"column": col, **result})
 
-    comparable_cols = [c for c in column_results if c["comparable"]]
-    marginal_score = (
-        round(
-            sum(c["similarity"] for c in comparable_cols) / len(comparable_cols),
-            _SCORE_PRECISION,
-        )
-        if comparable_cols
-        else None
-    )
+    marginal_score = mean_comparable_similarity(column_results)
 
     src_joints = source_snapshot.get("joints", [])
     out_joints_by_pair = {tuple(j.get("columns", [])): j for j in output_snapshot.get("joints", [])}
@@ -205,15 +210,7 @@ def compute_fidelity(
         result = _joint_similarity(src_joint, out_joint)
         joint_results.append({"columns": list(pair), **result})
 
-    comparable_joints = [j for j in joint_results if j["comparable"]]
-    pairwise_score = (
-        round(
-            sum(j["similarity"] for j in comparable_joints) / len(comparable_joints),
-            _SCORE_PRECISION,
-        )
-        if comparable_joints
-        else None
-    )
+    pairwise_score = mean_comparable_similarity(joint_results)
 
     overall = _compute_overall(marginal_score, pairwise_score)
 
