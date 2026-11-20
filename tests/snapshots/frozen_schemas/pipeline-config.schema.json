@@ -913,6 +913,7 @@
               },
               "reference_column": {},
               "reference_table": {},
+              "root_count": {},
               "snapshot_file": {},
               "source_column": {},
               "type": {},
