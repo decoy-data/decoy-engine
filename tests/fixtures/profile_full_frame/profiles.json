@@ -1825,7 +1825,7 @@
       "detector_id": "iso_date",
       "domain": "IDENTITY",
       "format_pattern": "%Y-%m-%d",
-      "format_pattern_complete": true,
+      "format_pattern_complete": false,
       "match_rate": 0.95,
       "sample_misses": [
        "garbage",
@@ -1852,7 +1852,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "%Y-%m-%d",
-    "format_pattern_complete": true,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": 2499,
     "is_likely_unique": false,
