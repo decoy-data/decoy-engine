@@ -347,7 +347,7 @@ def test_handler_backstop() -> None:
     nested = _ctx(declared_date_columns=frozenset({("t", "d")}))
     object.__setattr__(nested, "nested_outer_column", "d")
     with pytest.raises(StrategyError) as exc2:
-        handler.run(df, "_nested_leaves", _seed(), nested)
+        handler.run(df.rename(columns={"d": "_nested_leaves"}), "_nested_leaves", _seed(), nested)
     assert exc2.value.code == CODE
     # Date objects (a declared date32 cell) in a column the plan does not declare still raise.
     objects = pd.DataFrame({"d": pd.Series([pd.Timestamp("2024-01-05").date()], dtype=object)})

@@ -471,12 +471,18 @@ def test_the_branch_passes_exact_config_and_reuses_the_preflight_index_kernel(
 # ---------------------------------------------------------------------------
 
 
-def test_a_when_predicate_keeps_a_table_off_native_and_off_auto_chunk() -> None:
+@NEEDS_COMPANION
+def test_a_when_predicate_keeps_a_table_off_native() -> None:
     config = make_config([ds_col(), passthrough("p")])
     config["tables"][0]["columns"][0]["when"] = "d != ''"
     run = run_one(config, [_valued()])
     assert run.ev[0].native_admitted is False
     assert "when_predicate_not_native" in (run.ev[0].reroute_reason or "")
+
+
+def test_a_when_predicate_keeps_a_table_off_auto_chunk() -> None:
+    config = make_config([ds_col(), passthrough("p")])
+    config["tables"][0]["columns"][0]["when"] = "d != ''"
     joined = "; ".join(_whole_column_state_rejections(config, table=TABLE))
     assert "when_predicate_not_chunk_stable" in joined
 

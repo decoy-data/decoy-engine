@@ -121,14 +121,8 @@ def _date_table(n: int) -> pa.Table:
     return pa.table({"d": pa.array([f"2020-01-{1 + i % 28:02d}" for i in range(n)])})
 
 
-_DATE_NO_FORMAT = [
-    {
-        "name": "d",
-        "strategy": "date_shift",
-        "namespace": "d_ns",
-        "provider_config": {"min_days": -3, "max_days": 3, "date_format": "%Y-%m-%d"},
-    }
-]
+# `shuffle` permutes the whole column, so a group holding it cannot chunk.
+_DATE_FULL_FRAME = [{"name": "d", "strategy": "shuffle"}]
 
 
 def _sibling_job(kind: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str, pa.Table], str]:
@@ -138,7 +132,7 @@ def _sibling_job(kind: str, tmp_path: Path) -> tuple[dict[str, Any], dict[str, p
         tables["c"] = (mt.std_columns("c_ns"), mt.string_table(mt.SMALL, "c"))
         reason = "split_full_frame_present"
     elif kind == "full_frame_large_date_shift":
-        tables["c"] = (_DATE_NO_FORMAT, _date_table(mt.BIG))
+        tables["c"] = (_DATE_FULL_FRAME, _date_table(mt.BIG))
         reason = "split_full_frame_present"
     else:
         tables["b"] = (mt.std_columns("b_ns"), mt.string_table(mt.BIG, "b"))
@@ -177,15 +171,10 @@ def test_a_split_with_a_resident_group_or_extra_frame_stays_resident(
 
 
 def test_a_group_row_error_leaves_the_sink_untouched(tmp_path: Path) -> None:
-    bad = pa.table({"d": pa.array(["2020-01-01"] * (mt.BIG - 1) + ["not-a-date"])})
-    cols = [
-        {
-            "name": "d",
-            "strategy": "date_shift",
-            "namespace": "d_ns",
-            "provider_config": {"min_days": -5, "max_days": 5, "date_format": "%Y-%m-%d"},
-        }
-    ]
+    # `bucketize` over a text column keeps the group resident (its source is not a null-free
+    # number) and records a format error for the cell that is not a number.
+    bad = pa.table({"d": pa.array(["12"] * (mt.BIG - 1) + ["not-a-number"])})
+    cols = [{"name": "d", "strategy": "bucketize", "provider_config": {"width": 10}}]
     cfg, sources = mt.build_job(
         tmp_path,
         {"a": (mt.std_columns("a_ns"), mt.string_table(mt.BIG, "a")), "c": (cols, bad)},
