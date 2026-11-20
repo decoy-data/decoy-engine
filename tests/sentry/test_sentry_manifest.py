@@ -146,6 +146,8 @@ SENTRIES = (
     "tests/sentry/release/test_experimental_marker.py",
     "tests/sentry/release/test_frozen_surface_map.py",
     "tests/sentry/release/test_public_census.py",
+    "tests/sentry/release/test_tag_artifacts.py",
+    "tests/sentry/release/test_tag_census.py",
     "tests/sentry/source_config/test_declaration_gate.py",
     "tests/sentry/source_config/test_source_dialect_choke_point.py",
     "tests/sentry/tooling/test_ci_lanes.py",
