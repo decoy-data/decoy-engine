@@ -12,7 +12,7 @@
   },
   "decoy_engine/fileaccess/_fdtree.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
-   "max": 4
+   "max": 3
   },
   "decoy_engine/fileaccess/_local.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",

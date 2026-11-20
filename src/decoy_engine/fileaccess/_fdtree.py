@@ -50,10 +50,11 @@ def _close(fd: int) -> None:
 
 def _owned(found: os.stat_result) -> bool:
     """`found` is owned by the effective user: the one owner test of the descriptor leaf, its
-    reclaimer and the protected-directory check. Always False on win32, which has no uid."""
-    if not _osflags.WINDOWS:
-        return found.st_uid == os.geteuid()
-    return False
+    reclaimer and the protected-directory check. Always False on win32, which has no uid. The
+    absence of `os.geteuid` is the test (a string probe, not a platform read), so this function
+    adds nothing to the platform census."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and found.st_uid == geteuid()
 
 
 def _exact_stat(found: os.stat_result, kind: int, mode: int) -> bool:
