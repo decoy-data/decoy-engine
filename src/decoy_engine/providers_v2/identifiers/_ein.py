@@ -28,6 +28,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import require_locale
 
 # IRS published valid EIN prefixes (subset; representative).
 _VALID_PREFIXES: tuple[int, ...] = (
@@ -155,12 +156,11 @@ class EinValidator:
         return _is_valid_ein("".join(parts))
 
 
+_SUPPORTED_LOCALES = ("en_US",)
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
-    if locale != "en_US":
-        raise ProviderError(
-            code=reasons.provider.UNSUPPORTED_LOCALE,
-            message=f"EIN is US-only; got locale={locale!r}.",
-        )
+    require_locale("EIN", locale, _SUPPORTED_LOCALES)
     prefix = int(rng.choice(_VALID_PREFIXES))
     last7 = int(rng.integers(0, 10_000_000))
     return f"{prefix:02d}-{last7:07d}"
@@ -227,7 +227,7 @@ class EinAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_EIN_REGEX,
             blocklist_validators=("irs_prefix_list",),

@@ -176,6 +176,15 @@ MATRIX: tuple[MatrixRow, ...] = (
         "is covered by tests/unit/generation/kinds/test_gen_types_e3_lookup.py.",
     ),
     MatrixRow(
+        "provider",
+        DEFERRED,
+        (),
+        ("provider",),
+        "GEN-PROVIDERS E1: registry-backed provider draws (pool, keyed identifier, seeded batch); "
+        "resident only (the streamed route declines it), so no F0 fixture pins it. Value equality "
+        "and digests are in tests/unit/generation/kinds/test_provider.py.",
+    ),
+    MatrixRow(
         "conditional-sampling",
         SUPPORTED,
         ("conditional",),
