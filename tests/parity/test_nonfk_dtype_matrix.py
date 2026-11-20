@@ -197,3 +197,101 @@ def test_g3_read_set_has_one_production_caller() -> None:
                     if name == "read_set":
                         callers.append(f"{path.name}:{fn.name}")
     assert callers == ["_chunked_carry.py:carried_columns"]
+
+
+# -- part (b1): masked columns of admitted types (AT-B1 to AT-B3, G-1 masked rows) --------------
+
+_CLASS_TYPES = {
+    "int_with_nulls": ["int64_nulls", "uint64"],
+    "decimal": ["decimal128"],
+    "binary": ["binary", "large_binary", "fixed_size_binary"],
+}
+
+
+def _masked_entry(strategy: str, name: str = "p") -> dict[str, Any]:
+    if strategy == "hash":
+        return support.hash_col(name)
+    if strategy == "redact":
+        return support.redact_col(name)
+    return support.faker_col(name)
+
+
+def _masked_cells() -> list[tuple[str, str, str]]:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    return [
+        (strategy, t, lay)
+        for strategy, classes in CHUNK_STABLE_MASKED_SOURCE_TYPES.items()
+        for cls in sorted(classes)
+        for t in _CLASS_TYPES[cls]
+        for lay in LAYOUTS
+    ]
+
+
+MASKED = _masked_cells()
+
+
+@pytest.mark.parametrize(("strategy", "type_class", "layout"), MASKED)
+def test_at_b1_admitted_masked_pair_is_chunked_and_equals_the_oracle(
+    tmp_path: Path, strategy: str, type_class: str, layout: str
+) -> None:
+    table = source_table(type_class, layout)
+    cfg = _cfg(tmp_path, table, _masked_entry(strategy))
+    got = _run(table, cfg)
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "chunked", block["reason"]
+    base = _oracle(table, cfg).outputs[support.TABLE]
+    out = got.outputs[support.TABLE]
+    assert out.schema.field("p").type == base.schema.field("p").type
+    assert out.column("p").to_pylist() == base.column("p").to_pylist()
+
+
+def test_g1_every_table_pair_has_a_cell() -> None:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    cells = {(s, t) for s, t, _ in MASKED}
+    for strategy, classes in CHUNK_STABLE_MASKED_SOURCE_TYPES.items():
+        for cls in classes:
+            assert all((strategy, t) in cells for t in _CLASS_TYPES[cls])
+
+
+def test_at_b2_a_pair_outside_the_table_stays_full_frame(tmp_path: Path) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    non_deterministic = {**support.faker_col("p"), "deterministic": False}
+    got = _run(table, _cfg(tmp_path, table, non_deterministic))
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_b2_the_table_does_not_name_numeric_strategies() -> None:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    assert set(CHUNK_STABLE_MASKED_SOURCE_TYPES) == {"hash", "redact", "faker"}
+
+
+def test_at_b3_a_masked_column_read_by_another_entry_stays_full_frame(tmp_path: Path) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(
+        tmp_path,
+        table,
+        support.hash_col("p"),
+        s_entry={**support.redact_col("s"), "when": "p == p"},
+    )
+    block = _run(table, cfg).quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_b3_a_hash_with_its_own_when_is_not_admitted() -> None:
+    from decoy_engine.execution import _chunked_input as ci
+    from decoy_engine.execution.chunked._source_dtype_gate import admitted_masked_columns
+    from decoy_engine.providers_v2 import get_default_registry
+
+    table = source_table("int64_nulls", "later_mixed")
+    facts = ci.facts_for(None, table, "t")
+    registry = get_default_registry()
+    plain = [support.redact_col("s"), support.hash_col("p")]
+    gated = [support.redact_col("s"), {**support.hash_col("p"), "when": "p > 3"}]
+    assert admitted_masked_columns(facts, plain, registry) == {"p"}
+    assert admitted_masked_columns(facts, gated, registry) == frozenset()
