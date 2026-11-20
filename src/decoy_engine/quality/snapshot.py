@@ -45,10 +45,10 @@ from decoy_engine.errors import DecoyError
 from decoy_engine.internal.pandas_compat import (
     canonical_dtype_label,
     finite_numeric_cells,
+    histogram_for_range,
     numeric_cells,
     utc_naive_datetimes,
 )
-from decoy_engine.quality._histogram import histogram_for_range
 
 # Single source of truth for the DP schema version is the pandas-free
 # `dp_schema` module (guide section 3.8), re-exported here for the existing

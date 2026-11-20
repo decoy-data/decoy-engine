@@ -15,9 +15,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from decoy_engine.internal.pandas_compat import histogram_for_range
 from decoy_engine.profiling import distribution_snapshot_document
 from decoy_engine.quality import snapshot as snapshot_module
-from decoy_engine.quality._histogram import histogram_for_range
 from decoy_engine.quality.snapshot import compute_distribution_snapshot, numeric_stats
 
 _NARROW = pd.Series(1e15 + np.random.default_rng(0).normal(0, 1, 2000))
