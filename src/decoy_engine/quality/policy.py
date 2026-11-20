@@ -44,18 +44,26 @@ or shifted values under value-identity TVD; the constants below
 match what `compute_fidelity` actually reports for each strategy.
 
   - identity:   1.00  (no change at all)
-  - hash:       0.05  (value-identity TVD treats hashes as disjoint)
+  - hash:       intended (no default minimum, see below)
   - shuffle:    0.85  (same value set + same frequencies preserved)
   - bucketize:  0.30  (collapses many source values into one bucket)
   - date_shift: 0.50  (shifted dates land in different year bins)
-  - faker:      0.05  (faker produces a disjoint value set)
-  - redact:     0.05  (intentional destruction)
+  - faker:      intended (no default minimum)
+  - redact:     intended (no default minimum)
   - generate:   0.30  (synthetic baseline; D6 may revisit)
 
 These defaults will RISE again in D5b once a shape-only similarity
 metric lands, because the new metric will recognize hash's
 structural preservation. See `docs/audit/v2-d5-design-survey.md`
 for the comparator-vs-strategy interaction analysis.
+
+Intended columns: a strategy whose class in the distribution-behaviour
+table is `preserves_cardinality_only`, `destroys_frequency` or `collapses`
+(`categorical` excluded, its class depends on provider config) replaces
+values by design, so a low value-identity score on it is expected. Such a
+column has no default minimum and is listed in `intended_columns`; a
+pairwise joint that names one is listed in `intended_joints` and left out
+of the pairwise minimum. Aggregates still count intended columns in V1.
 
 Overrides via `policy_config["strategy_expectations"]` win over
 defaults; explicit per-column thresholds via
@@ -71,6 +79,12 @@ Out of scope:
 from __future__ import annotations
 
 from typing import Any
+
+from decoy_engine.contracts.distribution_behavior import (
+    distribution_behavior_for,
+    static_strategy_names,
+)
+from decoy_engine.quality.fidelity import mean_comparable_similarity
 
 QUALITY_POLICY_SCHEMA_VERSION = "quality-policy/v1"
 
@@ -97,12 +111,9 @@ QUALITY_POLICY_SCHEMA_VERSION = "quality-policy/v1"
 # need defaults that match measurement reality.
 _DEFAULT_STRATEGY_EXPECTATIONS: dict[str, float] = {
     "identity": 1.00,
-    "hash": 0.05,  # D5a: was 0.95; value-identity TVD treats hashes as disjoint
     "shuffle": 0.85,  # unchanged: shuffle keeps same value set + frequencies
     "bucketize": 0.30,  # D5a: was 0.70; collapses values, TVD reflects the loss
     "date_shift": 0.50,  # D5a: was 0.80; shifted dates land in different year bins
-    "faker": 0.05,  # D5a: was 0.10; faker produces disjoint values
-    "redact": 0.05,  # unchanged
     "generate": 0.30,  # unchanged: synthetic data, modest baseline
 }
 
@@ -137,6 +148,17 @@ _DEFAULT_SHAPE_STRATEGY_EXPECTATIONS: dict[str, float] = {
 }
 
 _VALID_MODES = {"report", "warn", "fail"}
+
+# Classes in the distribution-behaviour table whose strategies replace values by design.
+_REPLACING_CLASSES = frozenset({"preserves_cardinality_only", "destroys_frequency", "collapses"})
+
+# Derived from the one table, so a strategy added there with a replacing class is intended with
+# no edit here. `categorical` is out: its class depends on provider config the policy cannot see.
+_INTENDED_STRATEGIES: frozenset[str] = frozenset(
+    name
+    for name in static_strategy_names()
+    if name != "categorical" and distribution_behavior_for(name) in _REPLACING_CLASSES
+)
 
 
 def apply_quality_policy(
@@ -186,10 +208,18 @@ def apply_quality_policy(
 
     violations: list[dict[str, Any]] = []
 
+    # Before the per-column loop, so a non-comparable record still counts as intended.
+    intended_columns = _intended_columns(
+        strategy_map or {},
+        column_overrides=column_overrides,
+        strategy_expectations=strategy_expectations,
+    )
+    intended_joints = _intended_joints(report, intended_columns)
+
     _check_diagnostic(report, thresholds, violations)
     _check_overall(report, thresholds, violations)
     _check_marginal(report, thresholds, violations)
-    _check_pairwise(report, thresholds, violations)
+    pairwise_skipped = _check_pairwise(report, thresholds, intended_joints, violations)
     _check_per_column(
         report,
         column_overrides=column_overrides,
@@ -213,12 +243,17 @@ def apply_quality_policy(
         )
 
     verdict = _verdict_for(mode, violations)
-    return {
+    result: dict[str, Any] = {
         "schema_version": QUALITY_POLICY_SCHEMA_VERSION,
         "verdict": verdict,
         "mode": mode,
         "violations": violations,
+        "intended_columns": sorted(intended_columns),
+        "intended_joints": [list(pair) for pair in intended_joints],
     }
+    if pairwise_skipped is not None:
+        result["pairwise_skipped"] = pairwise_skipped
+    return result
 
 
 # ── per-check evaluators ───────────────────────────────────────────────────
@@ -293,13 +328,23 @@ def _check_marginal(
 def _check_pairwise(
     report: dict[str, Any],
     thresholds: dict[str, Any],
+    intended_joints: list[tuple[str, str]],
     violations: list[dict[str, Any]],
-) -> None:
+) -> str | None:
+    """Check the pairwise minimum; return `pairwise_skipped` when every joint is intended."""
     cfg = thresholds.get("pairwise") or {}
     minimum = cfg.get("min")
     if minimum is None:
-        return
-    actual = report.get("pairwise", {}).get("score")
+        return None
+    pairwise = report.get("pairwise") or {}
+    actual = pairwise.get("score")
+    joints = [j for j in pairwise.get("joints") or [] if isinstance(j, dict)]
+    if intended_joints and joints:
+        intended_set = set(intended_joints)
+        kept = [j for j in joints if _joint_pair(j) not in intended_set]
+        if not kept:
+            return "all_joints_intended"
+        actual = mean_comparable_similarity(kept)
     if actual is None or float(actual) < float(minimum):
         violations.append(
             {
@@ -310,6 +355,7 @@ def _check_pairwise(
                 "detail": f"pairwise.score {actual} below minimum {minimum}",
             },
         )
+    return None
 
 
 def _check_per_column(
@@ -487,6 +533,51 @@ def _normalize_column_overrides(raw: Any) -> dict[str, float]:
             if isinstance(col, str) and isinstance(minimum, (int, float)):
                 overrides[col] = float(minimum)
     return overrides
+
+
+def _intended_columns(
+    strategy_map: dict[str, str],
+    *,
+    column_overrides: dict[str, float],
+    strategy_expectations: dict[str, float],
+) -> set[str]:
+    """Columns whose strategy replaces values by design and that end with no minimum.
+
+    An explicit column override or strategy override resolves a minimum, so it wins and the
+    column is not intended.
+    """
+    return {
+        column
+        for column, strategy in strategy_map.items()
+        if strategy in _INTENDED_STRATEGIES
+        and column not in column_overrides
+        and strategy not in strategy_expectations
+    }
+
+
+def _joint_pair(joint: dict[str, Any]) -> tuple[str, str] | None:
+    columns = joint.get("columns")
+    if (
+        isinstance(columns, (list, tuple))
+        and len(columns) == 2
+        and all(isinstance(c, str) for c in columns)
+    ):
+        first, second = columns
+        return (first, second) if first <= second else (second, first)
+    return None
+
+
+def _intended_joints(report: dict[str, Any], intended: set[str]) -> list[tuple[str, str]]:
+    """Sorted, de-duplicated joint pairs that name an intended column."""
+    joints = (report.get("pairwise") or {}).get("joints") or []
+    pairs = {
+        pair
+        for joint in joints
+        if isinstance(joint, dict)
+        and (pair := _joint_pair(joint)) is not None
+        and (pair[0] in intended or pair[1] in intended)
+    }
+    return sorted(pairs)
 
 
 def _verdict_for(mode: str, violations: list[dict[str, Any]]) -> str:

@@ -129,6 +129,7 @@ SENTRIES = (
     "tests/sentry/defects/test_nested_json_choke_point.py",
     "tests/sentry/defects/test_when_reserved_names.py",
     "tests/sentry/defects/test_output_metadata_choke_point.py",
+    "tests/sentry/defects/test_metadata_carrier.py",
     "tests/sentry/defects/test_resident_fit_choke_points.py",
     "tests/sentry/defects/test_rng_construction.py",
     "tests/sentry/defects/test_split_decision_choke_point.py",

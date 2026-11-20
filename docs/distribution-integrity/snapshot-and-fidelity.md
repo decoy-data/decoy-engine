@@ -62,7 +62,7 @@ Top-level shape:
 
 | Kind | Assigned when | `stats` |
 |---|---|---|
-| `numeric` | Numeric dtype | `min`, `max`, `mean`, `std`, `quantiles` (`p05`, `p25`, `p50`, `p75`, `p95`), `bin_edges`, `bin_counts` (equal-width over min to max); optional `quantile_grid` (`probs`, `values`) for 100 or more finite cells, or `exact_values` (`values`, `counts`, `dropped_count`) for at most 30 distinct values. Both are value-bearing: a redacted fit sets them to null |
+| `numeric` | Numeric dtype | `min`, `max`, `mean`, `std`, `quantiles` (`p05`, `p25`, `p50`, `p75`, `p95`), `bin_edges`, `bin_counts` (raw: equal-width over min to max; plain v2: one histogram bin when a numeric shape block is released, otherwise equal width on a 1, 2, 5 grid, widened until every non-empty bin holds 10 rows); optional `quantile_grid` (`probs`, `values`) for 100 or more finite cells, or `exact_values` (`values`, `counts`, `dropped_count`) for at most 30 distinct values. Both are value-bearing: a redacted fit sets them to null |
 | `categorical` | Bool dtype, or object dtype with at most 30 distinct values | `top_values` (`[{value, count}]`, sorted by count then value), `other_count` |
 | `datetime` | Datetime dtype | `min`, `max` (ISO), `year_bins` (`[{year, count}]`) |
 | `freetext` | Object dtype with more than 30 distinct values | `length` (`min`, `max`, `mean`, `std`), `length_bin_edges`, `length_bin_counts` |
@@ -183,7 +183,8 @@ The report is label-free. Joint entries name the column pair, not cell keys.
 ## Policy (`quality/policy.py`)
 
 `apply_quality_policy(report, policy_config, *, strategy_map=None)` returns
-`quality-policy/v1`: `verdict`, `mode`, `violations`. `strategy_map` is
+`quality-policy/v1`: `verdict`, `mode`, `violations`, `intended_columns`,
+`intended_joints`, and `pairwise_skipped` when it applies. `strategy_map` is
 keyword-only.
 
 ```yaml
@@ -211,7 +212,22 @@ strategy expectation from `strategy_map`, then no check.
 
 Default value-identity expectations are tuned to what `compute_fidelity`
 actually reports for each strategy: identity 1.00, shuffle 0.85, date_shift
-0.50, bucketize 0.30, generate 0.30, hash 0.05, faker 0.05, redact 0.05.
+0.50, bucketize 0.30, generate 0.30.
+
+Intended columns: a strategy whose class in the distribution-behavior table
+(`contracts/distribution_behavior.py`) is `preserves_cardinality_only`,
+`destroys_frequency` or `collapses` replaces values by design (today `hash`,
+`fpe`, `tokenize`, `group_key`, `faker`, `grouped_series`, `redact`,
+`text_redact`; `categorical` is left out because its class depends on provider
+config). Such a column has no default minimum, so a correct mask does not fail
+a value-identity check, and it is listed in `intended_columns`. An explicit
+column threshold or a `strategy_expectations` entry for the strategy still sets
+a minimum and wins. A `--joint` pair that names an intended column is listed in
+`intended_joints` and is left out of the pairwise minimum; the minimum is then
+checked against `mean_comparable_similarity` of the other joints. When every
+joint is intended, the check is skipped and `pairwise_skipped` is
+`all_joints_intended`. `marginal.score`, `overall_score` and the grade still
+count intended columns, so a minimum on them can fail a correct mask.
 
 Two behaviors to know:
 

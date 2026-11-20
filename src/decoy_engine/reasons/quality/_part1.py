@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CONTINGENCY_TOP_K_INVALID",
@@ -58,6 +59,7 @@ __all__ = [
     "HIGH_CARDINALITY_INVALID_LABEL_ENCODING",
     "HIGH_CARDINALITY_LABEL_BYTES_LIMIT_EXCEEDED",
     "HIGH_CARDINALITY_NON_STRING_DTYPE",
+    "NUMERIC_BINS_INVALID",
 ]
 
 _d = _catalog.quality("CarrierError")
@@ -116,6 +118,7 @@ HIGH_CARDINALITY_LABEL_BYTES_LIMIT_EXCEEDED = _d(
 HIGH_CARDINALITY_NON_STRING_DTYPE = _d(
     "high_cardinality_non_string_dtype", "High cardinality non string dtype."
 )
+NUMERIC_BINS_INVALID = _d("numeric_bins_invalid", "Numeric bins invalid.", since=UNRELEASED)
 
 _d = _catalog.quality("DpBudgetError")
 

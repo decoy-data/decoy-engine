@@ -27,6 +27,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import PublicationRefused
 from tests.unit.execution.publication._sink_support import (
     DESCRIPTOR,
@@ -88,7 +89,7 @@ def _listing(leaf: Path) -> list[str]:
 
 
 def _expected(shape: list[tuple[str, list[pa.Table]]]) -> list[str]:
-    return sorted([DESCRIPTOR, *(f"{name}.parquet" for name, _ in shape)])
+    return sorted([DESCRIPTOR, STAGE_MARKER, *(f"{name}.parquet" for name, _ in shape)])
 
 
 def _kill_child(spec_path: str) -> None:
@@ -222,7 +223,7 @@ def test_fk_unit_all_or_none_route_commit_and_refused(mode: str, tmp_path: Path)
 
     leaf = tmp_path / "out"
     _route_job(tmp_path, mode, ParquetTransactionalSink(leaf))
-    assert _listing(leaf) == sorted([DESCRIPTOR, "child.parquet", "parent.parquet"])
+    assert _listing(leaf) == sorted([DESCRIPTOR, STAGE_MARKER, "child.parquet", "parent.parquet"])
     other = tmp_path / "other"
     other.mkdir()
     (other / "prior.txt").write_text("occupant", encoding="utf-8")

@@ -147,7 +147,7 @@ _SPANS = {
 
 
 @pytest.mark.parametrize("label", sorted(_SPANS))
-def test_every_span_writes_at_least_the_requested_bins_on_strict_edges(label: str) -> None:
+def test_every_span_writes_finite_strict_edges_and_floored_counts(label: str) -> None:
     cells = _SPANS[label]
     doc = _doc(pd.DataFrame({"x": cells}), flagged=[], numeric_bins=17)
     assert "x" not in doc["redacted_columns"]
@@ -155,16 +155,18 @@ def test_every_span_writes_at_least_the_requested_bins_on_strict_edges(label: st
     edges = stats["bin_edges"]
     assert all(math.isfinite(e) for e in edges)
     assert all(x < y for x, y in pairwise(edges))
-    assert len(stats["bin_counts"]) >= 17
+    # 24f withdrew "at least numeric_bins bins": every non-empty bin now holds K rows.
+    assert all(c == 0 or c >= K for c in stats["bin_counts"])
     assert len(edges) == len(stats["bin_counts"]) + 1
     assert sum(stats["bin_counts"]) == len(cells)
 
 
-def test_near_float_max_uses_the_fixed_public_domain_with_every_requested_bin() -> None:
+def test_near_float_max_uses_the_fixed_public_domain_as_one_bin() -> None:
     doc = _doc(pd.DataFrame({"x": _SPANS["near float max"]}), flagged=[], numeric_bins=17)
     stats = _col(doc, "x")["stats"]
     assert (stats["min"], stats["max"]) == (-1.5, 1.5)
-    assert len(stats["bin_counts"]) == 17
+    assert stats["bin_edges"] == [-1.5, 1.5]
+    assert stats["bin_counts"] == [50]
 
 
 def test_the_end_bins_each_hold_at_least_k_rows_when_the_span_is_not_constant() -> None:

@@ -33,6 +33,20 @@ class StrategyError(ExecutionError):
         super().__init__(code=code, message=f"strategy={strategy!r}: {message}")
 
 
+def text_mask_unsupported_pair_error(column: str | None) -> StrategyError:
+    """The value-free `StrategyError` a span whose detector cannot take its strategy maps to.
+
+    Every route catches the tagged `PipelineValidationError` from `mask_cell`, then raises this
+    AFTER its `except` block closes, so no `__cause__` or `__context__` carries the span. One
+    function keeps the code and message identical on the handler, the native chunked route and the
+    out-of-core route."""
+    return StrategyError(
+        code=reasons.runtime.UNSUPPORTED_STRATEGY,
+        strategy="text_mask",
+        message=f"column {column!r}: a span's detector cannot take its strategy.",
+    )
+
+
 def vault_requires_resident_output() -> ExecutionError:
     """B-6 D1 boundary rule B0: a file-vault writer where the engine does not hold every output row.
 
