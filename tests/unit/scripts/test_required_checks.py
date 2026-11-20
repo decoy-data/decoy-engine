@@ -55,8 +55,13 @@ CI_NAMES = [
     "pg-gate",
 ]
 IMPORT_SMOKE = ["import-smoke (3.11.9)", "import-smoke (3.12.7)"]
+FAKER_LOCK = [
+    "faker-output-lock (3.10.20)",
+    "faker-output-lock (3.11.9)",
+    "faker-output-lock (3.12.7)",
+]
 MERGE = {
-    "ci.yml": CI_NAMES + IMPORT_SMOKE,
+    "ci.yml": CI_NAMES + IMPORT_SMOKE + FAKER_LOCK,
     "native-companion.yml": NATIVE_NAMES,
     "docs.yml": ["docs-build"],
     "compat-preflight.yml": ["compat-preflight"],
@@ -201,6 +206,7 @@ def test_ci_yml_merge_jobs_are_named_by_key() -> None:
     for key in CI_NAMES:
         assert rc.job_check_names(key, doc["jobs"][key]) == [key]
     assert rc.job_check_names("import-smoke", doc["jobs"]["import-smoke"]) == IMPORT_SMOKE
+    assert rc.job_check_names("faker-output-lock", doc["jobs"]["faker-output-lock"]) == FAKER_LOCK
 
 
 def test_literal_name_beats_the_key() -> None:
@@ -258,7 +264,7 @@ def test_contexts_prints_the_merge_tier_as_json(
     out = capsys.readouterr().out
     got = json.loads(out)
     assert sorted(got) == sorted(n for names in MERGE.values() for n in names)
-    assert len(got) == len(set(got)) == 28
+    assert len(got) == len(set(got)) == 31
 
 
 # --- AT-21: verify --tier merge -------------------------------------------------------------

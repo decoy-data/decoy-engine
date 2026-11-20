@@ -228,6 +228,15 @@ def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
     return _identity_evidence(rate, gated=gated)
 
 
+def dismissible(finding: ResidualPIIFinding) -> bool:
+    """True when a `post_scan.dismissed` entry may lower this finding.
+
+    The one rule the scanner applies to a warning and the post-scan review checks before it writes
+    a dismissal: a warning, and not one raised from source-identity evidence.
+    """
+    return finding.severity == "warning" and not is_source_identity_finding(finding)
+
+
 def _source_identity(
     source_frames: dict[str, pd.DataFrame],
     table_name: str,

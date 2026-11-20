@@ -27,10 +27,10 @@ import logging
 import math
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
 import pandas as pd
 from pydantic import TypeAdapter
@@ -50,6 +50,7 @@ from decoy_engine.fileaccess import (
     entry_point,
 )
 from decoy_engine.profiling import _scan_integrity
+from decoy_engine.profiling._basis import claim_keys, read_basis
 from decoy_engine.profiling._model_pass import (
     REGEX_ONLY,
     ModelHit,
@@ -148,6 +149,7 @@ def scan_sources(
     sample_rows: int | None = 10_000,
     strategy: Strategy = "head",
     relationships: Sequence[Mapping[str, Any]] = (),
+    relationship_positions: Sequence[int] | None = None,
     integrity: bool = True,
     spill_dir: Path | None = None,
     file_access: FileAccess | None = None,
@@ -165,6 +167,8 @@ def scan_sources(
     key, null and orphan counts (`RelationshipFacts`), read from key columns only and spilled to
     a protected directory under `spill_dir` (default: the system temp directory). The tables
     they name must be in `sources` but need not be selected. Nothing is inferred.
+    `relationship_positions` gives each entry's place in the caller's own file, so a refusal
+    names that place (default: 1, 2, ... in the order given).
 
     `pre_scan` adds model detectors to the regex ones (`None`: regex only). They load strictly,
     once, before the first table; an unavailable model raises `ModelUnavailableError` first.
@@ -177,15 +181,12 @@ def scan_sources(
         isinstance(sample_rows, bool) or not isinstance(sample_rows, int) or sample_rows < 1
     ):
         raise PipelineConfigError("sample_rows must be a positive integer or None")
-    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
-    selected = list(descriptors) if tables is None else list(tables)
-    if repeated_names(selected):
-        raise PipelineConfigError("tables selects the same table more than once")
-    unknown = [t for t in selected if t not in descriptors]
-    if unknown:
-        raise PipelineConfigError("tables names a table that is not in sources")
-
-    declared = _scan_integrity.declare(descriptors, relationships) if integrity else ()
+    descriptors, selected, declared, _ = validate_scan_inputs(
+        sources,
+        tables,
+        relationships if integrity else (),
+        positions=relationship_positions if integrity else None,
+    )
 
     models, runs = load_pre_scan(pre_scan, file_access)
 
@@ -211,6 +212,45 @@ def scan_sources(
         engine_version=__version__,
         scanned_at=datetime.now(timezone.utc).isoformat(),
         detectors=runs,
+    )
+
+
+class ScanInputs(NamedTuple):
+    """What `validate_scan_inputs` found: the validated descriptors, the selected names in
+    order, the declared relationships and the count of full-pipeline relationships set aside."""
+
+    descriptors: dict[str, dict[str, Any]]
+    selected: list[str]
+    declared: tuple[_scan_integrity.DeclaredRelationship, ...]
+    unchecked: int = 0
+
+
+def validate_scan_inputs(
+    sources: Mapping[str, Mapping[str, Any]],
+    tables: Sequence[str] | None,
+    relationships: Sequence[Mapping[str, Any]],
+    *,
+    positions: Sequence[int] | None = None,
+    full_pipeline: bool = False,
+) -> ScanInputs:
+    """The one check of a scan's inputs: every descriptor, the `tables` selection and the
+    declared relationships. Reads no data.
+
+    `full_pipeline` is for a config that is a whole pipeline: a relationship with a generate
+    end (a table not in `sources`) is counted in `unchecked`, not refused, and positions are
+    the entries' own. Otherwise every relationship must name sources; `positions` renumbers."""
+    descriptors = {name: _validated(name, raw) for name, raw in sources.items()}
+    selected = list(descriptors) if tables is None else list(tables)
+    if repeated_names(selected):
+        raise PipelineConfigError("tables selects the same table more than once")
+    unknown = [t for t in selected if t not in descriptors]
+    if unknown:
+        raise PipelineConfigError("tables names a table that is not in sources")
+    if full_pipeline:
+        declared, unchecked = _scan_integrity.declare_pipeline(descriptors, relationships)
+        return ScanInputs(descriptors, selected, declared, unchecked)
+    return ScanInputs(
+        descriptors, selected, _scan_integrity.declare(descriptors, relationships, positions)
     )
 
 
@@ -288,12 +328,21 @@ def _read_and_profile(
     if sample_rows is None or whole or strategy == "random":
         frame = reader.to_frame()
         total, exact = len(frame), True
+        # A random read keeps everything when the source fits the cap: no sampling happened.
+        reached_end = sample_rows is None or whole or len(frame) <= sample_rows
         if not whole and sample_rows is not None and len(frame) > sample_rows:
             frame = frame.sample(n=sample_rows, random_state=_RANDOM_SEED).reset_index(drop=True)
     else:
+        # One row past the cap: under the `sample_frame` contract a short read is the end of the
+        # source, so a frame of `cap + 1` rows proves the table is larger than the sample.
         count = reader.row_count()
-        frame = reader.sample_frame(sample_rows)
-        total, exact = max(count.value, len(frame)), count.exact
+        frame = reader.sample_frame(sample_rows + 1)
+        reached_end = len(frame) <= sample_rows
+        if reached_end:
+            total, exact = len(frame), True
+        else:
+            frame = frame.iloc[:sample_rows]
+            total, exact = max(count.value, sample_rows + 1), count.exact
     refuse_duplicate_field_names(name, [str(c) for c in frame.columns])
 
     is_csv = descriptor["type"] == "file" and descriptor["format"] == "csv"
@@ -322,6 +371,7 @@ def _read_and_profile(
         sample_row_cap=row_cap,
         file_access=file_access,
     )
+    profile = replace(profile, basis=read_basis(profile.sample_strategy, row_cap, reached_end))
     models, position = model_pass
     hits = {} if models is None else models.run(frame, name, position)
     del frame
@@ -363,12 +413,6 @@ def _table_scan(
     zero_counts: dict[str, int] | None,
     hits: Mapping[str, tuple[ModelHit, ...]],
 ) -> TableScan:
-    scanned = profile.row_count
-    keys = tuple(
-        f.name
-        for f in profile.fields
-        if scanned > 0 and f.null_count == 0 and f.distinct_count == scanned
-    )
     return TableScan(
         name=name,
         descriptor=descriptor,
@@ -376,7 +420,7 @@ def _table_scan(
         warnings=warned,
         row_count=total,
         row_count_exact=exact,
-        key_candidates=keys,
+        key_candidates=claim_keys(profile),
         null_counts={f.name: f.null_count for f in profile.fields},
         leading_zero_counts={
             f.name: None if zero_counts is None else zero_counts.get(f.name) for f in profile.fields
@@ -454,6 +498,8 @@ def _table_core(t: TableScan) -> TableCore:
         warnings=[WarningRefCore.model_validate(asdict(w)) for w in t.warnings],
         reid_risk_score=_finite(p.reid_risk_score) if p.row_count > 0 else None,
         quasi_identifier_groups=[[core_name[n] for n in g] for g in p.quasi_identifier_groups],
+        basis=p.basis,
+        scanned_rows=p.row_count,
     )
 
 

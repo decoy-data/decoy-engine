@@ -223,7 +223,12 @@ def _sibling_case(kind: str) -> tuple[list[dict[str, Any]], str, Any, list[pa.Ta
                 "name": "dob",
                 "strategy": "date_shift",
                 "namespace": "dob_ns",
-                "provider_config": {"min_days": -30, "max_days": 30, "group_by": "g"},
+                "provider_config": {
+                    "min_days": -30,
+                    "max_days": 30,
+                    "group_by": "g",
+                    "date_format": "%Y-%m-%d",
+                },
             }
         ]
         return cols, "g", _DICT, [pa.table({"dob": dates, "g": _DICT.good})]

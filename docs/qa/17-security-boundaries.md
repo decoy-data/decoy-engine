@@ -26,6 +26,9 @@ expression evaluators, and SQL surfaces.
 - **Expressions.** `derived` and `when:` are held to closed grammars. `formula` runs
   under `simpleeval`. `DataFrame.eval` is pinned to the `numexpr` engine with empty
   local and global dicts.
+- **Output file metadata.** A published Parquet file carries no source key/value metadata:
+  no custom schema key, no field metadata at any depth, no `attrs` and no column-index name.
+  The one schema key it may carry is a rebuilt `b"pandas"` blob.
 - **Scratch files** holding rows are created in protected directories (mode `0700`,
   files `0600`).
 
@@ -45,6 +48,7 @@ expression evaluators, and SQL surfaces.
 | SEC-10 | Injection attempts through each expression field: `derived`, `formula`, `when:`, a generate `formula`. | None executes code, reads a file or touches the network. Each is refused or evaluates safely. |
 | SEC-11 | During a large out-of-core run, list the scratch directory and its permissions; after the run, and after a forced failure, list it again. | Directory `0700`, files `0600` while running. Nothing holding rows is left behind afterwards in either case. |
 | SEC-12 | A table or column name containing SQL metacharacters (`"; DROP TABLE x; --`) on the out-of-core route. | Handled as an identifier or refused. Never executed as SQL. |
+| SEC-13 | Mask a Parquet source whose schema metadata, field metadata, pandas `attrs` and column-index name each hold a marker, on a resident, an out-of-core and a chunked route. Search the raw bytes, every footer value and the decoded `ARROW:schema` of each output. | The marker is in none of them. Masked values, column names and types match a run on a clean copy of the source. |
 
 ## Open points
 

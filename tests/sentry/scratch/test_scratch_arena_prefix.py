@@ -32,7 +32,13 @@ SWEEP_NAME = re.compile(r"decoy-arena-v1-[0-9a-f]{16}")
 ARENA_BANNED = frozenset(
     {"os.mkdir", "os.makedirs", "tempfile.mkdtemp", "Path.mkdir", "os.chmod", "os.fchmod"}
 )
-CREATE_FLAGS = frozenset({"os.O_CREAT", "decoy_engine.fileaccess._output._FILE_CREATE"})
+CREATE_FLAGS = frozenset(
+    {
+        "os.O_CREAT",
+        "decoy_engine.fileaccess._osflags.CREAT",
+        "decoy_engine.fileaccess._output._FILE_CREATE",
+    }
+)
 # Plan 4.2: every raw creation in `_output.py` sits in one of these, plus the one flag definition.
 OUTPUT_RAW = frozenset(
     {
@@ -204,6 +210,10 @@ _SEEDS = {
     "arena_mkdtemp_alias": "from tempfile import mkdtemp as fresh\n\n\ndef root():\n    fresh()\n",
     "arena_chmod_getattr": "import os\n\n\ndef fix(p):\n    getattr(os, 'chmod')(p, 0o700)\n",
     "arena_fchmod": "import os\n\n\ndef fix(fd):\n    os.fchmod(fd, 0o700)\n",
+    "arena_osflags_marker": (
+        "import os\nfrom decoy_engine.fileaccess import _osflags\n\n\ndef marker(fd):\n"
+        "    return os.open('.m', _osflags.WRONLY | _osflags.CREAT, 0o600, dir_fd=fd)\n"
+    ),
     "arena_raw_marker": (
         "import os\nfrom os import O_CREAT as C\n\n\ndef marker(fd):\n"
         "    return os.open('.m', os.O_WRONLY | C, 0o600, dir_fd=fd)\n"

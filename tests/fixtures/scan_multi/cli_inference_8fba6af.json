@@ -85,18 +85,19 @@
         {
           "detector_id": "iso_date",
           "match_rate": 0.95,
-          "confidence_bucket": "high"
+          "confidence_bucket": "high",
+          "format_pattern": "%Y-%m-%d",
+          "format_pattern_complete": true
         }
       ],
       "expected": {
         "strategy": "date_shift",
         "provider": null,
         "provider_config": {
-          "min_days": -365,
-          "max_days": 365
+          "date_format": "%Y-%m-%d"
         },
         "deterministic": false,
-        "review": "The scan detected ISO-format dates. date_shift shifts each date by an independent per-value offset in [min_days, max_days] (same source value always gets the same shift, but shifts are NOT globally order-preserving across rows). Defaults are min_days: -365 / max_days: 365; tune via provider_config."
+        "review": "The scan detected ISO-format dates. date_shift shifts each date by an independent per-value offset in [min_days, max_days] (same source value always gets the same shift, but shifts are NOT globally order-preserving across rows). The window defaults to -365/+365 days and the date_format is the one the scan detected; tune via provider_config."
       }
     },
     {
@@ -107,18 +108,19 @@
         {
           "detector_id": "us_date",
           "match_rate": 0.95,
-          "confidence_bucket": "high"
+          "confidence_bucket": "high",
+          "format_pattern": "%m/%d/%Y",
+          "format_pattern_complete": true
         }
       ],
       "expected": {
         "strategy": "date_shift",
         "provider": null,
         "provider_config": {
-          "min_days": -365,
-          "max_days": 365
+          "date_format": "%m/%d/%Y"
         },
         "deterministic": false,
-        "review": "The scan detected US-format dates. date_shift shifts each date by an independent per-value offset in [min_days, max_days] (not order-preserving across rows). Defaults are -365/+365 days; tune via provider_config."
+        "review": "The scan detected US-format dates. date_shift shifts each date by an independent per-value offset in [min_days, max_days] (not order-preserving across rows). The window defaults to -365/+365 days and the date_format is the one the scan detected; tune via provider_config."
       }
     },
     {
@@ -931,6 +933,48 @@
         "provider_config": {},
         "deterministic": false,
         "review": "The scan detected multiple candidate signals (email, ssn). The scaffolder picked faker but the column may need a different strategy; review before running."
+      }
+    },
+    {
+      "id": "detector-iso_date-incomplete-format",
+      "inferred_type": "string",
+      "is_likely_unique": false,
+      "matches": [
+        {
+          "detector_id": "iso_date",
+          "match_rate": 0.95,
+          "confidence_bucket": "high",
+          "format_pattern": "%Y-%m-%d",
+          "format_pattern_complete": false
+        }
+      ],
+      "expected": {
+        "strategy": "redact",
+        "provider": null,
+        "provider_config": {},
+        "deterministic": false,
+        "review": "The scan did not flag this column as a known PII type. redact is the safe default; replace with passthrough if this column is intentionally kept verbatim, or pick a more appropriate strategy if your data carries PII the detectors missed."
+      }
+    },
+    {
+      "id": "detector-us_date-incomplete-format",
+      "inferred_type": "string",
+      "is_likely_unique": false,
+      "matches": [
+        {
+          "detector_id": "us_date",
+          "match_rate": 0.95,
+          "confidence_bucket": "high",
+          "format_pattern": "%m/%d/%Y",
+          "format_pattern_complete": false
+        }
+      ],
+      "expected": {
+        "strategy": "redact",
+        "provider": null,
+        "provider_config": {},
+        "deterministic": false,
+        "review": "The scan did not flag this column as a known PII type. redact is the safe default; replace with passthrough if this column is intentionally kept verbatim, or pick a more appropriate strategy if your data carries PII the detectors missed."
       }
     }
   ]

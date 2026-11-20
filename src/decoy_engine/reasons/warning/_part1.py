@@ -42,7 +42,7 @@ __all__ = [
 
 _d = _catalog.warning("QualityWarning")
 
-CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since=UNRELEASED)
+CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since="1.30.0")
 CARDINALITY_MATCH_DEVIATION = _d("cardinality_match_deviation", "Cardinality match deviation.")
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
@@ -87,7 +87,7 @@ REFERENCE_PARENT_POOL_EMPTY = _d(
 SCAN_BASELINE_MISSING = _catalog.warning("EvidenceManifest")(
     "scan_baseline_missing",
     "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
-    since=UNRELEASED,
+    since="1.30.0",
 )
 SCAN_CRASHED = _d("scan_crashed", "Scan crashed.")
 SCAN_HEADER_SUSPECT = _d(
@@ -122,5 +122,5 @@ _d = _catalog.warning("ConnectorEvent")
 SFTP_LOCK_NOT_REMOVED = _d(
     "sftp_lock_not_removed",
     "An SFTP lock file could not be removed after a run.",
-    since=UNRELEASED,
+    since="1.30.0",
 )

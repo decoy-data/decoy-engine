@@ -502,7 +502,14 @@ def _date_shift_no_format_job(tmp_path) -> tuple[dict, dict[str, pa.Table]]:
         tables=[
             {
                 "name": "ds",
-                "columns": [{"name": "dt", "strategy": "date_shift", "namespace": "dt_ns"}],
+                "columns": [
+                    {
+                        "name": "dt",
+                        "strategy": "date_shift",
+                        "namespace": "dt_ns",
+                        "provider_config": {"date_format": "%Y-%m-%d"},
+                    }
+                ],
             }
         ],
         sources={"ds": path},
@@ -623,11 +630,14 @@ class TestChunkedGateDelegation:
     rejection reason, so dropping the delegated gate flips the mode to chunked.
     """
 
-    def test_undated_date_shift_keeps_job_off_chunked(self, tmp_path):
+    def test_undated_date_shift_is_refused_by_compile_not_declined_by_the_planner(self, tmp_path):
+        from decoy_engine.plan import PlanCompileError, run_config_only_checks
+
         cfg, _ = _date_shift_no_format_job(tmp_path)
-        plan = _classify(cfg, substrate="pandas")
-        assert plan.mode == "pandas_fallback"
-        assert "date_shift_requires_explicit_format" in plan.rejections["chunked"]
+        del cfg["tables"][0]["columns"][0]["provider_config"]
+        with pytest.raises(PlanCompileError) as exc:
+            run_config_only_checks(cfg)
+        assert exc.value.code == "date_shift_requires_date_format"
 
     def test_bucketize_null_source_keeps_job_off_chunked(self, tmp_path):
         cfg, sources = _bucketize_null_job(tmp_path)

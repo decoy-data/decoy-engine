@@ -1,0 +1,27 @@
+{
+ "sentry_id": "physical-seam-scoped",
+ "created_in": "EW1",
+ "entries": {
+  "src/decoy_engine/execution/_isolated_common.py::RLIMIT_KINDS": {
+   "reason": "EW1 scoped change of RLIMIT_KINDS permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::abnormal_exit_reason": {
+   "reason": "EW1 scoped change of abnormal_exit_reason permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::apply_mem_cap": {
+   "reason": "EW1 scoped change of apply_mem_cap permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::classify_abnormal_exit": {
+   "reason": "EW1 scoped change of classify_abnormal_exit permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::if:not _osflags.WINDOWS": {
+   "reason": "EW1 scoped change of if:not _osflags.WINDOWS permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::imports": {
+   "reason": "EW1 scoped change of imports permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  },
+  "src/decoy_engine/execution/_isolated_common.py::peak_rss_mb": {
+   "reason": "EW1 scoped change of peak_rss_mb permitted by owner decision Q13: owns the POSIX `resource` import or a signal read that Windows lacks; EW1 of the Windows plan routes it through `_osflags` so the engine imports there"
+  }
+ }
+}

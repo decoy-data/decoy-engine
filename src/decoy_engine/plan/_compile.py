@@ -75,6 +75,7 @@ from decoy_engine.plan._checks_correctness import (
 from decoy_engine.plan._checks_date_shift import (
     check_date_preserve_values,
     check_date_shift_group_by_refs,
+    check_date_shift_window,
 )
 from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 from decoy_engine.plan._checks_dp import check_dp_generate_contract
@@ -223,6 +224,7 @@ def compile_plan(
     # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
     # shape). Config-only; runs inside the date_shift_group_by_refs slot.
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
     # compile-time manifest warnings for every active group. Config-only; runs
     # in both branches and in run_config_only_checks.
@@ -535,6 +537,7 @@ def run_config_only_checks(
     # (entity-anchor) column ref. Config-only.
     check_date_shift_group_by_refs(config)
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
     check_fpe_join_groups(config)

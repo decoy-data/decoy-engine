@@ -177,8 +177,9 @@ def test_pandas_expression_error_attributes_strategy():
 
 def test_pandas_not_boolean_attributes_strategy(monkeypatch):
     # An accepted predicate whose evaluation yields a non-boolean Series: the grammar cannot
-    # produce one, so the branch is reached by injecting the result.
-    df = pd.DataFrame({"v": ["a", "b"], "n": [1, 2]})
+    # produce one, so the branch is reached by injecting the result. A float column: an integer
+    # column is compared exactly without pandas' evaluator.
+    df = pd.DataFrame({"v": ["a", "b"], "n": [1.5, 2.5]})
     monkeypatch.setattr(pd.DataFrame, "eval", lambda *a, **k: pd.Series([2, 3]))
     with pytest.raises(StrategyError) as exc:
         run_with_when_gate(RedactHandler(), df, "v", _seed(when="n > 0"), _Ctx())
@@ -202,7 +203,7 @@ def test_missing_numexpr_raises_numexpr_required(monkeypatch):
         raise ImportError("numexpr not installed")
 
     monkeypatch.setattr(pd.DataFrame, "eval", _raise_import_error)
-    df = pd.DataFrame({"v": ["a", "b"], "flag": [1, 0]})
+    df = pd.DataFrame({"v": ["a", "b"], "flag": [1.0, 0.0]})
     with pytest.raises(StrategyError) as exc:
         run_with_when_gate(RedactHandler(), df, "v", _seed(when="flag == 1"), _Ctx())
     assert exc.value.code == "numexpr_required"

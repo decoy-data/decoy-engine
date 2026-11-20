@@ -36,15 +36,16 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `quarantine.py` | Quarantine-row routing (`quarantine:` block) |
 | `contracts/` | Versioned engine-owned contracts consumed by CLI/platform: `declared_casting.py` (F06 per-column parse/sentinel/policy/output contract), `_declared_base.py`, `_declared_formats.py` (the closed format shapes) |
 | `declared_casting/` | F06 casting boundary: `_catalog.py` (the only format registry + capability manifest), `_numeric.py`/`_date.py`/`_cobol.py` kernels, `_boundary.py` (`DeclaredCastRun`: pre-mask cast, post-mask format), `_counts.py`, `_eligibility.py` (`evaluate_declared_casting`, `declared_route_guard`), `_quarantine_protocol.py`, `_quarantine_local.py` (Fernet reference sink) |
-| `validation/`, `validation_result.py` | `validate_config` and the validation wire shape |
+| `validation/`, `validation_result.py` | `validate_config`, the validation wire shape, and the two config reviews: `validation/starter_review.py` (pre-scan: `column_entry`, `apply_review`) and `validation/finding_review.py` (post-scan: `finding_edits`) |
 | `relationships/` | Relationship graph, namespace registry, orphan policy |
+| `signed_evidence/` | Signed evidence (F33): strict JSON, RFC 8785 statement, detached ES256 JWS envelope, trust policy, required-check catalog, artifact binding, the pinned expectations loader, the bundle capability and the verifier entries. Imports only the engine `_canonical`, `_error_base`, `reasons` and `fileaccess` owners |
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
 | `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
 | `determinism/`, `keyprovider.py`, `_reference_date.py` | Seed protocol, key derivation, reference-date anchoring |
-| `vault.py`, `unmask.py` | Token vault write and unmask |
+| `vault/`, `unmask.py` | Token vault write and unmask |
 | `connectors/`, `sdk.py` | Connector SDK and in-tree file connectors (S3, GCS, SFTP, Postgres snapshot) and the conditional-write object store |
 | `data_discovery.py` | Read-only SQL over output (DuckDB) |
 | `context.py`, `instrumentation/` | Caller context and `Logger` protocol; opt-in timing collector |
