@@ -10,6 +10,14 @@
       "max": 1,
       "reason": "child-key staging batch built from a key-only schema; internal scratch that is never published"
     },
+    "decoy_engine/execution/out_of_core/_emit.py::_fk_resident_column": {
+      "max": 1,
+      "reason": "column cast to the joiner's observed type, not a schema; the rule matches every cast argument"
+    },
+    "decoy_engine/execution/out_of_core/_emit.py::_merged_column": {
+      "max": 1,
+      "reason": "column cast to a unified chunk type, not a schema; the rule matches every cast argument"
+    },
     "decoy_engine/execution/out_of_core/_emit.py::reconcile_batch": {
       "max": 1,
       "reason": "rebuilds a batch on fixed_schema, which _fixed_output_schema already passed through attach_output_metadata"
@@ -18,6 +26,18 @@
       "max": 1,
       "reason": "child-key staging batch on a key-only schema; internal scratch that is never published"
     },
+    "decoy_engine/execution/out_of_core/_join.py::mask_child_fk": {
+      "max": 1,
+      "reason": "reader over the child-key staging schema; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_relation.py::_build_relation": {
+      "max": 1,
+      "reason": "reader over the relation staging schema built from key types; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_relation.py::_cast_masked_array": {
+      "max": 1,
+      "reason": "array cast to a target type, not a schema; the rule matches every cast argument"
+    },
     "decoy_engine/execution/out_of_core/_relation.py::_relation_staging_batches": {
       "max": 1,
       "reason": "relation staging batch on a schema this module builds from key types; internal scratch that is never published"
@@ -25,10 +45,6 @@
     "decoy_engine/execution/out_of_core/_stage.py::MaskedKeyStager.add": {
       "max": 1,
       "reason": "masked-key stage batch on the stager's own key schema; internal scratch that is never published"
-    },
-    "decoy_engine/execution/out_of_core/_stream_driver.py::stream_table": {
-      "max": 1,
-      "reason": "raw parent spill batch built from the source column order; private spill file, never published"
     },
     "decoy_engine/execution/out_of_core/_stream_join.py::StreamFkJoiner._with_positional_row_nr": {
       "max": 1,
