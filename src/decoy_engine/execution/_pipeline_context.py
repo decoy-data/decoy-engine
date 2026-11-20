@@ -42,6 +42,7 @@ from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
 from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
+from decoy_engine.execution.pipeline._route_decision import decide_split
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.fileaccess import config_relative
 from decoy_engine.profile._readers import LazySource
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionAdapter
     from decoy_engine.execution._mixed_static import MixedStaticPlan
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
+    from decoy_engine.execution._pipeline_multi_table import MultiTableSplit
     from decoy_engine.execution._planner import ExecutionPlan
     from decoy_engine.execution._transactional_sink import TransactionalSink
     from decoy_engine.execution._transforms_prepare import PreparedSources
@@ -160,6 +162,9 @@ class RouteDecision:
     mixed: MixedStaticPlan | None = None
     # Set only for a run that requires streaming and takes the chunked lane.
     stream: StreamVerdict | None = None
+    # The B7 per-table split the full-frame executor runs, decided here so one decision serves
+    # the executor and anything that prices the run; `None` leaves the job whole.
+    split: MultiTableSplit | None = None
 
 
 def refuse_vault_with_sink(sink: Any, vault_writer: Any) -> None:
@@ -559,6 +564,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         keep_lazy=keep_lazy,
         ooc_declined=ooc_declined,
         mixed=mixed if route == "mixed" else None,
+        split=decide_split(ctx, route, route_chunked, keep_lazy),
     )
 
 

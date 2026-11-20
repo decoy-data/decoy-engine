@@ -1,5 +1,6 @@
 {
  "all_null": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {
@@ -53,6 +54,7 @@
   "source_label": "t"
  },
  "dup_heavy": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {
@@ -176,6 +178,7 @@
   "source_label": "t"
  },
  "empty_strings": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {
@@ -310,6 +313,7 @@
   "source_label": "t"
  },
  "hipaa": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {
@@ -1381,6 +1385,7 @@
   "source_label": "t"
  },
  "mixed_50k": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {
@@ -2955,6 +2960,7 @@
   "source_label": "t"
  },
  "one_row": {
+  "basis": "whole",
   "engine_version": "0.1.0",
   "fields": [
    {

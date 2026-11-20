@@ -139,16 +139,12 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.declared_casting._boundary import (
-    declared_date_shift_columns,
-    declared_integer_columns,
-    seal_evidence,
-)
+from decoy_engine.declared_casting._boundary import declared_date_shift_columns, seal_evidence
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
-from decoy_engine.execution._fk_keys import fk_columns_for_table, to_pandas_fk_safe
+from decoy_engine.execution._fk_keys import lossless_int_columns, to_pandas_fk_safe
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
@@ -163,10 +159,8 @@ from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
-    group_key_group_by_columns,
     order_work,
     source_anchor_columns,
-    top_code_columns,
 )
 from decoy_engine.execution._sequential_composite_chain import decline_composite_chain
 from decoy_engine.execution._sequential_native import SeqNativeRun
@@ -324,15 +318,7 @@ def run_sequential(
     # column set at load (lossless int+null) and snapshotted pre-mask into
     # ctx.group_anchor_snapshots below.
     group_anchor_cols = source_anchor_columns(plan, registry)
-    # HC-3b (Codex R2): top_code columns need the same lossless int+null typing
-    # so a value >= 2**53 is not rounded by a float64 widen (chunk-safety).
-    top_code_cols = top_code_columns(plan, registry)
-    # Phase 4 slice 2: a group_key `group_by` sibling has the identical
-    # lossless-typing need. group_key is not FK-key-eligible itself, but it
-    # can mask an ordinary column on any table in an FK job, so this route
-    # needs the same union the single-table pandas adapter uses.
-    group_key_cols = group_key_group_by_columns(plan, registry)
-    declared_int_cols = declared_integer_columns(plan)  # F06: typed ints stay exact
+    lossless = lossless_int_columns(plan, registry, graph)
 
     # A parent key map is retained until every child table that references it has
     # been processed; this makes multi-parent and diamond graphs safe.
@@ -424,14 +410,7 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(
-                    src,
-                    fk_columns_for_table(graph.edges, table)
-                    | group_anchor_cols.get(table, set())
-                    | top_code_cols.get(table, set())
-                    | group_key_cols.get(table, set())
-                    | declared_int_cols.get(table, set()),
-                )
+                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
                 register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))

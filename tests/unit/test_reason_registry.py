@@ -12,6 +12,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from scripts.release.reason_manifest_policy import append_only_violations
@@ -604,6 +605,16 @@ def _blocked_report(**parts: object) -> dict[str, object]:
     }
 
 
+def _residual_row(**fields: Any) -> dict[str, Any]:
+    """A complete writer row: the verdict refuses a row the strict reader would refuse."""
+    import dataclasses
+
+    from decoy_engine.verification.postmask.types import ResidualPIIFinding
+
+    base: dict[str, Any] = {"table": "t", "column": "c", "detector_id": "d", "match_rate": 0.5}
+    return dataclasses.asdict(ResidualPIIFinding(**{**base, **fields}))
+
+
 def _blocked_key(code: str, status: str, baseline: str) -> dict[str, object]:
     return {
         "kind": "primary",
@@ -623,9 +634,7 @@ def _blocked_key(code: str, status: str, baseline: str) -> dict[str, object]:
             "post_scan.key_column_missing",
         ),
         (
-            _blocked_report(
-                residual_pii=[{"table": "t", "column": "c", "detector_id": "d", "severity": "fail"}]
-            ),
+            _blocked_report(residual_pii=[_residual_row(severity="fail")]),
             "post_scan.finding_blocked",
         ),
         (_blocked_report(pass_failed_with="TypeError"), "post_scan.check_error"),
@@ -652,8 +661,9 @@ def test_a_post_scan_blocked_error_blocked_only_by_an_ner_row_is_ner_blocked() -
     from decoy_engine.verification.postmask import PostScanBlockedError, post_scan_verdict
 
     assert "ner_findings" in inspect.signature(post_scan_verdict).parameters
-    row = {"table": "t", "column": "c", "detector_id": "person_name", "severity": "fail"}
-    report = _blocked_report(residual_pii=[{**row, "source": "ner"}])
+    report = _blocked_report(
+        residual_pii=[_residual_row(severity="fail", detector_id="person_name", source="ner")]
+    )
     error = PostScanBlockedError(report, post_scan_verdict(report, ner_findings="fail"))
     assert error.code == "ner_blocked"
     assert str(error) == reasons.get("post_scan", "ner_blocked").summary

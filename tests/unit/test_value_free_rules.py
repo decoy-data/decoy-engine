@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from decoy_engine._value_free import SharedRules, derive_read
+from decoy_engine._value_free import ReadUnknownAs, SharedRules, WriteRules, derive_read
 
 
 class _Base(BaseModel):
@@ -143,3 +143,99 @@ def test_control_a_rules_owned_shape_derives_ignores_unknown_and_is_frozen() -> 
     assert not hasattr(got, "later")
     with pytest.raises(ValidationError):
         got.name = "y"  # type: ignore[attr-defined]
+
+
+# -- ReadUnknownAs, WriteRules and token=None ---------------------------------------------------
+
+Mode = Literal["a", "b"]
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+
+class _Marked(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    mode: Annotated[Mode, ReadUnknownAs("a")] = "a"
+    plain: Literal["x", "y"] = "x"
+
+
+def _keep(model: type[BaseModel]) -> type[BaseModel]:
+    return derive_read(model, base=_Strict, token=None, module=__name__)
+
+
+def test_an_unknown_string_reads_as_the_fallback_and_the_writer_still_refuses_it() -> None:
+    read = _keep(_Marked)
+    assert read.model_validate({"mode": "later"}).mode == "a"  # type: ignore[attr-defined]
+    assert read.model_validate({"mode": "b"}).mode == "b"  # type: ignore[attr-defined]
+    with pytest.raises(ValidationError):
+        _Marked.model_validate({"mode": "later"})
+
+
+@pytest.mark.parametrize("bad", [True, 1, ["a"], None])
+def test_a_non_string_is_still_refused_on_read(bad: Any) -> None:
+    with pytest.raises(ValidationError):
+        _keep(_Marked).model_validate({"mode": bad})
+
+
+def test_token_none_keeps_an_unmarked_literal_strict() -> None:
+    with pytest.raises(ValidationError):
+        _keep(_Marked).model_validate({"plain": "z"})
+
+
+def test_a_marker_off_a_literal_or_with_a_foreign_fallback_is_refused() -> None:
+    class NotLiteral(BaseModel):
+        mode: Annotated[str, ReadUnknownAs("a")] = "a"
+
+    class Foreign(BaseModel):
+        mode: Annotated[Mode, ReadUnknownAs("zzz")] = "a"
+
+    for model in (NotLiteral, Foreign):
+        with pytest.raises(TypeError):
+            _keep(model)
+
+
+def test_the_marker_is_read_before_the_substitute_hook() -> None:
+    seen: list[Any] = []
+
+    def spy(meta: list[Any]) -> Any:
+        seen.append(meta)
+
+    derive_read(_Marked, base=_Strict, token=None, substitute=spy, module=__name__)
+    assert all(not any(isinstance(m, ReadUnknownAs) for m in meta) for meta in seen)
+
+
+class _Writer(WriteRules):
+    @model_validator(mode="after")
+    def _never_x(self) -> _Writer:
+        if getattr(self, "name", None) == "x":
+            raise ValueError("fixed")
+        return self
+
+
+class _WriteOnly(_Write, _Writer):
+    pass
+
+
+def test_a_write_only_rule_runs_on_write_and_not_on_read() -> None:
+    with pytest.raises(ValidationError):
+        _WriteOnly.model_validate({"name": "x"})
+    assert _derive(_WriteOnly).model_validate({"name": "x"}).name == "x"  # type: ignore[attr-defined]
+
+
+def test_a_write_rules_class_with_a_field_is_refused() -> None:
+    class Fielded(WriteRules):
+        extra_field: str = "a"
+
+    class Write(Fielded):
+        name: str
+
+    with pytest.raises(TypeError):
+        _derive(Write)
+
+
+def test_a_default_factory_survives_the_derivation() -> None:
+    class Listed(BaseModel):
+        items: list[str] = Field(default_factory=list)
+
+    assert _keep(Listed).model_validate({}).items == []  # type: ignore[attr-defined]

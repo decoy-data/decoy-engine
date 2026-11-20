@@ -214,26 +214,12 @@ def plan_carry(
 
 def adapter_fk_safe_columns(plan: Any, registry: Any, graph: Any, table: str) -> set[str]:
     """The columns the stock adapter ingests losslessly (the set it passes to
-    `to_pandas_fk_safe`), so a diagnosis converts a column exactly as the adapter did."""
-    from decoy_engine.execution._fk_keys import fk_columns_for_table
-    from decoy_engine.execution._runner import (
-        date_shift_group_columns,
-        group_key_group_by_columns,
-        top_code_columns,
-    )
+    `to_pandas_fk_safe`), so a diagnosis, the native `when:` mask and the Faker null mask convert a
+    column exactly as the adapter did. It is `lossless_int_columns` itself, never a second union; a
+    null-free `when:`-read integer is included too (a superset the adapter narrows by its data)."""
+    from decoy_engine.execution._fk_keys import lossless_int_columns
 
-    # joint_mask key_by source columns are deliberately NOT unioned here. The stock adapter
-    # now ingests them losslessly via source_anchor_columns, but joint_mask is not chunk
-    # admitted (hash/redact/truncate/passthrough only) and is not native eligible
-    # (output_type_is_static is False), so a chunked or native diagnosis never sees a
-    # joint_mask key_by column on this path. If joint_mask ever becomes chunk or native
-    # eligible, union joint_mask_key_by_columns here to keep this mirror exact.
-    return (
-        set(fk_columns_for_table(graph.edges, table))
-        | date_shift_group_columns(plan, registry).get(table, set())
-        | top_code_columns(plan, registry).get(table, set())
-        | group_key_group_by_columns(plan, registry).get(table, set())
-    )
+    return lossless_int_columns(plan, registry, graph).for_table(table)
 
 
 __all__ = [
