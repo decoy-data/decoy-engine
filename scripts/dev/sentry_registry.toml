@@ -198,3 +198,11 @@ baseline = "tests/sentry/baselines/snapshot-parse-single-owner.json"
 [[sentry]]
 id = "parquet-intermediate-writers"
 baseline = "tests/sentry/baselines/parquet-intermediate-writers.json"
+
+[[sentry]]
+id = "group-by-single-reader"
+baseline = "tests/sentry/baselines/group-by-single-reader.json"
+
+[[sentry]]
+id = "lossless-int-columns"
+baseline = "tests/sentry/baselines/lossless-int-columns.json"
