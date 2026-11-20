@@ -125,7 +125,7 @@ def _callee(call: ast.Call, imports: dict[str, str]) -> tuple[str | None, bool]:
     chain = scan.attr_chain(call.func)
     if not chain:
         # A method on a call result (`pa.field(...).with_metadata(m)`): the name is the attribute.
-        if isinstance(call.func, ast.Attribute):
+        if isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Call):
             return call.func.attr, False
         return None, False
     dotted = ".".join([imports.get(chain[0], chain[0]), *chain[1:]])
