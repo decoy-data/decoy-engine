@@ -21,10 +21,16 @@ name or a value, so they are never forwarded.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import reasons
-from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, pool_seeds
+from decoy_engine.generators.derivation import (
+    DEFAULT_GENERATE_LOCALE,
+    TABLE_KEY,
+    GenDeriveContext,
+    pool_seeds,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
@@ -46,6 +52,21 @@ def draw_path(caps: CapabilityMatrix) -> DrawPath | None:
     if caps.backend_type == "faker":
         return "batch"
     return None
+
+
+def provider_column_values(
+    col: dict[str, Any],
+    n: int,
+    derive_key: Callable[[str], bytes] | None,
+    seed: int,
+    instance_default_locale: str | None,
+) -> list[Any]:
+    """``n`` values for a ``provider`` generate column, in its locale or the instance default."""
+    from decoy_engine.providers_v2 import get_default_registry
+
+    ctx = GenDeriveContext.for_column(derive_key=derive_key, column_config=col, fallback_seed=seed)
+    locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
+    return provider_generate(col, n, ctx, get_default_registry(), locale)
 
 
 def provider_generate(
