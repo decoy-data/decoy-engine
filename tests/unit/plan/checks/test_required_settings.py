@@ -21,7 +21,9 @@ from decoy_engine.plan.checks import (
 from decoy_engine.profile import Profile
 
 SRC = Path(__file__).resolve().parents[4] / "src" / "decoy_engine"
-GUARD_NAME = re.compile(r"reasons\.runtime\.([A-Z_]+(?:_REQUIRES_NAMESPACE|_UNSET))\b")
+GUARD_NAME = re.compile(
+    r"reasons\.runtime\.([A-Z_]+(?:_REQUIRES_NAMESPACE|_REQUIRES_DATE_FORMAT|_UNSET))\b"
+)
 # A runtime guard with no descriptor needs a reason here. None today: every guard that matches
 # the pattern is reachable from a config column and has a mapping entry.
 EXCLUDED_GUARDS: dict[str, str] = {}
@@ -33,7 +35,7 @@ EARLIER_CHECK = {"shuffle": {"deterministic_namespace_missing", "namespace_missi
 SATISFIED: dict[str, dict[str, Any]] = {
     "hash": {"namespace": "ns"},
     "fpe": {"namespace": "ns"},
-    "date_shift": {"namespace": "ns"},
+    "date_shift": {"namespace": "ns", "provider_config": {"date_format": "%Y-%m-%d"}},
     "bucket_perturb": {"namespace": "ns"},
     "categorical": {"namespace": "ns", "provider_config": {"categories": ["a", "b"]}},
     "tokenize": {"namespace": "ns"},

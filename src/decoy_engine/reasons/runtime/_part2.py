@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -415,7 +415,7 @@ KEY_VERSION_INVALID = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("MissingMaskSecret")
@@ -481,7 +481,7 @@ PROBE_FAILED = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.EXECUTION,
     retry=RetryClass.UNKNOWN,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("RowExceedsMaxRowBytes")

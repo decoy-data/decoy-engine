@@ -26,8 +26,8 @@ from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._strategies._faker_positional import faker_selection_namespace
 from decoy_engine.execution._strategies._text_redact import _DEFAULT_TOKEN
 from decoy_engine.execution.native._categorical_prepared import PreparedCategorical
-from decoy_engine.execution.native._date_shift_ext import DEFAULT_MAX_DAYS, DEFAULT_MIN_DAYS
 from decoy_engine.transforms.date_preserve import PreserveSet, preserve_set_from_config
+from decoy_engine.transforms.date_shift import shift_window
 
 __all__ = [
     "BucketPerturbParams",
@@ -290,10 +290,11 @@ def resolve_operator_params(
             f"group_key/{target}",
         )
     if strategy == "date_shift":
+        min_days, max_days = shift_window(cfg)
         return DateShiftParams(
             cfg["date_format"],
-            cfg.get("min_days", DEFAULT_MIN_DAYS),
-            cfg.get("max_days", DEFAULT_MAX_DAYS),
+            min_days,
+            max_days,
             namespace,
             preserve_set_from_config(cfg),
         )

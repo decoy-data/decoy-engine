@@ -32,7 +32,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import BinaryIO, Literal, TextIO
 
-from decoy_engine.fileaccess import _durable
+from decoy_engine.fileaccess import _durable, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
 from decoy_engine.fileaccess._local_chain import (
@@ -63,7 +63,7 @@ from decoy_engine.fileaccess._types import (
 
 _logger = logging.getLogger("decoy_engine.quarantine")
 
-_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _osflags.CLOEXEC
 
 
 class LocalHandle:
@@ -78,7 +78,7 @@ class LocalHandle:
 
     def fileno(self) -> int:
         if self._fd is None:
-            self._fd = os.open(self._path, os.O_RDONLY | os.O_CLOEXEC)
+            self._fd = os.open(self._path, _osflags.RDONLY | _osflags.CLOEXEC)
         return self._fd
 
     def library_path(self) -> str:
@@ -189,7 +189,7 @@ class _LocalStageDir:
 
     def open_file(self, component: str) -> int:
         self._check(component)
-        return os.open(self._dir / component, os.O_RDONLY | os.O_CLOEXEC)
+        return os.open(self._dir / component, _osflags.RDONLY | _osflags.CLOEXEC)
 
     def create_dir(self, component: str) -> _LocalStageDir:
         self._check(component)
@@ -223,7 +223,7 @@ def _sync_dir(directory: Path) -> None:
     """Best-effort fsync of a directory so a rename into it survives a crash. A directory that
     cannot be opened, synced or closed is skipped: the rename has already published."""
     try:
-        fd = os.open(directory, os.O_RDONLY | os.O_CLOEXEC)
+        fd = os.open(directory, _osflags.RDONLY | _osflags.CLOEXEC)
     except OSError:
         return
     with contextlib.suppress(OSError):
@@ -267,7 +267,9 @@ def own_entry(path: Path, mode: int, *, directory: bool = False) -> None:
     from decoy_engine.fileaccess._entry import require_ambient  # _entry imports this module
 
     require_ambient("repairing a handed entry")
-    fd = _call(os.open, path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    fd = _call(
+        os.open, path, _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC
+    )
     try:
         kind = os.fstat(fd).st_mode
         if not (stat.S_ISDIR(kind) if directory else stat.S_ISREG(kind)):
@@ -339,7 +341,7 @@ class LocalOutputTxn(_LocalStageDir):
             if self._mode == "replace" and not private and self._writes_through():
                 self._direct = True
                 self._staged_file = self._target
-                return os.open(self._target, os.O_WRONLY | os.O_TRUNC | os.O_CLOEXEC)
+                return os.open(self._target, _osflags.WRONLY | _osflags.TRUNC | _osflags.CLOEXEC)
             prefix = STAGE_PREFIX[self._label]
             suffix = STAGE_SUFFIX.get(self._label, "")
             if private:

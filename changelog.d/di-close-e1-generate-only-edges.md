@@ -1,3 +1,0 @@
-### Changed (generate-only relationship edges need no namespace, DI-CLOSE E1, 2026-11-16)
-
-A relationship whose parent and child tables are both generate tables no longer needs a `namespace`. The engine derives a private label for the edge, so `compile_plan`, the capacity estimate and `run_pipeline` accept it, and the generated rows are the same as without the `relationships:` block. Edges with a mask table on either side still need a namespace and are refused with `namespace_missing`. A config with relationships runs on the full-frame route. `docs/recipes.md` and `docs/strategies.md` no longer tell users to write a top-level `mode: generate` key.

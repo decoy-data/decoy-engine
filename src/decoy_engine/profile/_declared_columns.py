@@ -9,13 +9,21 @@ config instead of from the plan.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import fileaccess
+from decoy_engine.config import PipelineConfig, PipelineConfigError
 from decoy_engine.fileaccess import FileAccess
-from decoy_engine.profile._csv_reader import read_csv_source, resolve_csv_dialect, source_refusal
+from decoy_engine.profile._csv_reader import (
+    CsvDialect,
+    read_csv_source,
+    resolve_csv_dialect,
+    source_refusal,
+)
 from decoy_engine.profile._readers import build_declared_source
 from decoy_engine.validation_result import CODES
 
@@ -147,6 +155,8 @@ def declaration_findings(
     columns, each group in input order."""
     from decoy_engine.execution._pipeline_context import classify_table_kinds
 
+    if not inputs:
+        return ()
     known = {e.get("name") for e in config.get("tables") or [] if isinstance(e, Mapping)}
     kinds = classify_table_kinds(dict(config))
     tables: list[DeclarationFinding] = []
@@ -241,6 +251,103 @@ def _run_schemas(
     return merged
 
 
+# Keys a sources-only scan file may carry; any other `PipelineConfig` field marks a full pipeline.
+_SCAN_KEYS = frozenset({"sources", "relationships", "version"})
+_PIPELINE_ONLY = frozenset(PipelineConfig.model_fields) - _SCAN_KEYS
+# What a resolved dialect writes back into a descriptor: its own fields and the names file.
+_DIALECT_KEYS = frozenset({*(f.name for f in dataclasses.fields(CsvDialect)), "column_names_file"})
+
+
+@dataclasses.dataclass(frozen=True)
+class ScanDeclaration:
+    """What `scan_sources` is given for a scan config. The mappings are read-only views of
+    copies, two levels deep (nested lists inside a descriptor are plain copies).
+    `unchecked_relationships` counts full-pipeline relationships set aside (a generate end has
+    no rows to count)."""
+
+    descriptors: Mapping[str, Mapping[str, Any]]
+    tables: tuple[str, ...]
+    relationships: tuple[Mapping[str, Any], ...]
+    # Each kept relationship's place in the user's file, for `scan_sources(relationship_positions=)`.
+    relationship_positions: tuple[int, ...] = ()
+    unchecked_relationships: int = 0
+    ignored_keys: tuple[str, ...] = ()
+
+
+def _frozen_descriptors(descriptors: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
+    return MappingProxyType(
+        {n: MappingProxyType(copy.deepcopy(dict(d))) for n, d in descriptors.items()}
+    )
+
+
+def _scan_shape(config: Mapping[str, Any]) -> tuple[dict[str, Any], list[Mapping[str, Any]]]:
+    """The raw `sources` and `relationships`; a wrong shape is refused by name, never value."""
+    if not isinstance(config, Mapping):
+        raise PipelineConfigError("scan config must be a mapping")
+    version = config.get("version", 2)
+    if type(version) is not int or version != 2:
+        raise PipelineConfigError("scan config version must be the integer 2")
+    sources = config.get("sources")
+    if not isinstance(sources, Mapping) or not sources:
+        raise PipelineConfigError("scan config sources must be a non-empty mapping")
+    for name in (n for n, raw in sources.items() if not isinstance(raw, Mapping)):
+        raise PipelineConfigError(f"source for table {name!r} must be a mapping")
+    relationships = config.get("relationships", [])
+    if not isinstance(relationships, list):
+        raise PipelineConfigError("scan config relationships must be a list")
+    for position, raw in enumerate(relationships, 1):
+        if not isinstance(raw, Mapping):
+            raise PipelineConfigError(f"relationship {position} must be a mapping")
+    return dict(sources), list(relationships)
+
+
+def _scan_declaration(config: Mapping[str, Any], tables: Sequence[str] | None) -> ScanDeclaration:
+    # Imported here because the profiling package imports this one.
+    from decoy_engine.profiling.scan_set import validate_scan_inputs
+
+    sources, relationships = _scan_shape(config)
+    ignored = tuple(k for k in config if k in _PIPELINE_ONLY)
+    if not ignored:
+        unknown = next((k for k in config if k not in _SCAN_KEYS), None)
+        if unknown is not None:
+            raise PipelineConfigError(f"scan config has an unknown top-level key {unknown!r}")
+    checked = validate_scan_inputs(sources, tables, relationships, full_pipeline=bool(ignored))
+    positions = tuple(d.position for d in checked.declared)
+    return ScanDeclaration(
+        _frozen_descriptors(checked.descriptors),
+        tuple(checked.selected),
+        tuple(MappingProxyType(copy.deepcopy(dict(relationships[p - 1]))) for p in positions),
+        positions,
+        checked.unchecked,
+        ignored,
+    )
+
+
+def _csv_inline(name: str, descriptor: Mapping[str, Any], file_access: FileAccess | None) -> Any:
+    """A CSV descriptor rewritten from its resolved dialect: a `column_names_file` is read here
+    and its names written inline, the same dialect. Any other descriptor is returned as it is."""
+    if descriptor.get("type") != "file" or descriptor.get("format") != "csv":
+        return descriptor
+    dialect = resolve_csv_dialect(descriptor, table=name, file_access=file_access)
+    resolved = {k: v for k, v in dataclasses.asdict(dialect).items() if v is not None}
+    kept = {k: v for k, v in descriptor.items() if k not in _DIALECT_KEYS}
+    return (
+        kept
+        | resolved
+        | ({"column_names": list(dialect.column_names)} if dialect.column_names else {})
+    )
+
+
+def _inline_names(scan: ScanDeclaration, file_access: FileAccess | None) -> ScanDeclaration:
+    """`scan` with each CSV dialect resolved once under the bound file access; no data file is
+    opened, and the scan never reads a names file again."""
+    from decoy_engine.profiling.scan_set import validate_scan_inputs
+
+    sources = {n: _csv_inline(n, d, file_access) for n, d in scan.descriptors.items()}
+    descriptors = validate_scan_inputs(sources, scan.tables, ()).descriptors
+    return dataclasses.replace(scan, descriptors=_frozen_descriptors(descriptors))
+
+
 @dataclasses.dataclass(frozen=True)
 class DeclarationRequest:
     """What a route will read, as the catalogs `prepare_declared_sources` resolves and checks.
@@ -250,6 +357,7 @@ class DeclarationRequest:
     _descriptors: tuple[tuple[str, Mapping[str, Any]], ...]
     _inputs: tuple[DeclarationInput, ...]
     _remote: tuple[str, ...] = ()
+    _scan: ScanDeclaration | None = None
 
     @property
     def remote_sources(self) -> tuple[str, ...]:
@@ -270,6 +378,14 @@ class DeclarationRequest:
     @classmethod
     def for_descriptors(cls, config: Mapping[str, Any]) -> DeclarationRequest:
         return cls(config, _config_sources(config), ())
+
+    @classmethod
+    def for_scan(
+        cls, config: Mapping[str, Any], tables: Sequence[str] | None = None
+    ) -> DeclarationRequest:
+        """A scan of a sources-only file or a full pipeline. It checks no columns: the scan
+        finds them. Shape refusals are raised here, a names-file refusal by `prepare`."""
+        return cls(config, (), (), _scan=_scan_declaration(config, tables))
 
     @classmethod
     def for_supplied(
@@ -312,17 +428,26 @@ class PreparedDeclaredSources:
         config: Mapping[str, Any],
         inputs: tuple[DeclarationInput, ...],
         created_targets: CreatedTargets | None = None,
+        scan: ScanDeclaration | None = None,
     ) -> None:
         if token is not _TOKEN:
             raise TypeError("PreparedDeclaredSources is built by prepare_declared_sources")
         self._config = config
         self._created_targets = created_targets
+        self._scan = scan
         self._config_id = id(config)
         self.inputs = inputs
         # `for_chunks` with a schema: the columns a chunk of that table may carry.
         self._chunk_columns = {
             i.table: i.columns for i in inputs if i.origin == "chunk" and i.columns is not None
         }
+
+    @property
+    def scan_declaration(self) -> ScanDeclaration:
+        """The declaration of a `for_scan` request; any other capability raises `TypeError`."""
+        if self._scan is None:
+            raise TypeError("scan_declaration needs a capability prepared from for_scan")
+        return self._scan
 
     def matches(self, config: Mapping[str, Any]) -> bool:
         """True when `config` is the object this capability was prepared for."""
@@ -406,6 +531,7 @@ def prepare_declared_sources(
 
     `created_targets` is the execution layer's policy for columns the config creates; an
     execution route gets it through `prepare_declared_execution_sources`."""
+    scan = None if request._scan is None else _inline_names(request._scan, file_access)
     resolved = [
         DeclarationInput(
             name, source_columns(descriptor, table=name, file_access=file_access), "descriptor"
@@ -416,13 +542,14 @@ def prepare_declared_sources(
     if created_targets is not None:
         inputs = tuple(_with_created(request._config, i, created_targets) for i in inputs)
     check_columns_declared(request._config, inputs)
-    return PreparedDeclaredSources(_TOKEN, request._config, inputs, created_targets)
+    return PreparedDeclaredSources(_TOKEN, request._config, inputs, created_targets, scan)
 
 
 __all__ = [
     "DeclarationFinding",
     "DeclarationRequest",
     "PreparedDeclaredSources",
+    "ScanDeclaration",
     "check_columns_declared",
     "declaration_findings",
     "declared_columns",

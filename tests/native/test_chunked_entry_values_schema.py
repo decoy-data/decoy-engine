@@ -447,9 +447,11 @@ def test_passthrough_column_is_the_source_column_on_both_routes(
     out = _entry(config, chunks, evidence)
     assert evidence[0].native_admitted is (route == "native")
     assert len(out) == len(chunks)
+    # O3: a pass-through large_string column leaves both routes as string.
+    expected = pa.string() if dtype == pa.large_string() else dtype
     for got, src in zip(out, chunks, strict=True):
-        assert got.schema.field("p").type == dtype
-        assert got.column("p").equals(src.column("p"))
+        assert got.schema.field("p").type == expected
+        assert got.column("p").equals(src.column("p").cast(expected))
 
 
 @pytest.mark.parametrize("dtype", [pa.int64(), pa.uint64()], ids=str)

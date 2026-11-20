@@ -203,9 +203,9 @@ _MASK: dict[str, _Ortho] = {
         True,
         row_error_modes=("format_error",),
         notes=(
-            "Output is always a formatted date string (static type). Without an "
-            "explicit date_format the NODE needs a format_detect prepass "
-            "(resolved in _requirements.py), not a change to the static type."
+            "Output is always a formatted date string (static type). The format "
+            "comes from provider_config.date_format, which plan compile requires; "
+            "no node needs a detect prepass."
         ),
     ),
     "bucket_perturb": _Ortho(True, False, False, False, True),

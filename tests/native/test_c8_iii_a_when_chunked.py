@@ -19,6 +19,7 @@ from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import _chunked_oracle
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.plan._errors import PlanCompileError
+from tests._declared_schema import declared_schema
 from tests.native._b8_support import FORCE, identical, with_force
 from tests.native._c6c_i_support import ADMITTED_CONFIGS
 from tests.native._c8_iii_a_support import (
@@ -371,7 +372,9 @@ def _entry_vs_oracle(cols: list[dict[str, Any]], table: pa.Table) -> list[Any]:
         except Exception as exc:
             return ("error", (type(exc).__name__, getattr(exc, "code", None)))
 
-    assert call(run_mask_chunked, route_evidence_sink=evidence) == call(run_mask_pipeline_chunked)
+    assert call(run_mask_chunked, route_evidence_sink=evidence) == call(
+        run_mask_pipeline_chunked, source_schema=declared_schema(config, TABLE)
+    )
     return evidence
 
 

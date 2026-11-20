@@ -53,6 +53,7 @@ from pathlib import Path
 import pytest
 
 from tests.sentry.layout._reexport_init import imports_physical, is_pure_reexport_init
+from tests.sentry.layout._scoped_changes import changed_units, scoped_units
 from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
@@ -356,6 +357,11 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             "src/decoy_engine/execution/pipeline/_lifecycle.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_generate.py",
+            # NONFK-OOM S1: `_resident_fit.py` is the pure strict lower bound on resident bytes
+            # (pyarrow only); no physical import.
+            "src/decoy_engine/execution/pipeline/_resident_fit.py",
+            # NONFK-OOM S4a: `decide_split` moves the B7 split decision out of `_pipeline_context`.
+            "src/decoy_engine/execution/pipeline/_route_decision.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",
@@ -761,9 +767,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # gain docstring/comment edits only. None imports `execution.physical`.
             "src/decoy_engine/execution/_chunked_output_sink.py",
             "src/decoy_engine/execution/_isolated_worker.py",
-            # Isolated-run OOM classification: `_isolated_common.py` gains the Wrapping-value scrub
-            # and `_isolated_worker.py` classifies post-run failures. Neither imports `execution.physical`.
-            "src/decoy_engine/execution/_isolated_common.py",
+            # Isolated-run OOM classification: `_isolated_worker.py` classifies post-run failures.
+            # It does not import `execution.physical`. `_isolated_common.py` is function-scoped in
+            # `tests/sentry/layout/_scoped_changes.py` (Windows plan Q13), not a whole-file entry.
             # The driver removes staging on a self-reported failure and scrubs in-process error text.
             "src/decoy_engine/execution/_isolated_run.py",
             # SUB-RUN E2: `probe_peak_bytes` refuses a subset config; no `execution.physical` import.
@@ -1011,11 +1017,19 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
         for name, allowed in exact_line_changes.items()
         if name in diff_names and _only_these_line_changes(base, name, allowed)
     }
+    scoped_ok = {
+        name
+        for name, units in scoped_units().items()
+        if name in diff_names
+        and changed_units(_git("show", f"{base}:{name}"), (REPO_ROOT / name).read_text("utf-8"))
+        <= units
+    }
     unexpected = [
         name
         for name in diff_names
         if "/execution/physical/" not in name
         and name not in exact_ok
+        and name not in scoped_ok
         # Polars masking removal (2026-09-21): the whole execution/polars/ adapter
         # tree was deleted; permit those deletions wholesale rather than enumerate.
         and "/execution/polars/" not in name
