@@ -60,13 +60,12 @@ def provider_column_values(
     derive_key: Callable[[str], bytes] | None,
     seed: int,
     instance_default_locale: str | None,
+    registry: ProviderRegistry,
 ) -> list[Any]:
     """``n`` values for a ``provider`` generate column, in its locale or the instance default."""
-    from decoy_engine.providers_v2 import get_default_registry
-
     ctx = GenDeriveContext.for_column(derive_key=derive_key, column_config=col, fallback_seed=seed)
     locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
-    return provider_generate(col, n, ctx, get_default_registry(), locale)
+    return provider_generate(col, n, ctx, registry, locale)
 
 
 def provider_generate(

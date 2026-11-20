@@ -56,6 +56,7 @@ from decoy_engine.generation.relational import reference_draw_extras, reference_
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
 if TYPE_CHECKING:
@@ -385,7 +386,9 @@ def _generate_column(
             kind, col, n, seed, generated or {}, reference_date=reference_date
         )
     elif kind == "provider":
-        values = provider_column_values(col, n, derive_key, seed, instance_default_locale)
+        values = provider_column_values(
+            col, n, derive_key, seed, instance_default_locale, get_default_registry()
+        )
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set
         # at validation; this branch is the defensive fallback for callers that
