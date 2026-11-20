@@ -298,7 +298,9 @@ def test_self_ref_hash_is_native_beside_a_row_erroring_column(
     from tests.parity._d1a_hash_data import column_seed
 
     date_shift = column_seed(
-        "date_shift", namespace="ns_d", provider_config=(("min_days", 1), ("max_days", 30))
+        "date_shift",
+        namespace="ns_d",
+        provider_config=(("date_format", "%Y-%m-%d"), ("min_days", 1), ("max_days", 30)),
     )
     plan = s.make_plan(
         {"E": s.table_seed({"id": s.hashed("ns_emp"), "mgr": s.hashed("ns_emp"), "d": date_shift})}

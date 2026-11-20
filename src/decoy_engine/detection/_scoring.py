@@ -180,6 +180,20 @@ def _dominant_variant(
     return max(tally.items(), key=lambda kv: kv[1])[0]
 
 
+def _every_hit_parses(
+    raw_hits: pd.Series, stripped_hits: pd.Series, label: str, pattern: re.Pattern[str]
+) -> bool:
+    """Whether every hit has the winning shape and parses under the runtime date call.
+
+    Parses the raw (unstripped) hits with the same `pd.to_datetime(..., format=..., errors=
+    "coerce")` the date_shift handler runs, so a padded value or an impossible calendar date
+    counts as a failure here exactly as it does at run time.
+    """
+    if len(raw_hits) == 0 or not bool(stripped_hits.str.fullmatch(pattern).all()):
+        return False
+    return not bool(pd.to_datetime(raw_hits, format=label, errors="coerce").isna().any())
+
+
 def _evaluate(
     detector_id: str,
     values: PreparedValues,
@@ -227,13 +241,22 @@ def _evaluate(
     miss_rows = np.flatnonzero(~hit[values.codes])[:SAMPLE_MISS_LIMIT]
     misses = uniques.iloc[values.codes[miss_rows]].tolist()
     format_pattern: str | None = None
+    complete = False
     if format_variants:
         format_pattern = _dominant_variant(uniques[hit], values.counts[hit], format_variants)
+        # The date detectors label their variants with strptime formats, the others with regexes.
+        if format_pattern is not None and format_pattern.startswith("%"):
+            winner = dict(format_variants)[format_pattern]
+            # Every non-null value must be a hit: a miss is a cell date_shift would fail on.
+            complete = hits == values.n and _every_hit_parses(
+                values.raw_uniques[hit], uniques[hit], format_pattern, winner
+            )
     return DetectorMatch(
         detector_id=detector_id,
         match_rate=round(rate, 4),
         sample_misses=[str(m) for m in misses],
         format_pattern=format_pattern,
+        format_pattern_complete=complete,
         confidence=confidence,
         domain=domain_for(detector_id).value,
     )
