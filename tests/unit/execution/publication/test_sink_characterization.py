@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import PublicationRefused
 from decoy_engine.reasons import Operation
 from tests.unit.execution.publication._sink_support import (
@@ -130,7 +131,7 @@ def test_p4_an_empty_commit_binds_a_unit_a_later_sink_cannot_replace(
     its descriptor, and a different result is refused."""
     with sink_factory(policy, tmp_path) as make:
         assert make().commit().outcome == "published"
-        assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR]
+        assert sorted(os.listdir(tmp_path / "out")) == sorted([DESCRIPTOR, STAGE_MARKER])
         before = tree(tmp_path / "out")
         later = make()
         later.write("customers", table("B"))
@@ -170,7 +171,9 @@ def test_a_table_written_twice_replaces_its_staged_file(policy: str, tmp_path: P
         sink.write("customers", table("A"))
         sink.write_batches("customers", iter(table("B").to_batches()), schema=table("B").schema)
         sink.commit()
-    assert sorted(os.listdir(tmp_path / "out")) == [DESCRIPTOR, "customers.parquet"]
+    assert sorted(os.listdir(tmp_path / "out")) == sorted(
+        [DESCRIPTOR, STAGE_MARKER, "customers.parquet"]
+    )
     assert pq.read_table(tmp_path / "out" / "customers.parquet").equals(table("B"))
 
 

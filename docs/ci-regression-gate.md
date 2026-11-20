@@ -51,10 +51,30 @@ The determinism harness (`-m determinism_harness`, one test of about 11 minutes)
 minutes on a pull request, give it `if: github.event_name != 'pull_request'`, drop it from
 `ci/required-jobs.toml`, and restore the old expression in `gates.sh` and `regression-gate`.
 
+The gate also posts a verdict. A dispatch of `gate-selfhosted.yml` ends with the job
+`gate-verdict`, which sets the commit status `engine-gate/verdict` on the dispatched sha:
+`success` only when both shards passed, `failure` otherwise (a cancelled or timed-out gate
+included). It is a status, not a check run, because a skipped job reports a passing check run and a
+status that only a dispatch posts cannot be satisfied by a skip. `required_checks.py verify --tier
+merge` requires the status on the PR head, so dispatch the gate once per PR head. A later push is a
+new sha with no status. The context name is the `[[merge_status]]` entry in
+`ci/required-jobs.toml`.
+
+The macOS wheel legs in `native-companion.yml` run only when a PR touches the native companion.
+The job `native-changes` runs `scripts/dev/native_scope.py changes`, which lists the changed
+paths (`decoy-engine-native/`, `native-companion.yml`, `lock_version.sh`, `uv.lock`) and answers
+`true` on a match, on any git error, and on schedule and dispatch runs. The legs skip otherwise.
+A skipped matrix job reports no per-leg check, so the legs are in `merge_exempt` and the one
+required check is `companion-wheel-macos-ok`. That job runs `native_scope.py judge` on the
+`needs` context. It passes only when native is `false` and the legs were skipped, or native is
+`true` and every leg succeeded. A job listed in `[[aggregator]]` of `ci/required-jobs.toml` is the
+only merge job that may carry `if: always()`.
+
 Two registries drive the sentry `tests/sentry/tooling/test_ci_lanes.py`:
 
 - `ci/required-jobs.toml`: the jobs that must be green on a PR head (`merge`), the PR jobs that
-  need not be (`merge_exempt`), and the profile markers a whole-suite run does not cover.
+  need not be (`merge_exempt`), the jobs that judge exempt ones (`aggregator`), the commit
+  statuses a head needs (`merge_status`), and the profile markers a whole-suite run does not cover.
 - `ci/unlaned.toml`: markers and workflows with no automatic lane (benchmark, codspeed), each with
   a reason. The list can only shrink.
 
@@ -69,7 +89,8 @@ re-adds `push` to `main` in the same change.
 Before each engine merge, run `scripts/dev/required_checks.py verify --sha <pr head> --tier merge`
 with the engine venv Python and `GH_TOKEN` set. It reads the required list from the `origin/main`
 tip, not the branch, and requires every merge job green on its first attempt (`--allow-rerun
-WORKFLOW=REASON` logs a named exception for a pure download flake). `verify --tier nightly` says
+WORKFLOW=REASON` logs a named exception for a pure download flake) and the `engine-gate/verdict`
+status green on the head. `verify --tier nightly` says
 whether last night's scheduled runs on main are fresh and green; `contexts` prints the check names
 for branch protection.
 

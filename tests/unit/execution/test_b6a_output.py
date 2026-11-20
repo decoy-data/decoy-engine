@@ -19,6 +19,7 @@ import pytest
 
 from decoy_engine import output_table
 from decoy_engine.execution import ExecutionError
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_matrix as matrix
 from tests.unit.execution import _auto_chunk_strategies as strategies
@@ -66,7 +67,11 @@ def _check_case(cfg: dict[str, Any], src: pa.Table, tmp_path: Path, **extra: Any
     # keeps `check_metadata=True`.
     reference = b6a.parquet_bytes(output_table(expected), tmp_path / "reference.parquet")
     assert published == reference
-    assert sorted(p.name for p in target.iterdir()) == [DESCRIPTOR_NAME, f"{support.TABLE}.parquet"]
+    assert sorted(p.name for p in target.iterdir()) == [
+        STAGE_MARKER,
+        DESCRIPTOR_NAME,
+        f"{support.TABLE}.parquet",
+    ]
 
 
 # ---------------------------------------------------------------------------

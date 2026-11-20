@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -25,7 +25,9 @@ __all__ = [
     "FPE__CHECKSUM_INVALID_SOURCE",
     "FPE__UNENCRYPTABLE_DOMAIN",
     "FPE__UNENCRYPTABLE_LENGTH",
+    "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT",
     "GENERATE_FORMULA_EVALUATION_FAILED",
+    "GENERATE_PER_PARENT_INFEASIBLE",
     "GENERATION_BUDGET_EXCEEDED",
     "GENERATION_COLUMN_UNBOUNDED",
     "GENERATION_NOT_CLASS_A",
@@ -85,6 +87,9 @@ __all__ = [
     "RAW_HEX_BATCH_LENGTH_MISMATCH",
     "RAW_HEX_BATCH_TYPE_MISMATCH",
     "RAW_HEX_BATCH_UNEXPECTED_NULL",
+    "REFERENCE_BOUNDS_UNSATISFIED",
+    "REFERENCE_PARENT_POOL_EMPTY",
+    "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_CYCLE",
     "ROW_EXCEEDS_MAX_ROW_BYTES",
     "RUN_SINGLE_REQUIRES_TABLE",
@@ -320,6 +325,36 @@ GENERATE_FORMULA_EVALUATION_FAILED = _d(
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
     since="1.26.0",
+)
+
+# Reference-draw refusals. A summary is the whole message beside the table and column names, so
+# none names a key, count, bound or weight.
+_d = _catalog.runtime("GenerationError")
+
+GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
+    "generate_fitted_reference_bounds_conflict",
+    "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
+    since=UNRELEASED,
+)
+GENERATE_PER_PARENT_INFEASIBLE = _d(
+    "generate_per_parent_infeasible",
+    "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+    since=UNRELEASED,
+)
+REFERENCE_BOUNDS_UNSATISFIED = _d(
+    "reference_bounds_unsatisfied",
+    "Reference column per-parent bounds did not hold after the repair.",
+    since=UNRELEASED,
+)
+REFERENCE_PARENT_POOL_EMPTY = _d(
+    "reference_parent_pool_empty",
+    "Reference column has rows to fill but its parent column has no keys.",
+    since=UNRELEASED,
+)
+REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
+    "reference_weights_length_mismatch",
+    "Reference column weights count does not match its parent key count.",
+    since=UNRELEASED,
 )
 
 _d = _catalog.runtime("GenerationUnboundedError")

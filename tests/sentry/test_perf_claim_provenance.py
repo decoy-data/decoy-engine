@@ -17,8 +17,9 @@ a measurement source (a path under a benchmark/calibration tree, or an explicit
 purpose: it is a guardrail that forces a benchmark link to exist, not a proof
 that the link backs the specific number. The reviewer confirms the latter.
 
-There are no perf claims in `docs/` today, so this is a forward-looking gate:
-it goes red the first time someone publishes a number without a source.
+Today 32 docs carry a claim. A doc passes when it contains any one of the words
+"benchmark", "calibration" or "measured", anywhere in the file. That is a weak
+check: it does not tie the keyword to the claim. Tightening it is a follow-up.
 """
 
 from __future__ import annotations

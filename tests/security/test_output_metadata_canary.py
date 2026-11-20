@@ -475,3 +475,51 @@ def test_engine_has_no_csv_writer() -> None:
 )
 def test_csv_guard_sees_every_spelling(source: str) -> None:
     assert _csv_write_calls(source)
+
+
+# -- E2: tables the engine returns in memory carry no source schema metadata ----------------------
+
+IN_MEMORY_CANARIES = (mc.SCHEMA, mc.ATTRS, mc.SKEY, mc.CREATOR, mc.PDVER, mc.RIDX, mc.COLIDX)
+
+
+def _memory_leaks(table: pa.Table) -> set[str]:
+    """Schema-level leaks of one returned table: a key other than `pandas`, or a canary in any
+    key or value (the pandas blob included). Field metadata stays in memory by contract."""
+    meta = table.schema.metadata or {}
+    found = {f"key:{k!r}" for k in meta if k != b"pandas"}
+    text = b"\n".join(k + v for k, v in meta.items())
+    return found | {c for c in IN_MEMORY_CANARIES if c.encode() in text}
+
+
+def _in_memory_tables(case: str, tmp_path: Path) -> dict[str, pa.Table]:
+    if case == "degenerate_pin":
+        from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
+
+        table = _canary(pa.table({"f": pa.array([None, None], pa.int64()), "g": ["a", "b"]}))
+        return {"t": pin_degenerate_to_string(table, frozenset({"f"}))}
+    if case == "resident_transforms":
+        base = base_table()
+        cfg = single_table_config(
+            tmp_path,
+            base,
+            transforms=[{"op": "limit", "n": 4}],
+            columns=[{"name": "grp", "strategy": "redact"}],
+        )
+        path = Path(cfg["sources"]["t"]["path"])
+        pq.write_table(_canary(base), path)
+        result = run_pipeline(cfg, {"t": pq.read_table(path)}, engine_version=ENGINE_VERSION)
+        _expect_route(result, "full_frame", "no_relationships", streamed=False)
+    else:
+        cfg, paths = _fk_job(tmp_path)
+        result = run_pipeline(
+            cfg, _lazy(paths), engine_version=ENGINE_VERSION, execution_mode="out_of_core"
+        )
+        assert _exec(result)["execution_mode"] == "out_of_core", _exec(result)
+    assert result.outputs, "the route returned no in-memory table"
+    return dict(result.outputs)
+
+
+@pytest.mark.parametrize("case", ["out_of_core_fk", "resident_transforms", "degenerate_pin"])
+def test_in_memory(case: str, tmp_path: Path) -> None:
+    for name, table in _in_memory_tables(case, tmp_path).items():
+        assert _memory_leaks(table) == set(), name

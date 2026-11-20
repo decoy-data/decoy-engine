@@ -27,6 +27,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.determinism import COMPOSITE_SEED_WIDTHS, derive, resolve_seed, seed_bytes_to_int
+from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._city_state_zip import load_locality_table
 from decoy_engine.generation.composite._errors import CompositeError
@@ -116,7 +117,7 @@ class CompositeAddress:
             seed=chosen,
             size=n,
             build_time_ms=0.0,
-            backend_type="composite",
+            backend_type=COMPOSITE_BACKEND,
             backend_version="address/v1",
             distinct_count=n,
             output_columns=self.output_columns,

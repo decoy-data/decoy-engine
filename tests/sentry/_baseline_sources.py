@@ -325,6 +325,15 @@ SOURCES: tuple[Source, ...] = (
         ),
     ),
     Source(  # keys of the ratchet-schema baseline itself
+        "metadata-carrier-allow",
+        "tests/sentry/baselines/metadata-carrier-allow.json",
+        lambda: set(
+            json.loads((BASELINES / "metadata-carrier-allow.json").read_text(encoding="utf-8"))[
+                "entries"
+            ]
+        ),
+    ),
+    Source(  # keys of the ratchet-schema baseline itself
         "serial-resources",
         "tests/sentry/baselines/serial-resources.json",
         lambda: set(

@@ -63,6 +63,7 @@ from decoy_engine.generation._faker_pool import pool_eligible, pool_opted_out
 from decoy_engine.generation._numeric_typing import restore_declared
 from decoy_engine.generation.kinds import cast_output_values, output_types
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
+from decoy_engine.generation.relational import reference_policies
 from decoy_engine.progress import get_active_channel
 
 if TYPE_CHECKING:
@@ -103,9 +104,8 @@ def is_bounded_sink(sink: Any) -> bool:
     return sink is not None and getattr(sink, "bounded_write_batches", False) is True
 
 
-# A caller-supplied layout is held as a Python sequence of ints: an 8-byte slot plus, for a
-# non-cached value, a 28-byte int object. Charged before the run so it is in the ledger, never
-# silently outside it.
+# A caller-supplied layout is a Python sequence of ints: an 8-byte slot plus a 28-byte int object
+# per non-cached value. Charged before the run so it is in the ledger, never silently outside it.
 _LAYOUT_ENTRY_BYTES = 36
 
 
@@ -296,8 +296,7 @@ def _table_batches(
     declared = output_types(cols)
     for size in sizes:
         arrays = []
-        # Post-null-mask values of the columns already emitted in THIS batch, which is what the
-        # legacy path's `generated` mapping holds when a windowed_date column reads its anchor.
+        # Columns emitted so far in THIS batch, post-null-mask (legacy `generated`): date anchors.
         emitted: dict[str, list[Any]] = {}
         for col, name, stream, field_, gen_type in zip(
             cols, names, streams, schema, generated, strict=True
@@ -355,7 +354,7 @@ def run_generation(
     ``budget_bytes=None`` and no ``ledger`` is the explicit unbounded mode: no byte ceiling is
     enforced and no bounded-memory guarantee is made. ``partition(table, rows)`` overrides the
     batch layout (used to prove route-independence over irregular partitions). ``on_warning``
-    receives each fidelity-gate ``QualityWarning``; it never changes the generated tables.
+    receives each ``QualityWarning`` a route raises; it never changes the generated tables.
     """
     from decoy_engine.plan._seed import _normalize_job_seed_int
     from decoy_engine.plan.checks import check_faker_default_locale
@@ -425,6 +424,7 @@ def run_generation(
     counts: dict[str, int] = {}
     key_pools: dict[tuple[str, str], list[Any]] = {}
     referenced = _referenced_keys(tables)
+    policies = reference_policies(config)
 
     def _consume_table(
         t: dict[str, Any],
@@ -457,6 +457,8 @@ def run_generation(
                 stage=stage,
                 faker_payload=bounds.get((name, c["name"])),
                 numeric=g is not None and pa.types.is_integer(g),
+                reference_policy=policies.get((name, c["name"])),
+                on_warning=on_warning,
             )
             for c, g in zip(t["generate_columns"], generated, strict=True)
         ]

@@ -323,6 +323,74 @@ def test_required_list_rules() -> None:
     assert has(_r(t), "R3 codspeed.yml:benchmarks")
 
 
+AGG = ("native-companion.yml", "companion-wheel-macos-ok")
+
+
+def test_aggregator_may_have_always_if_and_judge_exempt_jobs() -> None:
+    t = seeded()
+    assert t.required["aggregator"][0]["job"] == AGG[1]
+    assert job(t, *AGG)["if"] == "always()"
+    assert not has(_r(t), "R2")
+    assert (AGG[0], "companion-wheel-macos") in {
+        (e["workflow"], e["job"]) for e in t.required["merge_exempt"]
+    }
+
+    t = seeded()
+    job(t, *AGG)["if"] = "always() && github.actor == 'x'"
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: merge job has an `if`")
+
+    t = seeded()
+    del job(t, *AGG)["if"]  # without always() a skipped leg skips the judge too
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: merge job has an `if`")
+
+    t = seeded()
+    job(t, "ci.yml", "determinism")["if"] = "always()"
+    assert has(_r(t), "R2 ci.yml:determinism: merge job has an `if`")
+
+    t = seeded()
+    t.required["merge_exempt"] = [
+        e for e in t.required["merge_exempt"] if e["job"] != "companion-wheel-macos"
+    ]
+    found = _r(t)
+    assert has(found, f"R2 {AGG[0]}:{AGG[1]}: judged job 'companion-wheel-macos' is not in")
+    assert has(found, "R3 native-companion.yml:companion-wheel-macos")
+
+    t = seeded()
+    for step in job(t, *AGG)["steps"]:
+        step["run"] = step.get("run", "").replace("native_scope.py judge", "true")
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: no step runs native_scope.py judge")
+
+    t = seeded()
+    for step in job(t, *AGG)["steps"]:
+        step.pop("env", None)
+        step["run"] = step.get("run", "").replace("$NEEDS", "{}")
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: no step runs native_scope.py judge")
+
+    t = seeded()
+    job(t, *AGG)["needs"] = ["native-changes"]
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: needs no judged job 'companion-wheel-macos'")
+
+    t = seeded()
+    job(t, *AGG)["needs"] = ["native-changes", "companion-wheel-macos", "companion-rust-lint"]
+    assert not has(_r(t), "R2")  # a merge-tier job is a legal need
+
+    t = seeded()
+    job(t, *AGG)["needs"] = ["native-changes", "companion-wheel-macos", "ghost"]
+    assert has(_r(t), "outside the merge tier")
+
+
+def test_aggregator_table_is_closed_and_must_name_a_merge_job() -> None:
+    t = seeded()
+    t.required["aggregator"][0]["extra"] = 1
+    assert has(_r(t), "R1 required-jobs.toml: [[aggregator]] entry keys")
+    t = seeded()
+    t.required["merge_status"][0]["reason"] = " "
+    assert has(_r(t), "R1 required-jobs.toml: [[merge_status]] reason")
+    t = seeded()
+    t.required["merge"][1]["jobs"].remove("companion-wheel-macos-ok")
+    assert has(_r(t), f"R2 {AGG[0]}:{AGG[1]}: aggregator is not a merge job")
+
+
 def test_push_only_job_cannot_reuse_a_required_check_name() -> None:
     t = seeded()
     t.workflows["gate-selfhosted.yml"]["jobs"]["extra"] = {
@@ -337,10 +405,10 @@ def test_push_only_job_cannot_reuse_a_required_check_name() -> None:
 
 def test_merge_job_with_an_unsupported_matrix_is_a_finding() -> None:
     t = seeded()
-    job(t, "native-companion.yml", "companion-wheel-macos")["strategy"]["matrix"]["exclude"] = [
+    job(t, "native-companion.yml", "companion-wheel-windows")["strategy"]["matrix"]["exclude"] = [
         {"python-version": "3.10"}
     ]
-    assert has(_r(t), "R2 native-companion.yml:companion-wheel-macos: matrix exclude")
+    assert has(_r(t), "R2 native-companion.yml:companion-wheel-windows: matrix exclude")
 
 
 def test_job_in_a_schedule_only_workflow_needs_no_listing() -> None:

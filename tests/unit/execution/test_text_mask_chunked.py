@@ -302,19 +302,6 @@ BRANCH_CASES: list[dict[str, Any]] = [
         "fk_ner_markers": None,
         "check": _check_redact,
     },
-    {
-        "name": "unknown_fallback",
-        "provider_config": {"ner": True, "unmatched_span_policy": "passthrough"},
-        "ner_markers": {_UNKNOWN_MARKER: "totally_unmapped_detector_xyz"},
-        "span_text": _UNKNOWN_MARKER,
-        "fk_raw_keys": ["UNK_A_ZQ", "UNK_B_ZQ", "UNK_C_ZQ"],
-        "fk_ner_markers": {
-            "UNK_A_ZQ": "totally_unmapped_detector_xyz",
-            "UNK_B_ZQ": "totally_unmapped_detector_xyz",
-            "UNK_C_ZQ": "totally_unmapped_detector_xyz",
-        },
-        "check": _check_redact,
-    },
 ]
 
 
@@ -360,6 +347,35 @@ class TestBranchSemantics:
 
         masked = a.column("cell")[0].as_py()
         case["check"](span, _extract_span(masked))
+
+
+class TestUnmappedNerDetector:
+    """E-F0: an NER span whose detector id has no strategy no longer falls to the redact token.
+
+    Before, a span from an unmapped id was redacted; the id now fails with a value-free
+    `StrategyError` (the handler converts the tagged `ConfigError` after its catch closes, so no
+    cause or context carries the span).
+    """
+
+    def test_handler_raises_a_value_free_strategy_error(self, monkeypatch) -> None:
+        _install_fake_ner(monkeypatch, {_UNKNOWN_MARKER: "totally_unmapped_detector_xyz"})
+        df = pd.DataFrame({"cell": [f"pre {_UNKNOWN_MARKER} post"]})
+        seed = ColumnSeed(
+            namespace=None,
+            strategy="text_mask",
+            provider=None,
+            backend_type="decoy_native",
+            backend_version="1",
+            cardinality_mode="bijective",
+            deterministic=False,
+            provider_config=(("ner", True), ("unmatched_span_policy", "passthrough")),
+        )
+        with pytest.raises(StrategyError) as exc:
+            TextMaskHandler().run(df.copy(), "cell", seed, _FakeCtx())
+        err = exc.value
+        assert err.code == "unsupported_strategy"
+        assert _UNKNOWN_MARKER not in str(err)
+        assert err.__cause__ is None and err.__context__ is None
 
 
 class TestUnmatchedSpanPolicies:

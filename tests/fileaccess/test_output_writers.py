@@ -18,7 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess
-from decoy_engine.fileaccess import FileRequest, FileRole
+from decoy_engine.fileaccess import STAGE_MARKER, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.safe_output import _file_metadata as fm
 from tests.security import _metadata_canary as mc
@@ -112,4 +112,4 @@ def test_the_schema_is_sanitized_before_the_file_opens(
     with _stage(tmp_path) as (txn, stage):
         with pytest.raises(TypeError):
             arrow_adapter.output_parquet_writer(txn, "t.parquet", bad)
-        assert list(stage.iterdir()) == []
+        assert [p.name for p in stage.iterdir()] == [STAGE_MARKER]  # no table file, only the proof
