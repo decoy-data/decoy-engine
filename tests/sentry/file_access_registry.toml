@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 188 (asserted by the sentry).
+# Count: 193 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -940,13 +940,13 @@ owner = "cam"
 reason = "F22 5.0 rule D, POSIX arm only: the ambient durable walk fsyncs the physical directory chain, so links in the caller path are resolved first"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn._publish_durable_dir"
+module = "decoy_engine/fileaccess/_local_chain.py"
+function = "_publish_durable_dir"
 sink = "os.replace"
 ordinal = 0
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
 owner = "cam"
-reason = "F22 5.1, POSIX arm only: the durable publication bind renames the fsynced stage onto the leaf, as LocalOutputTxn.publish does for other labels"
+reason = "F22 5.1, POSIX arm only: the durable publication bind renames the fsynced stage onto the leaf, as LocalOutputTxn.publish does for other labels; moved from `_local.py` with the held stage descriptor (F26 E1)"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
@@ -1801,3 +1801,51 @@ dir_test = "tests/unit/execution/test_isolated_run.py::TestNormalJobCompletes::t
 rule = "path handed over by the parent in the payload: an engine-created scratch file or stage directory"
 owner = "cam"
 reason = "the isolated child reads its payload and writes its staged output; the parent refused every policy but the ambient one before spawning it"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_prove_marker"
+sink = "os.open"
+ordinal = 0
+disposition = "read"
+rule = "O_RDONLY|O_NOFOLLOW|O_NONBLOCK: a fixed marker name (`.decoy-publication-stage` or `.decoy-arena`) under a held stage or arena descriptor"
+owner = "cam"
+reason = "F26 G1(d): the one bounded reader of a stage or arena interior proof; type, owner, mode and content are checked on the descriptor"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_rmtree_fd"
+sink = "os.scandir"
+ordinal = 0
+disposition = "read"
+rule = "a held stage or arena directory descriptor"
+owner = "cam"
+reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf; lists the directory it removes"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_rmtree_fd"
+sink = "os.open"
+ordinal = 0
+disposition = "read"
+rule = "O_RDONLY|O_DIRECTORY|O_NOFOLLOW: a name just listed under the held descriptor being removed"
+owner = "cam"
+reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf; a planted link fails ELOOP and is never followed"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_rmtree_fd"
+sink = "os.rmdir"
+ordinal = 0
+rule = "a name just listed under the held descriptor being removed, after its own contents"
+owner = "cam"
+reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf"
+
+[[entry]]
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "_rmtree_fd"
+sink = "os.unlink"
+ordinal = 0
+rule = "a non-directory name just listed under the held descriptor being removed; a link is unlinked, never followed"
+owner = "cam"
+reason = "A-4's descriptor tree removal, moved from `_output.py` to the F26 leaf"

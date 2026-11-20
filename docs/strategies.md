@@ -1754,7 +1754,11 @@ every column, not only the columns the profiler flags.
   column keeps its labels.
 - A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
   cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
-  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+  side of it. The histogram has one bin when the column also releases an `exact_values` or
+  `quantile_grid` block. Otherwise `numeric_bins` sets the finest grid step, and the step widens
+  until every non-empty bin holds at least 10 rows, so the histogram can have fewer bins than
+  requested. `numeric_bins` is an int from 1 to 1000; any other value is refused with
+  `quality.numeric_bins_invalid` before any histogram is computed.
 - A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
   10 rows each. A flagged column gets the same ranges.
 - A short string column whose labels read as sentences (median of 3 or more words) is written as
