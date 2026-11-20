@@ -133,7 +133,6 @@ def test_at_a5_the_auto_lane_hands_the_stock_adapter() -> None:
 def test_at_a6_nested_columns_profile_without_error_and_carry(tmp_path: Path) -> None:
     import random
 
-    from decoy_engine.profile import profile_source  # noqa: F401  (import check only)
     from decoy_engine.profile._readers_resident import ResidentTableSource
     from decoy_engine.profile._source import _profile_one_source
 
@@ -197,3 +196,147 @@ def test_g3_read_set_has_one_production_caller() -> None:
                     if name == "read_set":
                         callers.append(f"{path.name}:{fn.name}")
     assert callers == ["_chunked_carry.py:carried_columns"]
+
+
+# -- kill switch, physical plan, stream and lazy legs (Dennis r1 on #725) -----------------------
+
+LEGACY_TYPES = [t for t in CARRIED_TYPES if t != "map"]
+
+
+@pytest.mark.parametrize("type_class", LEGACY_TYPES)
+def test_at_a1_kill_switch_lane_keeps_the_registered_decline(
+    tmp_path: Path, type_class: str
+) -> None:
+    """`chunked_dispatcher_enabled=False` runs the legacy oracle, which converts every column to
+    pandas: no column is exempt, so the table runs full-frame as it did before."""
+    from decoy_engine.execution.physical._reasons import (
+        CODE_CHUNKED_SOURCE_DTYPE_UNSTABLE,
+        translate_chunked_rejection,
+    )
+
+    table = source_table(type_class, "later_mixed")
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    got = support.run_legacy(cfg, table)
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame", block
+    assert CODE_CHUNKED_SOURCE_DTYPE_UNSTABLE in translate_chunked_rejection(block["reason"])
+
+
+@pytest.mark.parametrize("dispatcher", [True, False])
+def test_the_physical_compiler_reads_the_kill_switch(tmp_path: Path, dispatcher: bool) -> None:
+    from decoy_engine.execution.physical._compiler import layer2_chunk_decision
+    from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
+
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    inputs = capture_physical_plan_inputs(
+        cfg,
+        {support.TABLE: table},
+        engine_version=support.ENGINE_VERSION,
+        auto_chunk_threshold_rows=support.THRESHOLD,
+        chunked_dispatcher_enabled=dispatcher,
+    )
+    _, route_chunked = layer2_chunk_decision(inputs)
+    assert route_chunked is dispatcher
+
+
+def test_at_a5_the_auto_lane_hands_run_mask_chunked_the_stock_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.native.chunked import _core
+
+    seen: list[Any] = []
+    real = _core.mask_chunked
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["adapter"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_core, "mask_chunked", spy)
+    table = source_table("int64_nulls", "later_mixed")
+    got = _run(table, _cfg(tmp_path, table, support.pass_col("p")))
+    assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
+    assert seen
+    assert all(is_stock_adapter(a) for a in seen)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=pa.ArrowTypeError,
+    reason="follow-up: the full-frame adapter cannot rebuild a map column from pandas",
+)
+def test_at_a9_small_map_table_on_full_frame(tmp_path: Path) -> None:
+    table = source_table("map", "later_mixed").slice(0, 8)
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    got = support.run_default(cfg, table, auto_chunk_threshold_rows=10_000)
+    assert got.outputs[support.TABLE].column("p").to_pylist() == table.column("p").to_pylist()
+
+
+LEG_TYPES = ["int64_nulls", "uint64", "decimal128", "binary", "dictionary", "list", "map"]
+
+
+def _written(sink_dir: Path) -> pa.Table:
+    import pyarrow.parquet as pq
+
+    return pq.read_table(sink_dir / f"{support.TABLE}.parquet")
+
+
+@pytest.mark.parametrize("mode", ["auto", "stream"])
+@pytest.mark.parametrize("type_class", LEG_TYPES)
+def test_a_lazy_parquet_source_streams_a_carried_column_exactly(
+    tmp_path: Path, mode: str, type_class: str
+) -> None:
+    from decoy_engine.execution import run_pipeline
+    from decoy_engine.profile._readers import LazySource
+    from tests.unit.execution.run_stream import _support as rs
+
+    table = source_table(type_class, "later_mixed")
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    sink, target = rs.engine_sink(tmp_path)
+    run_pipeline(
+        cfg,
+        sources={support.TABLE: LazySource(tmp_path / "src.parquet")},
+        sink=sink,
+        engine_version=support.ENGINE_VERSION,
+        execution_mode=mode,
+        auto_chunk_threshold_rows=support.THRESHOLD,
+        chunk_size_rows=support.CHUNK,
+    )
+    got = _written(target)
+    assert got.schema.field("p").type == table.schema.field("p").type
+    assert got.column("p").to_pylist() == table.column("p").to_pylist()
+
+
+def test_a_stream_fk_job_carries_a_passthrough_column_exactly(tmp_path: Path) -> None:
+    """Stream drops the FK graph for its lane view, so an FK job takes the carried exemption in
+    stream mode. The extra column must come back as the source holds it."""
+    import pyarrow.parquet as pq
+
+    from decoy_engine.config import PipelineConfig
+    from decoy_engine.profile._readers import LazySource
+    from tests.unit.execution.run_stream import _support as rs
+
+    cfg, _lazy, tables = rs.fk_job(tmp_path)
+    orders = tables["orders"].append_column(
+        "x", pa.array([None if i % 4 == 0 else 2**53 + i for i in range(31)], pa.int64())
+    )
+    path = cfg["sources"]["orders"]["path"]
+    pq.write_table(orders, path)
+    order_cols = next(t for t in cfg["tables"] if t["name"] == "orders")["columns"]
+    order_cols.append(support.pass_col("x"))
+    cfg = PipelineConfig.model_validate(cfg).model_dump()
+    sink, target = rs.engine_sink(tmp_path)
+    result = rs.run_stream(
+        cfg,
+        {
+            "customers": LazySource(Path(cfg["sources"]["customers"]["path"])),
+            "orders": LazySource(Path(path)),
+        },
+        sink,
+        chunk_size_rows=7,
+    )
+    entries = result.quality_metrics["auto_chunk"]["tables"]
+    assert all(t["dispatched"] for t in entries)
+    got = pq.read_table(target / "orders.parquet")
+    assert got.schema.field("x").type == pa.int64()
+    assert got.column("x").to_pylist() == orders.column("x").to_pylist()

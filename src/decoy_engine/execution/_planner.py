@@ -190,6 +190,7 @@ def classify_job(
     auto_chunk_threshold_rows: int = AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT,
     source_facts: Mapping[str, _ci.SourceFacts] | None = None,
     ignore_size_threshold: bool = False,
+    dispatcher_lane: bool = True,
 ) -> ExecutionPlan:
     """Classify a job into exactly one execution mode, without executing.
 
@@ -215,6 +216,10 @@ def classify_job(
 
     `ignore_size_threshold` drops the row-count gate, for a run that requires streaming: a
     table of any size, empty included, may take the lane. Every other gate still applies.
+
+    `dispatcher_lane` is False when the run's chunked lane is the legacy oracle (kill switch
+    `chunked_dispatcher_enabled=False`). That lane converts every column to pandas, so a carried
+    passthrough column gets no exemption from the dtype gate.
     """
     from decoy_engine.execution._pipeline import classify_table_kinds
     from decoy_engine.execution._runner import build_work_list, order_work
@@ -245,7 +250,7 @@ def classify_job(
         registry=registry,
         source_facts=facts,
         ignore_size_threshold=ignore_size_threshold,
-        carry_exempt=not has_fk,
+        carry_exempt=not has_fk and dispatcher_lane,
     ) or declared_rejection("chunked", plan=plan)  # F06: declared casting is full-frame only
     if chunked_rejection is None:
         reason = (
@@ -484,7 +489,8 @@ def _runtime_source_rejections(
     if gap:
         reasons.append(gap)
     stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
-    # FK jobs keep their routing: only a job with no FK edge exempts its carried columns.
+    # FK jobs and the legacy oracle lane keep their routing: only the dispatcher lane of a job
+    # with no FK edge exempts its carried columns.
     carried: frozenset[str] = frozenset()
     if carry_inputs is not None:
         carried = carried_columns(
@@ -495,7 +501,7 @@ def _runtime_source_rejections(
     )
     if unstable:
         reasons.append(
-            f"column(s) with non-chunk-stable pandas round-trip dtypes: "
+            "column(s) with non-chunk-stable pandas round-trip dtypes: "
             f"{', '.join(sorted(unstable))}"
         )
     # bucketize output dtype depends on chunk content: null / non-numeric
