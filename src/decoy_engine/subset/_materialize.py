@@ -23,7 +23,7 @@ from pathlib import Path
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileRequest, FileRole, OutputTxn
-from decoy_engine.fileaccess.adapters import polars as polars_adapter
+from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.subset._errors import SubsetConfigError, SubsetInternalError
 from decoy_engine.subset._inputs import ParquetPathInput
 from decoy_engine.subset._types import SubsetSource
@@ -66,7 +66,7 @@ def materialize_subset(
                     message=f"table {table!r}: wrote {frame.height} rows but expected "
                     f"{len(idx)} survivors",
                 )
-            polars_adapter.write_parquet(frame, txn, f"{table}.parquet")
+            arrow_adapter.write_output_table(frame.to_arrow(), txn, f"{table}.parquet")
             written.append((table, str(Path(output_dir) / f"{table}.parquet")))
     except BaseException:
         txn.abort()

@@ -31,7 +31,7 @@ FANOUT_ALLOWLIST: dict[str, int] = {
     # next route cluster: execution/chunked/, execution/sequential/ or execution/isolated/.
     "src/decoy_engine/execution": 103,
     # next family: execution/_strategies/<family>/.
-    "src/decoy_engine/execution/_strategies": 29,
+    "src/decoy_engine/execution/_strategies": 28,
     # next modules: execution/native/draw/ or execution/native/chunked/.
     "src/decoy_engine/execution/native": 55,
     # next stream modules: execution/out_of_core/stream/.

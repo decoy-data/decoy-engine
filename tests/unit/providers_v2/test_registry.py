@@ -9,6 +9,7 @@ from decoy_engine.providers_v2 import (
     CapabilityMatrix,
     ProviderError,
     ProviderSpec,
+    custom_provider_names,
     get_default_registry,
     register_faker_provider_v2,
 )
@@ -248,7 +249,6 @@ class TestV2CustomProviderRegistration:
     def test_registered_v2_provider_routes_through_faker_adapter(self) -> None:
         from decoy_engine.providers_v2._faker_adapter import (
             _unregister_faker_provider_v2,
-            _v2_custom_provider_names,
         )
 
         register_faker_provider_v2(
@@ -256,7 +256,7 @@ class TestV2CustomProviderRegistration:
             lambda f: f.bothify("##-###"),
         )
         try:
-            assert "custom_id_v2_unique_test_name" in _v2_custom_provider_names()
+            assert "custom_id_v2_unique_test_name" in custom_provider_names()
             registry = get_default_registry()
             # synthetic_member_id stays Faker-bound regardless of mimesis
             # adoption state; person_email does not.
@@ -277,7 +277,6 @@ class TestV2CustomProviderRegistration:
         from decoy_engine.internal.faker_setup import _CUSTOM_FAKER_PROVIDERS
         from decoy_engine.providers_v2._faker_adapter import (
             _unregister_faker_provider_v2,
-            _v2_custom_provider_names,
         )
 
         register_faker_provider_v2(
@@ -285,7 +284,7 @@ class TestV2CustomProviderRegistration:
             lambda f: "x",
         )
         try:
-            assert "v2_only_custom_provider_isolation_test" in _v2_custom_provider_names()
+            assert "v2_only_custom_provider_isolation_test" in custom_provider_names()
             assert "v2_only_custom_provider_isolation_test" not in _CUSTOM_FAKER_PROVIDERS
         finally:
             _unregister_faker_provider_v2("v2_only_custom_provider_isolation_test")
@@ -298,11 +297,10 @@ class TestV2CustomProviderRegistration:
             register_faker_provider,
             unregister_faker_provider,
         )
-        from decoy_engine.providers_v2._faker_adapter import _v2_custom_provider_names
 
         register_faker_provider("v1_only_custom_provider_inverse_test", lambda f: "y")
         try:
-            assert "v1_only_custom_provider_inverse_test" not in _v2_custom_provider_names()
+            assert "v1_only_custom_provider_inverse_test" not in custom_provider_names()
         finally:
             unregister_faker_provider("v1_only_custom_provider_inverse_test")
 

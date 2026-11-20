@@ -1,4 +1,3 @@
-# decoy_engine/__init__.py
 """
 decoy_engine -- data masking and synthetic generation library.
 
@@ -31,13 +30,11 @@ Public API (the contract CLI and platform code depend on):
     RELEASE_PHASE / ReleasePhase / is_pre_ga:
                       (decoy_engine.release) the single pre-GA/GA switch the rule
                       inversions and CI gates read. Pre-GA: hard-delete is allowed
-                      and the compatibility contract is advisory. The platform reads
-                      RELEASE_PHASE in process (no separate platform constant).
+                      and the compatibility contract is advisory. The platform reads RELEASE_PHASE in process and keeps no copy.
 
 Public exceptions (also in decoy_engine.errors):
     DecoyError, ConfigError, PipelineValidationError,
-    ConnectorError, ConnectorAuthError,
-    LicenseError, LicenseExpiredError,
+    ConnectorError, ConnectorAuthError, LicenseError, LicenseExpiredError,
     FlagPauseSignal, FixedWidthParseError
 
 Anything not in __all__, and anything under decoy_engine.internal, is private.
@@ -189,6 +186,7 @@ from decoy_engine.profile._csv_reader import CsvDialect, read_csv_source, resolv
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
     PreparedDeclaredSources,
+    ScanDeclaration,
     check_columns_declared,
     declared_columns,
     prepare_declared_sources,
@@ -289,7 +287,7 @@ from decoy_engine.relationships import (
 from decoy_engine.release import RELEASE_PHASE, ReleasePhase, is_pre_ga
 from decoy_engine.release import __version__ as __version__
 from decoy_engine.run_result import RUN_RESULT_SCHEMA, RunResult, RunResultRead, derive_outcome
-from decoy_engine.safe_output import ConfigProblem
+from decoy_engine.safe_output import ConfigProblem, output_schema, output_table
 
 # Connector SDK.
 from decoy_engine.sdk import (
@@ -482,6 +480,7 @@ __all__ = [
     "RouteEvent",
     "RunResult",
     "RunResultRead",
+    "ScanDeclaration",
     "ScanSet",
     "ScanSetCore",
     "SecretCachePolicy",
@@ -561,6 +560,8 @@ __all__ = [
     "native_companion_status",
     "ner_status",
     "open_protected_dir",
+    "output_schema",
+    "output_table",
     "parse_pipeline_config",
     "pipeline_config_hash",
     "prepare_declared_sources",

@@ -4,14 +4,14 @@ Thanks for considering a contribution. The engine is pre-1.0; the public API and
 
 ## Reporting bugs and requesting features
 
-[GitHub Issues](https://github.com/louiskeep/decoy-engine/issues) is the right channel for both. A good bug report includes the engine version (`python -c "import decoy_engine; print(decoy_engine.__version__)"`), a minimal `PipelineConfig` or pandas DataFrame that reproduces the issue, and the full traceback.
+[GitHub Issues](https://github.com/decoy-data/decoy-engine/issues) is the right channel for both. A good bug report includes the engine version (`python -c "import decoy_engine; print(decoy_engine.__version__)"`), a minimal `PipelineConfig` or pandas DataFrame that reproduces the issue, and the full traceback.
 
 For security issues, do not file a public issue: see [`SECURITY.md`](SECURITY.md).
 
 ## Local development
 
 ```
-git clone https://github.com/louiskeep/decoy-engine
+git clone https://github.com/decoy-data/decoy-engine
 cd decoy-engine
 python -m venv .venv
 source .venv/bin/activate    # PowerShell: .venv\Scripts\Activate.ps1
@@ -55,7 +55,7 @@ It runs every test not marked `serial` with `-n N --dist loadfile`, then the `se
 ### Reason codes
 
 - Declare a new reason with `since=UNRELEASED` (import `UNRELEASED` from the sibling `decoy_engine.reasons._types` module) and name it in your `changelog.d/` fragment as the code span `` `namespace/code` ``. Do not edit `REGISTRY_VERSION`, the `docs/reasons.md` version sentence, a `reason-manifest-v*.json` fixture, `consumer-contract.json` or `reason-registry-release.json`; release prep stamps all of them (`scripts/release/stamp_release.py`).
-- A released reason changes only by a first deprecation (`deprecated_in=UNRELEASED` with `replaced_by`) or an editorial summary correction listed in `PENDING_SUMMARY_EDITS` in `src/decoy_engine/reasons/_registry.py`. Anything else needs a new identity.
+- A released reason changes only by a first deprecation (`deprecated_in=UNRELEASED` with `replaced_by`) or an editorial summary correction listed in `PENDING_SUMMARY_EDITS` in `src/decoy_engine/reasons/_registry.py`. Anything else needs a new identity. The only other exceptions are the owner-approved pre-GA corrections in `scripts/release/reason_pre_ga_corrections.py` (see the compatibility contract); do not add to that list without owner approval.
 - Before merging, run `python scripts/release/reason_release_pin.py --check` and `python scripts/dev/registry_renumber.py --check --main origin/main`.
 - A branch started before this rule that claims a numeric minor: merge `origin/main`, run `python scripts/dev/registry_renumber.py --to-unreleased --main origin/main`, then the `--check` above. It converts identity additions only. A branch that deprecates or corrects an existing reason (alone or with additions) is redone on a fresh branch from `origin/main`: reapply only the intended source edits in the pending form, add or update the fragment, copy none of the old branch's version, fixture, contract or pin changes, and confirm `git diff --name-status origin/main...HEAD -- 'tests/fixtures/f29/reason-manifest-v*.json'` prints nothing.
 

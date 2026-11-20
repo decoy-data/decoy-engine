@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import Any, NewType, TypeVar
 
 from decoy_engine.fileaccess._types import (
+    DenialKind,
     FileAccessDenied,
     FileAccessReadError,
     FileAccessUnavailable,
@@ -46,10 +47,10 @@ def _escape(ch: str) -> str:
     return ch.encode("unicode_escape").decode("ascii")
 
 
-def deny(field_key: str) -> FileAccessDenied:
+def deny(field_key: str, *, kind: DenialKind | None = None) -> FileAccessDenied:
     """A fresh denial with nothing chained. Build it outside any `except` that holds a
-    library error, and raise it `from None`."""
-    exc = FileAccessDenied(field_key)
+    library error, and raise it `from None`. `kind` is the optional closed no-follow reason."""
+    exc = FileAccessDenied(field_key, kind=kind)
     exc.__suppress_context__ = True
     return exc
 
@@ -73,7 +74,7 @@ def scrub(exc: BaseException) -> BaseException:
     seen: set[int] = set()
     while inner is not None and id(inner) not in seen:
         if isinstance(inner, FileAccessDenied):
-            fresh = FileAccessDenied(inner.field_key, encoded=True)
+            fresh = FileAccessDenied(inner.field_key, encoded=True, kind=inner.kind)
             fresh.__cause__ = None
             fresh.__context__ = None
             fresh.__suppress_context__ = True

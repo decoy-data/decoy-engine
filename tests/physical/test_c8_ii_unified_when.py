@@ -242,9 +242,10 @@ def test_1_nullable_int_reached_through_a_group_key_protected_sibling(tmp_path: 
     admitted(case)
 
 
-def test_1_plain_arrow_int_with_nulls_declines(tmp_path: Path) -> None:
-    """Without a sidecar or a group_key, pandas reads the nullable int as float: the
-    round-trip check declines the table, and the output is lane-off's."""
+def test_1_plain_arrow_int_with_nulls_read_by_when_is_admitted(tmp_path: Path) -> None:
+    """FREEZE-O1: a nullable int a `when:` reads is ingested as an exact nullable integer on every
+    route, so the table is no longer declined for a float round trip. `admitted` also checks that
+    the lane-on output equals lane-off's."""
     n = 20
     plain = pa.table(
         {
@@ -253,7 +254,7 @@ def test_1_plain_arrow_int_with_nulls_declines(tmp_path: Path) -> None:
         }
     )
     case = Case(tmp_path, plain, [target("redact"), PASS_N], mutate=with_when({"c": "n > 1"}))
-    declined(case)
+    admitted(case)
 
 
 def test_1_float_passthrough_sibling_declines(tmp_path: Path) -> None:

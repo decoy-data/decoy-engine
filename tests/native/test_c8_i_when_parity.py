@@ -23,7 +23,6 @@ from tests.native._c8_i_support import (
     CHUNKINGS,
     PREDICATES,
     chunk_by_sizes,
-    run_native,
     run_native_below_gate,
     run_oracle_leg,
     source_table,
@@ -214,7 +213,7 @@ def test_the_compiled_backend_is_credited_only_for_chunks_that_ran(
     source = source_table()
     config = when_config("hash", "p == 'x'")
     sink: list[Any] = []
-    _out, evidence = run_native(config, chunk_by_sizes(source, [3, 3, 2, 3]), sink=sink)
+    _out, evidence = run_native_below_gate(config, chunk_by_sizes(source, [3, 3, 2, 3]), sink=sink)
     assert _per_chunk_executed(sink, "s") == [
         "rust_companion",
         "rust_companion",
@@ -228,7 +227,7 @@ def test_the_compiled_backend_is_credited_only_for_chunks_that_ran(
 @NEEDS_COMPANION
 def test_a_run_of_only_zero_match_chunks_never_credits_the_compiled_backend() -> None:
     sink: list[Any] = []
-    _out, evidence = run_native(
+    _out, evidence = run_native_below_gate(
         when_config("hash", "p == 'zzz'"), chunk_by_sizes(source_table(), [4, 4, 3]), sink=sink
     )
     assert _per_chunk_executed(sink, "s") == ["arrow_python"] * 3

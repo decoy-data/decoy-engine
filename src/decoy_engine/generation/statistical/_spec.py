@@ -64,8 +64,8 @@ from decoy_engine.generation.statistical._numeric_shape import (
 from decoy_engine.generation.statistical._snapshot_io import parse_snapshot_json
 from decoy_engine.profiling import (
     POLICY_RAW,
-    POLICY_REDACTED,
     REDACTED_COLUMNS_KEY,
+    REDACTED_POLICIES,
     VALUE_POLICY_KEY,
 )
 
@@ -268,9 +268,9 @@ def _refuse_withheld_values(
         return
     policy = snap.get(VALUE_POLICY_KEY)
     listed = snap.get(REDACTED_COLUMNS_KEY)
-    well_formed = policy in (POLICY_REDACTED, POLICY_RAW) and (
-        isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed)
-    )
+    well_formed = (
+        isinstance(policy, str) and (policy in REDACTED_POLICIES or policy == POLICY_RAW)
+    ) and (isinstance(listed, (list, tuple)) and all(isinstance(c, str) for c in listed))
     if well_formed and policy == POLICY_RAW:
         return
     if not well_formed:
@@ -286,7 +286,7 @@ def _refuse_withheld_values(
             return
         why = (
             f"the snapshot withheld the real values of source column {redacted[0]!r} "
-            "(a sensitive column)"
+            "(a sensitive column, or one with too few rows to release values)"
         )
     raise StatisticalSpecError(
         code=reasons.plan.STATISTICAL_SNAPSHOT_VALUES_REDACTED,

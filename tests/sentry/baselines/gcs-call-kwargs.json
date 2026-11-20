@@ -125,8 +125,9 @@
     "decoy_engine/execution/_strategies/_fpe.py::FpeStrategyHandler.run.encrypt_one::open::0": {
       "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
     },
-    "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0": {
-      "reason": "jsonpath_ng JSONPath.update on a parsed document"
+    "decoy_engine/execution/_strategies/nested/_handler.py::NestedStrategyHandler.run::update::0": {
+      "reason": "jsonpath_ng JSONPath.update on a parsed document",
+      "moved_from": "decoy_engine/execution/_strategies/_nested.py::NestedStrategyHandler.run::update::0"
     },
     "decoy_engine/execution/_transactional_sink.py::ParquetTransactionalSink._cleanup_staging::exists::0": {
       "reason": "pathlib Path.exists on a local path"
@@ -437,20 +438,25 @@
     "decoy_engine/validation/post/_runner.py::_merge::update::5": {
       "reason": "dict.update on a plain dict"
     },
-    "decoy_engine/vault.py::VaultWriter.add::update::0": {
-      "reason": "set.update on the VaultWriter entry set"
+    "decoy_engine/vault/_format.py::_fernet::open::0": {
+      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob",
+      "moved_from": "decoy_engine/vault.py::_fernet::open::0"
     },
-    "decoy_engine/vault.py::_fernet::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
+    "decoy_engine/vault/_reader.py::load_vault::update::0": {
+      "reason": "dict.update on a plain dict",
+      "moved_from": "decoy_engine/vault.py::load_vault::update::0"
     },
-    "decoy_engine/vault.py::assert_vault_writer_keyed::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
+    "decoy_engine/vault/_writer.py::VaultWriter.add::update::0": {
+      "reason": "set.update on the VaultWriter entry set",
+      "moved_from": "decoy_engine/vault.py::VaultWriter.add::update::0"
     },
-    "decoy_engine/vault.py::load_vault::update::0": {
-      "reason": "dict.update on a plain dict"
+    "decoy_engine/vault/_writer.py::assert_vault_writer_keyed::open::0": {
+      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob",
+      "moved_from": "decoy_engine/vault.py::assert_vault_writer_keyed::open::0"
     },
-    "decoy_engine/vault.py::vault_writer_for_config::open::0": {
-      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob"
+    "decoy_engine/vault/_writer.py::vault_writer_for_config::open::0": {
+      "reason": "vault OpaqueBox.open (decoy_engine._opaque), not a GCS Blob",
+      "moved_from": "decoy_engine/vault.py::vault_writer_for_config::open::0"
     }
   }
 }

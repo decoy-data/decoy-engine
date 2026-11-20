@@ -17,10 +17,10 @@ from __future__ import annotations
 import os
 import re
 import stat
-import sys
 import time
 from collections import Counter
 
+from decoy_engine.fileaccess import _fdtree, _osflags
 from decoy_engine.fileaccess._entry import require_ambient
 from decoy_engine.fileaccess._fdtree import (
     _close,
@@ -55,7 +55,7 @@ def reclaim_stages(
         raise ValueError("min_age_s must be a non-negative number of seconds")
     if apply:
         raise NotImplementedError("reclaim_stages(apply=True) is not built yet")
-    if sys.platform == "win32":
+    if _fdtree.fcntl is None:  # no flock here (win32): nothing can be proved dead
         return ReclaimReport()
     require_ambient("reclaiming publication stages")
     scope = _open_scope(os.fspath(directory))
@@ -78,7 +78,9 @@ def reclaim_stages(
 def _open_scope(path: str) -> int:
     failed = False
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(
+            path, _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC
+        )
     except OSError:  # the exception is dropped here: no path or OS text survives the call
         failed = True
     return -1 if failed else fd
@@ -106,7 +108,9 @@ def _judge(scope: int, name: str, min_age_s: float) -> ReclaimOutcome:
         return ReclaimOutcome.UNPROVEN
     try:
         fd = os.open(
-            name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=scope
+            name,
+            _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
+            dir_fd=scope,
         )
     except OSError:
         return ReclaimOutcome.UNPROVEN
@@ -162,7 +166,9 @@ def _newest(fd: int) -> float:
             continue
         try:
             child = os.open(
-                child_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd
+                child_name,
+                _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
+                dir_fd=fd,
             )
         except PermissionError:
             continue

@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 198 (asserted by the sentry).
+# Count: 201 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -639,6 +639,17 @@ owner = "cam"
 reason = "the packaged lark grammar is parsed when the module is imported; no caller or config value reaches the path"
 
 [[entry]]
+module = "decoy_engine/fileaccess/_ambient_tree.py"
+function = "open_ambient_tree"
+sink = "os.open"
+ordinal = 0
+rule = "a caller-named evidence directory, opened once only after `require_ambient` refused every policy but the ambient one; the final component is followed because the caller named it"
+owner = "cam"
+reason = "the one ambient open of a signed-evidence bundle or artifact root; every later read goes beneath its held handle with no-follow opens"
+ambient_only = true
+disposition = "read"
+
+[[entry]]
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalHandle.fileno"
 sink = "os.open"
@@ -1255,6 +1266,26 @@ owner = "cam"
 reason = "the shipped name-hint library"
 
 [[entry]]
+module = "decoy_engine/signed_evidence/_artifacts.py"
+function = "open_path_tree"
+sink = "open_ambient_tree"
+ordinal = 0
+rule = "the artifact root a caller of the path form named; `open_ambient_tree` refuses every policy but the ambient one before it opens anything"
+owner = "cam"
+reason = "the path form of the signed-evidence verifier opens its artifact root once, then reads only beneath that handle"
+disposition = "read"
+
+[[entry]]
+module = "decoy_engine/signed_evidence/_bundle.py"
+function = "open_signed_bundle"
+sink = "open_ambient_tree"
+ordinal = 0
+rule = "the bundle directory a caller named; `open_ambient_tree` refuses every policy but the ambient one before it opens anything"
+owner = "cam"
+reason = "a signed-evidence bundle is opened once and its statement and signature are read through that held handle"
+disposition = "read"
+
+[[entry]]
 module = "decoy_engine/transforms/_codeset_loader.py"
 function = "_resolve_read_path"
 sink = "Path.exists"
@@ -1273,7 +1304,7 @@ owner = "cam"
 reason = "existence check of a shipped corpus"
 
 [[entry]]
-module = "decoy_engine/vault.py"
+module = "decoy_engine/vault/_writer.py"
 function = "VaultWriter.serialize"
 sink = "pyarrow.parquet.write_table"
 ordinal = 0
@@ -1283,7 +1314,7 @@ owner = "cam"
 reason = "serializes a chunk to bytes; the file itself goes through the OutputDir or FileHandle"
 
 [[entry]]
-module = "decoy_engine/vault.py"
+module = "decoy_engine/vault/_reader.py"
 function = "load_vault"
 sink = "pyarrow.parquet.read_table"
 ordinal = 0

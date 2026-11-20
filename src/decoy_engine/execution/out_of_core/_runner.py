@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.declared_casting._boundary import seal_evidence
 from decoy_engine.declared_casting._eligibility import declared_route_guard
@@ -241,6 +242,8 @@ def run_fk_out_of_core(
         code_set_corpora: dict[tuple[str, str], dict[str, Any]] = {}
         hash_run = OocHashRun(native_threads=native_threads, faker_pool=faker_pool)
         relations, joins = _arena.create_dir("relations"), _arena.create_dir("joins")
+        # One width state per pass-through text column of each table, so a child's FK types see its parent's.
+        run_widths: dict[str, dict[str, TextWidthState]] = {}
         for index, table_name in enumerate(_table_order(plan, relationship_graph, sources)):
             if table_name not in sources:
                 continue
@@ -293,6 +296,7 @@ def run_fk_out_of_core(
                 "vault_config": config,
                 "validators": validators,
                 "cast_run": cast_run,
+                "run_widths": run_widths,
             }
             # `reorder_caps is not None` (not `route.use_reorder`) is the branch
             # condition so this narrows for mypy directly, matching `RouteDecision`'s
