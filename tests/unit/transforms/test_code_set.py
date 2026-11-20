@@ -2473,3 +2473,26 @@ class TestPrivateRowIndexDefaults:
         )
         assert default == explicit0
         assert explicit0 != explicit1
+
+
+class TestCodeSetCatalog:
+    """GEN-CATALOG GC3-E: the public catalog is a read-only view of CODESET_REGISTRY."""
+
+    def test_catalog_matches_registry_names_and_descriptions(self):
+        import decoy_engine
+        from decoy_engine.transforms.code_set import SHIPPED_CODE_SETS
+
+        catalog = decoy_engine.code_set_catalog()
+        assert catalog == {name: spec.description for name, spec in CODESET_REGISTRY.items()}
+        assert list(catalog) == sorted(catalog)
+        assert tuple(catalog) == SHIPPED_CODE_SETS
+
+    def test_catalog_returns_a_fresh_dict_per_call(self):
+        from decoy_engine.transforms.code_set import code_set_catalog
+
+        first = code_set_catalog()
+        first["icd10"] = "changed"
+        first.pop("hcpcs")
+        second = code_set_catalog()
+        assert second is not first
+        assert second == {name: spec.description for name, spec in CODESET_REGISTRY.items()}

@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
+
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
 SubsetRequest | Literal["config", "skip"] = "config")` is keyword-only (46 frozen parameters). `"config"`
 applies a `subset:` block, `"skip"` runs the full sources, a `SubsetRequest` replaces the block; any other
