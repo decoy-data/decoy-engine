@@ -19,7 +19,7 @@ import importlib.metadata
 import json
 import re
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from functools import lru_cache
 from typing import Any, Final
 
@@ -271,18 +271,40 @@ def sanitized_schema_metadata(
     return kept or None
 
 
-def attach_output_metadata(schema: pa.Schema, meta: Mapping[bytes, bytes] | None) -> pa.Schema:
+def attach_output_metadata(
+    schema: pa.Schema, meta: Mapping[bytes, bytes] | None, *, carried: Collection[str]
+) -> pa.Schema:
     """`schema` with its schema metadata replaced by the sanitized form of `meta`.
 
-    Field metadata is left as it is: this is the entry for in-memory tables, where a passthrough
-    column is the source field by contract. The writers strip field metadata."""
-    kept = sanitized_schema_metadata(meta, for_schema=schema)
-    return schema.with_metadata(kept) if kept else schema.remove_metadata()
+    `carried` names the columns that are the untouched source field (a passthrough column is the
+    source field by contract, so its field metadata stays). Every other column is rebuilt with no
+    field metadata at any depth: a masked or generated column's source metadata can describe the
+    values it replaced. Callers name the carried set from the plan, never from values. The writers
+    strip field metadata again; this is the in-memory entry."""
+    keep = frozenset(carried)
+    fields = [f if f.name in keep else _field(f) for f in schema]
+    source_items = tuple(meta.items()) if meta else ()
+    kept = _kept_metadata(source_items, tuple((f.name, f.type) for f in fields))
+    out = pa.schema(fields)
+    return out.with_metadata(dict(kept)) if kept else out.remove_metadata()
+
+
+@lru_cache(maxsize=256)
+def _kept_metadata(
+    source_items: tuple[tuple[bytes, bytes], ...], columns: tuple[tuple[str, pa.DataType], ...]
+) -> tuple[tuple[bytes, bytes], ...]:
+    """The sanitized schema metadata for one (source metadata, output schema) pair, computed once.
+
+    The out-of-core builders call `attach_output_metadata` for every batch; the blob only changes
+    with the source metadata or the output schema, so a table pays the JSON rebuild once."""
+    bare = pa.schema([pa.field(name, typ) for name, typ in columns])
+    kept = sanitized_schema_metadata(dict(source_items), for_schema=bare)
+    return tuple(kept.items()) if kept else ()
 
 
 def output_schema(schema: pa.Schema) -> pa.Schema:
     """`schema` with no field metadata at any depth and only the allowed schema keys."""
-    return attach_output_metadata(pa.schema([_field(f) for f in schema]), schema.metadata)
+    return attach_output_metadata(schema, schema.metadata, carried=())
 
 
 def output_table(table: pa.Table) -> pa.Table:

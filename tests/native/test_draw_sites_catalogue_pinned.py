@@ -63,7 +63,10 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24zb: mask.date_shift metadata (call site, seed text, notes) only.
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
-_CATALOGUE_DIGEST = "8b361f346ee022a4597a80190cc040db92cd27f18af9fb1edd297151b0803c06"
+# Re-pinned for GEN-REL E1: gen.reference notes and mirror call sites name the moved cardinality repair.
+# Re-pinned for E-F0: only the mask.text_mask_date_shift entry moves (an unparseable span now becomes
+# the redaction token, not its real text), and with it the catalogue digest.
+_CATALOGUE_DIGEST = "b64cea251740e312396ea37c5f8f9aafc1a968e1ea9005b24ae918cc3872e825"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -123,13 +126,13 @@ _ENTRY_DIGESTS = [
     "dfa795f581a81ffc81d668aac8669215dd62c577df7cdf3be702a317b31ea758",  # mask.joint_mask_keyed_row
     "71a6ecef1fb21899f869296e386b309004f2760a90ed24deb3c0b217c7385681",  # mask.joint_mask_null_fallback
     "ded3f195ad06b5b96de97035e9386102fbcacd718b699a7a3a6256915a53d1e8",  # mask.joint_mask_gen_row
-    "707f1f95424d98e829d7a6257d344515d801f77f6b52a7733e300ebd445ac4d8",  # mask.text_mask_date_shift
+    "05c78dbb9a24f8e6e60a356b45ca143b4f33af8f60638689a2ca92fd306ac65b",  # mask.text_mask_date_shift
     "568b337638c888c7dfd5cc616c5924d9827319202d43382ea821a884efe401c4",  # mask.text_mask_faker
     "2c7733e97f6e0dab2366a8d80b147025b26b19cf8c358fe51a0e815683476efc",  # mask.grouped_series_monotone_walk
     "be681b808e8b20697ba82f1eca89d9b9e9973bb56c16fa54de62c35bdc5b664b",  # mask.windowed_date
     "b22ab37e973ad02b943c741bf53e598e9e213a56df6e184144ad95adeca516fd",  # gen.faker_per_row
     "c26b56c364cecf593b15abddab6bb7a4ca9ada7a578b0748f714e4637cd4c7fa",  # gen.categorical
-    "83ea59b060a74b12e6c29c84f33178e809babeebdd3856deb5ff5257652061ce",  # gen.reference
+    "87f2153406c6b768556c6c729bdbc83b8d158d96a75375e8c409a0031cd996c0",  # gen.reference
     "8b47094cdc123d559a1b924657ac2d84aa012ed0d92fe1a4030b763b04c55f1c",  # gen.formula_per_row
     "8eee3a31f0bf72952a59e8528cecfda9a4d05e97b123e382b2cab08c76c1e1b9",  # gen.statistical_per_row
     "c5a8c289a8a94d363e365084d2148580330cdccdc27d4144bc983f482ddaab17",  # gen.null_probability
@@ -157,8 +160,9 @@ _ENTRY_DIGESTS = [
 
 _MAP_DIGESTS = {
     "MASK_STRATEGY_TO_SITE": "e42b340fc017f0608c08ec988fb697bb52c84f5cbb657dfa99b9531cd56681e9",
-    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution) and E3 (lookup).
-    "GEN_KIND_TO_SITE": "2174d2a884f6f011bb2aa63cd15507fe60ba168a9be1f30fd9ba24bf9f04f35d",
+    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution), E3 (lookup) and
+    # GEN-PROVIDERS E1 (provider, mapped to the existing gen.derive_context).
+    "GEN_KIND_TO_SITE": "80bf3649e287c8eb11094b836b24417b56214848d87b996160e884d13f4ac2a7",
     "PROVIDER_IDENTIFIER_SITES": "19593ad7e4ac52025cdc024aa16bdb04ab776755b83e6f7c0e546210b6fc7cd6",
     "FAMILIES": "cbbf3f70f90b3995c7bb16f11bf1560ce135af11761cc6444aa41feaf659e811",
     "ENTROPY_ROOTS": "4f3fdb974258ed94e92188bd4dd456363696dba2d2a4a90a4f744c53879949f8",

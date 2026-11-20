@@ -39,6 +39,7 @@ __all__ = [
     "FPE_UNENCRYPTABLE_LENGTH",
     "FPE_UNENCRYPTABLE_VALUE",
     "GENERATION_NOT_REPRODUCIBLE",
+    "GENERATION_PROVIDER_FAILED",
     "INVALID_SUBSTRATE",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISSING",
@@ -433,5 +434,14 @@ _d = _catalog.runtime("WindowedDateRowNumberError")
 WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE = _d(
     "windowed_date_row_number_out_of_range",
     "A windowed_date global row number is below 0 or at or above 2**62.",
+    since=UNRELEASED,
+)
+
+_d = _catalog.runtime("GenerationError")
+
+# The one fixed-text translation of an adapter or pool failure on a provider column.
+GENERATION_PROVIDER_FAILED = _d(
+    "generation_provider_failed",
+    "A provider column could not be generated.",
     since=UNRELEASED,
 )

@@ -27,6 +27,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import require_locale
 
 _NPI_LUHN_PREFIX = "80840"
 
@@ -86,12 +87,11 @@ class NpiValidator:
         return _is_valid_npi(value)
 
 
+_SUPPORTED_LOCALES = ("en_US",)
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
-    if locale != "en_US":
-        raise ProviderError(
-            code=reasons.provider.UNSUPPORTED_LOCALE,
-            message=f"NPI is US-only; got locale={locale!r}.",
-        )
+    require_locale("NPI", locale, _SUPPORTED_LOCALES)
     first = str(int(rng.choice([1, 2])))
     rest8 = int(rng.integers(0, 100_000_000))
     return _generate_npi_from_body(first + f"{rest8:08d}")
@@ -158,7 +158,7 @@ class NpiAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_NPI_REGEX,
             blocklist_validators=("nppes_luhn_check",),

@@ -17,6 +17,8 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.errors import PipelineValidationError
+from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution.native import _kernels_scalar
 from decoy_engine.execution.native._kernels_scalar import native_text_mask
 from decoy_engine.execution.native._text_mask_native_splice import (
@@ -221,8 +223,6 @@ def test_b1_non_ascii_and_control_cells_fall_back_and_match(name: str, paths: _P
     [
         {},  # defaults put ssn/us_phone/pan on fpe
         {"per_detector_strategy": {**_strategies("redact"), "us_phone": "fpe"}},
-        {"per_detector_strategy": {**_strategies("redact"), "email": "faker"}},
-        {"per_detector_strategy": {**_strategies("redact"), "ssn": "date_shift"}},
         {
             "per_detector_strategy": _strategies("redact"),
             "unmatched_span_policy": "replace_with_token",
@@ -232,8 +232,6 @@ def test_b1_non_ascii_and_control_cells_fall_back_and_match(name: str, paths: _P
     ids=[
         "default-fpe",
         "one-fpe",
-        "one-faker",
-        "one-date-shift",
         "replace-with-token",
         "bogus-policy",
     ],
@@ -279,11 +277,21 @@ def test_b1_crash_class_configs_decline_to_the_oracle() -> None:
     assert _native(
         plain, detectors=["email"], token=surrogate, unmatched_span_policy="passthrough"
     ) == _oracle(plain, detectors=["email"], token=surrogate, unmatched_span_policy="passthrough")
-    # MED-2 end-to-end: a non-string (unhashable) strategy value on a cell WITH a span.
+    # MED-2 end-to-end: a non-string (unhashable) strategy value on a cell WITH a span. E-F0 made
+    # this an unsupported pair. The oracle raises the tagged `PipelineValidationError`; the native
+    # route maps it to the shared `StrategyError(unsupported_strategy)`, as every route does. Neither
+    # message carries the cell. The `plan_native_splice` declines above still hold: the plan must
+    # not crash first.
     spanned = ["mail a@b.com now", "x"]
-    assert _native(spanned, detectors=["email"], per_detector_strategy={"email": []}) == _oracle(
-        spanned, detectors=["email"], per_detector_strategy={"email": []}
-    )
+    with pytest.raises(PipelineValidationError) as oracle_exc:
+        _oracle(spanned, detectors=["email"], per_detector_strategy={"email": []})
+    assert oracle_exc.value.code == "mask.text_mask_strategy_unsupported"
+    with pytest.raises(StrategyError) as native_exc:
+        _native(spanned, detectors=["email"], per_detector_strategy={"email": []})
+    assert native_exc.value.code == "unsupported_strategy"
+    assert native_exc.value.__cause__ is None and native_exc.value.__context__ is None
+    for err in (oracle_exc.value, native_exc.value):
+        assert "a@b.com" not in str(err)
 
 
 def test_b1_older_companion_without_the_symbols_keeps_slice_a(

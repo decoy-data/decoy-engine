@@ -36,7 +36,7 @@ def test_pool_values_deterministic_and_full_length_default_kwargs() -> None:
     reproducible across two independent calls sharing the same build_seed,
     and has exactly `pool_size` entries -- default (empty) kwargs."""
     gen_ctx = _gen_ctx("city", "en_US", {}, seed=1)
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
 
     values_a, exact_a, custom_a = _faker_pool.build_pool_values(
         "city", "en_US", build_seed, 200, {}
@@ -60,7 +60,7 @@ def test_pool_values_non_default_kwargs_change_the_pool() -> None:
     general-purpose (the allowlist gate lives in `pool_eligible`/`try_pool`,
     not here), so it is a valid seam-level probe for kwargs threading."""
     gen_ctx = _gen_ctx("country_code", "en_US", {}, seed=2)
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
 
     default_values, exact_d, custom_d = _faker_pool.build_pool_values(
         "country_code", "en_US", build_seed, 100, {}
@@ -83,7 +83,7 @@ def test_unavailable_type_returns_empty_pool_with_false_flag() -> None:
     `build_pool_values` must report `exact_name_available=False` and an
     empty pool, never raise."""
     gen_ctx = _gen_ctx("state", "ja_JP", {}, seed=3)
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
     values, exact, custom = _faker_pool.build_pool_values("state", "ja_JP", build_seed, 50, {})
     assert values == []
     assert exact is False
@@ -101,8 +101,8 @@ def test_seam_pool_is_the_exact_pool_build_and_sample_samples_from() -> None:
 
     faker_type, locale, kwargs, n = "job", "en_US", {}, 137
     gen_ctx = _gen_ctx(faker_type, locale, kwargs, seed=4)
-    build_seed = gen_ctx.family_bytes(_faker_pool._BUILD_FAMILY)[:8]
-    selection_seed = gen_ctx.family_bytes(_faker_pool._SELECTION_FAMILY)[:8]
+    build_seed = gen_ctx.family_bytes(_faker_pool.POOL_BUILD_FAMILY)[:8]
+    selection_seed = gen_ctx.family_bytes(_faker_pool.POOL_SELECTION_FAMILY)[:8]
 
     pool_values, sampled_output, exact, custom = _faker_pool._build_and_sample_returning_pool(
         faker_type=faker_type,

@@ -27,6 +27,9 @@ approved_growth = [
   { key = "decoy_engine/signed_evidence/_signer.py::ResolvedSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
   { key = "decoy_engine/generation/pool/_sampler.py::derive_validated_indices::mask_key", decision = "owner 2026-11-20 speed S2 windowed_date offsets draw from the keyed kernel (shared helper per review)" },
   { key = "decoy_engine/transforms/windowed_date.py::_draw_offsets::seed", decision = "owner 2026-11-20 speed S2 windowed_date offsets draw from the keyed kernel" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw::build_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw::selection_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw_keyed::value_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
 ]
 
 [[sentry]]
@@ -88,6 +91,12 @@ baseline = "tests/sentry/baselines/private-file-sinks.json"
 [[sentry]]
 id = "gcs-call-kwargs"
 baseline = "tests/sentry/baselines/gcs-call-kwargs.json"
+approved_growth = [
+  { key = "decoy_engine/fileaccess/_reclaim.py::_judge::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
+  { key = "decoy_engine/fileaccess/_reclaim.py::_open_scope::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
+  { key = "decoy_engine/fileaccess/_reclaim.py::_push_dir::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
+  { key = "decoy_engine/fileaccess/_fdtree.py::_prove_marker::open::0", decision = "owner 2026-11-20 F26 publication stage modules" },
+]
 
 [[sentry]]
 id = "serial-resources"
@@ -168,6 +177,10 @@ baseline = "tests/sentry/baselines/win32-import-surface.json"
 [[sentry]]
 id = "platform-census"
 baseline = "tests/sentry/baselines/platform-census.json"
+approved_growth = [
+  { key = "decoy_engine/fileaccess/_reclaim.py", decision = "owner 2026-11-20 F26 publication stage modules" },
+  { key = "decoy_engine/fileaccess/_fdtree.py", decision = "owner 2026-11-20 F26 publication stage modules" },
+]
 
 [[sentry]]
 id = "dir-fd-readers"
@@ -180,6 +193,9 @@ baseline = "tests/sentry/baselines/physical-seam-scoped.json"
 [[sentry]]
 id = "ci-write-scopes"
 baseline = "tests/sentry/baselines/ci-write-scopes.json"
+approved_growth = [
+  { key = "gate-selfhosted.yml::gate-verdict", decision = "owner 2026-11-17 gate-verdict statuses write scope" },
+]
 
 [[sentry]]
 id = "canonical-json-choke-point"
@@ -200,6 +216,10 @@ baseline = "tests/sentry/baselines/snapshot-parse-single-owner.json"
 [[sentry]]
 id = "parquet-intermediate-writers"
 baseline = "tests/sentry/baselines/parquet-intermediate-writers.json"
+
+[[sentry]]
+id = "metadata-carrier-allow"
+baseline = "tests/sentry/baselines/metadata-carrier-allow.json"
 
 [[sentry]]
 id = "date-shift-window-reader"

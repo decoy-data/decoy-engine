@@ -28,6 +28,7 @@ first-class `deterministic: bool` field, composed orthogonally with
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, get_args
 
 from pydantic import (
@@ -294,6 +295,7 @@ class GenerateColumnConfig(BaseModel):
         "constant",
         "distribution",
         "lookup",
+        "provider",
     ]
 
     # GP2 (Codex round-2 spec A/G7): the ONLY validated `type: faker` knob.
@@ -475,6 +477,11 @@ class TableConfig(BaseModel):
         return self
 
 
+def generate_columns_of(table: Mapping[str, Any]) -> list[Any]:
+    """A table's `generate_columns`; an empty list when the key is missing, None or empty."""
+    return table.get("generate_columns") or []
+
+
 def classify_table_kinds(config: dict[str, Any]) -> dict[str, str]:
     """Return `{table_name: "mask" | "generate"}` for every table in the config.
 
@@ -492,5 +499,5 @@ def classify_table_kinds(config: dict[str, Any]) -> dict[str, str]:
         name = table.get("name")
         if not isinstance(name, str):
             continue
-        out[name] = "generate" if table.get("generate_columns") else "mask"
+        out[name] = "generate" if generate_columns_of(table) else "mask"
     return out

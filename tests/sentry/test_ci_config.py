@@ -93,7 +93,7 @@ def test_seeded_unsafe_selfhosted_workflows_are_caught() -> None:
 
 def _gate_jobs() -> tuple[dict, dict]:
     wf = yaml.safe_load((WORKFLOWS / "gate-selfhosted.yml").read_text())
-    assert set(wf["jobs"]) == {"fast", "tree-proof", "gate"}
+    assert set(wf["jobs"]) == {"fast", "tree-proof", "gate", "gate-verdict"}
     return wf["jobs"]["fast"], wf["jobs"]["gate"]
 
 
@@ -325,3 +325,58 @@ def test_a_failed_lookup_runs_the_gate() -> None:
         raise OSError("api down")
 
     assert gate_tree_proof.decide(REPO, TREE, broken) == ["skip=false"]
+
+
+def _registry() -> dict:
+    return tomllib.loads((ROOT / "ci" / "required-jobs.toml").read_text())
+
+
+def test_gate_verdict_posts_status_on_dispatch_only() -> None:
+    text = (WORKFLOWS / "gate-selfhosted.yml").read_text()
+    wf = yaml.safe_load(text)
+    job = wf["jobs"]["gate-verdict"]
+    assert job["runs-on"] == "ubuntu-latest" and "timeout-minutes" in job
+    assert job["needs"] == "gate"
+    guard = str(job["if"])
+    for part in (
+        "always()",
+        "github.event_name == 'workflow_dispatch'",
+        "github.repository_owner == 'decoy-data'",
+        "github.actor == 'louiskeep'",
+        "!github.event.repository.fork",
+    ):
+        assert part in guard, part
+    # The one write scope; the workflow-level permissions stay read-only.
+    assert job["permissions"] == {"statuses": "write"}
+    assert wf["permissions"] == {"contents": "read"}
+    step = next(s for s in job["steps"] if "statuses" in s["run"])
+    env = step["env"]
+    assert env["GH_TOKEN"] == "${{ github.token }}"
+    # Success only when every gate shard succeeded; cancelled and skipped are failures.
+    assert "needs.gate.result == 'success'" in env["STATE"]
+    assert env["STATE"].count("'success'") == 2 and "'failure'" in env["STATE"]
+    # A status context is satisfied only by a dispatch, unlike the check run of a skipped job.
+    assert "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" in step["run"]
+    contexts = [e["context"] for e in _registry()["merge_status"]]
+    assert contexts == ["engine-gate/verdict"]
+    assert env["CONTEXT"] == contexts[0]
+    assert "secrets." not in text
+
+
+def test_native_changes_job_calls_script_with_full_history() -> None:
+    wf = yaml.safe_load((WORKFLOWS / "native-companion.yml").read_text())
+    job = wf["jobs"]["native-changes"]
+    assert "if" not in job and job["runs-on"] == "ubuntu-latest" and "timeout-minutes" in job
+    assert job["outputs"] == {"native": "${{ steps.scope.outputs.native }}"}
+    checkout = _checkout(job)
+    assert checkout["with"]["fetch-depth"] == 0
+    assert checkout["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+    step = next(s for s in job["steps"] if s.get("id") == "scope")
+    assert "scripts/dev/native_scope.py changes" in step["run"]
+    assert '>> "$GITHUB_OUTPUT"' in step["run"]
+    mac = wf["jobs"]["companion-wheel-macos"]
+    assert mac["needs"] == "native-changes"
+    assert mac["if"] == "needs.native-changes.outputs.native == 'true'"
+    agg = wf["jobs"]["companion-wheel-macos-ok"]
+    assert agg["needs"] == ["native-changes", "companion-wheel-macos"]
+    assert agg["if"] == "always()"

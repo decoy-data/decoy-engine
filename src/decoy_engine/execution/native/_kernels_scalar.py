@@ -50,8 +50,8 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span, iter_spans
-from decoy_engine.errors import FpeUnencryptableError
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._text_redact import _splice
 from decoy_engine.execution.native._text_mask_native_fpe import (
     encrypt_spans,
@@ -286,6 +286,7 @@ def native_text_mask(
                 sub_floor_notices=sub_floor_notices,
             )
 
+        unsupported = False
         try:
             if kernel is None:
                 out = [None if t is None else mask(t, None) for t in texts]
@@ -359,8 +360,15 @@ def native_text_mask(
                             )
                         else:
                             out.append(mask(text, spans))
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             raise text_mask_fail_closed_error(exc, column) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
         return pa.array(out, type=pa.string()), sub_floor_notices
     except BaseException:
         del mask_key
