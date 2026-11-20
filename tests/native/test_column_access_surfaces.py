@@ -242,6 +242,7 @@ _PINNED_RUN_CALLS = frozenset(
         "StrategyContext",
         "TimingCollector",
         "build_work_list",
+        "declared_date_shift_columns",
         "ctx.code_set_corpora_metrics",
         "ctx.date_preserve_metrics",
         "source_anchor_columns",
@@ -389,9 +390,9 @@ def _corpus() -> dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], set[
             {
                 "name": "val",
                 "strategy": "date_shift",
-                "provider_config": {"date_format": "%Y-%m-%d"},
                 "namespace": "dob_ns",
                 "provider_config": {
+                    "date_format": "%Y-%m-%d",
                     "min_days": -30,
                     "max_days": 30,
                     "date_format": "%Y-%m-%d",

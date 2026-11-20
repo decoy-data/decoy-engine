@@ -779,8 +779,8 @@ def _group_by_config(tmp_path: Path) -> dict[str, Any]:
                         {
                             "name": "d",
                             "strategy": "date_shift",
-                            "provider_config": {"date_format": "%Y-%m-%d"},
                             "provider_config": {
+                                "date_format": "%Y-%m-%d",
                                 "min_days": -100,
                                 "max_days": 100,
                                 "date_format": "%Y-%m-%d",

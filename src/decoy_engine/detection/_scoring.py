@@ -203,7 +203,6 @@ def _evaluate(
     min_rate: float,
     validator: Callable[[str], bool] | None = None,
     format_variants: list[tuple[str, re.Pattern[str]]] | None = None,
-    strptime_labels: bool = False,
 ) -> DetectorMatch | None:
     """Apply a regex to non-null values and decide whether the detector fires.
 
@@ -245,7 +244,8 @@ def _evaluate(
     complete = False
     if format_variants:
         format_pattern = _dominant_variant(uniques[hit], values.counts[hit], format_variants)
-        if strptime_labels and format_pattern is not None:
+        # The date detectors label their variants with strptime formats, the others with regexes.
+        if format_pattern is not None and format_pattern.startswith("%"):
             winner = dict(format_variants)[format_pattern]
             complete = _every_hit_parses(
                 values.raw_uniques[hit], uniques[hit], format_pattern, winner

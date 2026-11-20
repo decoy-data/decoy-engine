@@ -129,7 +129,7 @@ class DateShiftStrategyHandler:
     wizard_options: tuple[StrategyOption, ...] = (
         option("min_days", "int", -30),
         option("max_days", "int", 30),
-        option("date_format", "str", "%Y-%m-%d"),
+        option("date_format", "str", "%Y-%m-%d", required=True),
     )
     offer_in_wizard: bool = True
 

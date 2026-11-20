@@ -401,7 +401,6 @@ def detect_iso_date(series: pd.Series, col_name: str) -> DetectorMatch | None:
         min_rate=DEFAULT_MIN_MATCH_RATE,
         validator=_iso_date_valid,
         format_variants=_ISO_DATE_VARIANTS,
-        strptime_labels=True,
     )
 
 
@@ -413,7 +412,6 @@ def detect_us_date(series: pd.Series, col_name: str) -> DetectorMatch | None:
         name_hint=_hits_name_hint("us_date", col_name),
         min_rate=DEFAULT_MIN_MATCH_RATE,
         format_variants=_US_DATE_VARIANTS,
-        strptime_labels=True,
     )
 
 
@@ -425,7 +423,6 @@ def detect_eu_date(series: pd.Series, col_name: str) -> DetectorMatch | None:
         name_hint=_hits_name_hint("eu_date", col_name),
         min_rate=DEFAULT_MIN_MATCH_RATE,
         format_variants=_EU_DATE_VARIANTS,
-        strptime_labels=True,
     )
 
 

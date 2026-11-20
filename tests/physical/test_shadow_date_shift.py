@@ -126,7 +126,6 @@ def _ds_column(
     col: dict[str, Any] = {
         "name": "c",
         "strategy": "date_shift",
-        "provider_config": {"date_format": "%Y-%m-%d"},
         "provider_config": provider_config,
     }
     if namespace is not None:

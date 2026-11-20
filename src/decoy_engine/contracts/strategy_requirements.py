@@ -65,7 +65,7 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
             StrategyRequirement(
                 (*_PROVIDER, "date_format"),
                 reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT,
-                "date_shift needs provider_config.date_format, for example %Y-%m-%d.",
+                "date_shift needs provider_config.date_format, the strftime format of its dates.",
             ),
         ),
         "bucket_perturb": (_namespace("bucket_perturb"),),
