@@ -155,10 +155,10 @@ def date_shift_config_rejection(
     """The coded reason a `date_shift` column cannot run natively, or None.
 
     v1 admits ONLY the namespaced, string-source, explicit-`date_format`,
-    tz-free, no-`group_by` variant with integer day bounds. The oracle treats a
-    missing/empty format as whole-column autodetect (`_detect_format`, a
-    `format_detect` prepass) and a truthy `group_by` as a pre-mask sibling
-    anchor; both stay on the oracle. `min_days`/`max_days` pass through the
+    tz-free, no-`group_by` variant with integer day bounds. A missing format only
+    reaches here for a top-level column whose declared parse format supplies it (plan compile
+    refuses every other one), and that stays on the oracle; so does a truthy `group_by`, a
+    pre-mask sibling anchor. `min_days`/`max_days` pass through the
     oracle's `int()`, which also accepts floats and numeric strings; v1 narrows
     to real ints so the native bound resolution cannot diverge from it.
     """

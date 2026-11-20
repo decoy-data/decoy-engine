@@ -104,6 +104,10 @@ class FieldStats:
     #                    no detector with a variant fired.
     casing_pattern: str | None = None
     format_pattern: str | None = None
+    # True when the match that supplied `format_pattern` is a date match whose every hit parses
+    # under that format (`DetectorMatch.format_pattern_complete`). False for any other column and
+    # for a profile written before the field existed.
+    format_pattern_complete: bool = False
 
     # Plan B-2 - column-shape signals FORECAST's per-detector choosers
     # consume to pick mask params instead of using hardcoded defaults.

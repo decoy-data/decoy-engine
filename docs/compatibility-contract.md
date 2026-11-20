@@ -254,6 +254,18 @@ list and points here for the pairs. A rename takes a new row in the release that
 | `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
 <!-- renames-table:end -->
 
+**Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
+without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
+compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
+column whose own declared parse format supplies the date shape is exempt; a nested child, including one under a
+declared parent, is not. A runtime reason with the same code backs the handler. `starter_config` and the starter
+review write the detected variant only when every detector hit parses with it (`format_pattern_complete`, new on
+`DetectorMatch` and `FieldStats`, default false) and write `redact` otherwise; the starter now offers `date_shift` for
+`eu_date` too, and iso_date and us_date starters lose the fixed `min_days`/`max_days`. Re-pin checklist: the platform
+disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templates/upload_csv_mask_to_s3.yaml`, the
+platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
+(DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
