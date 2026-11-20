@@ -62,7 +62,9 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
 # Re-pinned for GEN-REL E1: gen.reference notes and mirror call sites name the moved cardinality repair.
-_CATALOGUE_DIGEST = "c43a5cba8cc00a2983c9112e8ed0adf89d6ea2ac8792fa9f559cd952723f2be7"
+# Re-pinned for E-F0: only the mask.text_mask_date_shift entry moves (an unparseable span now becomes
+# the redaction token, not its real text), and with it the catalogue digest.
+_CATALOGUE_DIGEST = "e0049ea83dcb12b32e685c0294801629e0aa80ad7e2dcd42b8c0db4d939b5fa4"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -122,7 +124,7 @@ _ENTRY_DIGESTS = [
     "dfa795f581a81ffc81d668aac8669215dd62c577df7cdf3be702a317b31ea758",  # mask.joint_mask_keyed_row
     "71a6ecef1fb21899f869296e386b309004f2760a90ed24deb3c0b217c7385681",  # mask.joint_mask_null_fallback
     "ded3f195ad06b5b96de97035e9386102fbcacd718b699a7a3a6256915a53d1e8",  # mask.joint_mask_gen_row
-    "707f1f95424d98e829d7a6257d344515d801f77f6b52a7733e300ebd445ac4d8",  # mask.text_mask_date_shift
+    "05c78dbb9a24f8e6e60a356b45ca143b4f33af8f60638689a2ca92fd306ac65b",  # mask.text_mask_date_shift
     "568b337638c888c7dfd5cc616c5924d9827319202d43382ea821a884efe401c4",  # mask.text_mask_faker
     "2c7733e97f6e0dab2366a8d80b147025b26b19cf8c358fe51a0e815683476efc",  # mask.grouped_series_monotone_walk
     "13fcb5fc47f3b985bcce484edec55922e9728bed9edd7e97db086ceca27d242f",  # mask.windowed_date

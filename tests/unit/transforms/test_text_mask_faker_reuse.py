@@ -26,6 +26,7 @@ from faker import Faker
 
 import decoy_engine.transforms._faker_span as faker_span_mod
 import decoy_engine.transforms.text_mask as text_mask_mod
+from decoy_engine.detection.detectors import Span
 from decoy_engine.transforms.text_mask import _mask_faker, _span_key, mask_cell
 
 # ── fixtures / helpers ──────────────────────────────────────────────────────────
@@ -42,15 +43,14 @@ def _reset_faker_tls():
     faker_span_mod._FAKER_TLS = threading.local()
 
 
-# Detector id -> the Faker method it reaches (the parity-sensitive set), plus an
-# unmapped id that must default to "name".
+# Detector id -> the Faker method it reaches (the parity-sensitive set). E-F0: an id with no
+# `_FAKER_METHOD` entry is refused by `strategy_supported`, so there is no unmapped case here.
 _DETECTORS: list[tuple[str, str]] = [
     ("person_name", "name"),
     ("first_name", "first_name"),
     ("last_name", "last_name"),
     ("address", "address"),
     ("location", "city"),
-    ("__c6b_unmapped__", "name"),
 ]
 
 _SPAN_TEXTS = [
@@ -103,7 +103,7 @@ def _fresh_reference(span_key: bytes, detector_id: str) -> str:
 def test_byte_parity_all_methods_all_seeds():
     """Reused ``_mask_faker`` == fresh-per-span reference char-for-char, for every
     reachable method (name/first_name/last_name/address/city) via its detector id
-    plus an unmapped id, across the wide seed sample incl. 0 and 0xffffffff."""
+    across the wide seed sample incl. 0 and 0xffffffff."""
     keys = _span_keys()
     for detector_id, _method in _DETECTORS:
         for span_key in keys:
@@ -131,21 +131,22 @@ def test_byte_parity_address_and_last_name_literals():
             assert reused not in ("", name_fallback)
 
 
-def test_byte_parity_cell_level_faker_override_end_to_end():
-    """A detector whose default is non-faker (email -> redact), routed to faker via
-    per_detector_strategy, runs end-to-end through ``mask_cell`` and produces the
-    reference faker value (email is unmapped -> name)."""
-    text = "Reach me at alice@example.com today."
-    matched = "alice@example.com"
-    output = mask_cell(text, _MASK_KEY, strategy_map={"email": "faker"})
-    span_key = _span_key(_MASK_KEY, matched)
-    expected = _fresh_reference(span_key, "email")
+def test_byte_parity_cell_level_faker_end_to_end():
+    """A person_name span (faker by default) runs end-to-end through ``mask_cell`` and produces
+    the reference faker value. E-F0: a built-in detector such as email no longer takes ``faker``."""
+    text = "Reach Alice Jones today."
+    matched = "Alice Jones"
+    span = Span("person_name", 6, 6 + len(matched), matched)
+    output = mask_cell(
+        text, _MASK_KEY, extra_spans=[span], detector_ids=[], unmatched_span_policy="passthrough"
+    )
+    expected = _fresh_reference(_span_key(_MASK_KEY, matched), "person_name")
     assert expected != ""
-    assert expected in output
-    assert matched not in output  # the raw email is gone
+    assert output == f"Reach {expected} today."
+    assert matched not in output  # the raw name is gone
 
 
-# ── Test 2: fallback-path parity with a seed-dependent failure stub ──────────────
+# ── Test 2: a failing Faker method propagates (E-F0 removed the fake.name() fallback) ──────
 
 
 def _failing_draw_then_raise(self, *args, **kwargs):
@@ -158,39 +159,30 @@ def _failing_draw_then_raise(self, *args, **kwargs):
     raise ValueError("stub failure after seed-dependent draws")
 
 
-def test_fallback_parity_method_raises_mid_draw(monkeypatch):
-    """Method raises after seed-dependent draws -> fallback name(). Patch is on the
-    Faker class, so it applies identically to the fresh reference's new instances
-    and to the reused cached instance (bound via getattr at call time)."""
+def test_a_method_that_raises_propagates(monkeypatch):
+    """The method raising is a bug, not a reason to write a different kind of value."""
     monkeypatch.setattr(Faker, "first_name", _failing_draw_then_raise, raising=False)
-    for span_key in _span_keys():
-        reused = _mask_faker("x", span_key, "first_name")
-        fresh = _fresh_reference(span_key, "first_name")
-        assert reused == fresh
+    with pytest.raises(ValueError, match="stub failure"):
+        _mask_faker("x", _span_keys()[0], "first_name")
 
 
-def test_fallback_parity_attr_non_callable(monkeypatch):
-    """Attr present but not callable -> fallback name(), no draws consumed first."""
+def test_a_non_callable_method_attribute_propagates(monkeypatch):
     monkeypatch.setattr(Faker, "last_name", "not_a_callable_sentinel", raising=False)
-    for span_key in _span_keys():
-        reused = _mask_faker("x", span_key, "last_name")
-        fresh = _fresh_reference(span_key, "last_name")
-        assert reused == fresh
+    with pytest.raises(TypeError):
+        _mask_faker("x", _span_keys()[0], "last_name")
 
 
-def test_fallback_parity_attr_unavailable(monkeypatch):
-    """Attr absent (getattr -> None) -> fallback name(). Mapped via a patched
-    ``_FAKER_METHOD`` entry pointing at a method Faker genuinely lacks; the
-    reference reads the same patched map."""
+def test_a_missing_method_propagates(monkeypatch):
     patched = dict(text_mask_mod._FAKER_METHOD)
     patched["__c6b_missing__"] = "no_such_faker_method_zzz"
     monkeypatch.setattr(text_mask_mod, "_FAKER_METHOD", patched)
-    # sanity: the bogus method really is unavailable on a Faker instance
-    assert getattr(Faker(), "no_such_faker_method_zzz", None) is None
-    for span_key in _span_keys():
-        reused = _mask_faker("x", span_key, "__c6b_missing__")
-        fresh = _fresh_reference(span_key, "__c6b_missing__")
-        assert reused == fresh
+    with pytest.raises(AttributeError):
+        _mask_faker("x", _span_keys()[0], "__c6b_missing__")
+
+
+def test_an_id_with_no_faker_method_is_not_masked_with_a_name():
+    with pytest.raises(KeyError):
+        _mask_faker("x", _span_keys()[0], "email")
 
 
 # ── Test 3: reseed isolation / order independence ────────────────────────────────

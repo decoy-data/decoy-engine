@@ -121,6 +121,8 @@ EXPECTED_S2_CHECKS_PASSED = (
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. Warn-only
     # (never raises), appended at the tail like every other check here.
     "freetext_advisory",
+    # E-F0: text_mask detector ids and strategy pairs, appended at the very tail.
+    "text_mask_strategies",
 )
 
 
@@ -134,7 +136,7 @@ class TestChecksPassedShape:
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         assert plan.plan_compile.checks_passed == EXPECTED_S2_CHECKS_PASSED
 
-    def test_checks_passed_contains_exactly_thirty_two_entries(
+    def test_checks_passed_contains_exactly_thirty_four_entries(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
         # 9 through S8, row 10 (B1/S13), row 11 (audit H5), row 31 (DPS-3
@@ -151,7 +153,7 @@ class TestChecksPassedShape:
         # row 26 (DE-03: faker_requires_provider), row 29 (HC-7:
         # freetext_advisory), row 30 (TX-2: text_mask_ner_available).
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-        assert len(plan.plan_compile.checks_passed) == 33
+        assert len(plan.plan_compile.checks_passed) == 34
 
     def test_orphan_fk_policy_completeness_at_documented_position(
         self, simple_config: dict, simple_profile: Profile
@@ -174,36 +176,37 @@ class TestChecksPassedShape:
         DPS-3 (2026-07-20) adds row 31 (dp_generate_contract) right after
         non_poolable_provider_with_pool_backend, ahead of statistical_columns."""
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-        assert plan.plan_compile.checks_passed[-29] == "composite_columns_length_match"
-        assert plan.plan_compile.checks_passed[-28] == "orphan_fk_policy_completeness"
-        assert plan.plan_compile.checks_passed[-27] == "pool_capacity_pre_flight"
-        assert plan.plan_compile.checks_passed[-26] == "composite_wiring_consistent"
-        assert plan.plan_compile.checks_passed[-25] == "deterministic_namespace_completeness"
-        assert plan.plan_compile.checks_passed[-24] == "null_bearing_int_unsupported"
+        assert plan.plan_compile.checks_passed[-30] == "composite_columns_length_match"
+        assert plan.plan_compile.checks_passed[-29] == "orphan_fk_policy_completeness"
+        assert plan.plan_compile.checks_passed[-28] == "pool_capacity_pre_flight"
+        assert plan.plan_compile.checks_passed[-27] == "composite_wiring_consistent"
+        assert plan.plan_compile.checks_passed[-26] == "deterministic_namespace_completeness"
+        assert plan.plan_compile.checks_passed[-25] == "null_bearing_int_unsupported"
         # §WHEN-NUMERIC (2026-10-22): right after the null-bearing-int check.
-        assert plan.plan_compile.checks_passed[-23] == "when_string_output_on_numeric_unsupported"
-        assert plan.plan_compile.checks_passed[-22] == "non_poolable_provider_with_pool_backend"
-        assert plan.plan_compile.checks_passed[-21] == "dp_generate_contract"
-        assert plan.plan_compile.checks_passed[-20] == "statistical_columns"
-        assert plan.plan_compile.checks_passed[-19] == "text_redact_ner_available"
-        assert plan.plan_compile.checks_passed[-18] == "text_mask_ner_available"
-        assert plan.plan_compile.checks_passed[-17] == "vault_columns"
-        assert plan.plan_compile.checks_passed[-16] == "fpe_checksum_scheme"
-        assert plan.plan_compile.checks_passed[-15] == "derived_column_refs"
-        assert plan.plan_compile.checks_passed[-14] == "derived_aggregate_refs"
-        assert plan.plan_compile.checks_passed[-13] == "grouped_series_refs"
-        assert plan.plan_compile.checks_passed[-12] == "windowed_date_refs"
-        assert plan.plan_compile.checks_passed[-11] == "group_key_refs"
-        assert plan.plan_compile.checks_passed[-10] == "date_shift_group_by_refs"
-        assert plan.plan_compile.checks_passed[-9] == "fpe_join_groups"
-        assert plan.plan_compile.checks_passed[-8] == "truncate_config"
-        assert plan.plan_compile.checks_passed[-7] == "bucketize_config"
-        assert plan.plan_compile.checks_passed[-6] == "top_code_config"
-        assert plan.plan_compile.checks_passed[-5] == "bucket_perturb_config"
-        assert plan.plan_compile.checks_passed[-4] == "categorical_categories"
-        assert plan.plan_compile.checks_passed[-3] == "fpe_charset_config"
-        assert plan.plan_compile.checks_passed[-2] == "faker_requires_provider"
-        assert plan.plan_compile.checks_passed[-1] == "freetext_advisory"
+        assert plan.plan_compile.checks_passed[-24] == "when_string_output_on_numeric_unsupported"
+        assert plan.plan_compile.checks_passed[-23] == "non_poolable_provider_with_pool_backend"
+        assert plan.plan_compile.checks_passed[-22] == "dp_generate_contract"
+        assert plan.plan_compile.checks_passed[-21] == "statistical_columns"
+        assert plan.plan_compile.checks_passed[-20] == "text_redact_ner_available"
+        assert plan.plan_compile.checks_passed[-19] == "text_mask_ner_available"
+        assert plan.plan_compile.checks_passed[-18] == "vault_columns"
+        assert plan.plan_compile.checks_passed[-17] == "fpe_checksum_scheme"
+        assert plan.plan_compile.checks_passed[-16] == "derived_column_refs"
+        assert plan.plan_compile.checks_passed[-15] == "derived_aggregate_refs"
+        assert plan.plan_compile.checks_passed[-14] == "grouped_series_refs"
+        assert plan.plan_compile.checks_passed[-13] == "windowed_date_refs"
+        assert plan.plan_compile.checks_passed[-12] == "group_key_refs"
+        assert plan.plan_compile.checks_passed[-11] == "date_shift_group_by_refs"
+        assert plan.plan_compile.checks_passed[-10] == "fpe_join_groups"
+        assert plan.plan_compile.checks_passed[-9] == "truncate_config"
+        assert plan.plan_compile.checks_passed[-8] == "bucketize_config"
+        assert plan.plan_compile.checks_passed[-7] == "top_code_config"
+        assert plan.plan_compile.checks_passed[-6] == "bucket_perturb_config"
+        assert plan.plan_compile.checks_passed[-5] == "categorical_categories"
+        assert plan.plan_compile.checks_passed[-4] == "fpe_charset_config"
+        assert plan.plan_compile.checks_passed[-3] == "faker_requires_provider"
+        assert plan.plan_compile.checks_passed[-2] == "freetext_advisory"
+        assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
 
     def test_s1_check_order_preserved(self, simple_config: dict, simple_profile: Profile) -> None:
         plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")

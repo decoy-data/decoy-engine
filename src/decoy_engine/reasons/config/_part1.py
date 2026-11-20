@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, RetryClass, Severity
+from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, RetryClass, Severity
 
 __all__ = [
     "CLOUD_IO_UNSUPPORTED_FORMAT",
@@ -44,6 +44,8 @@ __all__ = [
     "MASK_BAD_COLUMN_SPEC_TYPE",
     "MASK_FORMULA_MISSING",
     "MASK_REFERENCE_MISSING",
+    "MASK_TEXT_MASK_DETECTOR_UNKNOWN",
+    "MASK_TEXT_MASK_STRATEGY_UNSUPPORTED",
     "MASK_UNKNOWN_COLUMN",
     "MASK_UNKNOWN_STRATEGY",
     "NAMESPACE_AMBIGUITY",
@@ -333,3 +335,18 @@ TOP_LEVEL_BAD_ENGINE = _d("top_level.bad_engine", "Top level bad engine.")
 TOP_LEVEL_BAD_MODE = _d("top_level.bad_mode", "Top level bad mode.")
 TOP_LEVEL_BAD_SCHEMA_VERSION = _d("top_level.bad_schema_version", "Top level bad schema version.")
 UNTAGGED = _d("untagged", "A validation failure with no registered code.")
+
+# text_mask: a detector id or a detector and strategy pair the engine cannot carry out. The texts
+# name config keys (column, detector id, strategy), never a cell value.
+_d = _catalog.config("PipelineValidationError")
+
+MASK_TEXT_MASK_DETECTOR_UNKNOWN = _d(
+    "mask.text_mask_detector_unknown",
+    "A text_mask detector id is not one this field accepts.",
+    since=UNRELEASED,
+)
+MASK_TEXT_MASK_STRATEGY_UNSUPPORTED = _d(
+    "mask.text_mask_strategy_unsupported",
+    "A text_mask strategy cannot be applied to this detector.",
+    since=UNRELEASED,
+)
