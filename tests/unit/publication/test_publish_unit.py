@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import Recorder, anchor_at, key
 from tests.unit.publication._exits import EXITS, binding_after, run_exit
 from tests.unit.publication._publish_support import (

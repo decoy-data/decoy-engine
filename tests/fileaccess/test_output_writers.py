@@ -18,8 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess
-from decoy_engine.fileaccess import FileRequest, FileRole
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.safe_output import _file_metadata as fm
 from tests.security import _metadata_canary as mc

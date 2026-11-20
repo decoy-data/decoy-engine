@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import Recorder, anchor_at, key
 from tests.unit.publication._publish_support import (
     DESCRIPTOR,

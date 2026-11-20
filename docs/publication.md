@@ -404,9 +404,10 @@ out-of-core routes the pipeline rebuilds the route's result and the field is `No
 receipt is on the sink the caller passed (`sink.receipt`). A route whose commit raises fails
 the run with that error, and nothing of this attempt is bound.
 
-**On disk.** Every unit the reference sink publishes holds `_decoy_publication.json` beside
-its Parquet files, and the target's parent holds the empty lock file `.<leaf>.decoy-lock`
-(never removed). A consumer that lists every file of an output directory sees both. Unit
+**On disk.** Every unit the reference sink publishes holds `_decoy_publication.json` and the reserved
+stage marker `.decoy-publication-stage` beside its Parquet files, and the target's parent holds
+the empty lock file `.<leaf>.decoy-lock` (never removed). A consumer that lists every file of
+an output directory sees all of these. Unit
 files are `0600` and unit directories `0700`.
 
 ## The isolated route on `publish_unit`
@@ -423,7 +424,8 @@ vault is refused with `ValueError` before anything runs.
   envelope, not as a file. When the child reports `completed`, the parent, not the child,
   decides what is staged: the envelope's table names must each be one path component (no
   separator, no `..`, no repeat), and the stage must hold exactly those files, each a regular
-  file. A child-written `_decoy_publication.json`, an extra file, a directory, a link or a
+  file, besides the reserved `.decoy-publication-stage` marker the parent wrote
+  (`fileaccess.stage_entries` lists a stage without it). A child-written `_decoy_publication.json`, an extra file, a directory, a link or a
   missing table is refused (`failed`, `publication_failed`) and nothing is bound. The parent
   sets the stage to `0700` and each admitted file to `0600` through the entry's own descriptor
   (no link followed) before reading it; a file its owner cannot read is refused, not repaired.

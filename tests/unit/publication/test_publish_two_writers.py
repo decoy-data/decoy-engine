@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.unit.publication._publish_support import (
     POLICIES,
     close_root,

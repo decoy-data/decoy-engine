@@ -23,14 +23,16 @@ from collections import Counter
 from decoy_engine.fileaccess import _fdtree, _osflags
 from decoy_engine.fileaccess._entry import require_ambient
 from decoy_engine.fileaccess._fdtree import (
+    STAGE_HEX,
     _close,
     _exact_stat,
     _is_empty,
-    _prove_marker,
+    _owned,
     _same_entry,
     _try_exclusive,
+    prove_stage,
 )
-from decoy_engine.fileaccess._output import STAGE_HEX, STAGE_MAGIC, STAGE_MARKER, STAGE_PREFIX
+from decoy_engine.fileaccess._output import STAGE_PREFIX
 from decoy_engine.fileaccess._scratch_reports import ReclaimOutcome, ReclaimReport
 
 PENDING_PREFIX = STAGE_PREFIX["publication"]
@@ -98,28 +100,30 @@ def _list(scope: int) -> list[str] | None:
 
 def _judge(scope: int, name: str, min_age_s: float) -> ReclaimOutcome:
     """G1 (a) to (g) for one exact-named entry, read-only: the lock is released on return."""
-    try:
-        found = os.stat(name, dir_fd=scope, follow_symlinks=False)
-    except OSError:
-        return ReclaimOutcome.UNPROVEN
-    if found.st_uid != os.geteuid():
-        return ReclaimOutcome.FOREIGN
-    if not _exact_stat(found, stat.S_IFDIR, 0o700):
-        return ReclaimOutcome.UNPROVEN
-    try:
-        fd = os.open(
-            name,
-            _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
-            dir_fd=scope,
-        )
-    except OSError:
-        return ReclaimOutcome.UNPROVEN
-    try:
-        return _judge_held(scope, name, fd, min_age_s)
-    except OSError:
-        return ReclaimOutcome.UNPROVEN
-    finally:
-        _close(fd)
+    if not _osflags.WINDOWS:
+        try:
+            found = os.stat(name, dir_fd=scope, follow_symlinks=False)
+        except OSError:
+            return ReclaimOutcome.UNPROVEN
+        if not _owned(found):
+            return ReclaimOutcome.FOREIGN
+        if not _exact_stat(found, stat.S_IFDIR, 0o700):
+            return ReclaimOutcome.UNPROVEN
+        try:
+            fd = os.open(
+                name,
+                _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
+                dir_fd=scope,
+            )
+        except OSError:
+            return ReclaimOutcome.UNPROVEN
+        try:
+            return _judge_held(scope, name, fd, min_age_s)
+        except OSError:
+            return ReclaimOutcome.UNPROVEN
+        finally:
+            _close(fd)
+    return ReclaimOutcome.UNPROVEN
 
 
 def _judge_held(scope: int, name: str, fd: int, min_age_s: float) -> ReclaimOutcome:
@@ -143,7 +147,7 @@ def _proof(fd: int, name: str, min_age_s: float) -> str | ReclaimOutcome:
 
     A pending stage inside the grace is `young` whatever its marker says: it may be a writer
     that has not locked yet, or one from an engine that writes no marker."""
-    token = _prove_marker(fd, STAGE_MARKER, STAGE_MAGIC, STAGE_HEX)
+    token = prove_stage(fd)
     pending = _PENDING.fullmatch(name)
     if pending is None:
         return _FALLBACK if token is None else _PROVED
@@ -154,26 +158,48 @@ def _proof(fd: int, name: str, min_age_s: float) -> str | ReclaimOutcome:
 
 def _newest(fd: int) -> float:
     """The newest `max(st_mtime, st_ctime)` of the directory `fd` and everything below it, by
-    descriptor, no link followed. A subdirectory that cannot be opened (`EACCES`) counts with its
-    own times only: no writer without permission on it can change what is inside."""
-    held = os.fstat(fd)
+    descriptor, no link followed, walked with an explicit stack so depth cannot recurse. A
+    subdirectory that cannot be opened (`EACCES`) counts with its own times only: no writer
+    without permission on it can change what is inside."""
+    newest = 0.0
+    pending = [(fd, False)]  # (descriptor, ours to close)
+    try:
+        while pending:
+            held_fd, ours = pending.pop()
+            try:
+                newest = max(newest, _scan_one(pending, held_fd))
+            finally:
+                if ours:
+                    _close(held_fd)
+    finally:
+        for left, ours in pending:
+            if ours:
+                _close(left)
+    return newest
+
+
+def _scan_one(pending: list[tuple[int, bool]], held_fd: int) -> float:
+    """Newest time of directory `held_fd` and its direct entries; queue its subdirectories."""
+    held = os.fstat(held_fd)
     newest = max(held.st_mtime, held.st_ctime)
-    with os.scandir(fd) as entries:
+    with os.scandir(held_fd) as entries:
         children = [(entry.name, entry.stat(follow_symlinks=False)) for entry in entries]
     for child_name, found in children:
         newest = max(newest, found.st_mtime, found.st_ctime)
-        if not stat.S_ISDIR(found.st_mode):
-            continue
+        if stat.S_ISDIR(found.st_mode):
+            _push_dir(pending, held_fd, child_name)
+    return newest
+
+
+def _push_dir(pending: list[tuple[int, bool]], parent_fd: int, name: str) -> None:
+    """Queue the subdirectory `name` for the walk; one that cannot be opened is skipped."""
+    if not _osflags.WINDOWS:
         try:
             child = os.open(
-                child_name,
+                name,
                 _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
-                dir_fd=fd,
+                dir_fd=parent_fd,
             )
         except PermissionError:
-            continue
-        try:
-            newest = max(newest, _newest(child))
-        finally:
-            _close(child)
-    return newest
+            return
+        pending.append((child, True))

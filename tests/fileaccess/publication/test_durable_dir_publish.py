@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.fileaccess.publication._chain_support import (
     OSMARK,
     STAGE_GLOB,

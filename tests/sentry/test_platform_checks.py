@@ -36,6 +36,8 @@ DIR_FD_ALLOWLIST = frozenset({"decoy_engine/fileaccess/_rooted.py"})
 CENSUS: dict[str, int] = {
     "decoy_engine/execution/_isolated_commit.py": 1,
     "decoy_engine/execution/_isolated_common.py": 1,
+    "decoy_engine/fileaccess/_fdtree.py": 4,
+    "decoy_engine/fileaccess/_reclaim.py": 2,
     "decoy_engine/fileaccess/_local.py": 11,
     "decoy_engine/fileaccess/_openat2.py": 2,
     "decoy_engine/fileaccess/_osflags.py": 1,

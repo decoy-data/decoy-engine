@@ -30,14 +30,6 @@
    "reason": "EW1 inventory, owner EW2: the chain owner walk is skipped on win32 by EW2",
    "max": 1
   },
-  "decoy_engine/fileaccess/_fdtree.py::dir-fd": {
-   "reason": "EW1 inventory, owner EW5: stage marker read and tree removal by descriptor; EW5 gives it a win32 arm",
-   "max": 5
-  },
-  "decoy_engine/fileaccess/_fdtree.py::geteuid": {
-   "reason": "EW1 inventory, owner EW4: the owner check of the marker proof is scoped by EW4",
-   "max": 1
-  },
   "decoy_engine/fileaccess/_local.py::fchmod": {
    "reason": "EW1 inventory, owner EW4: owner-only creation moves to create_owner_only_file in EW4",
    "max": 2
@@ -57,18 +49,6 @@
   "decoy_engine/fileaccess/_output.py::fchmod": {
    "reason": "EW1 inventory, owner EW3: private-file creation gets a win32 arm in EW3 and EW4",
    "max": 3
-  },
-  "decoy_engine/fileaccess/_protected_dir.py::geteuid": {
-   "reason": "EW1 inventory, owner EW4: the POSIX owner check is the non-Windows arm; EW4 scopes it",
-   "max": 2
-  },
-  "decoy_engine/fileaccess/_reclaim.py::dir-fd": {
-   "reason": "EW1 inventory, owner EW5: stage reclaim opens by descriptor; EW5 gives it a win32 arm",
-   "max": 3
-  },
-  "decoy_engine/fileaccess/_reclaim.py::geteuid": {
-   "reason": "EW1 inventory, owner EW4: the foreign-owner check of the reclaim judge is scoped by EW4",
-   "max": 1
   },
   "decoy_engine/fileaccess/_scratch.py::dir-fd": {
    "reason": "EW1 inventory, owner EW5: ScratchArena gets its Windows arm in EW5",

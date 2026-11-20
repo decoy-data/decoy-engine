@@ -10,6 +10,10 @@
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
    "max": 1
   },
+  "decoy_engine/fileaccess/_fdtree.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 4
+  },
   "decoy_engine/fileaccess/_local.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
    "max": 11
@@ -29,6 +33,10 @@
   "decoy_engine/fileaccess/_protected_dir.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
    "max": 4
+  },
+  "decoy_engine/fileaccess/_reclaim.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 2
   },
   "decoy_engine/fileaccess/_rooted.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",

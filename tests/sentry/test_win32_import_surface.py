@@ -151,8 +151,7 @@ _OPENAT2, _DURABLE, _LOCAL, _OUTPUT = (
     _FA + "_local.py",
     _FA + "_output.py",
 )
-_PROTECTED, _SCRATCH = _FA + "_protected_dir.py", _FA + "_scratch.py"
-_FDTREE, _RECLAIM = _FA + "_fdtree.py", _FA + "_reclaim.py"
+_SCRATCH = _FA + "_scratch.py"
 
 # Sites that stay until the owning slice adds an `if not _osflags.WINDOWS` branch around them.
 # (rel path, rule) -> (exact site count, owner, reason). An entry only shrinks: the table is
@@ -176,18 +175,6 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
     ),
     (_DURABLE, "dir-fd"): (9, "EW2", "directory-descriptor fsync walk, POSIX arm lands in EW2"),
     (_DURABLE, "geteuid"): (1, "EW2", "the chain owner walk is skipped on win32 by EW2"),
-    (_FDTREE, "dir-fd"): (
-        5,
-        "EW5",
-        "stage marker read and tree removal by descriptor; EW5 gives it a win32 arm",
-    ),
-    (_FDTREE, "geteuid"): (1, "EW4", "the owner check of the marker proof is scoped by EW4"),
-    (_RECLAIM, "dir-fd"): (3, "EW5", "stage reclaim opens by descriptor; EW5 gives it a win32 arm"),
-    (_RECLAIM, "geteuid"): (
-        1,
-        "EW4",
-        "the foreign-owner check of the reclaim judge is scoped by EW4",
-    ),
     (_LOCAL, "fchmod"): (2, "EW4", "owner-only creation moves to create_owner_only_file in EW4"),
     (_OUTPUT, "dir-fd"): (
         20,
@@ -195,11 +182,6 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
         "the dir_fd stage and publication paths get a win32 arm in EW3",
     ),
     (_OUTPUT, "fchmod"): (3, "EW3", "private-file creation gets a win32 arm in EW3 and EW4"),
-    (_PROTECTED, "geteuid"): (
-        2,
-        "EW4",
-        "the POSIX owner check is the non-Windows arm; EW4 scopes it",
-    ),
     (_SCRATCH, "dir-fd"): (5, "EW5", "ScratchArena gets its Windows arm in EW5"),
     (_SCRATCH, "posix-import"): (
         1,
