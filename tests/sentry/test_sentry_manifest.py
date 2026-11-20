@@ -111,6 +111,7 @@ SENTRIES = (
     "tests/sentry/dependencies/test_dependency_floors.py",
     "tests/sentry/dependencies/test_faker_output_lock.py",
     "tests/sentry/dependencies/test_faker_output_lock_arguments.py",
+    "tests/sentry/dependencies/test_faker_output_lock_providers.py",
     "tests/sentry/dependencies/test_faker_output_lock_schema.py",
     "tests/sentry/dependencies/test_faker_pin_agrees.py",
     "tests/sentry/defects/test_anchored_regex.py",

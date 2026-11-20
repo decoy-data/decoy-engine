@@ -53,7 +53,12 @@ from decoy_engine.generation.kinds import (
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
-from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
+from decoy_engine.generators.derivation import (
+    DEFAULT_GENERATE_LOCALE,
+    TABLE_KEY,
+    GenDeriveContext,
+    with_table,
+)
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
@@ -382,7 +387,7 @@ def _generate_column(
         ctx = GenDeriveContext.for_column(
             derive_key=derive_key, column_config=col, fallback_seed=seed
         )
-        locale = str(col.get("locale") or instance_default_locale or "en_US")
+        locale = str(col.get("locale") or instance_default_locale or DEFAULT_GENERATE_LOCALE)
         values = provider_generate(col, n, ctx, get_default_registry(), locale)
     else:
         # The Literal on GenerateColumnConfig.type rejects anything outside this set

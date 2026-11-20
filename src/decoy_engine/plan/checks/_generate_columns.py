@@ -22,6 +22,7 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
+from decoy_engine.generators.derivation import DEFAULT_GENERATE_LOCALE
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs
@@ -179,7 +180,11 @@ def _check_provider(
     """A deferred default leaves a locale-less column to `check_faker_default_locale`."""
     from decoy_engine.plan.checks._generate_providers import check_provider_column
 
-    known = None if isinstance(default_locale, _Deferred) else (default_locale or "en_US")
+    known = (
+        None
+        if isinstance(default_locale, _Deferred)
+        else (default_locale or DEFAULT_GENERATE_LOCALE)
+    )
     check_provider_column(table, col, default_locale=known)
 
 

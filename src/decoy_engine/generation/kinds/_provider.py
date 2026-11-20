@@ -20,12 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from decoy_engine import reasons
-from decoy_engine.generators.derivation import (
-    POOL_BUILD_FAMILY,
-    POOL_SELECTION_FAMILY,
-    TABLE_KEY,
-    GenDeriveContext,
-)
+from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, pool_seeds
 
 if TYPE_CHECKING:
     from decoy_engine.providers_v2 import CapabilityMatrix, ProviderRegistry
@@ -58,24 +53,14 @@ def provider_generate(
 ) -> list[Any]:
     """``n`` values of the provider ``col`` names, in the effective ``locale``."""
     # Imported here: the provider and pool packages import `generation` while it initializes.
-    from decoy_engine.determinism import DeterminismError
-    from decoy_engine.generation.composite import CompositeError
-    from decoy_engine.generation.pool import GenerationError, PoolCapacityError
-    from decoy_engine.providers_v2 import ProviderError
-    from decoy_engine.providers_v2.identifiers import IdentifierError
+    from decoy_engine.generation.pool import GenerationError
 
     failed = False
     values: list[Any] = []
     try:
         values = _draw(col, n, gen_ctx, registry, locale)
-    except (
-        ProviderError,
-        CompositeError,
-        IdentifierError,
-        DeterminismError,
-        PoolCapacityError,
-        GenerationError,
-    ):
+    except Exception:
+        # Any failure inside the provider, whatever its type, can quote a name or a value.
         failed = True
     if failed:
         raise GenerationError(
@@ -112,39 +97,37 @@ def _draw(
     adapter = registry.get_adapter(provider)
     namespace = f"gen-provider/{col.get(TABLE_KEY)}/{col.get('name')}"
     if path == "pool":
+        build_seed, selection_seed = pool_seeds(gen_ctx)
         pool = PoolBuilder(registry).build(
-            provider,
-            size=DEFAULT_POOL_SIZE,
-            job_seed=gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8],
-            locale=locale,
+            provider, size=DEFAULT_POOL_SIZE, job_seed=build_seed, locale=locale
         )
         sampled = PoolSampler().sample(
-            pool,
-            n,
-            mode=CardinalityMode.REUSE,
-            seed=gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8],
-            deterministic=False,
+            pool, n, mode=CardinalityMode.REUSE, seed=selection_seed, deterministic=False
         )
         return list(sampled.tolist())
     if path == "keyed":
-        spec = ProviderSpec(
-            locale=locale,
-            deterministic=True,
-            namespace=namespace,
-            seed=gen_ctx.family_bytes(_VALUE_FAMILY),
-        )
-        # The identifier adapters take the row ordinal as the source value; the protocol types
-        # it narrower than they accept.
-        return [
-            adapter.generate(provider, spec=spec, source_value=i)  # type: ignore[arg-type]
-            for i in range(n)
-        ]
+        return _draw_keyed(adapter, provider, n, gen_ctx, locale, namespace)
     if path == "batch":
         spec = ProviderSpec(
-            locale=locale,
-            deterministic=False,
-            namespace=namespace,
-            seed=gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8],
+            locale=locale, deterministic=False, namespace=namespace, seed=pool_seeds(gen_ctx)[0]
         )
         return list(adapter.generate_batch(provider, spec=spec, count=n))
     raise ProviderError(code=reasons.provider.CAPABILITY_VIOLATION)
+
+
+def _draw_keyed(
+    adapter: Any, provider: str, n: int, gen_ctx: GenDeriveContext, locale: str, namespace: str
+) -> list[Any]:
+    """``n`` identifiers, each drawn through the keyed adapter path with its row ordinal."""
+    from decoy_engine.providers_v2 import ProviderSpec
+
+    value_seed = gen_ctx.family_bytes(_VALUE_FAMILY)
+    try:
+        spec = ProviderSpec(locale=locale, deterministic=True, namespace=namespace, seed=value_seed)
+        # The identifier adapters take the row ordinal as the source value; the protocol types
+        # it narrower than they accept.
+        return [adapter.generate(provider, spec=spec, source_value=i) for i in range(n)]
+    except BaseException:
+        # The family key is a 32-byte derived key; drop it before the traceback keeps this frame.
+        del value_seed
+        raise
