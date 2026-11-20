@@ -84,7 +84,7 @@ well, so the 0.17.0 items in `docs/records/release-ra-facts.md` apply too.
 | `pyproject.toml` dependency | `decoy-engine==0.16.0` | `decoy-engine==0.18.0` |
 | `api/engine_compat.py` `ENGINE_TRANSFORM_OWNERSHIP_SPECIFIER` | `"==0.16.0"` | `"==0.18.0"` |
 | `deploy/Dockerfile.production` `ARG DECOY_ENGINE_EXPECTED_VERSION` | `0.16.0` | `0.18.0` |
-| `.github/workflows/backend.yml` and `fixtures-verify.yml` `ENGINE_PIN_SHA` / `ENGINE_PIN_VERSION` | `5da40c2c6ce67db86703996dd8cf245955f05eca` / `"0.16.0"` | release commit / `"0.18.0"` |
+| `.github/workflows/backend.yml` and `fixtures-verify.yml` `ENGINE_PIN_SHA` / `ENGINE_PIN_VERSION` | `1608a2f38b92476a573537128671f8eca1751d3b` / `"0.16.0"` | release commit / `"0.18.0"` |
 | `tests/test_engine_version_fence_packaging.py` `PIN_PREFIX` / `PIN_VERSION` | `"5da40c2c"` / `"0.16.0"` | `PIN_PREFIX` above / `"0.18.0"` |
 | `tests/test_engine_ownership_gate.py` `PASSING` (and the `rc1`/`post1`/`dev0` failing variants) | `0.16.0` variants | `0.18.0` variants |
 | `tests/test_ds2_postgres_pull.py` installed-version and pyproject assertions | `"0.16.0"` | `"0.18.0"` |
@@ -98,7 +98,7 @@ CLI (`louiskeep/decoy`, read at CLI main `a5d36b4`; already on 0.17.0):
 | `pyproject.toml` dependency | `decoy-engine==0.17.0` | `decoy-engine==0.18.0` |
 | `tests/unit/test_pyproject_metadata.py` exact-pin assertion | `==0.17.0` | `==0.18.0` |
 | `.github/workflows/ci.yml` (3 sites), `release-smoke.yml` | `git+https://github.com/louiskeep/decoy-engine@v0.17.0` | `@v0.18.0` |
-| `.github/workflows/regen-diagrams.yml` | `decoy-engine@1132d29e40a0c947174fff65185fb95168ce504f` | `@<release commit>` |
+| `.github/workflows/regen-diagrams.yml` | `decoy-engine@bd3de1786b2747c7aa5b3e0e2e00cda0b14d0f90` | `@<release commit>` |
 | `requirements-certified.txt` header fingerprint (and its `decoy-engine 0.17.0` prose, install line), `scripts/cert_smoke.py` docstring | `a7b40d54...` on engine 0.17.0 | `b643894d...` on engine 0.18.0 (the 63 pins do not change) |
 
 Command: `grep -rn '0\.17\.0\|a7b40d54\|1132d29e' pyproject.toml tests .github requirements-certified.txt scripts src`.

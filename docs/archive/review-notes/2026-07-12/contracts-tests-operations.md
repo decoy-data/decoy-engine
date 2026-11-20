@@ -1,14 +1,14 @@
 # Contracts, Tests, Packaging, and Operations Review
 
 > Lead re-anchor: the frozen reviewed revision is
-> `c1c4f2c2b33af39e1de4874788a7df78a352970c`. It incorporates the previously
+> `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1`. It incorporates the previously
 > user-owned pandas/mypy/annotation changes described below. A final clean-revision test run
 > passed (`6281 passed, 38 skipped, 13 deselected`), as did ruff check, ruff format check, and mypy
 > over 375 source files. The artifact findings were rechecked against a build using the same final
 > tree content.
 
 **Review date:** 2026-07-12
-**Settled source snapshot:** `1e80016bdbf1aa100f7f21215c919df4c69f41b1`
+**Settled source snapshot:** `f9d5479a51c0fdb2fd55c94c79dbc6933bc929f6`
 (`chore/engine-ci-hardening`, based on `origin/main`)
 **Initial artifact snapshot:** `1a7eee31172f5339ed3925a6cc5e42d689771c18`
 (`bench/oom-route-e2e-probe`; the worktree changed during the review)

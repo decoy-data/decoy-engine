@@ -68,7 +68,7 @@ Platform (read at platform main `c7bc3dc4`):
 | `pyproject.toml` dependency | `decoy-engine==0.16.0` | `decoy-engine==0.17.0` |
 | `api/engine_compat.py` `ENGINE_TRANSFORM_OWNERSHIP_SPECIFIER` | `"==0.16.0"` | `"==0.17.0"` |
 | `deploy/Dockerfile.production` `ARG DECOY_ENGINE_EXPECTED_VERSION` | `0.16.0` | `0.17.0` |
-| `.github/workflows/backend.yml` and `fixtures-verify.yml` `ENGINE_PIN_SHA` / `ENGINE_PIN_VERSION` | `5da40c2c6ce67db86703996dd8cf245955f05eca` / `"0.16.0"` | release commit / `"0.17.0"` |
+| `.github/workflows/backend.yml` and `fixtures-verify.yml` `ENGINE_PIN_SHA` / `ENGINE_PIN_VERSION` | `1608a2f38b92476a573537128671f8eca1751d3b` / `"0.16.0"` | release commit / `"0.17.0"` |
 | `tests/test_engine_version_fence_packaging.py` `PIN_PREFIX` / `PIN_VERSION` | `"5da40c2c"` / `"0.16.0"` | first 8 hex of the release commit / `"0.17.0"` |
 | `tests/test_engine_ownership_gate.py` `PASSING` | `0.16.0` variants | `0.17.0` variants |
 

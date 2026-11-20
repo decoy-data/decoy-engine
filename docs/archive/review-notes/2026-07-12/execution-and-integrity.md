@@ -1,7 +1,7 @@
 # Execution and Data-Integrity Adversarial Review - 2026-07-12
 
 > Lead re-anchor: the frozen reviewed revision is
-> `c1c4f2c2b33af39e1de4874788a7df78a352970c`. Its only source deltas from the
+> `430bc3d4fecfeaea3ece4f5e76a8413f41a7d3a1`. Its only source deltas from the
 > reviewed behavioral baseline are typing annotations in isolated-run modules; the remaining
 > changes are CI/dependency metadata. The findings below remain current. The full frozen-revision
 > suite passed: `6281 passed, 38 skipped, 13 deselected`.
@@ -14,7 +14,7 @@ This note covers the critical execution path in `decoy-engine`: profiling, plan 
 route selection, pandas/Polars adapters, sequential and out-of-core FK execution, chunked
 execution, synthetic generation, transactional publication, and memory-safety controls.
 
-- Reviewed commit: `1e80016bdbf1aa100f7f21215c919df4c69f41b1` (`origin/main`).
+- Reviewed commit: `f9d5479a51c0fdb2fd55c94c79dbc6933bc929f6` (`origin/main`).
 - The shared checkout contained concurrent annotation-only edits in isolated-run modules and CI
   metadata. Those edits were not changed or treated as remediation.
 - Earlier July 9 findings were used only as leads. Every finding below was re-verified against

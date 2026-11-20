@@ -311,7 +311,7 @@ Registry renumbered at merge from 1.24.0 to 1.25.0 by scripts/dev/registry_renum
 
 ## Merge of main (2026-11-12)
 
-`origin/main` `4bb95063a68c55f229bd6e1ba88fbe2511f9a4aa` merged bottom-up with real merge commits:
+`origin/main` `e60abb10750d20885600d81b24338dc4faedf563` merged bottom-up with real merge commits:
 a1a `2201c34c` (clean), a1b `96e8331b` (merges a1a, clean), a2 `dbebb07c` (merges a1b), a3
 `cabff5ee` (merges a2). Conflicts: in a2, `.importlinter` and the `LAYERS` snapshot in
 `tests/sentry/layout/test_import_layers.py` (main added `support` to tier 1, a2 added

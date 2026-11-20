@@ -503,7 +503,7 @@ Consequence read from the code (not executed): any authenticated caller who can 
 
 ## 16. CLI mode switches (`/home/cam/vscode/decoy`, `src/decoy/cli/run.py` + `src/decoy/_native_gate.py`)
 
-Read at commit `b8274b0194748d5a60262b78b5969a8c85aeeac7` (local working tree, confirmed identical to `origin/main` by SHA comparison and a clean `git status`). All --native/--no-native dispatch logic lives in `_native_gate.py`, which `run.py` imports and delegates to; there is no separate `_dispatch.py`. Four engine entry points total: `run_pipeline(...)` (default and `--native`, identical call, differing only in pre/post gating), `run_pipeline(..., unified_slice_enabled=False)` (`--no-native`, same function with one forced kwarg), and `run_mask_pipeline_chunked(...)` (`--chunked`, a distinct function called once per mask-kind table).
+Read at commit `5442b9029b134a7c3cb74948565eb68381c2ae90` (local working tree, confirmed identical to `origin/main` by SHA comparison and a clean `git status`). All --native/--no-native dispatch logic lives in `_native_gate.py`, which `run.py` imports and delegates to; there is no separate `_dispatch.py`. Four engine entry points total: `run_pipeline(...)` (default and `--native`, identical call, differing only in pre/post gating), `run_pipeline(..., unified_slice_enabled=False)` (`--no-native`, same function with one forced kwarg), and `run_mask_pipeline_chunked(...)` (`--chunked`, a distinct function called once per mask-kind table).
 
 | ID | Predicate → outcome | file:line | Route/backend | Minimal fixture | Witness |
 |---|---|---|---|---|---|

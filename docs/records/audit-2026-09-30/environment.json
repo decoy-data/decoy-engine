@@ -42,7 +42,7 @@
     "repo_origin_checkout": "/home/cam/vscode/decoy-platform",
     "worktree": "/home/cam/vscode/decoy-platform/.claude/worktrees/audit-pinned",
     "created_via": "git -C /home/cam/vscode/decoy-platform worktree add --detach /home/cam/vscode/decoy-platform/.claude/worktrees/audit-pinned origin/main",
-    "commit": "0701a95422e405cff76eb38c12cfb4f372b151d4",
+    "commit": "d7b8bbb42826cbd7b03ef85974c1c468289e13db",
     "commit_matches_preflight": true,
     "fetch_before_worktree": true,
     "install_method": "uv pip install -e '.[dev]' from the audit-pinned worktree",
@@ -52,7 +52,7 @@
   },
   "cli": {
     "repo": "/home/cam/vscode/decoy",
-    "commit": "b8274b0194748d5a60262b78b5969a8c85aeeac7",
+    "commit": "5442b9029b134a7c3cb74948565eb68381c2ae90",
     "commit_matches_preflight": true,
     "fetch_before_check": true,
     "installed_in_venv": false,

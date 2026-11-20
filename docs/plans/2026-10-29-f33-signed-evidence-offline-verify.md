@@ -4,7 +4,7 @@ Status: plan
 
 Summary: Authenticate a versioned evidence statement and its artifact inventory, verify it offline with independently trusted public keys, and prevent strict publication when required checks are inconclusive.
 
-Baseline commit: `2a44723ff26ffd16c69f026582ec93998d67ca5d` (`git rev-parse HEAD`, inspected 2026-10-29).
+Baseline commit: `ac4e5dc3773a36f48b3f09565c1c2ee21c4b984b` (`git rev-parse HEAD`, inspected 2026-10-29).
 
 **CRYPTO / MAJOR tier. Gate = Dennis + Codex + Gemini, adversarial and crypto-focused. This is the Codex first draft for the Codex -> Gemini -> Dennis plan-gate pipeline, not an approved plan or implementation receipt.**
 

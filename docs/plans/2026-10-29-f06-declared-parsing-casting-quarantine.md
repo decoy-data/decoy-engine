@@ -2,7 +2,7 @@ Status: plan
 
 Summary: Add one engine-owned, versioned declared-casting contract; parse before masking and format after masking through one route-independent boundary; make null substitutions countable; and admit row quarantine only through a protected, retention-qualified sink.
 
-Baseline: `plan/f06-declared-parsing` at `fdd08a894d5dd4440a1adea0ee62bf0b670808bb`, equal to `origin/main` when this plan was authored (`F29: machine-readable errors & progress (#336)`).
+Baseline: `plan/f06-declared-parsing` at `5fb6a1202158e519e19690576b4bdba5226260be`, equal to `origin/main` when this plan was authored (`F29: machine-readable errors & progress (#336)`).
 
 # F06: declared parsing, casting, and quarantine
 
