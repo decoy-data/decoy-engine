@@ -82,7 +82,11 @@ def _date_shift_when_config(
                         # A nonzero-offset window so a masked date is provably
                         # different from its source (rules out an accidental
                         # zero-shift pass).
-                        "provider_config": {"min_days": 30, "max_days": 60},
+                        "provider_config": {
+                            "min_days": 30,
+                            "max_days": 60,
+                            "date_format": "%Y-%m-%d",
+                        },
                         "when": "keep == 1",
                     },
                     {"name": "keep", "strategy": "passthrough"},

@@ -21,7 +21,12 @@ from typing import Any, Literal
 from decoy_engine import reasons
 from decoy_engine.config import Dismissal, PipelineConfigError
 from decoy_engine.detection.types import DetectorSource, ModelRef
-from decoy_engine.profiling import check_starter_config, declared_key_namespaces, detector_entry
+from decoy_engine.profiling import (
+    check_starter_config,
+    declared_key_namespaces,
+    detector_entry,
+    recommendations,
+)
 from decoy_engine.validation.starter_review import (
     ReviewDecision,
     ReviewDuplicateError,
@@ -270,7 +275,7 @@ def _final_entry(
     proposed: list[dict[str, Any]] = []
     for decision, _row in group:
         if decision.verdict is ReviewVerdict.CONFIRM:
-            entry = _confirm_entry(decision)
+            entry = _confirm_entry(decision, _row)
         elif decision.verdict is ReviewVerdict.EDIT:
             as_review = ReviewDecision(
                 decision.table, decision.column, ReviewVerdict.EDIT, entry=decision.entry
@@ -292,16 +297,23 @@ def _final_entry(
     return proposed[0] if proposed else None
 
 
-def _confirm_entry(decision: FindingDecision) -> dict[str, Any]:
+def _confirm_entry(decision: FindingDecision, row: Mapping[str, Any]) -> dict[str, Any]:
     if decision.source == "ner":
         options: dict[str, Any] = {"ner_entities": [decision.detector_id]}
         if decision.model is not None:
             options["ner_model"] = decision.model.id
         return column_entry(_TEXT_REDACT, decision.column, options=options)
-    entry = detector_entry(decision.detector_id, decision.column)
+    fmt = row.get("format_pattern") if row.get("format_pattern_complete") is True else None
+    entry = detector_entry(
+        decision.detector_id, decision.column, date_format=fmt if isinstance(fmt, str) else None
+    )
     if entry is None:
+        starter = recommendations.starter_choice(decision.detector_id)
+        needs_format = starter is not None and starter.detected_date_format
         raise ReviewEntryError(
-            "the detector has no default strategy to confirm",
+            "a date format is needed to confirm this date finding; edit it with a date_format"
+            if needs_format
+            else "the detector has no default strategy to confirm",
             table=decision.table,
             column=decision.column,
         )

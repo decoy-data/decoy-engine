@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -20,6 +20,7 @@ __all__ = [
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING",
     "DATE_SHIFT_INVALID_CONFIG",
+    "DATE_SHIFT_REQUIRES_DATE_FORMAT",
     "DATE_SHIFT_REQUIRES_NAMESPACE",
     "DEDUPE_COLUMN_MISSING",
     "DEDUPE_UNSUPPORTED_TYPE",
@@ -132,6 +133,9 @@ DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING = _d(
     "date_shift_group_anchor_snapshot_missing", "Date shift group anchor snapshot missing."
 )
 DATE_SHIFT_INVALID_CONFIG = _d("date_shift_invalid_config", "Date shift invalid config.")
+DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
+    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
+)
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace."
 )
