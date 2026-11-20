@@ -160,10 +160,8 @@ def _generate_tables_from_config(
         table = generate_by_name[name]
         gcols = table["generate_columns"]
         n = int(table.get("row_count") or 0)
-        # Declared order, explicit loop: a `statistical` column with
-        # `condition_on` reads its already-generated sibling from `data`
-        # (WS3 sequential conditional sampling). Iteration order is the
-        # same as the prior dict comprehension; parity unaffected.
+        # Declared order: a `statistical` column with `condition_on` reads its already-generated
+        # sibling from `data` (WS3 sequential conditional sampling).
         data: dict[str, list[Any]] = {}
         # GEN-UNIQUE pair hook: a `unique_together` entry is drawn at its first-declared member's
         # turn; the second member's values wait here until the loop reaches it.
@@ -212,13 +210,10 @@ def _generate_tables_from_config(
                     on_warning=on_warning,
                 )
         # Cross-column formula post-pass: a `formula` column carrying
-        # `references` was filled with None placeholders by `_formula`
-        # above (the per-column loop cannot read siblings that may not
-        # exist yet). Now that every sibling column is finalized in
-        # `data`, `fill_referenced_formula_columns` overwrites them in
-        # declared order from the finished values. Lazy import (mirrors
-        # the fidelity-gate dispatch) so configs without reference-bearing
-        # formulas never pay pandas.
+        # `references` was filled with None placeholders by `_formula` above (the per-column loop
+        # cannot read siblings that may not exist yet). Now that every sibling is finalized in
+        # `data`, `fill_referenced_formula_columns` overwrites them in declared order. Lazy import
+        # so configs without reference-bearing formulas never pay pandas.
         if any(c.get("type") == "formula" and (c.get("references") or []) for c in gcols):
             from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
