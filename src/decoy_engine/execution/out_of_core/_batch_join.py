@@ -66,7 +66,7 @@ from decoy_engine._arrow_types import TextWidthState, promoted_text_type
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import FK_KEY_DTYPE_UNSUPPORTED_CODE, NULL_FK_KEY, fk_key_value
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
 from decoy_engine.execution.out_of_core._join import (
     _append_output_batch,
     _child_key_batches,
@@ -314,8 +314,9 @@ class ChildFkBatchJoiner:
         )
 
     def _batch_orphan_count(self) -> int:
-        count = self._conn.execute(
-            f"""
+        count = fetch_scalar(
+            self._conn.execute(
+                f"""
             SELECT count(*)
             FROM child_batch_keys c
             LEFT JOIN parent_keys p
@@ -323,7 +324,8 @@ class ChildFkBatchJoiner:
             WHERE c.__decoy_fk_join_key IS NOT NULL
               AND p.{_q(self._relation.join_key_column)} IS NULL
             """
-        ).fetchone()[0]
+            )
+        )
         return int(count)
 
     def _raise_on_batch_orphans(self) -> None:

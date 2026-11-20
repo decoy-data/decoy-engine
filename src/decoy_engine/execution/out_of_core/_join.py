@@ -25,7 +25,7 @@ from decoy_engine.execution._fk_keys import (
     fk_key_value,
 )
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge
 
@@ -107,8 +107,9 @@ def mask_child_fk(
         if edge.orphan_policy is OrphanPolicy.FAIL:
             # Streaming anti-join reducer: the total orphan count is the only
             # thing resident, and it raises before any output is produced.
-            fail_count = conn.execute(
-                f"""
+            fail_count = fetch_scalar(
+                conn.execute(
+                    f"""
                 SELECT count(*)
                 FROM child_keys c
                 LEFT JOIN parent_keys p
@@ -116,7 +117,8 @@ def mask_child_fk(
                 WHERE c.__decoy_fk_join_key IS NOT NULL
                   AND p.{_q(parent_relation.join_key_column)} IS NULL
                 """
-            ).fetchone()[0]
+                )
+            )
             if fail_count:
                 raise orphan_fk_violation_error(edge, fail_count)
         select_list = [f"c.{_q('__decoy_row_nr')}", f"c.{_q('__decoy_fk_join_key')}"]

@@ -50,7 +50,7 @@ from decoy_engine.execution.out_of_core._batch_join import (
     _resolve_output_types,
     mint_remap_values,
 )
-from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
+from decoy_engine.execution.out_of_core._duckdb import connect_duckdb, fetch_scalar
 from decoy_engine.execution.out_of_core._external_sort import BoundedExternalSorter
 from decoy_engine.execution.out_of_core._join import (
     _append_output_batch,
@@ -306,8 +306,9 @@ class StreamFkJoiner:
         with self._child_keys.open_reader() as reader:
             conn.register("child_keys", reader)
             try:
-                count = conn.execute(
-                    f"""
+                count = fetch_scalar(
+                    conn.execute(
+                        f"""
                     SELECT count(*)
                     FROM child_keys c
                     LEFT JOIN parent_keys p
@@ -315,7 +316,8 @@ class StreamFkJoiner:
                     WHERE c.__decoy_fk_join_key IS NOT NULL
                       AND p.{_q(join_key)} IS NULL
                     """
-                ).fetchone()[0]
+                    )
+                )
             finally:
                 conn.unregister("child_keys")
         return int(count)

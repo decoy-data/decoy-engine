@@ -429,7 +429,10 @@ def _count(conn: Any, sql: str, *, probe: bool = False) -> int:
     cursor = conn.execute(sql)
     if probe:
         _before_fetch(conn)
-    return int(cursor.fetchone()[0])
+    # fetchall, not fetchone: fetchone leaves the result unfinished, and DuckDB 2.x then
+    # rejects the next conn.register() (the child load after the parent counts) with
+    # ResourceInUseException, which the post-scan gate reported as check_error.
+    return int(cursor.fetchall()[0][0])
 
 
 def _complete(alias: str, width: int) -> str:
