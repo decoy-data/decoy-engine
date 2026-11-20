@@ -38,6 +38,7 @@ __all__ = [
     "POLICY_UNKNOWN_STRATEGY",
     "REMOTE_URI_INVALID",
     "SCAN_BASELINE_UNBOUND",
+    "TABLE_DUPLICATE",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -71,6 +72,11 @@ TARGET_SHARED_DESTINATION = _d(
 COLUMN_DUPLICATE = _d(
     "column_duplicate",
     "Two columns in one table have the same name. List each column once.",
+    since=UNRELEASED,
+)
+TABLE_DUPLICATE = _d(
+    "table_duplicate",
+    "Two tables in one config have the same name. Declare each table once.",
     since=UNRELEASED,
 )
 GENERATE_COLUMN_DUPLICATE = _d(

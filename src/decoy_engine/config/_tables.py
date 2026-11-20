@@ -43,7 +43,6 @@ from pydantic import (
 from pydantic_core import PydanticCustomError, ValidationError
 
 from decoy_engine import reasons
-from decoy_engine._field_names import repeated_names
 from decoy_engine.config._generate_option_catalog import POOLED_TYPE, closed_key_schema
 from decoy_engine.config._generate_options import option_problems, problem_details
 from decoy_engine.config._generate_unique import (
@@ -397,18 +396,16 @@ class TableConfig(BaseModel):
 
         For a mask table that silently drops the user's mask entry and ships the column
         unmasked; for a generate table it drops a generated column. Exact-name match, the
-        same rule the source-schema guards use (`repeated_names`).
+        same rule the source-schema guards use.
         """
         problems: list[tuple[tuple[str | int, ...], str]] = []
         for field, code in (
             ("columns", reasons.config.COLUMN_DUPLICATE),
             ("generate_columns", reasons.config.GENERATE_COLUMN_DUPLICATE),
         ):
-            entries = getattr(self, field)
-            repeated = repeated_names(c.name for c in entries)
             seen: set[str] = set()
-            for index, col in enumerate(entries):
-                if col.name in repeated and col.name in seen:
+            for index, col in enumerate(getattr(self, field)):
+                if col.name in seen:
                     problems.append(((field, index, "name"), str(code)))
                 seen.add(col.name)
         if problems:

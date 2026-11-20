@@ -13,6 +13,11 @@ what keeps masked values stable and joinable.
 
 ## Mask strategies
 
+List each column once per table and declare each table once. A repeated column name in a
+table is refused with `column_duplicate`, and a repeated table name with `table_duplicate`
+(both at the later entry), because the later entry would otherwise win and a `redact` could be
+silently replaced by a `passthrough`.
+
 [capability-matrix](capability-matrix.md) lists every mask strategy and is
 generated from the strategy registry. This page has a section for each of
 them. `passthrough` and the internal composite and nested handlers share the

@@ -9,11 +9,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from decoy_engine import reasons, run_pipeline
-from decoy_engine.config import PipelineConfig
+from decoy_engine import reasons
+from decoy_engine.config import PipelineConfig, PipelineConfigError, parse_pipeline_config
 
 COLUMN_DUPLICATE = str(reasons.config.COLUMN_DUPLICATE)
 GENERATE_DUPLICATE = str(reasons.config.GENERATE_COLUMN_DUPLICATE)
+TABLE_DUPLICATE = str(reasons.config.TABLE_DUPLICATE)
 CANARY = "CANARY-5519"
 
 
@@ -106,35 +107,86 @@ def test_generate_duplicate_keeps_its_own_code() -> None:
 
 
 def test_message_carries_no_data_values(tmp_path: Path) -> None:
+    """The canary sits in `provider_config`, a field the config accepts, so the duplicate is
+    the only problem and the check has the value in hand when it builds its message."""
     raw = _config(
         tmp_path,
         [
-            {"name": "s", "strategy": "redact", "replacement": CANARY},
-            {"name": "s", "strategy": "passthrough"},
+            {"name": "s", "strategy": "redact", "provider_config": {"note": CANARY}},
+            {"name": "s", "strategy": "passthrough", "when": f"s == '{CANARY}'"},
         ],
     )
-    with pytest.raises(ValidationError) as info:
-        PipelineConfig.model_validate(raw)
+    with pytest.raises(PipelineConfigError) as info:
+        parse_pipeline_config(raw)
+    assert [(p.code, p.location) for p in info.value.problems] == [
+        (COLUMN_DUPLICATE, "tables[0].columns[1].name")
+    ]
     assert CANARY not in str(info.value)
 
 
-def test_redact_then_passthrough_never_reaches_a_run(tmp_path: Path) -> None:
-    """The config that used to ship `s` unmasked is refused before a source is read."""
-    reads: list[str] = []
+def test_redact_then_passthrough_is_refused_at_parse(tmp_path: Path) -> None:
+    """The config that used to ship `s` unmasked never gets a `PipelineConfig`.
 
-    def loader(name: str) -> Any:
-        reads.append(name)
-        raise AssertionError("source read")
-
+    `run_pipeline` takes an already validated dict, so the refusal point is the parse.
+    """
     raw = _config(
         tmp_path,
         [{"name": "s", "strategy": "redact"}, {"name": "s", "strategy": "passthrough"}],
     )
-    with pytest.raises(ValidationError):
-        run_pipeline(
-            PipelineConfig.model_validate(raw).model_dump(),
-            engine_version="dup-cols",
-            source_loader=loader,
-        )
-    assert reads == []
-    assert not (tmp_path / "out.csv").exists()
+    with pytest.raises(PipelineConfigError):
+        parse_pipeline_config(raw)
+
+
+def _two_tables(tmp_path: Path, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    raw = _config(tmp_path, [{"name": "s", "strategy": "redact"}])
+    raw["tables"] = [first, second]
+    return raw
+
+
+MASK_REDACT = {"name": "t", "columns": [{"name": "s", "strategy": "redact"}]}
+MASK_PASS = {"name": "t", "columns": [{"name": "s", "strategy": "passthrough"}]}
+GENERATE_T = {
+    "name": "t",
+    "row_count": 2,
+    "generate_columns": [{"name": "c", "type": "sequence", "start": 1}],
+}
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [(MASK_REDACT, MASK_PASS), (MASK_PASS, MASK_REDACT), (MASK_REDACT, GENERATE_T)],
+    ids=["mask+mask", "mask+mask-reversed", "mask+generate"],
+)
+def test_repeated_table_name_is_refused_at_the_later_declaration(
+    tmp_path: Path, first: dict[str, Any], second: dict[str, Any]
+) -> None:
+    assert _errors(_two_tables(tmp_path, first, second)) == [
+        (TABLE_DUPLICATE, ("tables", 1, "name"))
+    ]
+
+
+def test_every_later_table_repeat_is_reported(tmp_path: Path) -> None:
+    raw = _two_tables(tmp_path, MASK_REDACT, MASK_PASS)
+    raw["tables"].append(copy.deepcopy(MASK_PASS))
+    assert [loc for _, loc in _errors(raw)] == [("tables", 1, "name"), ("tables", 2, "name")]
+
+
+def test_distinct_table_names_are_allowed(tmp_path: Path) -> None:
+    other = {**MASK_PASS, "name": "u"}
+    raw = _two_tables(tmp_path, MASK_REDACT, other)
+    raw["sources"]["u"] = raw["sources"]["t"]
+    raw["targets"]["u"] = {"type": "file", "format": "csv", "path": str(tmp_path / "out_u.csv")}
+    PipelineConfig.model_validate(raw)
+
+
+def test_table_duplicate_message_carries_no_data_values(tmp_path: Path) -> None:
+    first = {
+        "name": "t",
+        "columns": [{"name": "s", "strategy": "redact", "provider_config": {"n": CANARY}}],
+    }
+    with pytest.raises(PipelineConfigError) as info:
+        parse_pipeline_config(_two_tables(tmp_path, first, MASK_PASS))
+    assert [(p.code, p.location) for p in info.value.problems] == [
+        (TABLE_DUPLICATE, "tables[1].name")
+    ]
+    assert CANARY not in str(info.value)
