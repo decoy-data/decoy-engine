@@ -143,6 +143,7 @@ from decoy_engine.declared_casting._boundary import seal_evidence
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
+from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources, release_table
 from decoy_engine.execution._fk_keys import (
     lossless_int_columns,
@@ -516,7 +517,12 @@ def run_sequential(
                 from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
                 out = pin_degenerate_to_string(
-                    table_from_pandas_keeping_maps(frames[table], src_schema), faker_pin
+                    table_from_pandas_keeping_maps(
+                        frames[table],
+                        src_schema,
+                        untouched_columns(nodes_by_table.get(table, ()), src_schema.names),
+                    ),
+                    faker_pin,
                 )
                 conversion_ms += (time.perf_counter() - t1) * 1000.0
                 if cast_run is not None:  # after the parent maps were built from the typed frame

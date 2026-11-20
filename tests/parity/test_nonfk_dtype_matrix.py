@@ -489,3 +489,113 @@ def test_an_admitted_masked_pair_runs_full_frame_on_the_kill_switch_lane(
     block = support.run_legacy(cfg, table).quality_metrics["auto_chunk"]
     assert block["mode"] == "full_frame", block
     assert "p (integer with nulls)" in block["reason"]
+
+
+# -- a masked map column converts as any masked column does (Codex final on #725) ---------------
+
+MASKED_MAP = {
+    "redact": support.redact_col,
+    "truncate": support.truncate_col,
+    "hash": support.hash_col,
+    "faker": support.faker_col,
+}
+
+
+def _fk_job_with_map(
+    tmp_path: Path, entry: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, pa.Table]]:
+    """customers -> orders, with a map column `m` on orders in the middle of the columns."""
+    import pyarrow.parquet as pq
+
+    from decoy_engine.config import PipelineConfig
+    from tests.unit.execution.run_stream import _support as rs
+
+    cfg, _lazy, tables = rs.fk_job(tmp_path)
+    maps = source_table("map", "later_mixed").column("p").slice(0, 31).combine_chunks()
+    orders = tables["orders"].add_column(0, "a", pa.array(range(31), pa.int64()))
+    orders = orders.add_column(2, "m", maps).append_column("z", pa.array(range(31), pa.int64()))
+    pq.write_table(orders, cfg["sources"]["orders"]["path"])
+    cols = next(t for t in cfg["tables"] if t["name"] == "orders")["columns"]
+    cols[:] = [support.pass_col("a"), cols[0], entry, support.pass_col("z")]
+    cfg = PipelineConfig.model_validate(cfg).model_dump()
+    return cfg, {"customers": tables["customers"], "orders": orders}
+
+
+def _assert_masked_map(
+    out: pa.Column | pa.ChunkedArray, source: pa.ChunkedArray, strategy: str
+) -> None:
+    assert not pa.types.is_map(out.type), out.type
+    got, want = out.to_pylist(), source.to_pylist()
+    assert [v is None for v in got] == [v is None for v in want]
+    if strategy == "redact":
+        assert {v for v in got if v is not None} == {"REDACTED"}
+
+
+@pytest.mark.parametrize("strategy", list(MASKED_MAP))
+def test_a_masked_map_column_on_full_frame_is_not_forced_back_to_a_map(
+    tmp_path: Path, strategy: str
+) -> None:
+    table = source_table("map", "later_mixed").slice(0, 40)
+    cfg = _cfg(tmp_path, table, MASKED_MAP[strategy]("p"))
+    got = support.run_default(cfg, table, auto_chunk_threshold_rows=10_000)
+    assert got.quality_metrics["auto_chunk"]["mode"] == "full_frame"
+    _assert_masked_map(got.outputs[support.TABLE].column("p"), table.column("p"), strategy)
+
+
+@pytest.mark.parametrize("route", ["sequential", "full_frame"])
+@pytest.mark.parametrize("strategy", list(MASKED_MAP))
+def test_a_masked_map_column_on_an_fk_job_is_not_forced_back_to_a_map(
+    tmp_path: Path, strategy: str, route: str
+) -> None:
+    from decoy_engine.execution import run_pipeline
+    from tests.unit.execution.run_stream import _support as rs
+
+    cfg, tables = _fk_job_with_map(tmp_path, MASKED_MAP[strategy]("m"))
+    result = run_pipeline(
+        cfg, sources=tables, engine_version=rs.ENGINE_VERSION, execution_mode=route
+    )
+    assert result.quality_metrics["execution"]["execution_mode"] == route
+    out = result.outputs["orders"]
+    _assert_masked_map(out.column("m"), tables["orders"].column("m"), strategy)
+
+
+@pytest.mark.parametrize("route", ["sequential", "full_frame"])
+def test_a_passthrough_map_keeps_its_place_between_other_columns(
+    tmp_path: Path, route: str
+) -> None:
+    from decoy_engine.execution import run_pipeline
+    from tests.unit.execution.run_stream import _support as rs
+
+    cfg, tables = _fk_job_with_map(tmp_path, support.pass_col("m"))
+    result = run_pipeline(
+        cfg, sources=tables, engine_version=rs.ENGINE_VERSION, execution_mode=route
+    )
+    out = result.outputs["orders"]
+    assert out.column_names == tables["orders"].column_names
+    assert out.schema.field("m").type == tables["orders"].schema.field("m").type
+    assert out.column("m").to_pylist() == tables["orders"].column("m").to_pylist()
+
+
+# AT-A8: `run_mask_chunked` called directly (`--chunked`) is unchanged by this slice. The cells
+# below pass on the base head too; they pin what the direct entry returns for a carried column.
+@pytest.mark.parametrize(
+    "type_class", ["int64_nulls", "uint64", "decimal128", "dictionary", "list"]
+)
+def test_at_a8_run_mask_chunked_direct_output_is_unchanged(tmp_path: Path, type_class: str) -> None:
+    from decoy_engine import run_mask_chunked
+    from tests.native._chunked_entry_support import ENGINE_VERSION, TABLE, key_provider, split
+
+    table = source_table(type_class, "later_mixed")
+    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    chunks = list(
+        run_mask_chunked(
+            cfg,
+            split(table, support.CHUNK),
+            table=TABLE,
+            engine_version=ENGINE_VERSION,
+            key_provider=key_provider(),
+        )
+    )
+    out = pa.concat_tables(chunks)
+    assert out.schema.field("p").type == table.schema.field("p").type
+    assert out.column("p").to_pylist() == table.column("p").to_pylist()

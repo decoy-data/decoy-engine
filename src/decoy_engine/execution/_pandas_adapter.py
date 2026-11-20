@@ -44,6 +44,7 @@ from decoy_engine.execution._adapter import (
     StrategyHandler,
     TokenVaultWriter,
 )
+from decoy_engine.execution._chunked_carry import untouched_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._exact_int_sources import register_exact_int_sources
 from decoy_engine.execution._faker_degenerate_pin import apply_degenerate_faker_pin
@@ -312,7 +313,11 @@ class PandasExecutionAdapter:
         t1 = time.perf_counter()
         outputs = apply_degenerate_faker_pin(
             {
-                t: table_from_pandas_keeping_maps(f, sources[t].schema if t in sources else None)
+                t: table_from_pandas_keeping_maps(
+                    f,
+                    sources[t].schema,
+                    untouched_columns((n for n in ordered if n.table == t), f.columns),
+                )
                 for t, f in frames.items()
             },
             plan,
