@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _CHILD = """
 import importlib.util, os, sys
 import decoy_engine.fileaccess._fdtree as shipped
@@ -35,3 +37,15 @@ def test_fileaccess_imports_without_fcntl(tmp_path: Path) -> None:
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.split() == ["False", "True"]  # unlocked, and no fcntl bound
+
+
+def test_win32_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AT-E14 (E2a cell): on win32 the stage reclaim returns an empty report and touches nothing."""
+    from decoy_engine.fileaccess import ReclaimReport, _fdtree, reclaim_stages
+    from tests.fileaccess.publication._reclaim_support import make_stage, snapshot
+
+    make_stage(tmp_path)
+    before = snapshot(tmp_path)
+    monkeypatch.setattr(_fdtree, "fcntl", None)
+    assert reclaim_stages(tmp_path, apply=False, min_age_s=0) == ReclaimReport()
+    assert snapshot(tmp_path) == before

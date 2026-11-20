@@ -151,7 +151,7 @@ _OPENAT2, _DURABLE, _LOCAL, _OUTPUT = (
     _FA + "_local.py",
     _FA + "_output.py",
 )
-_PROTECTED, _SCRATCH = _FA + "_protected_dir.py", _FA + "_scratch.py"
+_SCRATCH = _FA + "_scratch.py"
 
 # Sites that stay until the owning slice adds an `if not _osflags.WINDOWS` branch around them.
 # (rel path, rule) -> (exact site count, owner, reason). An entry only shrinks: the table is
@@ -182,11 +182,6 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
         "the dir_fd stage and publication paths get a win32 arm in EW3",
     ),
     (_OUTPUT, "fchmod"): (3, "EW3", "private-file creation gets a win32 arm in EW3 and EW4"),
-    (_PROTECTED, "geteuid"): (
-        2,
-        "EW4",
-        "the POSIX owner check is the non-Windows arm; EW4 scopes it",
-    ),
     (_SCRATCH, "dir-fd"): (5, "EW5", "ScratchArena gets its Windows arm in EW5"),
     (_SCRATCH, "posix-import"): (
         1,

@@ -34,6 +34,10 @@
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
    "max": 4
   },
+  "decoy_engine/fileaccess/_reclaim.py": {
+   "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
+   "max": 2
+  },
   "decoy_engine/fileaccess/_rooted.py": {
    "reason": "EW1 census of platform reads in this module, measured at the slice head; may only shrink",
    "max": 1
