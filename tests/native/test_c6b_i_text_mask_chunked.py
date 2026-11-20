@@ -109,7 +109,7 @@ def test_empty_all_null_and_valued_chunks_interleaved_are_identical() -> None:
 def test_a_multi_chunk_run_over_many_rows_is_identical_on_both_legs() -> None:
     values = [None if i % 11 == 3 else CORPUS[i % len(CORPUS)] for i in range(20_007)]
     native, forced = run_pair(
-        [tm_col(per_detector_strategy={"ssn": "faker"}), passthrough("p")],
+        [tm_col(per_detector_strategy={"ssn": "fpe", "us_phone": "redact"}), passthrough("p")],
         split(source(values), 5_000),
     )
     assert len(native.out) == 5
@@ -126,7 +126,7 @@ def test_two_text_mask_columns_with_different_configs_each_match_the_oracle() ->
         }
     )
     columns = [
-        tm_col("a", detectors=["ssn"], per_detector_strategy={"ssn": "faker"}),
+        tm_col("a", detectors=["ssn"], per_detector_strategy={"ssn": "redact"}),
         tm_col("b", token="<X>"),
         passthrough("p"),
     ]
@@ -136,20 +136,21 @@ def test_two_text_mask_columns_with_different_configs_each_match_the_oracle() ->
     _assert_native_arrow_python(native, "b")
 
 
-def test_faker_override_maps_repeated_values_consistently_across_chunks() -> None:
-    # The disputed branch: a built-in detector OVERRIDDEN to faker. The same SSN in different chunks
-    # synthesizes to the same value (keyed on the matched value, not position/chunk), so two
-    # identical cells one row apart mask identically even when they land in different chunks.
+def test_fpe_override_maps_repeated_values_consistently_across_chunks() -> None:
+    # The same SSN in different chunks encrypts to the same value (keyed on the matched value, not
+    # position/chunk), so two identical cells one row apart mask identically even when they land in
+    # different chunks. (E-F0: faker no longer takes a built-in detector; the faker kernel is
+    # covered by the direct cells in tests/unit/plan/test_text_mask_strategy_check.py.)
     repeated = ["ssn 123-45-6789", "ssn 987-65-4321", "ssn 123-45-6789", "ssn 987-65-4321"]
     native, forced = run_pair(
-        [tm_col(per_detector_strategy={"ssn": "faker"}), passthrough("p")],
+        [tm_col(per_detector_strategy={"ssn": "fpe"}), passthrough("p")],
         split(source(repeated), 1),  # one row per chunk, so the repeats span chunk boundaries
     )
     assert_same_as_oracle(native, forced)
     masked = [v for c in native.out for v in c.column("s").to_pylist()]
-    assert masked[0] == masked[2]  # same SSN -> same synthetic value across chunks
+    assert masked[0] == masked[2]  # same SSN -> same encrypted value across chunks
     assert masked[1] == masked[3]
-    assert masked[0] != masked[1]  # different SSNs -> different synthetic values
+    assert masked[0] != masked[1]  # different SSNs -> different encrypted values
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +365,7 @@ def _rule(column: dict[str, Any], first: pa.Table) -> Any:
 
 def test_an_admitted_text_mask_config_is_string_pinned() -> None:
     assert "s" in _rule(tm_col(), source(CORPUS)).string_columns
-    assert "s" in _rule(tm_col(per_detector_strategy={"ssn": "faker"}), source([])).string_columns
+    assert "s" in _rule(tm_col(per_detector_strategy={"ssn": "fpe"}), source([])).string_columns
 
 
 @pytest.mark.parametrize("name", sorted(EXCLUDED_CONFIGS))
@@ -390,10 +391,10 @@ def _text_values(config: dict[str, Any], *, secret: bytes | None = None) -> list
 
 
 def test_output_is_reproducible_and_keyed() -> None:
-    columns = [tm_col(per_detector_strategy={"ssn": "faker"}), passthrough("p")]
+    columns = [tm_col(per_detector_strategy={"ssn": "fpe"}), passthrough("p")]
     base = _text_values(make_config(columns), secret=bytes(range(32)))
     assert base == _text_values(make_config(columns), secret=bytes(range(32)))  # same key, same out
-    # text_mask is keyed: a different secret changes the fpe/faker output (unlike text_redact).
+    # text_mask is keyed: a different secret changes the fpe output (unlike text_redact).
     assert base != _text_values(make_config(columns), secret=bytes(range(1, 33)))
 
 
