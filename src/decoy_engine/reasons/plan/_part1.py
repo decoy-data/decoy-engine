@@ -84,6 +84,7 @@ __all__ = [
     "DATE_SHIFT_GROUP_BY_WITH_WHEN_UNSUPPORTED",
     "DATE_SHIFT_MISSING_GROUP_BY_REF",
     "DATE_SHIFT_PRESERVE_VALUES_INVALID",
+    "DATE_SHIFT_REQUIRES_DATE_FORMAT",
     "DATE_SHIFT_REQUIRES_NAMESPACE",
     "DATE_SHIFT_WINDOW_INVALID",
     "DERIVED_AGGREGATE_COLUMN_MISSING",
@@ -382,6 +383,9 @@ CATEGORICAL_REQUIRES_NAMESPACE = _d(
 )
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace.", since="1.26.0"
+)
+DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
+    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
 )
 DATE_SHIFT_WINDOW_INVALID = _d(
     "date_shift_window_invalid", "Date shift window invalid.", since=UNRELEASED

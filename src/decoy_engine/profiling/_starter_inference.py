@@ -22,7 +22,7 @@ from typing import Any
 
 from decoy_engine.profiling import recommendations
 
-__all__ = ["StarterDecision", "infer_starter_strategy"]
+__all__ = ["StarterDecision", "detected_date_config", "infer_starter_strategy"]
 
 _AMBIGUITY_WINDOW = 0.1
 _CONFIDENT_BUCKETS = ("high", "medium")
@@ -79,14 +79,33 @@ class StarterDecision:
 _FALLBACK = StarterDecision(strategy="redact", review=_FALLBACK_REVIEW)
 
 
-def _from_descriptor(detector_id: str, bucket: str | None) -> StarterDecision:
+def detected_date_config(choice: recommendations.StarterChoice, match: Any) -> dict[str, Any] | None:
+    """The choice's settings with the scan's date format, or None when no format can be written.
+
+    None for a match with no variant, a variant that covers only part of the hits, or any hit
+    that does not parse under it (`format_pattern_complete`), so a starter never writes a
+    `date_shift` that would fail rows or not compile.
+    """
+    fmt = getattr(match, "format_pattern", None)
+    if not isinstance(fmt, str) or getattr(match, "format_pattern_complete", False) is not True:
+        return None
+    return {**choice.provider_config, "date_format": fmt}
+
+
+def _from_descriptor(detector_id: str, bucket: str | None, match: Any = None) -> StarterDecision:
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
         return _FALLBACK
+    provider_config: Mapping[str, Any] = choice.provider_config
+    if choice.detected_date_format:
+        detected = detected_date_config(choice, match)
+        if detected is None:
+            return _FALLBACK
+        provider_config = MappingProxyType(detected)
     return StarterDecision(
         strategy=choice.strategy,
         provider=choice.provider,
-        provider_config=choice.provider_config,
+        provider_config=provider_config,
         review=choice.review,
         detector_id=detector_id,
         confidence_bucket=bucket,
@@ -119,7 +138,7 @@ def infer_starter_strategy(field_stats: Any) -> StarterDecision:
         top = confident[0]
         bucket = getattr(top, "confidence", None)
         base = _from_descriptor(
-            getattr(top, "detector_id", ""), bucket if isinstance(bucket, str) else None
+            getattr(top, "detector_id", ""), bucket if isinstance(bucket, str) else None, top
         )
         ambiguous = (
             len(confident) > 1

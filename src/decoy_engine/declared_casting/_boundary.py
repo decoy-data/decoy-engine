@@ -161,6 +161,20 @@ def declared_integer_columns(plan: Any) -> dict[str, set[str]]:
     return out
 
 
+def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
+    """(table, column) of each date_shift column that declares a date parse format.
+
+    These are the columns that may run `date_shift` with no `date_format`: the declared contract
+    parses the cells first and the handler sees dates. The one list the runtime backstop reads.
+    """
+    block = getattr(plan, "declared_casting", None)
+    return frozenset(
+        (c.table, c.column)
+        for c in getattr(block, "columns", None) or ()
+        if c.strategy == "date_shift" and contract_model(c).logical_type == "date"
+    )
+
+
 @dataclass
 class CastBatch:
     """One cast batch: the typed rows that continue, where they came from, and the raw framing.

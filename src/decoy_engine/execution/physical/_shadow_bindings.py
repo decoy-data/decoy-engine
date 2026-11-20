@@ -286,8 +286,8 @@ def execution_binding_for_slice_node(
     # row-local, non-global); a future strategy added to SLICE_STRATEGIES
     # without updating the shadow coordinator's "no prepasses" contract
     # (C1) must fail loudly here rather than bind silently. date_shift declares
-    # `format_detect` only without an explicit date_format, and that config is
-    # rejected by `date_shift_config_rejection`, so it returned above.
+    # no prepass: plan compile requires its date_format, and the declared-casting column that
+    # may lack one is rejected by `date_shift_config_rejection`, so it returned above.
     if (
         requirements.required_prepasses
     ):  # pragma: no cover - unreachable while SLICE_STRATEGIES stays prepass-free

@@ -4,8 +4,8 @@ Date-format helpers shared by the date strategies.
 The date shift itself runs in ``execution/_strategies/_date_shift.py``: a keyed offset derived
 from the admitted mask secret. The V1 class that lived here, with an MD5 fallback offset that
 could be reversed by search, was deleted (roadmap row 24zb). What stays is format detection
-(``_detect_format``) and the common-format list (``_COMMON_FORMATS``), imported by the date_shift
-handler, ``bucket_perturb`` and ``text_mask``, and the one shift-window resolver
+(``_detect_format``) and the common-format list (``_COMMON_FORMATS``), imported by
+``bucket_perturb`` and ``text_mask`` (date_shift no longer detects: its format is required), and the one shift-window resolver
 (``shift_window``, ``shift_window_problem``) that every date_shift route reads its bounds from.
 """
 

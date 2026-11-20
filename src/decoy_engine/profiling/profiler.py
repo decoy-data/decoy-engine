@@ -130,6 +130,14 @@ def _format_pattern_from_detectors(
     return None
 
 
+def _format_pattern_complete_from_detectors(detector_matches: list[DetectorMatch]) -> bool:
+    """The completeness of the same match `_format_pattern_from_detectors` takes."""
+    for m in detector_matches:
+        if m.format_pattern is not None:
+            return m.format_pattern_complete
+    return False
+
+
 # ── distribution + detection trail ────────────────────────────────────────────
 
 
@@ -260,6 +268,7 @@ def _profile_column_stats(
     # Item 65 - format-preservation hints. Both fields are optional; the
     # masking-strategy post-pass reads them when `preserve_format=true`.
     fs.format_pattern = _format_pattern_from_detectors(fs.detector_matches)
+    fs.format_pattern_complete = _format_pattern_complete_from_detectors(fs.detector_matches)
     fs.casing_pattern = _detect_casing(series)
 
     # Plan B-2 - column-shape signals FORECAST choosers read.

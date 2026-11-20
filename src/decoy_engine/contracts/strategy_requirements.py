@@ -60,7 +60,14 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
     {
         "hash": (_namespace("hash"),),
         "fpe": (_namespace("fpe"),),
-        "date_shift": (_namespace("date_shift"),),
+        "date_shift": (
+            _namespace("date_shift"),
+            StrategyRequirement(
+                (*_PROVIDER, "date_format"),
+                reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT,
+                "date_shift needs provider_config.date_format, for example %Y-%m-%d.",
+            ),
+        ),
         "bucket_perturb": (_namespace("bucket_perturb"),),
         "categorical": (_namespace("categorical"),),
         "tokenize": (_namespace("tokenize"),),
