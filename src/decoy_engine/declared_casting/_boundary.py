@@ -26,6 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
+from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
     _counts as K,  # noqa: N812 -- short alias for the contract namespace
@@ -159,6 +160,25 @@ def declared_integer_columns(plan: Any) -> dict[str, set[str]]:
         if contract_model(c).logical_type == "integer":
             out.setdefault(c.table, set()).add(c.column)
     return out
+
+
+def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
+    """(table, column) of each date_shift column that declares a date parse format.
+
+    These are the columns that may run `date_shift` with no `date_format`: the declared contract
+    parses the cells first and the handler sees dates. The one list the runtime backstop reads.
+    """
+    block = getattr(plan, "declared_casting", None)
+    return frozenset(
+        (c.table, c.column)
+        for c in getattr(block, "columns", None) or ()
+        if c.strategy == "date_shift"
+        and date_shift_owns_declared_format(
+            nested=False,
+            logical_type=contract_model(c).logical_type,
+            has_parse_format=True,
+        )
+    )
 
 
 @dataclass

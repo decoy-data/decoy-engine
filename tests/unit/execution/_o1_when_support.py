@@ -124,7 +124,7 @@ def build_case(
             _col(
                 "d",
                 "date_shift",
-                provider_config={"max_shift_days": 3, "group_by": "v"},
+                provider_config={"max_shift_days": 3, "group_by": "v", "date_format": "%Y-%m-%d"},
                 deterministic=True,
                 namespace="ns_d",
             )

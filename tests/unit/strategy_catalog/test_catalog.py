@@ -469,7 +469,7 @@ EXPECTED_OPTIONS: dict[str, tuple[tuple[Any, ...], ...]] = {
     "date_shift": (
         ("min_days", "int", False, _PC, None, -30),
         ("max_days", "int", False, _PC, None, 30),
-        ("date_format", "str", False, _PC, None, "%Y-%m-%d"),
+        ("date_format", "str", True, _PC, None, "%Y-%m-%d"),
     ),
     "fpe": (
         ("charset", "str", False, _PC, None, "digits"),
@@ -540,7 +540,6 @@ def test_each_offered_row_equals_the_expected_table_exactly(info: StrategyInfo) 
 # Options whose effect the shared fixture cannot show; each reason is why, and where a probe
 # value can show it, a test below does.
 NOT_VISIBLE_ON_FIXTURE = {
-    ("date_shift", "date_format"): "the fixture already uses the auto-detected format",
     ("bucket_perturb", "date_format"): "the fixture already uses the auto-detected format",
     ("fpe", "charset"): "digits is the default and the fixture holds only digits",
     ("fpe", "preserve_separators"): "the digit-only fixture has no separators to preserve",
