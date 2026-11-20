@@ -32,6 +32,7 @@ from decoy_engine.fileaccess._entry import (
     scope,
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
+from decoy_engine.fileaccess._fdtree import STAGE_MARKER, stage_entries
 from decoy_engine.fileaccess._local import (
     LocalFileAccess,
     engine_dir_handle,
@@ -132,6 +133,8 @@ __all__ = [
     "CONTRACT_VERSION",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "STAGE_MARKER",
+    "STAGE_MARKER",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
@@ -190,5 +193,6 @@ __all__ = [
     "scratch_native_iter",
     "scrub",
     "shown",
+    "stage_entries",
     "write_private",
 ]

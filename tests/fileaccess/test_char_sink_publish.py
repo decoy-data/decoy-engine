@@ -23,7 +23,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME, PublicationRefused
 
 TABLE = pa.table({"a": [1, 2, 3]})

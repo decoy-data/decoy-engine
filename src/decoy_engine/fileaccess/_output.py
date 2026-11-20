@@ -54,9 +54,6 @@ STAGE_PREFIX: dict[str, str] = {
     "pack": "_decoy_pack_stage_",
     "publication": "._decoy_publication_pending_",
 }
-STAGE_MARKER = ".decoy-publication-stage"  # F26 G1(d) proof, kept in a bound unit as metadata
-STAGE_MAGIC = b"decoy-publication-stage-v1:"
-STAGE_HEX = "[0-9a-f]{12}"  # the token_hex(6) a stage name carries
 STAGE_SUFFIX: dict[str, str] = {"quarantine": ".jsonl", "quarantine_direct": ".jsonl"}
 # Labels whose stage holds secrets or real data, so the stage file is 0600 at creation.
 PRIVATE_LABELS: frozenset[str] = frozenset({"quarantine", "isolated", "vault", "publication"})
@@ -228,11 +225,11 @@ def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
         _fdtree.hold_stage_lock(stage_fd)
         token, marker = name.removeprefix(STAGE_PREFIX["publication"]), -1
         try:
-            marker = create_private_at(stage_fd, STAGE_MARKER)
-            _fdtree._write_marker(marker, STAGE_MAGIC, token)
+            marker = create_private_at(stage_fd, _fdtree.STAGE_MARKER)
+            _fdtree._write_marker(marker, _fdtree.STAGE_MAGIC, token)
         finally:
             _close(marker)
-        if _fdtree._prove_marker(stage_fd, STAGE_MARKER, STAGE_MAGIC, STAGE_HEX) != token:
+        if _fdtree.prove_stage(stage_fd) != token:
             raise OSError(errno.EIO, os.strerror(errno.EIO))
     except BaseException:
         with contextlib.suppress(OSError):

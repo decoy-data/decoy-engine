@@ -18,7 +18,7 @@ import pytest
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.fileaccess._output import STAGE_MARKER
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _b6b_support as b6b

@@ -24,8 +24,7 @@ import pytest
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.fileaccess._fdtree import _prove_marker
-from decoy_engine.fileaccess._output import STAGE_HEX, STAGE_MAGIC, STAGE_MARKER
+from decoy_engine.fileaccess._fdtree import STAGE_HEX, STAGE_MAGIC, STAGE_MARKER, _prove_marker
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests._declared_schema import declare_rest

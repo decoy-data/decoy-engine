@@ -18,6 +18,7 @@ import errno
 import os
 import re
 import stat
+from typing import Any
 
 from decoy_engine.fileaccess import _osflags
 
@@ -27,8 +28,19 @@ except ImportError:  # win32 has no fcntl: the lock is skipped there
     fcntl = None  # type: ignore[assignment]
 
 _DIR_FLAGS = _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC
+STAGE_MARKER = ".decoy-publication-stage"  # F26 G1(d) proof, kept in a bound unit as metadata
+STAGE_MAGIC = b"decoy-publication-stage-v1:"
+STAGE_HEX = "[0-9a-f]{12}"  # the token_hex(6) a stage name carries
 # Longer than any magic plus token plus newline: a read of this size that fills it is not a marker.
 _MARKER_MAX = 128
+
+
+def stage_entries(handle: Any) -> list[str]:
+    """The sorted entry names of a publication stage, without its reserved marker.
+
+    The one place that knows the marker is not content: a caller that checks what a stage holds
+    lists through here, so the marker never reads as an extra file."""
+    return sorted(entry.name for entry in handle.entries() if entry.name != STAGE_MARKER)
 
 
 def _close(fd: int) -> None:
@@ -39,7 +51,9 @@ def _close(fd: int) -> None:
 def _exact_stat(found: os.stat_result, kind: int, mode: int) -> bool:
     """`found` is of file type `kind`, owned by the effective user, with exactly `mode`."""
     same = stat.S_IFMT(found.st_mode) == kind and stat.S_IMODE(found.st_mode) == mode
-    return same and found.st_uid == os.geteuid()
+    if not _osflags.WINDOWS:  # no owner uid on win32; nothing here is reached there
+        return same and found.st_uid == os.geteuid()
+    return False
 
 
 def hold_stage_lock(fd: int) -> bool:
@@ -66,46 +80,55 @@ def _write_marker(fd: int, magic: bytes, token: str) -> None:
         raise OSError(errno.EIO, os.strerror(errno.EIO))
 
 
+def prove_stage(stage_fd: int) -> str | None:
+    """The token of a valid publication stage marker in `stage_fd`, or None."""
+    return _prove_marker(stage_fd, STAGE_MARKER, STAGE_MAGIC, STAGE_HEX)
+
+
 def _prove_marker(dir_fd: int, name: str, magic: bytes, token_pattern: str) -> str | None:
     """The token of a valid marker `name` under `dir_fd`, or None.
 
     Valid means: opened without following a link, a regular file owned by the effective user with
     mode exactly 0600, and content exactly `magic`, a token matching `token_pattern`, and one
-    newline. Any `OSError` is None; nothing is raised and nothing is changed."""
-    try:
-        # Literal read-only flags at each open, so the private-file sentry can read them.
-        fd = os.open(
-            name,
-            _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
-            dir_fd=dir_fd,
-        )
-    except OSError:
-        return None
-    try:
-        if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
+    newline. Any `OSError` is None; nothing is raised and nothing is changed. Always None on
+    win32, where no stage is marked."""
+    if not _osflags.WINDOWS:
+        try:
+            fd = os.open(
+                name,
+                _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.NONBLOCK | _osflags.CLOEXEC,
+                dir_fd=dir_fd,
+            )
+        except OSError:
             return None
-        data = os.pread(fd, _MARKER_MAX, 0)
-    except OSError:
-        return None
-    finally:
-        _close(fd)
-    found = re.fullmatch(re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n", data)
-    return found.group(1).decode("ascii") if found else None
+        try:
+            if not _exact_stat(os.fstat(fd), stat.S_IFREG, 0o600):
+                return None
+            data = os.pread(fd, _MARKER_MAX, 0)
+        except OSError:
+            return None
+        finally:
+            _close(fd)
+        pattern = re.escape(magic) + b"(" + token_pattern.encode("ascii") + b")\n"
+        found = re.fullmatch(pattern, data)
+        return found.group(1).decode("ascii") if found else None
+    return None
 
 
 def _rmtree_fd(dir_fd: int) -> None:
-    """Remove everything beneath `dir_fd` without following any link."""
-    for entry in list(os.scandir(dir_fd)):
-        if entry.is_dir(follow_symlinks=False):
-            child = os.open(
-                entry.name,
-                _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
-                dir_fd=dir_fd,
-            )
-            try:
-                _rmtree_fd(child)
-            finally:
-                _close(child)
-            os.rmdir(entry.name, dir_fd=dir_fd)
-        else:
-            os.unlink(entry.name, dir_fd=dir_fd)
+    """Remove everything beneath `dir_fd` without following any link (a no-op on win32)."""
+    if not _osflags.WINDOWS:
+        for entry in list(os.scandir(dir_fd)):
+            if entry.is_dir(follow_symlinks=False):
+                child = os.open(
+                    entry.name,
+                    _osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
+                    dir_fd=dir_fd,
+                )
+                try:
+                    _rmtree_fd(child)
+                finally:
+                    _close(child)
+                os.rmdir(entry.name, dir_fd=dir_fd)
+            else:
+                os.unlink(entry.name, dir_fd=dir_fd)
