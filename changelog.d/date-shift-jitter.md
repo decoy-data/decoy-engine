@@ -2,4 +2,4 @@ Breaking: date_shift output changes. It now honours `jitter_days: N` as the wind
 
 ### Changed (date_shift reads one window resolver, DATE-SHIFT-JITTER, 2026-11-19)
 
-Output-changing for every config that sets `jitter_days`, see the first line. The date_shift handler, the native operator parameters, the native admission and the plan compile check all read the window through `shift_window` and `shift_window_problem` in `transforms/date_shift.py`. New plan reason `date_shift_window_invalid`. A sentry fails on a new route that reads `min_days`, `max_days` or `jitter_days` itself.
+Output-changing for every config that sets `jitter_days`, see the first line. The date_shift handler, the native operator parameters, the native admission and the plan compile check all read the window through `shift_window` and `shift_window_problem` in `transforms/date_shift.py`. New reason, pending: `plan/date_shift_window_invalid`. A sentry fails on a new route that reads `min_days`, `max_days` or `jitter_days` itself.
