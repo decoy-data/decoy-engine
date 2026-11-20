@@ -13,6 +13,7 @@ jobs = [
   "dp-certified-gate",
   "determinism",
   "pg-gate",
+  "duckdb2-gate",
   "import-smoke",
   "faker-output-lock",
 ]
