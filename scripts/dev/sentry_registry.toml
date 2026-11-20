@@ -206,6 +206,10 @@ id = "parquet-intermediate-writers"
 baseline = "tests/sentry/baselines/parquet-intermediate-writers.json"
 
 [[sentry]]
+id = "metadata-carrier-allow"
+baseline = "tests/sentry/baselines/metadata-carrier-allow.json"
+
+[[sentry]]
 id = "date-shift-window-reader"
 baseline = "tests/sentry/baselines/date-shift-window-reader.json"
 
