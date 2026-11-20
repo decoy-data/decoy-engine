@@ -111,7 +111,10 @@ class PgAdmin:
         )
 
     def run(self, sql: str) -> None:
-        self._c.execute("CALL postgres_execute('admin', ?)", [sql])
+        # A bound parameter makes DuckDB 2 prepare the text on the server, and Postgres refuses
+        # several statements in one prepared statement. A literal goes out as a plain query.
+        literal = "'" + sql.replace("'", "''") + "'"
+        self._c.execute(f"CALL postgres_execute('admin', {literal})")
 
     def close(self) -> None:
         self._c.close()
