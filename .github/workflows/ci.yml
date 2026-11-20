@@ -448,6 +448,7 @@ jobs:
         # zero-skip guard below. A sentry (test_ci_lanes.py) fails if a marked file falls outside.
         run: >
           pytest tests/connectors/test_postgres_snapshot.py
+          tests/connectors/test_postgres_write_spike.py
           -m pg_integration --tb=short --junitxml=pg.xml
       - name: Guard -- the suites actually executed (passed>0, none skipped/errored/failed)
         run: python scripts/dev/junit_ran.py pg.xml
