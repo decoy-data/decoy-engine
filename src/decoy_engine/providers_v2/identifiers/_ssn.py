@@ -32,6 +32,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import require_locale
 
 # SSA POMS blocklist:
 _INVALID_AREAS: frozenset[int] = frozenset({0, 666, *range(900, 1000)})
@@ -107,13 +108,12 @@ class SsnValidator:
         return not _is_blocklisted(digits)
 
 
+_SUPPORTED_LOCALES = ("en_US",)
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
     """Non-deterministic SSN generator. Loops until a non-blocklisted draw."""
-    if locale != "en_US":
-        raise ProviderError(
-            code=reasons.provider.UNSUPPORTED_LOCALE,
-            message=f"SSN is US-only; got locale={locale!r}.",
-        )
+    require_locale("SSN", locale, _SUPPORTED_LOCALES)
     while True:
         value = int(rng.integers(0, 1_000_000_000))
         candidate = _format_ssn(value)
@@ -190,7 +190,7 @@ class SsnAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_SSN_REGEX,
             blocklist_validators=("ssa_pom_blocklist",),

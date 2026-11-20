@@ -37,6 +37,7 @@ MINIMAL: dict[str, dict[str, Any]] = {
     "constant": {"value": "US"},
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"codeset": "icd10"},
+    "provider": {"provider": "synthetic_npi"},
 }
 
 

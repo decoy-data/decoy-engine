@@ -28,6 +28,7 @@ from pathlib import Path
 
 import decoy_engine.generation._faker_pool as _faker_pool
 import decoy_engine.generation.synthesize as _synthesize
+import decoy_engine.generators.derivation as _derivation
 from decoy_engine.generation.pool._sampler import PoolSampler
 from decoy_engine.generators.derivation import GenDeriveContext, with_table
 from decoy_engine.providers import register_faker_provider, unregister_faker_provider
@@ -85,9 +86,16 @@ def test_pool_bridge_draws_from_both_frozen_hmac_labels() -> None:
     """`build_and_sample` must derive both the BUILD and SELECTION seeds via
     `GenDeriveContext.family_bytes`, under the two frozen label constants the
     catalogued `gen.faker_pool_build`/`gen.faker_pool_selection` sites document."""
-    source = inspect.getsource(_faker_pool)
-    tree = ast.parse(source)
-    build_fn = _find_function(tree, "build_and_sample")
+    # The seed pairing lives in one helper; `build_and_sample` reaches it through the pool bridge.
+    called = {
+        n.func.id
+        for n in ast.walk(
+            _find_function(ast.parse(inspect.getsource(_faker_pool)), "build_and_sample")
+        )
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "_pool_seeds" in called
+    build_fn = _find_function(ast.parse(inspect.getsource(_derivation)), "pool_seeds")
     family_bytes_args: list[str] = []
     for node in ast.walk(build_fn):
         if (
@@ -98,12 +106,12 @@ def test_pool_bridge_draws_from_both_frozen_hmac_labels() -> None:
             and isinstance(node.args[0], ast.Name)
         ):
             family_bytes_args.append(node.args[0].id)
-    assert set(family_bytes_args) == {"_BUILD_FAMILY", "_SELECTION_FAMILY"}, (
-        f"build_and_sample must derive exactly the build + selection seeds via "
+    assert set(family_bytes_args) == {"POOL_BUILD_FAMILY", "POOL_SELECTION_FAMILY"}, (
+        f"pool_seeds must derive exactly the build + selection seeds via "
         f"family_bytes; found calls keyed on {family_bytes_args}"
     )
-    assert _faker_pool._BUILD_FAMILY == "faker_pool_build"
-    assert _faker_pool._SELECTION_FAMILY == "faker_pool_selection"
+    assert _faker_pool.POOL_BUILD_FAMILY == "faker_pool_build"
+    assert _faker_pool.POOL_SELECTION_FAMILY == "faker_pool_selection"
 
 
 def test_new_pool_bridge_module_is_the_only_uncatalogued_file() -> None:

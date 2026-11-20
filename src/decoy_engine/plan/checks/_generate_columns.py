@@ -23,6 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.config import is_exact_sequence_key
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
+from decoy_engine.generators.derivation import DEFAULT_GENERATE_LOCALE
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs
@@ -30,6 +31,7 @@ from decoy_engine.plan._checks_grouped_series import check_grouped_series_refs
 from decoy_engine.plan._checks_windowed_date import check_windowed_date_refs
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._formula_types import check_formula_text_use
+from decoy_engine.plan.checks._generate_providers import registry_provider_names
 from decoy_engine.plan.checks._relationship_keys import check_generated_parent_keys
 
 __all__ = ["DEFERRED", "check_faker_default_locale", "check_generate_columns"]
@@ -158,6 +160,8 @@ def _check_column(
     kind = col.get("type")
     if kind == "faker":
         fakers.check(table, col, default_locale)
+    elif kind == "provider":
+        _check_provider(table, col, default_locale)
     elif kind == "categorical":
         _check_categories(table, col)
     elif kind == "reference":
@@ -167,6 +171,23 @@ def _check_column(
     if kind == "formula":
         _check_formula(table, cols, index, types)
     _check_input_edges(table, cols, index, tables)
+
+
+# ---- provider -------------------------------------------------------------------------------
+
+
+def _check_provider(
+    table: str, col: dict[str, Any], default_locale: str | None | _Deferred
+) -> None:
+    """A deferred default leaves a locale-less column to `check_faker_default_locale`."""
+    from decoy_engine.plan.checks._generate_providers import check_provider_column
+
+    known = (
+        None
+        if isinstance(default_locale, _Deferred)
+        else (default_locale or DEFAULT_GENERATE_LOCALE)
+    )
+    check_provider_column(table, col, default_locale=known)
 
 
 # ---- faker ----------------------------------------------------------------------------------
@@ -222,7 +243,11 @@ class _FakerView:
         fake, names = self._locale(effective)
         faker_type = col.get("faker_type", "word")
         if faker_type not in names and not has_custom_faker_override(faker_type, self._snapshot):
-            raise _refusal(reasons.plan.GENERATE_FAKER_TYPE_UNKNOWN, table, name, "faker_type")
+            if faker_type in registry_provider_names():
+                code = reasons.plan.GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER
+            else:
+                code = reasons.plan.GENERATE_FAKER_TYPE_UNKNOWN
+            raise _refusal(code, table, name, "faker_type")
         kwargs = col.get("faker_kwargs")
         if isinstance(kwargs, dict) and kwargs and not self._kwargs_known(fake, faker_type, kwargs):
             raise _refusal(reasons.plan.GENERATE_FAKER_KWARGS_UNKNOWN, table, name, "faker_kwargs")
@@ -525,10 +550,8 @@ def check_faker_default_locale(
         if table is not None and entry["name"] != table:
             continue
         for col in entry.get("generate_columns") or []:
-            if (
-                isinstance(col, dict)
-                and isinstance(col.get("name"), str)
-                and col.get("type") == "faker"
-                and not col.get("locale")
-            ):
-                view.check(entry["name"], col, instance_default_locale)
+            if isinstance(col, dict) and isinstance(col.get("name"), str) and not col.get("locale"):
+                if col.get("type") == "faker":
+                    view.check(entry["name"], col, instance_default_locale)
+                elif col.get("type") == "provider":
+                    _check_provider(entry["name"], col, instance_default_locale)

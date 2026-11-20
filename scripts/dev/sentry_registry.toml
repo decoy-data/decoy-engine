@@ -25,6 +25,9 @@ approved_growth = [
   { key = "decoy_engine/signed_evidence/_jws.py::SigningInputSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
   { key = "decoy_engine/signed_evidence/_signer.py::LocalEs256Signer.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
   { key = "decoy_engine/signed_evidence/_signer.py::ResolvedSigner.sign_signing_input::signing_input", decision = "owner 2026-11-17 F33 census rows for sign_signing_input" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw::build_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw::selection_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
+  { key = "decoy_engine/generation/kinds/_provider.py::_draw_keyed::value_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
 ]
 
 [[sentry]]

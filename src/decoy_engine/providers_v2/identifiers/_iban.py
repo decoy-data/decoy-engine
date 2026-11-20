@@ -41,6 +41,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import ENGINE_LOCALES, require_locale
 
 # Per-country IBAN total length (country + check + BBAN) per the
 # SWIFT IBAN registry. Every country in _IBAN_COUNTRIES has an
@@ -200,7 +201,11 @@ class IbanValidator:
         return _iban_valid(value)
 
 
+_SUPPORTED_LOCALES = ENGINE_LOCALES
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
+    require_locale("IBAN", locale, _SUPPORTED_LOCALES)
     country = _COUNTRIES_ORDERED[rng.integers(0, len(_COUNTRIES_ORDERED))]
     total_length = _IBAN_LENGTH_BY_COUNTRY[country]
     bban_length = total_length - 4
@@ -271,7 +276,7 @@ class IbanAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_IBAN_REGEX,
             blocklist_validators=("iban_mod97_check",),

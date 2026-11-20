@@ -410,6 +410,12 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
         {"file": _S, "codeset": _S, "value_column": _S, "weight_column": _S},
         one_of=("file", "codeset"),
     ),
+    # A registry provider by name. `field` and `group` bind one slot of a composite provider to a
+    # row; the plan check decides which providers take them.
+    "provider": TypeOptions(
+        {"provider": _S, "locale": _S, "field": _S, "group": _S},
+        required=("provider",),
+    ),
     "distribution": TypeOptions(
         {
             "family": OptionSpec(_family),

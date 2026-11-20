@@ -35,7 +35,11 @@ import pyarrow.compute as pc
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess
-from decoy_engine.generation._numeric_typing import numeric_plan, restore_declared
+from decoy_engine.generation._numeric_typing import (
+    numeric_plan,
+    provider_text_columns,
+    restore_declared,
+)
 from decoy_engine.generation._statistical_column import arrow_table
 from decoy_engine.generation._window_admission import (
     CODE_NOT_CLASS_A,
@@ -325,6 +329,7 @@ def generate_rows(
         specs=specs,
     )
     numeric = numeric_plan(prepared.config, provider_snapshot=provider_snapshot)
+    text_columns = provider_text_columns(prepared.config).get(table, ())
     for c in cols:
         dtype = numeric.get((table, c["name"]))
         if dtype is not None:
@@ -332,7 +337,13 @@ def generate_rows(
     names = [c["name"] for c in cols]
 
     def typed(data: dict[str, list[Any]]) -> pa.Table:
-        return arrow_table(data, table_name=table, statistical_specs=specs, columns=cols)
+        return arrow_table(
+            data,
+            table_name=table,
+            statistical_specs=specs,
+            columns=cols,
+            text_columns=text_columns,
+        )
 
     acc: dict[str, list[Any]] = {n: [] for n in names}
     emitted = used = 0
