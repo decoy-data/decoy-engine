@@ -7,13 +7,13 @@ build-backend = "hatchling.build"
 # `decoy-engine`. The CLI dist renamed to `decoy-cli`; the engine
 # library dist did not.
 name = "decoy-engine"
-version = "0.27.0"
+version = "0.28.1"
 description = "Data masking and synthetic generation engine. Validates pipeline configs, compiles execution plans, runs masking + generate jobs on a pandas substrate. Used by the decoy-cli CLI and the decoy-platform commercial product."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = "FSL-1.1-ALv2"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "louiskeep" }]
+authors = [{ name = "Decoy", email = "decoy@trydecoy.com" }]
 
 # PyPI Trove classifiers. OS-independent; Python 3.10/3.11/3.12;
 # topic taxonomy that library callers search for. Library-only
@@ -172,6 +172,18 @@ dependencies = [
     # still resolves.
     # HKDF.extract (determinism/_hkdf.py) needs 49.
     "cryptography>=49",
+    # F33 signed evidence (docs/plans/2026-11-17-f33-v1.md): detached ES256 JWS (RFC 7515) over a
+    # JCS (RFC 8785) statement. joserfc (BSD-3-Clause) supplies the JOSE protocol and the supported
+    # external-signer extension point the KMS seam needs; rfc8785 (Apache-2.0, Trail of Bits)
+    # supplies canonical bytes. Neither is hand-rolled here. Upper bounds because a minor release
+    # of either changes signature or canonicalization behavior; bump only with the conformance
+    # corpus green.
+    "joserfc>=1.7.7,<2",
+    "rfc8785>=0.1.4,<0.2",
+    # F09 vault v3 (docs/plans/2026-11-18-f09-vault-header-v1.md): libsodium secretstream through
+    # PyNaCl's nacl.bindings (Apache-2.0, bundles libsodium under ISC). Upper bound as for the
+    # other crypto dependencies: a major release can change the bindings.
+    "pynacl>=1.6.2,<2",
 ]
 
 [project.optional-dependencies]
@@ -193,6 +205,11 @@ dev = [
     # (a full run hung 70 min on 2026-11-10). The limit is `timeout` in [tool.pytest.ini_options];
     # tests/sentry/tooling/test_pytest_timeout.py fails if the plugin or the limit goes missing.
     "pytest-timeout>=2.4",
+    # Freezes the process clock before `faker` imports, so the Faker output lock
+    # (scripts/faker-determinism/output_lock.py) sees default arguments that read the date at
+    # import. Test tool only: not shipped, so NOTICE does not change. `uv.lock` pins one exact
+    # version; the dev/CI DP row (dp_provenance._CERTIFIED_STACKS) moves with it.
+    "time-machine>=3.5.1",
 ]
 # Test-Quality Program (TQ-0, 2026-07-25): coverage measurement + mutation
 # grading. pytest-cov feeds the TQ-3 diff-coverage ratchet; mutmut grades
@@ -325,11 +342,11 @@ perf = [
 
 # Project URLs surfaced on the PyPI sidebar.
 [project.urls]
-Homepage = "https://github.com/louiskeep/decoy-engine"
-Repository = "https://github.com/louiskeep/decoy-engine"
-Documentation = "https://github.com/louiskeep/decoy-engine/blob/main/README.md"
-Issues = "https://github.com/louiskeep/decoy-engine/issues"
-Changelog = "https://github.com/louiskeep/decoy-engine/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/decoy-data/decoy-engine"
+Repository = "https://github.com/decoy-data/decoy-engine"
+Documentation = "https://github.com/decoy-data/decoy-engine/blob/main/README.md"
+Issues = "https://github.com/decoy-data/decoy-engine/issues"
+Changelog = "https://github.com/decoy-data/decoy-engine/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/decoy_engine"]
@@ -410,11 +427,12 @@ pythonpath = ["src", "scripts"]
 # `timeout_method` on purpose: the plugin default is signal on POSIX and thread on Windows, and an
 # explicit "signal" would make every test error on Windows (no SIGALRM).
 timeout = 300
-addopts = "-m 'not benchmark and not testflight and not packaging and not codspeed and not determinism_harness'"
+addopts = "-m 'not benchmark and not testflight and not packaging and not codspeed and not determinism_harness and not faker_output_lock'"
 markers = [
     "no_default_secret: opt out of the shared throwaway secret (tests/_keyed_secret.py); the test asserts behavior with no secret supplied",
     "benchmark: informational performance benchmarks; not a regression gate",
     "determinism_harness: full faker-pool determinism matrix sweep (scripts/faker-determinism/check_determinism.py against golden_digests.json); excluded from the default loop for runtime, run explicitly via pytest -m determinism_harness",
+    "faker_output_lock: spawns frozen-clock Faker workers and diffs them against scripts/faker-determinism/output_lock.json (about a minute each); excluded from the default loop, run by the required faker-output-lock CI job",
     "codspeed: pytest-codspeed instrumented microbenchmarks (tests/codspeed/); needs the [perf] extra; run only by the codspeed CI workflow, gated on the CODSPEED_TOKEN secret",
     "pg_integration: needs a throwaway Postgres (docker, or DECOY_TEST_PG_DSN); skips cleanly when neither is available. Postgres snapshot primitive suites. Run by the pg-gate CI job (pytest -m pg_integration with DECOY_REQUIRE_PG=1, which turns the skip into a failure).",
     "perf: PERF.BASE.2/3 fixture + baseline tests; run in the default regression gate (not opt-in)",
@@ -536,9 +554,6 @@ ignore = [
 # explaining a balanced-categoricals fixture; ASCII would obscure the
 # product semantics.
 "tests/unit/test_scan_reid_risk.py" = ["RUF003"]
-# Empty-hook base classes intentionally swallow their body for
-# subclasses to override.
-"src/decoy_engine/internal/base.py" = ["B027"]
 # Late-import-to-break-cycle pattern, documented in the module header.
 "src/decoy_engine/internal/validator.py" = ["E402"]
 "src/decoy_engine/sdk.py" = ["E402"]
@@ -602,6 +617,28 @@ strict_equality = true
 # scoped to the listed modules.
 [[tool.mypy.overrides]]
 module = [
+    # F33 signed evidence: the verifier core is a security boundary; strict from the first commit.
+    "decoy_engine.signed_evidence",
+    "decoy_engine.signed_evidence._artifacts",
+    "decoy_engine.signed_evidence._boundary",
+    "decoy_engine.signed_evidence._bundle",
+    "decoy_engine.signed_evidence._canonical",
+    "decoy_engine.signed_evidence._catalog",
+    "decoy_engine.signed_evidence._checks",
+    "decoy_engine.signed_evidence._context",
+    "decoy_engine.signed_evidence._envelope",
+    "decoy_engine.signed_evidence._errors",
+    "decoy_engine.signed_evidence._expectations",
+    "decoy_engine.signed_evidence._jws",
+    "decoy_engine.signed_evidence._patterns",
+    "decoy_engine.signed_evidence._release",
+    "decoy_engine.signed_evidence._result",
+    "decoy_engine.signed_evidence._signer",
+    "decoy_engine.signed_evidence._statement",
+    "decoy_engine.signed_evidence._strict_json",
+    "decoy_engine.signed_evidence._time",
+    "decoy_engine.signed_evidence._trust",
+    "decoy_engine.signed_evidence._verifier",
     # SP-04 / P5.INFRA.1: checksum registry (new public module).
     "decoy_engine.checksums",
     # consultant-2026-07-09 F8: the V2.0-A/B `decoy_engine.graph.*` runner
@@ -983,11 +1020,6 @@ disable_error_code = ["attr-defined", "index"]
 # internal.* type-debt allowlist. V2.0-C split internal/helpers.py into
 # crypto/fs/faker_setup (now strict-gated). What remains in internal/
 # is the V1 legacy stack that V2.1 hard-deletes.
-
-# V1 legacy IOHandler base class. V2.1 delete with the Masker stack.
-[[tool.mypy.overrides]]
-module = ["decoy_engine.internal.base"]
-disable_error_code = ["import-untyped"]
 
 # consultant-2026-07-09 F8: internal.large_file_processor was removed by
 # the S9.5 V1 bulk-delete; override left dangling.

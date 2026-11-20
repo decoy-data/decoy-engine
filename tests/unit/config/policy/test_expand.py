@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+from pydantic import ValidationError
+
 from decoy_engine.config._tables import ColumnConfig
 from decoy_engine.config.policy import ColumnDecision, PrecedenceLevel
+from decoy_engine.config.policy._expand import _own_decision
 from tests.unit.config.policy._helpers import (
     codes,
     col,
@@ -217,7 +221,7 @@ def test_column_strategy_equal_to_a_level_1_rule_merges_and_a_pattern_rule_loses
     }
     (field,) = expand(raw, policy)[1].fields
     assert field.level is PrecedenceLevel.EXACT_FIELD
-    assert [s.kind for s in field.sources] == ["rule", "column"]
+    assert [(s.kind, s.id) for s in field.sources] == [("column", "t.c"), ("rule", "exact")]
     assert field.overridden == ("broad",)
 
 
@@ -454,3 +458,57 @@ def test_a_clean_non_dict_mapping_provider_config_is_decided():
     column = col("c", strategy="hash", provider_config=UserDict({"k": 1}))
     out, expansion = expand(raw_config([table("t", column)]), {})
     assert expansion.fields[0].decision.provider_config == {"k": 1}
+
+
+def test_sources_are_ordered_column_then_rules_in_policy_order_then_disguise_then_default():
+    same = {"strategy": "hash", "deterministic": True}
+    ssn = ColumnDecision(**same)
+    raw = raw_config([table("t", col("c", classification="ssn", **same))])
+    policy = {
+        "default": same,
+        "rules": [
+            {"id": "second", "select": {"table": "t", "column": "c"}, **same},
+            {"id": "first", "select": {"table": "t", "column": "c"}, **same},
+        ],
+    }
+    (field,) = expand(raw, policy, {"ssn": ssn})[1].fields
+    assert [(s.kind, s.id) for s in field.sources] == [
+        ("column", "t.c"),
+        ("rule", "second"),
+        ("rule", "first"),
+    ]
+    # Disguise and default only agree when no level 1 source exists.
+    bare = raw_config([table("t", col("c", classification="ssn"))])
+    (field,) = expand(bare, {"default": same}, {"ssn": ssn})[1].fields
+    assert [s.kind for s in field.sources] == ["disguise"]
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        {"strategy": 5},
+        {"strategy": "hash", "provider": 5},
+        {"strategy": "hash", "namespace": 5},
+        {"strategy": "hash", "deterministic": "maybe"},
+        {"strategy": "hash", "allow_collisions": [1]},
+        {"strategy": "hash", "provider_config": [1]},
+    ],
+)
+def test_every_input_own_decision_rejects_is_rejected_by_column_config(keys):
+    """`_own_decision` skips a column silently only when `ColumnConfig` reports it instead.
+
+    A `provider_config` JSON cannot carry and an empty or over-long strategy string are the
+    exceptions: `ColumnConfig` accepts them, so expansion reports each by its own policy code.
+    """
+    decision, unjson = _own_decision(keys)
+    assert decision is None and not unjson
+    with pytest.raises(ValidationError):
+        ColumnConfig.model_validate({"name": "c", **keys})
+
+
+@pytest.mark.parametrize("strategy", ["", "x" * 65])
+def test_a_column_strategy_outside_the_length_bounds_is_refused_by_name(strategy):
+    exc = refusal(raw_config([table("t", col("c", strategy=strategy))]), {})
+    assert codes(exc) == ["policy_unknown_strategy"]
+    assert exc.errors()[0]["loc"] == ("tables", 0, "columns", 0, "strategy")
+    assert "column t.c" in exc.errors()[0]["msg"]

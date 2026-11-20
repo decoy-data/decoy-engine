@@ -45,6 +45,8 @@ ambient_only_modules = [
   "decoy_engine/execution/_isolated_run.py",
   # F06 local quarantine store: opens beneath the caller-given root only after the guard.
   "decoy_engine/declared_casting/_quarantine_local.py",
+  # F33 signed evidence: a caller-named evidence directory, opened once after the guard.
+  "decoy_engine/fileaccess/_ambient_tree.py",
 ]
 
 # Modules that must call `fileaccess.require_ambient`, the guard the ambient-only entries rely on.
@@ -55,6 +57,8 @@ ambient_guards = [
   "decoy_engine/declared_casting/_quarantine_local.py",
   # LIB L0.1 allocator: calls require_ambient for any caller path.
   "decoy_engine/fileaccess/_protected_dir.py",
+  # F33 signed evidence: the one ambient open of a caller-named evidence directory.
+  "decoy_engine/fileaccess/_ambient_tree.py",
 ]
 
 # F25 plan 4.1. Exact, both ways: an unlisted module fails, and so does a listed module with no

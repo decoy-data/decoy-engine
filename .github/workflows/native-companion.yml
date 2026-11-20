@@ -259,7 +259,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -300,6 +300,11 @@ jobs:
       # ordering, malformed-result fail-closed); companion-present only.
       - name: Faker route integration (companion-present case)
         run: pytest tests/parity/native/test_c1_faker_parity.py tests/native/test_dispatch_faker.py tests/native/test_index_ext.py -v --tb=short
+      # PROFILE-SAMPLE-LABELS E2 (AT-14): the native lane of the chunked mask run is
+      # byte-identical at two chunk sizes after the first-chunk profile is labelled a
+      # sample; the cell skips without the companion, so this job runs it.
+      - name: First-chunk profile label characterization (companion-present case)
+        run: pytest tests/native/test_chunked_profile_label_characterization.py -v --tb=short
       # Task 3.1 D3: decoy_engine_native.__version__ resolves via importlib.metadata and
       # parses as PEP 440; companion-present only (the package must be installed for its
       # own metadata to resolve).
@@ -328,6 +333,27 @@ jobs:
       # (skipif no companion), so this is the one job that runs them.
       - name: native FPE (FF1) on both routes (companion-present case)
         run: pytest tests/native/test_c6a_fpe_chunked.py tests/native/test_fpe_ext_loader.py tests/physical/test_shadow_fpe.py -v --tb=short
+      # date_shift on the chunked native lane (parity, admission, type errors, jitter window):
+      # every case is companion-gated and skips elsewhere, so this is the one job that runs them.
+      - name: date_shift chunked native lane (companion-present case)
+        run: pytest tests/native/test_chunked_date_shift_parity.py tests/native/test_chunked_date_shift_admission.py tests/native/test_chunked_date_shift_types_errors.py tests/native/test_date_shift_jitter_chunked.py -v --tb=short
+      # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
+      # it, so this is the one job that can prove the chunked route leaks no source metadata.
+      # A skip here would hide that, so the step fails on any SKIPPED line and on an empty
+      # selection (pytest exits 5 then).
+      - name: Output metadata canary, auto-chunk route (companion-present case, must not skip)
+        run: |
+          set -o pipefail
+          pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
+          if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
+
+      # Every tests/native file, so a companion-gated test that no step above names cannot rot
+      # (58 such tests were red on main before this step existed). Same two-pass split as ci.yml:
+      # xdist for everything but `serial`, then the serial tests alone.
+      - name: Whole tests/native directory (companion-present case)
+        run: |
+          pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
+          pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A

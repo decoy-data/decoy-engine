@@ -8,7 +8,7 @@ This page is a human-readable reading of the authoritative, test-enforced source
 the per-operator compute classification in
 `docs/records/2026-10-16-d-audit-compute-matrix.md`
 (masking) and the generation compute audit (the
-[F-audit plan](https://github.com/louiskeep/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
+[F-audit plan](https://github.com/decoy-data/decoy-engine/blob/main/docs/plans/2026-10-19-phase-f-f-audit-no-legacy.md)).
 The enumerated strategy/provider list is [`capability-matrix.md`](capability-matrix.md);
 install and wheel/ABI facts are [`native/supported-matrix.md`](native/supported-matrix.md).
 If this page and those sources ever disagree, the sources win: they are derived from
@@ -194,7 +194,7 @@ Each cell is further qualified by the guards below.
 | `fpe` | Native payload requires exact string, namespace, valid FPE configuration, and no checksum option. SEQ keys additionally admit supported integer representations. Do not imply all integer payloads are native. |
 | `categorical` | SEQ/OOC native selection requires deterministic mode, namespace, exact-string source, string categories, and a buildable weighted CDF. Seeded positional categorical is separately native on chunked. OOC rejects its non-deterministic mode. |
 | `bucket_perturb` | OOC requires explicit `date_format` at route admission. Native execution further requires exact string, namespace, supported bucket and format, no timezone or special pandas format, and valid preserve_values. Runtime range guards still apply. |
-| `date_shift` | Native SEQ/chunked requires exact string, namespace, explicit non-special timezone-free format, no group_by, integer day bounds within the accepted range, and valid preserve_values. Main OOC rejects the entire strategy. |
+| `date_shift` | Native SEQ/chunked requires exact string, namespace, explicit non-special timezone-free format (plan compile requires one, except for a top-level declared-casting column), no group_by, integer day bounds within the accepted range, and valid preserve_values. Main OOC rejects the entire strategy. |
 | `faker` | Providers are person_first_name and person_last_name on these native paths. SEQ admits exact string with deterministic REUSE or positional REUSE. Chunked additionally admits bool/integer deterministic REUSE with its fixed-schema producer guarantee and accepted conversion metadata. Positional bool/integer/float REUSE requires explicit pool_size. Other modes and providers use their existing Python path. OOC admits the deterministic-REUSE person-name variant with an exact-string source through the compiled index selection (run-scoped pool); other faker shapes, and a non-string source, decline. |
 | `text_redact` / `text_mask` | Native paths have source/configuration guards. NER remains Python. OOC text_mask currently uses its dedicated loop, including batched NER inference. |
 | `code_set` | OOC admits mask mode without chapter_preserve. Gen mode and chapter_preserve remain route declines. There is no named Arrow code-set kernel on main. |
@@ -496,6 +496,56 @@ The ineligible families run on the legacy whole-table synthesize path with disti
 whole-table synthesize. Resident and streamed materialization produce byte-identical output for
 admitted streamed generation shapes; this does not imply that every legacy whole-table
 statistical family streams.
+
+## Advisory job estimate and lifecycle peak
+
+`estimate_job` reports the route, `peak_bytes` and a runtime band before a job runs. It also
+reports the memory the whole job needs, in three fields on `JobEstimate`: `lifecycle_peak_bytes`,
+`limiting_phase` and `phase_bytes`. It is advice. It never raises, never refuses a job and never
+changes a route.
+
+The lifecycle peak is the largest of three phase peaks. Each phase peak is the sum of the memory
+that is live at the same time in that phase.
+
+- ingest: each source is read whole, one after the other, and every earlier table stays resident.
+  A CSV source is read as text into a pandas frame and then copied to Arrow. A fixed_width source
+  builds a list of row dicts first. A Parquet source holds its Arrow table and one row group.
+- execute: the measured route model (the same one that gives `peak_bytes`), plus the input tables
+  the caller still holds that the measurement did not. A strategy that turns numbers into
+  strings (`hash`, `redact`) is priced with the strings it writes.
+- write: every input and every output are resident, plus the largest copy a target needs (a pandas
+  frame for CSV, the coercion and list copies for fixed_width, nothing for Parquet).
+
+`limiting_phase` names the phase that sets the peak; a tie goes to the earlier phase.
+
+Generate-only and mixed jobs get the same fields. A generate table has no source, so it adds
+nothing to ingest. In execute it adds what a resident run holds for its columns, with the width of
+each text column included, and the largest working set of a unique column draw. A plan that runs
+the legacy whole-table path (any column that admission declines, such as a `unique` faker column)
+holds every cell as a Python object, and the estimate prices it that way. In write its Arrow
+output sits beside the mask outputs. A column with no width source (a `formula`, for example)
+leaves the lifecycle fields unset, with a note naming it. A generate-only job keeps
+`peak_bytes=None`, and a mixed job stays `priceable=False`.
+
+What the estimate assumes and does not price:
+
+- The caller holds every input and output until the last target is written (the CLI does). The
+  `--chunked` path and a lazy handoff hold less, so the estimate is higher than they need.
+- String widths come from the first 10,000 rows of each source. A file whose later rows are wider
+  is under-priced.
+- Row counts of a CSV source are estimated from the file size; the estimate says so in `notes`.
+- The vault maps, post-scan baseline tables and quarantine frames are live beside the route's working
+  set and are not priced. Subset jobs are not priced. Disk and scratch space are not priced.
+- `peak_bytes` stays the router's own model on input widths. A job whose strategies turn numbers
+  into strings has a lifecycle execute phase above `peak_bytes`.
+- The estimate prices the pandas form of a string output. The native unified slice can keep it in
+  Arrow, so the real run can be well below the estimate (several times, for string outputs).
+- A file that changes between the estimate and the run only makes the estimate stale.
+
+On the measured fixtures the estimate is never below the measured peak. It is also within 1.5
+times the measured peak for type-preserving numeric jobs and for jobs whose limiting phase is
+ingest or write, on the matching route with at least 1,000,000 rows. String-output jobs are
+checked against the lower bound only.
 
 ## Progress events
 

@@ -36,10 +36,14 @@ from decoy_engine.config import (
     post_scan_sink_kind,
 )
 from decoy_engine.execution._chunked_input import SourceFacts, capture_source_facts, check_opened
-from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline_sources import materialize_source
 from decoy_engine.execution._transforms_gate import transform_bearing_mask_tables
 from decoy_engine.execution.out_of_core import MaskedKeyStager, resolve_ooc_memory_limit
+from decoy_engine.execution.pipeline._post_scan_distribution import (
+    DistributionState,
+    refuse_transformed_integrity,
+    refuse_unchecked_distribution,
+)
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.profile import LazySource
@@ -69,6 +73,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._pipeline_context import PipelineRunContext
     from decoy_engine.profiling.model_pack import DetectorSet
     from decoy_engine.verification.postmask import TableBatches
+    from decoy_engine.verification.postmask.distribution import DistributionInput
 
 __all__ = [
     "PostScanGate",
@@ -135,6 +140,7 @@ class PostScanGate:
         self._teed: dict[str, LazySource] = {}
         self._scratch = ExitStack()
         self._scratch_root: Path | None = None
+        self._distribution = DistributionState.for_run(config)
 
     @property
     def enforces_ner(self) -> bool:
@@ -169,13 +175,13 @@ class PostScanGate:
         if self.deferred:
             self._report_only(outputs, sources, table_kinds)
             return
-        if not _resident(outputs, table_kinds):
+        if not all(name in outputs for name in table_kinds):
             return  # the route wrote to a sink as it went; the commit reads the staged files
         suite = None
         if post_scan_integrity_requested(self._config):
 
             def suite(keys: tuple[KeyResult, ...]) -> dict[str, Any]:
-                return self._column_suite(outputs, sources, table_kinds, keys)
+                return self._column_suite(outputs, sources, table_kinds, keys, raw_sources)
 
         views = {name: from_table(name, table) for name, table in outputs.items()}
         self._decide(views, sources, raw_sources, suite)
@@ -287,6 +293,8 @@ class PostScanGate:
         """Record the declared parent keys of `rows` (a table before quarantine filtered it) at
         the `removed` row indices. A relationship that cannot be read is left for the check to
         report."""
+        if self._distribution is not None and not self.deferred:
+            self._distribution.note_quarantined(table, removed)
         if not self.required or self.deferred or not removed:
             return
         try:
@@ -329,12 +337,7 @@ class PostScanGate:
             ):
                 # The suite compares output with the raw source, and a transformed table's rows
                 # no longer line up with it. Refused before the commit, so nothing is published.
-                raise ExecutionError(
-                    code=reasons.runtime.POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED,
-                    message=reasons.get(
-                        "runtime", reasons.runtime.POST_SCAN_INTEGRITY_TRANSFORMS_UNSUPPORTED
-                    ).summary,
-                )
+                refuse_transformed_integrity()
             staged = {name: from_staged(name, opener) for name, opener in openers.items()}
             suite = (
                 self._staged_suite(staged) if post_scan_integrity_requested(self._config) else None
@@ -362,6 +365,7 @@ class PostScanGate:
                     keys=keys,
                     scratch=scratch,
                     memory_limit=self.memory_limit,
+                    distribution=self._distribution_input(masked, self._sources, True),
                 )
 
         return suite
@@ -387,6 +391,7 @@ class PostScanGate:
             base,
             needs=cast.declared_columns(name),
             schema=typed,
+            drops_rows=name in cast.quarantine_tables(),
             cast=lambda table, offset: (
                 cast.cast_batch(name, table, offset=offset, record=False).table
             ),
@@ -422,6 +427,7 @@ class PostScanGate:
         sources: Mapping[str, pa.Table | LazySource],
         table_kinds: Mapping[str, str],
         keys: tuple[KeyResult, ...],
+        raw_sources: bool,
     ) -> dict[str, Any]:
         # Generated tables have no source to compare against, as in the report-only suite.
         masked = _suite_tables(outputs, sources, table_kinds)
@@ -431,6 +437,21 @@ class PostScanGate:
             config=dict(self._config),
             detectors=self._detectors,
             keys=keys,
+            distribution=self._distribution_input(masked, sources, raw_sources),
+        )
+
+    def _distribution_input(
+        self, tables: list[str], sources: Mapping[str, pa.Table | LazySource], raw: bool
+    ) -> DistributionInput | None:
+        """The distribution check's input, its source side read through `_source` like every
+        other source side of the gate; `None` when the run did not ask for the check."""
+        if self._distribution is None:
+            return None
+        return self._distribution.build(
+            self._config,
+            tables,
+            lambda n: self._source(n, sources[n], raw),
+            cast_run=self._cast_run,
         )
 
 
@@ -454,11 +475,6 @@ _ACTIVE: ContextVar[PostScanGate | None] = ContextVar("decoy_post_scan_gate", de
 def active_gate() -> PostScanGate | None:
     """The gate bound to this run, or `None` outside `bind_gate`."""
     return _ACTIVE.get()
-
-
-def _resident(outputs: Mapping[str, pa.Table], table_kinds: Mapping[str, str]) -> bool:
-    """Whether every table the run produces is still held in `outputs`."""
-    return all(name in outputs for name in table_kinds)
 
 
 def _staged_openers(sink: Any) -> Mapping[str, Callable[[], int]] | None:
@@ -496,6 +512,7 @@ def _deferred(ctx: PipelineRunContext, route: str | None = None) -> bool:
 def bind_gate(ctx: PipelineRunContext, route: str | None = None) -> Iterator[PostScanGate]:
     """Bind one gate for the run. Its lazy-input snapshot is taken here, before any route reads."""
     deferred = _deferred(ctx, route)
+    refuse_unchecked_distribution(ctx, deferred=deferred)
     facts = (
         capture_source_facts(ctx.caller_sources, ctx.table_kinds)
         if post_scan_gate_applies(ctx.config) and not deferred

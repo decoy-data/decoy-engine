@@ -268,9 +268,13 @@ def check_contract(
             else:
                 assert d_field.type == l_type, name
         else:
-            # (c) a passthrough column equals the source exactly.
-            assert dispatcher.column(name).equals(source.column(name)), name
-            assert d_field.equals(source.schema.field(name), check_metadata=True), name
+            # (c) a passthrough column equals the source exactly, except that O3 narrows a
+            # `large_string` source column to `string` (same values, nulls and field metadata).
+            want_field, want = source.schema.field(name), source.column(name)
+            if pa.types.is_large_string(want_field.type):
+                want_field, want = want_field.with_type(pa.string()), want.cast(pa.string())
+            assert dispatcher.column(name).equals(want), name
+            assert d_field.equals(want_field, check_metadata=True), name
 
 
 def spy_lanes(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:

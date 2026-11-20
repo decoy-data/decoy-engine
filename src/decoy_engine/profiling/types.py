@@ -15,9 +15,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Final
 
 from decoy_engine.detection.types import DetectionSignal, DetectorMatch
+from decoy_engine.profiling._basis import Basis
+
+# What a null cell reads as in `TopValue.value`, so a literal cell can read the same.
+NULL_CELL_TEXT: Final = "(null)"
 
 
 @dataclass
@@ -100,6 +104,10 @@ class FieldStats:
     #                    no detector with a variant fired.
     casing_pattern: str | None = None
     format_pattern: str | None = None
+    # True when the match that supplied `format_pattern` is a date match whose every hit parses
+    # under that format (`DetectorMatch.format_pattern_complete`). False for any other column and
+    # for a profile written before the field existed.
+    format_pattern_complete: bool = False
 
     # Plan B-2 - column-shape signals FORECAST's per-detector choosers
     # consume to pick mask params instead of using hardcoded defaults.
@@ -191,6 +199,10 @@ class ColumnProfile:
     # Run metadata
     engine_version: str = "0.1.0"
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    # What the field counts were taken over: `whole` only when the read reached the end of the
+    # source. The default fails closed for a constructor or document that never said.
+    basis: Basis = "sample"
 
     def to_dict(self) -> dict[str, Any]:
         """The raw JSON-ready dict, cell values included.

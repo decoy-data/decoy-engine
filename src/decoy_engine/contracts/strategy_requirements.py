@@ -21,6 +21,7 @@ __all__ = [
     "StrategyRequirement",
     "lookup_path",
     "requirement_applies",
+    "requirement_missing",
     "requirements_for",
 ]
 
@@ -60,7 +61,14 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
     {
         "hash": (_namespace("hash"),),
         "fpe": (_namespace("fpe"),),
-        "date_shift": (_namespace("date_shift"),),
+        "date_shift": (
+            _namespace("date_shift"),
+            StrategyRequirement(
+                (*_PROVIDER, "date_format"),
+                reasons.plan.DATE_SHIFT_REQUIRES_DATE_FORMAT,
+                "date_shift needs provider_config.date_format, the strftime format of its dates.",
+            ),
+        ),
         "bucket_perturb": (_namespace("bucket_perturb"),),
         "categorical": (_namespace("categorical"),),
         "tokenize": (_namespace("tokenize"),),
@@ -92,6 +100,11 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
 def requirements_for(strategy: str) -> tuple[StrategyRequirement, ...]:
     """The requirements of ``strategy``; empty when it declares none."""
     return REQUIREMENTS_BY_STRATEGY.get(strategy, ())
+
+
+def requirement_missing(value: Any) -> bool:
+    """Every required setting is a name, so anything but a non-blank string is missing."""
+    return not isinstance(value, str) or not value.strip()
 
 
 def lookup_path(entry: Mapping[str, Any], path: tuple[str, ...]) -> Any:

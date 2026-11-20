@@ -203,9 +203,9 @@ _MASK: dict[str, _Ortho] = {
         True,
         row_error_modes=("format_error",),
         notes=(
-            "Output is always a formatted date string (static type). Without an "
-            "explicit date_format the NODE needs a format_detect prepass "
-            "(resolved in _requirements.py), not a change to the static type."
+            "Output is always a formatted date string (static type). The format "
+            "comes from provider_config.date_format, which plan compile requires; "
+            "no node needs a detect prepass."
         ),
     ),
     "bucket_perturb": _Ortho(True, False, False, False, True),
@@ -363,7 +363,15 @@ _MASK: dict[str, _Ortho] = {
         False,
         False,
         row_error_modes=("format_error", "mask_error"),
-        warning_codes=("nested_cell_json_parse_error", "nested_jsonpath_path_overlap"),
+        warning_codes=(
+            "nested_cell_json_parse_error",
+            "nested_jsonpath_path_overlap",
+            "nested_cell_oversized",
+            "nested_cell_too_deep",
+            "nested_cell_duplicate_key",
+            "nested_cell_number_out_of_range",
+            "nested_child_non_finite",
+        ),
         uncertain=True,
         notes=(
             "Delegates to a config-resolved child handler: its effective surface "

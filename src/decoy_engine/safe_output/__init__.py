@@ -4,12 +4,20 @@
 approved step name, closed counts and flags); ``safe_error_type`` labels an exception by exact
 type; ``validation_problems`` turns a Pydantic ``ValidationError`` into value-free
 ``ConfigProblem`` records. The wire functions arrive with the line serializer.
+``output_schema`` and ``output_table`` apply the one rule for the key/value metadata of a
+published Parquet file (see ``_file_metadata``).
 """
 
 from __future__ import annotations
 
 from decoy_engine.safe_output._event import EventKind, Flag, SafeEvent, StepRef
 from decoy_engine.safe_output._exception import SafeErrorType, safe_error_type
+from decoy_engine.safe_output._file_metadata import (
+    attach_output_metadata,
+    output_schema,
+    output_table,
+    sanitized_schema_metadata,
+)
 from decoy_engine.safe_output._validation import ConfigProblem, validation_problems, yaml_error_text
 
 __all__ = [
@@ -19,7 +27,11 @@ __all__ = [
     "SafeErrorType",
     "SafeEvent",
     "StepRef",
+    "attach_output_metadata",
+    "output_schema",
+    "output_table",
     "safe_error_type",
+    "sanitized_schema_metadata",
     "validation_problems",
     "yaml_error_text",
 ]
