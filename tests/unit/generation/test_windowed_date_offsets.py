@@ -205,11 +205,116 @@ def test_mask_and_generate_share_the_derivation() -> None:
     assert generated == oracle
     assert any(v is not None for v in oracle)
 
-    # The mask strategy reaches the same entry point under its own namespace (`windowed_date/<column>`).
-    masked = apply_windowed_date(cfg, frame, SEED8, "windowed_date/end", row_offset=offset)
-    assert masked == reference_apply_windowed_date(
+    # The mask leg runs through the strategy handler, which keys on `windowed_date/<column>`.
+    handler_out = _run_handler(
+        anchors,
+        {"anchor": "start", "min_days": -4, "max_days": 40, "distribution": "early"},
+        row_offset=offset,
+    )
+    assert handler_out == reference_apply_windowed_date(
         cfg, frame, SEED8, "windowed_date/end", row_offset=offset
     )
+    assert handler_out[5] is None and any(v is not None for v in handler_out)
+
+
+def _run_handler(anchors: list[Any], pc: dict[str, Any], *, row_offset: int = 0) -> list[Any]:
+    from decoy_engine.execution._adapter import StrategyContext
+    from decoy_engine.execution._strategies._windowed_date import WindowedDateStrategyHandler
+    from decoy_engine.generation.pool._cache import PoolCache
+    from decoy_engine.plan._types import ColumnSeed
+    from decoy_engine.providers_v2 import get_default_registry
+    from decoy_engine.relationships._graph import RelationshipGraph
+    from decoy_engine.relationships._namespace import NamespaceRegistry
+
+    ctx = StrategyContext(
+        registry=get_default_registry(),
+        pool_cache=PoolCache(),
+        relationship_graph=RelationshipGraph(edges=(), ordering=()),
+        namespace_registry=NamespaceRegistry(bindings=()),
+        job_seed=SEED8,
+        mask_key=SEED8,
+        row_offset=row_offset,
+    )
+    seed = ColumnSeed(
+        namespace="ns",
+        strategy="windowed_date",
+        provider=None,
+        backend_type="transform",
+        backend_version="v1",
+        cardinality_mode="preserve",
+        deterministic=False,
+        provider_config=tuple(pc.items()),
+    )
+    df = pd.DataFrame({"start": pd.Series(anchors, dtype=object), "end": [""] * len(anchors)})
+    out, _ = WindowedDateStrategyHandler().run(df, "end", seed, ctx)
+    result: list[Any] = out["end"].tolist()
+    return result
+
+
+@pytest.mark.parametrize("days", [106_752, -106_752])
+@pytest.mark.parametrize("key", ["min_days", "max_days"])
+def test_window_beyond_the_date_range_is_refused_at_parse(key: str, days: int) -> None:
+    from decoy_engine.plan._errors import PlanCompileError
+
+    cfg = {"anchor": "a", "min_days": -5, "max_days": 5, key: days}
+    with pytest.raises(PlanCompileError) as exc:
+        WindowedDateConfig.from_dict(cfg)
+    assert exc.value.code in {"windowed_date_window_out_of_range", "windowed_date_min_exceeds_max"}
+    if days > 0 or key == "min_days":
+        assert exc.value.code == "windowed_date_window_out_of_range"
+    assert str(abs(days)) not in str(exc.value)
+    WindowedDateConfig.from_dict({"anchor": "a", "min_days": -106_751, "max_days": 106_751})
+
+
+def test_bulk_fallback_matches_per_row_and_keeps_first_error() -> None:
+    # A mixed date/str column leaves the batched path; the loop must draw the same offsets.
+    import datetime as dt
+
+    cfg = _config(-30, 90, "early")
+    anchors: list[Any] = [
+        dt.date(2000 + i % 20, 1 + i % 12, 1 + i % 28)
+        if i % 2
+        else f"20{10 + i % 10}-05-0{1 + i % 9}"
+        for i in range(300)
+    ]
+    anchors[7] = None
+    frame = _frame(anchors)
+    got = apply_windowed_date(cfg, frame, SEED8, "windowed_date/d", row_offset=40)
+    assert got == reference_apply_windowed_date(cfg, frame, SEED8, "windowed_date/d", row_offset=40)
+    bad = list(anchors)
+    bad[3] = "not a date"
+    bad[9] = "also bad"
+    with pytest.raises(WindowedDateError) as exc:
+        apply_windowed_date(cfg, _frame(bad), SEED8, "windowed_date/d", row_offset=40)
+    assert "row 43" in str(exc.value)
+
+
+@pytest.mark.serial
+def test_mixed_column_fallback_is_not_slower_than_per_row_baseline() -> None:
+    # Regression guard for the review finding: origin/main drew a mixed date/str column at about
+    # 93 us/row and the first S2 head about 258. The bulk draw keeps it well under the baseline;
+    # the 200 us/row ceiling leaves wide margin for a loaded CI box.
+    import datetime as dt
+    import time
+
+    cfg = _config(-30, 90, "early")
+    n = 5_000
+    anchors: list[Any] = [
+        dt.date(2000 + i % 20, 1 + i % 12, 1 + i % 28) if i % 2 else "2015-05-04" for i in range(n)
+    ]
+    frame = _frame(anchors)
+    apply_windowed_date(cfg, frame, SEED8, "windowed_date/d")  # warm imports and caches
+    best = min(
+        _elapsed(lambda: apply_windowed_date(cfg, frame, SEED8, "windowed_date/d"), time)
+        for _ in range(3)
+    )
+    assert best / n < 200e-6
+
+
+def _elapsed(fn: Callable[[], object], time: Any) -> float:
+    start = time.perf_counter()
+    fn()
+    return float(time.perf_counter() - start)
 
 
 # --- 7. Row-number domain ---------------------------------------------------------------------
@@ -296,10 +401,9 @@ class _OutOfBoundsKernel:
 
 
 def test_malformed_kernel_result_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    from decoy_engine.generation.pool import GenerationError
-    from decoy_engine.transforms import windowed_date as wd
+    from decoy_engine.generation.pool import GenerationError, _sampler
 
-    monkeypatch.setattr(wd, "compiled_index_kernel", lambda: _OutOfBoundsKernel())
+    monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: _OutOfBoundsKernel())
     with pytest.raises(GenerationError) as exc:
         apply_windowed_date(
             _config(0, 30, "uniform"), _frame([ISO_ANCHOR]), SEED8, "windowed_date/stub"

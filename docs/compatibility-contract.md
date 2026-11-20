@@ -686,6 +686,8 @@ is part of the source, not of the namespace. Output dates change for the same se
 and no flag: regenerate stored `windowed_date` output. The window, null-anchor, determinism and
 partitioning guarantees are unchanged. Global row numbers must now be below `2**62` (before:
 below `2**64`); a negative or larger row number raises `windowed_date_row_number_out_of_range`.
+A window with `min_days` or `max_days` more than 106751 days from zero is refused at parse with
+`plan/windowed_date_window_out_of_range`.
 The draw-site entry `mask.windowed_date` moves to family `source_keyed_hmac` and the catalogue
 pin, provider golden and `TestWindowedDateGolden` are re-baselined with it.
 `SEED_PROTOCOL_VERSION` stays 7: a bump would rekey every keyed column and vault before GA, and

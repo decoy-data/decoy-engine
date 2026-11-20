@@ -53,13 +53,10 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.determinism._derive import DeriveContext, _check_pool_size
+from decoy_engine.determinism import check_pool_size
+from decoy_engine.determinism._derive import DeriveContext
 from decoy_engine.errors import DecoyError
-from decoy_engine.generation.pool._sampler import (
-    compiled_index_kernel,
-    reference_index_kernel,
-    validated_index_array,
-)
+from decoy_engine.generation.pool import derive_validated_indices
 from decoy_engine.plan._errors import PlanCompileError
 
 # Closed enumeration of allowed distributions.
@@ -142,6 +139,7 @@ class WindowedDateConfig:
             PlanCompileError: ``max_days`` is missing.
             PlanCompileError: ``distribution`` is set but not in
                 WINDOWED_DATE_DISTRIBUTIONS.
+            PlanCompileError: ``min_days`` or ``max_days`` is more than 106751 days from zero.
             PlanCompileError: ``min_days`` > ``max_days``.
         """
         anchor = cfg.get("anchor")
@@ -167,6 +165,16 @@ class WindowedDateConfig:
 
         min_days = int(cfg.get("min_days", 0))
         max_days = int(cfg["max_days"])
+
+        if max(abs(min_days), abs(max_days)) > _MAX_TIMEDELTA_DAYS:
+            raise PlanCompileError(
+                code=reasons.plan.WINDOWED_DATE_WINDOW_OUT_OF_RANGE,
+                path="provider_config.max_days",
+                message=(
+                    f"'min_days' and 'max_days' must each be within {_MAX_TIMEDELTA_DAYS} days "
+                    "of the anchor."
+                ),
+            )
 
         if min_days > max_days:
             raise PlanCompileError(
@@ -225,7 +233,7 @@ def _draw_offsets(
         if span == 0 and fits_int64:
             return np.full(count, lo, dtype=np.int64)
         pool_size = span + 1
-        _check_pool_size(pool_size)
+        check_pool_size(pool_size)
         if not fits_int64:
             # Past int64 every offset is past the Timedelta range, so the shift step refuses it
             # exactly as it refuses any other offset that large.
@@ -234,17 +242,15 @@ def _draw_offsets(
                 _MAX_TIMEDELTA_DAYS + 1 if lo > 0 else -_MAX_TIMEDELTA_DAYS - 1,
                 dtype=np.int64,
             )
-        kernel = compiled_index_kernel() or reference_index_kernel()
         sources = np.asarray(rows, dtype=np.int64) * 2
         draws: list[npt.NDArray[np.int64]] = []
         for k in range(1 if config.distribution == "uniform" else 2):
-            idx = kernel.derive_index_batch(
+            checked = derive_validated_indices(
                 pa.array(sources + k, type=pa.int64()),
                 mask_key=seed,
                 namespace=namespace,
                 pool_size=pool_size,
             )
-            checked = validated_index_array(idx, expected_len=count, pool_size=pool_size)
             draws.append(lo + checked.astype(np.int64))
         if len(draws) == 1:
             return draws[0]
@@ -491,12 +497,28 @@ def apply_windowed_date(
             if positions is not None
             else range(row_offset, row_offset + len(anchor_series))
         )
+        nonnull_rows = [
+            int(i)
+            for i, raw in zip(row_numbers, anchor_series, strict=True)
+            if not _is_null_cell(raw)
+        ]
+        # One draw for the whole batch keeps this path near the batched one. If it fails (a bad
+        # row number, seed or window), draw per row below so the first error is raised in row order.
+        try:
+            bulk: list[int] | None = _draw_offsets(nonnull_rows, config, seed, namespace).tolist()
+        except Exception:
+            bulk = None
+        cursor = 0
         for i, raw_anchor in zip(row_numbers, anchor_series, strict=True):
             if _is_null_cell(raw_anchor):
                 result.append(None)
                 continue
             anchor_ts = _parse_anchor(raw_anchor, int(i))
-            offset = int(_draw_offsets([int(i)], config, seed, namespace)[0])
+            if bulk is not None:
+                offset = bulk[cursor]
+                cursor += 1
+            else:
+                offset = int(_draw_offsets([int(i)], config, seed, namespace)[0])
             result.append(_shift_and_format(anchor_ts, offset, int(i)))
 
         return result

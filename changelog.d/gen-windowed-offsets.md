@@ -7,3 +7,5 @@ Breaking: windowed_date produces different dates for the same seed (output-chang
 Global row numbers must now be below 2^62 (before: below 2^64). A negative or larger row number raises the new reason `runtime/windowed_date_row_number_out_of_range`.
 
 `SEED_PROTOCOL_VERSION` does not change. A bump would rekey every keyed column and vault before GA, and only this site moves.
+
+A `windowed_date` window with `min_days` or `max_days` more than 106751 days from zero is now refused when the config is parsed, with the new reason `plan/windowed_date_window_out_of_range`. Before, such a window passed parsing and failed on the first row whose offset left the date range.

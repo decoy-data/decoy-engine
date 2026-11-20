@@ -28,7 +28,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.determinism import seed_bytes_to_int
+from decoy_engine.determinism import check_pool_size, seed_bytes_to_int
 from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._errors import GenerationError, raise_uniqueness_impossible
@@ -116,6 +116,32 @@ def validated_index_array(idx: Any, *, expected_len: int, pool_size: int) -> np.
     return idx_np
 
 
+def derive_validated_indices(
+    values: Any,
+    *,
+    mask_key: bytes,
+    namespace: str,
+    pool_size: int,
+    kernel: IndexDerivationKernel | None = None,
+) -> np.ndarray[Any, Any]:
+    """One checked pool index per source value: the one place a batch draw is made.
+
+    Uses `kernel` when given, else the compiled kernel when the native companion is present and
+    the byte-identical reference otherwise. The pool size is refused first, as `derive_index`
+    does, and the kernel's own result is validated before any caller indexes with it.
+    """
+    try:
+        check_pool_size(pool_size)
+        chosen = kernel or compiled_index_kernel() or reference_index_kernel()
+        idx = chosen.derive_index_batch(
+            values, mask_key=mask_key, namespace=namespace, pool_size=pool_size
+        )
+        return validated_index_array(idx, expected_len=len(values), pool_size=pool_size)
+    except BaseException:
+        del mask_key
+        raise
+
+
 def _derive_pool_indices(
     nonnull_source: pd.Series, *, seed: bytes, namespace: str, pool_size: int
 ) -> np.ndarray[Any, Any]:
@@ -145,11 +171,12 @@ def _derive_pool_indices(
                 arrow_values = None
             if arrow_values is not None:
                 try:
-                    idx = compiled.derive_index_batch(
-                        arrow_values, mask_key=seed, namespace=namespace, pool_size=pool_size
-                    )
-                    return validated_index_array(
-                        idx, expected_len=len(raw_values), pool_size=pool_size
+                    return derive_validated_indices(
+                        arrow_values,
+                        mask_key=seed,
+                        namespace=namespace,
+                        pool_size=pool_size,
+                        kernel=compiled,
                     )
                 except GenerationError as exc:
                     # The compiled kernel rejects every un-admitted Arrow type with
@@ -157,10 +184,13 @@ def _derive_pool_indices(
                     # (or raises the same per-value error the per-row path raised).
                     if exc.code != "native_type_not_admitted":
                         raise
-        idx = reference_index_kernel().derive_index_batch(
-            raw_values, mask_key=seed, namespace=namespace, pool_size=pool_size
+        return derive_validated_indices(
+            raw_values,
+            mask_key=seed,
+            namespace=namespace,
+            pool_size=pool_size,
+            kernel=reference_index_kernel(),
         )
-        return validated_index_array(idx, expected_len=len(raw_values), pool_size=pool_size)
     except BaseException:
         del seed
         raise

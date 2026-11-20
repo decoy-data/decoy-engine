@@ -270,8 +270,6 @@ def test_error_message_does_not_echo_the_value() -> None:
     [
         ("2200-12-30", 5, 5),  # lands past SUPPORTED_MAX
         ("1700-01-02", -5, -5),  # lands before SUPPORTED_MIN
-        ("2000-01-01", 10**12, 10**12),  # Timedelta overflow
-        ("2000-01-01", -(10**12), -(10**12)),
     ],
 )
 def test_window_overflow_and_out_of_range_result_raise(
@@ -282,6 +280,16 @@ def test_window_overflow_and_out_of_range_result_raise(
         run_resident(cfg)
     with pytest.raises(WindowedDateError):
         _generate_tables_from_config(prepared_config(cfg), None, None)
+
+
+@pytest.mark.parametrize("days", [10**12, -(10**12)])
+def test_window_beyond_timedelta_is_refused_at_plan_compile(days: int) -> None:
+    from decoy_engine.plan._errors import PlanCompileError
+
+    cfg = _cfg(4, _anchor_values(["2000-01-01"]), _win(min_days=days, max_days=days))
+    with pytest.raises(PlanCompileError) as exc:
+        _generate_tables_from_config(prepared_config(cfg), None, None)
+    assert exc.value.code == "windowed_date_window_out_of_range"
 
 
 def test_supported_range_boundaries_are_inclusive() -> None:

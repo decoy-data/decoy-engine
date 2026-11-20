@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.execution._adapter import (
@@ -23,11 +22,7 @@ from decoy_engine.execution._adapter import (
     context_draw_identity,
 )
 from decoy_engine.execution._positional_keys import positional_key_array
-from decoy_engine.generation.pool._sampler import (
-    compiled_index_kernel,
-    reference_index_kernel,
-    validated_index_array,
-)
+from decoy_engine.generation.pool import derive_validated_indices
 
 _DOMAIN_CODE = reasons.runtime.FAKER_POSITION_OUT_OF_DOMAIN
 
@@ -66,11 +61,9 @@ def positional_pool_indices(
     `PoolSampler` does."""
     try:
         keys = positional_key_array(row_offset, n, code=_DOMAIN_CODE, gate_positions=gate_positions)
-        kernel = compiled_index_kernel() or reference_index_kernel()
-        idx: pa.Array = kernel.derive_index_batch(
+        return derive_validated_indices(
             keys, mask_key=job_seed, namespace=namespace, pool_size=pool_size
         )
-        return validated_index_array(idx, expected_len=n, pool_size=pool_size)
     except BaseException:
         del job_seed
         raise
