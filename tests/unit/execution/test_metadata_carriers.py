@@ -9,7 +9,12 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine.execution.out_of_core import _emit, _rewrite_pass, _stream_driver_support
+from decoy_engine.execution.out_of_core import (
+    _budget,
+    _emit,
+    _rewrite_pass,
+    _stream_driver_support,
+)
 from decoy_engine.safe_output import _file_metadata, attach_output_metadata
 from tests.security import _metadata_canary as mc
 
@@ -88,7 +93,63 @@ def test_reconcile_batch_takes_its_metadata_from_the_fixed_schema() -> None:
     fixed: Any = attach_output_metadata(
         pa.schema([pa.field(f.name, f.type) for f in src.schema]), src.schema.metadata
     )
-    batch = pa.record_batch(src.columns, schema=src.schema)  # carries every source canary
+    batch = src.combine_chunks().to_batches()[0]  # carries every source canary
     out = _emit.reconcile_batch(batch, fixed)
     assert out.schema.metadata == fixed.metadata
     assert set(out.schema.metadata or {}) <= {b"pandas"}
+
+
+# -- a real multi-batch out-of-core run ----------------------------------------------------------
+
+
+def _ooc_run(tmp_path: Any) -> None:
+    import pyarrow.parquet as pq
+
+    from decoy_engine import run_pipeline
+    from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+    from decoy_engine.profile._readers import LazySource
+    from tests.unit.execution._transform_testkit import fk_config, fk_tables
+
+    parent, child = fk_tables()
+    cfg = fk_config(tmp_path, parent, child)
+    paths = {n: tmp_path / f"{n}_in.parquet" for n in ("parent", "child")}
+    for name, tbl in (("parent", parent), ("child", child)):
+        canary = mc.canary_table({n: tbl[n].combine_chunks() for n in tbl.column_names})
+        pq.write_table(canary, paths[name])
+    sink = ParquetTransactionalSink(tmp_path / "published")
+    result = run_pipeline(
+        cfg,
+        {n: LazySource(path=p) for n, p in paths.items()},
+        engine_version="metadata-carriers-test",
+        sink=sink,
+        execution_mode="out_of_core",
+    )
+    assert result.quality_metrics["execution"]["execution_mode"] == "out_of_core"
+
+
+def _sanitizer_calls_and_hits(
+    tmp_path: Any, batch_rows: int, mp: pytest.MonkeyPatch
+) -> tuple[int, int]:
+    _file_metadata._kept_metadata.cache_clear()
+    mp.setattr(_budget, "_MIN_BATCH_ROWS", batch_rows)
+    mp.setattr(_budget, "_MAX_BATCH_ROWS", batch_rows)
+    _ooc_run(tmp_path)
+    info = _file_metadata._kept_metadata.cache_info()
+    return info.misses, info.hits
+
+
+def test_a_multi_batch_run_sanitizes_once_per_table(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanitizer calls do not grow with the batch count: a 2-row batch size and a one-batch run
+    pay the same, and the extra batches are served from the per-table result."""
+    calls = _count_sanitizer(monkeypatch)
+    (tmp_path / "one").mkdir()
+    (tmp_path / "many").mkdir()
+    one_misses, _ = _sanitizer_calls_and_hits(tmp_path / "one", 10_000, monkeypatch)
+    one_calls = len(calls)
+    calls.clear()
+    many_misses, many_hits = _sanitizer_calls_and_hits(tmp_path / "many", 2, monkeypatch)
+    assert many_hits > one_misses, "the run must really have more than one batch per table"
+    assert (len(calls), many_misses) == (one_calls, one_misses)
+    assert one_calls <= 2 * 3, "a few output schemas per table at most, never one per batch"

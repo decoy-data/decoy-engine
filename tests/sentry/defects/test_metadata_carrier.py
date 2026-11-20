@@ -398,7 +398,8 @@ def test_a_cast_to_a_source_schema_is_seen() -> None:
 
 def test_attached_and_metadata_free_schemas_pass() -> None:
     src = (
-        "def f(arrays, fields, batch, src):\n"
+        "def f(arrays, batch, src):\n"
+        "    fields = [pa.field('a', pa.int64())]\n"
         "    a = attach_output_metadata(pa.schema(fields), batch.schema.metadata)\n"
         "    b = pa.schema(fields)\n"
         "    c = src.schema.remove_metadata()\n"
@@ -481,7 +482,7 @@ def test_every_cast_argument_is_checked(arg: str) -> None:
 
 @pytest.mark.parametrize("arg", ["field.type", "pa.int64()", "col_dtype", "pa.timestamp('us')"])
 def test_a_cast_to_a_type_passes(arg: str) -> None:
-    src = f"def f(col, field, col_dtype):\n    return col.cast({arg})\n"
+    src = f"import pyarrow as pa\ndef f(col, field, col_dtype):\n    return col.cast({arg})\n"
     assert _rules(src) == []
 
 
@@ -534,3 +535,70 @@ def test_a_cast_to_a_type_passes(arg: str) -> None:
 )
 def test_aliased_spellings_are_seen(source: str, rule: str) -> None:
     assert _rules(source) == [rule]
+
+
+# -- one fixture per way a schema gets metadata (every form must be flagged) -----------------------
+
+FORM_FIXTURES = {
+    "pa.schema(x, metadata=)": (
+        "import pyarrow as pa\ndef f(m, x):\n    return pa.schema(x, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "pa.schema(x, m)": (
+        "import pyarrow as pa\ndef f(m, x):\n    return pa.schema(x, m)\n",
+        "metadata-argument",
+    ),
+    "Table.from_pandas(schema=)": (
+        "import pyarrow as pa\ndef f(df, src):\n    return pa.Table.from_pandas(df, schema=src.schema)\n",
+        "whole-schema-reuse",
+    ),
+    "Table.from_pylist(schema=)": (
+        "import pyarrow as pa\ndef f(r, src):\n    return pa.Table.from_pylist(r, schema=src.schema)\n",
+        "whole-schema-reuse",
+    ),
+    "Table.from_pylist(metadata=)": (
+        "import pyarrow as pa\ndef f(r, m):\n    return pa.Table.from_pylist(r, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "Table.from_pydict(schema=)": (
+        "import pyarrow as pa\ndef f(d, src):\n    return pa.Table.from_pydict(d, schema=src.schema)\n",
+        "whole-schema-reuse",
+    ),
+    "Table.from_pydict(metadata=)": (
+        "import pyarrow as pa\ndef f(d, m):\n    return pa.Table.from_pydict(d, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "pa.table(metadata=)": (
+        "import pyarrow as pa\ndef f(d, m):\n    return pa.table(d, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "from_arrays positional metadata": (
+        "import pyarrow as pa\ndef f(c, m):\n    return pa.Table.from_arrays(c, None, None, m)\n",
+        "metadata-argument",
+    ),
+    "cast(schema)": (
+        "import pyarrow as pa\ndef f(t, src):\n    return t.cast(src.schema)\n",
+        "whole-schema-reuse",
+    ),
+    "cast(schema with metadata)": (
+        "import pyarrow as pa\ndef f(t, fields, m):\n    return t.cast(pa.schema(fields, metadata=m))\n",
+        "metadata-argument",
+    ),
+    "import pyarrow as p": (
+        "import pyarrow as p\ndef f(m, x):\n    return p.schema(x, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "from pyarrow import table": (
+        "from pyarrow import table\ndef f(d, m):\n    return table(d, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "from pyarrow import table, schema reuse": (
+        "from pyarrow import table\ndef f(d, src):\n    return table(d, schema=src.schema)\n",
+        "whole-schema-reuse",
+    ),
+}
+
+
+@pytest.mark.parametrize(("source", "rule"), FORM_FIXTURES.values(), ids=list(FORM_FIXTURES))
+def test_every_metadata_form_is_flagged(source: str, rule: str) -> None:
+    assert rule in _rules(source)
