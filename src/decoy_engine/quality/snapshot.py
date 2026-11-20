@@ -7,33 +7,17 @@ D1b (diagnostic) and D1c (fidelity) both consume snapshots without
 re-walking the underlying frames. The snapshot is the only thing that
 crosses the "input data -> downstream metrics" boundary.
 
-Hard requirements (enforced by tests):
-  - Deterministic: same input + same kwargs -> byte-identical JSON.
-  - JSON-serializable: `json.dumps(snapshot)` succeeds without custom
-    encoders. No numpy scalars, no Timestamp, no Decimal, no NaN/Inf.
-  - Pure: never mutates the input frame.
+Hard requirements (enforced by tests): deterministic (same input and kwargs give byte-identical
+JSON); JSON-serializable without custom encoders (no numpy scalars, Timestamp, Decimal, NaN or
+Inf); pure (never mutates the input frame).
 
-Prior art surveyed (per repo rule "use established methodology"):
-  - pandas describe / quantile / value_counts / crosstab: the per-column
-    summary stats and pairwise contingency are thin wrappers around these
-    primitives rather than hand-rolled accumulators.
-  - numpy histogram_bin_edges with the 'auto' rule was considered but
-    rejected: equal-width bins with a fixed N are easier to compare
-    across two frames (source vs output) because the bin boundaries are
-    a function of the data range, not the data distribution.
-  - SDV (Synthetic Data Vault) TabularPreset metadata pattern: each
-    column has a kind ("numerical" / "categorical" / "datetime" / "text"
-    in SDV; we use "numeric" / "categorical" / "datetime" / "freetext" /
-    "empty") that drives which stats apply. Snapshot kind is recorded
-    explicitly so D1c can refuse to compare across mismatched kinds.
-  - NIST SP 800-188 Sec. 4 (Trustworthy De-identification): utility
-    metrics for de-identified data are typically a comparison of
-    marginal distributions and pairwise contingency tables. Snapshot
-    captures exactly enough to support those comparisons later without
-    re-touching raw rows.
+Prior art: pandas describe / quantile / value_counts / crosstab for the per-column stats and
+pairwise contingency; equal-width bins with a fixed N (not numpy's 'auto' rule), so two frames
+compare on edges that follow the data range; SDV's per-column kind drives which stats apply, and
+the kind is recorded so fidelity scoring can refuse a kind mismatch; NIST SP 800-188 Sec. 4 on
+marginal and pairwise utility metrics.
 
-What this module does NOT do: score fidelity (D1c, fidelity.py), run structural checks (D1b,
-diagnostic.py) or persist snapshots to a job record (D2).
+Not done here: fidelity scoring (fidelity.py), structural checks (diagnostic.py), persistence.
 
 Sensitive artifact: a categorical column's `top_values` already carries
 REAL source values (gated by the consumer-side `allow_real_categories`
@@ -43,13 +27,13 @@ no top-K collapse, so the artifact additionally exposes every distinct
 code AND rare-code presence/absence -- treat it with the same care as
 a raw extract of that column.
 
-DPS Scope B history: the old `dp_mode` fit parameters are gone; see the CHANGELOG entry for DPS
-Scope B. `quality.dp.fit_dp_snapshot` does not call this function, which is explicitly non-DP.
+`quality.dp.fit_dp_snapshot` does not call this function, which is explicitly non-DP.
 """
 
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Collection, Sequence
 from typing import Any
 
@@ -61,6 +45,7 @@ from decoy_engine.errors import DecoyError
 from decoy_engine.internal.pandas_compat import (
     canonical_dtype_label,
     finite_numeric_cells,
+    histogram_for_range,
     numeric_cells,
     utc_naive_datetimes,
 )
@@ -112,6 +97,8 @@ DEFAULT_CATEGORICAL_TOP_K = 20
 DEFAULT_CONTINGENCY_TOP_K = 25
 # Upper bound on `contingency_top_k`: two ordinary categoricals (30 distinct each) fit in 900 cells.
 MAX_CONTINGENCY_TOP_K = 1000
+# Upper bound on `numeric_bins`: bounds the histogram memory before any data is read.
+MAX_NUMERIC_BINS = 1000
 
 # Cardinality cap that splits "categorical" from "freetext" for object columns. Mirrors
 # profiling/_distributions._PROFILE_CATEGORICAL_DISTINCT_CAP (30). This is the SINGLE fit
@@ -124,14 +111,32 @@ _HIGH_CARDINALITY_MAX_DISTINCT = 100_000
 _HIGH_CARDINALITY_MAX_LABEL_BYTES = 16 * 1024 * 1024  # 16 MiB
 
 
+def _check_int_param(name: str, value: object, maximum: int, code: str) -> None:
+    """Raise `DistributionSnapshotError` unless `value` is a non-bool integral from 1 to `maximum`.
+
+    The message names the type received, never the value, so a bad parameter cannot carry a cell.
+    """
+    if (
+        not isinstance(value, numbers.Integral)
+        or isinstance(value, bool)
+        or not 1 <= int(value) <= maximum
+    ):
+        raise DistributionSnapshotError(
+            code=code,
+            message=f"{name} must be an int from 1 to {maximum} (got type {type(value).__name__}).",
+        )
+
+
 def check_contingency_top_k(value: object) -> None:
     """Raise `DistributionSnapshotError` unless `value` is an int from 1 to the maximum."""
-    if type(value) is not int or not 1 <= value <= MAX_CONTINGENCY_TOP_K:
-        raise DistributionSnapshotError(
-            code=reasons.quality.CONTINGENCY_TOP_K_INVALID,
-            message=f"contingency_top_k must be an int from 1 to {MAX_CONTINGENCY_TOP_K} "
-            f"(got type {type(value).__name__}).",
-        )
+    _check_int_param(
+        "contingency_top_k", value, MAX_CONTINGENCY_TOP_K, reasons.quality.CONTINGENCY_TOP_K_INVALID
+    )
+
+
+def check_numeric_bins(value: object) -> None:
+    """Raise `DistributionSnapshotError` unless `value` is an int from 1 to `MAX_NUMERIC_BINS`."""
+    _check_int_param("numeric_bins", value, MAX_NUMERIC_BINS, reasons.quality.NUMERIC_BINS_INVALID)
 
 
 def compute_distribution_snapshot(
@@ -155,8 +160,7 @@ def compute_distribution_snapshot(
         joint_columns: Pairs of column names whose pairwise contingency
             table should be captured. Pairs referencing unknown columns
             are silently skipped (the snapshot is not a validator).
-        numeric_bins: Number of equal-width bins per numeric column. A numeric column also gets
-            an optional `quantile_grid` or `exact_values` block (generation/statistical/_numeric_shape.py).
+        numeric_bins: Equal-width bins per numeric column, an int from 1 to `MAX_NUMERIC_BINS`.
         categorical_top_k: Max distinct values kept per categorical
             column; rest collapse into the column's `other_count`.
         contingency_top_k: Max cells kept per joint table (an int from 1 to
@@ -180,6 +184,7 @@ def compute_distribution_snapshot(
         DistributionSnapshotError: bad `contingency_top_k`, `high_cardinality_columns`,
             `fanout_columns` or a safety-limit violation.
     """
+    check_numeric_bins(numeric_bins)
     check_contingency_top_k(contingency_top_k)
     # MED-3: a bare str satisfies `Collection[str]` but would iterate characters
     # and silently disable the feature; reject the shape explicitly.
@@ -445,7 +450,7 @@ def numeric_stats(
         bin_edges = [lo, hi]
         bin_counts = [int(finite.size)]
     else:
-        counts, edges = np.histogram(hist_input, bins=bins, range=(lo, hi))
+        counts, edges = histogram_for_range(hist_input, bins, lo, hi)
         bin_edges = [_round(float(e)) for e in edges]
         bin_counts = [int(c) for c in counts]
 

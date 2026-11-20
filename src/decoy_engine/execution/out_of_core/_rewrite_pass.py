@@ -52,6 +52,7 @@ from decoy_engine.execution.out_of_core._stream_driver_support import (  # noqa:
 from decoy_engine.execution.out_of_core._vault_collect import collect_batch_vault
 from decoy_engine.progress import get_active_channel
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -379,7 +380,8 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    carried = [f.name for f in source_schema if f.name not in fk_components and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 __all__ = ["_stream_table"]

@@ -10,6 +10,9 @@
   },
   "native-companion-release.yml::sign-publish": {
    "reason": "existing entry of _ci_lock_scan.py, registered in EW1 when the baseline scan began to read sentry subfolders; may only shrink"
+  },
+  "gate-selfhosted.yml::gate-verdict": {
+   "reason": "statuses: write for the engine-gate/verdict commit status; fourth write scope, approved by the owner 2026-11-17 (dispatch only, owner-guarded)"
   }
  }
 }

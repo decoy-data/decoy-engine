@@ -1,0 +1,16 @@
+{
+  "nulls": {
+    "synthetic_npi:0.3:500": "0085f183553a6bc02483cf7edc8a282b9b9878804e2e842cfd421ede3b475a46"
+  },
+  "scalars": {
+    "synthetic_cusip": "897716216ed7770bf53b5d13649f27166732b8c3073a1806d7cc4a17c1f738de",
+    "synthetic_ein": "93d27da780b8dda45cc177cf7b6a65a5da3cff81af5accaca43d773146a5e5d1",
+    "synthetic_iban": "62a5b05f233aa1938acb70eb64e0829ae9eb29cbb39af027ed2169169ce7e99d",
+    "synthetic_icd10": "3fc6e0a44aeadfbf3e129a1458d660944839c896f45f7e50d33c252c4808f0ff",
+    "synthetic_mrn": "df519ef586aaa18dc6339ad7c3fad89db0ab11121db3ea517054b96d71b1bb9b",
+    "synthetic_ndc": "378178826edaec9315ad3ac8d3f98f9cf625d9bf3affa409d01f1cfe42534172",
+    "synthetic_npi": "57e0e728842753da7d73b5da970e63aca40743146a62e3f46a265aba7e66ee27",
+    "synthetic_pan": "08ede064fd49c755e89461b9dc3540bbec9c8834eb57ebc85b3642996aa0e89a",
+    "synthetic_ssn": "c76f5bdddebb877c365d5cf67c49620b34962d65eae907c67624fb83c60adbdf"
+  }
+}

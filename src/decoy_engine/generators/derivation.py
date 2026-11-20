@@ -217,6 +217,11 @@ def strategy_config_fingerprint(
 #            `null_probability` is not in the fingerprint, so a shared family would hand the mask
 #            and the value the same uniforms.
 GEN_FAMILIES = ("py", "np", "faker", "faker_unique", "unique_pair", "dist")
+# The two extra `family_bytes` labels of a pooled column: the pool build and its row selection.
+POOL_BUILD_FAMILY = "faker_pool_build"
+POOL_SELECTION_FAMILY = "faker_pool_selection"
+# The locale a generate column uses when neither the column nor the instance names one.
+DEFAULT_GENERATE_LOCALE = "en_US"
 
 
 def _gen_hmac(key: bytes, label: bytes, *, extra: bytes = b"") -> bytes:
@@ -352,3 +357,18 @@ class GenDeriveContext:
             self._family_key(family), family.encode("utf-8"), extra=i.to_bytes(8, "big")
         )
         return int.from_bytes(block, "big", signed=False)
+
+
+def pool_seeds(gen_ctx: GenDeriveContext) -> tuple[bytes, bytes]:
+    """The (build, selection) seeds of a pooled column, the one pairing every pool caller uses."""
+    build_seed = gen_ctx.family_bytes(POOL_BUILD_FAMILY)[:8]
+    selection_seed = gen_ctx.family_bytes(POOL_SELECTION_FAMILY)[:8]
+    if build_seed == selection_seed:
+        # Astronomically unlikely for distinct HMAC labels; a real collision
+        # here means family_bytes stopped being label-disjoint, which would
+        # silently collapse the build and selection draws onto one stream.
+        raise RuntimeError(
+            "faker_pool_build/faker_pool_selection HMAC domains collided -- "
+            "GenDeriveContext.family_bytes is no longer label-disjoint"
+        )
+    return build_seed, selection_seed

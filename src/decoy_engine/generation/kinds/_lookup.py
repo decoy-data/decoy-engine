@@ -256,7 +256,7 @@ def lookup_values(
 
 
 def lookup_digests(
-    col: dict[str, Any], lookup: LookupList | None
+    col: Mapping[str, Any], lookup: LookupList | None
 ) -> dict[tuple[str, str], str] | None:
     """The fingerprint digest map of a lookup column: its pinned file's digest.
 
