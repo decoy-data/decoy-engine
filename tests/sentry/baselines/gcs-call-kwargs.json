@@ -255,7 +255,7 @@
     "decoy_engine/fileaccess/_reclaim.py::_judge::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
-    "decoy_engine/fileaccess/_reclaim.py::_newest::open::0": {
+    "decoy_engine/fileaccess/_reclaim.py::_push_dir::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
     },
     "decoy_engine/fileaccess/_reclaim.py::_open_scope::open::0": {

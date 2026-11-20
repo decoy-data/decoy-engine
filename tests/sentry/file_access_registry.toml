@@ -1912,7 +1912,7 @@ reason = "F26 G1(c): the descriptor the proof, lock and recheck are taken on"
 
 [[entry]]
 module = "decoy_engine/fileaccess/_reclaim.py"
-function = "_newest"
+function = "_scan_one"
 sink = "os.scandir"
 ordinal = 0
 disposition = "read"
@@ -1922,7 +1922,7 @@ reason = "F26 G1(e): the age of a pending stage is the newest time over its whol
 
 [[entry]]
 module = "decoy_engine/fileaccess/_reclaim.py"
-function = "_newest"
+function = "_push_dir"
 sink = "os.open"
 ordinal = 0
 disposition = "read"
