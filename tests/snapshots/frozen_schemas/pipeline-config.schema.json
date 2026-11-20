@@ -820,8 +820,18 @@
           },
           "then": {
             "additionalProperties": false,
+            "dependentRequired": {
+              "by": [
+                "condition_on"
+              ],
+              "condition_on": [
+                "by"
+              ]
+            },
             "properties": {
+              "by": {},
               "categories": {},
+              "condition_on": {},
               "determinism": {},
               "name": {},
               "null_probability": {},
