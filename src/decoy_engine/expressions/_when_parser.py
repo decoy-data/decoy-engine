@@ -50,7 +50,9 @@ _INT64_MAX = 2**63 - 1
 _INTEGER_CHARS = frozenset("-0123456789")
 
 # numexpr.expressions.functions (48 names), pandas' DEFAULT_GLOBALS, the names pandas
-# eval resolves from the frame itself, and the Python keywords. Frozen on purpose: `type` (a 3.12
+# eval resolves from the frame itself, the Python keywords, and nine words held back for later
+# grammar (`null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`,
+# `endswith`). Frozen on purpose: `type` (a 3.12
 # soft keyword) is listed on every interpreter so validation does not depend on the running Python.
 RESERVED_NAMES: frozenset[str] = frozenset(
     {
@@ -69,6 +71,8 @@ RESERVED_NAMES: frozenset[str] = frozenset(
         "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if",
         "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
         "return", "try", "while", "with", "yield", "match", "case", "_", "type",
+        # Words the grammar may grow into. Lowercase only: `NULL` or `Between` stays a column.
+        "null", "true", "false", "between", "like", "ilike", "matches", "startswith", "endswith",
     }
 )  # fmt: skip
 
