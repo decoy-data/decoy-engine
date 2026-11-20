@@ -25,6 +25,7 @@ from decoy_engine.execution.out_of_core._compat import _column_seed
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
 from decoy_engine.execution.out_of_core._source import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 from decoy_engine.transforms.code_set import (
     CodeSetConfig,
     describe_loaded_corpus,
@@ -82,7 +83,7 @@ def _payload_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata)
 
 
 def _fixed_output_schema(
@@ -109,7 +110,7 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata)
 
 
 def _replace_fk_columns(
@@ -130,7 +131,9 @@ def _replace_fk_columns(
         idx = batch.schema.get_field_index(child_col)
         arrays[idx] = fk_array
         fields[idx] = pa.field(child_col, dtype)
-    return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+    return pa.record_batch(
+        arrays, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+    )
 
 
 def _code_set_records_and_evidence_for_table(

@@ -45,6 +45,7 @@ from decoy_engine.execution.out_of_core._mask_group_c import (
 )
 from decoy_engine.execution.out_of_core._text_redact_native import native_text_redact_array
 from decoy_engine.kernel import hash_array, passthrough_array, redact_array, truncate_array
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from decoy_engine.execution.out_of_core._bucket_native import NativeBucket
@@ -386,7 +387,9 @@ def _narrow_unmasked(
         state = widths.setdefault(field.name, TextWidthState(fixed=fixed_schema))
         arrays[idx] = narrow_passthrough(arrays[idx], state)
         fields[idx] = field.with_type(arrays[idx].type)
-    return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+    return pa.record_batch(
+        arrays, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+    )
 
 
 def mask_batch(

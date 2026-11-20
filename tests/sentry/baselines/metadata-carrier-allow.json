@@ -1,0 +1,46 @@
+{
+  "sentry_id": "metadata-carrier-allow",
+  "created_in": "OUTPUT-METADATA-LEAK-E2",
+  "entries": {
+    "decoy_engine/execution/_chunked_output_sink.py::_cast": {
+      "max": 1,
+      "reason": "casts a chunk onto the sink's own writer schema, which the writer built; the output writer strips metadata again at publish"
+    },
+    "decoy_engine/execution/out_of_core/_batch_join.py::ChildFkBatchJoiner._staging_table": {
+      "max": 1,
+      "reason": "child-key staging batch built from a key-only schema; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_emit.py::reconcile_batch": {
+      "max": 1,
+      "reason": "rebuilds a batch on fixed_schema, which _fixed_output_schema already passed through attach_output_metadata"
+    },
+    "decoy_engine/execution/out_of_core/_join.py::_child_key_batches": {
+      "max": 1,
+      "reason": "child-key staging batch on a key-only schema; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_relation.py::_relation_staging_batches": {
+      "max": 1,
+      "reason": "relation staging batch on a schema this module builds from key types; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_stage.py::MaskedKeyStager.add": {
+      "max": 1,
+      "reason": "masked-key stage batch on the stager's own key schema; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_stream_driver.py::stream_table": {
+      "max": 1,
+      "reason": "raw parent spill batch built from the source column order; private spill file, never published"
+    },
+    "decoy_engine/execution/out_of_core/_stream_join.py::StreamFkJoiner._with_positional_row_nr": {
+      "max": 1,
+      "reason": "same-object rebuild: replaces one column of result and keeps the schema result already had"
+    },
+    "decoy_engine/execution/out_of_core/_stream_join.py::StreamFkJoiner.stage_batch": {
+      "max": 1,
+      "reason": "child-key spill batch on the joiner's own key schema; internal scratch that is never published"
+    },
+    "decoy_engine/execution/out_of_core/_stream_join_cursors.py::ChildKeyLockstepCursor.take": {
+      "max": 1,
+      "reason": "empty batch on the spill reader's own key schema; internal scratch that is never published"
+    }
+  }
+}

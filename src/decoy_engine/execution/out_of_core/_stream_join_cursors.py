@@ -38,6 +38,7 @@ import pyarrow.compute as pc
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._external_sort import BoundedExternalSorter
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -431,7 +432,9 @@ def _widen_payload_offsets(batch: pa.RecordBatch) -> pa.RecordBatch:
         pa.field(f.name, c.type, f.nullable, f.metadata)
         for f, c in zip(batch.schema, columns, strict=True)
     ]
-    return pa.record_batch(columns, schema=pa.schema(fields, metadata=batch.schema.metadata))
+    return pa.record_batch(
+        columns, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+    )
 
 
 def _assert_slim_sorter_schema(schema: pa.Schema) -> None:

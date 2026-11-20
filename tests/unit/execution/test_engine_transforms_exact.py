@@ -177,9 +177,9 @@ def _check_lineage(ops: list[dict[str, Any]]) -> None:
         else:
             assert out.column(name).to_pylist() == [r[name] for _, r in rows]
             assert out.schema.field(name).type == pa.int64()
-    # rule 4: non-pandas keys kept, pandas key rebuilt with no index columns
+    # rule 4: non-pandas keys dropped, pandas key rebuilt with no index columns
     meta = out.schema.metadata
-    assert meta[b"custom"] == b"keep-me"
+    assert set(meta) == {b"pandas"}
     pandas_meta = json.loads(meta[b"pandas"])
     assert pandas_meta["index_columns"] == []
     assert [c["field_name"] for c in pandas_meta["columns"]] == out.column_names
@@ -384,7 +384,7 @@ class TestExactPreservation:
         for name in tbl.column_names:
             _same_column(out.column(name), tbl.column(name))
             assert out.schema.field(name).equals(tbl.schema.field(name), check_metadata=True)
-        assert out.schema.metadata[b"custom"] == b"kept"
+        assert set(out.schema.metadata) == {b"pandas"}
         assert json.loads(out.schema.metadata[b"pandas"])["index_columns"] == []
 
     def test_select_subset_takes_with_metadata(self):

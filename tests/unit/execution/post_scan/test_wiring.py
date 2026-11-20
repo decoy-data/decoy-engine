@@ -8,7 +8,6 @@ A blocking verdict commits nothing. All values are made up.
 from __future__ import annotations
 
 import copy
-import dataclasses
 import logging
 from collections.abc import Callable
 from pathlib import Path
@@ -26,7 +25,6 @@ from decoy_engine.execution.pipeline import _post_scan
 from decoy_engine.execution.pipeline._post_scan import PostScanGate
 from decoy_engine.reason_adapter import reason_from_exception
 from decoy_engine.verification.postmask import PostScanBlockedError
-from decoy_engine.verification.postmask.types import ResidualPIIFinding
 from tests.unit.execution import _subset_run_support as subset_sup
 from tests.unit.execution._b6a_support import RecordingSink
 from tests.unit.execution.test_lazy_path_route_admission import (
@@ -144,13 +142,7 @@ def test_at16_a_gate_that_ran_lets_the_commit_through() -> None:
 
 
 DEFERRED = {"namespace": "post_scan", "code": "gate_deferred_route"}
-
-
-def _fail_row(table: str, column: str) -> dict[str, Any]:
-    """A complete writer row: the verdict refuses a row the strict reader would refuse."""
-    return dataclasses.asdict(
-        ResidualPIIFinding(table, column, "email", match_rate=0.5, severity="fail")
-    )
+FAIL = {"severity": "fail"}
 
 
 @pytest.mark.parametrize(
@@ -196,10 +188,8 @@ def test_at16_integrity_with_a_sink_and_lazy_inputs_still_withholds_on_a_failing
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "schema_version": "post-scan-integrity/v3",
-            "residual_pii": [_fail_row("customers", "email")],
-        }
+        finding = {"table": "customers", "column": "email", "detector_id": "email"}
+        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
 
     monkeypatch.setattr(_post_scan, "run_post_mask", failing)
     cfg, _, lazy = subset_sup.job(tmp_path)

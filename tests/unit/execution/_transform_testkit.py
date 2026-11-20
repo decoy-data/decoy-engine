@@ -23,6 +23,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.safe_output import attach_output_metadata
 from tests._declared_schema import declare_rest
 
 ENGINE_VERSION = "a8-engine-transforms-test"
@@ -287,11 +288,10 @@ def reference_transform(table: pa.Table, ops: Sequence[dict[str, Any]]) -> pa.Ta
             arr = pa.array(df[name], from_pandas=True)
             arrays.append(arr)
             fields.append(pa.field(name, arr.type))
-    out = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+    # Source schema keys other than the pandas blob are not carried (OUTPUT-METADATA-LEAK E2).
     fresh = pa.Table.from_pandas(df.reset_index(drop=True), preserve_index=False)
-    meta = {k: v for k, v in (table.schema.metadata or {}).items() if k != b"pandas"}
-    meta[b"pandas"] = fresh.schema.metadata[b"pandas"]
-    return out.replace_schema_metadata(meta)
+    schema = attach_output_metadata(pa.schema(fields), fresh.schema.metadata)
+    return pa.Table.from_arrays(arrays, schema=schema)
 
 
 def tables_equal(actual: pa.Table, expected: pa.Table) -> None:
