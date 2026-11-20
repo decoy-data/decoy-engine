@@ -258,7 +258,7 @@ def test_a_reviewed_new_package_goes_green_only_with_its_snapshot(
     (pkg / "__init__.py").write_text('"""A reviewed foundation leaf."""\n', encoding="utf-8")
     cfg = tree / ".importlinter"
     before = ignore_keys(cfg.read_text(encoding="utf-8"))
-    _edit(cfg, " : _nested_json\n", " : _nested_json : _probe_leaf\n")
+    _edit(cfg, " : _duckdb_read\n", " : _duckdb_read : _probe_leaf\n")
     assert lint_scratch(tree)
     text = cfg.read_text(encoding="utf-8")
     assert ignore_keys(text) == before

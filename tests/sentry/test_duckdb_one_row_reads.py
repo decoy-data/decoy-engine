@@ -3,7 +3,7 @@
 `fetchone()` leaves the SELECT result unfinished and DuckDB 2.x then rejects the next
 `conn.register()` on that connection (ResourceInUseException). That broke the post-scan gate
 and was found again in two connectors, so the class is closed here. A module that mentions
-DuckDB and calls `.fetchone(` fails unless the site is allowlisted below; an entry is only
+DuckDB and calls `.fetchone(` fails unless the site is listed below; an entry is only
 for a read after which the connection is closed, and it names why.
 """
 
@@ -17,7 +17,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 
 # (path under src/decoy_engine, enclosing function) -> why a fetchone is safe there.
-ALLOWED: dict[tuple[str, str], str] = {
+CLOSED_AFTER_READ: dict[tuple[str, str], str] = {
     ("execution/native/_pool_quality.py", "measure_pool_quality"): (
         "the connection is closed in the finally right after the read; nothing registers on it"
     ),
@@ -57,15 +57,15 @@ def fetchone_sites(root: Path) -> list[tuple[str, str]]:
 
 
 def test_no_unlisted_fetchone_in_duckdb_modules() -> None:
-    unlisted = [s for s in fetchone_sites(SRC) if s not in ALLOWED]
+    unlisted = [s for s in fetchone_sites(SRC) if s not in CLOSED_AFTER_READ]
     assert unlisted == [], "use decoy_engine._duckdb_read.fetch_row or fetch_scalar"
 
 
-def test_every_allowlist_entry_has_a_reason_and_a_live_site() -> None:
+def test_every_closed_after_read_entry_has_a_reason_and_a_live_site() -> None:
     live = set(fetchone_sites(SRC))
-    for key, reason in ALLOWED.items():
+    for key, reason in CLOSED_AFTER_READ.items():
         assert reason.strip(), key
-        assert key in live, f"stale allowlist entry {key}"
+        assert key in live, f"stale entry {key}"
 
 
 def test_the_scan_flags_a_seeded_violation(tmp_path: Path) -> None:
