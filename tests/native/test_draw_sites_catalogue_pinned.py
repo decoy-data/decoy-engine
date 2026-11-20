@@ -65,7 +65,13 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
 # Re-pinned at the GEN-INHERIT E2 main merge: row 24ze G1's form plus GEN-REL's gen.reference sites.
 # Re-pinned at the GEN-INHERIT E2 merge of GEN-REL E3b: gen.reference sites after the E3b merge.
-_CATALOGUE_DIGEST = "ccfc988839f27b38a817991ee5b43e9b5428d0c5c5df2c3966babb9f139ccc60"
+# Re-pinned for GEN-REL E1: gen.reference notes and mirror call sites name the moved cardinality repair.
+# Re-pinned for GEN-REL E2: gen.reference notes and mirror call sites name the self-reference tree draw.
+# Re-pinned for E-F0: only the mask.text_mask_date_shift entry moves (an unparseable span now becomes
+# the redaction token, not its real text), and with it the catalogue digest.
+# Re-pinned at the GEN-REL E2 main merge: both changes together.
+# Re-pinned at the GEN-INHERIT E2 main merge: the E-F0 date-shift entry joins the GEN-REL sites.
+_CATALOGUE_DIGEST = "0a64d7e59a95db24c7cd962fb0885c1b78b1577b4bc7d55999db4d074d0a9c77"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -125,7 +131,7 @@ _ENTRY_DIGESTS = [
     "dfa795f581a81ffc81d668aac8669215dd62c577df7cdf3be702a317b31ea758",  # mask.joint_mask_keyed_row
     "71a6ecef1fb21899f869296e386b309004f2760a90ed24deb3c0b217c7385681",  # mask.joint_mask_null_fallback
     "ded3f195ad06b5b96de97035e9386102fbcacd718b699a7a3a6256915a53d1e8",  # mask.joint_mask_gen_row
-    "707f1f95424d98e829d7a6257d344515d801f77f6b52a7733e300ebd445ac4d8",  # mask.text_mask_date_shift
+    "05c78dbb9a24f8e6e60a356b45ca143b4f33af8f60638689a2ca92fd306ac65b",  # mask.text_mask_date_shift
     "568b337638c888c7dfd5cc616c5924d9827319202d43382ea821a884efe401c4",  # mask.text_mask_faker
     "2c7733e97f6e0dab2366a8d80b147025b26b19cf8c358fe51a0e815683476efc",  # mask.grouped_series_monotone_walk
     "13fcb5fc47f3b985bcce484edec55922e9728bed9edd7e97db086ceca27d242f",  # mask.windowed_date

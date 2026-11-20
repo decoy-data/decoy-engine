@@ -22,7 +22,8 @@ workflow = "native-companion.yml"
 jobs = [
   "companion-wheel-linux",
   "companion-wheel-windows",
-  "companion-wheel-macos",
+  "native-changes",
+  "companion-wheel-macos-ok",
   "companion-rust-lint",
   "core-companion-present",
   "companion-fuzz-sanitizer",
@@ -50,6 +51,27 @@ reason = "runs only on PRs labelled bugfix"
 workflow = "docs.yml"
 job = "deploy"
 reason = "deploy job; runs only from a main push, and docs.yml has no push trigger until DOCS_DEPLOY is enabled"
+
+[[merge_exempt]]
+workflow = "native-companion.yml"
+job = "companion-wheel-macos"
+reason = "path-scoped; judged by companion-wheel-macos-ok"
+
+# A merge job that judges exempt jobs. It may carry exactly `if: always()` and may need the jobs it
+# judges; its step must run scripts/dev/native_scope.py judge on toJSON(needs). Branch protection
+# requires the aggregator's one context instead of the judged job's per-leg contexts.
+[[aggregator]]
+workflow = "native-companion.yml"
+job = "companion-wheel-macos-ok"
+judges = ["companion-wheel-macos"]
+reason = "macOS legs run only when the PR touches the native companion; a skipped leg reports no per-leg check"
+
+# Commit-status contexts a head needs before it merges. The status is posted by a gate-selfhosted.yml
+# dispatch on that sha (job gate-verdict). A status, not a check run: a skipped job's check run
+# passes branch protection, a missing status does not.
+[[merge_status]]
+context = "engine-gate/verdict"
+reason = "the self-hosted gate ran on this exact head and passed"
 
 # Default markers whose tests skip outside their profile: a whole-suite run does not count as
 # their lane.
