@@ -26,6 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
+from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
     _counts as K,  # noqa: N812 -- short alias for the contract namespace
@@ -171,7 +172,12 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
     return frozenset(
         (c.table, c.column)
         for c in getattr(block, "columns", None) or ()
-        if c.strategy == "date_shift" and contract_model(c).logical_type == "date"
+        if c.strategy == "date_shift"
+        and date_shift_owns_declared_format(
+            nested=False,
+            logical_type=contract_model(c).logical_type,
+            has_parse_format=True,
+        )
     )
 
 

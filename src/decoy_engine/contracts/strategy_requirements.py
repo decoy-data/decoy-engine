@@ -21,6 +21,7 @@ __all__ = [
     "StrategyRequirement",
     "lookup_path",
     "requirement_applies",
+    "requirement_missing",
     "requirements_for",
 ]
 
@@ -99,6 +100,11 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
 def requirements_for(strategy: str) -> tuple[StrategyRequirement, ...]:
     """The requirements of ``strategy``; empty when it declares none."""
     return REQUIREMENTS_BY_STRATEGY.get(strategy, ())
+
+
+def requirement_missing(value: Any) -> bool:
+    """Every required setting is a name, so anything but a non-blank string is missing."""
+    return not isinstance(value, str) or not value.strip()
 
 
 def lookup_path(entry: Mapping[str, Any], path: tuple[str, ...]) -> Any:

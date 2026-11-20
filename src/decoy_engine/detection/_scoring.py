@@ -247,7 +247,8 @@ def _evaluate(
         # The date detectors label their variants with strptime formats, the others with regexes.
         if format_pattern is not None and format_pattern.startswith("%"):
             winner = dict(format_variants)[format_pattern]
-            complete = _every_hit_parses(
+            # Every non-null value must be a hit: a miss is a cell date_shift would fail on.
+            complete = hits == values.n and _every_hit_parses(
                 values.raw_uniques[hit], uniques[hit], format_pattern, winner
             )
     return DetectorMatch(

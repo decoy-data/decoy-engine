@@ -2,4 +2,4 @@ Breaking: a `date_shift` column without `provider_config.date_format` is refused
 
 ### Changed (date_shift format required, DATE-SHIFT-FORMAT, 2026-11-20)
 
-Refusal added, see the first line. The plan compile check reads the requirement from the strategy requirements registry and also walks `nested` children. `DetectorMatch` and `FieldStats` gain `format_pattern_complete`. The strategy catalog now marks the `date_shift` option `date_format` as required. New reasons, pending: `plan/date_shift_requires_date_format` and `runtime/date_shift_requires_date_format`.
+Refusal added, see the first line. The plan compile check reads the requirement from the strategy requirements registry and also walks `nested` children. `DetectorMatch` and `FieldStats` gain `format_pattern_complete`. The strategy catalog now marks the `date_shift` option `date_format` as required. New reasons, pending: `plan/date_shift_requires_date_format` and `runtime/date_shift_requires_date_format`. Required-setting refusals (a namespace, a date_shift format) now come before the other run preflight checks and before any source read.

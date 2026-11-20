@@ -70,6 +70,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
+from decoy_engine.contracts.strategy_requirements import requirement_missing
 from decoy_engine.determinism._derive import DeriveContext
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -96,8 +97,8 @@ def _required_format(cfg: Mapping[str, Any], column: str, ctx: StrategyContext) 
     plan alone. It does not detect a format from the cells.
     """
     fmt = cfg.get("date_format")
-    if isinstance(fmt, str) and fmt.strip():
-        return fmt
+    if not requirement_missing(fmt):
+        return str(fmt)
     declared = (ctx.current_table, ctx.nested_outer_column or column) in ctx.declared_date_columns
     if date_shift_owns_declared_format(
         nested=bool(ctx.nested_outer_column),

@@ -22,6 +22,7 @@ from decoy_engine.contracts.strategy_requirements import (
     StrategyRequirement,
     lookup_path,
     requirement_applies,
+    requirement_missing,
     requirements_for,
 )
 from decoy_engine.plan._errors import PlanCompileError
@@ -33,11 +34,6 @@ __all__ = [
     "check_required_strategy_settings",
     "requirements_for",
 ]
-
-
-def _missing(value: Any) -> bool:
-    """Every required setting is a name, so anything but a non-blank string is missing."""
-    return not isinstance(value, str) or not value.strip()
 
 
 def _declared_date_format(col: dict[str, Any]) -> bool:
@@ -69,7 +65,9 @@ def _missing_in_nested(
         for req in requirements_for(child.strategy):
             if req.path[0] != "provider_config":
                 continue
-            if requirement_applies(req, rooted) and _missing(lookup_path(rooted, req.path)):
+            if requirement_applies(req, rooted) and requirement_missing(
+                lookup_path(rooted, req.path)
+            ):
                 where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
                 yield req, ".".join((where, child.config_path, "strategy_config", *req.path[1:]))
 
@@ -91,7 +89,7 @@ def _missing_requirements(
             continue
         if req.path == ("provider_config", "date_format") and _declared_date_format(col):
             continue
-        if requirement_applies(req, col) and _missing(lookup_path(col, req.path)):
+        if requirement_applies(req, col) and requirement_missing(lookup_path(col, req.path)):
             yield req, f"{where}." + ".".join(req.path)
     if strategy == "nested":
         for req, path in _missing_in_nested(table, col):
