@@ -607,3 +607,16 @@ def test_a_v2_row_with_a_null_match_rate_is_refused() -> None:
     assert isinstance(_refusal(lambda: finding_edits(_config(), report, [])), ReviewEntryError)
     v3 = _report({**EMAIL, "match_rate": None})
     assert finding_edits(_config(), v3, []) == ()
+
+
+def test_confirm_of_a_date_finding_uses_the_row_format_or_asks_for_one() -> None:
+    row = _row("dob", "iso_date")
+    with pytest.raises(ReviewEntryError) as refused:
+        finding_edits(_config(), _report(row), [_decision(row, V.CONFIRM)])
+    assert "date format" in str(refused.value)
+    withfmt = {**row, "format_pattern": "%Y-%m-%d", "format_pattern_complete": True}
+    (edit,) = finding_edits(_config(), _report(withfmt), [_decision(withfmt, V.CONFIRM)])
+    assert edit.value == detector_entry("iso_date", "dob", date_format="%Y-%m-%d")
+    partial = {**withfmt, "format_pattern_complete": False}
+    with pytest.raises(ReviewEntryError):
+        finding_edits(_config(), _report(partial), [_decision(partial, V.CONFIRM)])

@@ -448,7 +448,11 @@ def _fk_key_error_config(tmp_path: Path) -> dict[str, Any]:
                         {
                             "name": "id",
                             "strategy": "date_shift",
-                            "provider_config": {"min_days": 1, "max_days": 30},
+                            "provider_config": {
+                                "min_days": 1,
+                                "max_days": 30,
+                                "date_format": "%Y-%m-%d",
+                            },
                             "namespace": "parent_ns",
                         }
                     ],
