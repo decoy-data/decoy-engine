@@ -389,6 +389,7 @@ def _corpus() -> dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], set[
             {
                 "name": "val",
                 "strategy": "date_shift",
+                "provider_config": {"date_format": "%Y-%m-%d"},
                 "namespace": "dob_ns",
                 "provider_config": {
                     "min_days": -30,

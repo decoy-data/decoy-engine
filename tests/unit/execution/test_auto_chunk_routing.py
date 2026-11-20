@@ -826,7 +826,7 @@ class TestChunkStateGates:
                     "name": "val",
                     "strategy": "date_shift",
                     "namespace": "dob_ns",
-                    "provider_config": {"min_days": -30, "max_days": 30},
+                    "provider_config": {"min_days": -30, "max_days": 30, "date_format": "%Y-%m-%d"},
                 }
             ],
         )

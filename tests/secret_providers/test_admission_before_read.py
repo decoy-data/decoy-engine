@@ -277,6 +277,7 @@ def _date_plan_and_inputs():
             {
                 "name": "t",
                 "columns": [{"name": "d", "strategy": "date_shift", "namespace": "d_ns"}],
+                "provider_config": {"date_format": "%Y-%m-%d"},
             }
         ],
     }

@@ -26,7 +26,6 @@ from decoy_engine.generation.pool._errors import GenerationError
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.relationships._graph import RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
-from decoy_engine.transforms.date_shift import _detect_format
 
 _SEED = (0x42).to_bytes(8, "big")
 _NS = "ds_ns"
@@ -46,7 +45,7 @@ class _ReferenceDateShift:
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
             col = col.astype(object)
-        fmt = cfg.get("date_format") or _detect_format(col)
+        fmt = cfg.get("date_format") or None
         group_by = cfg.get("group_by")
         anchor_col = None
         if group_by:
@@ -106,13 +105,14 @@ def _plan(**cfg: Any) -> ColumnSeed:
     )
 
 
-def _ctx(snapshot: pd.Series | None = None) -> StrategyContext:
+def _ctx(snapshot: pd.Series | None = None, *, declared: bool = False) -> StrategyContext:
     ctx = StrategyContext(
         registry=None,  # type: ignore[arg-type]
         pool_cache=PoolCache(),
         relationship_graph=RelationshipGraph(edges=(), ordering=()),
         namespace_registry=NamespaceRegistry(bindings=()),
         job_seed=_SEED,
+        declared_date_columns=frozenset({("t", "d")}) if declared else frozenset(),
     )
     object.__setattr__(ctx, "current_table", "t")
     if snapshot is not None:
@@ -130,8 +130,14 @@ def _same_cell(a: object, b: object) -> bool:
     return bool(a == b)
 
 
-def _compare(df: pd.DataFrame, plan: ColumnSeed, snapshot: pd.Series | None = None) -> None:
-    ref_ctx, new_ctx = _ctx(snapshot), _ctx(snapshot)
+def _compare(
+    df: pd.DataFrame,
+    plan: ColumnSeed,
+    snapshot: pd.Series | None = None,
+    *,
+    declared: bool = False,
+) -> None:
+    ref_ctx, new_ctx = _ctx(snapshot), _ctx(snapshot, declared=declared)
     ref = _ReferenceDateShift().run(df.copy(), "d", plan, ref_ctx)
     new, warnings = DateShiftStrategyHandler().run(df.copy(), "d", plan, new_ctx)
     assert warnings == []
@@ -182,21 +188,20 @@ def test_frame_identity_with_pre_r0_implementation(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ["all_valid", "mixed", "all_unparseable", "empty_object"])
-def test_frame_identity_with_auto_detected_format(name: str) -> None:
-    _compare(_CASES[name], _plan(date_format=None))
+def test_frame_identity_for_a_declared_column_without_a_format(name: str) -> None:
+    # The only format-less route left: a column whose declared parse format owns the shape.
+    _compare(_CASES[name], _plan(date_format=None), declared=True)
 
 
-def test_frame_identity_when_format_is_undetectable() -> None:
+def test_frame_identity_when_declared_cells_do_not_parse() -> None:
     # fmt is None -> the `astype(str)` assembly branch.
     df = _frame(["15 Jan 2020 weird", "also weird"])
-    _compare(df, _plan(date_format=None))
+    _compare(df, _plan(date_format=None), declared=True)
 
 
 def test_frame_identity_astype_str_branch_with_parseable_values() -> None:
-    # No date_format and a format outside _COMMON_FORMATS cannot parse, so use
-    # a column pandas parses without a format but _detect_format rejects.
     df = _frame(["2020-01-15 10:30:00", "2020-02-01 00:00:00"])
-    _compare(df, _plan(date_format=None))
+    _compare(df, _plan(date_format=None), declared=True)
 
 
 def test_large_integer_and_wide_range() -> None:
@@ -293,5 +298,7 @@ def test_tz_naive_datetime_source_fails_identically() -> None:
     with pytest.raises(GenerationError) as ref:
         _ReferenceDateShift().run(df.copy(), "d", _plan(date_format=None), _ctx())
     with pytest.raises(GenerationError) as new:
-        DateShiftStrategyHandler().run(df.copy(), "d", _plan(date_format=None), _ctx())
+        DateShiftStrategyHandler().run(
+            df.copy(), "d", _plan(date_format=None), _ctx(declared=True)
+        )
     assert new.value.code == ref.value.code

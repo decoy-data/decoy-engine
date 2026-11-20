@@ -154,7 +154,9 @@ class TestWholeColumnStateRejections:
                         {"name": "wa", "strategy": "redact", "when": "x"},
                         {"name": "wb", "strategy": "redact", "when": "y"},
                         {"name": "da", "strategy": "date_shift"},
+                        "provider_config": {"date_format": "%Y-%m-%d"},
                         {"name": "db", "strategy": "date_shift"},
+                        "provider_config": {"date_format": "%Y-%m-%d"},
                     ],
                 }
             ]
@@ -173,6 +175,7 @@ class TestWholeColumnStateRejections:
                     "columns": [
                         {"strategy": "redact", "when": "x"},
                         {"strategy": "date_shift"},
+                        "provider_config": {"date_format": "%Y-%m-%d"},
                     ],
                 }
             ]

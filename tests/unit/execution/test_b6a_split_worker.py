@@ -126,7 +126,7 @@ _DATE_NO_FORMAT = [
         "name": "d",
         "strategy": "date_shift",
         "namespace": "d_ns",
-        "provider_config": {"min_days": -3, "max_days": 3},
+        "provider_config": {"min_days": -3, "max_days": 3, "date_format": "%Y-%m-%d"},
     }
 ]
 
@@ -183,7 +183,7 @@ def test_a_group_row_error_leaves_the_sink_untouched(tmp_path: Path) -> None:
             "name": "d",
             "strategy": "date_shift",
             "namespace": "d_ns",
-            "provider_config": {"min_days": -5, "max_days": 5},
+            "provider_config": {"min_days": -5, "max_days": 5, "date_format": "%Y-%m-%d"},
         }
     ]
     cfg, sources = mt.build_job(

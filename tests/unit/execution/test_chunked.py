@@ -64,7 +64,7 @@ _SAFE_COLUMNS = [
         "name": "dob",
         "strategy": "date_shift",
         "namespace": "dob_ns",
-        "provider_config": {"min_days": -30, "max_days": 30},
+        "provider_config": {"min_days": -30, "max_days": 30, "date_format": "%Y-%m-%d"},
     },
     {"name": "zip", "strategy": "truncate", "provider_config": {"length": 3}},
     {"name": "secret", "strategy": "redact"},
@@ -208,7 +208,7 @@ class TestChunkParityGroupBy:
             "name": "dob",
             "strategy": "date_shift",
             "namespace": "dob_ns",
-            "provider_config": {"min_days": -30, "max_days": 30, "group_by": "patient_id"},
+            "provider_config": {"min_days": -30, "max_days": 30, "group_by": "patient_id", "date_format": "%Y-%m-%d"},
         },
         {"name": "patient_id", "strategy": "passthrough"},
     ]
@@ -585,7 +585,7 @@ class TestChunkedRowErrorsFailClosed:
                     "name": "age",
                     "strategy": "date_shift",
                     "namespace": "age_ns",
-                    "provider_config": {"min_days": 30, "max_days": 60},
+                    "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
                 }
             ]
         return _config(tmp_path, columns)

@@ -503,6 +503,7 @@ def _date_shift_no_format_job(tmp_path) -> tuple[dict, dict[str, pa.Table]]:
             {
                 "name": "ds",
                 "columns": [{"name": "dt", "strategy": "date_shift", "namespace": "dt_ns"}],
+                "provider_config": {"date_format": "%Y-%m-%d"},
             }
         ],
         sources={"ds": path},
