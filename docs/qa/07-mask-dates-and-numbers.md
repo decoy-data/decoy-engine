@@ -9,7 +9,7 @@ Status: plan
 
 ## Expected behaviour
 
-- **date_shift**: moves each date by a per-value offset within `min_days` and
+- **date_shift**: needs `provider_config.date_format`; it moves each date by a per-value offset within `min_days` and
   `max_days` (defaults -365 and 365; reversed bounds are swapped). Same date gives the
   same shifted date within a namespace.
 - **bucket_perturb**: moves each date to a keyed position inside its own ISO week,

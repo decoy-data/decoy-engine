@@ -270,7 +270,7 @@ def _row_error_config(strategy: str, configured: bool) -> dict[str, Any]:
             "name": "age",
             "strategy": "date_shift",
             "namespace": "age_ns",
-            "provider_config": {"min_days": 30, "max_days": 60},
+            "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
         }
     return make_config([col] + ([passthrough("x")] if configured else []))
 

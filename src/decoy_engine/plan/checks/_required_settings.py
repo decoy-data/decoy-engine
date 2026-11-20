@@ -12,13 +12,17 @@ message only: no submitted value and no callable predicate, so a refusal cannot 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
+from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
     StrategyRequirement,
     lookup_path,
     requirement_applies,
+    requirement_missing,
     requirements_for,
 )
 from decoy_engine.plan._errors import PlanCompileError
@@ -32,9 +36,64 @@ __all__ = [
 ]
 
 
-def _missing(value: Any) -> bool:
-    """Every required setting is a name, so anything but a non-blank string is missing."""
-    return not isinstance(value, str) or not value.strip()
+def _declared_date_format(col: dict[str, Any]) -> bool:
+    """Whether this top-level column's date format comes from its own declared parse format."""
+    return date_shift_owns_declared_format(
+        nested=False,
+        logical_type=col.get("logical_type"),
+        has_parse_format=col.get("parse_format") is not None,
+    )
+
+
+def _missing_in_nested(
+    table: Any, col: dict[str, Any]
+) -> Iterator[tuple[StrategyRequirement, str]]:
+    """Each requirement a nested column's child leaves out, with its config path.
+
+    Only descriptors rooted at `provider_config` apply: a child takes its parent's namespace
+    (the nested handler copies it), so a root-level descriptor never binds the child. The child
+    never inherits a declared-casting exemption from its parent.
+    """
+    provider_config = col.get("provider_config")
+    if not isinstance(provider_config, dict):
+        return
+    for child in nested_children(provider_config):
+        if not isinstance(child.strategy, str):
+            continue
+        config = child.strategy_config if isinstance(child.strategy_config, dict) else {}
+        rooted = {"provider_config": config}
+        for req in requirements_for(child.strategy):
+            if req.path[0] != "provider_config":
+                continue
+            if requirement_applies(req, rooted) and requirement_missing(
+                lookup_path(rooted, req.path)
+            ):
+                where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+                yield req, ".".join((where, child.config_path, "strategy_config", *req.path[1:]))
+
+
+def _missing_requirements(
+    table: dict[str, Any], col: dict[str, Any], derived: Any
+) -> Iterator[tuple[StrategyRequirement, str]]:
+    """Each requirement the column leaves out with its path, in declaration order.
+
+    A `nested` column's child is walked after the column itself, for descriptors rooted at
+    `provider_config` only.
+    """
+    strategy = col.get("strategy")
+    if not isinstance(strategy, str):
+        return
+    where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+    for req in requirements_for(strategy):
+        if req.path == ("namespace",) and (table.get("name", "?"), col.get("name", "?")) in derived:
+            continue
+        if req.path == ("provider_config", "date_format") and _declared_date_format(col):
+            continue
+        if requirement_applies(req, col) and requirement_missing(lookup_path(col, req.path)):
+            yield req, f"{where}." + ".".join(req.path)
+    if strategy == "nested":
+        for req, path in _missing_in_nested(table, col):
+            yield req, path
 
 
 def check_required_strategy_settings(config: dict[str, Any]) -> None:
@@ -54,24 +113,14 @@ def check_required_strategy_settings(config: dict[str, Any]) -> None:
         if not isinstance(table, dict):
             continue
         for col in table.get("columns") or []:
-            strategy = col.get("strategy") if isinstance(col, dict) else None
-            if not isinstance(strategy, str):
+            if not isinstance(col, dict):
                 continue
-            for req in requirements_for(strategy):
-                if (
-                    req.path == ("namespace",)
-                    and (table.get("name", "?"), col.get("name", "?")) in derived
-                ):
-                    continue
-                if requirement_applies(req, col) and _missing(lookup_path(col, req.path)):
-                    raise PlanCompileError(
-                        code=req.code,
-                        path=(
-                            f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}."
-                            + ".".join(req.path)
-                        ),
-                        message=(
-                            f"column {col.get('name', '?')!r} in table "
-                            f"{table.get('name', '?')!r}: {req.message}"
-                        ),
-                    )
+            for req, path in _missing_requirements(table, col, derived):
+                raise PlanCompileError(
+                    code=req.code,
+                    path=path,
+                    message=(
+                        f"column {col.get('name', '?')!r} in table "
+                        f"{table.get('name', '?')!r}: {req.message}"
+                    ),
+                )

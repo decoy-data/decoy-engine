@@ -196,6 +196,8 @@ config:
         - name: signup_date
           strategy: date_shift
           namespace: signup_date_ns
+          provider_config:
+            date_format: "%Y-%m-%d"
 
         # segment: categorical (replaces with a value drawn from the categories).
         # deterministic:true + namespace for stable per-source-value mapping.

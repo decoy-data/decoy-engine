@@ -175,7 +175,7 @@ def _fk_key_error_config(tmp_path: Path, quarantine: dict[str, Any] | None) -> d
     id_col = {
         "name": "id",
         "strategy": "date_shift",
-        "provider_config": {"min_days": 1, "max_days": 30},
+        "provider_config": {"min_days": 1, "max_days": 30, "date_format": "%Y-%m-%d"},
         "namespace": "parent_ns",
     }
     cfg: dict[str, Any] = {
@@ -947,7 +947,11 @@ def _self_fk_config(tmp_path: Path, qpath: str) -> dict[str, Any]:
                         {
                             "name": "id",
                             "strategy": "date_shift",
-                            "provider_config": {"min_days": 1, "max_days": 30},
+                            "provider_config": {
+                                "min_days": 1,
+                                "max_days": 30,
+                                "date_format": "%Y-%m-%d",
+                            },
                             "namespace": "employee_ns",
                         },
                         _faker_col("manager_id", "employee_ns"),

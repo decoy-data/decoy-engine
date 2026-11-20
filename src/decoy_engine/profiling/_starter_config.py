@@ -245,21 +245,30 @@ def _suggestion(
     return dataclasses.replace(named, entry=MappingProxyType(_entry(named)))
 
 
-def detector_entry(detector_id: str, column: str) -> dict[str, Any] | None:
+def detector_entry(
+    detector_id: str, column: str, *, date_format: str | None = None
+) -> dict[str, Any] | None:
     """The column entry the starter writes for a column `detector_id` flagged, or None.
 
-    None when the detector has no starter choice. The namespace follows the same registry rule
-    as `starter_config`, so a review that takes a detector's default writes what a scan would.
+    None when the detector has no starter choice, or when its choice needs the detected date
+    format and `date_format` is not given: the descriptor holds no format, so it never builds a
+    `date_shift` the plan would refuse. The namespace follows the same registry rule as
+    `starter_config`, so a review that takes a detector's default writes what a scan would.
     """
     choice = recommendations.starter_choice(detector_id)
     if choice is None:
         return None
+    provider_config: Mapping[str, Any] = choice.provider_config
+    if choice.detected_date_format:
+        if not isinstance(date_format, str) or not date_format.strip():
+            return None
+        provider_config = {**provider_config, "date_format": date_format}
     bare = ColumnSuggestion(
         "",
         column,
         choice.strategy,
         provider=choice.provider,
-        provider_config=choice.provider_config,
+        provider_config=provider_config,
     )
     return _entry(dataclasses.replace(bare, namespace=column) if _needs_namespace(bare) else bare)
 

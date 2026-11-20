@@ -99,7 +99,7 @@ _DOCUMENT = (
         label="name row_count dtype_raw",
         scanned="inferred_type null_count null_rate distinct_count unique_rate is_likely_unique "
         "min_value max_value mean_value min_length max_length avg_length date_min date_max "
-        "date_format invalid_count sample_invalid casing_pattern format_pattern alphabet "
+        "date_format invalid_count sample_invalid casing_pattern format_pattern format_pattern_complete alphabet "
         "value_set_size_class numeric_range_class mode_value mode_freq top_values "
         "detector_matches sentinels pii_score distribution detection_trail domain",
     )
@@ -107,7 +107,7 @@ _DOCUMENT = (
     | _entries(
         "document",
         "DetectorMatch",
-        scanned="detector_id match_rate sample_misses format_pattern confidence domain",
+        scanned="detector_id match_rate sample_misses format_pattern format_pattern_complete confidence domain",
     )
     | _entries("document", "SentinelFlag", scanned="kind value count note")
     | _entries("document", "Distribution", scanned="kind data labels min max mean")
