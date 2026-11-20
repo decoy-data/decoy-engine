@@ -8,7 +8,9 @@ Compares HEAD with its merge base with `--base`. Two rules:
    `stamp_release.parse_fragment` accepts. The grammar lives there and nowhere else.
 2. A PR that changes `src/` adds at least one fragment, unless every non-merge commit in
    `merge-base..HEAD` is a `test`, `docs`, `ci`, `chore` or `refactor` Conventional Commit
-   (a `!` breaking marker or a subject that does not parse is never exempt).
+   (a `!` breaking marker or a subject that does not parse is never exempt). A release PR
+   satisfies this rule by adding a dated `## [X.Y.Z]` section to `CHANGELOG.md`: release prep
+   compiles the fragments into that section and deletes them, and its own fixes go there too.
 
 Exit codes: 0 ok; 1 a rule failed; 2 precondition (unknown base, not a repository). Messages carry
 paths, short commit ids and rule names, never commit text or file content.
@@ -28,11 +30,13 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from scripts.release.stamp_release import (  # noqa: E402
+    CHANGELOG,
     FRAGMENT_DIR,
     README,
     FragmentError,
     is_fragment_name,
     parse_fragment,
+    release_sections,
 )
 
 EXEMPT_TYPES = frozenset({"test", "docs", "ci", "chore", "refactor"})
@@ -68,6 +72,22 @@ def _changes(repo: Path, merge_base: str) -> list[tuple[str, str]]:
     return [(fields[i], fields[i + 1]) for i in range(0, len(fields) - 1, 2)]
 
 
+def _adds_release_section(repo: Path, merge_base: str) -> bool:
+    """True when HEAD's CHANGELOG.md has a release version the merge base does not."""
+
+    def versions(ref: str) -> set[str]:
+        proc = subprocess.run(  # noqa: S603 - fixed git executable, literal arguments
+            ["git", "show", f"{ref}:{CHANGELOG}"],  # noqa: S607
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return {v for v, _ in release_sections(proc.stdout)} if proc.returncode == 0 else set()
+
+    return bool(versions("HEAD") - versions(merge_base))
+
+
 def check(repo: Path, base: str) -> list[str]:
     merge_base = _git(repo, "merge-base", base, "HEAD").strip()
     changes = _changes(repo, merge_base)
@@ -90,6 +110,8 @@ def check(repo: Path, base: str) -> list[str]:
             continue
         added += status == "A"
     if added or not any(path.startswith("src/") for _, path in changes):
+        return problems
+    if _adds_release_section(repo, merge_base):
         return problems
     log = _git(repo, "log", "--no-merges", "--format=%h %s", f"{merge_base}..HEAD")
     blocking = [

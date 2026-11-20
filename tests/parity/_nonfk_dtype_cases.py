@@ -1,10 +1,10 @@
 """One synthetic source per type class and null layout, for the non-FK dtype matrix.
 
-Each case is a 200-row table with a masked string column `s` and one typed column `p`. With
-`chunk_size_rows=50` and `auto_chunk_threshold_rows=10` it stands in for a large table.
-Layouts: `chunk0_all_null` (chunk 0 entirely null, later chunks mixed), `later_mixed`
-(chunk 0 null-free, a later chunk mixed), `wide_value` (the widest values the type holds,
-nulls in a later chunk).
+Each case is a 200-row table with a masked string column `s` and one typed column `p`. The
+support module runs it with `chunk_size_rows=16` and `auto_chunk_threshold_rows=10`, so it stands
+in for a large table of 13 chunks. Layouts: `chunk0_all_null` (the first 50 rows null, so chunks 0
+to 2 are all null, later rows mixed), `later_mixed` (chunk 0 null-free, later chunks mixed) and
+`wide_value` (the widest values the type holds, nulls in later chunks).
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ from typing import Any
 import pyarrow as pa
 
 ROWS = 200
-CHUNK = 50
+NULL_PREFIX = 50
 LAYOUTS = ("chunk0_all_null", "later_mixed", "wide_value")
 
 
 def null_at(layout: str, i: int) -> bool:
     """Whether row `i` is null under `layout`."""
     if layout == "chunk0_all_null":
-        return i < CHUNK or i % 5 == 0
-    return i >= CHUNK and i % 7 == 0
+        return i < NULL_PREFIX or i % 5 == 0
+    return i >= NULL_PREFIX and i % 7 == 0
 
 
 def _wide(layout: str) -> bool:

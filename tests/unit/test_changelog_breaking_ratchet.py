@@ -32,6 +32,21 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.1", "`decoy_engine.validation.finding_review` adds `finding_edits"): (
+        "new experimental names; the refusals named are their own and no 1.0 command calls them"
+    ),
+    ("0.28.1", "A table in `scan-set/v1` now has `basis` (`whole` or `sample"): (
+        "the Breaking bullet on `scan_sources` and `basis` covers it"
+    ),
+    ("0.28.1", "Every open flag the engine uses now comes from one module, `"): (
+        "Windows-only; the engine did not import there before, and POSIX behavior is unchanged"
+    ),
+    ("0.28.1", "The 0.28.0 release certified the CLI runtime profile from th"): (
+        "describes the 0.28.0 bug this release fixes; no run that passed before is refused"
+    ),
+    ("0.28.1", "Release prep now refuses a CLI pin file that leaves out any "): (
+        "release tooling only; no engine consumer sees it"
+    ),
     ("0.28.0", "New base dependencies `joserfc` and `rfc8785`. Artifact file"): (
         "new verifier; the refusals named are its own and nothing calls it yet"
     ),
@@ -593,7 +608,8 @@ def test_released_sections_match_their_pins() -> None:
 
 def test_the_ratchet_catches_a_break_filed_outside_the_list() -> None:
     text = CHANGELOG.read_text(encoding="utf-8")
-    newest = _releases(text)[0][0]
+    # A patch release may carry no Breaking list; the ratchet only reads releases that do.
+    newest = next(v for v, sec in _releases(text) if _entries_outside_breaking(sec) is not None)
     marker = f"## [{newest}]"
     head, tail = text.split(marker, 1)
     planted = "\n### Changed (planted)\n\n- A planted option now fails with `planted_code`.\n"

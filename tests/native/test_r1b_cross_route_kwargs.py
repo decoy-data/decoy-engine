@@ -449,8 +449,9 @@ SNAPSHOT: list[tuple[str, dict[str, Any], str, dict[str, Any]]] = [
         "native_date_shift",
         {
             **_KEYED,
-            "min_days": 30,
-            "max_days": -30,
+            # The window resolver orders the bounds before any route calls the kernel.
+            "min_days": -30,
+            "max_days": 30,
             "date_format": _ALT_FMT,
             "namespace": "a/b",
             "index_kernel": "<index_kernel>",

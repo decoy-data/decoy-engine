@@ -639,7 +639,8 @@ class TestFailClosed:
 
     def test_int_column_with_nulls_stays_full_frame(self, tmp_path, monkeypatch):
         """pandas widens int+null to float PER FRAME, so per-chunk conversion
-        is not byte-stable; the routing must fail closed on that shape."""
+        is not byte-stable; the routing must fail closed on that shape. A `when:` that reads
+        the column puts it through pandas (an unread passthrough column is carried instead)."""
         vals: list[Any] = [i for i in range(_ROWS)]
         vals[7] = None
         df = pd.DataFrame(
@@ -652,7 +653,7 @@ class TestFailClosed:
         cfg = _config(
             tmp_path,
             [
-                {"name": "val", "strategy": "hash", "namespace": "ns"},
+                {"name": "val", "strategy": "hash", "namespace": "ns", "when": "amount > 3"},
                 {"name": "amount", "strategy": "passthrough"},
             ],
         )

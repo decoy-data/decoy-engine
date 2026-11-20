@@ -539,6 +539,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         has_mask_table=ctx.has_mask_table,
         table_kinds=ctx.table_kinds,
         prepared_tables=ctx.prepared.prepared,
+        dispatcher_enabled=ctx.chunked_dispatcher_enabled,
     )
     ooc_declined = out_of_core_declined(
         ctx.config,
