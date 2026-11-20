@@ -426,7 +426,7 @@ class TestEvidenceWarning:
         assert w.code == "top_code_generalized"
         assert w.provider == "top_code"
         assert w.column == "v"
-        assert w.detail["generalized"] == {"row_0": "under", "row_2": "over"}
+        assert "generalized" not in w.detail  # no per-row map: counts only
         assert w.detail["over_count"] == 1
         assert w.detail["under_count"] == 1
         # HC-1 lesson: never leak raw values into evidence.

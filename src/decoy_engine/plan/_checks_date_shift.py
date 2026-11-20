@@ -17,8 +17,10 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.date_preserve import has_preserve_values, preserve_config_problem
+from decoy_engine.transforms.date_shift import WINDOW_PROBLEMS, shift_window_problem
 
 
 def check_date_shift_group_by_refs(config: dict[str, Any]) -> None:
@@ -117,14 +119,19 @@ def check_date_shift_group_by_refs(config: dict[str, Any]) -> None:
             # top-level `strategy == "date_shift"` never matches it. Inspect it
             # explicitly and reject a nested date_shift+group_by before the
             # generic branch below.
-            if col_entry.get("strategy") == "nested" and pc.get("strategy") == "date_shift":
-                nested_cfg = pc.get("strategy_config") or {}
+            nested_date_shift = (
+                [c for c in nested_children(pc) if c.strategy == "date_shift"]
+                if col_entry.get("strategy") == "nested"
+                else []
+            )
+            if nested_date_shift:
+                nested_cfg = nested_date_shift[0].strategy_config or {}
                 if isinstance(nested_cfg, dict) and nested_cfg.get("group_by"):
                     raise PlanCompileError(
                         code=reasons.plan.DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED,
                         path=(
                             f"tables.{table_name}.columns.{col_name}"
-                            ".provider_config.strategy_config.group_by"
+                            f".{nested_date_shift[0].config_path}.strategy_config.group_by"
                         ),
                         message=(
                             f"date_shift column {col_name!r} in table "
@@ -217,6 +224,49 @@ def check_date_shift_group_by_refs(config: dict[str, Any]) -> None:
                 )
 
 
+def check_date_shift_window(config: dict[str, Any]) -> None:
+    """Refuse a date_shift column, top level or nested, whose window `shift_window` rejects.
+
+    The same validator the native admission calls, so no route reads a window this check would
+    refuse. Config-only: safe in both compile branches and in `run_config_only_checks`.
+
+    Raises:
+        PlanCompileError: `jitter_days` with `min_days` or `max_days`, a bad `jitter_days`, a
+            bound that is not a whole number, or a bound past +/- 106,751 days.
+    """
+    tables = config.get("tables")
+    for table_entry in tables if isinstance(tables, list) else []:
+        if not isinstance(table_entry, dict):
+            continue
+        table_name = table_entry.get("name", "?")
+        for col_entry in table_entry.get("columns") or []:
+            if not isinstance(col_entry, dict):
+                continue
+            col_name = col_entry.get("name", "?")
+            pc = col_entry.get("provider_config")
+            if not isinstance(pc, dict):
+                continue
+            base = f"tables.{table_name}.columns.{col_name}"
+            targets: list[tuple[dict[str, Any], str]] = []
+            if col_entry.get("strategy") == "date_shift":
+                targets.append((pc, f"{base}.provider_config"))
+            elif col_entry.get("strategy") == "nested":
+                targets.extend(
+                    (c.strategy_config or {}, f"{base}.{c.config_path}.strategy_config")
+                    for c in nested_children(pc)
+                    if c.strategy == "date_shift" and isinstance(c.strategy_config or {}, dict)
+                )
+            for cfg, prefix in targets:
+                problem = shift_window_problem(cfg)
+                if problem is not None:
+                    key, message = WINDOW_PROBLEMS[problem]
+                    raise PlanCompileError(
+                        code=reasons.plan.DATE_SHIFT_WINDOW_INVALID,
+                        path=f"{prefix}.{key}",
+                        message=f"date_shift column {col_name!r} in table {table_name!r}: {message}",
+                    )
+
+
 # ---------------------------------------------------------------------------
 # D1c: preserve_values
 # ---------------------------------------------------------------------------
@@ -240,10 +290,11 @@ def _preserve_columns(table_entry: dict[str, Any]) -> list[tuple[str, str, dict[
         pc = col_entry.get("provider_config")
         prefix = f"tables.{table_name}.columns.{name}.provider_config"
         if strategy == "nested" and isinstance(pc, dict):
+            (child,) = nested_children(pc)
             strategy, pc, prefix = (
-                pc.get("strategy"),
-                pc.get("strategy_config"),
-                (f"{prefix}.strategy_config"),
+                child.strategy,
+                child.strategy_config,
+                f"tables.{table_name}.columns.{name}.{child.config_path}.strategy_config",
             )
         if strategy in _PRESERVE_STRATEGIES and isinstance(pc, dict) and has_preserve_values(pc):
             found.append((name, str(strategy), pc, prefix))

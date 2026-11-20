@@ -78,13 +78,16 @@ _EXPECTED: dict[str, dict[str, tuple[str, list[bool | None], list[int]]]] = {
         "v not in [1]": ("bool", [False, True, True, False], [1, 2]),
         "not (v == 1)": ("bool", [False, True, True, False], [1, 2]),
     },
+    # FREEZE-O1: the `when:` frame turns a protected nullable integer into float64 with `NaN`, so
+    # the mask is a plain bool and a blank row follows the NaN rule: `!=`, `not in` and `not (...)`
+    # select it; `==`, `in` and the ordering tests do not.
     "int64_protected": {
-        "v == 1": ("boolean", [True, None, False, True], [0, 3]),
-        "v != 1": ("boolean", [False, None, True, False], [2]),
-        "v < 3": ("boolean", [True, None, False, True], [0, 3]),
-        "v in [1, 3]": ("boolean", [True, False, True, True], [0, 2, 3]),
-        "v not in [1]": ("boolean", [False, True, True, False], [1, 2]),
-        "not (v == 1)": ("boolean", [False, None, True, False], [2]),
+        "v == 1": ("bool", [True, False, False, True], [0, 3]),
+        "v != 1": ("bool", [False, True, True, False], [1, 2]),
+        "v < 3": ("bool", [True, False, False, True], [0, 3]),
+        "v in [1, 3]": ("bool", [True, False, True, True], [0, 2, 3]),
+        "v not in [1]": ("bool", [False, True, True, False], [1, 2]),
+        "not (v == 1)": ("bool", [False, True, True, False], [1, 2]),
     },
 }
 
@@ -107,10 +110,11 @@ def test_the_oracle_predicate_and_its_selection_for_each_representation(
     assert list(frame.index[mask.fillna(False).to_numpy(dtype=bool)]) == selected
 
 
-def test_a_null_in_a_nullable_mask_is_excluded_from_the_write_back_too() -> None:
+def test_a_blank_integer_is_a_plain_false_in_the_mask_and_the_write_back() -> None:
+    # Before FREEZE-O1 the mask was a nullable boolean with NA for the blank row.
     frame = to_pandas_fk_safe(pa.table({"v": pa.array(_INTS), "s": pa.array(list("abcd"))}), {"v"})
     mask = _eval_predicate(frame, "v == 1", "redact")
-    assert str(mask.dtype) == "boolean" and mask.isna().tolist() == [False, True, False, False]
+    assert str(mask.dtype) == "bool" and mask.tolist() == [True, False, False, True]
     frame.loc[mask, "s"] = "X"
     assert frame["s"].tolist() == ["X", "b", "c", "X"]
 

@@ -18,7 +18,11 @@ from decoy_engine._canonical import (
     strict_json_read,
     strict_json_write,
 )
-from decoy_engine._canonical._json import STRICT_JSON_TOKENS
+from decoy_engine._canonical._json import (
+    ALL_STRICT_JSON_TOKENS,
+    PROFILE_JSON_TOKENS,
+    STRICT_JSON_TOKENS,
+)
 
 _NESTED: dict[str, Any] = {
     "max_bytes": MASK_CELL_BYTES,
@@ -43,7 +47,23 @@ def _nest(depth: int) -> str:
 
 def test_tokens_keep_their_first_four_and_add_the_bounds() -> None:
     assert STRICT_JSON_TOKENS[:4] == ("not_json", "duplicate_key", "non_finite", "out_of_range")
-    assert STRICT_JSON_TOKENS[4:] == ("oversized", "too_deep")
+    assert STRICT_JSON_TOKENS[4:6] == ("oversized", "too_deep")
+
+
+def test_profile_tokens_need_their_opt_in_flag_and_stay_out_of_the_default_set() -> None:
+    assert not set(PROFILE_JSON_TOKENS) & set(STRICT_JSON_TOKENS)
+    assert ALL_STRICT_JSON_TOKENS == STRICT_JSON_TOKENS + PROFILE_JSON_TOKENS
+    for text in ("-0", "1.5", '"\\ud800"'):
+        strict_json_read(text)  # a default read raises none of the profile tokens
+    for text, flag, token in (
+        ("-0", "forbid_negative_zero", "negative_zero"),
+        ("1.5", "forbid_float", "float"),
+        ('"\\ud800"', "forbid_lone_surrogate", "invalid_unicode"),
+    ):
+        with pytest.raises(StrictJsonError) as caught:
+            strict_json_read(text, **{flag: True})
+        assert caught.value.token == token
+        assert token in PROFILE_JSON_TOKENS
 
 
 def test_lexeme_mode_keeps_every_number_as_read() -> None:

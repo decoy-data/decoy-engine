@@ -121,8 +121,13 @@ def _assert_output_contract(got: pa.Table, full: pa.Table, source: pa.Table) -> 
         if name == "s":
             assert _canon(got.select([name])) == _canon(full.select([name]))
             continue
-        assert got.schema.field(name).equals(source.schema.field(name), check_metadata=True), name
-        assert _canon(got.select([name])) == _canon(source.select([name])), name
+        want_field = source.schema.field(name)
+        want = source.select([name])
+        if pa.types.is_large_string(want_field.type):  # O3: pass-through text narrows to string
+            want_field = want_field.with_type(pa.string())
+            want = want.cast(pa.schema([want_field]))
+        assert got.schema.field(name).equals(want_field, check_metadata=True), name
+        assert _canon(got.select([name])) == _canon(want), name
 
 
 def _assert_chunked_equals_full(

@@ -17,7 +17,6 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_mask_pipeline_chunked
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution import ExecutionError
 from decoy_engine.execution._chunked_profile import first_chunk_profile
@@ -30,13 +29,13 @@ from decoy_engine.execution.native._dispatch import (
 from decoy_engine.execution.native._real_type_admission import real_type_rejection
 
 # A vault writer goes through the internal entry: the public one refuses it (B-6 B0).
-from decoy_engine.execution.native.chunked._core import mask_chunked as _run_mask_chunked
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.vault import VaultWriter
 from tests._declared_schema import declared_schema
 from tests.native._b8_support import (
     FORCE,
+    _run_mask_chunked_below_gate,
     assert_same_as_oracle,
     identical,
     policy_settings,
@@ -134,7 +133,7 @@ def test_error_policy_keeps_the_oracle_route_and_raises_as_today() -> None:
     chunks = _all_chunks()
     with pytest.raises(ExecutionError) as public:
         list(
-            run_mask_pipeline_chunked(
+            run_mask_pipeline_chunked_below_gate(
                 config,
                 list(chunks),
                 table=TABLE,
@@ -146,7 +145,7 @@ def test_error_policy_keeps_the_oracle_route_and_raises_as_today() -> None:
     sink: list[Any] = []
     ev: list[Any] = []
     vault = VaultWriter(vault_key())
-    gen = _run_mask_chunked(
+    gen = _run_mask_chunked_below_gate(
         config,
         list(chunks),
         table=TABLE,
@@ -396,7 +395,7 @@ def test_warnings_are_one_undeclared_output_columns_per_chunk_naming_the_columns
         assert isinstance(warning, QualityWarning)
         assert warning.code == "undeclared_output_columns"
         assert warning.provider == "output_projection" and warning.column is None
-        assert warning.detail == {"table": TABLE, "undeclared_columns": ["p", "t", "u"]}
+        assert warning.detail == {"table": TABLE, "undeclared_columns": "p, t, u"}
 
 
 def test_native_route_computes_the_warning_with_no_sink_given() -> None:
@@ -733,4 +732,4 @@ def test_stored_pandas_index_field_is_dropped_on_the_native_route(
         assert out.column_names == ["r", "t", "u"]
     for result in native.sink:
         (warning,) = result.warnings
-        assert warning.detail == {"table": TABLE, "undeclared_columns": ["u"]}
+        assert warning.detail == {"table": TABLE, "undeclared_columns": "u"}

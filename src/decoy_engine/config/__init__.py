@@ -43,6 +43,7 @@ from decoy_engine.config._generate_option_catalog import (
     generate_option_catalog,
 )
 from decoy_engine.config._generate_options import refuse_unlisted_generate_families
+from decoy_engine.config._generate_relational import per_parent_bounds, per_parent_problems
 from decoy_engine.config._generate_type_checks import (
     parse_output_type,
     refuse_fixed_width_output_types,
@@ -70,6 +71,7 @@ from decoy_engine.config._post_scan import (
     NO_SINK_KIND,
     Dismissal,
     PostScanConfig,
+    post_scan_distribution_tolerance,
     post_scan_gate_applies,
     post_scan_integrity_requested,
     post_scan_model_setting,
@@ -86,7 +88,7 @@ from decoy_engine.config._relationships import (
     RelationshipEnd,
     relationship_shape_error,
 )
-from decoy_engine.config._scan_baseline import ScanBaselineConfig
+from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
 from decoy_engine.config._sources import (
     FILE_SOURCE_PATH_FIELDS,
     SOURCE_LOCATOR_FIELDS,
@@ -102,7 +104,12 @@ from decoy_engine.config._subset import (
     SubsetPredicateConfig,
     SubsetSeedConfig,
 )
-from decoy_engine.config._tables import ColumnConfig, TableConfig, classify_table_kinds
+from decoy_engine.config._tables import (
+    ColumnConfig,
+    TableConfig,
+    classify_table_kinds,
+    generate_columns_of,
+)
 from decoy_engine.config._targets import (
     FileTarget,
     GCSTarget,
@@ -145,6 +152,7 @@ __all__ = [
     "GlobalSettings",
     "LimitOp",
     "NamespaceConfig",
+    "OnDrift",
     "OrphanPolicyLiteral",
     "PipelineConfig",
     "PipelineConfigError",
@@ -168,12 +176,16 @@ __all__ = [
     "declares_unique",
     "distinct_categories",
     "duplicate_target_groups",
+    "generate_columns_of",
     "generate_option_catalog",
     "override_sources",
     "parse_delivery_config",
     "parse_output_type",
     "parse_pipeline_config",
     "parse_relationship_config",
+    "per_parent_bounds",
+    "per_parent_problems",
+    "post_scan_distribution_tolerance",
     "post_scan_gate_applies",
     "post_scan_integrity_requested",
     "post_scan_model_setting",

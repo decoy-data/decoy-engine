@@ -18,7 +18,7 @@ Namespaces: `config`, `plan`, `runtime`, `provider`, `quality`, `connector`, `su
 
 ### Versioning
 
-`registry_version` (`1.29.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
+`registry_version` (`1.31.0`), `reason_schema_version` (`1`) and `event_schema_version` (`1`) are independent.
 
 Codes are append-only: a code never disappears or changes meaning. A retired code stays as a tombstone with its replacement link.
 
@@ -54,6 +54,8 @@ The same fixture also pins the two GEN-CLI additions (`warning.generation_fideli
 `reason-manifest-v1.23-gen-types.json` pins the three GEN-TYPES E2 additions (`config.generate_output_type_unsupported`, `runtime.output_type_cast_failed` and `runtime.declared_boolean_invalid`; `since` 1.23.0: a generate column or fixed-width target cannot carry the requested `output_type`, a generated value could not be cast to its `output_type`, and a value is not a boolean under `boolean/text/v1`).
 
 `reason-manifest-v1.24-fpe-fallbacks.json` pins the two FPE handler fallback codes (`runtime.fpe_unencryptable_value` and `runtime.fpe_checksum_unsupported`; `since` 1.24.0). The `fpe` strategy had emitted both since Task 5.2 when a low-level FPE error carried no more specific code, but neither was registered, so they surfaced as `decoy.unregistered_reason`. The checksum one's symbol is `FPE_CHECKSUM_UNSUPPORTED_STRATEGY`, because `FPE_CHECKSUM_UNSUPPORTED` already names the low-level `fpe.checksum_unsupported`.
+
+GEN-REL E1 adds ten pending identities (`since` unreleased) for generated `reference` columns: the validate-time refusals `config.generate_per_parent_bounds_conflict` (`min_per_parent` above `max_per_parent`), `config.generate_per_parent_null_conflict` (`null_probability` beside a positive per-parent bound), `config.generate_per_parent_infeasible` (`max_per_parent` times the parent `row_count` is below the child row count) and `config.generate_fitted_reference_bounds_conflict` (a positive bound beside `distribution: fitted`); the run-time refusals `runtime.generate_per_parent_infeasible` (the bounds cannot hold for the real distinct parent keys), `runtime.reference_parent_pool_empty` (child rows, no parent keys and a relationship at `orphan_policy: fail`), `runtime.reference_weights_length_mismatch` (`weighted` weights that do not match the real parent key count), `runtime.reference_bounds_unsatisfied` (the repair's final count check) and `runtime.generate_fitted_reference_bounds_conflict` (the run-time twin for a caller that skipped validation); and the warning `warning.reference_parent_pool_empty` (the same empty parent under `orphan_policy: warn`: the column is null and one warning is raised). The run-time refusals occur in the `generate` phase and are raised as `GenerationError`. Every message is the fixed summary plus the table and column names. The fitted empty-pool refusal keeps its existing `plan.reference_parent_pool_empty`.
 
 The ten GEN-TYPES E3 additions (`plan.lookup_not_pinned`, `plan.lookup_pinned_digest_mismatch`, `plan.lookup_file_unreadable`, `plan.lookup_file_format_unsupported`, `plan.lookup_file_empty`, `plan.lookup_file_too_large`, `plan.lookup_column_missing`, `plan.lookup_too_many_entries`, `plan.lookup_weight_invalid` and `plan.pinned_lookup_unsupported`) are pending: a `lookup` column's file is missing from the plan's pins, fails its digest, or cannot be used as a list, and a pinned-mode compile refuses `lookup` columns).
 
@@ -126,6 +128,16 @@ except Exception as exc:
 | Publication | Operation, an approved storage alias, `publication_state` and `cleanup_state`. |
 
 `StructuredEventsSink` stays a documented lossy adapter for the old logger signatures. A consumer that needs the complete record binds a `CallbackSink` and reads `event_to_dict`.
+
+## Consumers
+
+Three consumers read the registry. None keeps its own code list.
+
+**CLI `--json` failure envelope.** When a run fails, the CLI adds a `reason` field to the `--json` failure envelope. It holds the payload of `reason_adapter.reason_from_exception(exc).to_payload()` for the exception as the engine raised it, before the CLI rewrites a missing extra or the NER message. Only exceptions of a registered engine family reach it, so only registered codes appear, for example `reasons.runtime.KEYED_STRATEGY_REQUIRES_SECRET` and `reasons.runtime.WEAK_MASK_SECRET`. The field is absent when the CLI owns the refusal: a usage error that is not an engine family, a vault write failure (exit 3), and a pre-run gate refusal (exit 1 or 5). Any error while building the reason drops the field and never changes the exit code. The source is `_failure_reason` in the CLI's `cli/run/_errors.py` (CLI #229).
+
+**Platform job failures.** The platform projects a failed job into a fixed sentence with `APPROVED_ERROR_MESSAGES` in `api/persistence/error_projection.py`. A code outside that map gets the generic sentence plus the exception type name, never the exception text. The map includes `keyed_strategy_requires_secret` and `weak_mask_secret`, so a job that fails for a missing or short mask key shows a fixed message. A new engine reason does not appear there until someone adds its entry.
+
+**Platform reason record.** Carrying the full `ReasonRecord` through the platform API (F29 P1 and P2) is parked with the platform. Until it lands, the platform reads codes only through `APPROVED_ERROR_MESSAGES`.
 
 ## What this does not do
 

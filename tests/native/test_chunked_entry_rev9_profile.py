@@ -77,6 +77,11 @@ def test_arrow_column_profile_equals_the_pandas_profile_field_for_field(
     first = _first(case, xname)
     real = next(c for c in _real_profile(first).tables[0].columns if c.name == xname)
     ours = arrow_column_profile(xname, first.column(xname))
+    # `first_chunk_profile` labels every column a sample after the walk
+    # (`_as_chunk_sample`); `arrow_column_profile` itself is unchanged, so its output is
+    # compared with the profile's column once that label is applied to it.
+    assert (real.sampled, real.is_candidate_key_sampled) == (True, False)
+    ours = dataclasses.replace(ours, sampled=True, is_candidate_key_sampled=False)
     for field in dataclasses.fields(ColumnProfile):
         assert getattr(ours, field.name) == getattr(real, field.name), (case, field.name)
 

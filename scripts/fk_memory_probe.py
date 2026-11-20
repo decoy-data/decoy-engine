@@ -116,6 +116,11 @@ from tests.perf_fixtures.fk_relational import (  # noqa: E402
 )
 
 from decoy_engine.execution import PandasExecutionAdapter, ParquetTransactionalSink  # noqa: E402
+from decoy_engine.execution._isolated_common import (  # noqa: E402
+    CAPPED_ENV,
+    RLIMIT_KINDS,
+    apply_mem_cap,
+)
 from decoy_engine.execution._pipeline_route_exec import (  # noqa: E402
     _max_concurrent_ooc_instances,
 )
@@ -142,8 +147,6 @@ _MIB = 1024 * 1024
 _PROBE_MAX_CONCURRENT_INSTANCES = _max_concurrent_ooc_instances(
     make_graph(OrphanPolicy.PRESERVE), sink=True
 )
-
-_RLIMITS = {"as": resource.RLIMIT_AS, "data": resource.RLIMIT_DATA}
 
 # Failure shapes a hard memory cap produces in this stack. pyarrow's
 # ArrowMemoryError and numpy's _ArrayMemoryError both subclass MemoryError;
@@ -208,20 +211,11 @@ _GLIBC_TLS_OOM_MARKER = "cannot allocate memory for thread-local data"
 # would have handed it only ~20% (below even the old cap/4 that already failed).
 _DUCKDB_CAP_FRACTION = 1.25
 
-# Allocator pinning for capped workers. Arrow's default (jemalloc/mimalloc)
-# and glibc's per-thread arenas reserve address space far beyond live data
-# (~2.5 GB measured on this stack at a ~400 MB RSS), and both RLIMIT_AS and
-# RLIMIT_DATA count those reservations, so an unpinned capped run OOMs on
-# reservation, not on real usage. The system pool plus two glibc arenas make
-# the rlimit track actual allocation. Must be in the environment BEFORE the
-# worker process starts (glibc reads MALLOC_ARENA_MAX at startup, pyarrow
-# reads ARROW_DEFAULT_MEMORY_POOL at import), hence driver-side env, not
-# worker-side setenv; set these manually when running a capped single-tier
+# Capped workers run with `CAPPED_ENV` (allocator pinning plus BLAS thread
+# knobs), the same constant every production isolated child gets. It must be
+# in the environment BEFORE the worker process starts, hence driver-side env,
+# not worker-side setenv; set these manually when running a capped single-tier
 # probe by hand.
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
 
 
 # Keyed strategies need a secret in every release phase; the probe measures memory, not secrecy.
@@ -264,12 +258,6 @@ def _peak_vms_mb() -> float | None:
     except (OSError, ValueError, IndexError):
         pass
     return None
-
-
-def _apply_mem_cap(cap_mb: int, rlimit_kind: str) -> None:
-    """Hard-cap this process's memory before any workload allocation."""
-    cap_bytes = cap_mb * _MIB
-    resource.setrlimit(_RLIMITS[rlimit_kind], (cap_bytes, cap_bytes))
 
 
 def _is_memory_failure(exc: BaseException) -> bool:
@@ -751,7 +739,9 @@ def _sweep(
     records = []
     for rows in sizes:
         cmd = _worker_cmd(rows, width, orphan_frac, policy_name, mode, strategy=strategy)
-        proc = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+        proc = subprocess.run(  # noqa: S603
+            cmd, capture_output=True, text=True, env={**os.environ, **CAPPED_ENV}
+        )
         line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
         if proc.returncode != 0 or not line:
             print(f"  rows={rows}: FAILED (rc={proc.returncode})")
@@ -861,7 +851,7 @@ def _capability(
                 capture_output=True,
                 text=True,
                 timeout=1800,
-                env={**os.environ, **_CAPPED_ENV},
+                env={**os.environ, **CAPPED_ENV},
             )
             line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
             rec = None
@@ -964,7 +954,7 @@ def main() -> None:
     )
     ap.add_argument(
         "--rlimit-kind",
-        choices=sorted(_RLIMITS),
+        choices=sorted(RLIMIT_KINDS),
         default="data",
         help=(
             "which rlimit --mem-cap-mb sets; 'data' (default) caps brk+anonymous "
@@ -1033,7 +1023,7 @@ def main() -> None:
         ap.error("provide --rows or --sweep")
 
     if args.mem_cap_mb is not None:
-        _apply_mem_cap(args.mem_cap_mb, args.rlimit_kind)
+        apply_mem_cap(args.mem_cap_mb * _MIB, args.rlimit_kind)
 
     rec = _run_one(
         args.rows,

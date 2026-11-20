@@ -16,7 +16,8 @@ import re
 from typing import Any, Final, Literal
 
 from decoy_engine.errors import DecoyError
-from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA, ScanSetCoreRead
+from decoy_engine.profiling._scan_core import ScanSetCoreRead
+from decoy_engine.profiling.scan_set import SCAN_SET_SCHEMA
 
 _Kind = Literal["missing_tag", "unsupported_tag", "invalid"]
 
