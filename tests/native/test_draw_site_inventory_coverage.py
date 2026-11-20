@@ -359,7 +359,7 @@ def test_catalogued_call_sites_point_at_real_files() -> None:
 ENTRY_DRAW_TOKEN = re.compile(
     _DRAW_TOKEN.pattern
     + r"|\bderive_sources?\(|\bderive_func\(|\bhmac_hex\(|\w*hmac\w*\.new\(|"
-    + r"derive_index_batch\(|\bpositional_pool_indices\(|\.sample\(|\.integers\(|\.random\("
+    + r"derive_index_batch\(|\bpositional_pool_indices\(|\bderive_validated_indices\(|\.sample\(|\.integers\(|\.random\("
 )
 
 _CALL_SITE = re.compile(r"(?P<path>[\w/]+\.py)::(?P<qual>\w+(?:\.\w+)*)(?:#(?P<n>[1-9]\d*))?\Z")
