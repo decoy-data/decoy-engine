@@ -471,21 +471,14 @@ def test_the_branch_passes_exact_config_and_reuses_the_preflight_index_kernel(
 # ---------------------------------------------------------------------------
 
 
-def test_a_when_predicate_keeps_an_implicit_format_table_off_native_and_off_auto_chunk() -> None:
-    config = make_config([ds_col(date_format=None), passthrough("p")])
+def test_a_when_predicate_keeps_a_table_off_native_and_off_auto_chunk() -> None:
+    config = make_config([ds_col(), passthrough("p")])
     config["tables"][0]["columns"][0]["when"] = "d != ''"
     run = run_one(config, [_valued()])
     assert run.ev[0].native_admitted is False
     assert "when_predicate_not_native" in (run.ev[0].reroute_reason or "")
     joined = "; ".join(_whole_column_state_rejections(config, table=TABLE))
     assert "when_predicate_not_chunk_stable" in joined
-
-
-def test_autodetect_date_shift_stays_off_the_auto_chunk_route() -> None:
-    config = make_config([ds_col(date_format=None), passthrough("p")])
-    assert "date_shift_requires_explicit_format" in "; ".join(
-        _whole_column_state_rejections(config, table=TABLE)
-    )
 
 
 def _fk(parent_cols: list[dict[str, Any]], child_cols: list[dict[str, Any]]) -> dict[str, Any]:

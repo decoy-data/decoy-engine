@@ -17,6 +17,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "mixed",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -86,6 +87,7 @@
       "detector_id": "ssn",
       "domain": "IDENTITY",
       "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+      "format_pattern_complete": false,
       "match_rate": 0.7692,
       "sample_misses": [
        "bad",
@@ -118,6 +120,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -210,6 +213,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -276,6 +280,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -359,6 +364,7 @@
     "domain": null,
     "dtype_raw": "int64",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "integer",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -430,6 +436,7 @@
       "detector_id": "first_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      },
@@ -438,6 +445,7 @@
       "detector_id": "person_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -478,6 +486,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -549,6 +558,7 @@
       "detector_id": "last_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      },
@@ -557,6 +567,7 @@
       "detector_id": "person_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -597,6 +608,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -668,6 +680,7 @@
       "detector_id": "ssn",
       "domain": "IDENTITY",
       "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+      "format_pattern_complete": false,
       "match_rate": 0.9167,
       "sample_misses": [
        "999-33-4444"
@@ -710,6 +723,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -781,6 +795,7 @@
       "detector_id": "iso_date",
       "domain": "IDENTITY",
       "format_pattern": "%Y-%m-%d",
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -809,6 +824,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "%Y-%m-%d",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": 2,
     "is_likely_unique": false,
@@ -896,6 +912,7 @@
       "detector_id": "us_zip",
       "domain": "LOCATION",
       "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -922,6 +939,7 @@
     "domain": "LOCATION",
     "dtype_raw": "object",
     "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -987,6 +1005,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1046,6 +1065,7 @@
       "detector_id": "email",
       "domain": "CONTACT",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -1086,6 +1106,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -1157,6 +1178,7 @@
       "detector_id": "us_phone",
       "domain": "CONTACT",
       "format_pattern": "\\d{3}-\\d{3}-\\d{4}",
+      "format_pattern_complete": false,
       "match_rate": 0.8333,
       "sample_misses": [
        "555-012-3456",
@@ -1200,6 +1222,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": "\\d{3}-\\d{3}-\\d{4}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -1277,6 +1300,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1417,6 +1441,7 @@
       "detector_id": "email",
       "domain": "CONTACT",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 0.8021,
       "sample_misses": [
        "not an email",
@@ -1443,6 +1468,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1514,6 +1540,7 @@
       "detector_id": "ssn",
       "domain": "IDENTITY",
       "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+      "format_pattern_complete": false,
       "match_rate": 0.9991,
       "sample_misses": [
        "666-16-1566",
@@ -1540,6 +1567,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "\\d{3}-\\d{2}-\\d{4}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1611,6 +1639,7 @@
       "detector_id": "pan",
       "domain": "FINANCIAL",
       "format_pattern": "\\d{16}",
+      "format_pattern_complete": false,
       "match_rate": 0.5986,
       "sample_misses": [
        "4111111111111112",
@@ -1637,6 +1666,7 @@
     "domain": "FINANCIAL",
     "dtype_raw": "object",
     "format_pattern": "\\d{16}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1696,6 +1726,7 @@
       "detector_id": "ipv4",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 0.8534,
       "sample_misses": [
        "10.0.37.259",
@@ -1722,6 +1753,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1793,6 +1825,7 @@
       "detector_id": "iso_date",
       "domain": "IDENTITY",
       "format_pattern": "%Y-%m-%d",
+      "format_pattern_complete": true,
       "match_rate": 0.95,
       "sample_misses": [
        "garbage",
@@ -1819,6 +1852,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "%Y-%m-%d",
+    "format_pattern_complete": true,
     "inferred_type": "string",
     "invalid_count": 2499,
     "is_likely_unique": false,
@@ -1894,6 +1928,7 @@
       "detector_id": "email",
       "domain": "CONTACT",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -1916,6 +1951,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -1989,6 +2025,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2060,6 +2097,7 @@
       "detector_id": "us_phone",
       "domain": "CONTACT",
       "format_pattern": "\\(\\d{3}\\) \\d{3}-\\d{4}",
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -2082,6 +2120,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": "\\(\\d{3}\\) \\d{3}-\\d{4}",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -2153,6 +2192,7 @@
       "detector_id": "us_zip",
       "domain": "LOCATION",
       "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -2175,6 +2215,7 @@
     "domain": "LOCATION",
     "dtype_raw": "object",
     "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -2239,6 +2280,7 @@
       "detector_id": "us_zip",
       "domain": "LOCATION",
       "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+      "format_pattern_complete": false,
       "match_rate": 0.8,
       "sample_misses": [
        "0",
@@ -2252,6 +2294,7 @@
     "domain": "LOCATION",
     "dtype_raw": "object",
     "format_pattern": "(?<!\\w)\\d{5}(?!\\w)(?!\\.\\d)",
+    "format_pattern_complete": false,
     "inferred_type": "mixed",
     "invalid_count": null,
     "is_likely_unique": true,
@@ -2323,6 +2366,7 @@
       "detector_id": "email",
       "domain": "CONTACT",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -2332,6 +2376,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "mixed",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2395,6 +2440,7 @@
     "domain": null,
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2485,6 +2531,7 @@
       "detector_id": "iso_date",
       "domain": "IDENTITY",
       "format_pattern": "%Y-%m-%d",
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -2507,6 +2554,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "%Y-%m-%d",
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": 1479,
     "is_likely_unique": false,
@@ -2609,6 +2657,7 @@
     "domain": null,
     "dtype_raw": "int64",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "integer",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2701,6 +2750,7 @@
     "domain": null,
     "dtype_raw": "int64",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "integer",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2772,6 +2822,7 @@
       "detector_id": "first_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 0.7511,
       "sample_misses": [
        "zed1",
@@ -2784,6 +2835,7 @@
       "detector_id": "person_name",
       "domain": "IDENTITY",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 0.7511,
       "sample_misses": [
        "zed1",
@@ -2814,6 +2866,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -2992,6 +3045,7 @@
       "detector_id": "email",
       "domain": "CONTACT",
       "format_pattern": null,
+      "format_pattern_complete": false,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -3012,6 +3066,7 @@
     "domain": "CONTACT",
     "dtype_raw": "object",
     "format_pattern": null,
+    "format_pattern_complete": false,
     "inferred_type": "string",
     "invalid_count": null,
     "is_likely_unique": false,
@@ -3060,6 +3115,7 @@
       "detector_id": "iso_date",
       "domain": "IDENTITY",
       "format_pattern": "%Y-%m-%d",
+      "format_pattern_complete": true,
       "match_rate": 1.0,
       "sample_misses": []
      }
@@ -3080,6 +3136,7 @@
     "domain": "IDENTITY",
     "dtype_raw": "object",
     "format_pattern": "%Y-%m-%d",
+    "format_pattern_complete": true,
     "inferred_type": "string",
     "invalid_count": 0,
     "is_likely_unique": false,
