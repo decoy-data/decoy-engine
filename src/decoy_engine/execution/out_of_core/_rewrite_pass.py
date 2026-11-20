@@ -380,7 +380,8 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return attach_output_metadata(pa.schema(fields), source_schema.metadata)
+    carried = [f.name for f in source_schema if f.name not in fk_components and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 __all__ = ["_stream_table"]

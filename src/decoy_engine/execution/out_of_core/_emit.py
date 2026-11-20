@@ -255,8 +255,12 @@ def assemble_resident(
         columns.append(column)
         field = template.field(idx)
         fields.append(field if field.type.equals(column.type) else pa.field(name, column.type))
+    # The streamed batches already follow the fixed schema, whose masked fields are bare; an FK
+    # column is rebuilt from the joiner, so it is never the source field.
+    carried = [n for n in template.names if n not in fk_components]
     return pa.Table.from_arrays(
-        columns, schema=attach_output_metadata(pa.schema(fields), template.metadata)
+        columns,
+        schema=attach_output_metadata(pa.schema(fields), template.metadata, carried=carried),
     )
 
 

@@ -428,12 +428,12 @@ def _widen_payload_offsets(batch: pa.RecordBatch) -> pa.RecordBatch:
             changed = True
     if not changed:
         return batch
-    fields = [
-        pa.field(f.name, c.type, f.nullable, f.metadata)
-        for f, c in zip(batch.schema, columns, strict=True)
-    ]
+    fields = [f.with_type(c.type) for f, c in zip(batch.schema, columns, strict=True)]
+    # Only the widened payload columns change; every other field is the one the batch carried.
+    carried = [f.name for f, c in zip(batch.schema, columns, strict=True) if f.type.equals(c.type)]
     return pa.record_batch(
-        columns, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+        columns,
+        schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata, carried=carried),
     )
 
 

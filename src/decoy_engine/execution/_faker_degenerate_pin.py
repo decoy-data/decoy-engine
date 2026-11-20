@@ -192,5 +192,8 @@ def pin_degenerate_to_string(table: pa.Table, columns: frozenset[str]) -> pa.Tab
         )
     # The sanitizer rebuilds the blob from the output schema: a column now `string` takes the
     # string pair, so no hand patch of the source blob is left.
-    schema = attach_output_metadata(table.schema.remove_metadata(), table.schema.metadata)
+    # Cast columns were rebuilt bare above; every other column is the source field.
+    schema = attach_output_metadata(
+        table.schema.remove_metadata(), table.schema.metadata, carried=table.schema.names
+    )
     return table.cast(schema)

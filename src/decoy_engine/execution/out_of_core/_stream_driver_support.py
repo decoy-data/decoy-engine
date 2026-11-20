@@ -83,7 +83,9 @@ def _payload_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return attach_output_metadata(pa.schema(fields), source_schema.metadata)
+    # An FK column is replaced later by the join, so it is not carried either.
+    carried = [f.name for f in source_schema if f.name not in skip_columns and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 def _fixed_output_schema(
@@ -110,7 +112,8 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return attach_output_metadata(pa.schema(fields), source_schema.metadata)
+    carried = [f.name for f in source_schema if f.name not in fk_components and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 def _replace_fk_columns(
@@ -131,8 +134,10 @@ def _replace_fk_columns(
         idx = batch.schema.get_field_index(child_col)
         arrays[idx] = fk_array
         fields[idx] = pa.field(child_col, dtype)
+    carried = [n for n in batch.schema.names if n not in child_columns]
     return pa.record_batch(
-        arrays, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+        arrays,
+        schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata, carried=carried),
     )
 
 

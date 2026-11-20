@@ -360,8 +360,12 @@ class ChildFkBatchJoiner:
             # Same field semantics as Table.set_column with a bare name (the
             # whole-child path): the field follows the new array's type.
             fields[idx] = pa.field(child_col, dtype)
+        carried = [n for n in batch.schema.names if n not in self._edge.child_columns]
         return pa.record_batch(
-            arrays, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+            arrays,
+            schema=attach_output_metadata(
+                pa.schema(fields), batch.schema.metadata, carried=carried
+            ),
         )
 
 

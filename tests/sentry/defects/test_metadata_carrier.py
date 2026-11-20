@@ -17,9 +17,12 @@ Two checks over `src/decoy_engine`, both pure AST:
    function) is a row of `baselines/metadata-carrier-allow.json`: a same-object rebuild that keeps
    only what the object already carried. The baseline is shrink-only.
 
+Field metadata: the `metadata=` keyword (or fourth positional) of `pa.field` and the argument of
+`Field.with_metadata` follow the same rule, because a field built from a source field's metadata
+carries source text to a column the job rewrote. A carried field is kept with `Field.with_type`.
+
 Named limits: a schema reached through a call this scan does not know, a `getattr` and a
-`**kwargs` spelling are not modelled; field-level `metadata=` on `pa.field` is out of scope (the
-writers strip field metadata).
+`**kwargs` spelling are not modelled.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+import pytest
 
 from tests.sentry.defects import _defect_scan as scan
 
@@ -50,6 +55,7 @@ SEEDED = "execution/out_of_core/_x.py"
 # Constructors that take schema metadata: callee -> (keyword, positional index) of `metadata`.
 METADATA_SLOT: dict[str, int] = {
     "schema": 1,
+    "field": 3,
     "record_batch": 3,
     "table": 3,
     "from_arrays": 3,
@@ -182,7 +188,7 @@ def _fields_list(node: ast.expr, assigned: dict[str, list[ast.expr]], params: se
     if isinstance(node, (ast.List, ast.ListComp, ast.Tuple, ast.GeneratorExp)):
         return True
     if isinstance(node, ast.Name) and not _named_like_schema(node) and node.id not in params:
-        values = assigned.get(node.id)
+        values = assigned.get(node.id) or []
         return bool(values) and all(_fields_list(v, assigned, params) for v in values)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "list":
         return (
@@ -373,6 +379,30 @@ def test_none_and_literals_pass() -> None:
     assert _rules(src) == []
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        "pa.field(f.name, c.type, f.nullable, f.metadata)",
+        "pa.field(f.name, c.type, metadata=f.metadata)",
+        "pa.field(f.name, c.type, metadata=dict(f.metadata))",
+        "pa.field(f.name, c.type).with_metadata(f.metadata)",
+    ],
+    ids=["positional", "keyword", "merged", "with-metadata"],
+)
+def test_a_field_built_from_source_field_metadata_is_seen(call: str) -> None:
+    assert _rules(f"def f(f, c):\n    return {call}\n") == ["metadata-argument"]
+
+
+def test_a_literal_or_absent_field_metadata_passes() -> None:
+    src = (
+        "def f(f, c):\n"
+        "    a = pa.field(f.name, c.type, f.nullable)\n"
+        "    b = pa.field(f.name, c.type, metadata={b'k': b'v'})\n"
+        "    return f.with_type(c.type), a, b\n"
+    )
+    assert _rules(src) == []
+
+
 def test_the_sanitizer_is_private_to_safe_output() -> None:
     src = "def f(m, s):\n    return sanitized_schema_metadata(m, for_schema=s)\n"
     assert _rules(src) == ["sanitizer-outside"]
@@ -417,8 +447,6 @@ def test_whole_schema_reuse_is_scoped_to_output_bound_modules() -> None:
 
 
 # -- seeded cells for the spellings the first scan missed ------------------------------------------
-
-import pytest  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -542,6 +570,22 @@ def test_aliased_spellings_are_seen(source: str, rule: str) -> None:
 FORM_FIXTURES = {
     "pa.schema(x, metadata=)": (
         "import pyarrow as pa\ndef f(m, x):\n    return pa.schema(x, metadata=m)\n",
+        "metadata-argument",
+    ),
+    "pa.field(metadata=)": (
+        "import pyarrow as pa\ndef f(src, c):\n    return pa.field(src.name, c.type, metadata=src.metadata)\n",
+        "metadata-argument",
+    ),
+    "pa.field(name, type, nullable, m)": (
+        "import pyarrow as pa\ndef f(src, c):\n    return pa.field(src.name, c.type, src.nullable, src.metadata)\n",
+        "metadata-argument",
+    ),
+    "from pyarrow import field": (
+        "from pyarrow import field\ndef f(src, c):\n    return field(src.name, c.type, metadata=src.metadata)\n",
+        "metadata-argument",
+    ),
+    "Field.with_metadata": (
+        "import pyarrow as pa\ndef f(src, c):\n    return pa.field('a', c.type).with_metadata(src.metadata)\n",
         "metadata-argument",
     ),
     "pa.schema(x, m)": (

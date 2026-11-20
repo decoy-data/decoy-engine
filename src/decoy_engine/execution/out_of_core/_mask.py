@@ -387,8 +387,10 @@ def _narrow_unmasked(
         state = widths.setdefault(field.name, TextWidthState(fixed=fixed_schema))
         arrays[idx] = narrow_passthrough(arrays[idx], state)
         fields[idx] = field.with_type(arrays[idx].type)
+    carried = [f.name for f in batch.schema if f.name not in skip]
     return pa.record_batch(
-        arrays, schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata)
+        arrays,
+        schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata, carried=carried),
     )
 
 

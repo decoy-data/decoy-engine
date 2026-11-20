@@ -117,7 +117,9 @@ def _apply_ops(table: pa.Table, ops: Sequence[TransformOp]) -> pa.Table:
     # The pandas blob is derived from the columns this table really has (`fresh` names the dtypes
     # the transform frame gave them); no other source key, and no source `attributes`, is kept.
     fresh = pa.Schema.from_pandas(frame, preserve_index=False)
-    schema = attach_output_metadata(pa.schema(fields), fresh.metadata)
+    # Only a column read straight from the source table is the source field; a derived one is new.
+    carried = [name for name, origin in bindings if origin == _SOURCE]
+    schema = attach_output_metadata(pa.schema(fields), fresh.metadata, carried=carried)
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
