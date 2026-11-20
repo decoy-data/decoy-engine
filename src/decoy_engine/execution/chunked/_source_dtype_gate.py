@@ -17,6 +17,7 @@ import pyarrow.types as pat
 
 from decoy_engine.execution._chunked_carry import read_set
 from decoy_engine.execution._column_access import has_when
+from decoy_engine.execution._strategies._redact import redact_with_is_string
 from decoy_engine.execution.native._faker_deterministic_admission import (
     is_effective_deterministic_faker,
 )
@@ -60,8 +61,7 @@ def _config_admits(entry: Mapping[str, Any]) -> bool:
     if has_when(entry):
         return False  # a gated entry sees a per-chunk frame, and gated hash is not exact-int
     if strategy == "redact":
-        redact_with = (entry.get("provider_config") or {}).get("redact_with", "REDACTED")
-        return isinstance(redact_with, str)
+        return redact_with_is_string(entry.get("provider_config") or {})
     if strategy == "faker":
         return is_effective_deterministic_faker(entry)
     return True

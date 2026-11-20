@@ -31,6 +31,13 @@ def redact_with_of(cfg: dict[str, Any]) -> Any:
     return cfg.get("redact_with", _DEFAULT_REDACT_WITH)
 
 
+def redact_with_is_string(cfg: dict[str, Any]) -> bool:
+    """Whether `run` writes a string: the one rule the native requirements, the chunked schema
+    rule and the chunked source-type gate share. A non-string makes the output type
+    data-dependent."""
+    return isinstance(redact_with_of(cfg), str)
+
+
 class RedactHandler:
     """Replace every non-null value in the column with a fixed string."""
 
