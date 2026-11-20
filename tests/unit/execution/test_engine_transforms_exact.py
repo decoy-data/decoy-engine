@@ -25,6 +25,7 @@ from decoy_engine.plan._errors import PlanCompileError
 from tests._declared_schema import chunked_entry_kwargs, declared_schema
 from tests.unit.execution._transform_testkit import (
     ENGINE_VERSION,
+    comparable_pandas_blob,
     reference_bindings,
     reference_transform,
     single_table_config,
@@ -183,8 +184,8 @@ def _check_lineage(ops: list[dict[str, Any]]) -> None:
     pandas_meta = json.loads(meta[b"pandas"])
     assert pandas_meta["index_columns"] == []
     assert [c["field_name"] for c in pandas_meta["columns"]] == out.column_names
-    expected_meta = json.loads(reference_transform(tbl, ops).schema.metadata[b"pandas"])
-    assert pandas_meta == expected_meta
+    expected_meta = comparable_pandas_blob(reference_transform(tbl, ops).schema.metadata[b"pandas"])
+    assert comparable_pandas_blob(meta[b"pandas"]) == expected_meta
 
 
 class TestRowLineage:
@@ -1059,6 +1060,6 @@ class TestFreshPandasMetadata:
             _cfg(ops, columns=[{"name": "str", "strategy": "redact"}]), "t", tbl
         )
         expected = reference_transform(tbl, ops)
-        assert json.loads(out.schema.metadata[b"pandas"]) == json.loads(
+        assert comparable_pandas_blob(out.schema.metadata[b"pandas"]) == comparable_pandas_blob(
             expected.schema.metadata[b"pandas"]
         )

@@ -12,6 +12,7 @@ dedupe, derive and drop_column mean) are shared with production.
 from __future__ import annotations
 
 import copy
+import json
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -267,6 +268,18 @@ def reference_bindings(table: pa.Table, ops: Sequence[dict[str, Any]]) -> list[t
         elif op["op"] == "derive":
             bindings.append((op["column"], "derived"))
     return bindings
+
+
+def comparable_pandas_blob(blob: bytes) -> dict[str, Any]:
+    """The members of a pandas blob that pandas itself fixes, for comparing an engine output with
+    the reference. The output rule rebuilds `numpy_type` from the Arrow type and never carries the
+    data-derived `num_categories` (docs/security/output-metadata.md), so both are left out."""
+    obj = json.loads(blob)
+    for col in obj["columns"]:
+        col.pop("numpy_type", None)
+        if isinstance(col.get("metadata"), dict):
+            col["metadata"].pop("num_categories", None)
+    return obj
 
 
 def reference_transform(table: pa.Table, ops: Sequence[dict[str, Any]]) -> pa.Table:
