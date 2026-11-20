@@ -74,10 +74,7 @@ try:
     import joblib
     from sklearn.calibration import CalibratedClassifierCV, calibration_curve
     from sklearn.feature_extraction import DictVectorizer
-    from sklearn.metrics import (
-        balanced_accuracy_score,
-        brier_score_loss,
-    )
+    from sklearn.metrics import balanced_accuracy_score, brier_score_loss
     from decoy_engine.profiling.model_pack._mlstack import lgbm_classifier  # isort: skip  (sklearn first)
 
     LGBMClassifier = lgbm_classifier()

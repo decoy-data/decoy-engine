@@ -27,6 +27,7 @@ def _mlstack() -> ModuleType:
 
 def test_sklearn_is_imported_before_lightgbm(monkeypatch: pytest.MonkeyPatch) -> None:
     mod = _mlstack()
+    mod.import_ml_stack()  # load the stack first so submodule imports do not add to `seen`
     seen: list[str] = []
     real = builtins.__import__
 
