@@ -3,5 +3,8 @@
 Under `auto`, a large non-FK table with a masked integer-with-nulls, decimal or binary column no
 longer falls back to full-frame when the column uses `hash` (no `when:`), `redact` (a string
 `redact_with`) or deterministic `faker` (integer sources only) and no other column reads it. The
-output equals the full-frame result in type and value. Other strategies on these types, a `when:`
-on the column and `chunked_dispatcher_enabled=False` keep the full-frame route.
+output values equal the full-frame result. An all-null column keeps the type the chunked route
+already gives it (`string` for `hash` and `redact` on an all-null int, decimal or binary column,
+where full-frame gives `null`), as for the types that were chunked before. Other strategies on
+these types, a `when:` on the column and `chunked_dispatcher_enabled=False` keep the full-frame
+route.

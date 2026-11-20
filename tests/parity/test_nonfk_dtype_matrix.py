@@ -181,7 +181,7 @@ def test_at_a9_small_nested_table_on_full_frame_is_exact(tmp_path: Path) -> None
     assert out.column("q").to_pylist() == table.column("q").to_pylist()
 
 
-def test_g3_read_set_has_one_production_caller() -> None:
+def test_g3_read_set_has_two_production_callers() -> None:
     root = Path(carry.__file__).resolve().parents[1]
     callers: list[str] = []
     for path in sorted(root.rglob("*.py")):
@@ -195,7 +195,11 @@ def test_g3_read_set_has_one_production_caller() -> None:
                     name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
                     if name == "read_set":
                         callers.append(f"{path.name}:{fn.name}")
-    assert callers == ["_chunked_carry.py:carried_columns"]
+    # The carried exemption and the masked-column admission share the one read rule.
+    assert callers == [
+        "_chunked_carry.py:carried_columns",
+        "_source_dtype_gate.py:admitted_masked_columns",
+    ]
 
 
 # -- part (b1): masked columns of admitted types (AT-B1 to AT-B3, G-1 masked rows) --------------

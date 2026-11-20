@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.types as pat
 
-from decoy_engine.execution._column_access import has_when, touched_columns
+from decoy_engine.execution._chunked_carry import read_set
+from decoy_engine.execution._column_access import has_when
+from decoy_engine.execution.native._faker_deterministic_admission import (
+    is_effective_deterministic_faker,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.execution._chunked_input import SourceFacts
@@ -51,7 +55,7 @@ def type_class(arrow_type: pa.DataType, null_count: int) -> str | None:
 
 def _config_admits(entry: Mapping[str, Any]) -> bool:
     """The configuration under which a table row holds: no `when:`, a string `redact_with`, a
-    deterministic faker. Membership of the strategy in the table is checked by the caller."""
+    deterministic faker (the shared faker predicate). Membership of the strategy in the table is checked by the caller."""
     strategy = entry.get("strategy")
     if has_when(entry):
         return False  # a gated entry sees a per-chunk frame, and gated hash is not exact-int
@@ -59,7 +63,7 @@ def _config_admits(entry: Mapping[str, Any]) -> bool:
         redact_with = (entry.get("provider_config") or {}).get("redact_with", "REDACTED")
         return isinstance(redact_with, str)
     if strategy == "faker":
-        return entry.get("deterministic") is True
+        return is_effective_deterministic_faker(entry)
     return True
 
 
@@ -69,15 +73,15 @@ def admitted_masked_columns(
     """Masked columns whose (strategy, type class) pair is admitted and that no other entry
     reads, so no `when:` predicate or sibling reference sees the per-chunk pandas dtype."""
     entries = list(entries)
-    touched = touched_columns(entries, registry)
-    if touched is None:
-        return frozenset()
     types = {f.name: f.type for f in facts.schema}
+    # `read_set` is the one membership rule (NFKC-normalised names, fail closed when a
+    # declaration cannot be computed), shared with the carried exemption.
+    read = read_set(entries, types, registry)
     admitted: set[str] = set()
     for entry in entries:
         name = entry.get("name")
         strategy = entry.get("strategy")
-        if not isinstance(name, str) or name not in types or name in touched:
+        if not isinstance(name, str) or name not in types or name in read:
             continue
         classes = (
             CHUNK_STABLE_MASKED_SOURCE_TYPES.get(strategy) if isinstance(strategy, str) else None
