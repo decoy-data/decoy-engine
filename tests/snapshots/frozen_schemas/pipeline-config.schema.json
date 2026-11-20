@@ -913,6 +913,7 @@
               },
               "reference_column": {},
               "reference_table": {},
+              "root_count": {},
               "snapshot_file": {},
               "source_column": {},
               "type": {},
@@ -1074,6 +1075,7 @@
             "additionalProperties": false,
             "properties": {
               "anchor": {},
+              "anchor_via": {},
               "determinism": {},
               "distribution": {},
               "max_days": {},
