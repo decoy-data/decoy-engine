@@ -247,6 +247,13 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
+    # Required strategy settings (a namespace, a date_shift format) are config-only too, so a
+    # column missing one is refused before the source is profiled or read, with the code
+    # `compile_plan` raises later.
+    from decoy_engine.plan.checks import check_required_strategy_settings
+
+    check_required_strategy_settings(config)
+
     # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
     # substrate or count knob fails at submit time with a typed error instead of after the expensive
     # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
