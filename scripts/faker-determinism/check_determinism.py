@@ -39,10 +39,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from decoy_engine.generation import _faker_pool
-
 HERE = Path(__file__).resolve().parent
 ENGINE_ROOT = HERE.parent.parent
+if str(HERE) not in sys.path:  # loaded by file path in tests: the sibling modules need this
+    sys.path.insert(0, str(HERE))
+
+from _engine_access import _faker_pool  # noqa: E402
+from worker_env import worker_env  # noqa: E402
+
 DEFAULT_WORKER = HERE / "pool_determinism_worker.py"
 DEFAULT_GOLDEN_PATH = HERE / "golden_digests.json"
 DEFAULT_CERTIFIED_OUT = HERE / "certified_pairs.json"
@@ -194,15 +198,7 @@ def run_worker_once(
     timeout_s: float,
     python_exe: str,
 ) -> dict[str, Any]:
-    env = {
-        "PATH": "/usr/bin:/bin:/usr/local/bin",
-        "PYTHONPATH": str(ENGINE_ROOT / "src"),
-        "PYTHONHASHSEED": str(hash_seed),
-        "TZ": "UTC",
-        "LC_ALL": "C",
-        "LANG": "C",
-        "DECOY_ENGINE_COMMIT": engine_commit(),
-    }
+    env = worker_env(ENGINE_ROOT, hash_seed, engine_commit())
     locale_arg = candidate.locale if candidate.locale is not None else "-"
     cmd = [
         python_exe,

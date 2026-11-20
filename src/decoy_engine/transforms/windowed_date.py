@@ -49,10 +49,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from decoy_engine import reasons
-from decoy_engine.determinism._derive import derive
+from decoy_engine.determinism._derive import DeriveContext, derive
+from decoy_engine.determinism._seeds import seed_bytes_to_int
 from decoy_engine.errors import DecoyError
 from decoy_engine.plan._errors import PlanCompileError
 
@@ -274,6 +276,107 @@ def _shift_and_format(anchor: pd.Timestamp, offset: int, position: int) -> str:
     ) from None
 
 
+# Largest |offset| in days that `pd.Timedelta` represents (ns int64). The per-row reference path
+# raises past it even when the shifted date is in range, so the batched path must hand such a
+# batch to the reference path instead of computing a result.
+_MAX_TIMEDELTA_DAYS = 106_751
+_MIN_DAY = int(SUPPORTED_MIN.to_datetime64().astype("datetime64[D]").astype(np.int64))
+_MAX_DAY = int(SUPPORTED_MAX.to_datetime64().astype("datetime64[D]").astype(np.int64))
+
+
+def _vector_parse(cells: list[Any], kind: type) -> npt.NDArray[np.datetime64] | None:
+    """Parse one batch of non-null anchors of a single exact type, or None for any anomaly.
+
+    Draws nothing. None sends the whole batch to the per-row reference loop, which owns every
+    error message.
+    """
+    if kind is str:
+        if not all(_ISO_ANCHOR.fullmatch(c) for c in cells):
+            return None
+        parsed = pd.to_datetime(cells, format="ISO8601")
+    elif kind is _dt.date:
+        parsed = pd.to_datetime(cells)
+    elif kind in (_dt.datetime, pd.Timestamp):
+        if any(c.tzinfo is not None for c in cells):
+            return None
+        parsed = pd.to_datetime(cells)
+    else:
+        return None
+    values = parsed.to_numpy()
+    if values.dtype != np.dtype("datetime64[ns]") or bool(np.isnat(values).any()):
+        return None
+    return values
+
+
+def _prepare_batch(
+    anchor_series: pd.Series,
+    row_offset: int,
+    positions: Sequence[int] | None,
+) -> tuple[npt.NDArray[np.datetime64], npt.NDArray[np.intp], list[int]] | None:
+    """Parsed non-null anchors, their batch indexes and global row numbers, or None.
+
+    None means "use the reference loop": a mixed or unadmitted cell type, a subclass, a tz-aware
+    value, a grammar miss, a `positions` length mismatch, or any pandas surprise.
+    """
+    n = len(anchor_series)
+    if positions is not None and len(positions) != n:
+        return None
+    if str(anchor_series.dtype) == "datetime64[ns]":
+        raw = anchor_series.to_numpy()
+        keep = np.flatnonzero(~np.isnat(raw))
+        values: npt.NDArray[np.datetime64] | None = raw[keep]
+    else:
+        cells = list(anchor_series)
+        keep = np.fromiter((k for k, c in enumerate(cells) if not _is_null_cell(c)), dtype=np.intp)
+        kept = [cells[k] for k in keep]
+        kinds = {type(c) for c in kept}
+        if len(kinds) > 1:
+            return None
+        values = (
+            _vector_parse(kept, next(iter(kinds))) if kinds else np.empty(0, dtype="datetime64[ns]")
+        )
+    # One range check for every input class: an out-of-range anchor must raise as the per-row loop
+    # does, not shift back into range.
+    if values is None or (
+        values.size
+        and (
+            values.min() < SUPPORTED_MIN.to_datetime64()
+            or values.max() > SUPPORTED_MAX.to_datetime64()
+        )
+    ):
+        return None
+    if positions is None:
+        rows = [row_offset + int(k) for k in keep]
+    else:
+        rows = [int(positions[k]) for k in keep]
+    return values, keep, rows
+
+
+def _shift_and_format_batch(
+    values: npt.NDArray[np.datetime64],
+    offsets: npt.NDArray[np.int64],
+    keep: npt.NDArray[np.intp],
+    size: int,
+) -> list[str | None] | None:
+    """Shift whole days and format, or None when the reference loop must decide.
+
+    The output keeps only the date, so adding whole days to the day number is the same as the
+    reference timestamp add. The checks run in integer days first: NumPy datetime arithmetic
+    wraps silently past its range, and the reference raises for an offset past the Timedelta
+    range even when the shifted date would be in range.
+    """
+    if offsets.size and int(np.abs(offsets).max()) > _MAX_TIMEDELTA_DAYS:
+        return None
+    days = values.astype("datetime64[D]").astype(np.int64) + offsets
+    if days.size and (int(days.min()) < _MIN_DAY or int(days.max()) > _MAX_DAY):
+        return None
+    formatted = np.datetime_as_string(days.astype("datetime64[D]"), unit="D")
+    out = np.full(size, None, dtype=object)
+    out[keep] = formatted
+    result: list[str | None] = out.tolist()
+    return result
+
+
 def apply_windowed_date(
     config: WindowedDateConfig,
     df: pd.DataFrame,
@@ -315,6 +418,32 @@ def apply_windowed_date(
     """
     try:
         anchor_series = df[config.anchor]
+        # Batched path: the keyed derive, the parse, the shift and the format run once per
+        # batch; the per-row PCG64 draw stays here so the draw site and its bytes do not move.
+        # Any anomaly or Exception discards this work and reruns the batch through the
+        # per-row loop below, which raises the exact first error it always raised.
+        batched: list[str | None] | None
+        try:
+            prepared = _prepare_batch(anchor_series, row_offset, positions)
+            if prepared is None:
+                batched = None
+            else:
+                values, keep, rows = prepared
+                offsets = np.empty(len(rows), dtype=np.int64)
+                if rows:
+                    digests = DeriveContext.for_column(seed, namespace).derive_sources(
+                        namespace, (r.to_bytes(8, "big") for r in rows)
+                    )
+                    for k, digest in enumerate(digests):
+                        row_rng = np.random.default_rng(seed_bytes_to_int(digest[:8]))
+                        offsets[k] = _sample_offset(
+                            row_rng, config.min_days, config.max_days, config.distribution
+                        )
+                batched = _shift_and_format_batch(values, offsets, keep, len(anchor_series))
+        except Exception:
+            batched = None
+        if batched is not None:
+            return batched
         result: list[str | None] = []
 
         # C8-iii-d: `positions` gives each row its full-table row number under a `when:` gate, so a

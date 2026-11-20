@@ -180,8 +180,10 @@ def score_generated_fidelity(
                     "overall_score": float(overall),
                     "threshold": float(threshold),
                     "trigger": "overall" if overall < threshold else "column",
-                    "worst_columns": [[name, float(score)] for name, score in worst],
-                    "below_columns": [[name, float(score)] for name, score in sorted(below)],
+                    "worst_columns": ", ".join(f"{name}={float(score)}" for name, score in worst),
+                    "below_columns": ", ".join(
+                        f"{name}={float(score)}" for name, score in sorted(below)
+                    ),
                 },
             )
         )
@@ -200,7 +202,8 @@ def _frame_column(values: list[Any], spec: StatisticalSpec | None) -> Any:
 
 def _log_line(record: QualityWarning) -> str:
     detail = record.detail
-    worst = ",".join(f"{name}:{score}" for name, score in detail["worst_columns"])
+    pairs = str(detail["worst_columns"]).split(", ") if detail["worst_columns"] else []
+    worst = ",".join(":".join(pair.rsplit("=", 1)) for pair in pairs)
     return (
         f"generation_fidelity_below_threshold: table={detail['table']} "
         f"snapshot_index={detail['snapshot_index']} overall_score={detail['overall_score']} "

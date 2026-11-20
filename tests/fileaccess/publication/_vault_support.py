@@ -13,10 +13,11 @@ from typing import Any
 
 import pytest
 
-from decoy_engine import vault as vault_module
+from decoy_engine import vault as vault_package
 from decoy_engine.fileaccess import FileRequest, FileRole, Root, RootedFileAccess
 from decoy_engine.fileaccess._local import LocalFileAccess
 from decoy_engine.vault import VaultWriter
+from decoy_engine.vault import _writer as vault_module
 
 KEY = b"12345678" * 4
 OTHER_KEY = b"abcdefgh" * 4
@@ -63,7 +64,10 @@ class IssueProbe:
             self.issued.append(commit)
             return commit
 
+        # `VaultWriter.publish` calls the writer module's name; the adopt path calls it through
+        # the package, so both bindings are patched.
         monkeypatch.setattr(vault_module, "issue_commit", spy)
+        monkeypatch.setattr(vault_package, "issue_commit", spy)
 
 
 def kill_child(spec_path: str) -> None:

@@ -478,9 +478,9 @@ class TestWarnEventShape:
         assert w.column == "customer_id"
         assert w.detail == {
             "parent_table": "customers",
-            "parent_columns": ["customer_id"],
+            "parent_columns": "customer_id",
             "child_table": "orders",
-            "child_columns": ["customer_id"],
+            "child_columns": "customer_id",
             "orphan_rows": 2,
         }
         assert masked == [("o1",), ("o2",)]
@@ -495,8 +495,8 @@ class TestWarnEventShape:
         )
         _masked, warnings, _cascade = _resolve([("m9", "p9")], {}, edge)
         assert warnings[0].column == "member_id,plan_id"
-        assert warnings[0].detail["child_columns"] == ["member_id", "plan_id"]
-        assert warnings[0].detail["parent_columns"] == ["member_id", "plan_id"]
+        assert warnings[0].detail["child_columns"] == "member_id,plan_id"
+        assert warnings[0].detail["parent_columns"] == "member_id,plan_id"
 
 
 class TestGatherErroredParentKeys:

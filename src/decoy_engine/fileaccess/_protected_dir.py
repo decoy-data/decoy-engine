@@ -37,6 +37,7 @@ from pathlib import Path
 
 from decoy_engine import reasons
 from decoy_engine.errors import DecoyError
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._entry import require_ambient
 
 _MODE = 0o700
@@ -397,7 +398,7 @@ if sys.platform == "win32":  # pragma: no cover - exercised only on the Windows 
                 exists = ctypes.get_last_error() in (80, 183)  # file / already exists
                 _raise_errno(errno.EEXIST if exists else errno.EACCES)
             try:
-                return msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+                return msvcrt.open_osfhandle(handle, _osflags.WRONLY)
             except OSError:
                 _k32.CloseHandle(handle)
                 raise

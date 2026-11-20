@@ -445,7 +445,7 @@ def publish_tables(
             on_stage(txn.local_stage_path())
         try:
             for name, component in zip(names, components, strict=True):
-                arrow_adapter.write_table(tables[name], txn, component)
+                arrow_adapter.write_output_table(tables[name], txn, component)
         except OSError as exc:
             failure = _errno_name(exc)
             txn.abort()

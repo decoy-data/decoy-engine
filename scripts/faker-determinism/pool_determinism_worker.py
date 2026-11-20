@@ -56,13 +56,12 @@ from digest_codec import CODEC_VERSION, _pool_digest
 random.seed(os.urandom(8))
 np.random.seed(int.from_bytes(os.urandom(4), "big"))  # legacy global RNG only
 
+from _engine_access import _faker_pool, make_faker  # noqa: E402
 from faker import VERSION as _FAKER_VERSION  # noqa: E402
 
 from decoy_engine import __version__ as _engine_version  # noqa: E402
-from decoy_engine.generation import _faker_pool  # noqa: E402
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE  # noqa: E402
 from decoy_engine.generators.derivation import GenDeriveContext, with_table  # noqa: E402
-from decoy_engine.internal.faker_setup import make_faker  # noqa: E402
 
 ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

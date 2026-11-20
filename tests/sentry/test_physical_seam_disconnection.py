@@ -45,13 +45,15 @@ modification.
 
 from __future__ import annotations
 
-import re
+import ast
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from tests.sentry.layout._reexport_init import imports_physical, is_pure_reexport_init
+from tests.sentry.layout._scoped_changes import changed_units, scoped_units
 from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME as _RETIRED
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
@@ -156,18 +158,9 @@ DELIBERATELY_CONNECTED_MODULES: tuple[str, ...] = (
     "execution/_unified_slice_evidence.py",
 )
 
-_PHYSICAL_IMPORT_RE = re.compile(
-    r"^\s*(?:from\s+decoy_engine\.execution\.physical(?:\.\S+)?\s+import\b|"
-    r"import\s+decoy_engine\.execution\.physical(?:\.\S+)?\b)",
-    re.MULTILINE,
-)
-
 
 def _imports_physical(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8")
-    if "execution.physical" not in text:
-        return False
-    return bool(_PHYSICAL_IMPORT_RE.search(text))
+    return imports_physical(path, ENGINE_ROOT)
 
 
 def test_guarded_modules_exist() -> None:
@@ -358,8 +351,17 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # `_lifecycle_inputs.py` imports the profile readers, `_mem_estimate*` and
             # `execution._strategies` (the handlers' output declarations) only.
             # Neither imports anything under `execution.physical`.
+            # 84-E2: `_lifecycle_generate.py` prices the generate and mixed terms; it imports
+            # `decoy_engine.generation`, `_lifecycle` and `_lifecycle_inputs`, nothing under
+            # `execution.physical`.
             "src/decoy_engine/execution/pipeline/_lifecycle.py",
             "src/decoy_engine/execution/pipeline/_lifecycle_inputs.py",
+            "src/decoy_engine/execution/pipeline/_lifecycle_generate.py",
+            # NONFK-OOM S1: `_resident_fit.py` is the pure strict lower bound on resident bytes
+            # (pyarrow only); no physical import.
+            "src/decoy_engine/execution/pipeline/_resident_fit.py",
+            # NONFK-OOM S4a: `decide_split` moves the B7 split decision out of `_pipeline_context`.
+            "src/decoy_engine/execution/pipeline/_route_decision.py",
             # The B5 telemetry self-calibration loop had no engine, platform or CLI caller and
             # moved to `scripts/mem_telemetry.py` as calibration tooling (a deletion here).
             "src/decoy_engine/execution/_mem_telemetry.py",
@@ -407,12 +409,10 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # RUN-STREAM E1b: the host CPU probe (new sub-package `execution/pipeline/`), the
             # conservative budget export and the run-scoped DuckDB thread cap. None imports
             # `execution.physical`.
-            "src/decoy_engine/execution/out_of_core/__init__.py",
             "src/decoy_engine/execution/pipeline/_cgroup.py",
             "src/decoy_engine/execution/pipeline/_host.py",
             # SCAN-ML M5: the guard-free core of native `run_mask_chunked` that `run_pipeline`'s
             # auto-chunk lane calls (new private sub-package). Neither imports `execution.physical`.
-            "src/decoy_engine/execution/native/chunked/__init__.py",
             "src/decoy_engine/execution/native/chunked/_core.py",
             # SUB-RUN E2: the subset stage imports the public `decoy_engine.subset` surface only.
             "src/decoy_engine/execution/pipeline/_subset_stage.py",
@@ -422,6 +422,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # PS-7: the post-scan gate core, not yet wired; imports nothing from
             # `execution.physical`.
             "src/decoy_engine/execution/pipeline/_post_scan.py",
+            # The post-scan distribution check compares column facts and imports nothing from
+            # `execution.physical`.
+            "src/decoy_engine/execution/pipeline/_post_scan_distribution.py",
             # RUN-STREAM E3: `route_summary` reads recorded quality_metrics blocks and imports
             # nothing from `execution.physical`.
             "src/decoy_engine/execution/pipeline/_route_summary.py",
@@ -517,11 +520,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # and the determinism-mirror sites for the deleted polars strategy files.
             # The pandas execution path is unchanged. None is under execution/physical/.
             # The deleted execution/polars/ tree itself is carved out of the filter below.
-            "src/decoy_engine/execution/__init__.py",
             "src/decoy_engine/execution/_chunked.py",
             # The chunked entries' progress helper (new sub-package); it is in GUARDED_MODULES,
             # so it imports nothing from `execution.physical`.
-            "src/decoy_engine/execution/chunked/__init__.py",
             "src/decoy_engine/execution/chunked/_progress.py",
             "src/decoy_engine/execution/_chunked_adapter_gate.py",
             "src/decoy_engine/execution/_planner.py",
@@ -563,7 +564,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # masking-side, generation-side); `_draw_site_providers.py` keeps the registry and
             # re-exports, and its gen-pool sibling repoints its base-class import. Pure moves;
             # none imports `execution.physical`.
-            "src/decoy_engine/execution/native/protocol/__init__.py",
             "src/decoy_engine/execution/native/protocol/providers_base.py",
             "src/decoy_engine/execution/native/protocol/providers_gen.py",
             "src/decoy_engine/execution/native/protocol/providers_gen_unique.py",
@@ -596,8 +596,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # clears the outer gate positions for its child; windowed_date takes explicit positions.
             # Both import nothing from execution.physical.
             "src/decoy_engine/execution/_strategies/nested/_handler.py",
-            # Package marker for the nested handler move: a one-line re-export, no physical work.
-            "src/decoy_engine/execution/_strategies/nested/__init__.py",
             # Nested leaf dtype and child-output rules, split from the handler for its size cap;
             # pure value shaping on already-read cells, no physical read or write.
             "src/decoy_engine/execution/_strategies/nested/_leaves.py",
@@ -757,7 +755,6 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # `execution/pipeline/`) and its threading through the routing, lane and sink modules
             # listed here. Routing code that reads config, the plan and source footers; it imports
             # nothing from `execution.physical` (GUARDED_MODULES covers `_stream.py`).
-            "src/decoy_engine/execution/pipeline/__init__.py",
             "src/decoy_engine/execution/pipeline/_stream.py",
             # B7 also corrects the module docstring of `_pipeline_chunk_route.py`, which said
             # auto-chunk routing was single-table only (a docstring-only edit).
@@ -770,9 +767,9 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
             # gain docstring/comment edits only. None imports `execution.physical`.
             "src/decoy_engine/execution/_chunked_output_sink.py",
             "src/decoy_engine/execution/_isolated_worker.py",
-            # Isolated-run OOM classification: `_isolated_common.py` gains the Wrapping-value scrub
-            # and `_isolated_worker.py` classifies post-run failures. Neither imports `execution.physical`.
-            "src/decoy_engine/execution/_isolated_common.py",
+            # Isolated-run OOM classification: `_isolated_worker.py` classifies post-run failures.
+            # It does not import `execution.physical`. `_isolated_common.py` is function-scoped in
+            # `tests/sentry/layout/_scoped_changes.py` (Windows plan Q13), not a whole-file entry.
             # The driver removes staging on a self-reported failure and scrubs in-process error text.
             "src/decoy_engine/execution/_isolated_run.py",
             # SUB-RUN E2: `probe_peak_bytes` refuses a subset config; no `execution.physical` import.
@@ -1015,15 +1012,24 @@ def test_production_execution_modules_are_byte_identical_to_origin_main() -> Non
         for name, allowed in exact_line_changes.items()
         if name in diff_names and _only_these_line_changes(base, name, allowed)
     }
+    scoped_ok = {
+        name
+        for name, units in scoped_units().items()
+        if name in diff_names
+        and changed_units(_git("show", f"{base}:{name}"), (REPO_ROOT / name).read_text("utf-8"))
+        <= units
+    }
     unexpected = [
         name
         for name in diff_names
         if "/execution/physical/" not in name
         and name not in exact_ok
+        and name not in scoped_ok
         # Polars masking removal (2026-09-21): the whole execution/polars/ adapter
         # tree was deleted; permit those deletions wholesale rather than enumerate.
         and "/execution/polars/" not in name
         and name not in permitted_non_physical
+        and not is_pure_reexport_init(REPO_ROOT / name)
     ]
     assert not unexpected, (
         "Files under src/decoy_engine/execution changed versus origin/main outside "
@@ -1065,3 +1071,18 @@ def test_compile_physical_plan_is_unreachable_from_a_fresh_import_of_run_pipelin
         "pulled in execution.physical module(s), which must stay unreachable "
         "from production until Task 4.5+:\n  - " + "\n  - ".join(hits)
     )
+
+
+def test_no_hand_entry_is_a_pure_reexport_init() -> None:
+    """A hand entry for a pure re-export is dead: the rule already permits the file."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    entries = {
+        n.value if n.value.startswith("src/") else f"src/decoy_engine/{n.value}"
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant)
+        and isinstance(n.value, str)
+        and n.value.endswith("/__init__.py")
+        and "execution/" in n.value
+    }
+    dead = sorted(e for e in entries if is_pure_reexport_init(REPO_ROOT / e))
+    assert dead == [], f"remove these hand entries, the rule covers them: {dead}"

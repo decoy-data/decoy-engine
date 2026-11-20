@@ -219,7 +219,7 @@ class StagedParquetWriter:
         _replace_staged(txn, table, self.staged)
         self.publication_evidence.last_operation = Operation.WRITE
         try:
-            arrow_adapter.write_table(data, txn, component)
+            arrow_adapter.write_output_table(data, txn, component)
         except BaseException as exc:
             # Staged only: nothing is visible at the target until the single rename.
             capture_publication_failure(exc, self, Operation.WRITE, table=table)
@@ -268,7 +268,7 @@ class StagedParquetWriter:
         _replace_staged(txn, table, self.staged)
         evidence = self.publication_evidence
         evidence.last_operation = Operation.WRITE
-        writer = arrow_adapter.parquet_writer(txn, component, schema)
+        writer = arrow_adapter.output_parquet_writer(txn, component, schema)
         try:
             for batch in batches:
                 writer.write_batch(batch)

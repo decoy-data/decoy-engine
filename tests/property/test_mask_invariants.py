@@ -293,7 +293,7 @@ def test_date_shift_preserves_nulls_and_emits_valid_dates(values):
         "date_shift",
         namespace="ds",
         deterministic=True,
-        provider_config={"min_days": -365, "max_days": 365},
+        provider_config={"min_days": -365, "max_days": 365, "date_format": "%Y-%m-%d"},
     )
     out = _run(DateShiftStrategyHandler(), _df(values), "c", seed)
     src = _df(values)["c"]

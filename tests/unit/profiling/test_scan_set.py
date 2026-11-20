@@ -27,8 +27,8 @@ from decoy_engine.profiling import (
     scan_sources,
 )
 from decoy_engine.profiling import scan_set as scan_module
+from decoy_engine.profiling._scan_core import TableCore
 from decoy_engine.profiling._scan_text_checks import GUARD_DETECTORS
-from decoy_engine.profiling.scan_set import TableCore
 from decoy_engine.reason_adapter import reason_from_exception
 
 CANARY = "CANARY-9f3a71"
@@ -71,6 +71,14 @@ def test_invalid_descriptor_is_a_config_failure_naming_the_table(tmp_path: Path)
     assert "'t'" in str(info.value)
     assert CANARY not in str(info.value) and CANARY not in repr(info.value)
     assert info.value.__cause__ is None and info.value.__context__ is None
+
+
+def test_selection_refusals_keep_their_messages(tmp_path: Path) -> None:
+    sources = {"a": _csv(tmp_path, "a", "id\n1\n")}
+    with pytest.raises(PipelineConfigError, match="same table more than once"):
+        scan_sources(sources, tables=["a", "a"])
+    with pytest.raises(PipelineConfigError, match="not in sources"):
+        scan_sources(sources, tables=["nope"])
 
 
 def test_every_source_is_validated_selected_or_not(tmp_path: Path) -> None:
