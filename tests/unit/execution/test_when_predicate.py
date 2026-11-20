@@ -152,8 +152,9 @@ class TestErrorHandling:
 
     def test_when_non_bool_series_raises_when_expression_not_boolean(self, monkeypatch):
         # The grammar cannot produce a non-boolean result, so the branch is reached by injecting
-        # one for an accepted predicate.
-        df = pd.DataFrame({"v": ["a", "b"], "n": [1, 2]})
+        # one for an accepted predicate. A float column: an integer column is compared exactly
+        # without pandas' evaluator.
+        df = pd.DataFrame({"v": ["a", "b"], "n": [1.5, 2.5]})
         monkeypatch.setattr(pd.DataFrame, "eval", lambda *a, **k: pd.Series([2, 3]))
         with pytest.raises(StrategyError) as exc:
             run_with_when_gate(

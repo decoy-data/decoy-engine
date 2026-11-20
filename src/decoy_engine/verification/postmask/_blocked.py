@@ -20,10 +20,12 @@ from dataclasses import dataclass
 from typing import Any, NamedTuple, cast, get_args
 
 from decoy_engine import reasons
+from decoy_engine.detection.types import DetectorSource
 from decoy_engine.errors import DecoyError
 from decoy_engine.reasons import MAX_NAME_LEN, ReasonRef, reason_ref_payload
 from decoy_engine.verification.postmask import _keys
-from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS
+from decoy_engine.verification.postmask.finding_reader import VerdictRow, project_for_verdict
+from decoy_engine.verification.postmask.types import READABLE_SCHEMA_VERSIONS, Severity
 
 __all__ = [
     "PostScanBlockedError",
@@ -65,8 +67,8 @@ _MAX_SPOTS = 3
 # Read from `_keys` so a new status or baseline cannot be missed here.
 _STATUSES = frozenset(get_args(_keys.Status))
 _BASELINES = frozenset(get_args(_keys.Baseline))
-_SEVERITIES = frozenset({"info", "warning", "fail", "error"})
-_MODEL_SOURCES = frozenset({"ner", "classifier"})
+_SEVERITIES = frozenset(get_args(Severity))
+_MODEL_SOURCES = frozenset(get_args(DetectorSource)) - {"regex"}
 _NER_MODES = ("warn", "fail")
 # A report that cannot be read is a check that could not run, so it blocks.
 _UNREADABLE = object()
@@ -212,13 +214,9 @@ def _key_refs(key: Mapping[str, Any]) -> Iterator[tuple[ReasonRef, bool]]:
             yield ref, True
 
 
-def _ner_blocks(finding: Mapping[str, Any], ner_findings: str) -> bool:
+def _ner_blocks(row: VerdictRow, ner_findings: str) -> bool:
     """The NER predicate: under `fail`, an NER row at `fail` or `error` withholds the outputs."""
-    return (
-        ner_findings == "fail"
-        and finding.get("source") == "ner"
-        and finding.get("severity") in ("fail", "error")
-    )
+    return ner_findings == "fail" and row.source == "ner" and row.severity in ("fail", "error")
 
 
 def post_scan_verdict(report: Mapping[str, Any], *, ner_findings: str = "warn") -> PostScanVerdict:
@@ -240,21 +238,26 @@ def post_scan_verdict(report: Mapping[str, Any], *, ner_findings: str = "warn") 
         blocked.add(_CHECK_ERROR)
     for section in ("residual_pii", "policy_validation"):
         for finding in _rows(report, section):
-            severity = finding.get("severity") if isinstance(finding, Mapping) else None
+            row = project_for_verdict(finding, version=version, residual=section == "residual_pii")
+            severity = row.severity
+            if section == "residual_pii" and not row.valid:
+                # The strict reader refuses this row (a missing field, a wrong type, or a v3
+                # field in a v2 report), so its severity is not trusted: the check errored.
+                blocked.add(_CHECK_ERROR)
             if (
                 section == "residual_pii"
                 and isinstance(finding, Mapping)
-                and finding.get("source") in _MODEL_SOURCES
+                and row.source in _MODEL_SOURCES
                 and severity in _SEVERITIES
             ):
-                if _ner_blocks(finding, ner_findings):
+                if _ner_blocks(row, ner_findings):
                     blocked.add(_NER_BLOCKED)
             elif severity == "fail":
                 blocked.add(_FINDING_BLOCKED)
             elif severity not in _SEVERITIES or severity == "error":
                 blocked.add(_CHECK_ERROR)
     for finding in _rows(report, "fk_preservation"):
-        severity = finding.get("severity") if isinstance(finding, Mapping) else None
+        severity = project_for_verdict(finding, version=version).severity
         if severity not in _SEVERITIES:
             blocked.add(_CHECK_ERROR)
         elif severity == "fail":
@@ -277,13 +280,15 @@ def block_location(report: Mapping[str, Any]) -> str:
     finding has no detector, so it carries the fixed id `policy_validation`. A model row never
     gives `finding_blocked`, so it is not named here."""
     spots = []
+    version = report.get("schema_version")
     for section, fixed in (("residual_pii", None), ("policy_validation", "policy_validation")):
         for f in _rows(report, section):
-            if not (isinstance(f, Mapping) and f.get("severity") == "fail"):
+            row = project_for_verdict(f, version=version)
+            if not (isinstance(f, Mapping) and row.severity == "fail"):
                 continue
-            if section == "residual_pii" and f.get("source") in _MODEL_SOURCES:
+            if section == "residual_pii" and row.source in _MODEL_SOURCES:
                 continue
-            table, column, detector = f.get("table"), f.get("column"), fixed or f.get("detector_id")
+            table, column, detector = row.table, row.column, fixed or row.detector_id
             if all(
                 isinstance(n, str) and 0 < len(n) <= MAX_NAME_LEN for n in (table, column, detector)
             ):

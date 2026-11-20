@@ -6,7 +6,9 @@ a kind's spec from here instead of keeping their own table.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -40,6 +42,9 @@ class KindSpec:
     # How the default export proves a payload free of paths and values; required for a writable
     # kind, so a new kind cannot ship an export that strips only what was remembered.
     export_rule: ExportRule | None = None
+    # A claim the payload makes that no export may carry unproven, even with ``keep_paths``;
+    # it returns the payload with such claims dropped (a scan-set's unproven keys).
+    claim_rule: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     diff_rule: str | None = None
     canary_fixture: str | None = None
 
@@ -56,6 +61,7 @@ class KindSpec:
             self.path_fields
             or self.locator_fields
             or self.export_rule
+            or self.claim_rule
             or self.diff_rule
             or self.canary_fixture
         ):

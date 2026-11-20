@@ -3,7 +3,7 @@
 Static capabilities are strategy-only; RESOLVED requirements read the compiled
 node + profile. The load-bearing example from the plan: a ``date_shift`` node
 with an explicit ``date_format`` needs no prepass and has a determinate output
-schema; without one it needs a ``format_detect`` prepass.
+schema; no date_shift node needs a ``format_detect`` prepass.
 """
 
 from __future__ import annotations
@@ -102,10 +102,10 @@ def test_date_shift_with_explicit_format_needs_no_prepass() -> None:
     assert req.output_arrow_schema is not None
 
 
-def test_date_shift_without_format_needs_format_detect_prepass() -> None:
+def test_date_shift_never_needs_a_format_detect_prepass() -> None:
     node = _scalar_node("date_shift")
     req = requirements_for(node, plan=None, profile=_profile())
-    assert "format_detect" in req.required_prepasses
+    assert "format_detect" not in req.required_prepasses
 
 
 def test_formula_node_has_indeterminate_schema_and_is_not_native() -> None:

@@ -28,6 +28,7 @@ from decoy_engine.execution.native._chunked_evidence import plan_column_backends
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
 from decoy_engine.execution.native._date_shift_ext import native_date_shift
 from decoy_engine.execution.native._requirements import CHUNKED_ROUTE_VETOED_STRATEGIES
+from decoy_engine.execution.native._when_admission import when_native_rejection
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.providers_v2 import get_default_registry
 from tests.native._b8_support import FORCE_REASON, identical
@@ -471,21 +472,36 @@ def test_the_branch_passes_exact_config_and_reuses_the_preflight_index_kernel(
 # ---------------------------------------------------------------------------
 
 
-def test_a_when_predicate_keeps_an_implicit_format_table_off_native_and_off_auto_chunk() -> None:
-    config = make_config([ds_col(date_format=None), passthrough("p")])
+def test_a_formatted_date_shift_with_a_simple_when_is_admitted_natively() -> None:
+    # date_shift is in ADMITTED_WHEN_STRATEGIES: with its required format it no longer
+    # declines for an implicit format, so a predicate on the target alone runs natively.
+    config = make_config([ds_col(), passthrough("p")])
     config["tables"][0]["columns"][0]["when"] = "d != ''"
-    run = run_one(config, [_valued()])
+    entries = config["tables"][0]["columns"]
+    schema = _valued().schema
+    assert (
+        when_native_rejection("d", entries, get_default_registry(), table=TABLE, schema=schema)
+        is None
+    )
+
+
+@NEEDS_COMPANION
+def test_a_when_predicate_keeps_a_table_off_native() -> None:
+    # `a` is masked before `d` runs, so the predicate would read a masked value on the
+    # oracle and must keep the whole table off the native route.
+    config = make_config([ds_col(), {"name": "a", "strategy": "redact"}, passthrough("p")])
+    config["tables"][0]["columns"][0]["when"] = "a == 'REDACTED'"
+    table = pa.table({"d": _valued().column("d"), "a": ["k"] * 6, "p": list(range(6))})
+    run = run_one(config, [table])
     assert run.ev[0].native_admitted is False
-    assert "when_predicate_not_native" in (run.ev[0].reroute_reason or "")
+    assert "when_predicate_reads_masked_column" in (run.ev[0].reroute_reason or "")
+
+
+def test_a_when_predicate_keeps_a_table_off_auto_chunk() -> None:
+    config = make_config([ds_col(), passthrough("p")])
+    config["tables"][0]["columns"][0]["when"] = "d != ''"
     joined = "; ".join(_whole_column_state_rejections(config, table=TABLE))
     assert "when_predicate_not_chunk_stable" in joined
-
-
-def test_autodetect_date_shift_stays_off_the_auto_chunk_route() -> None:
-    config = make_config([ds_col(date_format=None), passthrough("p")])
-    assert "date_shift_requires_explicit_format" in "; ".join(
-        _whole_column_state_rejections(config, table=TABLE)
-    )
 
 
 def _fk(parent_cols: list[dict[str, Any]], child_cols: list[dict[str, Any]]) -> dict[str, Any]:

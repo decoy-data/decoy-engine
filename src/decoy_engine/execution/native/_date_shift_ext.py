@@ -50,18 +50,10 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.transforms.date_shift import order_window
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
-
-# The oracle's defaults (`_date_shift.py`: `cfg.get("min_days", -365)` etc.).
-DEFAULT_MIN_DAYS = -365
-DEFAULT_MAX_DAYS = 365
-
-# `pd.Timedelta.max.days`. A bound outside +/- this can never produce a valid
-# shift in pandas, so admission declines it to the oracle (which raises); it
-# also keeps `offset + min_days` far from int64 overflow on the native side.
-MAX_ABS_SHIFT_DAYS = 106_751
 
 # The oracle's `reason` string for a parse failure, reproduced verbatim so the
 # native and oracle `RowError` records compare equal.
@@ -69,11 +61,11 @@ FORMAT_ERROR_REASON = "value is not a parseable date under date_shift"
 
 
 def resolve_shift_range(min_days: int, max_days: int) -> tuple[int, int]:
-    """`(min_days, range_size)` exactly as the oracle resolves them: swap an
-    inverted range, then `range_size = max - min + 1` (always >= 1)."""
-    if min_days > max_days:
-        min_days, max_days = max_days, min_days
-    return min_days, max_days - min_days + 1
+    """`(min_days, range_size)` for bounds `shift_window` resolved: the offset draw covers
+    `range_size` values from `min_days`. A reversed pair is ordered, so a caller that hands the
+    kernel raw bounds still gets the oracle's window."""
+    low, high = order_window(min_days, max_days)
+    return low, high - low + 1
 
 
 def _derive_offsets(
@@ -227,10 +219,7 @@ def native_date_shift(
 
 
 __all__ = [
-    "DEFAULT_MAX_DAYS",
-    "DEFAULT_MIN_DAYS",
     "FORMAT_ERROR_REASON",
-    "MAX_ABS_SHIFT_DAYS",
     "native_date_shift",
     "resolve_shift_range",
 ]

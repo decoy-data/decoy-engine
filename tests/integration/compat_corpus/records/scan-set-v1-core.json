@@ -1,0 +1,73 @@
+{
+  "detectors": [
+    {
+      "model": null,
+      "source": "regex"
+    }
+  ],
+  "engine_version": "0.28.0",
+  "relationships": [],
+  "scan_schema": "scan-set/v1",
+  "scanned_at": "2026-11-19T12:00:00+00:00",
+  "tables": [
+    {
+      "descriptor": {
+        "format": "csv",
+        "has_header": true,
+        "layout": null,
+        "path": "/work/data/claims.csv",
+        "type": "file"
+      },
+      "fields": [
+        {
+          "detector_hits": [],
+          "distinct_count": 40,
+          "dtype": "integer",
+          "leading_zero_count": 0,
+          "model_hits": [],
+          "name": "id",
+          "null_count": 0,
+          "null_rate": 0.0,
+          "pii_candidate": false,
+          "pii_score": 0.0
+        },
+        {
+          "detector_hits": [],
+          "distinct_count": 2,
+          "dtype": "string",
+          "leading_zero_count": 0,
+          "model_hits": [],
+          "name": "status",
+          "null_count": 0,
+          "null_rate": 0.0,
+          "pii_candidate": false,
+          "pii_score": 0.0
+        },
+        {
+          "detector_hits": [],
+          "distinct_count": 40,
+          "dtype": "integer",
+          "leading_zero_count": 0,
+          "model_hits": [],
+          "name": "amount",
+          "null_count": 0,
+          "null_rate": 0.0,
+          "pii_candidate": false,
+          "pii_score": 0.0
+        }
+      ],
+      "key_candidates": [
+        "id",
+        "amount"
+      ],
+      "name": "claims",
+      "quasi_identifier_groups": [],
+      "reid_risk_score": 0.0,
+      "row_count": 40,
+      "row_count_exact": false,
+      "sample_row_cap": 10000,
+      "sample_strategy": "head",
+      "warnings": []
+    }
+  ]
+}

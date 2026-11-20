@@ -808,37 +808,6 @@ def _classify(cfg, sources, *, substrate="pandas"):
 
 
 class TestChunkStateGates:
-    def test_date_shift_mixed_format_without_explicit_format_stays_full_frame(
-        self, tmp_path, monkeypatch
-    ):
-        """P3 remediation BLOCKER 1: date_shift without an explicit
-        date_format detects the format from whole-column samples; per-chunk
-        detection can lock a DIFFERENT format (the reviewer's mixed ISO +
-        dd/mm/YYYY counterexample), so the job must fail closed."""
-        values = [f"20{10 + i % 5:02d}-03-{(i % 28) + 1:02d}" for i in range(16)]
-        values += [f"{13 + (i % 15):02d}/03/20{10 + i % 5:02d}" for i in range(16, _ROWS)]
-        df = pd.DataFrame({"val": values})
-        df.to_csv(tmp_path / "in.csv", index=False)
-        cfg = _config(
-            tmp_path,
-            [
-                {
-                    "name": "val",
-                    "strategy": "date_shift",
-                    "namespace": "dob_ns",
-                    "provider_config": {"min_days": -30, "max_days": 30},
-                }
-            ],
-        )
-        sources = {"accounts": pa.Table.from_pandas(df, preserve_index=False)}
-        # S1's honesty pack (landed after this fixture was authored) turns
-        # the dd/mm/YYYY rows' unparseable-as-ISO cells into row errors on
-        # the full-frame date_shift pass; both routes must decline to
-        # chunk this shape and fail identically (see the helper's docstring).
-        _assert_row_errors_fail_identically_both_routes(
-            cfg, sources, monkeypatch, explain_plan=True
-        )
-
     def test_date_shift_with_explicit_format_still_routes_byte_identical(
         self, tmp_path, monkeypatch
     ):
