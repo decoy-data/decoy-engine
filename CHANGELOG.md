@@ -18,6 +18,10 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - a pass-through `large_string` column is now written as `string` (32-bit offsets) when its values fit; a value that cannot fit keeps `large_string`
 - published Parquet files no longer carry the source file's custom metadata, field metadata or pandas `attrs`, and extension-type columns (opaque, tensors, custom types) are written as their storage type
 
+### Added (resident lower bound, NONFK-OOM S1, 2026-11-19)
+
+`decoy_engine.execution.pipeline` exports `lower_bound_bytes`, `TableBytesSpec`, `resident_spec` and `lazy_spec`: a pure strict lower bound on the bytes a full-frame run holds resident (input tables plus one pandas copy). Nothing in the run path calls it yet; the NONFK-OOM baseline bench does.
+
 ### Changed (`when:` on integer columns is exact and has one blank-row rule, FREEZE-O1, 2026-11-18)
 
 Integer comparisons in `when:` are exact beyond 2**53. A value or an integer literal outside the range a float64 holds exactly, and any comparison of an integer column with a float literal, is compared as Python integers. Before, a plain integer column with a blank was widened to float64 and `id == 9007199254740993` also selected `9007199254740992`.
