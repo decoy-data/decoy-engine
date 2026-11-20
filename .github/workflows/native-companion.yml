@@ -259,7 +259,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -346,6 +346,14 @@ jobs:
           set -o pipefail
           pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
           if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
+
+      # Every tests/native file, so a companion-gated test that no step above names cannot rot
+      # (58 such tests were red on main before this step existed). Same two-pass split as ci.yml:
+      # xdist for everything but `serial`, then the serial tests alone.
+      - name: Whole tests/native directory (companion-present case)
+        run: |
+          pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
+          pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A

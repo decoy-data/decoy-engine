@@ -204,7 +204,11 @@ output as it came in. Needs a namespace.
 - `jitter_days`: `N` means the range `[-N, N]`. A non-negative integer up to
   106,751. It cannot be combined with `min_days` or `max_days`; the plan is
   refused (`date_shift_window_invalid`) if it is.
-- `date_format`: a strftime format; auto-detected from the column if omitted.
+- `date_format`: a strftime format. Required: a `date_shift` column without one is refused at
+  plan compile (`date_shift_requires_date_format`), and nothing guesses it from the cells. A
+  top-level column whose own declared parse format supplies the date shape is exempt; a nested
+  child is not. The starter writes the variant the scan detected, and only when every detected
+  value parses with it; otherwise it writes `redact`.
 - `preserve_values`: a list of ISO dates (`YYYY-MM-DD`) that pass through
   unchanged, for sentinels such as `9999-12-31` ("never expires") that
   downstream logic tests with `date = <sentinel>`. See

@@ -362,7 +362,10 @@ _STRATEGY_SPECS: dict[str, list[tuple[dict[str, Any], list[object], pa.DataType,
     ],
     "date_shift": [
         (
-            {"namespace": "ds_ns", "provider_config": {"min_days": -30, "max_days": 30}},
+            {
+                "namespace": "ds_ns",
+                "provider_config": {"min_days": -30, "max_days": 30, "date_format": "%Y-%m-%d"},
+            },
             ["2020-01-15", None, "2019-06-30"],
             _STR,
             "null",

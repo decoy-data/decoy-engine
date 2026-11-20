@@ -462,7 +462,7 @@ CAPABILITY_PROOFS: list[CapabilityProof] = [
         ["1980-01-15", "1991-06-30", "2003-11-02"],
         {
             "namespace": "dob",
-            "provider_config": {"min_days": 30, "max_days": 90},
+            "provider_config": {"min_days": 30, "max_days": 90, "date_format": "%Y-%m-%d"},
         },
         "Each date is shifted by a keyed offset inside the configured window, preserving the date format.",
         # min_days=30 excludes a zero shift, so _all_changed is a valid check here.

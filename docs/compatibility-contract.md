@@ -231,6 +231,41 @@ today's `int()` coercion and window. One new plan reason, `date_shift_window_inv
 fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
 `build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
 
+**Public renames.** This table owns every public rename since the 0.16.0 taxonomy split, so a consumer
+maps an old name to its new one in one place. Kinds are `symbol`, `wire key`, `config key`, `reason code`
+and `CLI-visible label`. A `symbol` row names a dotted import path: the new path must import and the old
+one must not (`tests/sentry/test_contract_renames_table.py` checks both). The CLI keeps its own retired
+list and points here for the pairs. A rename takes a new row in the release that makes it.
+
+<!-- renames-table:start -->
+| old | new | kind | since | note |
+|---|---|---|---|---|
+| `decoy_engine.storm` | `decoy_engine.detection`, `decoy_engine.profiling`, `decoy_engine.verification` | symbol | 0.16.0 | Package split by concern. |
+| `decoy_engine.run_storm` | `decoy_engine.profile_columns` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.StormProfile` | `decoy_engine.ColumnProfile` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.run_storm_post_mask` | `decoy_engine.verification.run_post_mask` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `decoy_engine.StormPostMaskReport` | `decoy_engine.verification.PostMaskReport` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `run_storm: true` | `post_scan: {integrity: true}` | config key | 0.17.0 | Pipeline config `version: 2` is required; `PipelineConfig.run_storm` became `PipelineConfig.post_scan`. |
+| `quality_metrics["storm_postmask"]` | `quality_metrics["post_scan_integrity"]` | wire key | 0.17.0 | Run result key. |
+| `storm-post-mask/v1` | `post-scan-integrity/v2` | wire key | 0.17.0 | Report schema tag. |
+| `storm.scan` | `pre_scan.profile` | wire key | 0.17.0 | Profiler event name. |
+| `route/run_storm_requested` | `route/post_scan_integrity_requested` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. The new one was retired in 0.25.0 and points at `route/post_scan_models_resident`. |
+| `route/run_storm` | `route/post_scan_integrity` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. |
+| `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
+<!-- renames-table:end -->
+
+**Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
+without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
+compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
+column whose own declared parse format supplies the date shape is exempt; a nested child, including one under a
+declared parent, is not. A runtime reason with the same code backs the handler. `starter_config` and the starter
+review write the detected variant only when every detector hit parses with it (`format_pattern_complete`, new on
+`DetectorMatch` and `FieldStats`, default false) and write `redact` otherwise; the starter now offers `date_shift` for
+`eu_date` too, and iso_date and us_date starters lose the fixed `min_days`/`max_days`. Re-pin checklist: the platform
+disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templates/upload_csv_mask_to_s3.yaml`, the
+platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
+(DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 
