@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -79,7 +78,7 @@ GENERATE_COLUMN_DUPLICATE = _d(
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
     "generate_fitted_reference_bounds_conflict",
     "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_FORMULA_INVALID = _d(
     "generate_formula_invalid",
@@ -114,17 +113,17 @@ GENERATE_OUTPUT_TYPE_UNSUPPORTED = _d(
 GENERATE_PER_PARENT_BOUNDS_CONFLICT = _d(
     "generate_per_parent_bounds_conflict",
     "Generate reference column min_per_parent is greater than its max_per_parent.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PER_PARENT_NULL_CONFLICT = _d(
     "generate_per_parent_null_conflict",
     "Generate column null_probability cannot be combined with a per-parent option.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_UNIQUE_CONFLICT = _d(
     "generate_unique_conflict",
