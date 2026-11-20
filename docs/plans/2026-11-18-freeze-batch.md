@@ -367,6 +367,9 @@ AT-O1 route cells assert a route-owned production witness before checking values
 | `tests/sentry/release/test_public_census.py` | new (AT-X0a, AT-X0e, AT-X0f) | Sentry test (release) | the map sentry |
 | `tests/sentry/release/test_experimental_marker.py` | new | Sentry test (release) | the map sentry |
 | `tests/sentry/release/test_tag_census.py` | new | Sentry test (release) | the map sentry |
+| `tests/sentry/release/_tags.py` | new (census helpers: AST tag scan, 3.1 code-block reader) | Sentry test (release) | the tag census |
+| `tests/sentry/release/test_tag_artifacts.py` | new (AT-S7c, AT-S7e) | Sentry test (release) | the tag census |
+| `changelog.d/freeze-s7a-tag-census.md` | new | Changelog fragments | - |
 | `src/decoy_engine/sdk.py`, `src/decoy_engine/providers.py` | changed (module and function docstrings) | Public API | - |
 | `src/decoy_engine/internal/base.py`, `src/decoy_engine/transforms/base.py` | deleted | Transforms | - |
 | `src/decoy_engine/transforms/formula.py`, `pyproject.toml` | changed | Transforms | - |
