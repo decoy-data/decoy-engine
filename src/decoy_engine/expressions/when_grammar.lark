@@ -6,7 +6,8 @@
 //   <column> [not] in [<literal>, ...]
 // No arithmetic, calls, attributes, subscripts, ref-to-ref comparisons, chained
 // comparisons, None or empty lists. Names that pandas eval would resolve to
-// something other than a column are rejected after parsing (RESERVED_NAMES).
+// something other than a column, and the words held back for later grammar, are
+// rejected after parsing (RESERVED_NAMES, case-sensitive).
 //
 // Strings carry no backslash, no quote character of either kind and no control
 // character, so pandas eval and this parser read the same characters without any

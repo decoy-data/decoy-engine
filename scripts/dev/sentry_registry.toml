@@ -204,6 +204,10 @@ id = "metadata-carrier-allow"
 baseline = "tests/sentry/baselines/metadata-carrier-allow.json"
 
 [[sentry]]
+id = "date-shift-window-reader"
+baseline = "tests/sentry/baselines/date-shift-window-reader.json"
+
+[[sentry]]
 id = "group-by-single-reader"
 baseline = "tests/sentry/baselines/group-by-single-reader.json"
 

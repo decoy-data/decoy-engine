@@ -168,6 +168,11 @@ SOURCES: tuple[Source, ...] = (
     ),
     Source("module-size", "test_module_size.py", in_code("test_module_size.py", "ALLOWLIST")),
     Source(
+        "date-shift-window-reader",
+        "test_date_shift_window_reader.py",
+        in_code("test_date_shift_window_reader.py", "CENSUS"),
+    ),
+    Source(
         "package-fanout",
         "layout/test_package_fanout.py",
         in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST"),
