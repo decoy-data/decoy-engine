@@ -188,6 +188,9 @@ baseline = "tests/sentry/baselines/physical-seam-scoped.json"
 [[sentry]]
 id = "ci-write-scopes"
 baseline = "tests/sentry/baselines/ci-write-scopes.json"
+approved_growth = [
+  { key = "gate-selfhosted.yml::gate-verdict", decision = "owner 2026-11-17 gate-verdict statuses write scope" },
+]
 
 [[sentry]]
 id = "canonical-json-choke-point"

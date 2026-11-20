@@ -514,7 +514,7 @@ def test_permissions_sentry() -> None:
 def test_every_real_workflow_declares_permissions() -> None:
     bad = {n: f for n, wf in _real_workflows().items() if (f := permission_findings(n, wf))}
     assert not bad, bad
-    assert len(WRITE_ALLOWLIST) == 3, "write-scope allowlist is a ratchet at 3 entries"
+    assert len(WRITE_ALLOWLIST) == 4, "write-scope allowlist is a ratchet at 4 entries"
     used = {
         (n, j)
         for n, wf in _real_workflows().items()
