@@ -104,7 +104,7 @@ ALLOWLIST: dict[str, int] = {
     "src/decoy_engine/detection/detectors.py": 920,
     "src/decoy_engine/generators/columns.py": 678,
     # monolithic train_and_evaluate; decompose into split/fit/calibrate/evaluate modules.
-    "src/decoy_engine/profiling/model_pack/trainer.py": 712,
+    "src/decoy_engine/profiling/model_pack/trainer.py": 711,
     # compile-check ownership table; split into per-strategy check modules once the check set stabilises.
     "src/decoy_engine/plan/_checks.py": 700,
     # statistical-column check threading; same per-strategy-check decomposition target as _checks.py.
