@@ -312,7 +312,7 @@ def test_an_entry_built_from_the_examples_validates_compiles_and_runs(
 def test_the_full_ner_entry_is_valid_config_even_without_the_model(info: StrategyInfo) -> None:
     entry = _entry(info)
     assert entry["provider_config"]["ner"] == {
-        "model": "en_core_web_sm",
+        "model": "en_core_web_md",
         "entities": ["person_name"],
     }
     support.make_cfg([entry])
@@ -434,7 +434,7 @@ def test_strategies_that_never_read_a_namespace_run_without_one(tmp_path: Path) 
 _PC = "provider_config"
 _NER = "provider_config.ner"
 _NER_ROWS = (
-    ("ner_model", "str", False, _NER, None, "en_core_web_sm"),
+    ("ner_model", "str", False, _NER, None, "en_core_web_md"),
     ("ner_entities", "str_list", False, _NER, ("location", "person_name"), ("person_name",)),
 )
 EXPECTED_OPTIONS: dict[str, tuple[tuple[Any, ...], ...]] = {
@@ -469,7 +469,7 @@ EXPECTED_OPTIONS: dict[str, tuple[tuple[Any, ...], ...]] = {
     "date_shift": (
         ("min_days", "int", False, _PC, None, -30),
         ("max_days", "int", False, _PC, None, 30),
-        ("date_format", "str", False, _PC, None, "%Y-%m-%d"),
+        ("date_format", "str", True, _PC, None, "%Y-%m-%d"),
     ),
     "fpe": (
         ("charset", "str", False, _PC, None, "digits"),
@@ -540,7 +540,6 @@ def test_each_offered_row_equals_the_expected_table_exactly(info: StrategyInfo) 
 # Options whose effect the shared fixture cannot show; each reason is why, and where a probe
 # value can show it, a test below does.
 NOT_VISIBLE_ON_FIXTURE = {
-    ("date_shift", "date_format"): "the fixture already uses the auto-detected format",
     ("bucket_perturb", "date_format"): "the fixture already uses the auto-detected format",
     ("fpe", "charset"): "digits is the default and the fixture holds only digits",
     ("fpe", "preserve_separators"): "the digit-only fixture has no separators to preserve",

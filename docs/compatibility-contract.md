@@ -75,6 +75,16 @@ only be written under a secret of at least 32 bytes; from that vault on, the v2 
 32-byte vault key length and `VAULT_KEY_LABEL` are permanent, per this contract's own pre-GA to GA rule
 (section 1).
 
+**Pre-GA correction (freeze batch O1, `when:` on integer columns, 2026-11-18).** Breaking, no shim: a
+`when:` predicate over an integer column compares exactly beyond 2**53, for a value or an integer
+literal, on every route, and uses one NaN-style rule for a blank cell on every route and column class:
+`!=`, `not in` and `not (...)` select a blank row; `==`, `in` and the ordering tests do not. FK keys,
+declared integers, `date_shift` anchors, `top_code` columns and `group_key` siblings used the pandas
+`NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
+that passes through is written as `int64` instead of `double`.
+
+**Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
+
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
 SubsetRequest | Literal["config", "skip"] = "config")` is keyword-only (46 frozen parameters). `"config"`
 applies a `subset:` block, `"skip"` runs the full sources, a `SubsetRequest` replaces the block; any other
@@ -94,6 +104,12 @@ root. `RouteSummary` gains `native_executed: bool | None`, true only when an exe
 backend from the operator registry. The no-sink lazy auto-chunk lane returns one resident output with either
 keyword value.
 
+**Pre-GA additive function with F24 84-E2 (2026-11-18).** `decoy_engine.generation.generated_lifecycle_terms(config, spec_widths)`
+is a new name; it returns the resident bytes and the largest unique working set of a config's generate tables for
+`estimate_job`. `estimate_job` now fills the three lifecycle fields of `JobEstimate` for generate-only and mixed jobs
+too. `peak_bytes` of a generate-only job stays `None`, and a mixed job stays `priceable=False`; no existing value
+changes. New note text: `lifecycle not priced: generated column {column} has no width source`.
+
 **Pre-GA additive fields with SAMPLE SE2 (2026-11-12).** `ExecutionResult.sample_source_rows: dict[str, pa.Table] | None`
 (default `None`, hidden from `repr`, not compared) holds the first kept source rows per table, only for a sample
 request with `display_rows > 0`. `RunResult.sample: SampleMarker | None` (`rows`, `roots`, `head_tables`,
@@ -106,10 +122,25 @@ with `when_outside_closed_grammar`). It is listed on every interpreter rather th
 `keyword.softkwlist`, so a config validates identically on every supported Python. The list is frozen
 on purpose; after GA any further addition is a breaking change.
 
+**Pre-GA correction (FREEZE-S5, 2026-11-20).** `RESERVED_NAMES` of the `when` closed grammar gains nine
+words: `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` and `endswith`. They are held
+back for later grammar (SQL-style literals and string operators), so adding one to the grammar is not a second
+breaking change. A config whose `when:` reads a column with one of these names now fails with
+`when_outside_closed_grammar`; rename the column. Reserved names match exactly and case-sensitively, so `NULL`
+and `Between` stay columns. The set is pinned by an exact snapshot, and a sentry checks that every keyword
+literal in `when_grammar.lark` is reserved.
+
 **Pre-GA correction (SUB-STOP, 2026-11-05).** A config with `subset:` set is refused by every run entry
 (`run_pipeline`, `run_pipeline_isolated`, `run_mask_pipeline_chunked`, `run_mask_chunked`, `run_native_or_oracle_chunked`) and by `compile_plan`,
 with `config.subset_run_unsupported` (registry 1.6.0). Before, the block validated and the run silently masked
 the full sources. `plan_subset` and `run_subset` are unchanged; run them first and point `sources:` at their output.
+
+**Pre-GA correction (DATE-SHIFT-UNKEYED E1, 2026-11-16).** `keyed_columns_for_config` and
+`secret_requirements_for_config` now walk a raw table dict's mask `columns` even when the same dict holds a
+non-empty `generate_columns`. Before, such a dict was skipped, so a keyed column could hide. A validated config
+(`PipelineConfig.model_validate(...).model_dump()`) cannot have both kinds, so its output and ordering do not
+move. The unexported V1 class `transforms.date_shift.DateShiftStrategy` and its three private helpers are
+deleted; `_detect_format` and `_COMMON_FORMATS` stay.
 
 **Pre-GA correction (CONFIG-EXPLICIT E1, 2026-11-08).** A csv file source must set `has_header` (registry
 1.15.0). An old config without it fails validation with `source_file.has_header_required` and the fix line
@@ -145,7 +176,7 @@ output for it). Loader tables with a `sources:` entry are unchanged.
 gains the optional `scan_baseline: {path: str, schema: "scan-set/v1"}` block, default absent and omitted from
 `model_dump()` while unset, so a config without it hashes as before. The block is a pointer no run reads, so it
 is left out of `pipeline_config_hash` (with `sources`, `targets`, `pre_scan` and `name`): two configs that differ
-only in `scan_baseline` hash the same. `ColumnConfig.namespace` and
+only in `scan_baseline` hash the same. (SCAN-CHECKS D-1 adds the optional `scan_baseline.on_drift: warn | fail`, omitted from the dump while unset. When set it is hashed, because it decides whether a run is refused; `path` and `schema` stay out. `decoy-run-result/v1` gains the check id `scan_drift`, and `build_run_result` takes `pre_checks`. Both are additive. A reader from before this change refuses the new config key, and a tolerant `RunResultRead` reads the new check id as a plain token. F15 E2 adds the optional `scan_baseline.sha256`, 64 lowercase hex characters in a strict string, omitted from the dump while unset; when `on_drift` is set it is hashed with `on_drift`. It also tightens the released `on_drift: fail`: the config is refused with `config/scan_baseline_unbound` unless `sha256` is set. This is a pre-GA tightening of a key released in 0.28.0, allowed while `is_pre_ga()` holds; a config with `on_drift: fail` and no digest must add one.) `ColumnConfig.namespace` and
 `RelationshipConfig.namespace` refuse any value starting `decoy-set-namespace-` with `config/namespace_placeholder_unset`
 (new, `since` unreleased), naming the field location and never the value. No shipped config used the prefix. No
 artifact tag changes. `DEFAULT_STRATEGY_BY_DETECTOR` is now derived from `profiling.DETECTOR_DESCRIPTORS` with its
@@ -162,6 +193,80 @@ before and now accepts the set; an unknown spelling there leaves ML off (`classi
 still returns `None` and its warning no longer holds the value. The engine-set `DECOY_INSIDE_ISOLATED_WORKER`
 marker reads through the same parser, so any accepted true spelling counts as inside a worker. The custom
 provider folder variable `CUSTOM_PROVIDERS_DIR` is renamed `DECOY_CUSTOM_PROVIDERS_DIR` with no alias.
+
+**Pre-GA correction (retired route reasons removed, 2026-11-16).** The two route tombstones the v0.16.0 reframe left
+behind, the requested-check reason and the resident-output reason that `route/post_scan_integrity_requested` and
+`route/post_scan_integrity` replaced, are deleted from the registry. This is a one-time exception to the append-only
+rule, approved by the owner before GA. `reasons.find("route", <code>)` returns `None` for both, and a persisted
+record that names one reads as `decoy/unknown_reason_from_future` with the original identity kept in its context,
+the same path a record from a newer engine takes. `REGISTRY_VERSION` stays `1.29.0`, so engine 0.27.0 and the first
+release with this change report one registry version with two different catalogs. An engine branch forked before
+this change sees the two identities as stale in its registry checks until it rebases.
+
+**Pre-GA correction (connector usage outcomes, 2026-11-17).** Eight released connector codes change their `rules`
+from outcome `execution`, retry `unknown` to outcome `configuration`, retry `configuration_repair`:
+`connector/ambiguous_name`, `connector/column_not_found`, `connector/duplicate_relation`,
+`connector/extension_unavailable`, `connector/extension_untrusted_location`, `connector/relation_not_found`,
+`connector/unsupported_column_type` and `connector/value_not_representable`. Each names a problem the user fixes in
+the config or the database, so the CLI now exits 1 for them instead of 3. This is a one-time exception to the
+append-only rule, approved by the owner before GA. It is a closed list in
+`scripts/release/reason_pre_ga_corrections.py`: the release pin check and the v1 append-only check accept only these
+eight identities, only the `rules` field and only this exact old and new value. Any other change to a released reason
+still fails. `REGISTRY_VERSION` stays `1.29.0`, so a consumer that keys on the outcome or retry of these codes sees
+the new values under the same registry version until the next release recaptures the pin.
+
+**Pre-GA corrections taken with the freeze batch (X0, 2026-11-18).** The engine gets a third tier. Section 3.4
+froze `__init__.py` and `sdk.py` whole, so every name in `sdk.py` was frozen by default. Section 3.6 moves these names to
+experimental: the connector SDK objects defined in `decoy_engine.sdk` and their root re-exports, the `CAP_*` flags and
+`SDK_VERSION`, and the six provider registration functions. `ConfigError` and `ConnectorError` stay frozen because
+`sdk` only re-exports them from `errors`. No name is removed or renamed. A public subpackage that section 3.4 does not
+name now defaults to documented internal. Later slices of the batch add their own lines here: the `FormulaStrategy`
+base removal, the public renames, and the `when:`, compressed-CSV and pass-through output changes.
+
+**Pre-GA output change (date_shift `jitter_days`, DATE-SHIFT-JITTER, 2026-11-19).** `date_shift` now reads
+`jitter_days: N` as the window `[-N, N]` on every route. Before, no route read the key and a config with it shifted by
+up to a year. Output changes for every config that sets `jitter_days` (the shipped disguises when a client applies
+them, the recommendations default, platform fixtures). `jitter_days` together with `min_days` or `max_days` is refused
+at plan compile, as is a `jitter_days` that is not an integer, is negative or exceeds 106,751, and any `min_days` or
+`max_days` that `int()` coerces to a value outside [-106751, 106751]. Configs that set `min_days` and `max_days` keep
+today's `int()` coercion and window. One new plan reason, `date_shift_window_invalid`. Re-pin checklist: the platform
+fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
+`build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
+
+**Public renames.** This table owns every public rename since the 0.16.0 taxonomy split, so a consumer
+maps an old name to its new one in one place. Kinds are `symbol`, `wire key`, `config key`, `reason code`
+and `CLI-visible label`. A `symbol` row names a dotted import path: the new path must import and the old
+one must not (`tests/sentry/test_contract_renames_table.py` checks both). The CLI keeps its own retired
+list and points here for the pairs. A rename takes a new row in the release that makes it.
+
+<!-- renames-table:start -->
+| old | new | kind | since | note |
+|---|---|---|---|---|
+| `decoy_engine.storm` | `decoy_engine.detection`, `decoy_engine.profiling`, `decoy_engine.verification` | symbol | 0.16.0 | Package split by concern. |
+| `decoy_engine.run_storm` | `decoy_engine.profile_columns` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.StormProfile` | `decoy_engine.ColumnProfile` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.run_storm_post_mask` | `decoy_engine.verification.run_post_mask` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `decoy_engine.StormPostMaskReport` | `decoy_engine.verification.PostMaskReport` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `run_storm: true` | `post_scan: {integrity: true}` | config key | 0.17.0 | Pipeline config `version: 2` is required; `PipelineConfig.run_storm` became `PipelineConfig.post_scan`. |
+| `quality_metrics["storm_postmask"]` | `quality_metrics["post_scan_integrity"]` | wire key | 0.17.0 | Run result key. |
+| `storm-post-mask/v1` | `post-scan-integrity/v2` | wire key | 0.17.0 | Report schema tag. |
+| `storm.scan` | `pre_scan.profile` | wire key | 0.17.0 | Profiler event name. |
+| `route/run_storm_requested` | `route/post_scan_integrity_requested` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. The new one was retired in 0.25.0 and points at `route/post_scan_models_resident`. |
+| `route/run_storm` | `route/post_scan_integrity` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. |
+| `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
+<!-- renames-table:end -->
+
+**Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
+without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
+compile entry points and before any source read. The engine no longer detects the format from a sample. A top-level
+column whose own declared parse format supplies the date shape is exempt; a nested child, including one under a
+declared parent, is not. A runtime reason with the same code backs the handler. `starter_config` and the starter
+review write the detected variant only when every detector hit parses with it (`format_pattern_complete`, new on
+`DetectorMatch` and `FieldStats`, default false) and write `redact` otherwise; the starter now offers `date_shift` for
+`eu_date` too, and iso_date and us_date starters lose the fixed `min_days`/`max_days`. Re-pin checklist: the platform
+disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templates/upload_csv_mask_to_s3.yaml`, the
+platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
+(DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
 
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
@@ -196,9 +301,30 @@ composite/v1  custom/v1   ... (every disguise spec)
 subset-manifest/v1         decoy-run-result/v1
 decoy-record/v1            sample-run/v1         decoy-library-export/v1
 decoy-job-log/v1
-scan-set/v1
+scan-set/v1             scan-diff/v1
 decoy-resume-run/v1    decoy-resume-table/v1
+lock/v1
+decoy-publication/v1    immutable_directory/v1    publication/v1    checkpoint-index/v1
+pinned-plan/v1          decoy-safe-output/v1      decoy-quarantine/v1
+decoy-support-bundle/v1 decoy-reasons/v1          decoy-model-pack/v1
+dps-marginal/v3         post-scan-integrity/v2    canary-span-report/v1
+flagged-redacted/v1     phase-result/v1           phase-event/v1
+decoy.evidence.statement/v1    decoy.trust-policy/v1    decoy.required-catalog/v1
 ```
+
+**Tags added with the freeze batch (FREEZE-S7a, 2026-11-20).** Every `"<name>/vN"` literal in engine source
+is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 19 tags
+after `lock/v1` above were persisted or exported with no listing before. Ten are pinned without reading a
+written artifact, and the map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are
+older versions the engine still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with
+no model yet; `decoy-support-bundle/v1`, `decoy-reasons/v1` and `canary-span-report/v1` name a typed constant
+the engine does not write to a file itself; `dps-marginal/v3` has a writer that needs the `opendp` extra.
+`phase-result/v1` and `phase-event/v1` are frozen because the wire form `to_wire` builds carries the tag; no
+engine code calls `to_wire` yet, so they have no engine writer either. The other nine are read from a written
+artifact by a sentry. The census reads Python string and bytes constants under `src/decoy_engine`. Tags built
+with f-strings or concatenation, and tags in Rust or YAML files, are out of its scope (`S7A-KL-2`). A tag that never leaves the process is internal
+(`decoy_engine.contracts.stability.INTERNAL_TAGS`, with a reason), and a
+sentry scans written artifacts to confirm no internal tag appears in one. Derivation labels are in 3.3.
 
 A user runs `decoy fit`, keeps the `distribution-snapshot/v1` artifact, and
 feeds it to a later engine version. That artifact is a **contract**.
@@ -225,6 +351,10 @@ dropped. A default export withholds such a record (its id goes in the header's `
 
 The `evidence` payload (`cli-local-1`) also accepts two additive optional keys, `path_base` (exactly `"project"`) and `project_manifest` (path text or `null`), both present or both absent (a reader refuses a half pair, a null `path_base` and any base other than `"project"`), as a run inside a `decoy.yaml` project writes them. Absent keys stay absent, and `project_manifest` is a path field in a default export.
 
+It also accepts the optional `scan_baseline` member (SCAN-CHECKS B-1): the `FileFingerprint` shape (`path`, `fingerprint`, `fingerprint_method`, `size_bytes`) of the baseline file the pipeline points at, hashed at run start. The fingerprint is `null` when the file could not be read. Absent stays absent, so the `manifest_hash` of a run with no baseline is unchanged, and `scan_baseline/path` is a path field in a default export. A reader from before this change refuses the key, so the CLI writes it only after it pins the engine that reads it. The sample is `evidence-cli-local-1-baseline.json`.
+
+`lock/v1` is the runtime lock (`decoy_engine.support`: `RuntimeLock`, `build_runtime_lock`, `read_runtime_lock`, `compare_runtime_locks`, `run_probe`, `probe_status`, `ProbeError`). It is canonical JSON of the library versions and two content digests that masked or generated bytes depend on, plus an optional `key_version` label. The reader refuses an unknown tag, a missing tag, a missing field except `probe`, which is optional and omitted when absent, and a wrong type (`True` is not a count, `"7"` is not a `7`, and a `null` `probe` is a wrong type), and ignores a field added under `lock/v1`. `probe` is the digest of the synthetic probe (`run_probe`), a SHA-256 over fixed public inputs run through the engine's Python reference code for the keyed hash, FF1 and the seeded Faker pool; `probe_status` reports `ok` only when it equals the golden for the current seed protocol. It never holds a key, a key check value, a path or a host name. The `key_version` label rule is `decoy_engine.keyprovider.is_key_version_label`, shared with the resume store records. A hand-written sample is in `tests/integration/compat_corpus/runtime-lock/`.
+
 `decoy-resume-run/v1` and `decoy-resume-table/v1` are the two files of a `decoy run --resume` store (`decoy_engine.delivery.resume`: `RunRecord`, `TableRecord` and their encoders and decoders). They are canonical JSON read by the strict reader the publication descriptor uses: exact tag, every field, no unknown field, exact types (`False` is not a `0`, `"1"` is not a `1`), `re.fullmatch` shapes (a digest with a trailing newline is refused), relative artifact paths and at most 64 KiB. There is no tolerant read model: a change to either shape takes a new tag. They hold digests, counts, tokens and one path relative to the run folder (the artifact's placed path, the same trust class as the F22 descriptor the delivered run folder carries), never a cell value or a key. `RUN.json` is capped at 64 KiB, which holds about 337 tables; `encode_run_record` refuses a longer table list with `oversize` and the caller treats that run as not resumable. Corpus samples are in `tests/integration/compat_corpus/resume/`.
 
 `scan-set/v1` is the record of one multi-table scan (`decoy_engine.scan_sources`). The engine
@@ -235,6 +365,29 @@ that looks like data, the core writes positional names (`c0..cn`) instead. A mis
 the guard cannot recognise (a person name, an address) is the stated limit. The core holds no
 cell value. The optional per-table `detail` member of `scan_set_to_dict(detail=True)` is
 the nested `ColumnProfile` dict; it is additive-only within `/v1` and is not part of the core.
+
+Each table also holds `basis` (`whole` or `sample`) and `scanned_rows`, the rows the field counts were taken over
+(PROFILE-SAMPLE-LABELS). `whole` is written only when the read reached the end of the source, with an exact
+`row_count` equal to `scanned_rows`; `key_candidates` is empty on a `sample`: the write model refuses a sampled key claim, and a read of a core with no `basis`, or any `basis` other than `whole`, drops its stored `key_candidates` (they were never proven by a whole read), so that core stays readable and exportable. Both members have read defaults, so a
+core written before them reads as `basis: "sample"` with `scanned_rows: null`. A `basis` string outside the two
+values reads as `sample`, so a third value added in a later minor is not a break. `basis`, `scanned_rows` and the two
+values are frozen at 1.0. A plain profile document (`profile_document`, `ColumnProfile`) gains the same `basis` key, the
+last field of the dataclass.
+
+`scan-diff/v1` is the record of the drift between two scans (`decoy_engine.profiling`: `diff_scan_documents`,
+`diff_scan_tables`, `scan_diff_to_dict`). The engine owns its shape: `ScanDiffCore` to write (unknown fields
+refused, scores floats (bool and strings refused), drift kinds a closed set) and `ScanDiffCoreRead` to read (unknown fields ignored). The
+tag is required. A reader accepts `scan-diff/v1` and `scan-diff/v1.<minor>`, and refuses another major, a missing tag
+and text after the tag. A drift kind this reader does not know (one a later minor could add) is refused with fixed
+text, because a reader that dropped a kind could report a drifted diff as clean. The five kinds are, per table,
+`pii_bucket_increased`, `new_high_pii_field` and `new_quasi_identifier_group`, and, per set, `table_added` and
+`no_common_table` (the one kind when no table matches). `tables_removed` and `detectors_changed` are information, not
+drift. The document holds table and column names, PII scores, buckets, quasi-identifier group names, a risk delta and
+engine versions, never a cell value. `read_scan_set` is the one reader of a parsed `scan-set/v1` or
+`scan-set/v1.<minor>` document, with the same tag rule. The new names are exported from `decoy_engine.profiling`, not
+from `decoy_engine`. Corpus samples and the parity pairs are in `tests/integration/compat_corpus/scan_diff/`.
+
+A bound baseline (F15 E2) is the scan file whose bytes `scan_baseline.sha256` pins. `decoy_engine.profiling.bind_baseline` hashes the bytes, checks the digest, and only then parses them with the engine's strict JSON parser, which now also refuses a number that overflows to infinity (`1e999`). `BaselineBindingError` carries `pre_scan.baseline_digest_mismatch` or `pre_scan.baseline_unreadable` (both since UNRELEASED) with fixed text. `evaluate_drift` returns a `DriftVerdict` (`passed`, `warned` with `pre_scan.drift_detected`, or with `pre_scan.baseline_unbound` when the baseline has no digest and nothing drifted, or `failed` with `pre_scan.drift_blocked`) holding table and column names and drift kinds only. The new names are exported from `decoy_engine.profiling`, not from `decoy_engine`.
 
 `post-scan-integrity/v3` is the report `run_post_mask` returns (v2 until SCAN-ML M4). Recorded pre-GA semantic change
 (POSTSCAN-STREAM PS-4, 2026-11-12): each `fk_preservation[]` finding now derives from the declared
@@ -257,6 +410,27 @@ them whole numbers in the Int64 range (pandas' reading of a nullable integer col
 self-reference with a null root), is compared as an integer key. A column with any fraction stays
 float, so against an integer parent it is still a type mismatch, and so is an all-null float column.
 The tag stayed `v2` for that change; the field set only grew.
+
+Row 31 DI-1b (2026-11) adds the optional `post_scan.distribution: {tolerance_pct, on_breach}` config block and an
+optional `distribution` section of the v3 report. `tolerance_pct` is a strict number above 0 and at most 100;
+`on_breach` is `warn` only until the blocking slice, so `fail` is refused at config load. The block needs
+`post_scan.integrity: true` (`config.post_scan_inactive` otherwise), is left out of the dump while absent (a
+config without it keeps its dump and plan hash) and is hashed when set. The report section holds one row per
+checked fact (`table`, `column`, `fact`, `severity`, `delta_pct`), no source or output value, and is absent
+unless the block is set, so a v3 reader that ignores unknown keys is unaffected. A run that asks for the check
+and has a transform-bearing mask table, a source loader or a deferred gate is refused (a transform-bearing table
+with the existing `runtime/post_scan_integrity_transforms_unsupported`, the others with
+`runtime/post_scan_distribution_deferred`, new, `since` unreleased). Registry version and manifests are
+untouched until the release.
+
+`distribution-snapshot/v2` (row 24f, 2026-11) is what a plain `decoy fit` now writes
+(`distribution_snapshot_document` with `include_values=False`). Only the datetime bucket changed:
+`year_bins` entries are `{start_year, end_year, count}` year ranges instead of `{year, count}`.
+The raw writer, the DP writer and `include_values=True` keep writing v1, and every reader accepts
+both (`decoy_engine.contracts.distribution_snapshot`). The same change moves `value_policy` to
+`flagged-redacted/v2` (every unflagged column is also floored at 10 rows); readers accept v1 and
+v2. A column too small to floor is listed in `redacted_columns`. Generated output of a statistical
+column fitted from a new plain snapshot changes; an old snapshot generates as before.
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
@@ -336,6 +510,21 @@ with an update — expecting the new rows to join to the old output (same person
 same pseudonym across runs) — is relying on the derivation (HKDF-SHA256 `derive`,
 FPE keying, Faker seeding) being unchanged. Change any of it and you break that
 user with **zero error message.**
+
+**Derivation labels (frozen).** These tags are inputs to a key, a digest or a seed. Changing one changes
+output bytes or a stored digest with no error, so each is part of the determinism guarantee. The list equals
+`decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
+3.1, a declared-casting format id (`docs/declared-casting.md`) nor internal. The 14 declared-casting ids (`string/exact/v1`,
+`cobol/comp-3/v1` and the rest) name a format a user declares in config; the F06 parse and output registries own them.
+`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
+
+```
+canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/keyprovider/v1
+decoy-engine/protected-quarantine/v1   decoy-probe/v1            decoy-resume-key-check/v1
+decoy.shuffle.unkeyed/v1       joint_mask/gen_row/v1     joint_mask/keyed_row/v1
+joint_mask/null_fallback/v1    name_email/v1             pinned-plan-fingerprint/v1
+policy-expansion/v1            secret-provider/v1        tokenize-key/v1
+```
 
 **Rules:**
 
@@ -527,6 +716,19 @@ No `SEED_PROTOCOL_VERSION` change.
 
 ### 3.4 The public API + CLI contract
 
+- **Pass-through text width (O3, 2026-11):** a pass-through `large_string` column leaves
+  every route as `string` when its values fit 32-bit offsets, and as `large_string` after
+  one value that cannot fit. Each batch is judged from its own offsets: a batch whose total
+  exceeds the limit is split at row boundaries into ordered `string` slices, and the source is
+  never pre-scanned or reread. A value that cannot fit promotes the column to `large_string`
+  for the rest of the run: the CSV writer keeps the value, and resident output widens its
+  earlier chunks. Parquet cannot store a single value of 2 GiB or more on any head: the raw
+  writer raises `ArrowInvalid` and a strict file-access write raises `FileAccessReadError`.
+  O3 adds no earlier refusal. A sink whose writer schema is fixed before the first batch
+  keeps the source `large_string` field, byte-equal to the previous release: the out-of-core
+  sink, the streamed `run_auto_chunk` sink and any `TransactionalSink`. Narrowing to `string`
+  applies to resident results, `run_mask_chunked` chunks, whole-frame output and CSV.
+
 - **Python:** the symbols re-exported from `decoy_engine/__init__.py` and
   `decoy_engine/sdk.py`, with their signatures and output-affecting defaults.
   As of 2026-09-30 this includes `read_fixed_width` and `FixedWidthParseError`
@@ -592,7 +794,9 @@ No `SEED_PROTOCOL_VERSION` change.
   nullable integer above 2^53, comes back exact; a read passthrough column that
   pandas refuses raises `chunked_passthrough_value_unrepresentable`, and a custom
   or subclass adapter carries nothing), one output type per column per call (`string` for hash, truncate,
-  string-redact and native-admissible deterministic categorical columns, the source type for passthrough), no pandas
+  string-redact and native-admissible deterministic categorical columns, the source type for passthrough, except
+  that a pass-through `large_string` column is `string` while its values fit 32-bit offsets; see
+  "Pass-through text width" in §3.4), no pandas
   metadata on yielded chunks, and identical validation on both routes. A column
   that is `null`-typed in the first chunk and typed in a later one raises
   `chunked_leading_null_type` on both routes. Its error codes are
@@ -778,6 +982,17 @@ No `SEED_PROTOCOL_VERSION` change.
   dispatcher's contract (passthrough columns are the source column exactly, string-output
   columns are `string`, no schema metadata) and may differ from the full-frame and
   unified-slice routes. Converging those routes is roadmap item ROUTE-OUTPUT-CONTRACT.
+  Output Parquet key/value metadata (OUTPUT-METADATA-LEAK, 2026-11-19): on every route, a
+  published Parquet file carries no field metadata at any depth (this ends "passthrough
+  field metadata kept"), writes an extension-type column as its storage type (except
+  `arrow.uuid`, `arrow.bool8`, `arrow.json` and the pandas period and interval types) and
+  carries one schema key at most, `b"pandas"`, rebuilt from the output schema
+  (see `docs/security/output-metadata.md`). The schema metadata difference between routes
+  narrows to "a sanitized pandas blob or none". Output bytes change only for a source with
+  custom metadata, `attrs`, field metadata, a column-index name or a range index; masked
+  values, column names, other Arrow types, nullability and row-group layout do not change. The
+  public names `output_schema` and `output_table` are additive. In-memory results returned
+  to a caller are outside this promise.
   `run_pipeline` gains one more keyword-only argument (2026-10-02),
   `multi_table_dispatch_enabled: bool = True`: with no FK edge in the job, each mask table
   that would auto-chunk alone dispatches on the same lane, so the auto-chunk shape above now
@@ -872,6 +1087,15 @@ No `SEED_PROTOCOL_VERSION` change.
   written before M3a still validates and reads back with empty lists, `ScanSetCoreRead` ignores
   unknown keys, and no stored field can hold a cell value (a source, a detector id, a model id and
   version, a band and a rate bucket). The starter config ignores model hits.
+  SCAN-ML-MD M-1 (2026-11) makes the NER hit rate per model: `decoy_engine.detection._ner_rate`
+  gains `NER_MIN_RATES` (sm 0.211, md 0.122) and `NerRate.min_rate`, and `NER_MODEL_WHEELS` gains
+  the `en_core_web_md` 3.8.0 wheel. The default model is unchanged. `load_detectors` now refuses an
+  installed NER model that has no entry in `NER_MIN_RATES` with `ModelUnavailableError`
+  (`provider.ner_model_uncalibrated`, registry unreleased), so a config that names
+  `en_core_web_lg`, `en_core_web_trf` or a non-English model for `pre_scan` or `post_scan` is
+  refused at load, before any row is read, where it used to run on sm's 0.211. A model that is
+  absent or incompatible keeps its own earlier reason. `text_redact` and `text_mask` `ner` columns
+  read no rate and are not refused for any model name.
 - **CLI:** verb names, flag names, and the exit-code contract (0 ok, 1
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and
@@ -950,6 +1174,9 @@ for another config raises `ValueError`). `build_run_context` checks the config d
 columns is refused before it is profiled or masked. `run_pipeline_isolated` runs the same check in the parent before
 staging or spawn, and the child `run_pipeline` rechecks. The refusals are `source_file.undeclared_column` (names a
 position and a count, never a column) and `source_file.undeclared_table`.
+`DeclarationRequest.for_validate` is the offline form for `decoy validate`: it reads only local file headers, never opens an `s3`, `gcs` or other non-file source, and names those sources in `remote_sources` so the caller can report them as not checked (additive, 2026-11-16, QA-GATE G-eng).
+
+`DeclarationRequest.for_scan(config, tables=None)` is the scan form (additive, SCAN-MULTI E-S1c, 2026-11-19). It reads `sources`, `relationships` and `version` of a sources-only file or a full pipeline, checks the inputs with the one `scan_sources` validator and opens no data file. A `column_names_file` is read once. `scan_sources` takes the additive keyword `relationship_positions`. The capability's `scan_declaration` property is a frozen `ScanDeclaration`; on a capability from any other request it raises `TypeError`.
 
 **Declaration gate on the chunked entries (CONFIG-EXPLICIT E2d).** `run_mask_pipeline_chunked`,
 `run_mask_chunked` and `run_native_or_oracle_chunked` call `prepare_declared_sources`
@@ -990,6 +1217,16 @@ namespace, registry unreleased): a `namespace` for `hash`, `fpe`, `date_shift`, 
 collection. The requirements are `StrategyRequirement` descriptors in `decoy_engine.plan.checks`, and
 `StrategyInfo.requirements` carries the same rows. Specific earlier checks keep precedence.
 
+**Nested cell reading and output (F07 E1).** Recorded pre-GA semantic change (2026-11-17): the `nested`
+strategy reads each cell with `strict_json_read` under bounds (16 MiB, depth 64) and writes a number it did
+not select as it was read, so `1.10`, `1e400` and a long decimal are no longer rewritten. A cell that repeats
+a key, is over a bound or holds a raw lone surrogate (an escaped `\ud800` is valid) fails its row with a closed warning code (`nested_cell_duplicate_key`,
+`nested_cell_oversized`, `nested_cell_too_deep`, `nested_cell_json_parse_error`). A selected integer too long
+for `int` fails the row (`nested_cell_number_out_of_range`). A leaf list of integers with a null now reaches
+the child as integers and a null, not as `float64` with `NaN`, so `hash` and `tokenize` accept it. A child
+output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
+(`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
+
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,
@@ -1000,6 +1237,69 @@ bundle set.
 
 **Rule:** **never edit a released disguise version.** Add a new dated version.
 Review enforces this until a test does; do not "fix" a shipped disguise in place.
+
+### 3.6 Experimental surfaces
+
+Every public engine name has one of three tiers. **Frozen** names follow sections 3.1 to 3.5 and section 4. An
+**experimental** name may change or be removed in any minor release; the change gets a `Changed` or `Removed`
+changelog fragment that starts with "Experimental:", and no deprecation window is promised. **Internal** names may
+change in any release. The registry is `src/decoy_engine/contracts/stability.py`, and
+`tests/sentry/release/test_public_census.py` gives every exported name exactly one tier.
+
+- Section 3.4 freezes `decoy_engine/__init__.py` and `decoy_engine/sdk.py` whole, plus the subpackage names it lists
+  one by one. A public subpackage that section 3.4 does not name defaults to internal, unless one of its objects
+  is exported by a frozen path or the registry lists the name as frozen or experimental. No name is unclassified:
+  each export matches one explicit registry row or one package rule.
+  Inside a subpackage that section 3.4 names, a name it does not list is internal too (for example
+  `detection.load_detectors`).
+- The tier belongs to the object and applies to every path that exports it. A constant is matched by its name and
+  its object identity, so `SEED_PROTOCOL_VERSION` has one tier wherever it is exported. Only the paths that section
+  3.4 names are a stability promise. Another path to a frozen object, such as `decoy_engine.execution.ExecutionResult`,
+  is an internal import path to a frozen object: the object does not change incompatibly, but the path may move.
+  `decoy_engine.FileSource` and `decoy_engine.sdk.FileSource` are one experimental object; `sdk.ConfigError` and
+  `sdk.ConnectorError` are the frozen `errors` objects.
+- Everything `sdk.py` defines is experimental: each class or function whose `__module__` is `decoy_engine.sdk`, and
+  each constant assigned there, so a new `sdk` name starts experimental. The Faker provider registration functions
+  live elsewhere and are listed in the registry by identity.
+- Determinism is never experimental. Output bytes made through an experimental surface (a custom provider's values,
+  a connector's rows once masked) follow section 3.3. Stored records are frozen whatever the tier of the code that
+  wrote them.
+- An experimental class or function starts its docstring with `Experimental:`. An experimental constant has no
+  docstring, so the docstring of its module starts with the marker and names it. The documentation page for an
+  experimental surface carries the marker in its first paragraph. A sentry checks the marker against the registry
+  both ways.
+- A public package that needs an optional extra may fail to import only for that extra. The census then reads its
+  declared names from source and fails on any other import error, on an `__all__` it cannot read, and on a public
+  package without `__all__` that is not on the registry's counted list. The census floors are 59 packages and
+  1,186 names.
+- An experimental surface becomes frozen by moving its registry row and dropping the marker in a minor release. A
+  frozen name never goes back to experimental inside a major.
+
+The experimental names at 1.0, one per line (the sentry compares this list with the registry):
+
+```text
+CAP_DRY_RUN
+CAP_INTROSPECTION
+CAP_MULTIPART
+CAP_RESUMABLE
+CAP_SIGNED_URL
+CAP_STREAMING
+CheckResult
+ConnectorConfig
+FileMeta
+FileSink
+FileSource
+PermanentError
+SDK_VERSION
+TransientError
+WriteResult
+atomic_swap_db_providers
+load_custom_providers
+register_faker_list_provider
+register_faker_provider
+register_faker_provider_v2
+unregister_faker_provider
+```
 
 ## 4. The rules for adding a feature without breaking anyone
 
@@ -1166,6 +1466,6 @@ retrofitted after users hold artifacts we no longer have fixtures for.
   `decoy-platform/docs/guides/engineering-best-practices.md`
 - Determinism contract: `decoy-engine/docs/determinism.md`
 - Roadmap versioning lock: `decoy/docs/ROADMAP.md` section 5.5, the versioning freeze at V1
-  (https://github.com/louiskeep/decoy/blob/main/docs/ROADMAP.md)
+  (https://github.com/decoy-data/decoy/blob/main/docs/ROADMAP.md)
 - This document should be linked from each repo's `CONTRIBUTING.md` and named as
   a required pre-read in the PR template.

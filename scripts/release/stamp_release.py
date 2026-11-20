@@ -1,7 +1,8 @@
 """Stamp the reason registry and compile changelog fragments into CHANGELOG.md at release prep.
 
     python scripts/release/stamp_release.py --version X.Y.Z [--date YYYY-MM-DD] [--repo PATH]
-        [--registry-minor auto|X.Y.0]
+        [--registry-minor auto|X.Y.0] --cli-pins-base PATH --cli-pins PATH [--cli-pins PATH ...]
+        --cli-version X.Y.Z [--allow-delta NAME ...]
 
 Run on the release prep branch, in a full clone. It reads every `changelog.d/<slug>.md` (not the
 README), orders them newest first by the commit that added each file, and writes one
@@ -18,6 +19,13 @@ the docs/reasons.md anchor, empties `PENDING_SUMMARY_EDITS`, writes the minor's 
 only), rebuilds consumer-contract.json and recaptures the v2 release pin. `--registry-minor` may
 only restate the automatic minor of an identity release.
 
+It also writes the DP certified rows (`scripts/release/dp_rows.py`) into `_CERTIFIED_STACKS`: the
+dev/CI row from `uv.lock` at `--version`, and one CLI-profile row per `--cli-pins` file at
+`--version` and `--cli-version`, each at the top of its block. `--cli-pins-base` is the previous
+certified pin file: every pin file must parse as plain `name==version` lines, and every candidate
+must name the same packages as the base, except names listed in `--allow-delta`. Existing rows are
+never removed.
+
 `parse_fragment` is the one fragment grammar; `scripts/dev/check_fragment.py` calls it too.
 Every write is planned, applied to a candidate copy of HEAD and checked there first; only then is
 the same plan applied to the clean tree, where any failure restores the owned paths and removes a
@@ -26,7 +34,8 @@ identities and versions, never file content.
 
 Exit codes: 0 done; 1 refused (a malformed fragment, a shallow clone, an uncommitted fragment, a
 bad version or date, a CHANGELOG without the expected headings, a registry the pin rejects, a
-pending identity no fragment names, a candidate that fails its checks).
+pending identity no fragment names, a candidate that fails its checks, a missing DP option, a pin
+file that does not parse, a candidate whose package names differ from the base).
 """
 
 from __future__ import annotations
@@ -44,13 +53,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 FRAGMENT_DIR = "changelog.d"
-REGISTRY_PATHS = ("src/decoy_engine/reasons", "tests/fixtures/f29", "docs/reasons.md")
+DP_PROVENANCE = "src/decoy_engine/quality/dp_provenance.py"
+REGISTRY_PATHS = (
+    "src/decoy_engine/reasons",
+    "tests/fixtures/f29",
+    "docs/reasons.md",
+    DP_PROVENANCE,
+)
 F29 = "tests/fixtures/f29"
 REASON_PIN = f"{F29}/reason-registry-release.json"
 CONTRACT = f"{F29}/consumer-contract.json"
 README = "README.md"
 TYPES = ("Added", "Changed", "Fixed", "Deprecated", "Removed", "Security")
 PIN_FILE = Path("tests") / "fixtures" / "changelog_released_sections.json"
+CHANGELOG = "CHANGELOG.md"
 BREAKING_HEADING = "### Breaking for consumers"
 
 _BREAKING_LINE = re.compile(r"Breaking: (?P<text>\S.*)")
@@ -90,6 +106,16 @@ class FragmentError(ValueError):
 
 
 @dataclass(frozen=True)
+class DpRequest:
+    """The DP certified-row inputs of one release prep (see `dp_rows`)."""
+
+    base: Path
+    candidates: tuple[Path, ...]
+    cli_version: str
+    allow_delta: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Fragment:
     breaking: str | None
     block: str
@@ -123,13 +149,42 @@ def parse_fragment(text: str) -> Fragment:
     return Fragment(breaking, block)
 
 
+_LINK_DEF = re.compile(r"\[[^\]\n]+\]: https?://\S*")
+
+
+def _footer_start(text: str) -> int:
+    """Offset where the trailing link-reference block starts (len(text) if there is none).
+
+    Only the block at end of file counts, so a reference definition inside a section body
+    never cuts that section short.
+    """
+    end = len(text)
+    start = end
+    for line in reversed(text.splitlines(keepends=True)):
+        stripped = line.strip()
+        if stripped and not _LINK_DEF.fullmatch(stripped):
+            break
+        end -= len(line)
+        if stripped:
+            start = end
+    return start
+
+
 def release_sections(text: str) -> list[tuple[str, str]]:
-    """(version, section text from its heading up to the next release heading), newest first."""
+    """(version, section text from its heading up to the next release heading), newest first.
+
+    The oldest section stops at the link-reference footer: those links belong to the whole
+    file, so editing one (an org move, a new compare link) must not change a released pin.
+    """
     marks = list(_RELEASE.finditer(text))
-    return [
-        (m.group(1), text[m.start() : marks[i + 1].start() if i + 1 < len(marks) else len(text)])
-        for i, m in enumerate(marks)
-    ]
+    out = []
+    for i, m in enumerate(marks):
+        if i + 1 < len(marks):
+            end = marks[i + 1].start()
+        else:
+            end = max(_footer_start(text), m.end())
+        out.append((m.group(1), text[m.start() : end]))
+    return out
 
 
 def section_digest(section: str) -> str:
@@ -237,7 +292,7 @@ def _remove(path: Path) -> None:
 
 
 def _owned_paths() -> list[str]:
-    return ["CHANGELOG.md", PIN_FILE.as_posix(), FRAGMENT_DIR]
+    return [CHANGELOG, PIN_FILE.as_posix(), FRAGMENT_DIR]
 
 
 def _dirty(root: Path, owned: list[str]) -> list[str]:
@@ -324,7 +379,7 @@ def _changelog_plan(
     if problem is not None:
         raise FragmentError(problem)
 
-    changelog_path = root / "CHANGELOG.md"
+    changelog_path = root / CHANGELOG
     before = changelog_path.read_text(encoding="utf-8")
     if any(v == version for v, _ in release_sections(before)):
         raise FragmentError("CHANGELOG.md already has a section for this version")
@@ -338,7 +393,7 @@ def _changelog_plan(
         **{k: v for k, v in pins.items() if k != prev_version},
     }
 
-    writes = {PIN_FILE.as_posix(): json.dumps(pins, indent=2) + "\n", "CHANGELOG.md": text}
+    writes = {PIN_FILE.as_posix(): json.dumps(pins, indent=2) + "\n", CHANGELOG: text}
     return writes, [f"{FRAGMENT_DIR}/{name}" for name in ordered], fragments
 
 
@@ -432,12 +487,34 @@ def _candidate_contract(root: Path, writes: dict, removes: list[str], t, stamped
     return json.dumps(built["contract"], indent=1, sort_keys=True) + "\n"
 
 
-def stamp_release(root: Path, version: str, date: str, registry_minor: str = "auto") -> str:
-    """Stamp the pending registry facts and compile the changelog in one transaction; returns the
-    registry version the release ships."""
+def _dp_plan(root: Path, version: str, dp: DpRequest) -> dict[str, str]:
+    """The write that adds this release's DP rows; nothing is written."""
+    _tools()  # puts the repository root on sys.path for `scripts.release`
+    from scripts.release import dp_rows
+
+    try:
+        text = _read(root, DP_PROVENANCE)
+        new = dp_rows.plan_rows(
+            root, text, version, dp.cli_version, dp.base, list(dp.candidates), list(dp.allow_delta)
+        )
+    except dp_rows.DpRowError as err:
+        raise FragmentError(f"dp rows: {err}") from None
+    return {DP_PROVENANCE: new} if new != text else {}
+
+
+def stamp_release(
+    root: Path,
+    version: str,
+    date: str,
+    registry_minor: str = "auto",
+    dp: DpRequest | None = None,
+) -> str:
+    """Stamp the pending registry facts, add the DP certified rows when `dp` is given and compile
+    the changelog in one transaction; returns the registry version the release ships."""
     pol, rp, rr = _tools()
     owned = [*_owned_paths(), *REGISTRY_PATHS]
     _preflight(root, version, date, owned)
+    dp_writes = _dp_plan(root, version, dp) if dp is not None else {}
     state = _extract(rr, root)
     live, pending = state["manifest"], frozenset(map(tuple, state["pending"]))
     writes, removes, fragments = _changelog_plan(root, version, date)
@@ -451,10 +528,30 @@ def stamp_release(root: Path, version: str, date: str, registry_minor: str = "au
     if problems:
         raise FragmentError("registry: " + "; ".join(problems))
     registry, created, stamped = _registry_plan(root, live, t, version)
-    writes = {**registry, **writes}
+    writes = {**registry, **writes, **dp_writes}
     writes[CONTRACT] = _candidate_contract(root, writes, removes, t, stamped)
     _apply(root, writes, removes, owned, tuple(created))
     return t.version
+
+
+def _dp_request(args: argparse.Namespace) -> DpRequest:
+    """The DP options, all required; argparse would exit 2, a refusal here exits 1."""
+    missing = [
+        flag
+        for flag, value in (
+            ("--cli-pins-base", args.cli_pins_base),
+            ("--cli-pins", args.cli_pins),
+            ("--cli-version", args.cli_version),
+        )
+        if not value
+    ]
+    if missing:
+        raise FragmentError(f"missing {', '.join(missing)}")
+    if _VERSION.fullmatch(args.cli_version) is None:
+        raise FragmentError("--cli-version must look like X.Y.Z")
+    return DpRequest(
+        args.cli_pins_base, tuple(args.cli_pins), args.cli_version, tuple(args.allow_delta)
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -463,9 +560,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--date", default=datetime.date.today().isoformat())
     ap.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     ap.add_argument("--registry-minor", default="auto")
+    ap.add_argument("--cli-pins-base", type=Path, help="the previous certified pin file")
+    ap.add_argument("--cli-pins", type=Path, action="append", default=[], help="a candidate file")
+    ap.add_argument("--cli-version", help="the decoy-cli version the candidate rows are for")
+    ap.add_argument(
+        "--allow-delta", action="append", default=[], help="a package name that may differ"
+    )
     args = ap.parse_args(argv)
     try:
-        shipped = stamp_release(args.repo, args.version, args.date, args.registry_minor)
+        dp = _dp_request(args)
+        shipped = stamp_release(args.repo, args.version, args.date, args.registry_minor, dp)
     except FragmentError as err:
         print(f"stamp_release: refused: {err}", file=sys.stderr)
         return 1

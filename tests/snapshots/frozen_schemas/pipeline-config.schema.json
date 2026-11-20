@@ -345,6 +345,28 @@
       "title": "Dismissal",
       "type": "object"
     },
+    "DistributionCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "on_breach": {
+          "const": "warn",
+          "default": "warn",
+          "title": "On Breach",
+          "type": "string"
+        },
+        "tolerance_pct": {
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Tolerance Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "tolerance_pct"
+      ],
+      "title": "DistributionCheck",
+      "type": "object"
+    },
     "DpGenerateSettings": {
       "additionalProperties": false,
       "properties": {
@@ -1434,6 +1456,17 @@
           "title": "Dismissed",
           "type": "array"
         },
+        "distribution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DistributionCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "integrity": {
           "default": false,
           "title": "Integrity",
@@ -1778,6 +1811,22 @@
     "ScanBaselineConfig": {
       "additionalProperties": false,
       "properties": {
+        "on_drift": {
+          "anyOf": [
+            {
+              "enum": [
+                "warn",
+                "fail"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Drift"
+        },
         "path": {
           "title": "Path",
           "type": "string"
@@ -1786,6 +1835,19 @@
           "const": "scan-set/v1",
           "title": "Schema",
           "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
         }
       },
       "required": [

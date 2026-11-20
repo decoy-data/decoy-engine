@@ -12,7 +12,9 @@ jobs = [
   "ner-gate",
   "dp-certified-gate",
   "determinism",
+  "pg-gate",
   "import-smoke",
+  "faker-output-lock",
 ]
 
 [[merge]]
@@ -62,3 +64,7 @@ reason = "tests need the NER model wheel; the dev profile skips them"
 [[dedicated_marker]]
 name = "dp_certified"
 reason = "fit_dp_snapshot completes only on the certified profile"
+
+[[dedicated_marker]]
+name = "pg_integration"
+reason = "tests need a Postgres server and the DuckDB postgres extension; only pg-gate sets DECOY_REQUIRE_PG=1 so a missing one fails"

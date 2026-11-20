@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.config import classify_table_kinds
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile._types import Profile, Relationship
 
@@ -55,7 +56,9 @@ class NamespaceConfigError(PlanCompileError):
       resolved. Two clauses: (a) a deterministic-mode column in the config
       that does not declare a namespace; (b) a FK `Relationship` with
       `namespace=None` where neither parent nor child column declares
-      one explicitly and no auto-binding supplies one.
+      one explicitly and no auto-binding supplies one. An edge between two
+      generate tables is exempt: it takes a derived label (see
+      `_generate_only_namespace`) because nothing on it is masked.
     """
 
 
@@ -90,6 +93,9 @@ class NamespaceRegistry:
     """
 
     bindings: tuple[NamespaceBinding, ...]
+    # Tables the config marks as generate tables (from `classify_table_kinds`). An edge whose
+    # parent and child are both in this set masks nothing, so it needs no namespace.
+    generate_tables: frozenset[str] = frozenset()
     # Lazy-default to empty so older callers constructing
     # NamespaceRegistry(bindings=...) without _index still work; the
     # post-init below populates from bindings if _index is empty.
@@ -139,6 +145,11 @@ class NamespaceRegistry:
         child_ns = self.for_column(relationship.child_table, relationship.child_columns)
         if child_ns is not None:
             return child_ns
+        if (
+            relationship.parent_table in self.generate_tables
+            and relationship.child_table in self.generate_tables
+        ):
+            return _generate_only_namespace(relationship)
         raise NamespaceConfigError(
             code=reasons.config.NAMESPACE_MISSING,
             path=(
@@ -321,7 +332,21 @@ def build_namespace_registry(
         NamespaceBinding(namespace=ns, declared_by=tuple(namespace_to_columns[ns]))
         for ns in sorted(namespace_to_columns.keys())
     )
-    return NamespaceRegistry(bindings=bindings)
+    kinds = classify_table_kinds(config)
+    return NamespaceRegistry(
+        bindings=bindings,
+        generate_tables=frozenset(name for name, kind in kinds.items() if kind == "generate"),
+    )
+
+
+def _generate_only_namespace(relationship: Relationship) -> str:
+    """The private label of an edge between two generate tables, keyed by the parent key.
+
+    Nothing is masked on such an edge, so the label is never registered, bound to a column or
+    written to the plan. It follows the composite precedent: `generated/<table>/<columns>`, with
+    the columns joined by `__`. Fan-out children of one parent key share it.
+    """
+    return f"generated/{relationship.parent_table}/{'__'.join(relationship.parent_columns)}"
 
 
 def composite_bindings(

@@ -1,0 +1,37 @@
+{
+  "base": "06877527b",
+  "kept_cases": {
+    "tests/unit/signed_evidence/test_independence_and_boundary.py": {
+      "test_low_level_jws_verify_is_not_public": "def test_low_level_jws_verify_is_not_public() -> None:\n    import decoy_engine.signed_evidence as se\n    for name in dir(se):\n        assert 'verify_es256' not in name and name not in {'verify_signature', 'jws_verify'}\n    assert 'verify_signed_evidence' in se.__all__"
+    }
+  },
+  "retired_cases": {
+    "tests/unit/signed_evidence/test_independence_and_boundary.py": [
+      "test_core_modules_exist_and_import_only_allowed_packages",
+      "test_no_absolute_decoy_engine_imports_inside_the_core",
+      "test_loads_without_engine_init_or_data_libraries"
+    ]
+  },
+  "retired_files": [
+    "tests/sentry/test_evidence_signing_boundary.py",
+    "tests/unit/evidence_release/test_staging.py"
+  ],
+  "unchanged": {
+    "tests/unit/signed_evidence/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "tests/unit/signed_evidence/_corpus.py": "d24f004e88732fd112541262c8d0f1726a389099bcd8e70d7ca87dba33b58f58",
+    "tests/unit/signed_evidence/_factory.py": "c3b77f4acfff2cf8f4e27e8459c447d531bdd536ad8af115548e30c94a71d77f",
+    "tests/unit/signed_evidence/test_boundary.py": "bb1523e4165276eb6aa3261382200d2c1d67d0423c732440c9517b040e4713cb",
+    "tests/unit/signed_evidence/test_canonical_properties.py": "2e534e4e430b6995e0202691530d75564fa5bb4e5a1890ec844dab4f634b5ce2",
+    "tests/unit/signed_evidence/test_catalog_and_checks.py": "58acbc9317d5a6fee5393a193a4dd0944fd8f63be7db2a6671211d6abc6be8cd",
+    "tests/unit/signed_evidence/test_conformance_corpus.py": "232eb9a699dad5d11f23d2371aad2947a9a86eba46e05a3c21bde583456358c2",
+    "tests/unit/signed_evidence/test_envelope_parser.py": "66a1c403fbb14b6cde7bdc663b85f6cb9f0c3a29950838c7625b096cf3057680",
+    "tests/unit/signed_evidence/test_filesystem_binding.py": "aa605bb9a458a7c85bacd696fd1a9ac07077868f375d633efe99d87592751719",
+    "tests/unit/signed_evidence/test_mutation_resistance.py": "4554c85e3b0fa65048a0f8dc91bbcf0ba997066aeeb4a7fb868982e60f9c104e",
+    "tests/unit/signed_evidence/test_privacy_canaries.py": "6772aa65e1784d282698f6207b870554029ca1ddb84ef3ccae362acdc314ff21",
+    "tests/unit/signed_evidence/test_release_decision.py": "ba565f8303874100b262fe33aee186d49d4b7f2ecbbdc01d30dd67b8cbbc8100",
+    "tests/unit/signed_evidence/test_signer_seam.py": "b26f2f593fd521263683f311f21c4a7aa2eba0de7488dbc3087c7b531d4706a5",
+    "tests/unit/signed_evidence/test_statement_schema.py": "23001495cef357a9cece51fb1855f1645837cf4dc0df351b141942356dd2cc24",
+    "tests/unit/signed_evidence/test_strict_json.py": "a0012f9c85aeefc98b8737bc18dc118a0a9130cf242a051ddb955a672c2b6e28",
+    "tests/unit/signed_evidence/test_trust_and_context.py": "b5eb01fe4f502acf6c8d714752d6511bd4010efcca9a544d020f5d83f6ee3ddf"
+  }
+}

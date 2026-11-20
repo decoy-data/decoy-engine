@@ -1,0 +1,3717 @@
+{
+  "entries": [
+    {
+      "code": "policy_block_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The policy block has a duplicate id, a prohibition without exactly one of forbid and require, or a value JSON cannot carry.",
+      "symbol": "POLICY_BLOCK_INVALID"
+    },
+    {
+      "code": "policy_column_partial",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A column without a strategy sets keys that only a strategy can use.",
+      "symbol": "POLICY_COLUMN_PARTIAL"
+    },
+    {
+      "code": "policy_field_undecided",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "No policy level decides a mask column.",
+      "symbol": "POLICY_FIELD_UNDECIDED"
+    },
+    {
+      "code": "policy_prohibited",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A mask column's decided strategy breaks a policy prohibition.",
+      "symbol": "POLICY_PROHIBITED"
+    },
+    {
+      "code": "policy_rule_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Two policy sources decide one column differently at the same precedence level.",
+      "symbol": "POLICY_RULE_CONFLICT"
+    },
+    {
+      "code": "policy_selector_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy selector is empty, has an unknown key or holds a value outside the grammar.",
+      "symbol": "POLICY_SELECTOR_INVALID"
+    },
+    {
+      "code": "policy_selector_unmatched",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy rule selects no mask column.",
+      "symbol": "POLICY_SELECTOR_UNMATCHED"
+    },
+    {
+      "code": "policy_unknown_classification",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A classification is not one the engine knows.",
+      "symbol": "POLICY_UNKNOWN_CLASSIFICATION"
+    },
+    {
+      "code": "policy_unknown_strategy",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A policy names a masking strategy the engine does not know.",
+      "symbol": "POLICY_UNKNOWN_STRATEGY"
+    },
+    {
+      "code": "remote_uri_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "ConfigError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A remote source argument is not a valid s3://, gs:// or sftp:// URI.",
+      "symbol": "REMOTE_URI_INVALID"
+    },
+    {
+      "code": "scan_baseline_unbound",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "scan_baseline.on_drift: fail needs scan_baseline.sha256, so the baseline is bound.",
+      "symbol": "SCAN_BASELINE_UNBOUND"
+    },
+    {
+      "code": "column_name_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "connector",
+      "owner": "PostgresSnapshotError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Column name unsupported.",
+      "symbol": "COLUMN_NAME_UNSUPPORTED"
+    },
+    {
+      "code": "relation_shape_changed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "connector",
+      "owner": "PostgresSnapshotError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Relation shape changed.",
+      "symbol": "RELATION_SHAPE_CHANGED"
+    },
+    {
+      "code": "adopt_not_verified",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: adopt not verified.",
+      "symbol": "ADOPT_NOT_VERIFIED"
+    },
+    {
+      "code": "artifact_changed_during_read",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact changed during read.",
+      "symbol": "ARTIFACT_CHANGED_DURING_READ"
+    },
+    {
+      "code": "artifact_enumeration_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact enumeration failed.",
+      "symbol": "ARTIFACT_ENUMERATION_FAILED"
+    },
+    {
+      "code": "artifact_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact missing.",
+      "symbol": "ARTIFACT_MISSING"
+    },
+    {
+      "code": "artifact_not_regular_file",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact not regular file.",
+      "symbol": "ARTIFACT_NOT_REGULAR_FILE"
+    },
+    {
+      "code": "artifact_path_unsafe",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact path unsafe.",
+      "symbol": "ARTIFACT_PATH_UNSAFE"
+    },
+    {
+      "code": "artifact_platform_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact platform unsupported.",
+      "symbol": "ARTIFACT_PLATFORM_UNSUPPORTED"
+    },
+    {
+      "code": "artifact_unreadable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: artifact unreadable.",
+      "symbol": "ARTIFACT_UNREADABLE"
+    },
+    {
+      "code": "bom",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bom.",
+      "symbol": "BOM"
+    },
+    {
+      "code": "bundle_construction_forbidden",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bundle construction forbidden.",
+      "symbol": "BUNDLE_CONSTRUCTION_FORBIDDEN"
+    },
+    {
+      "code": "bundle_member_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bundle member missing.",
+      "symbol": "BUNDLE_MEMBER_MISSING"
+    },
+    {
+      "code": "bundle_member_unavailable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bundle member unavailable.",
+      "symbol": "BUNDLE_MEMBER_UNAVAILABLE"
+    },
+    {
+      "code": "bundle_root_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bundle root missing.",
+      "symbol": "BUNDLE_ROOT_MISSING"
+    },
+    {
+      "code": "bundle_root_not_directory",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: bundle root not directory.",
+      "symbol": "BUNDLE_ROOT_NOT_DIRECTORY"
+    },
+    {
+      "code": "canonicalization_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: canonicalization failed.",
+      "symbol": "CANONICALIZATION_FAILED"
+    },
+    {
+      "code": "carrier_construction_forbidden",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: carrier construction forbidden.",
+      "symbol": "CARRIER_CONSTRUCTION_FORBIDDEN"
+    },
+    {
+      "code": "carrier_fields_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: carrier fields invalid.",
+      "symbol": "CARRIER_FIELDS_INVALID"
+    },
+    {
+      "code": "catalog.bom",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog bom.",
+      "symbol": "CATALOG_BOM"
+    },
+    {
+      "code": "catalog.duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog duplicate member.",
+      "symbol": "CATALOG_DUPLICATE_MEMBER"
+    },
+    {
+      "code": "catalog.float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog float not allowed.",
+      "symbol": "CATALOG_FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "catalog.integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog integer out of domain.",
+      "symbol": "CATALOG_INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "catalog.invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog invalid unicode.",
+      "symbol": "CATALOG_INVALID_UNICODE"
+    },
+    {
+      "code": "catalog.non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog non finite number.",
+      "symbol": "CATALOG_NON_FINITE_NUMBER"
+    },
+    {
+      "code": "catalog.not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog not json.",
+      "symbol": "CATALOG_NOT_JSON"
+    },
+    {
+      "code": "catalog.not_utf8",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog not utf8.",
+      "symbol": "CATALOG_NOT_UTF8"
+    },
+    {
+      "code": "catalog.too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog too deep.",
+      "symbol": "CATALOG_TOO_DEEP"
+    },
+    {
+      "code": "catalog.too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog too large.",
+      "symbol": "CATALOG_TOO_LARGE"
+    },
+    {
+      "code": "catalog.too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog too many nodes.",
+      "symbol": "CATALOG_TOO_MANY_NODES"
+    },
+    {
+      "code": "catalog_duplicate_requirement",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog duplicate requirement.",
+      "symbol": "CATALOG_DUPLICATE_REQUIREMENT"
+    },
+    {
+      "code": "catalog_no_required_checks",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog no required checks.",
+      "symbol": "CATALOG_NO_REQUIRED_CHECKS"
+    },
+    {
+      "code": "catalog_schema_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog schema invalid.",
+      "symbol": "CATALOG_SCHEMA_INVALID"
+    },
+    {
+      "code": "catalog_schema_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: catalog schema unsupported.",
+      "symbol": "CATALOG_SCHEMA_UNSUPPORTED"
+    },
+    {
+      "code": "context_incomplete",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: context incomplete.",
+      "symbol": "CONTEXT_INCOMPLETE"
+    },
+    {
+      "code": "context_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: context invalid.",
+      "symbol": "CONTEXT_INVALID"
+    },
+    {
+      "code": "duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: duplicate member.",
+      "symbol": "DUPLICATE_MEMBER"
+    },
+    {
+      "code": "envelope.duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope duplicate member.",
+      "symbol": "ENVELOPE_DUPLICATE_MEMBER"
+    },
+    {
+      "code": "envelope.float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope float not allowed.",
+      "symbol": "ENVELOPE_FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "envelope.integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope integer out of domain.",
+      "symbol": "ENVELOPE_INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "envelope.invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope invalid unicode.",
+      "symbol": "ENVELOPE_INVALID_UNICODE"
+    },
+    {
+      "code": "envelope.non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope non finite number.",
+      "symbol": "ENVELOPE_NON_FINITE_NUMBER"
+    },
+    {
+      "code": "envelope.too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope too deep.",
+      "symbol": "ENVELOPE_TOO_DEEP"
+    },
+    {
+      "code": "envelope.too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope too large.",
+      "symbol": "ENVELOPE_TOO_LARGE"
+    },
+    {
+      "code": "envelope.too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope too many nodes.",
+      "symbol": "ENVELOPE_TOO_MANY_NODES"
+    },
+    {
+      "code": "envelope_alg_not_es256",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope alg not es256.",
+      "symbol": "ENVELOPE_ALG_NOT_ES256"
+    },
+    {
+      "code": "envelope_base64url_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope base64url invalid.",
+      "symbol": "ENVELOPE_BASE64URL_INVALID"
+    },
+    {
+      "code": "envelope_crit_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope crit invalid.",
+      "symbol": "ENVELOPE_CRIT_INVALID"
+    },
+    {
+      "code": "envelope_cty_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope cty invalid.",
+      "symbol": "ENVELOPE_CTY_INVALID"
+    },
+    {
+      "code": "envelope_header_field_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope header field invalid.",
+      "symbol": "ENVELOPE_HEADER_FIELD_INVALID"
+    },
+    {
+      "code": "envelope_header_field_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope header field missing.",
+      "symbol": "ENVELOPE_HEADER_FIELD_MISSING"
+    },
+    {
+      "code": "envelope_header_member_forbidden",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope header member forbidden.",
+      "symbol": "ENVELOPE_HEADER_MEMBER_FORBIDDEN"
+    },
+    {
+      "code": "envelope_not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope not json.",
+      "symbol": "ENVELOPE_NOT_JSON"
+    },
+    {
+      "code": "envelope_payload_present",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope payload present.",
+      "symbol": "ENVELOPE_PAYLOAD_PRESENT"
+    },
+    {
+      "code": "envelope_protected_not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope protected not json.",
+      "symbol": "ENVELOPE_PROTECTED_NOT_JSON"
+    },
+    {
+      "code": "envelope_shape_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope shape unsupported.",
+      "symbol": "ENVELOPE_SHAPE_UNSUPPORTED"
+    },
+    {
+      "code": "envelope_typ_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope typ invalid.",
+      "symbol": "ENVELOPE_TYP_INVALID"
+    },
+    {
+      "code": "envelope_unprotected_header",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: envelope unprotected header.",
+      "symbol": "ENVELOPE_UNPROTECTED_HEADER"
+    },
+    {
+      "code": "expectations.bom",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations bom.",
+      "symbol": "EXPECTATIONS_BOM"
+    },
+    {
+      "code": "expectations.duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations duplicate member.",
+      "symbol": "EXPECTATIONS_DUPLICATE_MEMBER"
+    },
+    {
+      "code": "expectations.float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations float not allowed.",
+      "symbol": "EXPECTATIONS_FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "expectations.integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations integer out of domain.",
+      "symbol": "EXPECTATIONS_INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "expectations.invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations invalid unicode.",
+      "symbol": "EXPECTATIONS_INVALID_UNICODE"
+    },
+    {
+      "code": "expectations.non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations non finite number.",
+      "symbol": "EXPECTATIONS_NON_FINITE_NUMBER"
+    },
+    {
+      "code": "expectations.not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations not json.",
+      "symbol": "EXPECTATIONS_NOT_JSON"
+    },
+    {
+      "code": "expectations.not_utf8",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations not utf8.",
+      "symbol": "EXPECTATIONS_NOT_UTF8"
+    },
+    {
+      "code": "expectations.too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations too deep.",
+      "symbol": "EXPECTATIONS_TOO_DEEP"
+    },
+    {
+      "code": "expectations.too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations too large.",
+      "symbol": "EXPECTATIONS_TOO_LARGE"
+    },
+    {
+      "code": "expectations.too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations too many nodes.",
+      "symbol": "EXPECTATIONS_TOO_MANY_NODES"
+    },
+    {
+      "code": "expectations_artifact_id_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations artifact id duplicate.",
+      "symbol": "EXPECTATIONS_ARTIFACT_ID_DUPLICATE"
+    },
+    {
+      "code": "expectations_artifacts_empty",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations artifacts empty.",
+      "symbol": "EXPECTATIONS_ARTIFACTS_EMPTY"
+    },
+    {
+      "code": "expectations_bad_path",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations bad path.",
+      "symbol": "EXPECTATIONS_BAD_PATH"
+    },
+    {
+      "code": "expectations_bad_token",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations bad token.",
+      "symbol": "EXPECTATIONS_BAD_TOKEN"
+    },
+    {
+      "code": "expectations_digest_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations digest mismatch.",
+      "symbol": "EXPECTATIONS_DIGEST_MISMATCH"
+    },
+    {
+      "code": "expectations_missing_field",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations missing field.",
+      "symbol": "EXPECTATIONS_MISSING_FIELD"
+    },
+    {
+      "code": "expectations_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations out of range.",
+      "symbol": "EXPECTATIONS_OUT_OF_RANGE"
+    },
+    {
+      "code": "expectations_pin_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations pin invalid.",
+      "symbol": "EXPECTATIONS_PIN_INVALID"
+    },
+    {
+      "code": "expectations_schema_unknown",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations schema unknown.",
+      "symbol": "EXPECTATIONS_SCHEMA_UNKNOWN"
+    },
+    {
+      "code": "expectations_unknown_field",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations unknown field.",
+      "symbol": "EXPECTATIONS_UNKNOWN_FIELD"
+    },
+    {
+      "code": "expectations_wrong_type",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: expectations wrong type.",
+      "symbol": "EXPECTATIONS_WRONG_TYPE"
+    },
+    {
+      "code": "float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: float not allowed.",
+      "symbol": "FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "input_access_denied",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: input access denied.",
+      "symbol": "INPUT_ACCESS_DENIED"
+    },
+    {
+      "code": "input_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: input invalid.",
+      "symbol": "INPUT_INVALID"
+    },
+    {
+      "code": "input_too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: input too large.",
+      "symbol": "INPUT_TOO_LARGE"
+    },
+    {
+      "code": "input_unavailable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: input unavailable.",
+      "symbol": "INPUT_UNAVAILABLE"
+    },
+    {
+      "code": "integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: integer out of domain.",
+      "symbol": "INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: invalid unicode.",
+      "symbol": "INVALID_UNICODE"
+    },
+    {
+      "code": "legacy_integrity_only",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: legacy integrity only.",
+      "symbol": "LEGACY_INTEGRITY_ONLY"
+    },
+    {
+      "code": "non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: non finite number.",
+      "symbol": "NON_FINITE_NUMBER"
+    },
+    {
+      "code": "not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: not json.",
+      "symbol": "NOT_JSON"
+    },
+    {
+      "code": "not_utf8",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: not utf8.",
+      "symbol": "NOT_UTF8"
+    },
+    {
+      "code": "permit_construction_forbidden",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: permit construction forbidden.",
+      "symbol": "PERMIT_CONSTRUCTION_FORBIDDEN"
+    },
+    {
+      "code": "permit_fields_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: permit fields invalid.",
+      "symbol": "PERMIT_FIELDS_INVALID"
+    },
+    {
+      "code": "signature_encoding_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signature encoding invalid.",
+      "symbol": "SIGNATURE_ENCODING_INVALID"
+    },
+    {
+      "code": "signer_bad_signature",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer bad signature.",
+      "symbol": "SIGNER_BAD_SIGNATURE"
+    },
+    {
+      "code": "signer_identity_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer identity invalid.",
+      "symbol": "SIGNER_IDENTITY_INVALID"
+    },
+    {
+      "code": "signer_identity_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer identity mismatch.",
+      "symbol": "SIGNER_IDENTITY_MISMATCH"
+    },
+    {
+      "code": "signer_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer invalid.",
+      "symbol": "SIGNER_INVALID"
+    },
+    {
+      "code": "signer_key_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer key invalid.",
+      "symbol": "SIGNER_KEY_INVALID"
+    },
+    {
+      "code": "signer_verify_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signer verify unsupported.",
+      "symbol": "SIGNER_VERIFY_UNSUPPORTED"
+    },
+    {
+      "code": "signing_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: signing failed.",
+      "symbol": "SIGNING_FAILED"
+    },
+    {
+      "code": "statement.bom",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement bom.",
+      "symbol": "STATEMENT_BOM"
+    },
+    {
+      "code": "statement.duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement duplicate member.",
+      "symbol": "STATEMENT_DUPLICATE_MEMBER"
+    },
+    {
+      "code": "statement.float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement float not allowed.",
+      "symbol": "STATEMENT_FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "statement.integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement integer out of domain.",
+      "symbol": "STATEMENT_INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "statement.invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement invalid unicode.",
+      "symbol": "STATEMENT_INVALID_UNICODE"
+    },
+    {
+      "code": "statement.non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement non finite number.",
+      "symbol": "STATEMENT_NON_FINITE_NUMBER"
+    },
+    {
+      "code": "statement.not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement not json.",
+      "symbol": "STATEMENT_NOT_JSON"
+    },
+    {
+      "code": "statement.not_utf8",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement not utf8.",
+      "symbol": "STATEMENT_NOT_UTF8"
+    },
+    {
+      "code": "statement.too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement too deep.",
+      "symbol": "STATEMENT_TOO_DEEP"
+    },
+    {
+      "code": "statement.too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement too large.",
+      "symbol": "STATEMENT_TOO_LARGE"
+    },
+    {
+      "code": "statement.too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement too many nodes.",
+      "symbol": "STATEMENT_TOO_MANY_NODES"
+    },
+    {
+      "code": "statement_array_order",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement array order.",
+      "symbol": "STATEMENT_ARRAY_ORDER"
+    },
+    {
+      "code": "statement_artifact_id_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement artifact id duplicate.",
+      "symbol": "STATEMENT_ARTIFACT_ID_DUPLICATE"
+    },
+    {
+      "code": "statement_coverage_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement coverage invalid.",
+      "symbol": "STATEMENT_COVERAGE_INVALID"
+    },
+    {
+      "code": "statement_missing_field",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement missing field.",
+      "symbol": "STATEMENT_MISSING_FIELD"
+    },
+    {
+      "code": "statement_not_canonical",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement not canonical.",
+      "symbol": "STATEMENT_NOT_CANONICAL"
+    },
+    {
+      "code": "statement_path_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement path duplicate.",
+      "symbol": "STATEMENT_PATH_DUPLICATE"
+    },
+    {
+      "code": "statement_path_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement path invalid.",
+      "symbol": "STATEMENT_PATH_INVALID"
+    },
+    {
+      "code": "statement_publication_incoherent",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement publication incoherent.",
+      "symbol": "STATEMENT_PUBLICATION_INCOHERENT"
+    },
+    {
+      "code": "statement_schema_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement schema invalid.",
+      "symbol": "STATEMENT_SCHEMA_INVALID"
+    },
+    {
+      "code": "statement_schema_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement schema unsupported.",
+      "symbol": "STATEMENT_SCHEMA_UNSUPPORTED"
+    },
+    {
+      "code": "statement_too_many_artifacts",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement too many artifacts.",
+      "symbol": "STATEMENT_TOO_MANY_ARTIFACTS"
+    },
+    {
+      "code": "statement_too_many_checks",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement too many checks.",
+      "symbol": "STATEMENT_TOO_MANY_CHECKS"
+    },
+    {
+      "code": "statement_unknown_field",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: statement unknown field.",
+      "symbol": "STATEMENT_UNKNOWN_FIELD"
+    },
+    {
+      "code": "too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: too deep.",
+      "symbol": "TOO_DEEP"
+    },
+    {
+      "code": "too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: too large.",
+      "symbol": "TOO_LARGE"
+    },
+    {
+      "code": "too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: too many nodes.",
+      "symbol": "TOO_MANY_NODES"
+    },
+    {
+      "code": "trust_policy.bom",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy bom.",
+      "symbol": "TRUST_POLICY_BOM"
+    },
+    {
+      "code": "trust_policy.duplicate_member",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy duplicate member.",
+      "symbol": "TRUST_POLICY_DUPLICATE_MEMBER"
+    },
+    {
+      "code": "trust_policy.float_not_allowed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy float not allowed.",
+      "symbol": "TRUST_POLICY_FLOAT_NOT_ALLOWED"
+    },
+    {
+      "code": "trust_policy.integer_out_of_domain",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy integer out of domain.",
+      "symbol": "TRUST_POLICY_INTEGER_OUT_OF_DOMAIN"
+    },
+    {
+      "code": "trust_policy.invalid_unicode",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy invalid unicode.",
+      "symbol": "TRUST_POLICY_INVALID_UNICODE"
+    },
+    {
+      "code": "trust_policy.non_finite_number",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy non finite number.",
+      "symbol": "TRUST_POLICY_NON_FINITE_NUMBER"
+    },
+    {
+      "code": "trust_policy.not_json",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy not json.",
+      "symbol": "TRUST_POLICY_NOT_JSON"
+    },
+    {
+      "code": "trust_policy.not_utf8",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy not utf8.",
+      "symbol": "TRUST_POLICY_NOT_UTF8"
+    },
+    {
+      "code": "trust_policy.too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy too deep.",
+      "symbol": "TRUST_POLICY_TOO_DEEP"
+    },
+    {
+      "code": "trust_policy.too_large",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy too large.",
+      "symbol": "TRUST_POLICY_TOO_LARGE"
+    },
+    {
+      "code": "trust_policy.too_many_nodes",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy too many nodes.",
+      "symbol": "TRUST_POLICY_TOO_MANY_NODES"
+    },
+    {
+      "code": "trust_policy_alg_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy alg unsupported.",
+      "symbol": "TRUST_POLICY_ALG_UNSUPPORTED"
+    },
+    {
+      "code": "trust_policy_digest_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy digest mismatch.",
+      "symbol": "TRUST_POLICY_DIGEST_MISMATCH"
+    },
+    {
+      "code": "trust_policy_duplicate_kid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy duplicate kid.",
+      "symbol": "TRUST_POLICY_DUPLICATE_KID"
+    },
+    {
+      "code": "trust_policy_key_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy key conflict.",
+      "symbol": "TRUST_POLICY_KEY_CONFLICT"
+    },
+    {
+      "code": "trust_policy_key_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy key invalid.",
+      "symbol": "TRUST_POLICY_KEY_INVALID"
+    },
+    {
+      "code": "trust_policy_lifecycle_incoherent",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy lifecycle incoherent.",
+      "symbol": "TRUST_POLICY_LIFECYCLE_INCOHERENT"
+    },
+    {
+      "code": "trust_policy_pin_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy pin invalid.",
+      "symbol": "TRUST_POLICY_PIN_INVALID"
+    },
+    {
+      "code": "trust_policy_schema_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy schema invalid.",
+      "symbol": "TRUST_POLICY_SCHEMA_INVALID"
+    },
+    {
+      "code": "trust_policy_schema_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy schema unsupported.",
+      "symbol": "TRUST_POLICY_SCHEMA_UNSUPPORTED"
+    },
+    {
+      "code": "trust_policy_thumbprint_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "evidence",
+      "owner": "SignedEvidence",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "verification",
+          "phase": "verify",
+          "retry": "never",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Signed evidence was refused: trust policy thumbprint mismatch.",
+      "symbol": "TRUST_POLICY_THUMBPRINT_MISMATCH"
+    },
+    {
+      "code": "baseline_digest_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The scan baseline file does not match scan_baseline.sha256, so the run stopped.",
+      "symbol": "BASELINE_DIGEST_MISMATCH"
+    },
+    {
+      "code": "baseline_unbound",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The scan baseline has no scan_baseline.sha256, so nothing proves it is the intended file.",
+      "symbol": "BASELINE_UNBOUND"
+    },
+    {
+      "code": "baseline_unreadable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The scan baseline file is not a readable scan-set/v1 scan.",
+      "symbol": "BASELINE_UNREADABLE"
+    },
+    {
+      "code": "drift_blocked",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "finding",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The sources drifted from the scan baseline, so the run stopped under on_drift: fail.",
+      "symbol": "DRIFT_BLOCKED"
+    },
+    {
+      "code": "drift_detected",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "pre_scan",
+      "owner": "decoy_engine.phase",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "resolve",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The sources drifted from the scan baseline; the run continues under on_drift: warn.",
+      "symbol": "DRIFT_DETECTED"
+    },
+    {
+      "code": "ner_model_uncalibrated",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "provider",
+      "owner": "NerUnavailableError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "NER model has no calibrated hit rate.",
+      "symbol": "NER_MODEL_UNCALIBRATED"
+    },
+    {
+      "code": "key_version_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "MaskSecretError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "resolve",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The key version label is not valid.",
+      "symbol": "KEY_VERSION_INVALID"
+    },
+    {
+      "code": "post_scan_distribution_deferred",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "mask",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "generate",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "finalize",
+          "retry": "configuration_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "configuration",
+          "phase": "unknown",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
+      "symbol": "POST_SCAN_DISTRIBUTION_DEFERRED"
+    },
+    {
+      "code": "probe_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ProbeError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "resolve",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The synthetic probe could not run.",
+      "symbol": "PROBE_FAILED"
+    },
+    {
+      "code": "spool_disk_full",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "ExecutionError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "environment_repair",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "environment_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The disk or quota for the local copy of a remote source is too small.",
+      "symbol": "SPOOL_DISK_FULL"
+    },
+    {
+      "code": "cardinality_collisions",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "Cardinality collisions.",
+      "symbol": "CARDINALITY_COLLISIONS"
+    },
+    {
+      "code": "nested_cell_duplicate_key",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A nested cell repeats an object key, so it cannot be masked.",
+      "symbol": "NESTED_CELL_DUPLICATE_KEY"
+    },
+    {
+      "code": "nested_cell_number_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A nested rule selects a number too long to read as an integer.",
+      "symbol": "NESTED_CELL_NUMBER_OUT_OF_RANGE"
+    },
+    {
+      "code": "nested_cell_oversized",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A nested cell is larger than the byte limit, so it cannot be masked.",
+      "symbol": "NESTED_CELL_OVERSIZED"
+    },
+    {
+      "code": "nested_cell_too_deep",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A nested cell is deeper than the nesting limit, so it cannot be masked.",
+      "symbol": "NESTED_CELL_TOO_DEEP"
+    },
+    {
+      "code": "nested_child_non_finite",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "A nested child strategy returned a value that is not a finite number.",
+      "symbol": "NESTED_CHILD_NON_FINITE"
+    },
+    {
+      "code": "scan_baseline_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "EvidenceManifest",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
+      "symbol": "SCAN_BASELINE_MISSING"
+    },
+    {
+      "code": "sftp_lock_not_removed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "ConnectorEvent",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.30.0",
+      "summary": "An SFTP lock file could not be removed after a run.",
+      "symbol": "SFTP_LOCK_NOT_REMOVED"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.30.0"
+}

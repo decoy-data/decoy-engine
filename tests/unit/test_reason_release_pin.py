@@ -16,10 +16,11 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.release.reason_manifest_policy import since_floor_violations
+from scripts.release.reason_manifest_policy import append_only_violations, since_floor_violations
 from scripts.release.reason_release_pin import PIN_PATH, build_pin, load_pin, pin_violations
 
 from decoy_engine import reasons
+from tests.sentry.test_no_residual_removed_surface import RETIRED_PATTERN
 
 V1_PIN = Path(__file__).resolve().parents[1] / "fixtures" / "f29" / "reason-manifest-v1.json"
 
@@ -44,6 +45,10 @@ def test_pin_is_well_formed() -> None:
     pin, problems = load_pin(PIN_PATH.read_text(encoding="utf-8"))
     assert problems == [] and pin is not None
     assert sum(pin["since_counts"].values()) == len(pin["identities"])
+
+
+def test_pin_holds_no_identity_with_the_retired_name() -> None:
+    assert [i["code"] for i in _pin()["identities"] if RETIRED_PATTERN.search(i["code"])] == []
 
 
 def _first_shipped(m: dict) -> dict:
@@ -327,3 +332,97 @@ def test_at2_a_flipped_digest_nibble_under_the_live_value_fails_the_pin_cli(tree
     name = f"{record['namespace']}.{record['code']}"
     assert res.returncode == 1 and f"{name}: summary" in res.stderr, res.stderr[-800:]
     assert re.search(r"[0-9a-f]{64}", res.stderr) is None, "messages name fields, never digests"
+
+
+def test_pin_cli_check_accepts_the_checked_in_tree(tree) -> None:
+    # --release-ready holds only after release prep stamps pending reasons; release_checks.sh runs it.
+    res = pin_cli(tree, "--check")
+    assert res.returncode == 0, res.stderr[-800:]
+
+
+# Pre-GA correction (docs/compatibility-contract.md, 2026-11-17): eight released connector codes
+# may move their `rules` from execution/unknown to configuration/configuration_repair, nothing else.
+_CORRECTED = (
+    "ambiguous_name",
+    "column_not_found",
+    "duplicate_relation",
+    "extension_unavailable",
+    "extension_untrusted_location",
+    "relation_not_found",
+    "unsupported_column_type",
+    "value_not_representable",
+)
+
+
+def _rules(outcome: str, retry: str) -> list[dict]:
+    return [
+        {"phase": p, "severity": "error", "outcome": outcome, "retry": retry}
+        for p in ("resolve", "unknown")
+    ]
+
+
+_OLD, _NEW = _rules("execution", "unknown"), _rules("configuration", "configuration_repair")
+
+
+def _conn(m: dict, code: str) -> dict:
+    return next(e for e in m["entries"] if (e["namespace"], e["code"]) == ("connector", code))
+
+
+def _released() -> dict:
+    """The live catalog as the release shipped it: the eight corrected codes still hold the old rules."""
+    m = _live()
+    for code in _CORRECTED:
+        assert _conn(m, code)["rules"] == _NEW, code
+        _conn(m, code)["rules"] = _OLD
+    return m
+
+
+def test_the_correction_list_is_closed_to_the_eight_connector_rules() -> None:
+    from scripts.release.reason_pre_ga_corrections import PRE_GA_CORRECTIONS
+
+    assert sorted(PRE_GA_CORRECTIONS) == [("connector", c) for c in _CORRECTED]
+    for field, old, new in PRE_GA_CORRECTIONS.values():
+        assert (field, json.loads(json.dumps(old)), json.loads(json.dumps(new))) == (
+            "rules",
+            _OLD,
+            _NEW,
+        )
+
+
+def test_the_eight_corrected_rules_pass_the_pin_and_the_append_only_check() -> None:
+    released, live = _released(), _live()
+    assert pin_violations(build_pin(released, released["registry_version"]), live) == []
+    assert append_only_violations(released, live) == []
+
+
+def _ninth_code(released: dict, live: dict) -> str:
+    _conn(released, "catalog_read_failed")["rules"] = _OLD
+    _conn(live, "catalog_read_failed")["rules"] = _NEW
+    return "connector.catalog_read_failed: rules"
+
+
+def _other_field(released: dict, live: dict) -> str:
+    _conn(live, "ambiguous_name")["owner"] = "SomeOtherOwner"
+    return "connector.ambiguous_name: owner"
+
+
+def _other_target(released: dict, live: dict) -> str:
+    _conn(live, "relation_not_found")["rules"] = _rules("configuration", "never")
+    return "connector.relation_not_found: rules"
+
+
+def _other_source(released: dict, live: dict) -> str:
+    _conn(released, "column_not_found")["rules"] = _rules("execution", "never")
+    return "connector.column_not_found: rules"
+
+
+@pytest.mark.parametrize("mutate", [_ninth_code, _other_field, _other_target, _other_source])
+def test_any_other_released_change_still_fails(mutate) -> None:
+    released, live = _released(), _live()
+    needle = mutate(released, live)
+    pin = build_pin(released, released["registry_version"])
+    assert f"{needle} differs from the release pin" in pin_violations(pin, live)
+    ns, code, field = needle.replace(": ", ".").split(".")
+    assert f"('{ns}', '{code}'): {field} changed" in " ".join(
+        append_only_violations(released, live)
+    )

@@ -73,7 +73,8 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.errors", "EnvFlagError", "config"),
     ("decoy_engine.errors", "PKDuplicatesError", "runtime"),
     ("decoy_engine.keyprovider", "MaskSecretError", "runtime"),
-    ("decoy_engine.vault", "VaultError", "runtime"),
+    ("decoy_engine.support._probe", "ProbeError", "runtime"),
+    ("decoy_engine.vault._format", "VaultError", "runtime"),
     ("decoy_engine.execution._mixed_admission", "MixedDeclineError", "runtime"),
     ("decoy_engine.execution._unified_slice", "UnifiedSliceInvariantError", "runtime"),
     ("decoy_engine.execution.native._chunk_schema", "NativeChunkSchemaDriftError", "runtime"),
@@ -99,11 +100,20 @@ _CODED: tuple[tuple[str, str, str], ...] = (
     ("decoy_engine.quality.dp_provenance", "ProvenanceError", "quality"),
     ("decoy_engine.quality.snapshot", "DistributionSnapshotError", "quality"),
     ("decoy_engine.verification.postmask._blocked", "PostScanBlockedError", "post_scan"),
-    ("decoy_engine.connectors.postgres_snapshot", "PostgresSnapshotError", "connector"),
+    ("decoy_engine.connectors._postgres_session", "PostgresSnapshotError", "connector"),
     ("decoy_engine.execution.physical._shadow_diff_codes", "ShadowDifference", "physical"),
     ("decoy_engine.publication._types", "PublicationRefused", "decoy"),
     ("decoy_engine.publication._types", "PublicationFailed", "decoy"),
     ("decoy_engine.delivery.resume._plan", "ResumeRefusedError", "decoy"),
+    ("decoy_engine.validation.starter_review", "ReviewInputError", "config"),
+    ("decoy_engine.validation.starter_review", "ReviewUnknownColumnError", "pre_scan"),
+    ("decoy_engine.validation.starter_review", "ReviewDuplicateError", "pre_scan"),
+    ("decoy_engine.validation.starter_review", "ReviewStaleError", "pre_scan"),
+    ("decoy_engine.validation.starter_review", "ReviewEmptyTableError", "pre_scan"),
+    ("decoy_engine.validation.finding_review", "ReviewDismissRefusedError", "post_scan"),
+    ("decoy_engine.validation.finding_review", "ReviewConflictError", "post_scan"),
+    ("decoy_engine.validation.finding_review", "ReviewIntegrityOffError", "post_scan"),
+    ("decoy_engine.profiling.bound_baseline", "BaselineBindingError", "pre_scan"),
 )
 # Engine exceptions that carry no code but have one fixed meaning: (module, class, reason).
 _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
@@ -120,6 +130,7 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.sdk", "PermanentError", reasons.decoy.CONNECTOR_PERMANENT_FAILURE),
     ("decoy_engine.fileaccess._types", "FileAccessDenied", reasons.decoy.FILE_ACCESS_DENIED),
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
+    ("decoy_engine.profiling.scan_set_read", "ScanSetReadError", reasons.config.UNTAGGED),
     # F22 errno-only file-access errors: one meaning each, whoever raised them.
     (
         "decoy_engine.fileaccess._types",
@@ -142,6 +153,14 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
 )
 
 
+# Engine exceptions that carry a registered reason identity of their own: (module, class). The
+# identity is read from the trusted ``.identity`` attribute and must be a registered ``ReasonCode``;
+# the exception's ``.code`` (a frozen wire token for a conformance vector) is never classified.
+_IDENTIFIED: tuple[tuple[str, str], ...] = (
+    ("decoy_engine.signed_evidence._errors", "SignedEvidenceError"),
+)
+
+
 @lru_cache(maxsize=1)
 def _families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
     """Resolve the tables to class objects once; classes are the trust anchor, not strings."""
@@ -154,6 +173,15 @@ def _families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
     for module, name, reason in _FIXED:
         fixed[getattr(importlib.import_module(module), name)] = reason
     return coded, fixed
+
+
+def _loaded_identified() -> frozenset[type]:
+    """The identified families whose module this process has already imported (imports nothing)."""
+    return frozenset(
+        cls
+        for module, name in _IDENTIFIED
+        if (cls := getattr(sys.modules.get(module), name, None)) is not None
+    )
 
 
 def _loaded_families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
@@ -179,7 +207,9 @@ def _loaded_families() -> tuple[dict[type, str], dict[type, ReasonCode]]:
 
 def registered_family_names() -> frozenset[str]:
     """The class name of every trusted family, read from the tables without importing any module."""
-    return frozenset(name for _module, name, _ in (*_CODED, *_FIXED))
+    return frozenset(
+        [name for _module, name, _ in (*_CODED, *_FIXED)] + [name for _module, name in _IDENTIFIED]
+    )
 
 
 def loaded_families() -> frozenset[type]:
@@ -189,13 +219,18 @@ def loaded_families() -> frozenset[type]:
     and safe on a failure path because it imports nothing.
     """
     coded, fixed = _loaded_families()
-    return frozenset(coded) | frozenset(fixed)
+    return frozenset(coded) | frozenset(fixed) | _loaded_identified()
 
 
 def registered_families() -> frozenset[type]:
     """Every exception class the adapter trusts (coded or fixed), for completeness tests."""
+    import importlib
+
     coded, fixed = _families()
-    return frozenset(coded) | frozenset(fixed)
+    identified = frozenset(
+        getattr(importlib.import_module(module), name) for module, name in _IDENTIFIED
+    )
+    return frozenset(coded) | frozenset(fixed) | identified
 
 
 def _first_in_mro(exc: BaseException, table: dict[type, Any]) -> Any:
@@ -254,6 +289,8 @@ def _classify(exc: BaseException, phase: Phase, context: ReasonContext | None) -
     )
     if publishing and _capacity_evidence(exc):
         return _record(reasons.decoy.STORAGE_CAPACITY_EXHAUSTED, phase, context)
+    if any(cls in _loaded_identified() for cls in type(exc).__mro__):
+        return _record(_identified_reason(exc), phase, context)
     coded, fixed = _loaded_families()
     namespace = _first_in_mro(exc, coded)
     if namespace is not None:
@@ -273,6 +310,17 @@ def _classify(exc: BaseException, phase: Phase, context: ReasonContext | None) -
     if publishing and isinstance(exc, OSError):
         return _record(reasons.decoy.PUBLICATION_FAILED, phase, context)
     return _record(reasons.decoy.UNEXPECTED_ERROR, phase, context)
+
+
+def _identified_reason(exc: BaseException) -> ReasonCode:
+    """The exception's own registered identity, or ``decoy.unregistered_reason`` when it has none."""
+    try:
+        identity = exc.identity  # type: ignore[attr-defined]
+    except Exception:
+        return reasons.decoy.UNREGISTERED_REASON
+    if isinstance(identity, ReasonCode) and reasons.find(identity.namespace, identity) is not None:
+        return identity
+    return reasons.decoy.UNREGISTERED_REASON
 
 
 def _read_code(exc: BaseException) -> str | None:

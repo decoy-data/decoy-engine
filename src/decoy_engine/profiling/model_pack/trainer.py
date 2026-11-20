@@ -72,13 +72,12 @@ try:
     # only (no loading from arbitrary external sources).  This is the same
     # posture used by every sklearn model-persistence workflow.
     import joblib
-    from lightgbm import LGBMClassifier
     from sklearn.calibration import CalibratedClassifierCV, calibration_curve
     from sklearn.feature_extraction import DictVectorizer
-    from sklearn.metrics import (
-        balanced_accuracy_score,
-        brier_score_loss,
-    )
+    from sklearn.metrics import balanced_accuracy_score, brier_score_loss
+    from decoy_engine.profiling.model_pack._mlstack import lgbm_classifier  # isort: skip  (sklearn first)
+
+    LGBMClassifier = lgbm_classifier()
 except (ImportError, OSError) as _err:  # OSError: lightgbm dlopen fails without libomp/libgomp
     raise ImportError(
         "scikit-learn and lightgbm failed to import. They are base dependencies: reinstall "

@@ -10,18 +10,19 @@ import pytest
 
 from decoy_engine.execution._transforms import FilterOp, apply_transforms
 from decoy_engine.execution._when_gate import _eval_predicate
-from decoy_engine.transforms.date_shift import DateShiftStrategy
 from tests.unit._dps_helpers import compile_and_generate
 
 _SECRET = "bob@example.com"
 
 
 def _nullable_frame() -> pd.DataFrame:
-    # Extension dtypes make pandas fall back from numexpr, which triggers the log line.
+    # Extension dtypes make pandas fall back from numexpr, which triggers the log line. `Float64`,
+    # not `Int64`: the `when:` frame turns a nullable integer into a plain float64 (FREEZE-O1), so
+    # an integer column no longer reaches numexpr as an extension array.
     return pd.DataFrame(
         {
             "email": pd.array([_SECRET, "x@y.z", None], dtype="string"),
-            "age": pd.array([10, 20, 30], dtype="Int64"),
+            "age": pd.array([10, 20, 30], dtype="Float64"),
         }
     )
 
@@ -57,18 +58,6 @@ def test_transform_fallback_log_names_the_op_not_the_expression(caplog) -> None:
     for record in records:
         assert _SECRET not in record.getMessage()
         assert "filter" in record.getMessage()
-
-
-def test_date_shift_unparseable_values_are_counted_not_logged(caplog) -> None:
-    column = pd.Series(["2024-01-01", _SECRET, "2024-02-02", _SECRET])
-    with caplog.at_level(logging.DEBUG):
-        out = DateShiftStrategy(seed=7).apply(
-            column, {"column": "dob", "date_format": "%Y-%m-%d", "min_days": 1, "max_days": 5}
-        )
-    assert out.iloc[1] == _SECRET and out.iloc[3] == _SECRET  # unparseable values unchanged
-    assert out.iloc[0] != "2024-01-01" and out.iloc[2] != "2024-02-02"
-    assert _SECRET not in caplog.text
-    assert "2 value(s) in column 'dob' could not be parsed" in caplog.text
 
 
 def test_formula_errors_fail_the_run_without_cell_values(caplog) -> None:
@@ -193,19 +182,6 @@ def test_disguise_loader_logs_locations_not_input_values(tmp_path, caplog) -> No
     with caplog.at_level(logging.ERROR, logger="decoy_engine.disguises.loader"):
         load_disguises(tmp_path)
     assert "schema validation failed" in caplog.text
-    assert _SECRET not in caplog.text
-
-
-def test_date_shift_key_failure_logs_type_not_message(caplog) -> None:
-    import pytest
-
-    def bad_key(_label: str) -> bytes:
-        raise RuntimeError(_SECRET)
-
-    strategy = DateShiftStrategy(seed=7, derive_key=bad_key)
-    with caplog.at_level(logging.DEBUG), pytest.raises(Exception):
-        strategy.apply(pd.Series(["2024-01-01"]), {"column": "dob", "date_format": "%Y-%m-%d"})
-    assert "RuntimeError" in caplog.text
     assert _SECRET not in caplog.text
 
 

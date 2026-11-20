@@ -9,7 +9,7 @@ Status: plan
 
 ## Expected behaviour
 
-- **date_shift**: moves each date by a per-value offset within `min_days` and
+- **date_shift**: needs `provider_config.date_format`; it moves each date by a per-value offset within `min_days` and
   `max_days` (defaults -365 and 365; reversed bounds are swapped). Same date gives the
   same shifted date within a namespace.
 - **bucket_perturb**: moves each date to a keyed position inside its own ISO week,
@@ -29,6 +29,8 @@ Status: plan
 
 ## Checks
 
+Every check below runs with a mask secret configured, except DATE-13.
+
 | Id | Run this | What should happen |
 |---|---|---|
 | DATE-01 | `date_shift` with defaults on ISO dates. | Every output is within 365 days of its source. Equal dates shift equally. Rerun is identical. |
@@ -43,12 +45,10 @@ Status: plan
 | DATE-10 | `top_code` with `preset: hipaa_age` on ages 0 to 110. | 0 to 89 render as their own integers; 90 and above render as `90+`. Output is one string type. |
 | DATE-11 | `top_code` with an unknown preset; with `floor >= cap`; under a `when:` gate. | Each refused at compile. |
 | DATE-12 | `windowed_date` with `min_days: 1`, `max_days: 30` and each distribution, 10,000 rows each. | Every output is 1 to 30 days after its anchor. `early` takes the smaller of two uniform draws and `late` the larger, so the mean offset is within 0.5 day of 10.5 (`early`), 15.5 (`uniform`) and 20.5 (`late`). Rerun is identical. |
+| DATE-13 | `date_shift` with no secret configured; then with a `SeedKeyProvider`. | Refused with `runtime.keyed_strategy_requires_secret` before any source read, on `run_pipeline` and both chunked entries. No target is written. |
 
 ## Open points
 
-- The `date_shift` section of `docs/strategies.md` says "null and unparseable values are
-  left as-is", while the row-error section says an unparseable cell now fails or
-  quarantines. DATE-03 assumes the second. Fix the stale sentence.
 - `bucketize` likewise says "non-numeric and null values pass through"; DATE-09 assumes
   a non-numeric cell is a `format_error`.
 - `bucket_perturb` with no detectable date format passes the column through with only a

@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Iterator
 from typing import TypeVar
 
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import LOCK_PREFIX, LOCK_SUFFIX, validate_component
 from decoy_engine.fileaccess._output import (
     _CREATOR_KEY,
@@ -51,7 +52,7 @@ _CHUNK = 1 << 16
 
 def _leaf_flags() -> int:
     # O_NONBLOCK: a FIFO planted in a unit must not block the open.
-    return os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+    return _osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC | _osflags.NONBLOCK
 
 
 def _sync(dir_fd: int) -> None:
@@ -247,7 +248,7 @@ def _held_lock(open_parent: Callable[[], int], leaf: str, timeout_s: float) -> I
 
 def _open_lock_at(parent_fd: int, leaf: str) -> int:
     # O_RDWR because NFS emulates flock with byte-range locks, which need write access.
-    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    flags = _osflags.RDWR | _osflags.CREAT | _osflags.NOFOLLOW | _osflags.CLOEXEC
     lock_fd = _call(os.open, f"{LOCK_PREFIX}{leaf}{LOCK_SUFFIX}", flags, 0o600, dir_fd=parent_fd)
     try:
         _restore_missing_owner_bits(lock_fd)  # under umask 0477 it is born 0200

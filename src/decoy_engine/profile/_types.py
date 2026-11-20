@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from decoy_engine.profiling._basis import key_claim_allowed
+
 
 class PIIClass(str, Enum):
     """Built-in detector ids.
@@ -102,7 +104,7 @@ class ColumnProfile:
     max_length: int | None = None
 
     def __post_init__(self) -> None:
-        if self.sampled and self.is_candidate_key_sampled:
+        if not key_claim_allowed(not self.sampled, self.is_candidate_key_sampled):
             raise ValueError(
                 f"ColumnProfile {self.name!r}: is_candidate_key_sampled must be "
                 "False when sampled=True. A definitive candidate-key flag "

@@ -19,6 +19,7 @@ __all__ = [
     "NAMESPACE_EMPTY",
     "NER_MODEL_INCOMPATIBLE",
     "NER_MODEL_NOT_INSTALLED",
+    "NER_MODEL_UNCALIBRATED",
     "NER_SPACY_NOT_INSTALLED",
     "SEED_WRONG_LENGTH",
     "UNKNOWN_PROVIDER",
@@ -54,6 +55,9 @@ _d = _catalog.provider("NerUnavailableError")
 
 NER_MODEL_INCOMPATIBLE = _d("ner_model_incompatible", "NER model incompatible.", since="1.8.0")
 NER_MODEL_NOT_INSTALLED = _d("ner_model_not_installed", "NER model not installed.")
+NER_MODEL_UNCALIBRATED = _d(
+    "ner_model_uncalibrated", "NER model has no calibrated hit rate.", since="1.30.0"
+)
 NER_SPACY_NOT_INSTALLED = _d("ner_spacy_not_installed", "NER spacy not installed.")
 
 _d = _catalog.provider("ProviderError")

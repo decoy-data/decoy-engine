@@ -144,6 +144,19 @@ def verification(owner: str) -> Declarer:
     )
 
 
+def evidence(owner: str) -> Declarer:
+    """A signed-evidence verifier refusal: an input or context the verifier cannot act on."""
+    return Declarer(
+        "evidence",
+        owner,
+        kind=Kind.FAILURE,
+        phases=(_P.VERIFY,),
+        severity=Severity.ERROR,
+        outcome=Outcome.VERIFICATION,
+        retry=RetryClass.NEVER,
+    )
+
+
 def physical(owner: str) -> Declarer:
     """A shadow-plan comparison or admission difference. Internal diagnostics, never replayable."""
     return Declarer(

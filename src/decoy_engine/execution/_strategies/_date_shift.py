@@ -1,12 +1,16 @@
 """date_shift strategy (engine-v2 S9): shift each date by a keyed offset.
 
 Re-keyed onto S3 (S9 spec §4 row 5): the per-value offset in
-``[min_days, max_days]`` is `min_days + (int.from_bytes(derive(job_seed,
-namespace, _canonicalize_source(value))[:8], "big") % range_size)` -- NOT the
-legacy HMAC(column_key)/MD5 path. Same source date -> same shift within a
-namespace; byte-stable across runs. Format detection + the vectorized
-datetime parse/reformat are reused from V1 `transforms/date_shift._detect_format`.
+``[min_days, max_days]`` is `min_days + (int.from_bytes(derive(mask_key,
+namespace, _canonicalize_source(value))[:8], "big") % range_size)`. The mask
+key is the admitted secret (at least 32 bytes); there is no key-free path. Same
+source date -> same shift within a namespace; byte-stable across runs. The
+format is required: plan compile refuses a column without
+`provider_config.date_format`, and the handler refuses it too (a column whose own declared
+parse format supplies the shape is the one exception). Nothing guesses it from the cells.
 Null + parse-failed positions restore the original value.
+
+Pattern: HKDF-SHA256 then HMAC-SHA256 keyed deterministic offset (HKDF RFC 5869; HMAC RFC 2104).
 
 Sprint 2 honesty pack (2026-07-04, D7/D8, discovery 0.1): a non-null cell
 that fails `pd.to_datetime` parsing used to silently keep the ORIGINAL
@@ -58,12 +62,15 @@ offset, same as an ungrouped column).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
+from decoy_engine.contracts.strategy_requirements import requirement_missing
 from decoy_engine.determinism._derive import DeriveContext
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -77,7 +84,36 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.date_preserve import preserve_set_from_config
-from decoy_engine.transforms.date_shift import _detect_format
+from decoy_engine.transforms.date_shift import shift_window
+
+
+def _required_format(cfg: Mapping[str, Any], column: str, ctx: StrategyContext) -> str | None:
+    """The column's `date_format`, or None when its declared parse format owns it.
+
+    Plan compile refuses a missing format before any read, so this is the backstop for a caller
+    that reaches the handler without compile. It keys on where the column sits in the plan (the
+    table and column in `ctx.declared_date_columns`, and not running as a nested child), never on
+    the data, so a declared column holding date objects and a text column are told apart by the
+    plan alone. It does not detect a format from the cells.
+    """
+    fmt = cfg.get("date_format")
+    if not requirement_missing(fmt):
+        return str(fmt)
+    declared = (ctx.current_table, ctx.nested_outer_column or column) in ctx.declared_date_columns
+    if date_shift_owns_declared_format(
+        nested=bool(ctx.nested_outer_column),
+        logical_type="date" if declared else None,
+        has_parse_format=declared,
+    ):
+        return None
+    raise StrategyError(
+        code=reasons.runtime.DATE_SHIFT_REQUIRES_DATE_FORMAT,
+        strategy="date_shift",
+        message=(
+            f"column {ctx.nested_outer_column or column!r} uses date_shift but has no "
+            "provider_config.date_format."
+        ),
+    )
 
 
 class DateShiftStrategyHandler:
@@ -94,7 +130,7 @@ class DateShiftStrategyHandler:
     wizard_options: tuple[StrategyOption, ...] = (
         option("min_days", "int", -30),
         option("max_days", "int", 30),
-        option("date_format", "str", "%Y-%m-%d"),
+        option("date_format", "str", "%Y-%m-%d", required=True),
     )
     offer_in_wizard: bool = True
 
@@ -112,10 +148,7 @@ class DateShiftStrategyHandler:
                 message=f"column {column!r} uses date_shift but has no namespace.",
             )
         cfg = provider_config_to_dict(plan.provider_config)
-        min_days = int(cfg.get("min_days", -365))
-        max_days = int(cfg.get("max_days", 365))
-        if min_days > max_days:
-            min_days, max_days = max_days, min_days
+        min_days, max_days = shift_window(cfg)
         range_size = max_days - min_days + 1
         try:
             preserve = preserve_set_from_config(cfg)
@@ -139,7 +172,7 @@ class DateShiftStrategyHandler:
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
             col = col.astype(object)
-        fmt = cfg.get("date_format") or _detect_format(col)
+        fmt = _required_format(cfg, column, ctx)
 
         # HC-3(a): group_by anchors the digest input to a sibling entity
         # column read from the PRE-MASK snapshot in ctx, not the live frame

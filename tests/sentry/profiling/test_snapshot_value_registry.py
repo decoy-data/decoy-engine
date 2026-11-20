@@ -19,6 +19,9 @@ import pytest
 from decoy_engine.profiling import _value_redaction as vr
 from decoy_engine.profiling import distribution_snapshot_document
 from decoy_engine.profiling._value_redaction import (
+    DATA_RULES,
+    SNAPSHOT_FLOOR_KEPT_STATS,
+    SNAPSHOT_FLOOR_STATS,
     SNAPSHOT_KINDS,
     SNAPSHOT_VALUE_FREE_STATS,
     SNAPSHOT_VALUE_STATS,
@@ -119,9 +122,18 @@ def test_the_registries_are_disjoint() -> None:
 
 
 def test_the_four_snapshot_rules_join_the_one_rule_enum() -> None:
-    assert {"coarse_range", "empty_map", "previous_year_start", "next_year_end"} <= {
-        r.value for r in Rule
-    }
+    assert {
+        "coarse_range",
+        "empty_map",
+        "previous_year_start",
+        "next_year_end",
+        "top_coded_range",
+        "k_tail_quantiles",
+        "fold_years_under_k",
+        "kept_year_start",
+        "kept_year_end",
+        "fold_under_k",
+    } <= {r.value for r in Rule}
     enums = [v for v in vars(vr).values() if isinstance(v, type) and issubclass(v, enum.Enum)]
     assert enums == [Rule]
 
@@ -130,7 +142,8 @@ def test_every_visited_key_is_classified_and_every_entry_is_visited() -> None:
     snap = _snapshot(high_cardinality_columns=["code"])
     assert _kinds_seen(snap) == SNAPSHOT_KINDS
     assert _unclassified(snap) == set()
-    assert _visited(snap) == set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
+    plain = distribution_snapshot_document(_frame(), joint_columns=_PAIRS)
+    assert _visited(snap) | _visited(plain) == set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
 
 
 def test_the_kinds_equal_the_kinds_the_snapshot_source_can_emit() -> None:
@@ -150,14 +163,28 @@ def test_a_new_stats_key_is_reported_unclassified(monkeypatch: pytest.MonkeyPatc
 
 def test_a_sixth_kind_literal_is_seen_by_the_source_read() -> None:
     source = Path(snapshot_module.__file__).read_text(encoding="utf-8")
-    patched = source.replace(
-        'return "freetext", _freetext_stats', 'return "geo", _freetext_stats', 1
-    )
+    patched = source.replace('return "freetext", freetext_stats', 'return "geo", freetext_stats', 1)
     assert patched != source
     assert _kinds_in_source(patched) - SNAPSHOT_KINDS == {"geo"}
 
 
-# AT-11
+# AT-11 (floor table)
+
+
+def test_the_floor_table_and_the_kept_aggregates_cover_every_flagged_key() -> None:
+    year_bins = {("datetime", "year_bins")}
+    assert (
+        set(SNAPSHOT_FLOOR_STATS) | SNAPSHOT_FLOOR_KEPT_STATS
+        == set(SNAPSHOT_VALUE_STATS) | year_bins
+    )
+    assert set(SNAPSHOT_FLOOR_STATS) & SNAPSHOT_FLOOR_KEPT_STATS == set()
+    assert set(SNAPSHOT_FLOOR_STATS.values()) <= DATA_RULES
+    assert set(SNAPSHOT_FLOOR_STATS) <= set(SNAPSHOT_VALUE_STATS) | SNAPSHOT_VALUE_FREE_STATS
+
+
+def test_every_key_of_a_plain_document_is_classified() -> None:
+    doc = distribution_snapshot_document(_frame(), joint_columns=_PAIRS)
+    assert _unclassified(doc) == set()
 
 
 def _containers(doc: dict[str, Any], scope: str, names: set[str]) -> list[dict[str, Any]]:
@@ -242,28 +269,59 @@ _FORBIDDEN_NAMES = {
 _FORBIDDEN_CALLS = {"crosstab", "_joint_snapshot", "joint_snapshot"}
 
 
-def _guard_findings(source: str) -> list[str]:
+def _is_placeholder(node: ast.AST) -> bool:
+    return (isinstance(node, ast.Name) and node.id == "REDACTED") or (
+        isinstance(node, ast.Attribute) and node.attr == "REDACTED"
+    )
+
+
+def _shared_findings(source: str) -> list[str]:
+    """Checks for every writer of a value document: no placeholder, null or empty written inline.
+
+    `_apply` owns every replacement. The placeholder may only be read, as an operand of a
+    comparison or membership test (`text not in (REDACTED, ...)`).
+    """
     tree = ast.parse(source)
+    parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+
+    def operand(node: ast.AST) -> bool:
+        parent = parents.get(node)
+        if isinstance(parent, (ast.Tuple, ast.Set, ast.List)):
+            parent = parents.get(parent)
+        return isinstance(parent, ast.Compare)
+
     found: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant):
-            if isinstance(node.value, str) and node.value in _FORBIDDEN_NAMES:
-                found.append(f"string {node.value}")
-            if isinstance(node.value, float) and 0.0 <= node.value <= 1.0:
+        text = isinstance(node, ast.Constant) and node.value == vr.REDACTED
+        if (_is_placeholder(node) or text) and not operand(node):
+            found.append("the placeholder used other than in a comparison")
+        if isinstance(node, ast.Constant) and isinstance(node.value, float):
+            if 0.0 <= node.value <= 1.0:
                 found.append(f"float {node.value}")
-        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_NAMES | _FORBIDDEN_CALLS:
-            found.append(f"attribute {node.attr}")
-        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_CALLS:
-            found.append(f"name {node.id}")
         if isinstance(node, (ast.Assign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             value = node.value
             plain = (
-                isinstance(value, ast.Constant)
-                and (value.value is None or value.value == vr.REDACTED)
-            ) or (isinstance(value, ast.Dict) and not value.keys)
+                (isinstance(value, ast.Constant) and value.value is None)
+                or (isinstance(value, ast.Dict) and not value.keys)
+                or (isinstance(value, ast.List) and not value.elts)
+            )
             if plain and any(isinstance(t, ast.Subscript) for t in targets):
-                found.append("a stats key assigned null, {} or the placeholder inline")
+                found.append("a stats key assigned null, {} or [] inline")
+    return found
+
+
+def _guard_findings(source: str) -> list[str]:
+    tree = ast.parse(source)
+    found = _shared_findings(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str) and node.value in _FORBIDDEN_NAMES:
+                found.append(f"string {node.value}")
+        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_NAMES | _FORBIDDEN_CALLS:
+            found.append(f"attribute {node.attr}")
+        if isinstance(node, ast.Name) and node.id in _FORBIDDEN_CALLS:
+            found.append(f"name {node.id}")
         if isinstance(node, ast.Call):
             fn = node.func
             name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
@@ -376,10 +434,45 @@ def test_the_guard_bites_on_each_forbidden_shape(snippet: str) -> None:
 
 
 def test_the_profile_redactor_uses_the_same_selection_stamp_and_applier() -> None:
-    tree = _tree(_SRC / "profiling" / "_value_redaction.py")
-    by_name = {
-        fn.name: set(_call_names(fn)) for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
-    }
-    assert {"_sensitive_entries", "stamp_value_policy"} <= by_name["redact_profile_dict"]
-    assert "_apply" in by_name["redact_profile_dict"] | by_name["_redact_field"]
-    assert "_sensitive_entries" in by_name["value_sensitive_names"]
+    def calls(path: str) -> dict[str, set[str]]:
+        return {
+            fn.name: set(_call_names(fn))
+            for fn in ast.walk(_tree(_SRC / "profiling" / path))
+            if isinstance(fn, ast.FunctionDef)
+        }
+
+    writer = calls("_profile_document.py")
+    registry = calls("_value_redaction.py")
+    assert {"_sensitive_entries", "stamp_value_policy"} <= writer["redact_profile_dict"]
+    assert "_apply" in writer["redact_profile_dict"] | registry["_redact_field"]
+    assert "_sensitive_entries" in registry["value_sensitive_names"]
+    assert "_floor_field" in writer["redact_profile_dict"]
+    assert "_apply" in writer["_floor_field"]
+
+
+_PROFILE_PATH = _SRC / "profiling" / "_profile_document.py"
+
+
+def test_the_profile_writer_has_no_inline_placeholder_null_or_empty_write() -> None:
+    assert _shared_findings(_PROFILE_PATH.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        'def f(field):\n    field["mode_value"] = None',
+        "def f(labels, i):\n    labels[i] = REDACTED",
+        "def f(labels, n):\n    labels = [REDACTED] * n",
+        'def f(field):\n    field["labels"] = "[redacted]"',
+        'def f(field):\n    field["sample_invalid"] = []',
+        "def f(x):\n    return x >= 0.5",
+    ],
+)
+def test_the_shared_guard_bites_on_each_inline_write(snippet: str) -> None:
+    assert _shared_findings(snippet) != []
+
+
+def test_the_shared_guard_lets_a_placeholder_comparison_through() -> None:
+    assert (
+        _shared_findings("def f(t):\n    return t not in (REDACTED, 'x') and t != REDACTED") == []
+    )

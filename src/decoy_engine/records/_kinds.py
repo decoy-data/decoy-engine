@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from decoy_engine.config import SOURCE_LOCATOR_FIELDS, SOURCE_PATH_FIELDS, SourceDescriptor
 from decoy_engine.profiling import SCAN_SET_SCHEMA, ScanSetCore, ScanSetCoreRead
+from decoy_engine.profiling._scan_core import without_unproven_keys
 from decoy_engine.records._export_rules import pointer_rule
 from decoy_engine.records._payloads import EvidencePayload, ExportLayout, SampleRunPayload
 from decoy_engine.records._read_model import read_model_of
@@ -26,6 +27,7 @@ _LAYOUT: TypeAdapter[Any] = TypeAdapter(ExportLayout)
 _EVIDENCE_PATHS = (
     "/payload/pipeline_path",
     "/payload/project_manifest",
+    "/payload/scan_baseline/path",
     "/payload/input_fingerprints/*/path",
     "/payload/output_fingerprints/*/path",
 )
@@ -95,6 +97,7 @@ SCAN_SET = register_kind(
         path_fields=_SCAN_PATHS,
         locator_fields=_SCAN_LOCATORS,
         export_rule=pointer_rule(_SCAN_PATHS, _SCAN_LOCATORS, scrub=_scan_set_scrub),
+        claim_rule=without_unproven_keys,
         diff_rule="scan-set",
         canary_fixture="scan-set",
     )

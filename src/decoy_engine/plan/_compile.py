@@ -75,6 +75,7 @@ from decoy_engine.plan._checks_correctness import (
 from decoy_engine.plan._checks_date_shift import (
     check_date_preserve_values,
     check_date_shift_group_by_refs,
+    check_date_shift_window,
 )
 from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 from decoy_engine.plan._checks_dp import check_dp_generate_contract
@@ -225,6 +226,7 @@ def compile_plan(
     # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
     # shape). Config-only; runs inside the date_shift_group_by_refs slot.
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
     # compile-time manifest warnings for every active group. Config-only; runs
     # in both branches and in run_config_only_checks.
@@ -542,6 +544,7 @@ def run_config_only_checks(
     # (entity-anchor) column ref. Config-only.
     check_date_shift_group_by_refs(config)
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
     check_fpe_join_groups(config)
@@ -636,8 +639,8 @@ def _hash_config(config: dict[str, Any]) -> str:
 
     The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
-    is called), `pre_scan` only suggests and `scan_baseline` is a pointer no run reads, so none is
-    masking semantics. A user swapping a local file source for an S3 source does not change which
+    is called), `pre_scan` only suggests and `scan_baseline` is a pointer, so none is
+    masking semantics. The one exception is `scan_baseline.on_drift` (with its `sha256`), hashed when set (below). A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
     stays in: under `ner_findings: fail` its `dismissed` list decides what blocks.
@@ -649,6 +652,14 @@ def _hash_config(config: dict[str, Any]) -> str:
     and every other site that hashes the config.
     """
     semantic_config = {k: v for k, v in config.items() if k not in _UNHASHED_BLOCKS}
+    # `scan_baseline.on_drift` and the digest that pins the baseline decide which drift refuses a
+    # run, so they are hashed when `on_drift` is set. The pointer (`path`, `schema`) stays out.
+    baseline = config.get("scan_baseline")
+    if isinstance(baseline, dict) and baseline.get("on_drift") is not None:
+        hashed = {"on_drift": baseline["on_drift"]}
+        if baseline.get("sha256") is not None:
+            hashed["sha256"] = baseline["sha256"]
+        semantic_config["scan_baseline"] = hashed
     global_settings = semantic_config.get("global_settings")
     if isinstance(global_settings, dict) and any(
         key in global_settings for key in _NON_SEMANTIC_GLOBAL_SETTINGS

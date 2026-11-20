@@ -7,6 +7,7 @@ import pytest
 from decoy_engine.plan import (
     Plan,
     PlanCompileError,
+    _compile,
     compile_plan,
     plan_from_yaml,
     plan_to_yaml,
@@ -117,6 +118,57 @@ class TestCompileDeterminism:
         p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
         p2 = compile_plan(with_pointer, simple_profile, decoy_engine_version="0.1.0")
         assert p1.pipeline_config_hash == p2.pipeline_config_hash
+
+    def test_on_drift_moves_the_config_hash_and_path_and_schema_do_not(
+        self, simple_config: dict, simple_profile: Profile
+    ) -> None:
+        def hash_of(block: dict | None) -> str:
+            config = (
+                dict(simple_config) if block is None else {**simple_config, "scan_baseline": block}
+            )
+            return compile_plan(
+                config, simple_profile, decoy_engine_version="0.1.0"
+            ).pipeline_config_hash
+
+        pointer = {"path": "x.json", "schema": "scan-set/v1"}
+        bare = hash_of(None)
+        warn = hash_of({**pointer, "on_drift": "warn"})
+        fail = hash_of({**pointer, "on_drift": "fail"})
+        assert hash_of(pointer) == bare
+        assert hash_of({**pointer, "on_drift": None}) == bare
+        assert len({bare, warn, fail}) == 3
+        assert hash_of({**pointer, "path": "elsewhere/y.json", "on_drift": "warn"}) == warn
+
+    def test_the_baseline_digest_moves_the_hash_only_when_on_drift_is_set(
+        self, simple_config: dict, simple_profile: Profile, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def hash_of(block: dict) -> str:
+            return compile_plan(
+                {**simple_config, "scan_baseline": block},
+                simple_profile,
+                decoy_engine_version="0.1.0",
+            ).pipeline_config_hash
+
+        pointer = {"path": "x.json", "schema": "scan-set/v1"}
+        one, two = "a" * 64, "b" * 64
+        real = _compile.canonical_config_bytes
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            _compile, "canonical_config_bytes", lambda c: (seen.append(c), real(c))[1]
+        )
+        hash_of({**pointer, "on_drift": "warn"})
+        monkeypatch.undo()
+        # warn without a digest hashes exactly {"on_drift": "warn"}, so its hash is unchanged.
+        assert seen[-1]["scan_baseline"] == {"on_drift": "warn"}
+        warn = hash_of({**pointer, "on_drift": "warn"})
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != warn
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one}) != hash_of(
+            {**pointer, "on_drift": "warn", "sha256": two}
+        )
+        assert hash_of({**pointer, "on_drift": "warn", "sha256": one, "path": "z.json"}) == hash_of(
+            {**pointer, "on_drift": "warn", "sha256": one}
+        )
+        assert hash_of({**pointer, "sha256": one}) == hash_of(pointer)
 
     def test_two_compiles_equal(self, simple_config: dict, simple_profile: Profile) -> None:
         p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")

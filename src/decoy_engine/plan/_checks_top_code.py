@@ -28,6 +28,7 @@ import math
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import nested_children
 from decoy_engine.execution._strategies._top_code import _MAX_EXACT_INT, _PRESETS
 from decoy_engine.plan._errors import PlanCompileError
 
@@ -143,10 +144,18 @@ def check_top_code_config(config: dict[str, Any]) -> None:
             # the flagged raw value reaches main output; and (b) the bottom-bound
             # checks below never reach the child config. Fail closed until nested
             # RowError positioning is correct.
-            if col_entry.get("strategy") == "nested" and pc.get("strategy") == "top_code":
+            nested_top_code = (
+                [c for c in nested_children(pc) if c.strategy == "top_code"]
+                if col_entry.get("strategy") == "nested"
+                else []
+            )
+            if nested_top_code:
                 raise PlanCompileError(
                     code=reasons.plan.TOP_CODE_UNSUPPORTED_IN_NESTED,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.strategy",
+                    path=(
+                        f"tables.{table_name}.columns.{col_name}."
+                        f"{nested_top_code[0].config_path}.strategy"
+                    ),
                     message=(
                         f"top_code column {where} sets a `nested` strategy with a "
                         "top_code child. top_code is not supported as a nested "

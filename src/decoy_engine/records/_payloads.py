@@ -36,7 +36,8 @@ Number = StrictInt | StrictFloat
 # keep their wider shape: a manifest already on disk must still read. New payloads use SafeName,
 # Sha256 and the other shared types.
 _PLAIN = r"^[^\x00-\x1f\x7f]+$"
-Name = Annotated[StrictStr, StringConstraints(min_length=1, max_length=256, pattern=_PLAIN)]
+# A name is any non-empty str: the shared rule `is_plain_name`, which accepts every name the config does.
+Name = Annotated[StrictStr, StringConstraints(min_length=1)]
 RelPath = Annotated[StrictStr, StringConstraints(min_length=1, max_length=1024, pattern=_PLAIN)]
 # Sample-run paths are machine paths, reduced to file names by export, so they stay loose too.
 PathText = RelPath
@@ -143,6 +144,9 @@ class EvidencePayload(_Model, _BindingRules):
     # Absent must stay absent for the manifest_hash, so these are never given a stored default.
     path_base: Literal["project"] | None = None
     project_manifest: RelPath | None = None
+    # Additive to cli-local-1: the pipeline's scan baseline, hashed at run start. Absent when the
+    # pipeline names none; a path with a null fingerprint when the file could not be read.
+    scan_baseline: FileFingerprint | None = None
 
 
 class ColumnRef(_Model):

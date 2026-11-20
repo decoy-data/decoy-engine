@@ -32,6 +32,7 @@ Config keys accepted via ``plan.provider_config``:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
@@ -49,10 +50,40 @@ from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
+    resolve_ner_config,
 )
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.text_mask import mask_cell
+
+# The note every route attaches to the sub-floor warning.
+_SUB_FLOOR_NOTE = (
+    "these spans' domain was below the FF1 minimum admissible "
+    "domain, or failed checksum validation, and could not be "
+    "FF1-encrypted; they were handled under the configured "
+    "sub_floor_span policy instead (non-reversible)."
+)
+
+
+def text_mask_sub_floor_warning(
+    notices: Mapping[str, int], *, policy: str | None, column: str
+) -> QualityWarning:
+    """The one aggregate `text_mask_sub_floor_span_handled` warning for `notices`.
+
+    Every route builds it here: `TextMaskHandler.run`, the native unified and chunked routes and
+    the out-of-core runners, so the warnings cannot drift. `by_detector` is `name=count` pairs
+    joined with ", " in name order, because `detail` holds scalars only."""
+    return QualityWarning(
+        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
+        provider="text_mask",
+        column=column,
+        detail={
+            "policy": policy,
+            "by_detector": ", ".join(f"{name}={count}" for name, count in sorted(notices.items())),
+            "total": sum(notices.values()),
+            "note": _SUB_FLOOR_NOTE,
+        },
+    )
 
 
 class TextMaskHandler:
@@ -120,19 +151,7 @@ class TextMaskHandler:
         # installed spaCy model no longer matches the version stamped at compile
         # (plan.ner_model_version). Runs before any iter_ner_spans call, so it
         # needs no spaCy pipeline; skipped when no version was stamped.
-        ner_cfg = cfg.get("ner")
-        ner_model: str | None = None
-        ner_entities: list[str] | None = None
-        if ner_cfg:
-            from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-            if isinstance(ner_cfg, dict):
-                ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-                raw_entities = ner_cfg.get("entities")
-                if isinstance(raw_entities, (list, tuple)) and raw_entities:
-                    ner_entities = [str(e) for e in raw_entities]
-            else:
-                ner_model = DEFAULT_NER_MODEL
+        ner_model, ner_entities = resolve_ner_config(cfg)
 
         enforce_ner_model_version(
             ner_model=ner_model,
@@ -254,21 +273,8 @@ class TextMaskHandler:
             # channel counterpart, mirroring how the fpe strategy aggregates
             # `fpe_partial_plaintext_disclosure`).
             warnings.append(
-                QualityWarning(
-                    code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-                    provider="text_mask",
-                    column=column,
-                    detail={
-                        "policy": sub_floor_span_policy,
-                        "by_detector": dict(sub_floor_notices),
-                        "total": sum(sub_floor_notices.values()),
-                        "note": (
-                            "these spans' domain was below the FF1 minimum admissible "
-                            "domain, or failed checksum validation, and could not be "
-                            "FF1-encrypted; they were handled under the configured "
-                            "sub_floor_span policy instead (non-reversible)."
-                        ),
-                    },
+                text_mask_sub_floor_warning(
+                    sub_floor_notices, policy=sub_floor_span_policy, column=column
                 )
             )
         return df, warnings

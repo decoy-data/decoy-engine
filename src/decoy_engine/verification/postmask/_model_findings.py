@@ -37,7 +37,7 @@ import pandas as pd
 from decoy_engine.config import post_scan_integrity_requested, post_scan_ner_findings
 from decoy_engine.detection._model_status import log_detector_models, log_detector_run
 from decoy_engine.detection._ner_rate import ner_rates
-from decoy_engine.detection.ner import DEFAULT_NER_MODEL, pipeline_version
+from decoy_engine.detection.ner import NerSurface, pipeline_version, resolve_ner_model
 from decoy_engine.detection.types import DetectorSource, ModelRef
 from decoy_engine.profiling import passes_through
 from decoy_engine.profiling.model_pack import DetectorSet, classify_frame, load_detectors
@@ -46,7 +46,7 @@ from decoy_engine.verification.postmask.residual_pii import (
     _PRODUCES_PII_LIKE_VALUES,
     _REUSES_SOURCE_VALUES,
     configured_columns,
-    is_source_identity_finding,
+    dismissible,
 )
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
@@ -73,8 +73,10 @@ def post_scan_detectors(
         return None
     block = config["post_scan"]
     sources = tuple(block.get("detectors") or ("regex",))
-    ner_model = block.get("ner_model") or DEFAULT_NER_MODEL
-    return load_detectors(sources, ner_model=ner_model, file_access=file_access)
+    ner_model = resolve_ner_model(block.get("ner_model"))
+    return load_detectors(
+        sources, ner_model=ner_model, surface=NerSurface.POST_SCAN, file_access=file_access
+    )
 
 
 @dataclass
@@ -245,7 +247,7 @@ def review(
     used: set[int] = set()
     out: list[ResidualPIIFinding] = []
     for finding in findings:
-        if finding.severity == "warning" and not is_source_identity_finding(finding):
+        if dismissible(finding):
             hits = [i for i, d in enumerate(dismissals) if _matches(d, finding)]
             if hits:
                 used |= set(hits)

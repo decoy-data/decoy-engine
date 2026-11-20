@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 if sys.version_info >= (3, 11):
@@ -29,14 +31,17 @@ else:
 REGISTRY = "scripts/dev/sentry_registry.toml"
 BASELINE_DIR = "tests/sentry/baselines"
 MIN_REASON = 15
+DECISION = re.compile(r"^owner \d{4}-\d{2}-\d{2} .{10,}$")
+_GLOB_CHARS = frozenset("*?[]")
 PLACEHOLDERS = frozenset({"todo", "tbd", "fixme", "xxx", "n/a", "none"})
 # Only sentries whose last key segment is a message digest may re-key; for any other sentry a
 # changed last segment can mean a different permitted thing, so it compares exactly.
 REKEY_PER_SITE = frozenset({"validation-name-messages"})
 # Only these sentries may move a key to a new home, and only by a declared ``moved_from``. Their
-# keys are ``<file under src/>::<qualname>::<binding name>``; other sentries use other key shapes
-# (src-relative paths, ordinals) for which "the old site is gone" cannot be proven.
-REHOME_BY_BINDING = frozenset({"secret-material-census"})
+# keys are ``<file under src/>::<qualname>::<name>``, optionally followed by ``::<ordinal>`` (the
+# call sites of one method in one function); other sentries use other key shapes (src-relative
+# paths) for which "the old site is gone" cannot be proven.
+REHOME_BY_BINDING = frozenset({"secret-material-census", "gcs-call-kwargs"})
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,44 @@ def parse_registry(text: str) -> tuple[dict[str, str], list[str]]:
             findings.append(f"registry: two sentries ({', '.join(ids)}) share baseline {path}")
         if not path.startswith(BASELINE_DIR + "/"):
             findings.append(f"registry: baseline {path} is outside {BASELINE_DIR}/")
+    return out, findings
+
+
+def _decision_ok(decision: object) -> bool:
+    """A dated owner decision: the whole string matches and the date is a real calendar day."""
+    if not isinstance(decision, str) or not DECISION.fullmatch(decision):
+        return False
+    try:
+        date.fromisoformat(decision.split(" ", 2)[1])
+    except ValueError:
+        return False
+    return True
+
+
+def parse_approvals(text: str) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """``{sentry id: {key: decision}}`` from ``approved_growth`` rows, and findings for bad rows.
+
+    A row is ``{ key, decision }``; the key compares exactly (no glob or prefix) and the decision
+    must name a dated owner decision. Growth of a baseline passes only through a row here.
+    """
+    out: dict[str, dict[str, str]] = {}
+    findings: list[str] = []
+    for row in tomllib.loads(text).get("sentry", []):
+        sid = row.get("id", "")
+        for item in row.get("approved_growth", []):
+            key = item.get("key") if isinstance(item, dict) else None
+            decision = item.get("decision") if isinstance(item, dict) else None
+            if not isinstance(key, str) or not key:
+                findings.append(f"{sid}: approved_growth row has no key")
+            elif _GLOB_CHARS & set(key):
+                findings.append(f"{sid}: approved_growth key {key} is a pattern; list exact keys")
+            elif not _decision_ok(decision):
+                findings.append(
+                    f"{sid}: approved_growth for {key} needs a decision "
+                    "'owner YYYY-MM-DD <text of 10+ chars>'"
+                )
+            else:
+                out.setdefault(sid, {})[key] = decision
     return out, findings
 
 
@@ -193,6 +236,14 @@ def _mentions(n: ast.AST, name: str) -> bool:
     return getattr(n, "name", None) == name
 
 
+def _site_parts(key: str) -> tuple[str, str, str] | None:
+    """Split ``<file>::<qualname>::<name>`` with an optional all-digit ``::<ordinal>`` suffix."""
+    parts = key.split("::")
+    if len(parts) == 4 and parts[3].isdigit():
+        parts = parts[:3]
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+
+
 def site_gone(root: Path, key: str, base_ref: str) -> bool:
     """True when ``<file>.py::<qualname>::<name>`` is proven absent from the source tree.
 
@@ -202,8 +253,8 @@ def site_gone(root: Path, key: str, base_ref: str) -> bool:
     when the file existed at ``base_ref``. A key of another shape, an unresolvable path, or a
     file that never existed is "not proven" and returns false.
     """
-    parts = key.split("::")
-    if len(parts) != 3 or not parts[0].endswith(".py") or not parts[2].isidentifier():
+    parts = _site_parts(key)
+    if parts is None or not parts[0].endswith(".py") or not parts[2].isidentifier():
         return False
     file, qualname, name = parts
     if not all(q.isidentifier() for q in qualname.split(".")):
@@ -237,7 +288,8 @@ def rehomes(
     remaining = set(grown)
     report: list[str] = []
     for old, keys in sorted(claims.items()):
-        same_name = old.rpartition("::")[2] == keys[0].rpartition("::")[2]
+        old_parts, new_parts = _site_parts(old), _site_parts(keys[0])
+        same_name = old_parts is not None and new_parts is not None and old_parts[2] == new_parts[2]
         if len(keys) != 1 or not same_name or old not in lost or _max_of(lost[old]) is not None:
             continue
         if site_gone(root, old, base_ref):
@@ -256,6 +308,10 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
     head, findings = parse_registry(
         reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
     )
+    approvals, approval_findings = parse_approvals(
+        reg_file.read_text(encoding="utf-8") if reg_file.exists() else ""
+    )
+    findings += approval_findings
     base_text = _git_show(root, base_ref, REGISTRY)
     base_reg = parse_registry(base_text)[0] if base_text is not None else {}
     report: list[str] = []
@@ -276,6 +332,10 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
                 f"{path}: sentry_id {base.sentry_id!r} does not match registry id {sid}"
             )
         findings += reason_findings(path, base)
+        findings += [
+            f"{sid}: stale approved_growth, {key} is not in {path}"
+            for key in sorted(set(approvals.get(sid, {})) - base.keys)
+        ]
 
     removed = set(base_reg) - set(head)
     # A key a replacement keeps must keep its max too, or a rename would launder a raised max.
@@ -303,6 +363,11 @@ def check(root: Path, base_ref: str) -> tuple[list[str], list[str]]:
                 lost = {k: e for k, e in old.items() if k not in base.keys}
                 grown, moved = rehomes(root, base_ref, grown, base.reasons, lost)
                 report += [f"{sid}: {line}" for line in moved]
+            approved = grown & frozenset(approvals.get(sid, {}))
+            report += [
+                f"{sid}: approved growth {k} ({approvals[sid][k]})" for k in sorted(approved)
+            ]
+            grown -= approved
             if grown:
                 findings.append(
                     f"{sid}: baseline gained key(s) not in the merge base: {_fmt(grown)}"

@@ -7,14 +7,24 @@ threshold test; averaging per-batch rates would not equal the whole-column rate.
 Source and output are read in lockstep and re-cut to equal lengths, because the two readers
 need not share batch boundaries. When the row counts differ the positional comparison is
 skipped, as `residual_pii` and `policy_validation` do. Holds counts, names and detector ids only.
+
+The distribution check (`post_scan.distribution`) adds null counts and streamed moments (count,
+mean, sum of squared deviations). They merge per batch by the pairwise formula of Chan, Golub and
+LeVeque, "Updating formulae and a pairwise algorithm for computing sample variances" (1979), so
+batch cuts do not change the result and no raw sum of squares is kept. The output side comes from
+the pass that already runs (`ColumnFacts.output_values`); the source side is a source-only pass,
+`value_facts`, because the lockstep pass pairs the sides only when their row counts match, which
+quarantine breaks. Aggregates only: no value reaches a field here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, replace
+import math
+from collections.abc import Callable, Collection, Iterator, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 
@@ -22,6 +32,121 @@ from decoy_engine.detection.detectors import counting_scope, decide_detector, ru
 from decoy_engine.internal.pandas_compat import exact_int_types_mapper
 from decoy_engine.profiling import KEY_BATCH_ROWS, column_distinct, passes_through
 from decoy_engine.verification.postmask._stream_input import TableBatches, key_batches
+
+
+@dataclass(frozen=True)
+class Moments:
+    """Count, mean and sum of squared deviations (M2) of a set of numbers, mergeable in any
+    grouping."""
+
+    count: int = 0
+    mean: float = 0.0
+    m2: float = 0.0
+
+    @classmethod
+    def of(cls, values: np.ndarray) -> Moments:
+        n = int(values.size)
+        if n == 0:
+            return cls()
+        # A spread past the float range overflows to infinity; the caller withholds such moments.
+        with np.errstate(over="ignore"):
+            mean = float(values.mean())
+            return cls(n, mean, float(np.square(values - mean).sum()))
+
+    def merge(self, other: Moments) -> Moments:
+        if other.count == 0:
+            return self
+        if self.count == 0:
+            return other
+        n = self.count + other.count
+        delta = other.mean - self.mean
+        return Moments(
+            n,
+            self.mean + delta * other.count / n,
+            self.m2 + other.m2 + delta * delta * self.count * other.count / n,
+        )
+
+    @property
+    def std(self) -> float | None:
+        """The sample standard deviation, or `None` below two values."""
+        return math.sqrt(self.m2 / (self.count - 1)) if self.count > 1 else None
+
+
+@dataclass(frozen=True)
+class ValueFacts:
+    """Null count and moments of one column. `moments` is `None` for a column that is not an
+    integer or float, one that holds a non-finite value, and one whose read failed (`error`
+    then holds the class name of the failure, never its message)."""
+
+    rows: int
+    nulls: int
+    moments: Moments | None
+    error: str | None = None
+    # True when the column held a non-finite value (infinity, NaN, or a spread past the float
+    # range), so the moments are withheld. Distinct from a non-numeric column.
+    non_finite: bool = False
+
+    @property
+    def non_null(self) -> int:
+        return self.rows - self.nulls
+
+
+@dataclass
+class _ValueTally:
+    numeric: bool
+    rows: int = 0
+    nulls: int = 0
+    moments: Moments = field(default_factory=Moments)
+    # Exact extremes of the finite values, internal only. A constant column has min == max, and
+    # its moments are then exact (`done`): the pairwise merge of a constant leaves a mean and an M2
+    # a few ulps off, which would read as a spread.
+    low: float = math.inf
+    high: float = -math.inf
+    finite: bool = True
+    error: str | None = None
+
+    def add(self, array: pa.Array) -> None:
+        if self.error is not None:
+            return
+        try:
+            self.rows += len(array)
+            self.nulls += array.null_count
+            if self.numeric and self.finite:
+                values = array.drop_null().to_numpy(zero_copy_only=False).astype("float64")
+                merged = (
+                    self.moments.merge(Moments.of(values)) if np.isfinite(values).all() else None
+                )
+                # A sum of squared deviations can overflow on finite values; withhold it too.
+                if merged is not None and math.isfinite(merged.mean) and math.isfinite(merged.m2):
+                    self.moments = merged
+                    if values.size:
+                        self.low = min(self.low, float(values.min()))
+                        self.high = max(self.high, float(values.max()))
+                else:
+                    self.finite = False
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            self.error = type(exc).__name__
+
+    def done(self) -> ValueFacts:
+        keeps = self.numeric and self.finite and self.error is None
+        moments = self.moments
+        if moments.count and self.low == self.high:
+            moments = Moments(moments.count, self.low, 0.0)
+        return ValueFacts(
+            self.rows,
+            self.nulls,
+            moments if keeps else None,
+            self.error,
+            non_finite=self.numeric and not self.finite and self.error is None,
+        )
+
+
+def _is_numeric(schema: pa.Schema, column: str) -> bool:
+    # By position, not `schema.field(name)`, which raises on a duplicated column name.
+    data_type = schema.types[schema.names.index(column)]
+    return pa.types.is_integer(data_type) or pa.types.is_floating(data_type)
 
 
 @dataclass(frozen=True)
@@ -55,6 +180,8 @@ class ColumnFacts:
     distinct_error: str | None = None
     # True when the failed count was the source's, so a zero source_distinct means unknown.
     source_distinct_failed: bool = False
+    # Null count and moments of the output column, from the same pass as the detector rates.
+    output_values: ValueFacts | None = None
 
     @property
     def error(self) -> str | None:
@@ -73,6 +200,7 @@ class _Tally:
     error: str | None = None
     # detector id -> [hits, non-null values, threshold, name hint]
     detectors: dict[str, list[float | bool]] | None = None
+    values: _ValueTally | None = None
 
 
 def _series(batch: pa.RecordBatch, column: str) -> pd.Series:
@@ -148,7 +276,8 @@ def _counted(table: TableBatches) -> tuple[TableBatches, Callable[[], None]]:
             yield batch
 
     def verify() -> None:
-        if seen[0] != table.num_rows:
+        # A table that drops rows on read (a declared cast) may give fewer rows, never more.
+        if seen[0] > table.num_rows or (seen[0] != table.num_rows and not table.drops_rows):
             raise ValueError(
                 f"column facts: a table read gave {seen[0]} rows but the table declares "
                 f"{table.num_rows}"
@@ -181,14 +310,23 @@ def column_facts(
     batch_rows: int = KEY_BATCH_ROWS,
     scratch: Path,
     memory_limit: str,
+    value_columns: Collection[str] | None = None,
 ) -> dict[str, ColumnFacts]:
-    """Facts for each of `columns` that the output has, keyed by column name."""
+    """Facts for each of `columns` that the output has, keyed by column name.
+
+    `value_columns` names the columns whose output null counts and moments are tallied
+    (`ColumnFacts.output_values`); `None` tallies every column. The run passes only the columns
+    a distribution check reads, so an unconfigured run pays nothing for them."""
     wanted = [c for c in columns if c in output.schema.names]
     if not wanted:
         return {}
     compared = [c for c in wanted if source is not None and c in source.schema.names]
     aligned = source is not None and source.num_rows == output.num_rows
-    tallies = {c: _Tally() for c in wanted}
+    tallied = set(wanted if value_columns is None else value_columns)
+    tallies = {
+        c: _Tally(values=_ValueTally(_is_numeric(output.schema, c)) if c in tallied else None)
+        for c in wanted
+    }
     out_read, out_verify = _counted(output)
     checks = [out_verify]
     if aligned and source is not None and compared:
@@ -211,6 +349,9 @@ def column_facts(
                         raise
                     tallies[c].error = type(exc).__name__
             _add_detectors(tallies[c], out_s, c)
+            values = tallies[c].values
+            if values is not None:
+                values.add(out_batch.column(out_batch.schema.get_field_index(c)))
     for check in checks:
         check()
     facts = {}
@@ -239,5 +380,37 @@ def column_facts(
             identity_error=t.error,
             distinct_error=distinct_failed,
             source_distinct_failed=source_failed,
+            output_values=t.values.done() if t.values is not None else None,
         )
     return facts
+
+
+def distinct_counts(
+    table: TableBatches, columns: Sequence[str], *, scratch: Path, memory_limit: str
+) -> dict[str, int | None]:
+    """The distinct count of each of `columns` that `table` has, or `None` for one whose count
+    failed with an uncoded error."""
+    counts: dict[str, int | None] = {}
+    for column in dict.fromkeys(columns):
+        if column in table.schema.names:
+            count, error = _distinct_or_error(table, column, scratch, memory_limit)
+            counts[column] = None if error is not None else count
+    return counts
+
+
+def value_facts(
+    table: TableBatches, columns: Sequence[str], *, batch_rows: int = KEY_BATCH_ROWS
+) -> dict[str, ValueFacts]:
+    """Null count and moments of each of `columns` that `table` has, in one read of the table.
+
+    A short or long stream is refused (`ValueError`) rather than answered over a prefix."""
+    wanted = [c for c in dict.fromkeys(columns) if c in table.schema.names]
+    if not wanted:
+        return {}
+    tallies = {c: _ValueTally(_is_numeric(table.schema, c)) for c in wanted}
+    counted, verify = _counted(table)
+    for batch in counted.read(wanted, batch_rows):
+        for c in wanted:
+            tallies[c].add(batch.column(batch.schema.get_field_index(c)))
+    verify()
+    return {c: t.done() for c, t in tallies.items()}

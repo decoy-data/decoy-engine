@@ -48,6 +48,7 @@ from decoy_engine.profile._readers import (
     ParquetFileSource,
     ProfileSource,
     build_declared_source,
+    has_row_beyond,
 )
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._types import Profile, Relationship, TableProfile
@@ -246,13 +247,24 @@ def _profile_one_source(
         effective_sample_rows = sample_rows
 
     row_count = reader.row_count()
+    # The profiled frame is parsed from exactly the cap, so no later row can change a
+    # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
+    # when the cap is filled a second read asks for one row more. That frame is only
+    # counted, never profiled. An exact count already says the source is larger.
     sample_df = reader.sample_frame(effective_sample_rows)
+    proven_total = len(sample_df)
+    if (
+        not row_count.exact
+        and proven_total == effective_sample_rows
+        and has_row_beyond(reader.sample_frame, effective_sample_rows)
+    ):
+        proven_total = effective_sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
-    effective_total = max(row_count.value, len(sample_df))
+    effective_total = max(row_count.value, proven_total)
     table = walk_dataframe(
         sample_df,
         table_name=table_name,

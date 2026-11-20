@@ -91,10 +91,12 @@ from decoy_engine.execution._errors import (
     text_mask_unsupported_pair_error,
 )
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
-from decoy_engine.execution._strategies._ner_config import enforce_ner_model_version
+from decoy_engine.execution._strategies._ner_config import (
+    enforce_ner_model_version,
+    resolve_ner_config,
+)
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
-from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
@@ -121,34 +123,6 @@ if TYPE_CHECKING:
 # `_compat.py`; code_set and bucket_perturb are admitted only for the config
 # shapes the kernel reproduces byte-for-byte (see module docstring + `_compat`).
 GROUP_C_STRATEGIES = frozenset({"text_mask", "code_set", "bucket_perturb"})
-
-
-def text_mask_sub_floor_warning(
-    column: str, policy: str | None, by_detector: dict[str, int]
-) -> QualityWarning:
-    """The aggregate `text_mask_sub_floor_span_handled` QualityWarning
-    (round-2 MEDIUM-1), shared so the out-of-core runners
-    (`_runner.run_fk_out_of_core`, `_stream_driver.stream_table`) emit the
-    IDENTICAL shape the full-frame handler
-    (`_strategies/_text_mask.TextMaskHandler.run`) does, from the SAME
-    accumulated `sub_floor_notices` dict `_text_mask_array` threads through
-    `mask_cell` for every batch of a table."""
-    return QualityWarning(
-        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-        provider="text_mask",
-        column=column,
-        detail={
-            "policy": policy,
-            "by_detector": dict(by_detector),
-            "total": sum(by_detector.values()),
-            "note": (
-                "these spans' domain was below the FF1 minimum admissible "
-                "domain, or failed checksum validation, and could not be "
-                "FF1-encrypted; they were handled under the configured "
-                "sub_floor_span policy instead (non-reversible)."
-            ),
-        },
-    )
 
 
 def group_c_array(
@@ -336,22 +310,8 @@ def _text_mask_ner(
     """Resolve NER config + enforce the compile-vs-runtime model-version pin.
 
     The pin check is the shared `enforce_ner_model_version`, so the whole-frame and out-of-core
-    routes raise the same text. The config parse below is still a local copy of
-    `resolve_ner_config`; folding it in is a logged follow-up."""
-    ner_cfg = cfg.get("ner")
-    if not ner_cfg:
-        return None, None
-    from decoy_engine.detection.ner import DEFAULT_NER_MODEL
-
-    ner_model: str
-    ner_entities: list[str] | None = None
-    if isinstance(ner_cfg, dict):
-        ner_model = str(ner_cfg.get("model") or DEFAULT_NER_MODEL)
-        raw_entities = ner_cfg.get("entities")
-        if isinstance(raw_entities, (list, tuple)) and raw_entities:
-            ner_entities = [str(e) for e in raw_entities]
-    else:
-        ner_model = DEFAULT_NER_MODEL
+    routes raise the same text, and `resolve_ner_config` is the one config parse."""
+    ner_model, ner_entities = resolve_ner_config(cfg)
 
     enforce_ner_model_version(
         ner_model=ner_model,

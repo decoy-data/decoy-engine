@@ -5,6 +5,7 @@ from __future__ import annotations
 from decoy_engine.reasons import _catalog
 
 __all__ = [
+    "CARDINALITY_COLLISIONS",
     "CARDINALITY_MATCH_DEVIATION",
     "FIT_JOINT_CELLS_TRUNCATED",
     "FORMAT_RULE_VIOLATION",
@@ -24,10 +25,12 @@ __all__ = [
     "OUT_OF_CORE_CALLER_MANAGED_RESIDENCY",
     "POOL_DOMINATES_CACHE",
     "POST_SCAN_OUTPUT_UNREADABLE",
+    "SCAN_BASELINE_MISSING",
     "SCAN_CRASHED",
     "SCAN_HEADER_SUSPECT",
     "SCAN_KEY_TYPE_MISMATCH",
     "SEED_IGNORED_WITH_MASTER_KEY",
+    "SFTP_LOCK_NOT_REMOVED",
     "SOURCE_VALUE_LEAK",
     "TEXT_MASK_SUB_FLOOR_SPAN_HANDLED",
     "TOP_CODE_GENERALIZED",
@@ -37,6 +40,7 @@ __all__ = [
 
 _d = _catalog.warning("QualityWarning")
 
+CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since="1.30.0")
 CARDINALITY_MATCH_DEVIATION = _d("cardinality_match_deviation", "Cardinality match deviation.")
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
@@ -71,6 +75,13 @@ POST_SCAN_OUTPUT_UNREADABLE = _d(
     "checked on the output.",
     since="1.27.0",
 )
+# SCAN-CHECKS: `--evidence-out` asked to hash the pipeline's scan baseline and the file is gone. The
+# run continues and the manifest records the path with a null fingerprint. Fixed, value-free text.
+SCAN_BASELINE_MISSING = _catalog.warning("EvidenceManifest")(
+    "scan_baseline_missing",
+    "The scan baseline file could not be read, so the evidence manifest has no fingerprint for it.",
+    since="1.30.0",
+)
 SCAN_CRASHED = _d("scan_crashed", "Scan crashed.")
 SCAN_HEADER_SUSPECT = _d(
     "scan_header_suspect", "First row looks like data, not a header.", since="1.10.0"
@@ -99,3 +110,10 @@ JOB_LOG_WRITE_FAILED = _d("job_log_write_failed", "Job log write failed.", since
 LIBRARY_DEGRADED = _d("library_degraded", "Library degraded.", since="1.20.0")
 LIBRARY_DELETE_SKIPPED = _d("library_delete_skipped", "Library delete skipped.", since="1.20.0")
 LIBRARY_WRITE_FAILED = _d("library_write_failed", "Library write failed.", since="1.20.0")
+_d = _catalog.warning("ConnectorEvent")
+
+SFTP_LOCK_NOT_REMOVED = _d(
+    "sftp_lock_not_removed",
+    "An SFTP lock file could not be removed after a run.",
+    since="1.30.0",
+)

@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from typing import Any, TypeVar
 
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
@@ -68,15 +69,17 @@ def _open(name: str, dir_fd: int | None = None, *, directory: bool = True) -> in
         return _call(
             os.open,
             name,
-            flags=os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            flags=_osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
             dir_fd=dir_fd,
         )
-    return _call(os.open, name, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    return _call(
+        os.open, name, flags=_osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC, dir_fd=dir_fd
+    )
 
 
 def _open_base(path: str) -> int:
     # The policy already vetted `path`, and a temp directory may be a link (macOS /tmp).
-    return _call(os.open, path, flags=os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    return _call(os.open, path, flags=_osflags.RDONLY | _osflags.DIRECTORY | _osflags.CLOEXEC)
 
 
 def _rename(src: str, dst: str, dir_fd: int) -> None:

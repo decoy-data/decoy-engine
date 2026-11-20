@@ -132,7 +132,10 @@ oracles). Surfaced by the grouped_series batch-gate as an out-of-scope observati
 (product source unchanged in this tests-only sweep). Not reproduced as a failure
 on the current callers; flag for a decision on whether to align to `df.index`.
 
-### 11. `transforms/date_shift.DateShiftStrategy` (V1 class) is dead/superseded legacy code (cleanup candidate)
+### 11. `transforms/date_shift.DateShiftStrategy` (V1 class) is dead/superseded legacy code (REMOVED, row 24zb)
+
+Removed: the V1 class and its three private helpers were deleted in row 24zb; the module keeps `_detect_format` and `_COMMON_FORMATS`. The text below is the finding as recorded.
+
 `transforms/date_shift.py`. The active engine-v2 S9 date_shift is
 `execution/_strategies/_date_shift.DateShiftStrategyHandler` (registered in the
 strategy registry). The V1 `DateShiftStrategy` class in `transforms/date_shift.py`

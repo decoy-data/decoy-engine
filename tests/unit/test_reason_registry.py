@@ -12,11 +12,13 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from scripts.release.reason_manifest_policy import append_only_violations
 
 from decoy_engine import reasons
+from tests.sentry.test_no_residual_removed_surface import RETIRED_NAME, RETIRED_PATTERN
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "f29"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sentry"))
@@ -603,6 +605,16 @@ def _blocked_report(**parts: object) -> dict[str, object]:
     }
 
 
+def _residual_row(**fields: Any) -> dict[str, Any]:
+    """A complete writer row: the verdict refuses a row the strict reader would refuse."""
+    import dataclasses
+
+    from decoy_engine.verification.postmask.types import ResidualPIIFinding
+
+    base: dict[str, Any] = {"table": "t", "column": "c", "detector_id": "d", "match_rate": 0.5}
+    return dataclasses.asdict(ResidualPIIFinding(**{**base, **fields}))
+
+
 def _blocked_key(code: str, status: str, baseline: str) -> dict[str, object]:
     return {
         "kind": "primary",
@@ -622,9 +634,7 @@ def _blocked_key(code: str, status: str, baseline: str) -> dict[str, object]:
             "post_scan.key_column_missing",
         ),
         (
-            _blocked_report(
-                residual_pii=[{"table": "t", "column": "c", "detector_id": "d", "severity": "fail"}]
-            ),
+            _blocked_report(residual_pii=[_residual_row(severity="fail")]),
             "post_scan.finding_blocked",
         ),
         (_blocked_report(pass_failed_with="TypeError"), "post_scan.check_error"),
@@ -651,8 +661,9 @@ def test_a_post_scan_blocked_error_blocked_only_by_an_ner_row_is_ner_blocked() -
     from decoy_engine.verification.postmask import PostScanBlockedError, post_scan_verdict
 
     assert "ner_findings" in inspect.signature(post_scan_verdict).parameters
-    row = {"table": "t", "column": "c", "detector_id": "person_name", "severity": "fail"}
-    report = _blocked_report(residual_pii=[{**row, "source": "ner"}])
+    report = _blocked_report(
+        residual_pii=[_residual_row(severity="fail", detector_id="person_name", source="ner")]
+    )
     error = PostScanBlockedError(report, post_scan_verdict(report, ner_findings="fail"))
     assert error.code == "ner_blocked"
     assert str(error) == reasons.get("post_scan", "ner_blocked").summary
@@ -694,3 +705,42 @@ def test_gen_types_e3_codes_are_registered() -> None:
         assert not re.search(r"[{}%]", spec.summary)
         assert getattr(getattr(reasons, ns), code.upper()) == code
     assert tuple(int(p) for p in reasons.REGISTRY_VERSION.split(".")) >= (1, 24, 0)
+
+
+# The two route tombstones removed before GA (one-time exception to the append-only rule).
+REMOVED_ROUTE_CODES = (f"run_{RETIRED_NAME}_requested", f"run_{RETIRED_NAME}")
+REMOVED_IDS = ["requested-check", "resident-output"]
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_removed_route_codes_no_longer_resolve(code: str) -> None:
+    assert reasons.find("route", code) is None
+
+
+def test_no_registered_reason_carries_the_retired_name() -> None:
+    for entry in reasons.manifest()["entries"]:
+        for field in ("code", "summary", "owner", "symbol"):
+            assert not RETIRED_PATTERN.search(str(entry[field])), (entry["namespace"], field)
+
+
+def _record_naming(namespace: str, code: str) -> dict[str, object]:
+    payload = reasons.ReasonRecord.for_reason(reasons.runtime.MISSING_MASK_SECRET).to_payload()
+    return {**payload, "registry_version": "1.29.0", "namespace": namespace, "code": code}
+
+
+@pytest.mark.parametrize("code", REMOVED_ROUTE_CODES, ids=REMOVED_IDS)
+def test_a_record_naming_a_removed_code_reads_as_an_unknown_reason(code: str) -> None:
+    record, written = reasons.ReasonRecord.parse_payload(_record_naming("route", code))
+    assert (record.namespace, record.code) == ("decoy", "unknown_reason_from_future")
+    assert record.context.original_identity == ("route", code)
+    assert written == "1.29.0"
+
+
+def test_a_malformed_identity_beside_a_removed_code_is_dropped() -> None:
+    for namespace, code in (
+        ("route\n", REMOVED_ROUTE_CODES[0]),
+        ("route", REMOVED_ROUTE_CODES[1] + "\n"),
+    ):
+        record, _ = reasons.ReasonRecord.parse_payload(_record_naming(namespace, code))
+        assert record.code == "unknown_reason_from_future"
+        assert record.context.original_identity is None
