@@ -393,7 +393,11 @@ The raw writer, the DP writer and `include_values=True` keep writing v1, and eve
 both (`decoy_engine.contracts.distribution_snapshot`). The same change moves `value_policy` to
 `flagged-redacted/v2` (every unflagged column is also floored at 10 rows); readers accept v1 and
 v2. A column too small to floor is listed in `redacted_columns`. Generated output of a statistical
-column fitted from a new plain snapshot changes; an old snapshot generates as before.
+column fitted from a new plain snapshot changes; an old snapshot generates as before. A plain v2
+numeric histogram accompanying `exact_values` or `quantile_grid` has one bin; without either block,
+it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at least 10 rows.
+`numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
+unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because

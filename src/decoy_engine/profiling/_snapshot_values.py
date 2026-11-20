@@ -1,27 +1,19 @@
 """The distribution snapshot `decoy fit` writes, with value-sensitive columns' cells withheld.
 
-Which columns are sensitive, which stats are cell values and how the marker is written all come
-from `_value_redaction.py`, the same helpers a scan document uses. This module only applies the
-rules that need the data: re-binning a numeric column and bounding a datetime by years.
+Sensitive columns, stats and the marker come from `_value_redaction.py`, as for a scan document;
+this module applies the rules that need the data.
 
-Every column the profiler did not flag gets a floor instead (`SNAPSHOT_FLOOR_STATS`): no label,
-joint cell or year range is held by fewer than `MIN_RELEASE_COUNT` rows, and a numeric range is
-top and bottom coded, so one rare cell or extreme cannot ship. A column too small to floor takes
-the flagged treatment and is listed. Minimum frequency rule, top and bottom coding and global
-recoding: Hundepool et al., Statistical Disclosure Control (Wiley 2012), sections 3.4 and 4.2; R
-sdcMicro `topBotCoding` and `globalRecode`; R synthpop `sdc()`.
+Every column the profiler did not flag gets a floor (`SNAPSHOT_FLOOR_STATS`): no label, joint
+cell or year range is held by fewer than `MIN_RELEASE_COUNT` rows, and a numeric range is top and
+bottom coded. A column too small to floor is flagged and listed. Minimum frequency rule, top and
+bottom coding, global recoding: Hundepool et al., Statistical Disclosure Control (Wiley 2012),
+sections 3.4 and 4.2; R sdcMicro `topBotCoding` and `globalRecode`.
 
 Pattern: statistical disclosure control global recoding; HIPAA Safe Harbor year-only dates.
 
-Numeric columns are released as one coarse interval (statistical disclosure control global
-recoding, Hundepool et al., Statistical Disclosure Control, Wiley 2012, sections 3.4.2 to
-3.4.3; R sdcMicro `globalRecode`). The bounds sit on a power-of-ten grid one step above the
-column's range and strictly outside every cell, so they say the range's order of magnitude and
-nothing else; there is no interior edge because any edge can equal a real cell. Near float max
-the grid cannot be written, so the bounds are the fixed (-1.5, 1.5). Datetimes keep
-their per-year counts and are bounded by the years around them (HIPAA Safe Harbor,
-45 CFR 164.514(b)(2)(i)(C)). Pretty-number axis bounds follow Heckbert, "Nice numbers for graph
-labels" (Graphics Gems, 1990), in the powers-of-ten form.
+A flagged numeric column is one coarse interval on a power-of-ten grid strictly outside its
+cells; near float max the bounds are the fixed (-1.5, 1.5). Datetimes are bounded by the years
+around them (HIPAA Safe Harbor, 45 CFR 164.514(b)(2)(i)(C)).
 """
 
 from __future__ import annotations
@@ -73,15 +65,14 @@ from decoy_engine.quality.snapshot import (
     numeric_stats,
 )
 
-# The snapshot writes 12 decimal places, so a finer grid step could not be written.
+# 12 decimal places are written, so a finer grid step could not be.
 _FLOOR: Final = Decimal(1).scaleb(-12)
 _PRECISION: Final = 80
 _FALLBACK_DOMAIN: Final = (-1.5, 1.5)
 # Heckbert's nice steps are 1, 2 or 5 times a power of ten.
 _NICE_MANTISSAS: Final = (1, 2, 5)
 _MAX_STEP_TRIES: Final = 64
-# The numeric shape blocks a fallback domain would leave outside its edges.
-_SHAPE_BLOCKS: Final = ("quantile_grid", "exact_values")
+_SHAPE_BLOCKS: Final = ("quantile_grid", "exact_values")  # a fallback domain pops these
 # A string column whose median label has this many words reads as sentences, so it is free text.
 FREETEXT_MIN_WORDS: Final = 3
 
@@ -229,14 +220,10 @@ def release_ranges_at_k(
 ) -> list[tuple[int, int, int | float]]:
     """Bottom and top code ordered `(start, end, count)` ranges at the K-th row, then fold them.
 
-    Every range below the one that holds the `MIN_RELEASE_COUNT`-th lowest row counts under that
-    range, and likewise above the K-th highest, so the outer edges of what is released are those of
-    the K-th row from each end and never name one of the K-1 rows at either end. Then
-    `fold_ranges_under_k` merges until each range holds K rows. Fewer than K rows in all, or K-th
-    rows that cross (fewer than 2K-1 rows), release nothing, as numeric columns already do. Top
-    and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al., Statistical Disclosure
-    Control (Wiley, 2012), section 3.4. The one coder for the snapshot's years and a profile
-    document's decades.
+    Ranges below the one holding the K-th lowest row count under it, and likewise above the K-th
+    highest, so the outer edges never name one of the K-1 end rows. Then `fold_ranges_under_k`
+    merges until each range holds K rows. Under 2K-1 rows release nothing, as numeric columns do.
+    Top and bottom coding: R sdcMicro `topBotCoding`; Hundepool et al. (Wiley 2012), section 3.4.
     """
     counts = [count for _, _, count in ranges]
     if sum(counts) < MIN_RELEASE_COUNT:
@@ -320,39 +307,62 @@ def _writable(stats: dict[str, Any], bins: int) -> bool:
     )
 
 
-def _top_coded_stats(
-    non_null: pd.Series, finite: np.ndarray[Any, np.dtype[np.float64]], numeric_bins: int
-) -> tuple[dict[str, Any], bool]:
-    """Numeric stats whose bounds depend only on the K-th smallest and K-th largest cell.
+def _one_bin(
+    non_null: pd.Series, low: float, high: float, held: list[float]
+) -> dict[str, Any] | None:
+    """One bin on the one-bin grid bounds of `[low, high]` if writable and it holds `held`."""
+    try:
+        lower, upper = _grid_edges(low, high)
+        stats = numeric_stats(non_null, bins=1, domain=(float(lower), float(upper)))
+    except (OverflowError, ValueError):
+        return None
+    e = stats["bin_edges"]
+    return stats if _writable(stats, 1) and e[0] <= min(held) and e[-1] >= max(held) else None
 
-    Top and bottom coding (R sdcMicro `topBotCoding`): the cells beyond those two are clamped into
-    the end bins, so replacing any of them leaves every key unchanged. The bounds sit on a nice
-    grid (Heckbert 1990), widened until `numeric_bins` edges survive the 12-place writer; near
-    float max the public fixed domain is used. The flag is True for that fallback. When the two
-    cells are equal, or closer than the grid floor can resolve, the requested bin count puts them
-    in an interior bin, so a tail swap can move counts there (still counts on a public grid).
+
+def _top_coded_stats(
+    non_null: pd.Series,
+    finite: np.ndarray[Any, np.dtype[np.float64]],
+    numeric_bins: int,
+    shape_values: list[float],
+) -> tuple[dict[str, Any], bool]:
+    """Numeric stats that depend only on the K-th smallest and largest cells (top and bottom coding).
+
+    A released shape block (`shape_values` non-empty) gets one bin on the one-bin grid bounds.
+    Otherwise the grid is the finest Heckbert step, from the requested width up, at which every
+    bin holds 0 or at least K rows. The flag is True when the fixed public domain was used.
     """
     ordered = np.sort(finite)
     low, high = float(ordered[MIN_RELEASE_COUNT - 1]), float(ordered[-MIN_RELEASE_COUNT])
+    if shape_values:
+        one = _one_bin(non_null, low, high, shape_values)
+        return (
+            (one, False)
+            if one
+            else (numeric_stats(non_null, bins=1, domain=_FALLBACK_DOMAIN), True)
+        )
     with localcontext() as ctx:
         ctx.prec = _PRECISION
         d_low, d_high = Decimal(repr(low)), Decimal(repr(high))
         width = (d_high - d_low) / numeric_bins if d_low < d_high else _grid_step(d_low, d_high)
         for step in islice(_nice_steps(width), _MAX_STEP_TRIES):
             start = (d_low / step).to_integral_value(ROUND_FLOOR) * step
-            bins = max(
-                numeric_bins, int(((d_high - start) / step).to_integral_value(ROUND_CEILING))
-            )
+            bins = max(1, int(((d_high - start) / step).to_integral_value(ROUND_CEILING)))
             domain = (float(start), float(start + step * bins))
             if not all(math.isfinite(edge) for edge in domain):
                 break
+            inner = [float(start + step * i) for i in range(1, bins)]
+            cum = np.searchsorted(ordered, inner, side="left")
+            counts = np.diff(cum, prepend=0, append=ordered.size).tolist()
+            if any(0 < c < MIN_RELEASE_COUNT for c in counts):
+                continue
             try:
                 stats = numeric_stats(non_null, bins=bins, domain=domain)
             except (OverflowError, ValueError):
                 break
-            if _writable(stats, bins):
+            if _writable(stats, bins) and stats["bin_counts"] == counts:
                 return stats, False
-    return numeric_stats(non_null, bins=numeric_bins, domain=_FALLBACK_DOMAIN), True
+    return numeric_stats(non_null, bins=1, domain=_FALLBACK_DOMAIN), True
 
 
 def _k_tail_quantiles(quantiles: dict[str, float], finite_count: int) -> dict[str, float]:
@@ -413,7 +423,8 @@ def _floor_column(non_null: pd.Series, col: dict[str, Any], *, numeric_bins: int
         by_rule.setdefault(rule, []).append(key)
     finite = finite_numeric_cells(non_null) if kind == "numeric" else None
     if finite is not None and finite.size > 0 and stats.get("min") is not None:
-        top_coded, shape_outside = _top_coded_stats(non_null, finite, numeric_bins)
+        shape_values = [v for b in _SHAPE_BLOCKS for v in (stats.get(b) or {}).get("values", ())]
+        top_coded, shape_outside = _top_coded_stats(non_null, finite, numeric_bins, shape_values)
         for key in by_rule.get(Rule.TOP_CODED_RANGE, ()):
             stats[key] = top_coded[key]
         for block in _SHAPE_BLOCKS if shape_outside else ():
