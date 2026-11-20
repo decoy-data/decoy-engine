@@ -188,6 +188,15 @@ def passthrough_columns(
     ]
 
 
+def untouched_columns(nodes: Iterable[Any], names: Sequence[str]) -> frozenset[str]:
+    """The columns of a table no work node changes: every column except those some
+    non-passthrough node writes. The node-side twin of `passthrough_columns` for the
+    full-frame and sequential adapters, which hold work nodes rather than the config; a
+    passthrough node, `when:` or not, leaves its column as the source held it."""
+    written = {c for node in nodes if node.strategy != "passthrough" for c in node.columns}
+    return frozenset(names) - written
+
+
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:
     table_cfg = next(
         (t for t in config.get("tables") or [] if isinstance(t, dict) and t.get("name") == table),
@@ -245,4 +254,5 @@ __all__ = [
     "passthrough_columns",
     "plan_carry",
     "read_set",
+    "untouched_columns",
 ]

@@ -482,13 +482,21 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
-def table_from_pandas_keeping_maps(frame: pd.DataFrame, schema: pa.Schema | None) -> pa.Table:
-    """`pa.Table.from_pandas(frame)` that gives every map column the source held its map type
-    back. `schema` is the source table's. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot infer
-    a type from; the declared type rebuilds it exactly. Only the source's map columns are
-    typed, so every other column converts as it always did."""
+def table_from_pandas_keeping_maps(
+    frame: pd.DataFrame, schema: pa.Schema | None, untouched: Collection[str]
+) -> pa.Table:
+    """`pa.Table.from_pandas(frame)` that gives every untouched map column the source held its
+    map type back. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot
+    infer a type from; the declared type rebuilds it exactly. `schema` is the source table's and
+    `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
+    map column holds the strategy's own values and converts as it always did, like every other
+    column."""
     maps = (
-        [f for f in schema if pa.types.is_map(f.type) and f.name in frame.columns]
+        [
+            f
+            for f in schema
+            if pa.types.is_map(f.type) and f.name in frame.columns and f.name in untouched
+        ]
         if schema is not None
         else []
     )
