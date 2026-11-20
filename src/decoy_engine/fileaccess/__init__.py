@@ -134,7 +134,6 @@ __all__ = [
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
     "STAGE_MARKER",
-    "STAGE_MARKER",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
