@@ -111,9 +111,16 @@ def scrub(value: Any) -> Any:
     return canon(value)
 
 
+def _without_thread_record(metrics: dict[str, Any]) -> dict[str, Any]:
+    """`metrics` minus `execution.native_threads` (ENGINE-THREADS-DEFAULT, pinned by
+    test_native_threads_default.py); the baselines predate it and run on one thread."""
+    execution = {k: v for k, v in metrics.get("execution", {}).items() if k != "native_threads"}
+    return {**metrics, "execution": execution} if "execution" in metrics else metrics
+
+
 def project(result: Any) -> dict[str, Any]:
     """The comparison surface of an `ExecutionResult`."""
-    metrics = result.quality_metrics
+    metrics = _without_thread_record(result.quality_metrics)
     return {
         "tables": {name: project_table(tbl) for name, tbl in sorted(result.outputs.items())},
         "warnings": [repr(w) for w in result.warnings],

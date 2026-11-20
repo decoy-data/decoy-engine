@@ -58,6 +58,11 @@ def _run_small(tmp_path: Path, **kwargs: Any) -> Any:
     return run_pipeline(cfg, sources, engine_version=ENGINE, auto_chunk=False, **kwargs)
 
 
+def _pair(block: dict[str, Any]) -> tuple[int, str]:
+    record = block["native_threads"]
+    return record["count"], record["source"]
+
+
 def _block(result: Any) -> dict[str, Any]:
     return result.quality_metrics["execution"]
 
@@ -65,14 +70,14 @@ def _block(result: Any) -> dict[str, Any]:
 def test_default_resolves_to_usable_cpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_cpus(monkeypatch, 3)
     block = _block(_run_small(tmp_path))
-    assert (block["native_threads"], block["native_threads_source"]) == (3, "auto")
+    assert _pair(block) == (3, "auto")
 
 
 @pytest.mark.parametrize("threads", [1, 2])
 def test_explicit_value_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, threads: int) -> None:
     _patch_cpus(monkeypatch, 8)
     block = _block(_run_small(tmp_path, native_threads=threads))
-    assert (block["native_threads"], block["native_threads_source"]) == (threads, "explicit")
+    assert _pair(block) == (threads, "explicit")
 
 
 def test_detection_failure_falls_back_to_one(
@@ -80,9 +85,9 @@ def test_detection_failure_falls_back_to_one(
 ) -> None:
     _patch_cpus_failing(monkeypatch)
     block = _block(_run_small(tmp_path))
-    assert (block["native_threads"], block["native_threads_source"]) == (1, "auto_fallback")
+    assert _pair(block) == (1, "auto_fallback")
     block = _block(_run_small(tmp_path, native_threads=2))
-    assert (block["native_threads"], block["native_threads_source"]) == (2, "explicit")
+    assert _pair(block) == (2, "explicit")
 
 
 def test_other_detection_errors_are_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,7 +102,7 @@ def test_other_detection_errors_are_not_swallowed(monkeypatch: pytest.MonkeyPatc
 def test_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_cpus(monkeypatch, 5000)
     block = _block(_run_small(tmp_path))
-    assert (block["native_threads"], block["native_threads_source"]) == (MAX_NATIVE_THREADS, "auto")
+    assert _pair(block) == (MAX_NATIVE_THREADS, "auto")
     assert MAX_NATIVE_THREADS == 1024
 
 
@@ -119,8 +124,8 @@ def test_isolated_run_resolves_in_the_child(tmp_path: Path) -> None:
     result = run_pipeline_isolated(cfg, sources, engine_version=ENGINE)
     assert result.outcome == "completed", result.error
     block = _block(result)
-    assert block["native_threads_source"] == "auto"
-    assert block["native_threads"] >= 1
+    assert block["native_threads"]["source"] == "auto"
+    assert block["native_threads"]["count"] >= 1
 
 
 # -- every route -------------------------------------------------------------------------------
@@ -286,8 +291,8 @@ def test_default_output_bytes_equal_single_thread_per_route(
     (tmp_path / "auto").mkdir()
     one, want = drive(tmp_path / "one", 1)
     auto, got = drive(tmp_path / "auto", None)
-    assert _block(one)["native_threads"] == 1
-    assert _block(auto)["native_threads"] == 4
+    assert _block(one)["native_threads"]["count"] == 1
+    assert _block(auto)["native_threads"]["count"] == 4
     assert sorted(got) == sorted(want)
     for name in want:
         assert got[name].schema.equals(want[name].schema), (route, name)
@@ -300,10 +305,10 @@ def test_source_on_every_route(route: str, tmp_path: Path, monkeypatch: pytest.M
     _patch_cpus(monkeypatch, 3)
     result, _ = ROUTES[route](tmp_path, None)
     block = _block(result)
-    assert (block["native_threads"], block["native_threads_source"]) == (3, "auto"), route
+    assert _pair(block) == (3, "auto"), route
     (tmp_path / "explicit").mkdir()
     result, _ = ROUTES[route](tmp_path / "explicit", 2)
-    assert _block(result)["native_threads_source"] == "explicit", route
+    assert _block(result)["native_threads"]["source"] == "explicit", route
 
 
 _RSS_CHILD = """

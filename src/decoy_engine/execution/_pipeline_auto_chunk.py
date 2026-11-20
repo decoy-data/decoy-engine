@@ -72,15 +72,13 @@ REASON_DISPATCHER_DISABLED = reasons.route.DISPATCHER_DISABLED
 def require_lane_knobs(native_threads: Any, chunked_dispatcher_enabled: Any) -> None:
     """Fail-early validation of the two `run_pipeline` lane knobs, before profiling.
 
-    `native_threads` is None (auto, resolved by `native_threads_for_run`) or an int from 1 to B1's
-    `MAX_NATIVE_THREADS`, not a bool;
+    `native_threads` is an int from 1 to B1's `MAX_NATIVE_THREADS`, not a bool;
     `require_positive_int` alone accepts any larger int, so the upper bound is
     checked here against B1's constant (never a second literal)."""
     from decoy_engine.execution.native._chunked_entry import MAX_NATIVE_THREADS
 
-    if native_threads is not None:
-        require_positive_int("native_threads", native_threads)
-    if native_threads is not None and native_threads > MAX_NATIVE_THREADS:
+    require_positive_int("native_threads", native_threads)
+    if native_threads > MAX_NATIVE_THREADS:
         raise ExecutionError(
             code=reasons.runtime.INVALID_EXECUTION_KNOB,
             message=(
