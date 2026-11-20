@@ -268,7 +268,7 @@ def provider_text_columns(config: Mapping[str, Any]) -> dict[str, set[str]]:
     tables, cols = _generate_columns(config)
     out: dict[str, set[str]] = {}
     for key in cols:
-        root = cols.get(_reference_root(tables, key))
+        root = cols.get(reference_root(tables, key))
         if root is not None and root.get("type") == "provider":
             out.setdefault(key[0], set()).add(key[1])
     return out
