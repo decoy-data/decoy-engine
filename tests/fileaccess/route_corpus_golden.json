@@ -647,6 +647,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -826,6 +829,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -860,6 +866,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -950,6 +959,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -1032,6 +1044,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [

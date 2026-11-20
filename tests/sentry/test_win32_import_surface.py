@@ -177,7 +177,7 @@ EXCEPTIONS: dict[tuple[str, str], tuple[int, str, str]] = {
     (_DURABLE, "geteuid"): (1, "EW2", "the chain owner walk is skipped on win32 by EW2"),
     (_LOCAL, "fchmod"): (2, "EW4", "owner-only creation moves to create_owner_only_file in EW4"),
     (_OUTPUT, "dir-fd"): (
-        22,
+        20,
         "EW3",
         "the dir_fd stage and publication paths get a win32 arm in EW3",
     ),
