@@ -212,7 +212,9 @@ def _masked_entry(strategy: str, name: str = "p") -> dict[str, Any]:
         return support.hash_col(name)
     if strategy == "redact":
         return support.redact_col(name)
-    return support.faker_col(name)
+    if strategy == "faker":
+        return support.faker_col(name)
+    return {"name": name, "strategy": strategy}
 
 
 def _masked_cells() -> list[tuple[str, str, str]]:
@@ -275,7 +277,7 @@ def test_at_b3_a_masked_column_read_by_another_entry_stays_full_frame(tmp_path: 
         tmp_path,
         table,
         support.hash_col("p"),
-        s_entry={**support.redact_col("s"), "when": "p == p"},
+        s_entry={**support.redact_col("s"), "when": "p != 1"},
     )
     block = _run(table, cfg).quality_metrics["auto_chunk"]
     assert block["mode"] == "full_frame"
@@ -438,3 +440,14 @@ def test_a_stream_fk_job_carries_a_passthrough_column_exactly(tmp_path: Path) ->
     got = pq.read_table(target / "orders.parquet")
     assert got.schema.field("x").type == pa.int64()
     assert got.column("x").to_pylist() == orders.column("x").to_pylist()
+
+
+@pytest.mark.parametrize("strategy", ["hash", "redact", "faker"])
+def test_an_admitted_masked_pair_runs_full_frame_on_the_kill_switch_lane(
+    tmp_path: Path, strategy: str
+) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(tmp_path, table, _masked_entry(strategy))
+    block = support.run_legacy(cfg, table).quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame", block
+    assert "p (integer with nulls)" in block["reason"]

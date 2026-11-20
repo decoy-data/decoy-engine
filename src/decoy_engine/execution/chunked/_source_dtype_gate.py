@@ -50,7 +50,8 @@ def type_class(arrow_type: pa.DataType, null_count: int) -> str | None:
 
 
 def _config_admits(entry: Mapping[str, Any]) -> bool:
-    """The per-strategy configuration under which the table row holds."""
+    """The configuration under which a table row holds: no `when:`, a string `redact_with`, a
+    deterministic faker. Membership of the strategy in the table is checked by the caller."""
     strategy = entry.get("strategy")
     if has_when(entry):
         return False  # a gated entry sees a per-chunk frame, and gated hash is not exact-int
@@ -59,7 +60,7 @@ def _config_admits(entry: Mapping[str, Any]) -> bool:
         return isinstance(redact_with, str)
     if strategy == "faker":
         return entry.get("deterministic") is True
-    return strategy == "hash"
+    return True
 
 
 def admitted_masked_columns(
