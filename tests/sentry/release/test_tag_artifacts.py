@@ -178,12 +178,12 @@ PRODUCERS: dict[str, Producer] = {
     "decoy-safe-output/v1": _safe_output,
     "decoy-quarantine/v1": _quarantine,
     "decoy-model-pack/v1": _model_pack,
-    "phase-result/v1": _phase_result,
-    "phase-event/v1": _phase_event,
     "decoy.evidence.statement/v1": _fixture("vectors/a1_flip_csv/statement.bin"),
     "decoy.trust-policy/v1": _shared("decoy.trust-policy/v1"),
     "decoy.required-catalog/v1": _shared("decoy.required-catalog/v1"),
-    # No engine writer: S7A-KL-1.
+    # No engine writer: S7A-KL-1. `to_wire` only builds the dict; nothing in the engine calls it.
+    "phase-result/v1": _phase_result,
+    "phase-event/v1": _phase_event,
     "publication/v1": _kind_schema("publication"),
     "checkpoint-index/v1": _kind_schema("checkpoint"),
     "decoy-support-bundle/v1": _const("decoy_engine.support", "BundleSchema", "V1"),
@@ -197,6 +197,8 @@ PRODUCERS: dict[str, Producer] = {
 }
 NO_WRITER = frozenset(
     {
+        "phase-result/v1",
+        "phase-event/v1",
         "publication/v1",
         "checkpoint-index/v1",
         "decoy-support-bundle/v1",

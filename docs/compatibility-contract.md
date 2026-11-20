@@ -259,13 +259,15 @@ decoy.evidence.statement/v1    decoy.trust-policy/v1    decoy.required-catalog/v
 
 **Tags added with the freeze batch (FREEZE-S7a, 2026-11-20).** Every `"<name>/vN"` literal in engine source
 is classified, and `tests/sentry/release/test_tag_census.py` fails on a new unclassified one. The 19 tags
-after `lock/v1` above were persisted or exported with no listing before. Eight have no engine writer, and the
-map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are older versions the engine
-still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with no model yet;
-`decoy-support-bundle/v1`, `decoy-reasons/v1`, `dps-marginal/v3` and `canary-span-report/v1` name a typed
-constant the engine does not write to a file itself. The other eleven are read from a written artifact by a
-sentry. `phase-result/v1` and `phase-event/v1` are frozen because `to_wire` writes them into the exported JSON.
-Tags built with f-strings are a known limit of the census. A tag that never leaves the process is internal
+after `lock/v1` above were persisted or exported with no listing before. Ten are pinned without reading a
+written artifact, and the map cites `S7A-KL-1` for them: `post-scan-integrity/v2` and `flagged-redacted/v1` are
+older versions the engine still reads; `publication/v1` and `checkpoint-index/v1` are reserved record kinds with
+no model yet; `decoy-support-bundle/v1`, `decoy-reasons/v1` and `canary-span-report/v1` name a typed constant
+the engine does not write to a file itself; `dps-marginal/v3` has a writer that needs the `opendp` extra.
+`phase-result/v1` and `phase-event/v1` are frozen because the wire form `to_wire` builds carries the tag; no
+engine code calls `to_wire` yet, so they have no engine writer either. The other nine are read from a written
+artifact by a sentry. The census reads Python string and bytes constants under `src/decoy_engine`. Tags built
+with f-strings or concatenation, and tags in Rust or YAML files, are out of its scope (`S7A-KL-2`). A tag that never leaves the process is internal
 (`decoy_engine.contracts.stability.INTERNAL_TAGS`, with a reason), and a
 sentry scans written artifacts to confirm no internal tag appears in one. Derivation labels are in 3.3.
 
@@ -457,13 +459,16 @@ user with **zero error message.**
 **Derivation labels (frozen).** These tags are inputs to a key, a digest or a seed. Changing one changes
 output bytes or a stored digest with no error, so each is part of the determinism guarantee. The list equals
 `decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
-3.1, nor internal. `ff1-key/v1` is the one label that 3.1 lists too.
+3.1, a declared-casting format id (`docs/declared-casting.md`) nor internal. The 14 declared-casting ids (`string/exact/v1`,
+`cobol/comp-3/v1` and the rest) name a format a user declares in config; the F06 parse and output registries own them.
+`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
 
 ```
-canary-span-normalization/v1   decoy-probe/v1            decoy-resume-key-check/v1
-decoy.shuffle.unkeyed/v1       fpe-key/v1                name_email/v1
-pinned-plan-fingerprint/v1     policy-expansion/v1       secret-provider/v1
-tokenize-key/v1
+canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/keyprovider/v1
+decoy-engine/protected-quarantine/v1   decoy-probe/v1            decoy-resume-key-check/v1
+decoy.shuffle.unkeyed/v1       joint_mask/gen_row/v1     joint_mask/keyed_row/v1
+joint_mask/null_fallback/v1    name_email/v1             pinned-plan-fingerprint/v1
+policy-expansion/v1            secret-provider/v1        tokenize-key/v1
 ```
 
 **Rules:**

@@ -17,7 +17,7 @@ from scripts.release.frozen_map import rows
 import decoy_engine
 import decoy_engine.sdk
 from tests.sentry.layout import map_paths, section
-from tests.sentry.release import _census
+from tests.sentry.release import _census, _tags
 
 ROOT = Path(__file__).resolve().parents[3]
 MAP = ROOT / "docs" / "frozen-surfaces.md"
@@ -27,7 +27,6 @@ NAMES_HEADING = "## Public names (contract 3.4)"
 EXPERIMENTAL_HEADING = "## Experimental surfaces (contract 3.6)"
 OTHER_HEADING = "## Other frozen surfaces"
 LIMITS_HEADING = "## Known limits"
-_TAG = re.compile(r"[a-z][a-z0-9._-]*/v\d+")
 _SPAN = re.compile(r"`([^`]+)`")
 _LIMIT = re.compile(r"accepted-known-limit: ([^\s`]+)`")
 # Design note 1 sources with no list to read from code: each must keep its one row.
@@ -46,7 +45,7 @@ def contract_tags(contract: str) -> list[str]:
     block = section(contract, "### 3.1 Persisted artifact formats (the biggest surface)").split(
         "```"
     )[1]
-    return _TAG.findall(block)
+    return _tags.BARE.findall(block)
 
 
 def surface_counts(table: str) -> collections.Counter[str]:
