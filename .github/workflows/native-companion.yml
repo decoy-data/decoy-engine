@@ -179,12 +179,38 @@ jobs:
           path: decoy-engine-native/dist/*.whl
           retention-days: 14
 
+  # native-changes: whether this pull request touches the native companion (the paths and
+  # the match rule live in scripts/dev/native_scope.py). Hosted macOS runners are few, so the
+  # macOS legs wait for one only when the companion changed. A schedule or dispatch run, and any
+  # git error, say `true`. Full history, so the base commit and the merge base are present.
+  native-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.scope.outputs.native }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether the native companion changed
+        id: scope
+        run: |
+          python3 scripts/dev/native_scope.py changes \
+            --event "${{ github.event_name }}" \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+
   # companion-wheel-macos: the macOS arm64 row of the approved target matrix (Task
   # 3.1). `macos-15` is the current pinned Apple-Silicon runner label (`macos-14` is
   # deprecated); `target: aarch64-apple-darwin` selects the arm64 architecture
   # explicitly rather than relying on the runner's default. Same shared
-  # parity_smoke.py as every other target.
+  # parity_smoke.py as every other target. Runs only when native-changes says the companion
+  # changed; companion-wheel-macos-ok is the merge check, not these legs.
   companion-wheel-macos:
+    needs: native-changes
+    if: needs.native-changes.outputs.native == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
@@ -225,6 +251,25 @@ jobs:
           path: decoy-engine-native/dist/*.whl
           retention-days: 14
 
+  # companion-wheel-macos-ok: the one required check for the macOS legs. A skipped matrix job
+  # reports no per-leg check, so the legs are not required themselves. The decision (native
+  # false and legs skipped, or native true and legs green) is scripts/dev/native_scope.py judge;
+  # anything else is red, including a native-changes that wrote no output.
+  companion-wheel-macos-ok:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [native-changes, companion-wheel-macos]
+    if: always()
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/dev
+          persist-credentials: false
+      - name: Judge the macOS legs against the path scope
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: printf '%s' "$NEEDS" | python3 scripts/dev/native_scope.py judge
+
   # companion-rust-lint: format + clippy gate on the Rust crate so the first
   # real kernel (Task 2.2) cannot merge without Rust lint enforcement. Pins the
   # same 1.98.0 as rust-toolchain.toml so CI and local builds agree.
@@ -259,7 +304,7 @@ jobs:
   # already covers.
   core-companion-present:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/lock-env
@@ -337,6 +382,10 @@ jobs:
       # every case is companion-gated and skips elsewhere, so this is the one job that runs them.
       - name: date_shift chunked native lane (companion-present case)
         run: pytest tests/native/test_chunked_date_shift_parity.py tests/native/test_chunked_date_shift_admission.py tests/native/test_chunked_date_shift_types_errors.py tests/native/test_date_shift_jitter_chunked.py -v --tb=short
+      # NONFK-OOM part (a): the carried-passthrough dtype matrix routes a non-FK table through
+      # `run_mask_chunked`, whose native lane runs only with the companion installed.
+      - name: Non-FK carried passthrough dtype matrix (companion-present case)
+        run: pytest tests/parity/test_nonfk_dtype_matrix.py -v --tb=short
       # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
       # it, so this is the one job that can prove the chunked route leaks no source metadata.
       # A skip here would hide that, so the step fails on any SKIPPED line and on an empty
@@ -346,6 +395,14 @@ jobs:
           set -o pipefail
           pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
           if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
+
+      # Every tests/native file, so a companion-gated test that no step above names cannot rot
+      # (58 such tests were red on main before this step existed). Same two-pass split as ci.yml:
+      # xdist for everything but `serial`, then the serial tests alone.
+      - name: Whole tests/native directory (companion-present case)
+        run: |
+          pytest tests/native -m "not serial" -n 4 --dist loadfile -q --tb=short
+          pytest tests/native -m "serial" -q --tb=short || [ $? -eq 5 ]
 
   # companion-fuzz-sanitizer: the KeyedDerivationKernel is the one security-sensitive native
   # unit, so it gets fuzz + sanitizer evidence beyond the KAT/proptest/clippy gates above. A

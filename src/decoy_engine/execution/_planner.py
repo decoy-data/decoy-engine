@@ -476,12 +476,9 @@ def _runtime_source_rejections(
             f"threshold ({auto_chunk_threshold_rows}); full-frame is cheaper "
             "than streaming at this size"
         )
-    gap = _ci.null_count_gap_reason(facts, bucketize_columns or [], table)
-    if gap:
-        reasons.append(gap)
-    stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
     # FK jobs and the legacy oracle lane keep their routing: only the dispatcher lane of a job
-    # with no FK edge exempts its carried columns.
+    # with no FK edge exempts its carried columns, from the footer null-count gate and the
+    # dtype gate alike.
     carried: frozenset[str] = frozenset()
     masked_ok: frozenset[str] = frozenset()
     if carry_inputs is not None:
@@ -490,6 +487,10 @@ def _runtime_source_rejections(
         masked_ok = admitted_masked_columns(
             facts, _table_column_entries(dict(cfg), table=table), registry
         )
+    gap = _ci.null_count_gap_reason(facts, bucketize_columns or [], table, carried)
+    if gap:
+        reasons.append(gap)
+    stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
     unstable = unstable_source_columns(
         facts, declared_stable=stable, declared_bad=bad, carried=carried, masked_ok=masked_ok
     )

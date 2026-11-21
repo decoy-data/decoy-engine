@@ -27,6 +27,7 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.determinism import resolve_seed
+from decoy_engine.generation.composite._backend import COMPOSITE_BACKEND
 from decoy_engine.generation.composite._bundle_pool import BundlePool
 from decoy_engine.generation.composite._errors import CompositeError
 from decoy_engine.generation.pool._cardinality import CardinalityMode
@@ -89,7 +90,7 @@ class CompositeCityStateZip:
             seed=chosen,
             size=len(table),
             build_time_ms=0.0,
-            backend_type="composite",
+            backend_type=COMPOSITE_BACKEND,
             backend_version="locality/v1",
             distinct_count=len(table),
             output_columns=self.output_columns,

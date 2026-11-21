@@ -39,14 +39,14 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
     option,
     provider_config_to_dict,
 )
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
@@ -190,6 +190,7 @@ class TextMaskHandler:
         null_mask = col.isna().to_list()
         col_values = col.to_list()
 
+        unsupported = False
         try:
             if ner_model is None:
                 for pos, value in enumerate(col_values):
@@ -245,6 +246,10 @@ class TextMaskHandler:
                             sub_floor_span_policy=sub_floor_span_policy,
                             sub_floor_notices=sub_floor_notices,
                         )
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             raise StrategyError(
                 code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
@@ -254,6 +259,9 @@ class TextMaskHandler:
                     "silently choose a sub_floor_span fallback."
                 ),
             ) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
 

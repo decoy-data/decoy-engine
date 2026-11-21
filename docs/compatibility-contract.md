@@ -83,6 +83,8 @@ declared integers, `date_shift` anchors, `top_code` columns and `group_key` sibl
 `NA` rule before, so they now mask more rows. A null-bearing integer column that a `when:` reads and
 that passes through is written as `int64` instead of `double`.
 
+**Pre-GA additive name with GEN-CATALOG GC3-E (2026-11-17).** `decoy_engine.code_set_catalog() -> dict[str, str]` returns each shipped code set name with its one-line description, in name order, read from the engine registry. It returns a new dict per call and reads no corpus file. No reason code, schema, config key or exit code changes.
+
 **Pre-GA additive keyword with SUB-RUN E2 (2026-11-12).** `run_pipeline(..., subset_request:
 SubsetRequest | Literal["config", "skip"] = "config")` is keyword-only (46 frozen parameters). `"config"`
 applies a `subset:` block, `"skip"` runs the full sources, a `SubsetRequest` replaces the block; any other
@@ -230,6 +232,29 @@ at plan compile, as is a `jitter_days` that is not an integer, is negative or ex
 today's `int()` coercion and window. One new plan reason, `date_shift_window_invalid`. Re-pin checklist: the platform
 fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`,
 `build_mortgage_credit.py`, `build_insurance.py`) and any stored date_shift output made from a `jitter_days` config.
+
+**Public renames.** This table owns every public rename since the 0.16.0 taxonomy split, so a consumer
+maps an old name to its new one in one place. Kinds are `symbol`, `wire key`, `config key`, `reason code`
+and `CLI-visible label`. A `symbol` row names a dotted import path: the new path must import and the old
+one must not (`tests/sentry/test_contract_renames_table.py` checks both). The CLI keeps its own retired
+list and points here for the pairs. A rename takes a new row in the release that makes it.
+
+<!-- renames-table:start -->
+| old | new | kind | since | note |
+|---|---|---|---|---|
+| `decoy_engine.storm` | `decoy_engine.detection`, `decoy_engine.profiling`, `decoy_engine.verification` | symbol | 0.16.0 | Package split by concern. |
+| `decoy_engine.run_storm` | `decoy_engine.profile_columns` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.StormProfile` | `decoy_engine.ColumnProfile` | symbol | 0.16.0 | Top-level re-export. |
+| `decoy_engine.run_storm_post_mask` | `decoy_engine.verification.run_post_mask` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `decoy_engine.StormPostMaskReport` | `decoy_engine.verification.PostMaskReport` | symbol | 0.16.0 | The new name is not a top-level re-export. |
+| `run_storm: true` | `post_scan: {integrity: true}` | config key | 0.17.0 | Pipeline config `version: 2` is required; `PipelineConfig.run_storm` became `PipelineConfig.post_scan`. |
+| `quality_metrics["storm_postmask"]` | `quality_metrics["post_scan_integrity"]` | wire key | 0.17.0 | Run result key. |
+| `storm-post-mask/v1` | `post-scan-integrity/v2` | wire key | 0.17.0 | Report schema tag. |
+| `storm.scan` | `pre_scan.profile` | wire key | 0.17.0 | Profiler event name. |
+| `route/run_storm_requested` | `route/post_scan_integrity_requested` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. The new one was retired in 0.25.0 and points at `route/post_scan_models_resident`. |
+| `route/run_storm` | `route/post_scan_integrity` | reason code | 0.17.0 | The old identity was a registry tombstone until 0.28.0 removed it. |
+| `CUSTOM_PROVIDERS_DIR` | `DECOY_CUSTOM_PROVIDERS_DIR` | config key | 0.24.0 | Environment variable, no alias. |
+<!-- renames-table:end -->
 
 **Pre-GA refusal added (date_shift `date_format` required, DATE-SHIFT-FORMAT, 2026-11-20).** A `date_shift` column
 without `provider_config.date_format` is refused at plan compile with `date_shift_requires_date_format`, in both
@@ -405,7 +430,11 @@ The raw writer, the DP writer and `include_values=True` keep writing v1, and eve
 both (`decoy_engine.contracts.distribution_snapshot`). The same change moves `value_policy` to
 `flagged-redacted/v2` (every unflagged column is also floored at 10 rows); readers accept v1 and
 v2. A column too small to floor is listed in `redacted_columns`. Generated output of a statistical
-column fitted from a new plain snapshot changes; an old snapshot generates as before.
+column fitted from a new plain snapshot changes; an old snapshot generates as before. A plain v2
+numeric histogram accompanying `exact_values` or `quantile_grid` has one bin; without either block,
+it has equal-width bins on a 1, 2, 5 grid and every non-empty bin is held by at least 10 rows.
+`numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` (new, `since`
+unreleased) by every snapshot writer, and above 1000 by the DP fit (`dp_numeric_bins_invalid`).
 
 `post-scan-integrity/v3` (the dict `run_post_mask` returns and `run_pipeline` stamps under
 `quality_metrics["post_scan_integrity"]`) is minted by SCAN-ML M4 (2026-11), because
@@ -1409,7 +1438,8 @@ acceptable cost.
 - [ ] No `name/vN` artifact shape changed under its existing tag (or: I minted a
       new version and kept the old reader).
 - [ ] No determinism golden baseline changed (or: I made a reviewed,
-      version-gated decision and said so in the PR).
+      version-gated decision, or before GA a dated entry in this document,
+      and said so in the PR).
 - [ ] Vault read/write is untouched (or: PO-reviewed new-version + permanent old
       reader).
 - [ ] No released disguise version was edited in place.

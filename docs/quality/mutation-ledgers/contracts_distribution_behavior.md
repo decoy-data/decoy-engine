@@ -1,6 +1,6 @@
-# Mutation grading: `execution/_distribution_behavior.py` -- substrate bar 75%
+# Mutation grading: `contracts/distribution_behavior.py` -- substrate bar 75%
 
-TQ substrate sweep (branch `tq/substrate-sweep`). `_distribution_behavior.py` is
+TQ substrate sweep (branch `tq/substrate-sweep`). `distribution_behavior.py` (moved from `execution/_distribution_behavior.py`) is
 the per-strategy distribution-behavior metadata registry: a module-level constant
 `_STATIC_BEHAVIOR` (24 strategy -> label entries) plus `distribution_behavior_for()`,
 which resolves `categorical` dynamically from its provider config (weights /
@@ -53,6 +53,6 @@ None. 0 product bugs.
 
 ## Regenerate
 
-`[tool.mutmut]` `only_mutate = ["src/decoy_engine/execution/_distribution_behavior.py"]`,
+`[tool.mutmut]` `only_mutate = ["src/decoy_engine/contracts/distribution_behavior.py"]`,
 `pytest_add_cli_args_test_selection = ["tests/unit/providers_v2/test_distribution_behavior_metadata.py"]`,
 then `python scripts/tq_mutate.py --run`.

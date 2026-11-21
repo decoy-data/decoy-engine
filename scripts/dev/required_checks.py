@@ -18,7 +18,9 @@ list. `origin/main` is fetched and must equal that sha, else exit 2 ("stale orig
 - `verify --tier merge`: per merge workflow, the newest `pull_request` run on head H has every
   derived name with conclusion `success` (skipped, neutral, cancelled and missing are red) on
   `run_attempt` 1, unless `--allow-rerun` names the workflow; the reason is printed for the gate
-  log.
+  log. Each `[[merge_status]]` context of the registry (`engine-gate/verdict`, posted by a
+  `gate-selfhosted.yml` dispatch on that exact sha) must also be a commit status in state
+  `success` on H. A head with no dispatch has no such status and stays red.
 - `verify --tier nightly`: per workflow with a `schedule` trigger on main, the newest `schedule`
   run is on the main sha, at most 26 hours old, `completed` with conclusion `success`, and has
   every job the tree derives for that workflow with conclusion `success`. All job pages are read.
@@ -265,6 +267,26 @@ def _jobs(repo: str, run: dict[str, Any], fetch: Fetch) -> dict[str, list[str | 
     return by_name
 
 
+def _gate_status_problems(repo: str, head: str, tree: MainTree, fetch: Fetch) -> list[str]:
+    """Each required commit-status context must be `success` on `head`; the API keeps the newest
+    status per context. A registry with no `[[merge_status]]` table is an error, never a pass."""
+    wanted = tree.required.get("merge_status")
+    if not wanted:
+        raise CheckError(f"{REGISTRY} has no [[merge_status]] entry at the main sha")
+    statuses = _read_listing(
+        fetch,
+        lambda page: f"repos/{repo}/commits/{head}/status?per_page=100&page={page}",
+        "statuses",
+        {"id": (int,), "context": (str,), "state": (str,)},
+    )
+    state = {s["context"]: s["state"] for s in statuses}
+    return [
+        f"{e['context']}: dispatch gate-selfhosted.yml on {head}"
+        for e in wanted
+        if state.get(e["context"]) != "success"
+    ]
+
+
 def verify_merge(
     repo: str, head: str, tree: MainTree, fetch: Fetch, allow_rerun: dict[str, str]
 ) -> list[str]:
@@ -287,7 +309,7 @@ def verify_merge(
                 problems.append(f"{wf}: check {name!r} is missing")
             elif set(got[name]) != {"success"}:
                 problems.append(f"{wf}: check {name!r} is not green")
-    return problems
+    return problems + _gate_status_problems(repo, head, tree, fetch)
 
 
 def verify_nightly(repo: str, tree: MainTree, fetch: Fetch, now: datetime) -> list[str]:
