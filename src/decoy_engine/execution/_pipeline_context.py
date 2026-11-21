@@ -270,9 +270,8 @@ def build_run_context(
     require_bool("auto_chunk", auto_chunk)
     require_positive_int("chunk_size_rows", chunk_size_rows)
     require_positive_int("auto_chunk_threshold_rows", auto_chunk_threshold_rows)
-    _pipeline_auto_chunk.require_lane_knobs(
-        1 if native_threads is None else native_threads, chunked_dispatcher_enabled
-    )
+    lane_threads = 1 if native_threads is None else native_threads
+    _pipeline_auto_chunk.require_lane_knobs(lane_threads, chunked_dispatcher_enabled)
     threads = native_threads_for_run(native_threads)
     publish = OutputPublish(sink, stream_chunked_output, post_validation)  # B6a; validates the knob
     require_bool("multi_table_dispatch_enabled", multi_table_dispatch_enabled)
