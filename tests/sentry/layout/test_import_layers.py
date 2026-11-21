@@ -1,7 +1,8 @@
 """Sentry: the engine's import layers hold, and the layer list is the reviewed one.
 
-``.importlinter`` declares one import-linter ``layers`` contract over the top-level children
-of ``decoy_engine``. It is exhaustive, so a new top-level package or module is red until it is
+``.importlinter`` declares an import-linter ``layers`` contract and a ``policy-direction``
+``forbidden`` contract (policy packages must not import I/O or backends). The layers contract is
+over the top-level children of ``decoy_engine``. It is exhaustive, so a new top-level package or module is red until it is
 placed. ``LAYERS`` below is the reviewed snapshot of the tiers: config and snapshot must agree
 exactly, so placing a package or moving one down a tier edits both in the same diff. The
 ignore lines are measured back imports that exist today; they may only shrink (X0a baseline
@@ -87,13 +88,23 @@ def facade_ignores(text: str, src: Path) -> list[str]:
     """Ignore lines whose importer or imported side is a package rather than a leaf module.
 
     import-linter exempts a whole module edge, not the symbols that first needed it, so an
-    ignore on a package facade lets any later import through that facade.
+    ignore on a package facade lets any later import through that facade. In a ``forbidden``
+    contract the imported side is the forbidden module itself, so it may be a package
+    (``fileaccess``); the importer side must still be a leaf.
     """
-    return sorted(
-        key
-        for key in ignore_keys(text)
-        if any((src / Path(*side.split("."))).is_dir() for side in key.split(" -> "))
-    )
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    parser.read_string(text)
+    bad: set[str] = set()
+    for name in parser.sections():
+        forbidden = parser.get(name, "type", fallback="") == "forbidden"
+        raw = parser.get(name, "ignore_imports", fallback="")
+        lines = "".join(f"    {ln}\n" for ln in raw.splitlines())
+        for key in ignore_keys(f"[c]\nignore_imports =\n{lines}"):
+            importer, imported = key.split(" -> ")
+            sides = [importer] if forbidden else [importer, imported]
+            if any((src / Path(*side.split("."))).is_dir() for side in sides):
+                bad.add(key)
+    return sorted(bad)
 
 
 def test_every_ignore_names_leaf_modules() -> None:
@@ -213,6 +224,32 @@ def test_the_facade_check_sees_a_package_ignore() -> None:
     ]
 
 
+def test_a_forbidden_ignore_may_name_a_package_only_as_the_forbidden_side() -> None:
+    text = (
+        "[c]\ntype = forbidden\nignore_imports =\n"
+        "    decoy_engine.plan._compile -> decoy_engine.fileaccess\n"
+        "    decoy_engine.plan -> decoy_engine.fileaccess\n"
+    )
+    assert facade_ignores(text, ROOT / "src") == ["decoy_engine.plan -> decoy_engine.fileaccess"]
+
+
+@pytest.mark.parametrize(
+    ("module", "line"),
+    [
+        # Policy reaching I/O: tier order alone would allow both (R1 policy-direction contract).
+        ("plan/_seed_envelope.py", "from decoy_engine.connectors import _clients"),
+        ("config/_generate_unique.py", "from decoy_engine.io import bounded_reader"),
+    ],
+)
+def test_a_new_policy_import_of_io_is_red(
+    scratch: Path, tmp_path: Path, module: str, line: str
+) -> None:
+    tree = _tree(scratch, tmp_path)
+    path = tree / "src" / "decoy_engine" / module
+    path.write_text(path.read_text(encoding="utf-8") + f"\n{line}\n", encoding="utf-8")
+    assert not lint_scratch(tree)
+
+
 @pytest.mark.parametrize(
     ("module", "line"),
     [
@@ -243,8 +280,9 @@ def test_an_ignore_line_matching_no_import_is_red(scratch: Path, tmp_path: Path)
     tree = _tree(scratch, tmp_path)
     _edit(
         tree / ".importlinter",
-        "ignore_imports =\n",
-        "ignore_imports =\n    decoy_engine.errors -> decoy_engine.unmask\n",
+        "    decoy_engine.errors -> decoy_engine.execution._row_error_summary\n",
+        "    decoy_engine.errors -> decoy_engine.execution._row_error_summary\n"
+        "    decoy_engine.errors -> decoy_engine.unmask\n",
     )
     assert not lint_scratch(tree)
 
