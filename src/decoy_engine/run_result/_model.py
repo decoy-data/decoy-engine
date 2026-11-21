@@ -180,7 +180,12 @@ RowsSource = Literal["outputs", "phase", "rate"]
 TableDeliveryState = Literal["delivered", "failed", "withheld", "dropped", "none"]
 OutputFormat = Literal["csv", "parquet", "fixed_width"]
 CheckId = Literal[
-    "post_validation", "post_scan_integrity", "fidelity", "native_post_run", "scan_drift"
+    "post_validation",
+    "post_scan_integrity",
+    "fidelity",
+    "native_post_run",
+    "scan_drift",
+    "pre_scan",
 ]
 CheckStatus = Literal["passed", "warned", "failed", "error", "not_run"]
 

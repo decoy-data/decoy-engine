@@ -84,6 +84,7 @@ from decoy_engine.config._parse import (
     parse_delivery_config,
     parse_pipeline_config,
     parse_relationship_config,
+    pre_scan_hash_input,
 )
 from decoy_engine.config._pipeline import PipelineConfig
 from decoy_engine.config._post_scan import (
@@ -100,7 +101,10 @@ from decoy_engine.config._post_scan import (
     post_scan_sink_kind,
     post_scan_sink_refusal,
 )
-from decoy_engine.config._pre_scan import PreScanConfig
+from decoy_engine.config._pre_scan import (
+    PreScanConfig,
+    pre_scan_requested,
+)
 from decoy_engine.config._relationships import (
     OrphanPolicyLiteral,
     RelationshipConfig,
@@ -227,6 +231,8 @@ __all__ = [
     "post_scan_resident_reason",
     "post_scan_sink_kind",
     "post_scan_sink_refusal",
+    "pre_scan_hash_input",
+    "pre_scan_requested",
     "reference_root",
     "refuse_fixed_width_output_types",
     "refuse_namespace_placeholder",
