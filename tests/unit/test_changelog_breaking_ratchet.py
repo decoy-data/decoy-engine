@@ -36,8 +36,7 @@ TRIAGED: dict[tuple[str, str], str] = {
         "new generate type; the refusals named are its own new codes and no existing config meets them"
     ),
     ("0.28.2", "Each synthetic identifier now reads one locale constant for "): (
-        "only CUSIP generate_random changes for existing callers (other locales refused); a "
-        "reviewer decides if that needs a Breaking bullet"
+        "the Breaking bullet on CUSIP `generate_random` locales covers it"
     ),
     ("0.28.2", "`per_detector_strategy: {ssn: date_shift}` (and `email: date"): (
         "the Breaking bullet on text_mask detector and strategy pairs covers it"

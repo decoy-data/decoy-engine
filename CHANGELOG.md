@@ -19,6 +19,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - a `when:` predicate that reads a column named `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` or `endswith` is refused with `when_outside_closed_grammar`; rename the column.
 - a generated `reference` column with infeasible or conflicting per-parent bounds, `null_probability` beside a bound, mismatched `weighted` weights, or an empty parent under `orphan_policy: fail` is now refused instead of generated; a bounded reference whose repair runs produces different values once.
 - a `text_mask` config that names a detector id the engine does not know, or a detector and strategy pair it cannot run (for example `date_shift` or `faker` on `email`, `fpe` on `email`), now fails at compile and in `decoy validate` instead of running
+- CUSIP `generate_random` now refuses locales other than `en_CA` and `en_US`. Pass one of those two locales.
 
 ### Changed (interior numeric bin floor and numeric_bins ceiling, 24F-E2, 2026-11-20)
 
