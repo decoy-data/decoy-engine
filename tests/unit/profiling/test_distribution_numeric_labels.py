@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from decoy_engine.profiling import profile_columns
 from decoy_engine.profiling._distributions import _distribution_numeric
@@ -32,3 +34,25 @@ def test_a_subnormal_only_range_is_charted_not_returned_empty() -> None:
     dist = _distribution_numeric(pd.Series(cells))
     assert dist is not None and len(dist.labels) == 10 and sum(dist.data) == 192.0
     assert len(profile_columns(pd.DataFrame({"x": cells}), "t").fields) == 1
+
+
+_MAX = float(np.finfo(float).max)
+
+
+@pytest.mark.parametrize(
+    "cells",
+    [[-_MAX, 0.0, _MAX], [1e308, 1.79e308], [-1.79e308, -1e308]],
+)
+def test_float_max_ranges_chart_ten_finite_bins(cells: list[float]) -> None:
+    dist = _distribution_numeric(pd.Series(cells))
+    assert dist is not None and len(dist.labels) == 10 and sum(dist.data) == len(cells)
+    assert not any("nan" in label or "inf" in label for label in dist.labels)
+
+
+def test_fallback_counts_match_pd_cut_right_closed() -> None:
+    from decoy_engine.internal.pandas_compat import histogram_for_range
+
+    values = np.arange(11.0)
+    expected = pd.cut(pd.Series(values), bins=10, include_lowest=True).value_counts().sort_index()
+    counts, _ = histogram_for_range(values, 10, 0.0, 10.0, right_closed=True)
+    assert list(counts) == [int(c) for c in expected.values] == [2, 1, 1, 1, 1, 1, 1, 1, 1, 1]

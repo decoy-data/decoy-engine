@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine.detection.types import DetectorMatch
+from decoy_engine.internal.pandas_compat import histogram_for_range
 from decoy_engine.profiling.types import Distribution
 
 # Cardinality threshold for "categorical" object columns. Below this we group
@@ -46,17 +47,14 @@ def _edge_label(left: float, right: float) -> str:
 
 
 def _bin_counts_and_labels(series: pd.Series) -> tuple[list[int], list[str]]:
-    """10 equal-width bins between min and max, labelled without `pd.cut`'s edge rounding.
-
-    `pd.cut` also refuses a range so small that its edges collide, so this builds the edges and
-    counts itself; `np.histogram` accepts repeated edges.
-    """
+    """10 bins and labels from the shared histogram, for a range `pd.cut` cannot label."""
     values = series.to_numpy(dtype=float)
-    edges = np.maximum.accumulate(np.linspace(values.min(), values.max(), 11))
-    counts = np.histogram(values, bins=edges)[0].tolist()
-    # A tiny edge rounds to zero here instead of overflowing.
-    rounded = [float(np.round(e, 3)) for e in edges]
-    return counts, [_edge_label(lo, hi) for lo, hi in pairwise(rounded)]
+    counts, edges = histogram_for_range(
+        values, 10, float(values.min()), float(values.max()), right_closed=True
+    )
+    # Python's round() leaves a large finite edge alone; a tiny edge rounds to zero.
+    rounded = [round(float(e), 3) for e in edges]
+    return [int(c) for c in counts], [_edge_label(lo, hi) for lo, hi in pairwise(rounded)]
 
 
 def _distribution_numeric(non_null: pd.Series) -> Distribution | None:

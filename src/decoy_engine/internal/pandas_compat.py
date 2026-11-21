@@ -126,14 +126,38 @@ def finite_numeric_cells(series: pd.Series) -> np.ndarray[Any, np.dtype[np.float
 _REFUSED = (ValueError, IndexError)
 
 
-def histogram_for_range(
+def _right_closed_histogram(
     values: np.ndarray[Any, np.dtype[np.float64]], bins: int, lo: float, hi: float
+) -> tuple[Any, Any]:
+    """`bins` equal-width bins over `[lo, hi]`, each `(left, right]` and `lo` in the first.
+
+    This is the `pd.cut(include_lowest=True)` rule. Each edge is `lo*(1-t) + hi*t`, so no
+    intermediate passes float max (`hi - lo` does for `[-max, max]`), and the edges never
+    decrease. Edges may repeat when the range sits at the float floor; the counts still add up.
+    """
+    t = np.linspace(0.0, 1.0, bins + 1)
+    edges = np.maximum.accumulate(lo * (1.0 - t) + hi * t)
+    edges[0], edges[-1] = lo, hi
+    codes = np.clip(np.searchsorted(edges, values, side="left") - 1, 0, bins - 1)
+    return np.bincount(codes, minlength=bins), edges
+
+
+def histogram_for_range(
+    values: np.ndarray[Any, np.dtype[np.float64]],
+    bins: int,
+    lo: float,
+    hi: float,
+    *,
+    right_closed: bool = False,
 ) -> tuple[Any, Any]:
     """Counts and edges over `[lo, hi]`; fewer bins than asked when numpy refuses `bins`.
 
     A snapshot must not crash on such a column. No error text is kept, so no cell can leak.
+    `right_closed` counts as `pd.cut` does and always returns exactly `bins` bins.
     """
     with np.errstate(all="ignore"):
+        if right_closed:
+            return _right_closed_histogram(values, bins, lo, hi)
         try:
             return np.histogram(values, bins=bins, range=(lo, hi))
         except _REFUSED:
