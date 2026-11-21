@@ -205,7 +205,7 @@ def test_e1_the_fail_hash_input_follows_the_pre_scan_defaults(
         detectors: tuple[str, ...] = ("regex", "classifier")  # type: ignore[assignment]
         ner_model: str = "en_core_web_sm"
 
-    monkeypatch.setattr("decoy_engine.config._pre_scan.PreScanConfig", Wider)
+    monkeypatch.setattr("decoy_engine.config._parse.PreScanConfig", Wider)
     assert pre_scan_hash_input({"on_findings": "fail"}) == {
         "on_findings": "fail",
         "detectors": ["regex", "classifier"],

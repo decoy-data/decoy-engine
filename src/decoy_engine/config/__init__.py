@@ -84,6 +84,7 @@ from decoy_engine.config._parse import (
     parse_delivery_config,
     parse_pipeline_config,
     parse_relationship_config,
+    pre_scan_hash_input,
 )
 from decoy_engine.config._pipeline import PipelineConfig
 from decoy_engine.config._post_scan import (
@@ -102,7 +103,6 @@ from decoy_engine.config._post_scan import (
 )
 from decoy_engine.config._pre_scan import (
     PreScanConfig,
-    pre_scan_hash_input,
     pre_scan_requested,
 )
 from decoy_engine.config._relationships import (
