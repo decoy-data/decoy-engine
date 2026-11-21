@@ -523,7 +523,7 @@ output bytes or a stored digest with no error, so each is part of the determinis
 `decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
 3.1, a declared-casting format id (`docs/declared-casting.md`) nor internal. The 14 declared-casting ids (`string/exact/v1`,
 `cobol/comp-3/v1` and the rest) name a format a user declares in config; the F06 parse and output registries own them.
-`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
+`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too. `vault-key/v1` (`derive(mask_key, "vault", b"vault-key/v1")`) is also a derivation label, but only 3.1 lists it, so it is not in the block below.
 
 ```
 canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/keyprovider/v1

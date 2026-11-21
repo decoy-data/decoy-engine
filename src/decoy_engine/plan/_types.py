@@ -285,12 +285,15 @@ class Plan:
 
     Frozen dataclass; same compile input produces a byte-identical Plan.
     The `seed_protocol_version` field tracks the determinism-envelope
-    version: S1 stamped `0` (placeholder seed derivation); S3 bumped to `1`
-    when real HMAC-keyed material landed; the F-series corrections bumped to
-    `2` (coordinated Faker-seeding + canonicalize-integer fixes that shift
-    deterministic output). A manifest carrying an older version cannot be
-    reproduced by builds at a newer version (per S1 spec H1 + done-definition
-    release-notes rule).
+    version (`determinism._derive.SEED_PROTOCOL_VERSION`, currently 7): S1
+    stamped `0` (placeholder seed derivation); S3 bumped to `1` when real
+    HMAC-keyed material landed; `2` (F-series: Faker pool seeding and
+    canonicalize-integer fixes); `3` (numpy null-injection pattern); `4`
+    (keyed formula `hash()`); `5` (reversible single-key FPE, Luhn check
+    digit appended); `6` (full-width per-row generation derivation); `7`
+    (FPE moved to NIST FF1 with a framed tweak). A manifest carrying an
+    older version cannot be reproduced by builds at a newer version (per S1
+    spec H1 + done-definition release-notes rule).
     """
 
     plan_version: int

@@ -1,0 +1,3 @@
+### Fixed (a mask handler may not change the row count, HANDLER-ROW-COUNT, 2026-11-21)
+
+The pandas mask paths now refuse a handler that returns a different number of rows, or the same rows under a different index, than it was given. Before, a `when:`-gated run wrote the result back by index, so a dropped row became a null and the run reported success. The plain, gated, composite and chunked routes all raise `handler_row_count_changed`; the message names the table, column, strategy and the two counts, never a value. New reason, pending: `runtime/handler_row_count_changed`. No built-in handler changes rows, so shipped output is unchanged.

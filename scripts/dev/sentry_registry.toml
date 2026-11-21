@@ -85,6 +85,10 @@ id = "wave-b-e0-test-files"
 baseline = "tests/sentry/baselines/wave-b-e0-test-files.json"
 
 [[sentry]]
+id = "handler-row-guard-exempt"
+baseline = "tests/sentry/baselines/handler-row-guard-exempt.json"
+
+[[sentry]]
 id = "private-file-sinks"
 baseline = "tests/sentry/baselines/private-file-sinks.json"
 
