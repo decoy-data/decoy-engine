@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from decimal import Decimal
+from itertools import pairwise
 from typing import Final
 
 import numpy as np
@@ -34,6 +35,25 @@ OTHER_LABEL: Final = "other"
 FREETEXT_BUCKET_LABELS: Final = ("<20", "20-50", "50-100", ">100")
 
 
+def _edge_label(left: float, right: float) -> str:
+    """Label one bin: whole numbers when it spans more than 1 unit, else two decimals."""
+    if not (math.isfinite(left) and math.isfinite(right)):
+        # pd.cut widens the range, so an edge can pass float max and has no int form.
+        return f"{left:.6g}-{right:.6g}"
+    if (right - left) >= 1:
+        return f"{int(left)}-{int(right)}"
+    return f"{left:.2f}-{right:.2f}"
+
+
+def _bin_counts_and_labels(series: pd.Series) -> tuple[list[int], list[str]]:
+    """The same 10 equal-width bins as `pd.cut`, labelled without its edge rounding."""
+    codes, edges = pd.cut(series, bins=10, include_lowest=True, labels=False, retbins=True)
+    counts = np.bincount(codes.to_numpy(dtype=int), minlength=len(edges) - 1).tolist()
+    # A tiny edge rounds to zero here instead of overflowing.
+    rounded = [float(np.round(e, 3)) for e in edges]
+    return counts, [_edge_label(lo, hi) for lo, hi in pairwise(rounded)]
+
+
 def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
     """10 equal-width bins between min and max, with counts + min/max/mean."""
     series = pd.to_numeric(non_null, errors="coerce").dropna()
@@ -51,20 +71,16 @@ def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
             max=str(series.max()),
             mean=round(float(series.mean()), 4),
         )
-    binned = pd.cut(series, bins=10, include_lowest=True)
-    bin_counts = binned.value_counts().sort_index()
-    data = [int(c) for c in bin_counts.values]
-    # Label format: prefer integers when bin width spans more than 1 unit;
-    # otherwise show two decimals so tight ranges stay readable.
-    labels = []
-    for iv in bin_counts.index:
-        if not (math.isfinite(iv.left) and math.isfinite(iv.right)):
-            # pd.cut widens the range, so an edge can pass float max and has no int form.
-            labels.append(f"{iv.left:.6g}-{iv.right:.6g}")
-        elif (iv.right - iv.left) >= 1:
-            labels.append(f"{int(iv.left)}-{int(iv.right)}")
-        else:
-            labels.append(f"{iv.left:.2f}-{iv.right:.2f}")
+    try:
+        binned = pd.cut(series, bins=10, include_lowest=True)
+    except ValueError:
+        # pd.cut's label builder rounds an edge near the float floor (a subnormal max) to a
+        # non-finite value and refuses a legal column. Chart it from codes and edges instead.
+        data, labels = _bin_counts_and_labels(series)
+    else:
+        bin_counts = binned.value_counts().sort_index()
+        data = [int(c) for c in bin_counts.values]
+        labels = [_edge_label(iv.left, iv.right) for iv in bin_counts.index]
     return Distribution(
         kind="numeric",
         data=[float(d) for d in data],
