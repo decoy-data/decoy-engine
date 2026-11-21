@@ -12,10 +12,9 @@ message only: no submitted value and no callable predicate, so a refusal cannot 
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
-from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
@@ -26,6 +25,7 @@ from decoy_engine.contracts.strategy_requirements import (
     requirements_for,
 )
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.checks._strategy_sites import StrategySite, strategy_sites
 from decoy_engine.relationships import composite_bindings
 
 __all__ = [
@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 
-def _declared_date_format(col: dict[str, Any]) -> bool:
+def _declared_date_format(col: Mapping[str, Any]) -> bool:
     """Whether this top-level column's date format comes from its own declared parse format."""
     return date_shift_owns_declared_format(
         nested=False,
@@ -45,55 +45,48 @@ def _declared_date_format(col: dict[str, Any]) -> bool:
     )
 
 
-def _missing_in_nested(
-    table: Any, col: dict[str, Any]
-) -> Iterator[tuple[StrategyRequirement, str]]:
-    """Each requirement a nested column's child leaves out, with its config path.
+def _missing_in_child(site: StrategySite) -> Iterator[tuple[StrategyRequirement, str]]:
+    """Each requirement a nested child leaves out, with its config path.
 
     Only descriptors rooted at `provider_config` apply: a child takes its parent's namespace
     (the nested handler copies it), so a root-level descriptor never binds the child. The child
     never inherits a declared-casting exemption from its parent.
     """
-    provider_config = col.get("provider_config")
-    if not isinstance(provider_config, dict):
+    if not isinstance(site.strategy, str):
         return
-    for child in nested_children(provider_config):
-        if not isinstance(child.strategy, str):
+    config = site.config if isinstance(site.config, dict) else {}
+    rooted = {"provider_config": config}
+    for req in requirements_for(site.strategy):
+        if req.path[0] != "provider_config":
             continue
-        config = child.strategy_config if isinstance(child.strategy_config, dict) else {}
-        rooted = {"provider_config": config}
-        for req in requirements_for(child.strategy):
-            if req.path[0] != "provider_config":
-                continue
-            if requirement_applies(req, rooted) and requirement_missing(
-                lookup_path(rooted, req.path)
-            ):
-                where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
-                yield req, ".".join((where, child.config_path, "strategy_config", *req.path[1:]))
+        if requirement_applies(req, rooted) and requirement_missing(lookup_path(rooted, req.path)):
+            yield req, ".".join((site.config_path, *req.path[1:]))
 
 
 def _missing_requirements(
-    table: dict[str, Any], col: dict[str, Any], derived: Any
+    site: StrategySite, derived: Any
 ) -> Iterator[tuple[StrategyRequirement, str]]:
-    """Each requirement the column leaves out with its path, in declaration order.
+    """Each requirement a strategy site leaves out with its path, in declaration order.
 
-    A `nested` column's child is walked after the column itself, for descriptors rooted at
-    `provider_config` only.
+    A top-level column is held to every descriptor of its strategy. A nested child (a later
+    site of the same column) is held to the descriptors rooted at `provider_config` only.
     """
+    if site.nested:
+        yield from _missing_in_child(site)
+        return
+    col = site.entry
     strategy = col.get("strategy")
     if not isinstance(strategy, str):
         return
-    where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+    table_name, col_name = site.table, site.column
+    where = f"tables.{table_name}.columns.{col_name}"
     for req in requirements_for(strategy):
-        if req.path == ("namespace",) and (table.get("name", "?"), col.get("name", "?")) in derived:
+        if req.path == ("namespace",) and (table_name, col_name) in derived:
             continue
         if req.path == ("provider_config", "date_format") and _declared_date_format(col):
             continue
         if requirement_applies(req, col) and requirement_missing(lookup_path(col, req.path)):
             yield req, f"{where}." + ".".join(req.path)
-    if strategy == "nested":
-        for req, path in _missing_in_nested(table, col):
-            yield req, path
 
 
 def check_required_strategy_settings(config: dict[str, Any]) -> None:
@@ -105,22 +98,13 @@ def check_required_strategy_settings(config: dict[str, Any]) -> None:
     Raises:
         PlanCompileError: the code of the missing setting's descriptor.
     """
-    tables = config.get("tables")
     # A coherent_with member's namespace comes from its group's binding, so the column need not
     # declare one. The registry owns that rule; ask it instead of restating it.
     _, derived = composite_bindings(config)
-    for table in tables if isinstance(tables, list) else []:
-        if not isinstance(table, dict):
-            continue
-        for col in table.get("columns") or []:
-            if not isinstance(col, dict):
-                continue
-            for req, path in _missing_requirements(table, col, derived):
-                raise PlanCompileError(
-                    code=req.code,
-                    path=path,
-                    message=(
-                        f"column {col.get('name', '?')!r} in table "
-                        f"{table.get('name', '?')!r}: {req.message}"
-                    ),
-                )
+    for site in strategy_sites(config):
+        for req, path in _missing_requirements(site, derived):
+            raise PlanCompileError(
+                code=req.code,
+                path=path,
+                message=(f"column {site.column!r} in table {site.table!r}: {req.message}"),
+            )

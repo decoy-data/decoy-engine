@@ -17,8 +17,8 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.checks._strategy_sites import StrategySite, strategy_sites
 from decoy_engine.transforms.date_preserve import has_preserve_values, preserve_config_problem
 from decoy_engine.transforms.date_shift import WINDOW_PROBLEMS, shift_window_problem
 
@@ -88,141 +88,128 @@ def check_date_shift_group_by_refs(config: dict[str, Any]) -> None:
                 if end_table and end_col:
                     fk_cols.add((str(end_table), str(end_col)))
 
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
+    # Per table: the column names a group_by anchor may name. date_shift is mask-kind only, so an
+    # anchor must be a real (masked/source) `columns` entry present in the frame at mask time --
+    # deliberately NOT unioning `generate_columns` (unlike windowed_date, which can anchor on a
+    # generate-side column). Including them would let a group_by naming a generate-only column
+    # pass compile and then KeyError at execution; restricting to `columns` lets compile fully
+    # own the validation.
+    names_by_table: dict[int, set[str]] = {}
+    for site in strategy_sites(config):
+        table_name, col_name, col_entry = site.table, site.column, site.entry
+        all_col_names = names_by_table.get(id(site.table_entry))
+        if all_col_names is None:
+            all_col_names = {
+                str(c["name"])
+                for c in site.table_entry.get("columns", []) or []
+                if isinstance(c, dict) and c.get("name")
+            }
+            names_by_table[id(site.table_entry)] = all_col_names
+
+        # Nested (P2 #4): a nested column carries its child strategy + config under its
+        # provider_config, so top-level `strategy == "date_shift"` never matches it. Reject a
+        # nested date_shift+group_by here, before the generic branch below.
+        if site.nested:
+            nested_cfg = site.config or {}
+            if (
+                site.strategy == "date_shift"
+                and isinstance(nested_cfg, dict)
+                and nested_cfg.get("group_by")
+            ):
+                raise PlanCompileError(
+                    code=reasons.plan.DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED,
+                    path=f"{site.config_path}.group_by",
+                    message=(
+                        f"date_shift column {col_name!r} in table "
+                        f"{table_name!r} sets group_by inside a `nested` "
+                        "strategy. group_by is not supported there: the "
+                        "nested child masks a synthetic single-column leaf "
+                        "batch with no sibling columns, so the entity anchor "
+                        "can never be present. Move date_shift+group_by to a "
+                        "top-level column."
+                    ),
+                )
             continue
-        table_name = table_entry.get("name", "?")
-
-        # Build the set of column names known in this table. date_shift is
-        # mask-kind only, so a group_by anchor must be a real (masked/source)
-        # `columns` entry present in the frame at mask time -- deliberately NOT
-        # unioning `generate_columns` (unlike windowed_date, which can anchor on
-        # a generate-side column). Including them would let a group_by naming a
-        # generate-only column pass compile and then KeyError at execution;
-        # restricting to `columns` lets compile fully own the validation.
-        all_col_names: set[str] = set()
-        for col_entry in table_entry.get("columns", []) or []:
-            if isinstance(col_entry, dict) and col_entry.get("name"):
-                all_col_names.add(str(col_entry["name"]))
-
-        for col_entry in table_entry.get("columns") or []:
-            if not isinstance(col_entry, dict):
-                continue
-            col_name = col_entry.get("name", "?")
-            pc = col_entry.get("provider_config") or {}
-            if not isinstance(pc, dict):
-                continue
-
-            # Nested (P2 #4): a nested column carries its child strategy +
-            # config under provider_config.strategy / .strategy_config, so
-            # top-level `strategy == "date_shift"` never matches it. Inspect it
-            # explicitly and reject a nested date_shift+group_by before the
-            # generic branch below.
-            nested_date_shift = (
-                [c for c in nested_children(pc) if c.strategy == "date_shift"]
-                if col_entry.get("strategy") == "nested"
-                else []
+        pc = site.config or {}
+        if not isinstance(pc, dict):
+            continue
+        if col_entry.get("strategy") != "date_shift":
+            continue
+        group_by = pc.get("group_by")
+        # Falsy (None, "", 0, []) means "no group_by": the handler's own
+        # `if group_by:` gate skips it, so compile agrees and does not error.
+        if not group_by:
+            continue
+        # Non-string but truthy (P2 #3): e.g. `group_by: 123` or a list.
+        # `str(123) in cols` would slip past a bare membership test if a
+        # column named "123" existed, but execution does `df[123]` ->
+        # KeyError. Reject before the membership test.
+        if not isinstance(group_by, str):
+            raise PlanCompileError(
+                code=reasons.plan.DATE_SHIFT_MISSING_GROUP_BY_REF,
+                path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
+                message=(
+                    f"date_shift column {col_name!r} in table "
+                    f"{table_name!r} has a group_by that is not a string "
+                    f"(got {group_by!r}). group_by must name a column in the "
+                    "same table."
+                ),
             )
-            if nested_date_shift:
-                for child in nested_date_shift:
-                    nested_cfg = child.strategy_config or {}
-                    if isinstance(nested_cfg, dict) and nested_cfg.get("group_by"):
-                        raise PlanCompileError(
-                            code=reasons.plan.DATE_SHIFT_GROUP_BY_UNSUPPORTED_IN_NESTED,
-                            path=(
-                                f"tables.{table_name}.columns.{col_name}"
-                                f".{child.config_path}.strategy_config.group_by"
-                            ),
-                            message=(
-                                f"date_shift column {col_name!r} in table "
-                                f"{table_name!r} sets group_by inside a `nested` "
-                                "strategy. group_by is not supported there: the "
-                                "nested child masks a synthetic single-column leaf "
-                                "batch with no sibling columns, so the entity anchor "
-                                "can never be present. Move date_shift+group_by to a "
-                                "top-level column."
-                            ),
-                        )
-                continue
-
-            if col_entry.get("strategy") != "date_shift":
-                continue
-            group_by = pc.get("group_by")
-            # Falsy (None, "", 0, []) means "no group_by": the handler's own
-            # `if group_by:` gate skips it, so compile agrees and does not error.
-            if not group_by:
-                continue
-            # Non-string but truthy (P2 #3): e.g. `group_by: 123` or a list.
-            # `str(123) in cols` would slip past a bare membership test if a
-            # column named "123" existed, but execution does `df[123]` ->
-            # KeyError. Reject before the membership test.
-            if not isinstance(group_by, str):
-                raise PlanCompileError(
-                    code=reasons.plan.DATE_SHIFT_MISSING_GROUP_BY_REF,
-                    path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
-                    message=(
-                        f"date_shift column {col_name!r} in table "
-                        f"{table_name!r} has a group_by that is not a string "
-                        f"(got {group_by!r}). group_by must name a column in the "
-                        "same table."
-                    ),
-                )
-            if group_by not in all_col_names:
-                raise PlanCompileError(
-                    code=reasons.plan.DATE_SHIFT_MISSING_GROUP_BY_REF,
-                    path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
-                    message=(
-                        f"date_shift column {col_name!r} in table "
-                        f"{table_name!r} references group_by column "
-                        f"{group_by!r} which is not defined in the same "
-                        f"table. Available columns: {sorted(all_col_names)!r}."
-                    ),
-                )
-            # FK column + group_by (Codex R2 P1s): fail closed. A group_by shift
-            # depends on a per-entity anchor, so equal FK keys can mask to
-            # different dates -- breaking referential integrity on the chunked FK
-            # self-masking route (FK child) and mis-anchoring orphan REMAP (FK
-            # parent). Reject until per-route FK-anchor threading exists.
-            if (table_name, col_name) in fk_cols:
-                raise PlanCompileError(
-                    code=reasons.plan.DATE_SHIFT_GROUP_BY_ON_FK_COLUMN_UNSUPPORTED,
-                    path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
-                    message=(
-                        f"date_shift column {col_name!r} in table {table_name!r} "
-                        "participates in a foreign-key relationship AND sets "
-                        "group_by. Entity-anchored shifting makes the masked value "
-                        "depend on a sibling anchor, which breaks referential "
-                        "integrity (equal keys can shift apart) and orphan remap. "
-                        "Remove group_by from this FK column, or drop the FK "
-                        "relationship on it."
-                    ),
-                )
-            # `when` + `group_by` (Codex R1 P1 #1 residual): fail closed. The
-            # entity anchor is aligned to the frame the handler sees by index
-            # LABEL, which is correct only while a when-gated subset keeps its
-            # parent-table labels. Any route that re-bases a when-gated subset
-            # onto a FRESH RangeIndex (the original positions surviving only in
-            # the gate's internal `_decoy_when_row_pos` anchor) would make that
-            # label-reindex silently pick the WRONG rows -- a wrong-output hole
-            # the handler cannot detect (both indexes are RangeIndexes). Rather
-            # than depend on that alignment invariant, reject the combination
-            # until per-route positional anchoring is implemented. date_shift's
-            # core per-entity-consistent shift does not need `when`.
-            when_val = col_entry.get("when")
-            if isinstance(when_val, str) and when_val.strip():
-                raise PlanCompileError(
-                    code=reasons.plan.DATE_SHIFT_GROUP_BY_WITH_WHEN_UNSUPPORTED,
-                    path=(f"tables.{table_name}.columns.{col_name}.when"),
-                    message=(
-                        f"date_shift column {col_name!r} in table "
-                        f"{table_name!r} combines `when` with `group_by`. This "
-                        "combination is not yet supported: a when-gated subset "
-                        "cannot be re-aligned to the pre-mask entity anchor "
-                        "without risking wrong offsets. Remove `when` or "
-                        "`group_by` from this column."
-                    ),
-                )
+        if group_by not in all_col_names:
+            raise PlanCompileError(
+                code=reasons.plan.DATE_SHIFT_MISSING_GROUP_BY_REF,
+                path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
+                message=(
+                    f"date_shift column {col_name!r} in table "
+                    f"{table_name!r} references group_by column "
+                    f"{group_by!r} which is not defined in the same "
+                    f"table. Available columns: {sorted(all_col_names)!r}."
+                ),
+            )
+        # FK column + group_by (Codex R2 P1s): fail closed. A group_by shift
+        # depends on a per-entity anchor, so equal FK keys can mask to
+        # different dates -- breaking referential integrity on the chunked FK
+        # self-masking route (FK child) and mis-anchoring orphan REMAP (FK
+        # parent). Reject until per-route FK-anchor threading exists.
+        if (table_name, col_name) in fk_cols:
+            raise PlanCompileError(
+                code=reasons.plan.DATE_SHIFT_GROUP_BY_ON_FK_COLUMN_UNSUPPORTED,
+                path=(f"tables.{table_name}.columns.{col_name}.provider_config.group_by"),
+                message=(
+                    f"date_shift column {col_name!r} in table {table_name!r} "
+                    "participates in a foreign-key relationship AND sets "
+                    "group_by. Entity-anchored shifting makes the masked value "
+                    "depend on a sibling anchor, which breaks referential "
+                    "integrity (equal keys can shift apart) and orphan remap. "
+                    "Remove group_by from this FK column, or drop the FK "
+                    "relationship on it."
+                ),
+            )
+        # `when` + `group_by` (Codex R1 P1 #1 residual): fail closed. The
+        # entity anchor is aligned to the frame the handler sees by index
+        # LABEL, which is correct only while a when-gated subset keeps its
+        # parent-table labels. Any route that re-bases a when-gated subset
+        # onto a FRESH RangeIndex (the original positions surviving only in
+        # the gate's internal `_decoy_when_row_pos` anchor) would make that
+        # label-reindex silently pick the WRONG rows -- a wrong-output hole
+        # the handler cannot detect (both indexes are RangeIndexes). Rather
+        # than depend on that alignment invariant, reject the combination
+        # until per-route positional anchoring is implemented. date_shift's
+        # core per-entity-consistent shift does not need `when`.
+        when_val = col_entry.get("when")
+        if isinstance(when_val, str) and when_val.strip():
+            raise PlanCompileError(
+                code=reasons.plan.DATE_SHIFT_GROUP_BY_WITH_WHEN_UNSUPPORTED,
+                path=(f"tables.{table_name}.columns.{col_name}.when"),
+                message=(
+                    f"date_shift column {col_name!r} in table "
+                    f"{table_name!r} combines `when` with `group_by`. This "
+                    "combination is not yet supported: a when-gated subset "
+                    "cannot be re-aligned to the pre-mask entity anchor "
+                    "without risking wrong offsets. Remove `when` or "
+                    "`group_by` from this column."
+                ),
+            )
 
 
 def check_date_shift_window(config: dict[str, Any]) -> None:
@@ -235,37 +222,20 @@ def check_date_shift_window(config: dict[str, Any]) -> None:
         PlanCompileError: `jitter_days` with `min_days` or `max_days`, a bad `jitter_days`, a
             bound that is not a whole number, or a bound past +/- 106,751 days.
     """
-    tables = config.get("tables")
-    for table_entry in tables if isinstance(tables, list) else []:
-        if not isinstance(table_entry, dict):
+    for site in strategy_sites(config):
+        if site.strategy != "date_shift":
             continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns") or []:
-            if not isinstance(col_entry, dict):
-                continue
-            col_name = col_entry.get("name", "?")
-            pc = col_entry.get("provider_config")
-            if not isinstance(pc, dict):
-                continue
-            base = f"tables.{table_name}.columns.{col_name}"
-            targets: list[tuple[dict[str, Any], str]] = []
-            if col_entry.get("strategy") == "date_shift":
-                targets.append((pc, f"{base}.provider_config"))
-            elif col_entry.get("strategy") == "nested":
-                targets.extend(
-                    (c.strategy_config or {}, f"{base}.{c.config_path}.strategy_config")
-                    for c in nested_children(pc)
-                    if c.strategy == "date_shift" and isinstance(c.strategy_config or {}, dict)
-                )
-            for cfg, prefix in targets:
-                problem = shift_window_problem(cfg)
-                if problem is not None:
-                    key, message = WINDOW_PROBLEMS[problem]
-                    raise PlanCompileError(
-                        code=reasons.plan.DATE_SHIFT_WINDOW_INVALID,
-                        path=f"{prefix}.{key}",
-                        message=f"date_shift column {col_name!r} in table {table_name!r}: {message}",
-                    )
+        cfg = site.config or {} if site.nested else site.config
+        if not isinstance(cfg, dict):
+            continue
+        problem = shift_window_problem(cfg)
+        if problem is not None:
+            key, message = WINDOW_PROBLEMS[problem]
+            raise PlanCompileError(
+                code=reasons.plan.DATE_SHIFT_WINDOW_INVALID,
+                path=f"{site.config_path}.{key}",
+                message=(f"date_shift column {site.column!r} in table {site.table!r}: {message}"),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -276,31 +246,17 @@ _PRESERVE_STRATEGIES = ("date_shift", "bucket_perturb")
 _FK_SHAPE_CODE = reasons.plan.DATE_PRESERVE_VALUES_UNSUPPORTED_FK_SHAPE
 
 
-def _preserve_columns(table_entry: dict[str, Any]) -> list[tuple[str, str, dict[str, Any], str]]:
-    """``(column, strategy, config, config_path)`` for each date column that opts in.
+def _preserve_column(site: StrategySite) -> tuple[str, str, dict[str, Any], str] | None:
+    """``(column, strategy, config, config_path)`` when this site is a date column that opts in.
 
     A nested column carries its child strategy's config under ``strategy_config``.
     """
-    found: list[tuple[str, str, dict[str, Any], str]] = []
-    table_name = table_entry.get("name", "?")
-    for col_entry in table_entry.get("columns") or []:
-        if not isinstance(col_entry, dict):
-            continue
-        name = str(col_entry.get("name", "?"))
-        strategy = col_entry.get("strategy")
-        pc = col_entry.get("provider_config")
-        prefix = f"tables.{table_name}.columns.{name}.provider_config"
-        if strategy == "nested" and isinstance(pc, dict):
-            for child in nested_children(pc):
-                cfg = child.strategy_config
-                if child.strategy in _PRESERVE_STRATEGIES and isinstance(cfg, dict):
-                    if has_preserve_values(cfg):
-                        path = f"tables.{table_name}.columns.{name}.{child.config_path}"
-                        found.append((name, str(child.strategy), cfg, f"{path}.strategy_config"))
-            continue
-        if strategy in _PRESERVE_STRATEGIES and isinstance(pc, dict) and has_preserve_values(pc):
-            found.append((name, str(strategy), pc, prefix))
-    return found
+    cfg = site.config
+    if site.strategy not in _PRESERVE_STRATEGIES or not isinstance(cfg, dict):
+        return None
+    if not has_preserve_values(cfg):
+        return None
+    return str(site.column), str(site.strategy), cfg, site.config_path
 
 
 Endpoint = tuple[str, tuple[str, ...]]
@@ -386,40 +342,40 @@ def check_date_preserve_values(config: dict[str, Any]) -> None:
             or ``date_preserve_values_unsupported_fk_shape``.
     """
     edges = _relationship_edges(config)
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
+    for site in strategy_sites(config):
+        found = _preserve_column(site)
+        if found is None:
             continue
-        table_name = str(table_entry.get("name", "?"))
-        for name, strategy, pc, prefix in _preserve_columns(table_entry):
-            if strategy == "date_shift":
-                problem = preserve_config_problem(pc)
-                if problem is not None:
-                    raise PlanCompileError(
-                        code=reasons.plan.DATE_SHIFT_PRESERVE_VALUES_INVALID,
-                        path=f"{prefix}.preserve_values",
-                        message=f"date_shift column {name!r} in table {table_name!r}: {problem}",
-                    )
-                if pc.get("group_by"):
-                    raise PlanCompileError(
-                        code=reasons.plan.DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED,
-                        path=f"{prefix}.group_by",
-                        message=(
-                            f"date_shift column {name!r} in table {table_name!r} sets both "
-                            "preserve_values and group_by. The entity anchor must row-align "
-                            "with the frame being shifted, which excluding sentinel rows "
-                            "breaks. Remove one of the two."
-                        ),
-                    )
-            fk_problem = _fk_shape_problem(table_name, name, edges)
-            if fk_problem is not None:
+        name, strategy, pc, prefix = found
+        table_name = str(site.table)
+        if strategy == "date_shift":
+            problem = preserve_config_problem(pc)
+            if problem is not None:
                 raise PlanCompileError(
-                    code=_FK_SHAPE_CODE,
+                    code=reasons.plan.DATE_SHIFT_PRESERVE_VALUES_INVALID,
                     path=f"{prefix}.preserve_values",
+                    message=f"date_shift column {name!r} in table {table_name!r}: {problem}",
+                )
+            if pc.get("group_by"):
+                raise PlanCompileError(
+                    code=reasons.plan.DATE_PRESERVE_VALUES_WITH_GROUP_BY_UNSUPPORTED,
+                    path=f"{prefix}.group_by",
                     message=(
-                        f"{strategy} column {name!r} in table {table_name!r} sets "
-                        f"preserve_values, but {fk_problem}. preserve_values is supported on "
-                        "payload date columns and on the parent key of one single-column "
-                        "relationship between two tables. Remove it from this column."
+                        f"date_shift column {name!r} in table {table_name!r} sets both "
+                        "preserve_values and group_by. The entity anchor must row-align "
+                        "with the frame being shifted, which excluding sentinel rows "
+                        "breaks. Remove one of the two."
                     ),
                 )
+        fk_problem = _fk_shape_problem(table_name, name, edges)
+        if fk_problem is not None:
+            raise PlanCompileError(
+                code=_FK_SHAPE_CODE,
+                path=f"{prefix}.preserve_values",
+                message=(
+                    f"{strategy} column {name!r} in table {table_name!r} sets "
+                    f"preserve_values, but {fk_problem}. preserve_values is supported on "
+                    "payload date columns and on the parent key of one single-column "
+                    "relationship between two tables. Remove it from this column."
+                ),
+            )

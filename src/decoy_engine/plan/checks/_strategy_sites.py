@@ -40,6 +40,14 @@ class StrategySite:
     config_path: str
     provider: Any
     provider_path: str
+    entry: Mapping[str, Any]
+    table_entry: Mapping[str, Any]
+
+    @property
+    def strategy_path(self) -> str:
+        """The config path of the strategy name this site runs."""
+        suffix = ".strategy_config" if self.nested else ".provider_config"
+        return self.config_path.removesuffix(suffix) + ".strategy"
 
     @property
     def label(self) -> str:
@@ -53,7 +61,9 @@ class StrategySite:
         return f"{self.table}.{self.column}{suffix}"
 
 
-def column_sites(table_name: Any, col_entry: Mapping[str, Any]) -> Iterator[StrategySite]:
+def column_sites(
+    table_name: Any, col_entry: Mapping[str, Any], table_entry: Mapping[str, Any] | None = None
+) -> Iterator[StrategySite]:
     """The sites of one column entry: the column itself, then each child of a nested column."""
     col_name = col_entry.get("name", "?")
     where = f"tables.{table_name}.columns.{col_name}"
@@ -69,6 +79,8 @@ def column_sites(table_name: Any, col_entry: Mapping[str, Any]) -> Iterator[Stra
         f"{where}.provider_config",
         provider,
         f"{where}.provider",
+        col_entry,
+        table_entry or {},
     )
     if col_entry.get("strategy") != "nested" or not isinstance(pc, Mapping):
         return
@@ -85,6 +97,8 @@ def column_sites(table_name: Any, col_entry: Mapping[str, Any]) -> Iterator[Stra
             f"{at}.strategy_config",
             effective_provider(child, provider),
             f"{at}.strategy_config.provider" if own else f"{where}.provider",
+            col_entry,
+            table_entry or {},
         )
 
 
@@ -96,7 +110,7 @@ def strategy_sites(config: Mapping[str, Any]) -> Iterator[StrategySite]:
             continue
         for col in table.get("columns") or ():
             if isinstance(col, Mapping):
-                yield from column_sites(table.get("name", "?"), col)
+                yield from column_sites(table.get("name", "?"), col, table)
 
 
 @dataclass(frozen=True)

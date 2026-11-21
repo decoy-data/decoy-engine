@@ -17,8 +17,8 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.checks._strategy_sites import strategy_sites
 from decoy_engine.transforms.bucket_perturb import bucket_perturb_date_format_problem
 from decoy_engine.transforms.date_preserve import preserve_config_problem
 
@@ -59,35 +59,12 @@ def check_bucket_perturb_config(config: dict[str, Any]) -> None:
         PlanCompileError: ``bucket_perturb_date_format_unsupported`` or
             ``bucket_perturb_preserve_values_invalid``.
     """
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            strategy = col_entry.get("strategy")
-            if strategy not in ("bucket_perturb", "nested"):
-                continue
-            col_name = col_entry.get("name", "?")
-            pc = col_entry.get("provider_config")
-            prefix = f"tables.{table_name}.columns.{col_name}.provider_config"
-            if strategy == "bucket_perturb":
-                _reject_if_unwritable(
-                    pc, column=col_name, table=table_name, path_prefix=prefix, where=""
-                )
-            elif isinstance(pc, dict):
-                for child in nested_children(pc):
-                    if child.strategy != "bucket_perturb":
-                        continue
-                    _reject_if_unwritable(
-                        child.strategy_config,
-                        column=col_name,
-                        table=table_name,
-                        path_prefix=(
-                            f"tables.{table_name}.columns.{col_name}"
-                            f".{child.config_path}.strategy_config"
-                        ),
-                        where=" (nested child)",
-                    )
+    for site in strategy_sites(config):
+        if site.strategy == "bucket_perturb":
+            _reject_if_unwritable(
+                site.config,
+                column=site.column,
+                table=site.table,
+                path_prefix=site.config_path,
+                where=" (nested child)" if site.nested else "",
+            )

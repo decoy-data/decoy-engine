@@ -2,23 +2,11 @@
  "sentry_id": "nested-site-walker",
  "created_in": "F07-E3B",
  "entries": {
-  "plan/_checks_bucket_perturb.py::nested_children": {
-   "reason": "checks bucket_perturb children; not a NER or provider site"
-  },
-  "plan/_checks_date_shift.py::nested_children": {
-   "reason": "checks date_shift children and group_by refs"
-  },
-  "plan/_checks_top_code.py::nested_children": {
-   "reason": "checks top_code children for their bound setting"
-  },
   "plan/checks/_nested_rules.py::nested_children": {
    "reason": "validates the rules form itself, rule by rule"
   },
   "plan/checks/_nested_rules.py::rules": {
    "reason": "validates the rules form itself, rule by rule"
-  },
-  "plan/checks/_required_settings.py::nested_children": {
-   "reason": "required settings of the child strategy"
   },
   "execution/_column_access.py::nested_children": {
    "reason": "column read set of a nested child at run time"
