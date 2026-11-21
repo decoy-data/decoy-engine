@@ -10,7 +10,8 @@ preserve exactly.
 
 from __future__ import annotations
 
-from decoy_engine.execution.native._chunked_entry import MAX_NATIVE_THREADS
+from typing import Any
+
 from decoy_engine.execution.native._dispatch import (
     NativeRouteEvidence,
     NodeRouteRecord,
@@ -25,3 +26,13 @@ __all__ = [
     "plan_native_route",
     "run_native_or_oracle_chunked",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    # Lazy: `_chunked_entry` imports `execution._chunked`, which imports this package, so an
+    # eager import here is a cycle.
+    if name == "MAX_NATIVE_THREADS":
+        from decoy_engine.execution.native import _chunked_entry
+
+        return _chunked_entry.MAX_NATIVE_THREADS
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
