@@ -521,7 +521,9 @@ def run_sequential(
                     table_from_pandas_keeping_maps(
                         frames[table],
                         src_schema,
-                        untouched_columns(nodes_by_table.get(table, ()), src_schema.names),
+                        untouched_columns(
+                            nodes_by_table.get(table, ()), src_schema.names, registry
+                        ),
                     ),
                     faker_pin,
                 )

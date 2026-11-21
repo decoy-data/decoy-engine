@@ -64,8 +64,8 @@ def test_at_a1_configured_passthrough_is_carried_exactly(
 
 
 def test_at_a2_unconfigured_columns_are_carried() -> None:
-    """A file source must declare every column, so the unconfigured shape is reachable only
-    through the shared carried-set function the planner and the lane both call."""
+    """The carried-set function the planner and the lane both call: unconfigured columns are
+    passthrough under the policy, a duplicated name carries nothing."""
     from decoy_engine.providers_v2 import get_default_registry
 
     cfg = {"tables": [{"name": "t", "columns": [support.redact_col("s")]}]}
@@ -81,18 +81,41 @@ def test_at_a2_unconfigured_columns_are_carried() -> None:
     )
 
 
-@pytest.mark.parametrize("type_class", ["int64_nulls", "decimal128", "list"])
-def test_at_a3_non_carried_columns_equal_the_full_frame_oracle(
-    tmp_path: Path, type_class: str
+@pytest.mark.parametrize("policy", ["warn", "error", None])
+def test_at_a2_unconfigured_columns_cannot_reach_run_pipeline(
+    tmp_path: Path, policy: str | None
 ) -> None:
-    table = source_table(type_class, "later_mixed")
-    cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    """The unconfigured shape has no end-to-end run: `run_pipeline` refuses a source column the
+    config leaves out (`source_file.undeclared_column`) before it routes, whatever the
+    unconfigured-column policy, and a mask table needs a declared file source, so a resident
+    `pa.Table` cannot dodge the gate. The carried-set function above is therefore the only
+    place the shape is reachable, and the planner and the lane both call it."""
+    from decoy_engine.errors import PipelineValidationError
+
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(tmp_path, table, None)  # `p` is in the source file but not in the table entry
+    if policy is not None:
+        cfg["global_settings"]["unconfigured_column_policy"] = policy
+    with pytest.raises(PipelineValidationError, match="undeclared_column"):
+        _run(table, cfg)
+
+
+@pytest.mark.parametrize(("type_class", "layout"), CELLS, ids=IDS)
+def test_at_a3_masked_column_equals_the_full_frame_oracle(
+    tmp_path: Path, type_class: str, layout: str
+) -> None:
+    """The masked column `s` carries a keyed hash, so its values depend on the whole
+    pipeline: a carried sibling must not change what the masking writes. Type and values
+    are compared with the full-frame run over every type class and null layout."""
+    table = source_table(type_class, layout)
+    cfg = _cfg(tmp_path, table, support.pass_col("p"), s_entry=support.hash_col("s", "ns_a3"))
     got = _run(table, cfg)
     base = _oracle(table, cfg)
     assert got.quality_metrics["auto_chunk"]["mode"] == "chunked"
     a, b = got.outputs[support.TABLE], base.outputs[support.TABLE]
     assert a.schema.field("s").type == b.schema.field("s").type
     assert a.column("s").to_pylist() == b.column("s").to_pylist()
+    assert a.column("s").to_pylist() != table.column("s").to_pylist()
 
 
 def _when_read_run(tmp_path: Path) -> dict[str, Any]:
@@ -115,6 +138,17 @@ def test_at_a4_a_column_read_by_when_stays_full_frame(tmp_path: Path) -> None:
     block = _when_read_run(tmp_path)
     assert block["mode"] == "full_frame"
     assert "non-chunk-stable pandas round-trip dtypes" in block["reason"]
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_a4_a_column_read_as_a_sibling_reference_stays_full_frame(tmp_path: Path) -> None:
+    """`group_by` names `p`, so the read set keeps `p` out of the carried set and the dtype gate
+    judges it. Without the read-set subtraction this job would route chunked."""
+    table = source_table("int64_nulls", "later_mixed")
+    entry = {**support.redact_col("s"), "provider_config": {"group_by": "p"}}
+    cfg = _cfg(tmp_path, table, support.pass_col("p"), s_entry=entry)
+    block = _run(table, cfg).quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
     assert "p (integer with nulls)" in block["reason"]
 
 
@@ -181,21 +215,68 @@ def test_at_a9_small_nested_table_on_full_frame_is_exact(tmp_path: Path) -> None
     assert out.column("q").to_pylist() == table.column("q").to_pylist()
 
 
-def test_g3_read_set_has_one_production_caller() -> None:
+def _scan(source: str, filename: str, target: str) -> list[str]:
+    """`file:function` of every call to `target` in `source`, by AST. A call counts whether it
+    names the function directly, through a `from ... import ... as` alias or a rebinding, or as
+    an attribute of a module, and whether it sits in a function or at module level."""
+    tree = ast.parse(source)
+    names = {target}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names |= {a.asname for a in node.names if a.name == target and a.asname}
+    for node in ast.walk(tree):  # `rs = read_set` rebinds the function under a new name
+        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute)):
+            bound = node.value.id if isinstance(node.value, ast.Name) else node.value.attr
+            if bound in names:
+                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    found: list[str] = []
+
+    def visit(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                f = child.func
+                if (f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")) in names:
+                    found.append(f"{filename}:{scope}")
+            is_def = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            visit(child, child.name if is_def else scope)
+
+    visit(tree, "<module>")
+    return found
+
+
+def _production_callers(target: str) -> list[str]:
     root = Path(carry.__file__).resolve().parents[1]
-    callers: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        tree = ast.parse(path.read_text())
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for node in ast.walk(fn):
-                if isinstance(node, ast.Call):
-                    f = node.func
-                    name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
-                    if name == "read_set":
-                        callers.append(f"{path.name}:{fn.name}")
-    assert callers == ["_chunked_carry.py:carried_columns"]
+    return [
+        hit
+        for path in sorted(root.rglob("*.py"))
+        for hit in _scan(path.read_text(), path.name, target)
+    ]
+
+
+def test_g3_read_set_has_one_production_caller() -> None:
+    assert _production_callers("read_set") == ["_chunked_carry.py:carried_columns"]
+
+
+def test_g3_carried_columns_has_exactly_two_production_callers() -> None:
+    """The planner's dtype gate and `plan_carry`: a third caller is a second place that can
+    disagree on which columns are carried."""
+    assert _production_callers("carried_columns") == [
+        "_chunked_carry.py:plan_carry",
+        "_planner.py:_runtime_source_rejections",
+    ]
+
+
+def test_g3_the_scanner_resolves_aliases_and_module_level_calls() -> None:
+    src = (
+        "from m import read_set as rs\n"
+        "import m\n"
+        "alias = rs\n"
+        "rs([], [], None)\n"
+        "def f():\n    return alias([], [], None)\n"
+        "class C:\n    def g(self):\n        return m.read_set([], [], None)\n"
+        "def h():\n    return other()\n"
+    )
+    assert _scan(src, "x.py", "read_set") == ["x.py:<module>", "x.py:f", "x.py:g"]
 
 
 # -- kill switch, physical plan, stream and lazy legs (Dennis r1 on #725) -----------------------
@@ -319,19 +400,19 @@ def _written(sink_dir: Path) -> pa.Table:
     return pq.read_table(sink_dir / f"{support.TABLE}.parquet")
 
 
-@pytest.mark.parametrize("mode", ["auto", "stream"])
-@pytest.mark.parametrize("type_class", LEG_TYPES)
-def test_a_lazy_parquet_source_streams_a_carried_column_exactly(
-    tmp_path: Path, mode: str, type_class: str
-) -> None:
+def _run_lazy(tmp_path: Path, table: pa.Table, mode: str, **write_options: Any) -> Any:
+    """Run `table` as a lazy Parquet source (written with `write_options`) into the engine sink."""
+    import pyarrow.parquet as pq
+
     from decoy_engine.execution import run_pipeline
     from decoy_engine.profile._readers import LazySource
     from tests.unit.execution.run_stream import _support as rs
 
-    table = source_table(type_class, "later_mixed")
     cfg = _cfg(tmp_path, table, support.pass_col("p"))
+    if write_options:
+        pq.write_table(table, str(tmp_path / "src.parquet"), **write_options)
     sink, target = rs.engine_sink(tmp_path)
-    run_pipeline(
+    result = run_pipeline(
         cfg,
         sources={support.TABLE: LazySource(tmp_path / "src.parquet")},
         sink=sink,
@@ -340,9 +421,67 @@ def test_a_lazy_parquet_source_streams_a_carried_column_exactly(
         auto_chunk_threshold_rows=support.THRESHOLD,
         chunk_size_rows=support.CHUNK,
     )
-    got = _written(target)
+    return result, _written(target)
+
+
+@pytest.mark.parametrize("mode", ["auto", "stream"])
+@pytest.mark.parametrize("type_class", LEG_TYPES)
+def test_a_lazy_parquet_source_streams_a_carried_column_exactly(
+    tmp_path: Path, mode: str, type_class: str
+) -> None:
+    table = source_table(type_class, "later_mixed")
+    result, got = _run_lazy(tmp_path, table, mode)
+    block = result.quality_metrics["auto_chunk"]
+    if mode == "auto":
+        assert block["mode"] == "chunked", block.get("reason")
+    assert block["input"]["mode"] == "lazy", block["input"]
     assert got.schema.field("p").type == table.schema.field("p").type
     assert got.column("p").to_pylist() == table.column("p").to_pylist()
+
+
+@pytest.mark.parametrize("type_class", ["int64_nulls", "uint64"])
+def test_a_carried_integer_column_needs_no_footer_null_count(
+    tmp_path: Path, type_class: str
+) -> None:
+    """Parquet written without statistics has no footer null count for `p`. Nothing reads that
+    count for a carried column, so the table still routes chunked; the same file with `p` read
+    by a `when:` predicate declines on the missing count."""
+    table = source_table(type_class, "later_mixed")
+    result, got = _run_lazy(tmp_path, table, "auto", write_statistics=False)
+    block = result.quality_metrics["auto_chunk"]
+    assert block["mode"] == "chunked", block.get("reason")
+    assert block["input"]["mode"] == "lazy", block["input"]
+    assert got.column("p").to_pylist() == table.column("p").to_pylist()
+
+
+def test_a_read_integer_column_without_footer_statistics_still_declines(tmp_path: Path) -> None:
+    import pyarrow.parquet as pq
+
+    from decoy_engine.execution import run_pipeline
+    from decoy_engine.profile._readers import LazySource
+    from tests.unit.execution.run_stream import _support as rs
+
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(
+        tmp_path,
+        table,
+        support.pass_col("p"),
+        s_entry={**support.redact_col("s"), "when": "p > 3"},
+    )
+    pq.write_table(table, str(tmp_path / "src.parquet"), write_statistics=False)
+    sink, _target = rs.engine_sink(tmp_path)
+    result = run_pipeline(
+        cfg,
+        sources={support.TABLE: LazySource(tmp_path / "src.parquet")},
+        sink=sink,
+        engine_version=support.ENGINE_VERSION,
+        execution_mode="auto",
+        auto_chunk_threshold_rows=support.THRESHOLD,
+        chunk_size_rows=support.CHUNK,
+    )
+    block = result.quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
+    assert "lazy_source_null_count_unavailable" in block["reason"]
 
 
 def test_a_stream_fk_job_carries_a_passthrough_column_exactly(tmp_path: Path) -> None:

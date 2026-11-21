@@ -31,7 +31,7 @@ physical-plan hash; `open_input` compares them with the handle it actually reads
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -158,20 +158,25 @@ def facts_match(a: SourceFacts, b: SourceFacts) -> bool:
     )
 
 
-def null_count_gaps(facts: SourceFacts, bucketize_columns: Iterable[str]) -> list[str]:
+def null_count_gaps(
+    facts: SourceFacts,
+    bucketize_columns: Iterable[str],
+    carried: Collection[str] = frozenset(),
+) -> list[str]:
     """Gated columns with no exact null count: the integer columns and the numeric bucketize
-    source columns, which are the only columns the planner reads a null count for."""
+    source columns, which are the only columns the planner reads a null count for. A carried
+    column never reaches pandas, so nothing reads its null count and it is not gated."""
     if facts.table is not None:
         return []
     gated: list[str] = []
     for field in facts.schema:
-        if pat.is_integer(field.type):
+        if pat.is_integer(field.type) and field.name not in carried:
             gated.append(field.name)
     names = set(facts.schema.names)
     for name in bucketize_columns:
         if name in names and name not in gated:
             kind = facts.schema.field(name).type
-            if pat.is_integer(kind) or pat.is_floating(kind):
+            if (pat.is_integer(kind) or pat.is_floating(kind)) and name not in carried:
                 gated.append(name)
     return [name for name in gated if facts.null_count(name) is None]
 
@@ -190,10 +195,14 @@ def facts_for(
 
 
 def null_count_gap_reason(
-    facts: SourceFacts, bucketize_columns: Iterable[str], table: str
+    facts: SourceFacts,
+    bucketize_columns: Iterable[str],
+    table: str,
+    carried: Collection[str] = frozenset(),
 ) -> str | None:
-    """The planner's rejection when a gated column of a lazy table has no footer null count."""
-    gaps = null_count_gaps(facts, bucketize_columns)
+    """The planner's rejection when a gated column of a lazy table has no footer null count.
+    `carried` columns are exempt, as in the dtype gate."""
+    gaps = null_count_gaps(facts, bucketize_columns, carried)
     if not gaps:
         return None
     return (

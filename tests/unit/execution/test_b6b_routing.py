@@ -208,7 +208,9 @@ def test_a_lazy_source_without_statistics_and_no_gated_column_still_routes_chunk
 def test_an_integer_column_without_footer_statistics_declines_and_runs_full_frame(
     tmp_path: Path,
 ) -> None:
-    columns = [support.redact_col("r"), support.pass_col("x")]
+    # `x` is read by a `when:` predicate, so it goes through pandas and its null count is read;
+    # a plain passthrough `x` is carried and needs no count (test_nonfk_dtype_matrix).
+    columns = [{**support.redact_col("r"), "when": "x >= 0"}, support.pass_col("x")]
     data = {
         "r": pa.array([f"s{i}" for i in range(N)]),
         "x": pa.array(range(N), pa.int64()),

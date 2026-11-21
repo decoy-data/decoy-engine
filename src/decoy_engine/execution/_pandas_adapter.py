@@ -318,7 +318,7 @@ class PandasExecutionAdapter:
                 t: table_from_pandas_keeping_maps(
                     f,
                     sources[t].schema,
-                    untouched_columns((n for n in ordered if n.table == t), f.columns),
+                    untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
                 )
                 for t, f in frames.items()
             },
