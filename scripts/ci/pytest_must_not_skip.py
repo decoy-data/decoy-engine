@@ -43,7 +43,7 @@ def violations(junit_xml: Path, allow_skip: Sequence[str] = ()) -> list[str]:
 
 
 def companion_problem() -> str | None:
-    from decoy_engine.execution.native._companion_status import native_companion_status
+    from decoy_engine import native_companion_status
 
     status = native_companion_status()
     return None if status.ok else f"the native companion did not load: {status}"
