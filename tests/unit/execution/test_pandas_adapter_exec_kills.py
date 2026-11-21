@@ -1024,7 +1024,9 @@ class TestRunSequentialThreading:
         parent = pa.table(
             {
                 "id": pa.array(_IDS, type=pa.string()),
-                "age": pa.array(["10", "20", "30", "40", "50", "badX"], type=pa.string()),
+                "age": pa.array(
+                    [f"2020-01-{d}" for d in (10, 11, 12, 13, 14)] + ["badX"], type=pa.string()
+                ),
             }
         )
         child = pa.table(
@@ -1066,7 +1068,12 @@ class TestRunSequentialThreading:
                     "name": "parent",
                     "columns": [
                         _faker_col("id", "parent_ns"),
-                        {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+                        {
+                            "name": "age",
+                            "strategy": "date_shift",
+                            "namespace": "age_ns",
+                            "provider_config": {"date_format": "%Y-%m-%d"},
+                        },
                     ],
                 },
                 {"name": "child", "columns": [_faker_col("parent_id", "parent_ns")]},

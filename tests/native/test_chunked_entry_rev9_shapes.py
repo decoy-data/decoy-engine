@@ -259,30 +259,23 @@ _ROW_ERROR_SHAPES = ["time64ns_unaligned", "dict_uint64_indices", "list_int", "d
 
 
 def _row_error_config(strategy: str, configured: bool) -> dict[str, Any]:
-    if strategy == "bucketize":
-        col: dict[str, Any] = {
-            "name": "age",
-            "strategy": "bucketize",
-            "provider_config": {"width": 10},
-        }
-    else:
-        col = {
-            "name": "age",
-            "strategy": "date_shift",
-            "namespace": "age_ns",
-            "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
-        }
+    col: dict[str, Any] = {
+        "name": "age",
+        "strategy": "date_shift",
+        "namespace": "age_ns",
+        "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+    }
     return make_config([col] + ([passthrough("x")] if configured else []))
 
 
 @pytest.mark.parametrize("configured", [True, False], ids=["configured", "unconfigured"])
-@pytest.mark.parametrize("strategy", ["bucketize", "date_shift"])
+@pytest.mark.parametrize("strategy", ["date_shift"])
 @pytest.mark.parametrize("shape_name", _ROW_ERROR_SHAPES)
 def test_row_error_chunk_sink_result_carries_the_source_column(
     shape_name: str, strategy: str, configured: bool
 ) -> None:
     shape = BY_NAME[shape_name]
-    good, bad = ("23", "not-a-number") if strategy == "bucketize" else ("2020-01-01", "not-a-date")
+    good, bad = "2020-01-01", "not-a-date"
     chunks = [
         pa.table({"age": pa.array([good, good, good]), "x": shape.good}),
         pa.table({"age": pa.array([good, bad, good]), "x": shape.bad}),

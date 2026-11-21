@@ -177,16 +177,23 @@ def test_a_split_with_a_resident_group_or_extra_frame_stays_resident(
 
 
 def test_a_group_row_error_leaves_the_sink_untouched(tmp_path: Path) -> None:
-    # `date_shift` over a text column keeps the group resident (its source is not a typed date)
-    # and records a format error for the cell that is not a date.
-    bad = pa.table({"d": pa.array(["2020-01-12"] * (mt.BIG - 1) + ["not-a-date"])})
-    cols = [
+    # `shuffle` keeps the group resident, and `date_shift` over the text column `e` records a
+    # format error for the cell that is not a date.
+    n = mt.BIG
+    bad = pa.table(
         {
-            "name": "d",
-            "strategy": "date_shift",
-            "namespace": "d_ns",
-            "provider_config": {"date_format": "%Y-%m-%d"},
+            "d": pa.array([f"2020-01-{1 + i % 28:02d}" for i in range(n)]),
+            "e": pa.array(["2020-01-12"] * (n - 1) + ["not-a-date"]),
         }
+    )
+    cols = [
+        {"name": "d", "strategy": "shuffle"},
+        {
+            "name": "e",
+            "strategy": "date_shift",
+            "namespace": "e_ns",
+            "provider_config": {"date_format": "%Y-%m-%d"},
+        },
     ]
     cfg, sources = mt.build_job(
         tmp_path,

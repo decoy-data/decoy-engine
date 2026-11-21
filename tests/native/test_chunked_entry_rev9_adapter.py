@@ -255,11 +255,16 @@ def test_subclass_adapter_passthrough_refusal_propagates_raw(make: Any) -> None:
 def test_row_errors_under_a_subclass_match_the_public_oracle() -> None:
     config = make_config(
         [
-            {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}},
+            {
+                "name": "age",
+                "strategy": "date_shift",
+                "namespace": "age_ns",
+                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+            },
             passthrough("x"),
         ]
     )
-    chunks = [pa.table({"age": pa.array(["23", "x1", "47"]), "x": _INTS})]
+    chunks = [pa.table({"age": pa.array(["2020-01-01", "x1", "2020-01-03"]), "x": _INTS})]
     with pytest.raises(RowErrorsFailedError) as oracle:
         run_public(config, chunks, adapter=_Recorder())
     with pytest.raises(RowErrorsFailedError) as entry:

@@ -29,6 +29,7 @@ from decoy_engine.execution.native._plan import (
 from decoy_engine.execution.native._requirements import resolve_input_arrow_type
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.profile import ColumnProfile, Profile, Relationship, TableProfile
+from tests._column_shapes import INT_DECL
 
 
 def _col(name: str, dtype: str) -> ColumnProfile:
@@ -558,7 +559,12 @@ def test_capability_friendly_kernel_less_strategy_is_exactly_python_only() -> No
     # capability check (row-local, static output type) but has no compiled
     # kernel, so its fallback_policy must be exactly "python_only" via that
     # gate specifically, not merely non-"native" for some other reason.
-    col = {"name": "c", "strategy": "bucketize", "provider_config": {"width": 10}}
+    col = {
+        "name": "c",
+        "strategy": "bucketize",
+        "provider_config": {"width": 10},
+        **INT_DECL,
+    }
     plan = compile_native_plan(_config(col), _profile("c", "object"), engine_version="0.1.0")
     assert plan.nodes[0].fallback_policy == "python_only"
 

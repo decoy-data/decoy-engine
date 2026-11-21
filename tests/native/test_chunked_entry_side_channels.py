@@ -628,13 +628,27 @@ class _UnconvertibleAdapter(PandasExecutionAdapter):
 
 def _row_error_setup() -> tuple[dict[str, Any], list[pa.Table]]:
     config = make_config(
-        [redact("s"), {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}]
+        [
+            redact("s"),
+            {
+                "name": "age",
+                "strategy": "date_shift",
+                "namespace": "age_ns",
+                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+            },
+        ]
     )
     good = pa.table(
-        {"s": pa.array(["a", "b"], pa.string()), "age": pa.array(["23", "47"], pa.string())}
+        {
+            "s": pa.array(["a", "b"], pa.string()),
+            "age": pa.array(["2020-01-01", "2020-01-03"], pa.string()),
+        }
     )
     bad = pa.table(
-        {"s": pa.array(["c", "d"], pa.string()), "age": pa.array(["12", "oops"], pa.string())}
+        {
+            "s": pa.array(["c", "d"], pa.string()),
+            "age": pa.array(["2020-01-01", "oops"], pa.string()),
+        }
     )
     return config, [good, bad]
 
@@ -665,10 +679,21 @@ def test_unconvertible_column_maps_to_chunked_schema_mismatch() -> None:
 
 def test_row_error_chunk_with_an_unconvertible_column_raises_row_errors_not_mismatch() -> None:
     config = make_config(
-        [redact("s"), {"name": "age", "strategy": "bucketize", "provider_config": {"width": 10}}]
+        [
+            redact("s"),
+            {
+                "name": "age",
+                "strategy": "date_shift",
+                "namespace": "age_ns",
+                "provider_config": {"min_days": 30, "max_days": 60, "date_format": "%Y-%m-%d"},
+            },
+        ]
     )
     bad = pa.table(
-        {"s": pa.array(["c", "d"], pa.string()), "age": pa.array(["12", "oops"], pa.string())}
+        {
+            "s": pa.array(["c", "d"], pa.string()),
+            "age": pa.array(["2020-01-01", "oops"], pa.string()),
+        }
     )
     sink: list[Any] = []
     with pytest.raises(RowErrorsFailedError):
