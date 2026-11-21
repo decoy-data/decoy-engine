@@ -4,7 +4,8 @@ Phase 5 S-slate operator #1. The oracle (`transforms/bucket_perturb.py`)
 snaps each parseable date to a deterministic position inside its time bucket
 (ISO week / calendar month / calendar quarter): parse the string, find the
 bucket start and size, draw a keyed within-bucket offset, add it, and
-strftime back; null and unparseable rows pass through UNCHANGED. The keyed
+strftime back; null rows stay null and a non-null row that does not parse is a
+`format_error` row error (its text stays in the frame). The keyed
 offset is `int.from_bytes(derive(job_seed, namespace, canon(value))[:8],
 "big") % bucket_size`, which is exactly what the compiled `derive_index_batch`
 kernel computes byte-for-byte (KAT-pinned, `_index_ext.py`; canonicalization
@@ -46,6 +47,7 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
@@ -219,13 +221,14 @@ def native_bucket_perturb(
     native_threads: int | None = None,
     derive_calls: list[int] | None = None,
     preserved: np.ndarray[Any, Any] | None = None,
-) -> pa.Array:
+) -> tuple[pa.Array, tuple[int, ...]]:
     """Perturb a `pa.string()` date column onto the native lane (full-frame or one chunk).
 
     Parses each value with pandas (the parse authority), snaps parseable rows to
     a keyed within-bucket position via the compiled index kernel, and strftimes
-    back with pandas (the format authority). Null and unparseable rows pass
-    through UNCHANGED (the original string, never re-null/re-format). Output is
+    back with pandas (the format authority). Null rows keep their null; an unparseable
+    non-null row keeps its original string (never re-formatted) and its position is
+    returned, so the caller must route it as a row error. Output is
     pinned `pa.string()` per batch; the null-shape reconciliation to the oracle's
     data-dependent type happens afterwards: at full-frame final assembly
     (`_shadow_assembly.assemble_column`) and, per chunk, in the chunked masker
@@ -250,7 +253,7 @@ def native_bucket_perturb(
         col = array.combine_chunks() if isinstance(array, pa.ChunkedArray) else array
         if preserved is not None and preserved.any():
             rest = pa.array(~preserved)
-            computed = native_bucket_perturb(
+            computed, positions = native_bucket_perturb(
                 col.filter(rest),
                 bucket=bucket,
                 date_format=date_format,
@@ -260,7 +263,11 @@ def native_bucket_perturb(
                 native_threads=native_threads,
                 derive_calls=derive_calls,
             )
-            return pc.replace_with_mask(col.cast(pa.string()), rest, computed)  # type: ignore[attr-defined, unused-ignore]
+            kept = np.flatnonzero(~preserved)
+            return (
+                pc.replace_with_mask(col.cast(pa.string()), rest, computed),  # type: ignore[attr-defined, unused-ignore]
+                tuple(int(kept[p]) for p in positions),
+            )
 
         # Reproduce the oracle's own series preparation (`apply_bucket_perturb`): an
         # extension-dtype column is coerced to object first, then parsed with the
@@ -273,13 +280,13 @@ def native_bucket_perturb(
         parsed = pd.to_datetime(series, format=date_format, errors="coerce")
 
         null_mask = series.isna().to_numpy()
-        # A parse-fail is a coerced NaT that was NOT already source-null; both pass
-        # through unchanged, so the two are unioned into `valid`'s complement.
+        # A parse-fail is a coerced NaT that was NOT already source-null. Neither is
+        # perturbed; the parse-fails are returned as row error positions below.
         parse_failed = parsed.isna().to_numpy() & ~null_mask
         valid = ~(null_mask | parse_failed)
 
-        # Start from the ORIGINAL values so null + parse-fail rows are preserved
-        # byte-for-byte; only the parseable rows are overwritten below.
+        # Start from the ORIGINAL values so null + parse-fail rows keep their text in the
+        # frame; only the parseable rows are overwritten below.
         out = np.array(series.astype(object).to_numpy(copy=True), dtype=object)
 
         if valid.any():
@@ -303,10 +310,16 @@ def native_bucket_perturb(
         elif derive_calls is not None:
             derive_calls.append(0)
 
-        return pa.array(out, type=pa.string())
+        format_errors = tuple(int(i) for i in np.flatnonzero(parse_failed))
+        return pa.array(out, type=pa.string()), format_errors
     except BaseException:
         del mask_key
         raise
 
 
-__all__ = ["has_timezone_directive", "native_bucket_perturb", "native_range_exceeded"]
+__all__ = [
+    "FORMAT_ERROR_REASON",
+    "has_timezone_directive",
+    "native_bucket_perturb",
+    "native_range_exceeded",
+]

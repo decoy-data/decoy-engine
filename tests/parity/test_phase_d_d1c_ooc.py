@@ -32,7 +32,7 @@ _BACKENDS = [
     ),
 ]
 _NEAR_BOUNDS = ["2262-04-10", "1677-09-22"]
-_OOC = [*NORMAL, IN_RANGE, None, OUT_OF_RANGE, "not-a-date", IN_RANGE, *_NEAR_BOUNDS]
+_OOC = [*NORMAL, IN_RANGE, None, OUT_OF_RANGE, IN_RANGE, *_NEAR_BOUNDS]
 
 
 @pytest.fixture(params=_BACKENDS)
@@ -78,7 +78,7 @@ def test_sentinels_survive_on_every_driver_and_batch_shape(
 def test_unset_empty_and_matching_nothing_are_the_baseline(
     _backend: str, mode: str, tmp_path: Path
 ) -> None:
-    values = [*NORMAL, IN_RANGE, None, OUT_OF_RANGE, "x"]
+    values = [*NORMAL, IN_RANGE, None]
 
     def digest(extra: tuple[tuple[str, Any], ...], sub: str) -> str:
         run = _run(values, extra, mode=mode, tmp=tmp_path / sub, batch=3)
@@ -124,7 +124,7 @@ def test_disposition_counts_sentinels_with_no_values(_backend: str, tmp_path: Pa
     (entry,) = [e for e in run.result.quality_metrics[KEY] if e["column"] == "b"]
     assert entry["preserved_rows"] == 3
     assert IN_RANGE not in repr(entry) and OUT_OF_RANGE not in repr(entry)
-    unset = _run(values, (), tmp=tmp_path / "b", batch=2)
+    unset = _run([NORMAL[0], IN_RANGE, IN_RANGE], (), tmp=tmp_path / "b", batch=2)
     (plain,) = [e for e in unset.result.quality_metrics[KEY] if e["column"] == "b"]
     assert "preserved_rows" not in plain
 
@@ -170,7 +170,7 @@ def test_native_and_python_agree_with_sentinels_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     keep = (("preserve_values", (IN_RANGE, OUT_OF_RANGE)),)
-    values = [*NORMAL, IN_RANGE, None, OUT_OF_RANGE, "not-a-date"]
+    values = [*NORMAL, IN_RANGE, None, OUT_OF_RANGE]
     native = _run(values, keep, tmp=tmp_path / "n", batch=3)
     force_companion_unavailable(monkeypatch)
     python = _run(values, keep, tmp=tmp_path / "p", batch=3)

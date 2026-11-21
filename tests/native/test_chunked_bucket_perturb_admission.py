@@ -13,6 +13,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked
+from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_output_sink import OutputEvidenceAccumulator
 from decoy_engine.execution._errors import StrategyError
@@ -189,15 +190,19 @@ def test_non_string_source_on_the_auto_route_falls_back_to_full_frame(tmp_path: 
     cfg = make_config([bp_col()])
     cfg["sources"][TABLE]["path"] = str(tmp_path / "t.csv")
     pd.DataFrame({"d": [1, 2, 3, 4, 5, 6]}).to_csv(tmp_path / "t.csv", index=False)
-    result = run_pipeline(
-        cfg,
-        sources={TABLE: table},
-        engine_version=ENGINE_VERSION,
-        auto_chunk_threshold_rows=10,
-        chunk_size_rows=2,
-        key_provider=key_provider(),
-    )
-    assert result.quality_metrics["auto_chunk"]["mode"] == "full_frame"
+    # The ints do not parse as dates, so the full-frame run ends in row errors. The single-table
+    # `summary` is set only by the chunked legs, so its absence shows the auto route fell back.
+    with pytest.raises(RowErrorsFailedError) as caught:
+        run_pipeline(
+            cfg,
+            sources={TABLE: table},
+            engine_version=ENGINE_VERSION,
+            auto_chunk_threshold_rows=10,
+            chunk_size_rows=2,
+            key_provider=key_provider(),
+        )
+    assert caught.value.summary is None
+    assert caught.value.summaries_by_table
 
 
 @pytest.mark.parametrize("date_format", [None, ""], ids=["absent", "empty"])
@@ -346,7 +351,7 @@ def test_a_missing_index_companion_plans_rust_and_executes_on_the_oracle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _no_index_kernel(monkeypatch)
-    chunks = split(source([date_value(i) for i in range(5)] + [None, "junk"]), 3)
+    chunks = split(source([date_value(i) for i in range(5)] + [None, date_value(6)]), 3)
     run = run_one(make_config([bp_col(), passthrough("p")]), chunks)
     assert run.ev[0].native_admitted is False
     assert "index_extension_unavailable" in (run.ev[0].reroute_reason or "")
@@ -362,7 +367,7 @@ def test_companion_absent_run_matches_a_forced_oracle_run(monkeypatch: pytest.Mo
         source([date_value(i) for i in range(4)]),
         source([None, None]),
         source([]),
-        source([date_value(9), "junk"]),
+        source([date_value(9), date_value(8)]),
     ]
     absent = run_one(make_config([bp_col(), passthrough("p")]), chunks)
     forced = run_one(
@@ -413,8 +418,7 @@ def test_kernel_calls_scale_with_bucket_columns_times_chunks() -> None:
 _DEGENERATE = {
     "empty": [source([]), source([])],
     "all_null": [source([None] * 3), source([None] * 2)],
-    "all_unparseable": [source(["junk", "more"]), source(["2021-13-45"])],
-    "mixed_degenerate": [source([]), source([None] * 3), source(["junk"])],
+    "mixed_degenerate": [source([]), source([None] * 3), source([None])],
 }
 
 
@@ -453,9 +457,8 @@ _ORDERINGS = {
     "degenerate_valued_degenerate": [
         source([]),
         source([date_value(3)]),
-        source(["junk"]),
+        source([None]),
     ],
-    "unparseable_then_valued": [source(["junk"]), source([date_value(4)])],
 }
 
 
@@ -521,6 +524,6 @@ def test_the_branch_passes_exact_config_and_reuses_the_preflight_index_kernel(
 
 @NEEDS_COMPANION
 def test_admitted_run_equals_the_forced_oracle_run() -> None:
-    chunks = split(source([date_value(i) for i in range(11)] + [None, "junk"]), 4)
+    chunks = split(source([date_value(i) for i in range(11)] + [None, date_value(12)]), 4)
     native, forced = run_pair([bp_col(), passthrough("p")], chunks)
     assert_same_as_oracle(native, forced)
