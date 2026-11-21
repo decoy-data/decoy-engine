@@ -45,7 +45,7 @@ def contract_tags(contract: str) -> list[str]:
     block = section(contract, "### 3.1 Persisted artifact formats (the biggest surface)").split(
         "```"
     )[1]
-    return _tags.BARE.findall(block)
+    return _tags.WHOLE.findall(block)
 
 
 def surface_counts(table: str) -> collections.Counter[str]:
