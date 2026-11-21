@@ -224,14 +224,14 @@ def test_every_list_admission_accepts_is_accepted() -> None:
     from hypothesis import given, settings
     from hypothesis import strategies as st
 
-    from decoy_engine.generation._admission import _categorical_type
+    from decoy_engine.config import categorical_arrow_type
 
     atoms = st.one_of(st.text(max_size=3), st.integers(-5, 5), st.floats(-5, 5), st.booleans())
 
     @settings(max_examples=60, deadline=None)
     @given(st.lists(atoms, min_size=1, max_size=5))
     def prop(categories: list[Any]) -> None:
-        if _categorical_type(cat(categories))[0] is not None:
+        if categorical_arrow_type(cat(categories))[0] is not None:
             run_config_only_checks(cfg([cat(categories)]))
 
     prop()
@@ -369,9 +369,11 @@ def test_mask_only_config_keeps_its_ref_refusal_value_free() -> None:
 # ---- every key that names a sibling column ---------------------------------------------------
 
 REF_KEYS = {
+    # Without `from_table` the input of a generate aggregate is a same-table column, checked by
+    # the generate-input check alone, so a missing one and a later one are the same refusal.
     "derived_aggregate.column": (
         lambda r: {"name": "x", "type": "derived_aggregate", "op": "sum", "column": r},
-        "derived_aggregate_missing_column_ref",
+        "generate_column_forward_reference",
         "column",
     ),
     "grouped_series.group_by": (
@@ -384,9 +386,11 @@ REF_KEYS = {
         "grouped_series_missing_order_by_ref",
         "order_by",
     ),
+    # The anchor of a generate column is resolved and checked by the generate-input check alone,
+    # so a missing one and a later one are the same refusal.
     "windowed_date.anchor": (
         lambda r: {"name": "x", "type": "windowed_date", "anchor": r, "max_days": 3},
-        "windowed_date_missing_anchor_ref",
+        "generate_column_forward_reference",
         "anchor",
     ),
     "group_key.group_by": (
@@ -410,6 +414,192 @@ def test_reference_key_earlier_accepted_later_and_missing_refused(name: str) -> 
         cfg([seq("o"), build("p"), seq("p")]), "generate_column_forward_reference", p("x", key)
     )
     assert_refused(cfg([seq("o"), build("ghost")]), missing_code, p("x", key))
+
+
+# ---- inputs that live in another table ---------------------------------------------------------
+
+FORWARD = "generate_column_forward_reference"
+
+
+def _family(kids: list[dict[str, Any]], parents: list[dict[str, Any]] | None = None) -> dict:
+    """Table `t` (the child under test) and its parent `p`."""
+    config = cfg(kids)
+    config["tables"].insert(
+        0,
+        {
+            "name": "p",
+            "row_count": 3,
+            "generate_columns": parents
+            or [seq("id"), {"name": "born", "type": "categorical", "categories": ["2001-02-03"]}],
+        },
+    )
+    return config
+
+
+def _fk(name: str = "pid") -> dict[str, Any]:
+    return {"name": name, "type": "reference", "reference_table": "p", "reference_column": "id"}
+
+
+def _anchored(anchor: str = "born", via: str = "pid", **extra: Any) -> dict[str, Any]:
+    return {
+        "name": "x",
+        "type": "windowed_date",
+        "anchor": anchor,
+        "anchor_via": via,
+        "max_days": 3,
+        **extra,
+    }
+
+
+def test_cross_table_anchor_is_accepted_with_no_same_named_child_column() -> None:
+    """`anchor` names a column of the table `anchor_via` points at, not a sibling."""
+    assert_accepted(_family([_fk(), _anchored()]))
+
+
+def test_cross_table_anchor_is_accepted_whatever_a_same_named_child_column_does() -> None:
+    later = {"name": "born", "type": "sequence", "start": 1}
+    assert_accepted(_family([_fk(), _anchored(), later]))
+    assert_accepted(_family([later, _fk(), _anchored()]))
+
+
+def test_cross_table_anchor_missing_from_the_parent_is_refused() -> None:
+    assert_refused(_family([_fk(), _anchored("ghost")]), FORWARD, p("x", "anchor"))
+
+
+def test_cross_table_anchor_is_not_satisfied_by_a_same_named_child_column() -> None:
+    """The parent has no `nick`; an earlier child column of that name must not stand in."""
+    nick = {"name": "nick", "type": "categorical", "categories": ["2001-02-03"]}
+    assert_refused(_family([nick, _fk(), _anchored("nick")]), FORWARD, p("x", "anchor"))
+
+
+def test_cross_table_anchor_may_be_declared_anywhere_in_the_parent() -> None:
+    """Order inside the parent does not matter: the whole parent table is finished first."""
+    parents = [{"name": "born", "type": "categorical", "categories": ["2001-02-03"]}, seq("id")]
+    assert_accepted(_family([_fk(), _anchored()], parents))
+
+
+def test_anchor_via_must_name_an_earlier_column_of_the_same_table() -> None:
+    assert_refused(_family([_anchored(), _fk()]), FORWARD, p("x", "anchor_via"))
+    assert_refused(_family([_fk(), _anchored(via="ghost")]), FORWARD, p("x", "anchor_via"))
+    # `id` is the parent's key, not a column of this table.
+    assert_refused(_family([_fk(), _anchored(via="id")]), FORWARD, p("x", "anchor_via"))
+
+
+def test_anchor_via_that_is_not_a_reference_leads_to_no_table() -> None:
+    """An earlier column that references nothing cannot carry the anchor to a parent."""
+    plain = {"name": "pid", "type": "sequence", "start": 1}
+    born = {"name": "born", "type": "categorical", "categories": ["2001-02-03"]}
+    assert_refused(_family([plain, _anchored()]), FORWARD, p("x", "anchor"))
+    assert_refused(_family([plain, born, _anchored()]), FORWARD, p("x", "anchor"))
+
+
+def test_anchor_without_anchor_via_keeps_the_same_table_rule() -> None:
+    own = {"name": "born", "type": "categorical", "categories": ["2001-02-03"]}
+    same_table = {"name": "x", "type": "windowed_date", "anchor": "born", "max_days": 3}
+    assert_accepted(_family([_fk(), own, same_table]))
+    # The parent's `born` is not a sibling: without `anchor_via` nothing reaches it.
+    assert_refused(_family([_fk(), same_table]), FORWARD, p("x", "anchor"))
+    assert_refused(_family([_fk(), same_table, own]), FORWARD, p("x", "anchor"))
+
+
+def test_cross_table_refusals_quote_no_name_from_the_config() -> None:
+    config = _family([_fk(), _anchored("canary_7731_col")])
+    for site in _sites():
+        exc = refusal(config, site)
+        assert (exc.code, exc.path) == (FORWARD, p("x", "anchor"))
+        assert "canary_7731_col" not in str(exc) and exc.__context__ is None
+
+
+def test_the_generate_input_check_walks_the_one_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every edge the check judges comes from `config.iter_generate_input_refs`."""
+    from decoy_engine import config as config_api
+    from decoy_engine.plan.checks import _generate_columns as checks
+
+    seen: list[tuple[str, str]] = []
+    real = config_api.iter_generate_input_refs
+
+    def spy(table: Any, column: Any) -> Any:
+        seen.append((table["name"], column["name"]))
+        return real(table, column)
+
+    monkeypatch.setattr(config_api, "iter_generate_input_refs", spy)
+    checks.check_generate_columns(_family([_fk(), _anchored()]))
+    assert seen == [("p", "id"), ("p", "born"), ("t", "pid"), ("t", "x")]
+    assert not hasattr(checks, "_referenced")
+    assert not hasattr(checks, "_check_forward_references")
+
+
+# ---- per-parent aggregates: `column` and `via` are columns of the `from_table` child -----------
+
+
+def _orders(
+    total: dict[str, Any],
+    parents: list[dict[str, Any]] | None = None,
+    kids: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Table `t` (the parent under test, holding the aggregate) and its child `lines`."""
+    fk = {"name": "oid", "type": "reference", "reference_table": "t", "reference_column": "id"}
+    config = cfg(parents or [seq("id"), total])
+    config["tables"].append(
+        {
+            "name": "lines",
+            "row_count": 6,
+            "generate_columns": kids or [seq("lid"), fk, seq("price", start=5)],
+        }
+    )
+    return config
+
+
+def _total(column: str = "price", via: str = "oid", **extra: Any) -> dict[str, Any]:
+    return {
+        "name": "x",
+        "type": "derived_aggregate",
+        "op": "sum",
+        "column": column,
+        "from_table": "lines",
+        "via": via,
+        **extra,
+    }
+
+
+def test_per_parent_column_is_accepted_with_no_same_named_parent_column() -> None:
+    assert_accepted(_orders(_total()))
+    # The aggregate check keeps its own op rule for this form.
+    bad_op = _orders(_total(op="product"))
+    assert_refused(bad_op, "derived_aggregate_op_invalid", p("x", "op"))
+
+
+def test_per_parent_column_missing_from_the_child_is_refused() -> None:
+    """The parent has a `price`; it must not stand in for the child's."""
+    fk = {"name": "oid", "type": "reference", "reference_table": "t", "reference_column": "id"}
+    config = _orders(_total(), [seq("id"), seq("price"), _total()], [seq("lid"), fk])
+    assert_refused(config, FORWARD, p("x", "column"))
+
+
+def test_per_parent_column_may_be_declared_anywhere_in_the_child() -> None:
+    """The child table is finished before the post-pass reads it."""
+    fk = {"name": "oid", "type": "reference", "reference_table": "t", "reference_column": "id"}
+    assert_accepted(_orders(_total(), kids=[seq("price"), seq("lid"), fk]))
+    assert_accepted(_orders(_total(), kids=[seq("lid"), seq("price"), fk]))
+
+
+def test_per_parent_via_must_be_a_column_of_the_child() -> None:
+    assert_refused(_orders(_total(via="ghost")), FORWARD, p("x", "via"))
+    # `id` is the parent's column, not one of the child's.
+    assert_refused(_orders(_total(via="id")), FORWARD, p("x", "via"))
+
+
+def test_per_parent_from_table_that_names_no_table_is_refused() -> None:
+    config = _orders(_total(), [seq("id"), seq("price"), _total(from_table="ghost")])
+    assert_refused(config, FORWARD, p("x", "column"))
+
+
+def test_per_parent_refusals_quote_no_name_from_the_config() -> None:
+    config = _orders(_total("canary_7731_col"))
+    for site in _sites():
+        exc = refusal(config, site)
+        assert (exc.code, exc.path) == (FORWARD, p("x", "column"))
+        assert "canary_7731_col" not in str(exc) and exc.__context__ is None
 
 
 def _conditioned_snapshot(tmp_path: Any) -> str:

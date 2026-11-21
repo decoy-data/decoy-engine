@@ -820,8 +820,18 @@
           },
           "then": {
             "additionalProperties": false,
+            "dependentRequired": {
+              "by": [
+                "condition_on"
+              ],
+              "condition_on": [
+                "by"
+              ]
+            },
             "properties": {
+              "by": {},
               "categories": {},
+              "condition_on": {},
               "determinism": {},
               "name": {},
               "null_probability": {},
@@ -1008,6 +1018,7 @@
             "properties": {
               "column": {},
               "determinism": {},
+              "from_table": {},
               "name": {},
               "null_probability": {},
               "op": {},
@@ -1016,7 +1027,8 @@
                 "type": "null"
               },
               "type": {},
-              "unique": {}
+              "unique": {},
+              "via": {}
             },
             "required": [
               "op",
@@ -1075,6 +1087,7 @@
             "additionalProperties": false,
             "properties": {
               "anchor": {},
+              "anchor_via": {},
               "determinism": {},
               "distribution": {},
               "max_days": {},
@@ -1091,6 +1104,37 @@
             "required": [
               "anchor",
               "max_days"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "inherit"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "column": {},
+              "determinism": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "type": {},
+              "unique": {},
+              "via": {}
+            },
+            "required": [
+              "via",
+              "column"
             ]
           }
         },
@@ -1318,7 +1362,8 @@
             "constant",
             "distribution",
             "lookup",
-            "provider"
+            "provider",
+            "inherit"
           ],
           "title": "Type",
           "type": "string"

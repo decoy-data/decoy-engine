@@ -761,6 +761,12 @@
        "value_column": "code"
       },
       {
+       "name": "key",
+       "type": "sequence",
+       "pooled": null,
+       "start": 1
+      },
+      {
        "name": "pv",
        "type": "provider",
        "pooled": null,
@@ -802,6 +808,20 @@
        "pooled": null,
        "reference_column": "seq",
        "reference_table": "t1"
+      },
+      {
+       "name": "r4",
+       "type": "reference",
+       "pooled": null,
+       "reference_table": "t1",
+       "reference_column": "key"
+      },
+      {
+       "name": "ih",
+       "type": "inherit",
+       "pooled": null,
+       "via": "r4",
+       "column": "cat"
       }
      ],
      "transforms": []
@@ -846,10 +866,13 @@
    "t1.cn": "5474f20182b631dc224f7bab649d0688a8262ff779f8430fa2bb979dea770f8d",
    "t1.ds": "ae8a2133d95c8948ea5c7c1088c70913192211b34aac6f13bb271100c3485d5c",
    "t1.lk": "bd7cea34b57c192a32810ad9940499dc1bdd771842970ca20a98cb8248751839",
+   "t1.key": "0b54fb7c7c569d98917929f27b59a542f8b6c8ac9ad3c2964e59572c87d81333",
    "t1.pv": "ed1de023a891f1d354e6950650935d8e2b380f981775273f81fc5f7a6a9775f2",
    "t2.r1": "ad719105118ece5004ed92bd8e3cfbc1fe9ff119b94447ae71ce719f9a97d44e",
    "t2.r2": "fed50788ad83ee8b55a9bb8a7f792dff1d7ffd74b0ce47314b99a817125bb5c4",
-   "t2.r3": "4da13208780f85255779ada2859faab8e505ad807ea3a69677989799b66375ca"
+   "t2.r3": "4da13208780f85255779ada2859faab8e505ad807ea3a69677989799b66375ca",
+   "t2.r4": "349055c1d2806ce318bd4f38bbcc8f3eb3b3551b3ad00ca42b06f114d1ccb65d",
+   "t2.ih": "a65ff5d3b81ed9cad1143391372a1efe9c700d1143cb2c3ed2260bfc105962f9"
   },
   "raw": {
    "global_settings": {
@@ -988,6 +1011,11 @@
        "value_column": "code"
       },
       {
+       "name": "key",
+       "type": "sequence",
+       "start": 1
+      },
+      {
        "name": "pv",
        "type": "provider",
        "provider": "synthetic_npi"
@@ -1023,6 +1051,18 @@
        "reference_column": "seq",
        "reference_table": "t1",
        "type": "reference"
+      },
+      {
+       "name": "r4",
+       "type": "reference",
+       "reference_table": "t1",
+       "reference_column": "key"
+      },
+      {
+       "name": "ih",
+       "type": "inherit",
+       "via": "r4",
+       "column": "cat"
       }
      ],
      "name": "t2",
