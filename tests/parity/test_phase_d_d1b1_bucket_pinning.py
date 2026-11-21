@@ -162,13 +162,11 @@ def test_per_batch_shape_reconciles_to_the_pinned_type_and_output(
     for name, _ in SHAPE_SEEDS:
         assert run.tables["t"].column(name).to_pylist() == EXPECTED[name], name
     if mode == "resident":
-        # Data-derived like the pandas path: an all-null column is null-typed, an
-        # all-unparseable-but-present one stays string.
+        # Data-derived like the pandas path: an all-null column is null-typed.
         assert run.tables["t"].column("b_allnull").type == pa.null()
-        assert run.tables["t"].column("b_unparse").type == pa.string()
 
 
-# --- Empty, all-null and all-unparseable boundary: zero kernel calls, the column history counts ---
+# --- Empty and all-null boundary: zero kernel calls, the column history counts ---
 
 
 def _dates(values: list[str | None]) -> pa.Table:
@@ -178,8 +176,8 @@ def _dates(values: list[str | None]) -> pa.Table:
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize(
     "values",
-    [[None] * 5, ["nope", "bad", "2024-99-99", "", "x"]],
-    ids=["all-null", "all-unparseable"],
+    [[None] * 5],
+    ids=["all-null"],
 )
 def test_a_column_with_nothing_to_perturb_makes_no_kernel_call_and_reports_idle(
     values: list[str | None], mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -205,15 +203,11 @@ def test_a_column_with_nothing_to_perturb_makes_no_kernel_call_and_reports_idle(
         ["2024-03-05", "2024-03-06", None, None, None, None],
         [None, None, "2024-03-05", "2024-03-06", None, None],
         [None, None, None, None, "2024-03-05", "2024-03-06"],
-        ["2024-03-05", "2024-03-06", "nope", "bad", "", "x"],
-        ["nope", "bad", "", "x", "2024-03-05", "2024-03-06"],
     ],
     ids=[
         "populated-then-null",
         "null-between-populated",
         "null-then-populated",
-        "populated-then-unparseable",
-        "unparseable-then-populated",
     ],
 )
 def test_idle_batches_neither_erase_nor_fake_a_native_execution(
@@ -227,9 +221,6 @@ def test_idle_batches_neither_erase_nor_fake_a_native_execution(
     assert state["kernel"].calls == 1
     got = run.tables["t"].column("a").to_pylist()
     assert [v is None for v in got] == [v is None for v in values]
-    assert [g for g, v in zip(got, values, strict=True) if v in (None, "nope", "bad", "", "x")] == [
-        v for v in values if v in (None, "nope", "bad", "", "x")
-    ]
     assert entry(run)["executed_backend"] == RUST_COMPANION
     assert "reason" not in entry(run)
 
@@ -287,17 +278,17 @@ def test_a_date_near_the_pandas_range_bound_fails_closed(
         _assert_aborted(sink, out_dir)
 
 
-def test_out_of_range_dates_are_not_near_the_bound_and_pass_through(
+def test_out_of_range_dates_are_not_near_the_bound_and_refuse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """9999-12-31 and 2299-01-01 parse to NaT on both paths, so they need no guard."""
+    """9999-12-31 and 2299-01-01 parse to NaT on both paths, so they need no range guard. They
+    are unparseable cells: the route has no row-error channel, so it refuses rather than keep them."""
     install_index_companion(monkeypatch)
     forbid_python_bucket(monkeypatch)
     values = ["9999-12-31", "2299-01-01", "2024-03-05"]
-    run = run_chain(_dates(values), (("a", bucket_seed("quarter", ISO)),))
-    got = run.tables["t"].column("a").to_pylist()
-    assert got[:2] == values[:2]
-    assert got[2] != values[2]
+    with pytest.raises(ExecutionError) as caught:
+        run_chain(_dates(values), (("a", bucket_seed("quarter", ISO)),))
+    assert caught.value.code == "bucket_perturb_unparseable_no_row_channel"
 
 
 # --- Validation ordering: native selection never hoists or replaces an existing check ---

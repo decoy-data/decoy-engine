@@ -83,6 +83,7 @@ from decoy_engine.execution._sequential_native_ops import (
     _load_text_redact,
     _table_columns,
     bucket_perturb_op,
+    bucket_row_errors,
     categorical_op,
     date_shift_op,
     date_shift_row_errors,
@@ -401,6 +402,8 @@ class SeqNativeRun:
                 return None
             call = BucketCall(namespace, mask_key, bucket, date_format, preserved, [])
             result = _OPS[BUCKET_PERTURB].apply(bound, array, call)
+            # Unparseable cells ride the row-error channel, as the Python handler records them.
+            ctx.row_errors.extend(bucket_row_errors(column, result.errors))
             decision.native_calls += sum(call.derive_calls)
             if preserved is not None:
                 count = int(preserved.sum())
