@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CARDINALITY_COLLISIONS",
     "CARDINALITY_MATCH_DEVIATION",
+    "DRIFT_NOT_CHECKED",
     "FIT_JOINT_CELLS_TRUNCATED",
     "FORMAT_RULE_VIOLATION",
     "FPE_JOIN_GROUP_ACTIVE",
@@ -43,6 +45,12 @@ _d = _catalog.warning("QualityWarning")
 
 CARDINALITY_COLLISIONS = _d("cardinality_collisions", "Cardinality collisions.", since="1.30.0")
 CARDINALITY_MATCH_DEVIATION = _d("cardinality_match_deviation", "Cardinality match deviation.")
+DRIFT_NOT_CHECKED = _d(
+    "drift_not_checked",
+    "scan_baseline.on_drift is not checked by decoy run yet; the run continues without a drift "
+    "check.",
+    since=UNRELEASED,
+)
 FIT_JOINT_CELLS_TRUNCATED = _d(
     "fit_joint_cells_truncated", "Fit joint cells truncated.", since="1.22.0"
 )

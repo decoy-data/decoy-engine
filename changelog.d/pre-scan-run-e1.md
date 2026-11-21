@@ -1,0 +1,3 @@
+### Added (pre-scan config for the run-start check, PRE-SCAN-RUN E1, 2026-11-21)
+
+Writing a `pre_scan` block now turns the run-start pre-scan on, so a written default block stays in the dump (a block never written is still dropped). `decoy_engine.config.pre_scan_requested` is the one reader of that switch. `pre_scan.on_findings: warn | fail` (default `warn`) is new; under `fail` the effective `on_findings`, `detectors` and `ner_model` are part of the plan hash. `decoy-run-result/v1` gains the check id `pre_scan`, and `build_run_result(pre_checks=...)` accepts it before `scan_drift`. New pending reasons: `pre_scan/uncovered_pii`, `pre_scan/uncovered_pii_blocked` and `warning/drift_not_checked`. No run reads the block yet; the run-start step ships in the CLI.

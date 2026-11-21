@@ -124,6 +124,9 @@ def _fidelity_warned(report: Any) -> bool:
     return bool(report.get("warnings")) or report.get("grade") in ("F", "unavailable")
 
 
+_PRE_CHECK_ORDERS = {(), ("pre_scan",), ("scan_drift",), ("pre_scan", "scan_drift")}
+
+
 def _pre_check(check: Check) -> Check:
     c = check.counts
     return _check(
@@ -222,15 +225,15 @@ def build_run_result(
     ``route`` is ``route_summary(quality_metrics)``, read once by the caller; ``chunked`` is the
     caller's own fact that the ``--chunked`` entry ran, which leaves no route in the metrics.
 
-    ``pre_checks`` are checks the caller ran before the engine did (the scan-drift check). They come
+    ``pre_checks`` are checks the caller ran before the engine did (the pre-scan and scan-drift checks, in that order). They come
     first in ``checks``; a blocking one that failed makes the status ``findings``, as
-    ``blocking_failed`` does, but the engine checks keep the caller's own flag. Only ``scan_drift`` is
-    accepted. A pre-check cannot claim to block unless it failed."""
+    ``blocking_failed`` does, but the engine checks keep the caller's own flag. Only ``pre_scan`` and ``scan_drift`` are
+    accepted, at most one of each. A pre-check cannot claim to block unless it failed."""
     if tables.run_failed != (failure is not None):
         raise ValueError("tables.run_failed disagrees with failure")
     pre = tuple(_pre_check(c) for c in pre_checks)
-    if any(c.id != "scan_drift" for c in pre):
-        raise ValueError("pre_checks may hold only the scan_drift check")
+    if tuple(c.id for c in pre) not in _PRE_CHECK_ORDERS:
+        raise ValueError("pre_checks may hold at most one pre_scan then one scan_drift check")
     pre_blocked = any(c.blocking for c in pre)
     outcome = derive_outcome(
         category=None if failure is None else failure.category,

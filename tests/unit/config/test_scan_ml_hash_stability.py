@@ -134,8 +134,11 @@ def test_default_values_are_dropped_from_the_dump_even_when_written_out() -> Non
             },
         }
     ).model_dump()
+    # pre_scan is kept by presence (writing it turns the run-start pre-scan on); the rest of
+    # the written defaults still drop.
+    assert explicit.pop("pre_scan") == {"detectors": ("regex",)}
     assert explicit == plain
-    assert "pre_scan" not in explicit
+    assert "pre_scan" not in plain
     with_ner = PipelineConfig.model_validate(
         {
             **raw,
