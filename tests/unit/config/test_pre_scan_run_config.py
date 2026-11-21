@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
+
 import copy
 import hashlib
 import json
@@ -35,7 +37,7 @@ def _raw(tmp_path: Path, **extra: Any) -> dict[str, Any]:
 
 def _hash(tmp_path: Path, **extra: Any) -> str:
     cfg = PipelineConfig.model_validate(_raw(tmp_path, **extra)).model_dump()
-    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture")
+    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture", sources=NO_SOURCES)
     return str(plan.pipeline_config_hash)
 
 

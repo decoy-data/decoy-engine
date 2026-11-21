@@ -329,9 +329,7 @@ def _load_sources(data_dir: Path) -> dict[str, pa.Table]:
 
 
 def _compiled_plan(config: dict[str, Any], key_provider: Any) -> tuple[Any, bytes, Any, Any]:
-    """Compile (plan, mask_key, namespace_registry, relationship_graph),
-    the same four objects `run_pipeline` builds, so a staged prefix's
-    `pool_build`/`selection` work matches production exactly."""
+    """Compile (plan, mask_key, namespace_registry, relationship_graph) as `run_pipeline` does."""
     from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.keyprovider import require_mask_key, resolve_key_provider
     from decoy_engine.plan import compile_plan
@@ -339,8 +337,7 @@ def _compiled_plan(config: dict[str, Any], key_provider: Any) -> tuple[Any, byte
     from decoy_engine.profile import profile_source
     from decoy_engine.relationships import RelationshipGraph, build_namespace_registry
 
-    job_seed_int = _normalize_job_seed_int(config)
-    profile = profile_source(config, seed=job_seed_int)
+    profile = profile_source(config, seed=_normalize_job_seed_int(config))
     plan = compile_plan(
         config, profile, decoy_engine_version="phase3-c1-baseline", sources=NO_SOURCES
     )
