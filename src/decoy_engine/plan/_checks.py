@@ -28,7 +28,6 @@ from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
-from decoy_engine.plan.checks._provider_sites import provider_sites
 from decoy_engine.profile._types import Profile
 
 # Strategies under which a null-bearing integer source column is ambiguous: an
@@ -69,6 +68,7 @@ def check_unknown_provider(config: dict[str, Any]) -> None:
     (faker is already loaded by other engine modules at package import time);
     cycle prevention is. Dennis Session 22 L1.
     """
+    from decoy_engine.plan.checks._provider_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     known = get_default_registry().known_providers()
@@ -103,6 +103,7 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
     Config + registry only (no profile): safe to run in --no-profile
     mode and in config-only validation paths.
     """
+    from decoy_engine.plan.checks._provider_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     registry = get_default_registry()
