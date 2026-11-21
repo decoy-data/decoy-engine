@@ -5,6 +5,7 @@ Kept apart from `test_nonfk_dtype_matrix.py` so that module stays under the size
 
 from __future__ import annotations
 
+import decimal
 from pathlib import Path
 
 import pyarrow as pa
@@ -58,22 +59,76 @@ def _all_null(type_class: str) -> pa.Table:
 
 @pytest.mark.parametrize("strategy", ["hash", "redact"])
 @pytest.mark.parametrize("type_class", ["int64_nulls", "decimal128", "binary"])
-def test_m3_an_all_null_column_equals_values_and_pins_the_type_split(
+def test_m3_an_all_null_column_falls_back_and_matches_the_oracle_type(
     tmp_path: Path, strategy: str, type_class: str
 ) -> None:
-    """Values equal the oracle. The type differs and is pinned: a change shows up here.
-
-    Known split (V2-LOG): chunked gives `string`, full-frame gives `null`."""
+    """Chunked pins hash/redact output to `string`; full-frame writes `null`. The gate declines
+    an all-null column so both routes give the same schema and values."""
     table = _all_null(type_class)
     cfg = _cfg(tmp_path, table, _masked_entry(strategy))
     got = _run(table, cfg)
     block = got.quality_metrics["auto_chunk"]
     out = got.outputs[support.TABLE]
     base = _oracle(table, cfg).outputs[support.TABLE]
-    assert block["mode"] == "chunked", block["reason"]
+    assert block["mode"] == "full_frame", block
+    assert out.schema.field("p").type == base.schema.field("p").type
     assert out.column("p").to_pylist() == base.column("p").to_pylist()
-    assert out.schema.field("p").type == pa.string()
-    assert base.schema.field("p").type == pa.null()
+
+
+@pytest.mark.parametrize("strategy", ["hash", "redact"])
+@pytest.mark.parametrize("type_class", ["int64_nulls", "decimal128", "binary"])
+def test_m3_the_gate_declines_an_all_null_pinned_column_only(
+    strategy: str, type_class: str
+) -> None:
+    registry = get_default_registry()
+    entries = [support.redact_col("s"), _masked_entry(strategy)]
+    all_null = ci.facts_for(None, _all_null(type_class), "t")
+    assert admitted_masked_columns(all_null, entries, registry) == frozenset()
+    some = _all_null(type_class)
+    values = {"int64_nulls": 7, "decimal128": decimal.Decimal("1.50"), "binary": b"x"}
+    col = some.column("p").to_pylist()
+    col[3] = values[type_class]
+    some = some.set_column(1, "p", pa.array(col, some.schema.field("p").type))
+    assert admitted_masked_columns(ci.facts_for(None, some, "t"), entries, registry) == {"p"}
+
+
+@pytest.mark.parametrize("strategy", ["hash", "redact"])
+@pytest.mark.parametrize("type_class", ["int64_nulls", "decimal128", "binary"])
+def test_m3_a_lazy_sink_all_null_column_has_the_same_schema_on_both_routes(
+    tmp_path: Path, strategy: str, type_class: str
+) -> None:
+    """The lazy transactional-sink path: the written Parquet schema of an all-null masked column
+    is the same auto-chunked and forced full-frame."""
+    import pyarrow.parquet as pq
+
+    from decoy_engine.execution import run_pipeline
+    from decoy_engine.profile._readers import LazySource
+    from tests.unit.execution.run_stream import _support as rs
+
+    table = _all_null(type_class)
+    cfg = _cfg(tmp_path, table, _masked_entry(strategy))
+    written = {}
+    for mode in ("auto", "full_frame"):
+        sink, target = rs.engine_sink(tmp_path, mode)
+        extra = (
+            {"auto_chunk_threshold_rows": support.THRESHOLD, "chunk_size_rows": support.CHUNK}
+            if mode == "auto"
+            else {}
+        )
+        result = run_pipeline(
+            cfg,
+            sources={support.TABLE: LazySource(tmp_path / "src.parquet")},
+            sink=sink,
+            engine_version=support.ENGINE_VERSION,
+            execution_mode=mode,
+            **extra,
+        )
+        # A chunked run streams into the sink; a full-frame run returns the table in memory.
+        file = target / f"{support.TABLE}.parquet"
+        written[mode] = pq.read_table(file) if file.exists() else result.outputs[support.TABLE]
+    a, b = written["auto"], written["full_frame"]
+    assert a.schema.field("p").type == b.schema.field("p").type
+    assert a.column("p").to_pylist() == b.column("p").to_pylist()
 
 
 # -- every nullable integer width and the allow_collisions faker alias (Codex final on #735) ----

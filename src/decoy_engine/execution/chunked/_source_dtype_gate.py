@@ -38,6 +38,12 @@ CHUNK_STABLE_MASKED_SOURCE_TYPES: Mapping[str, frozenset[str]] = {
     "faker": frozenset({INT_WITH_NULLS}),
 }
 
+# hash and redact pin their chunked output to Arrow `string`, while the full-frame route writes
+# a `null` field for a column with no value. A column that is all null (or whose null count is
+# unknown, so it may be) would get a different Parquet schema per route, so it falls back to
+# full-frame. The admission table above stays the only table.
+_STRING_PINNED = frozenset({"hash", "redact"})
+
 
 def type_class(arrow_type: pa.DataType, null_count: int) -> str | None:
     """The admission class of a source type, or None when it has none."""
@@ -88,7 +94,10 @@ def admitted_masked_columns(
         )
         if classes is None or not _config_admits(entry):
             continue
-        if type_class(types[name], facts.null_count(name) or 0) in classes:
+        nulls = facts.null_count(name)
+        if strategy in _STRING_PINNED and (nulls is None or nulls >= facts.num_rows):
+            continue  # all-null (or unknown): see _STRING_PINNED
+        if type_class(types[name], nulls or 0) in classes:
             admitted.add(name)
     return frozenset(admitted)
 
