@@ -109,7 +109,7 @@ def test_the_proof_manifest_and_matrix_list_the_type() -> None:
     root = Path(__file__).resolve().parents[4]
     manifest = json.loads((root / "docs" / "proof-manifest.json").read_text())
     assert "provider" in manifest["generation_strategies"]
-    assert manifest["surface"]["generate"] == 15
+    assert manifest["surface"]["generate"] == 16  # GEN-INHERIT E1 adds the sixteenth
     assert "`provider`" in (root / "docs" / "capability-matrix.md").read_text()
 
 
