@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,10 @@ def test_e1_t1_an_unwritten_block_is_dropped_and_the_dump_is_unchanged() -> None
     assert "pre_scan" not in dump
     assert not pre_scan_requested(dump)
     # Same dump as before this change: no new key reaches a config that never wrote the block.
-    assert set(dump) == set(PipelineConfig.model_validate(LEGACY_RAW).model_dump())
+    cfg = copy.deepcopy(dump)
+    del cfg["sources"]["p"]["has_header"]  # the frozen baseline predates the csv has_header key
+    legacy_dump = json.dumps(cfg, sort_keys=True)
+    assert hashlib.sha256(legacy_dump.encode()).hexdigest() == BASELINE["config_dump_sha256"]
 
 
 def test_e1_t2_pre_scan_requested_is_presence_not_truthiness() -> None:
@@ -180,3 +184,29 @@ def test_e1_t3_the_hash_fills_defaults_in_a_raw_block() -> None:
         {**base, "pre_scan": {"detectors": ["classifier", "regex"], "on_findings": "fail"}}
     )
     assert _hash_config({**base, "pre_scan": {"on_findings": "warn"}}) == _hash_config(base)
+
+
+def test_e1_the_fail_hash_input_follows_the_pre_scan_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decoy_engine.config import PreScanConfig, pre_scan_hash_input
+
+    assert pre_scan_hash_input(None) is None
+    assert pre_scan_hash_input({"on_findings": "warn"}) is None
+    assert pre_scan_hash_input({"on_findings": "fail"}) == {
+        "on_findings": "fail",
+        "detectors": ["regex"],
+    }
+    assert pre_scan_hash_input(PreScanConfig(on_findings="fail")) == pre_scan_hash_input(
+        {"on_findings": "fail"}
+    )
+
+    class Wider(PreScanConfig):
+        detectors: tuple[str, ...] = ("regex", "classifier")  # type: ignore[assignment]
+        ner_model: str = "en_core_web_sm"
+
+    monkeypatch.setattr("decoy_engine.config._pre_scan.PreScanConfig", Wider)
+    assert pre_scan_hash_input({"on_findings": "fail"}) == {
+        "on_findings": "fail",
+        "detectors": ["regex", "classifier"],
+    }
