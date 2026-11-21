@@ -160,3 +160,34 @@ def test_unknown_stored_shape_refused(tmp_path: Path, token: object) -> None:
     assert "'d'" not in exc.value.message and "column d in table people" in exc.value.message
     assert "bogus" not in exc.value.message and "TEXT" not in exc.value.message
     assert exc.value.__cause__ is None and exc.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "text",
+        ["x"],
+        [{"table": "people", "column": "d"}],
+        [{"table": 5, "column": "d", "shape": "text"}],
+        [{"table": "people", "column": ["d"], "shape": "text"}],
+        [
+            {"table": "people", "column": "d", "shape": "text"},
+            {"table": "people", "column": "d", "shape": "date"},
+        ],
+    ],
+    ids=[
+        "not-a-list",
+        "entry-not-a-mapping",
+        "no-token",
+        "non-str-table",
+        "non-str-column",
+        "duplicate",
+    ],
+)
+def test_malformed_stored_shapes_are_plan_errors(tmp_path: Path, bad: object) -> None:
+    data = _stored(tmp_path)
+    data["column_shapes"] = bad
+    with pytest.raises(PlanCompileError) as exc:
+        plan_from_yaml(yaml.safe_dump(data, sort_keys=False))
+    assert exc.value.code == reasons.plan.STORED_SHAPE_UNKNOWN
+    assert exc.value.__cause__ is None and exc.value.__context__ is None

@@ -139,6 +139,9 @@ def check_required_strategy_settings(
     Raises:
         PlanCompileError: the code of the missing setting's descriptor.
     """
+    from decoy_engine.profile._walk import observed_shape
+
+    observed_shape(None, None)
     config_only = shapes is None
     resolved = build_column_shapes(config) if shapes is None else shapes
     tables = config.get("tables")

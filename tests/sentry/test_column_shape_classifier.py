@@ -28,19 +28,31 @@ ALLOWED_CALLERS: dict[str, dict[str, str]] = {
     "declared_shape": {
         "plan/checks/_column_shapes.py": "maps an F06 declaration to its shape",
     },
+    # The profile layer's wrapper over `classify_column`: a caller of it reaches the classifier.
+    "observed_shape": {
+        "profile/_walk.py": "the walk records each column's shape",
+        "execution/_chunked_profile.py": "the Arrow twin of the walk records the same shape",
+    },
 }
+
 
 SHAPE_PACKAGES = ("plan", "profile", "execution/_strategies", "declared_casting")
 SHAPE_PREDICATE = re.compile(r"^is_(date|timestamp|decimal)")
 
 
 MODULE = "decoy_engine.contracts.column_shape"
+# Where a wrapper over the classifier is defined: the module it is imported from, and its file.
+WRAPPERS: dict[str, tuple[str, str]] = {
+    "observed_shape": ("decoy_engine.profile._walk", "profile/_walk.py")
+}
 
 
 def _call_sites(root: Path, name: str) -> set[str]:
-    """Files that call `name` as the one this module owns. The execution package has an
+    """Files that call `name` as the one this package owns. The execution package has an
     unrelated `classify_column` for memory estimates, so a call counts only when the file got
-    the name from `contracts.column_shape`, by import or through the module."""
+    the name from its home module, by import or through the module. The defining file of a
+    wrapper counts its own calls."""
+    module, home_file = WRAPPERS.get(name, (MODULE, HOME))
     found: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
@@ -50,10 +62,12 @@ def _call_sites(root: Path, name: str) -> set[str]:
         imported = {
             (a.asname or a.name)
             for n in ast.walk(tree)
-            if isinstance(n, ast.ImportFrom) and n.module == MODULE
+            if isinstance(n, ast.ImportFrom) and n.module == module
             for a in n.names
             if a.name == name
         }
+        if rel == home_file and name in WRAPPERS:
+            imported.add(name)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -61,7 +75,7 @@ def _call_sites(root: Path, name: str) -> set[str]:
             if (isinstance(fn, ast.Name) and fn.id in imported) or (
                 isinstance(fn, ast.Attribute)
                 and fn.attr == name
-                and ast.unparse(fn.value).endswith("column_shape")
+                and ast.unparse(fn.value).endswith(module.rsplit(".", 1)[-1])
             ):
                 found.add(rel)
     return found
@@ -104,6 +118,16 @@ def test_the_sentry_catches_a_planted_caller(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert _call_sites(tmp_path, "classify_column") == {"execution/_chunked_profile.py"}
+
+
+def test_the_sentry_catches_a_planted_wrapper_caller(tmp_path: Path) -> None:
+    probe = tmp_path / "plan" / "_x.py"
+    probe.parent.mkdir()
+    probe.write_text(
+        "from decoy_engine.profile._walk import observed_shape\nx = observed_shape(t, None)\n",
+        encoding="utf-8",
+    )
+    assert _call_sites(tmp_path, "observed_shape") == {"plan/_x.py"}
 
 
 def test_a_same_named_function_from_elsewhere_is_not_counted(tmp_path: Path) -> None:

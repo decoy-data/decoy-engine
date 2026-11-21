@@ -85,23 +85,38 @@ def column_shapes_to_list(shapes: tuple[PlanColumnShape, ...]) -> list[dict[str,
     return [{"table": c.table, "column": c.column, "shape": c.shape.value} for c in shapes]
 
 
+def _bad_shapes(message: str) -> PlanCompileError:
+    return PlanCompileError(
+        code=reasons.plan.STORED_SHAPE_UNKNOWN, path="<column_shapes>", message=message
+    )
+
+
 def column_shapes_from_list(raw: Any) -> tuple[PlanColumnShape, ...]:
-    """Load the stored shapes. A token this engine does not know is refused, never read as
-    `other`; the message names the table and column and holds no stored value."""
+    """Load the stored shapes. A token this engine does not know, a malformed entry or a repeated
+    column is refused, never read as `other`; messages hold no stored value."""
+    if raw is not None and not isinstance(raw, list):
+        raise _bad_shapes("the stored column_shapes is not a list; compile the plan again.")
     out: list[PlanColumnShape] = []
+    seen: set[tuple[str, str]] = set()
     for entry in raw or ():
-        table, column = entry.get("table"), entry.get("column")
+        table = entry.get("table") if isinstance(entry, dict) else None
+        column = entry.get("column") if isinstance(entry, dict) else None
+        if not isinstance(table, str) or not isinstance(column, str):
+            raise _bad_shapes(
+                "a stored column shape has no table and column name; compile the plan again."
+            )
         token = entry.get("shape")
         shape = _SHAPES_BY_TOKEN.get(token) if isinstance(token, str) else None
         if shape is None:
-            raise PlanCompileError(
-                code=reasons.plan.STORED_SHAPE_UNKNOWN,
-                path="<column_shapes>",
-                message=(
-                    f"column {column!s} in table {table!s} has a stored shape this engine "
-                    "does not know; compile the plan again."
-                ),
+            raise _bad_shapes(
+                f"column {column} in table {table} has a stored shape this engine "
+                "does not know; compile the plan again."
             )
+        if (table, column) in seen:
+            raise _bad_shapes(
+                f"column {column} in table {table} has two stored shapes; compile the plan again."
+            )
+        seen.add((table, column))
         out.append(PlanColumnShape(table=table, column=column, shape=shape))
     return tuple(out)
 
