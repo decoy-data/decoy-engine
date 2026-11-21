@@ -104,6 +104,7 @@ def _oracle_preflight(
     carry_passthrough: bool = False,
     secret_registry: Any = None,
     secret_cache_policy: Any = None,
+    source_schema: pa.Schema | None = None,
 ) -> OraclePreflightState:
     """Admit the keyed-mask secret, THEN run the eager half of the oracle.
 
@@ -141,6 +142,7 @@ def _oracle_preflight(
             pool_cache=pool_cache,
             warm_pools=warm_pools,
             carry_passthrough=carry_passthrough,
+            source_schema=source_schema,
         )
     except BaseException:
         admitted.close()
@@ -180,6 +182,7 @@ def _oracle_preflight_admitted(
     pool_cache: Any,
     warm_pools: bool,
     carry_passthrough: bool,
+    source_schema: pa.Schema | None = None,
 ) -> OraclePreflightState:
     """The eager half of the oracle: every check that runs before a chunk masks.
 
@@ -234,10 +237,12 @@ def _oracle_preflight_admitted(
     # empty source too (from `empty_input_profile`) and the empty-input return
     # comes after the gate.
     carry = None
+    fmt = ((config.get("sources") or {}).get(table) or {}).get("format")
+    seen: dict[str, Any] = {"table": table, "engine_version": engine_version, "source_format": fmt}
     if first is None:
-        profile = empty_input_profile(config, table=table, engine_version=engine_version)
+        profile = empty_input_profile(config, source_schema=source_schema, **seen)
     elif not carry_passthrough:
-        profile = first_chunk_profile(first, table=table, engine_version=engine_version)
+        profile = first_chunk_profile(first, **seen)
     else:
         carry = plan_carry(
             config,
@@ -247,9 +252,7 @@ def _oracle_preflight_admitted(
             registry=resolved_registry,
         )
         try:
-            profile = first_chunk_profile(
-                first, table=table, engine_version=engine_version, carried=carry.carried
-            )
+            profile = first_chunk_profile(first, carried=carry.carried, **seen)
         except Exception as exc:
             carry.diagnose_profile(exc, profile_input(first, carry.carried), table=table)
             raise
@@ -545,6 +548,7 @@ def _mask_pipeline_chunked(
         chunk_result_sink=chunk_result_sink,
         key_provider=key_provider,
         base_row_offset=base_row_offset,
+        source_schema=source_schema,
     )
 
 
@@ -561,6 +565,7 @@ def _mask_declared(
     chunk_result_sink: list[Any] | None = None,
     key_provider: Any = None,
     base_row_offset: int = 0,
+    source_schema: pa.Schema | None = None,
 ) -> Iterator[pa.Table]:
     """The oracle preflight and per-chunk masking, after the entry's checks and gate."""
     from decoy_engine.execution.chunked import observe_chunked
@@ -577,6 +582,7 @@ def _mask_declared(
         key_provider=key_provider,
         base_row_offset=base_row_offset,
         pool_cache=None,
+        source_schema=source_schema,
     )
     if state.first is None:
         # Admission cleared (or the plan is unkeyed); there is genuinely nothing to mask.

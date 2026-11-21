@@ -81,8 +81,8 @@ def _write(tmp_path: Path, text: str | bytes, name: str = "list.csv") -> Path:
     return path
 
 
-def test_the_plan_version_is_four() -> None:
-    assert PLAN_VERSION == 4
+def test_the_plan_version_is_five() -> None:
+    assert PLAN_VERSION == 5
 
 
 # AT-10 ---------------------------------------------------------------------------------
@@ -321,4 +321,4 @@ def test_a_plan_with_no_lookup_has_no_lookups_key(tmp_path: Path) -> None:
     config = one({"name": "x", "type": "categorical", "categories": ["a", "b"]})
     data = yaml.safe_load(plan_to_yaml(_compile(config)))
     assert "lookups" not in data["generation"]
-    assert data["plan_version"] == 4
+    assert data["plan_version"] == 5

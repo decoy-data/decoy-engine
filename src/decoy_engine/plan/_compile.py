@@ -25,8 +25,9 @@ constant (S3 stamped 1; the F-series corrections bumped it to 2).
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from decoy_engine.config import (
     refuse_fixed_width_output_types,
@@ -95,8 +96,10 @@ from decoy_engine.plan._graph import _build_namespaces, _build_relationships
 # Seed normalization lives in `plan/_seed.py` (single shared validator, F5).
 from decoy_engine.plan._seed_envelope import _build_seed_envelope
 from decoy_engine.plan._types import (
+    PLAN_VERSION,
     OrderingNode,
     Plan,
+    PlanColumnShape,
     PlanCompileResult,
 )
 from decoy_engine.plan.checks import (
@@ -104,20 +107,14 @@ from decoy_engine.plan.checks import (
     check_generate_columns,
     check_required_strategy_settings,
 )
+from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
-# F06: bumped 2 -> 3 for the pinned `declared_casting` payload. A version-2 YAML loads with
-# `declared_casting=None` (it never declared any) and runs exactly as before.
-# DPS Scope B (guide 4.7): bumped 1 -> 2 for the pinned `GenerationPlan`
-# payload. A plan_version 1 YAML predates `generation` entirely and
-# deserializes with `generation=None` -- the correct pre-GA hard-delete
-# behavior (`generate_tables` raises the moment it's asked to generate).
-# GEN-TYPES E3: bumped 3 -> 4 for the pinned `generation.lookups` list (omitted when empty, so a
-# plan without lookups differs from its version-3 form only by the version line).
-PLAN_VERSION = 4
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 
 @entry_point
@@ -130,10 +127,12 @@ def compile_plan(
     file_access: FileAccess | None = None,
     base_dir: str | Path | None = None,
     instance_default_locale: Any = DEFERRED,
+    source_schemas: Mapping[str, pa.Schema] | None = None,
 ) -> Plan:
     """Compile (config, profile, engine_version) into a frozen Plan.
 
     Args:
+        source_schemas: Arrow schema by table name; it shapes a column the profile has no entry for.
         instance_default_locale: the locale a faker column without `locale` will generate in,
             when the caller knows it (`None` is Faker's en_US). The default leaves those
             columns to the check `run_generation` repeats with the real locale.
@@ -251,7 +250,8 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config)
+    column_shapes = build_column_shapes(config, profile=profile, source_schemas=source_schemas)
+    check_required_strategy_settings(config, column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. WARN-ONLY --
@@ -473,6 +473,10 @@ def compile_plan(
         ),
         generation=generation_plan,
         declared_casting=compile_declared_casting_contract(config),
+        column_shapes=tuple(
+            PlanColumnShape(table, column, shape)
+            for (table, column), shape in column_shapes.items()
+        ),
     )
 
 

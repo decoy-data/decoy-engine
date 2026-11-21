@@ -162,7 +162,8 @@ _SCAN_CORE = (
 # The planner types are named by string, so `profiling` takes no edge into `profile`. On a
 # first-chunk profile `TableProfile.row_count` and `row_count_exact` describe the chunk, not the
 # source (`execution/capacity.py` reads `row_count_exact`, so it is not flipped); no route
-# serializes that profile.
+# serializes that profile. `ColumnProfile.shape` reads the source format and its schema, never the
+# sampled rows, so it is a label.
 _PLANNER = (
     _entries(
         "planner",
@@ -170,7 +171,7 @@ _PLANNER = (
         scanned="dtype null_count distinct_count avg_length max_length",
         checked="is_candidate_key_sampled",
         source="row_count",
-        label="name sampled declared_pk is_fk fk_target pii_class",
+        label="name sampled declared_pk is_fk fk_target pii_class shape",
     )
     | _entries("planner", "TableProfile", source="row_count row_count_exact", label="name columns")
     | _entries(

@@ -47,6 +47,15 @@ FAIL_POST_SCAN: dict[str, Any] = {
     "ner_findings": "fail",
 }
 
+# The fixture predates `ColumnProfile.shape`. Its profile hash moves once because `shape` is hashed
+# (COLUMN-SHAPE E1a); the config hash and every other line of the plan are unchanged.
+_BASELINE_PROFILE_HASH = (
+    "profile_hash: 1e5b08f74f7870e689271fb8ba9a3e2143cba8cc088ff2968c884eaedcad4220"
+)
+_SHAPED_PROFILE_HASH = (
+    "profile_hash: 0237ffceec65800308ae069d4dd042dc50c572788e0a4118ee85195eba3c0e85"
+)
+
 
 def _raw(tmp_path: Path, **extra: Any) -> dict[str, Any]:
     raw = copy.deepcopy(LEGACY_RAW)
@@ -75,8 +84,8 @@ def test_f06_baseline_dump_hash_and_plan_are_unchanged(tmp_path: Path) -> None:
     plan = _compile(_raw(tmp_path))
     assert plan.pipeline_config_hash == BASELINE["pipeline_config_hash"]
     assert plan_to_yaml(plan) == BASELINE["plan_yaml_at_baseline"].replace(
-        "plan_version: 2", "plan_version: 4", 1
-    )
+        "plan_version: 2", "plan_version: 5", 1
+    ).replace(_BASELINE_PROFILE_HASH, _SHAPED_PROFILE_HASH, 1)
     with_models = _compile(
         _raw(tmp_path, post_scan={**FAIL_POST_SCAN, "dismissed": [NER_DISMISSAL]})
     )

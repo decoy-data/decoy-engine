@@ -236,3 +236,7 @@ baseline = "tests/sentry/baselines/group-by-single-reader.json"
 [[sentry]]
 id = "lossless-int-columns"
 baseline = "tests/sentry/baselines/lossless-int-columns.json"
+
+[[sentry]]
+id = "column-shape-classifier"
+baseline = "tests/sentry/baselines/column-shape-classifier.json"

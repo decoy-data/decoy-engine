@@ -100,6 +100,9 @@ def build_routing_facts(
         decoy_engine_version=engine_version,
         base_dir=base_dir,
         instance_default_locale=instance_default_locale,
+        # A source-loader table has no descriptor and no profile entry: its schema is the only
+        # place its column shapes come from.
+        source_schemas={**schemas, **(source_loader_schemas or {})},
     )
     ns_registry = build_namespace_registry(config, profile)
     if profile.relationships:

@@ -69,12 +69,15 @@ def capture_physical_plan_inputs(
     vault_writer: Any = None,
     base_dir: str | Path | None = None,
     chunked_dispatcher_enabled: bool = True,
+    source_loader_schemas: Mapping[str, pa.Schema] | None = None,
 ) -> PhysicalPlanInputs:
     """Build a `PhysicalPlanInputs` snapshot for `config`/`sources` by running
     the real preflight sequence. Argument defaults mirror `run_pipeline`'s own
     (`_pipeline_finalize` / `_planner` constants) so an unspecified knob here
     captures the same routing facts an unspecified `run_pipeline` kwarg would. `base_dir` is the
-    config file's folder, as for `run_pipeline`.
+    config file's folder, as for `run_pipeline`. `source_loader_schemas` is the schema of each
+    table `source_loader` supplies, as for `run_pipeline`; a loader table takes its column shapes
+    from it.
     """
     from decoy_engine.execution._guards import prepare_declared_execution_sources
     from decoy_engine.execution._pipeline import classify_table_kinds
@@ -154,14 +157,21 @@ def capture_physical_plan_inputs(
     job_seed = _normalize_job_seed_int(config)
     # The same request and profile call the live route makes, so a table the caller supplies
     # without a descriptor is profiled, seeded and planned here as it is there.
+    caller_schemas = {n: s.schema for n, s in caller_sources.items()}
     declared = prepare_declared_execution_sources(
-        DeclarationRequest.for_run(config, {n: s.schema for n, s in caller_sources.items()}),
+        DeclarationRequest.for_run(config, caller_schemas),
         registry=resolved_registry,
     )
     profile = profile_source(
         config, seed=job_seed, declared=declared, supplied_sources=caller_sources
     )
-    plan = compile_plan(config, profile, decoy_engine_version=engine_version, base_dir=base_dir)
+    plan = compile_plan(
+        config,
+        profile,
+        decoy_engine_version=engine_version,
+        base_dir=base_dir,
+        source_schemas={**caller_schemas, **(source_loader_schemas or {})},
+    )
 
     ns_registry = build_namespace_registry(config, profile)
     if profile.relationships:

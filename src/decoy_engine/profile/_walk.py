@@ -33,6 +33,7 @@ import pyarrow as pa
 import pyarrow.types as pat
 
 from decoy_engine._field_names import repeated_names
+from decoy_engine.contracts.column_shape import ColumnShape, classify_column
 from decoy_engine.internal.pandas_compat import canonical_dtype_label
 from decoy_engine.profile._pii import detect_pii_classes
 from decoy_engine.profile._types import ColumnProfile, PIIClass, TableProfile
@@ -49,6 +50,7 @@ def walk_dataframe(
     run_pii_detection: bool = False,
     total_row_count: int | None = None,
     arrow_schema: pa.Schema | None = None,
+    source_format: str | None = None,
 ) -> TableProfile:
     """Return a TableProfile for the given DataFrame.
 
@@ -84,6 +86,8 @@ def walk_dataframe(
         arrow_schema: the source's Arrow schema, when the caller holds one. A list,
             struct or map column holds unhashable cells in pandas, so its
             `distinct_count` is None instead of a `nunique` call that would raise.
+        source_format: the source's format (`csv`, `parquet`, `table`, ...). A text format gives
+            every column the `text` shape whatever the reader inferred; see `classify_column`.
 
     Returns:
         TableProfile with one ColumnProfile per DataFrame column.
@@ -144,6 +148,7 @@ def walk_dataframe(
             fk_specs=fk_specs,
             pii_class=pii_tags.get(col_name_str),
             arrow_type=arrow_types.get(col_name_str),
+            source_format=source_format,
         )
         columns.append(column)
 
@@ -171,6 +176,7 @@ def _walk_column(
     fk_specs: dict[str, tuple[str, str]],
     pii_class: PIIClass | None,
     arrow_type: pa.DataType | None = None,
+    source_format: str | None = None,
 ) -> ColumnProfile:
     """Build a ColumnProfile for one column.
 
@@ -240,4 +246,12 @@ def _walk_column(
         pii_class=pii_class,
         avg_length=avg_length,
         max_length=max_length,
+        shape=observed_shape(arrow_type, source_format),
     )
+
+
+def observed_shape(arrow_type: pa.DataType | None, source_format: str | None) -> ColumnShape:
+    """The shape a profile records for one column. The profile layer's one entry to
+    `classify_column`: the Arrow twin of the walk (`arrow_column_profile`) calls this too, so
+    the two profiles of one column agree."""
+    return classify_column(source_format=source_format, arrow_type=arrow_type)

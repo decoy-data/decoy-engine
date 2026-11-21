@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CONFIG_VALUE_NOT_JSON",
@@ -37,6 +38,8 @@ __all__ = [
     "PINNED_LOOKUP_UNSUPPORTED",
     "PINNED_PROVIDER_UNSUPPORTED",
     "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
+    "PLAN_RECOMPILE_REQUIRED",
+    "PLAN_VERSION_UNSUPPORTED",
     "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_PARENT_NOT_UNIQUE",
     "SORT_UNSUPPORTED_TYPE",
@@ -52,6 +55,7 @@ __all__ = [
     "STATISTICAL_SNAPSHOT_VALUES_REDACTED",
     "STATISTICAL_SPEC_NOT_PINNED",
     "STATISTICAL_STATS_DEGENERATE",
+    "STORED_SHAPE_UNKNOWN",
     "TOP_CODE_INVALID_FLOOR",
 ]
 
@@ -102,6 +106,21 @@ TOP_CODE_INVALID_FLOOR = _d("top_code_invalid_floor", "Top code invalid floor.")
 # Summaries double as the refusal text plan checks show, so they never name a value.
 _d = _catalog.plan("PlanCompileError")
 
+PLAN_RECOMPILE_REQUIRED = _d(
+    "plan_recompile_required",
+    "A stored plan was written by an older engine; compile it again from its config.",
+    since=UNRELEASED,
+)
+PLAN_VERSION_UNSUPPORTED = _d(
+    "plan_version_unsupported",
+    "A stored plan has a plan_version this engine does not support.",
+    since=UNRELEASED,
+)
+STORED_SHAPE_UNKNOWN = _d(
+    "stored_shape_unknown",
+    "A stored plan names a column shape this engine does not know; compile the plan again.",
+    since=UNRELEASED,
+)
 CONFIG_VALUE_NOT_JSON = _d(
     "config_value_not_json",
     "A config value has a type JSON cannot hold; quote it as a string.",
