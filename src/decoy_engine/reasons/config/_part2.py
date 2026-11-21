@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
@@ -82,23 +81,23 @@ TARGET_SHARED_DESTINATION = _d(
 COLUMN_DUPLICATE = _d(
     "column_duplicate",
     "Two columns in one table have the same name. List each column once.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 TABLE_DUPLICATE = _d(
     "table_duplicate",
     "Two tables in one config have the same name. Declare each table once.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_AGGREGATE_INPUT_NOT_NUMERIC = _d(
     "generate_aggregate_input_not_numeric",
     "Generate per-parent aggregate reads a child column that is not numeric; give it a numeric "
     "output_type or aggregate a numeric column.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_AGGREGATE_READ_BEFORE_FILL = _d(
     "generate_aggregate_read_before_fill",
     "Generate column reads a per-parent aggregate, which is filled only after every table exists.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",
@@ -108,7 +107,7 @@ GENERATE_COLUMN_DUPLICATE = _d(
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
     "generate_fitted_reference_bounds_conflict",
     "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_FORMULA_INVALID = _d(
     "generate_formula_invalid",
@@ -144,38 +143,38 @@ GENERATE_PARENT_LOOKUP_KEY_NOT_UNIQUE = _d(
     "generate_parent_lookup_key_not_unique",
     "Generate column reads a parent row through a column that is not a reference to a sequence "
     "key with no null_probability.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PARENT_LOOKUP_SELF_REFERENCE = _d(
     "generate_parent_lookup_self_reference",
     "Generate column reads a parent row through a reference to its own table.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PER_PARENT_BOUNDS_CONFLICT = _d(
     "generate_per_parent_bounds_conflict",
     "Generate reference column min_per_parent is greater than its max_per_parent.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_PER_PARENT_NULL_CONFLICT = _d(
     "generate_per_parent_null_conflict",
     "Generate column null_probability cannot be combined with a per-parent option.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_SELF_REFERENCE_KEY_INVALID = _d(
     "generate_self_reference_key_invalid",
     "Generate self-reference column must name an earlier sequence column of its own table with "
     "no null_probability.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_SELF_REFERENCE_OPTION_UNSUPPORTED = _d(
     "generate_self_reference_option_unsupported",
     "Generate self-reference column takes distribution random and an optional max_per_parent only.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 GENERATE_UNIQUE_CONFLICT = _d(
     "generate_unique_conflict",

@@ -32,6 +32,39 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.2", "A generate column can now use `type: provider` with `provide"): (
+        "new generate type; the refusals named are its own new codes and no existing config meets them"
+    ),
+    ("0.28.2", "Each synthetic identifier now reads one locale constant for "): (
+        "the Breaking bullet on CUSIP `generate_random` locales covers it"
+    ),
+    ("0.28.2", "`per_detector_strategy: {ssn: date_shift}` (and `email: date"): (
+        "the Breaking bullet on text_mask detector and strategy pairs covers it"
+    ),
+    ("0.28.2", "`decoy_engine.fileaccess.reclaim_stages(directory, apply=Fal"): (
+        "new function; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.2", "A plain numeric histogram no longer holds a bin of 1 to 9 ro"): (
+        "the Breaking bullet on the plain `decoy fit` histogram bins covers it"
+    ),
+    ("0.28.2", "A numeric histogram that numpy refuses for the range (narrow"): (
+        "a fix that removes a raise; no run that passed before is refused"
+    ),
+    ("0.28.2", "Every `publication` stage, on both POSIX policies, now holds"): (
+        "additive lock and marker; no run that passed before is refused"
+    ),
+    ("0.28.2", "A generated `reference` column now gets the parent and child"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `min_per_parent` and `max_per_parent` are exact. The repai"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- An empty parent with child rows follows the `orphan_policy"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `distribution: weighted` with a weights list that does not"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
     ("0.28.1", "`decoy_engine.validation.finding_review` adds `finding_edits"): (
         "new experimental names; the refusals named are their own and no 1.0 command calls them"
     ),
