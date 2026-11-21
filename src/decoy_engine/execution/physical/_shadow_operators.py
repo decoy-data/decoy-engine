@@ -23,7 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
-from decoy_engine.execution.native._date_shift_ext import format_error_reason
+from decoy_engine.execution.native._date_shift_ext import format_error_row_errors
 from decoy_engine.execution.native._faker_null_mask import faker_missing_mask
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error
 from decoy_engine.execution.native._operator_params import (
@@ -321,7 +321,7 @@ def run_operator(
     (0-based within `array`, no table): the coordinator is the layer that knows
     the table and the batch offset, so it attributes and rebases them, the same
     split `drain_row_errors` makes for the oracle's handlers. Only date_shift
-    emits any; every other operator returns `()`. `column` is the target column
+    and bucket_perturb emit any (`format_error`); every other operator returns `()`. `column` is the target column
     name the records carry, required by date_shift. `row_offset` is the table-global ordinal
     of `array`'s first row, which only the two position-keyed operators read: they draw by
     `row_offset + i`, so a batch reproduces the whole-frame draw. The position-keyed Faker
@@ -425,10 +425,8 @@ def run_operator(
     if result.format_error_positions:
         if column is None:  # pragma: no cover - the date_shift guard above requires a column
             raise AssertionError("a format-error node reached run_operator with no target column")
-        reason = format_error_reason(binding.operator_id)
         row_errors = tuple(
-            RowError(column=column, row_index=i, trigger="format_error", reason=reason)
-            for i in result.format_error_positions
+            format_error_row_errors(column, result.format_error_positions, binding.operator_id)
         )
     evidence.actual_operator = binding.operator_id
     evidence.executed = True

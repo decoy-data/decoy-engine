@@ -320,3 +320,24 @@ def test_one_builder_serves_both_operators_value_free(strategy: str, reason: str
         ("t", "c", 3, reason),
         ("t", "c", 5, reason),
     ]
+
+
+def test_sequential_bindings_and_a_mixed_records_call() -> None:
+    from decoy_engine.execution._sequential_native_ops import (
+        bucket_row_errors,
+        date_shift_row_errors,
+    )
+    from decoy_engine.execution.native._chunked_row_errors import format_error_records
+
+    bucket = FORMAT_ERROR_REASON
+    shift = "value is not a parseable date under date_shift"
+    assert [(r.row_index, r.reason) for r in bucket_row_errors("b", (1, 4))] == [
+        (1, bucket),
+        (4, bucket),
+    ]
+    assert [(r.row_index, r.reason) for r in date_shift_row_errors("d", (2,))] == [(2, shift)]
+    records = format_error_records("t", {"b": (1,), "d": (2,)}, bucket_columns={"b"})
+    assert [(r.column, r.row_index, r.reason) for r in records] == [
+        ("b", 1, bucket),
+        ("d", 2, shift),
+    ]
