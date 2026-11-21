@@ -400,6 +400,18 @@ jobs:
           pytest tests/security/test_output_metadata_canary.py -k auto_chunk_native -v -rs --tb=short | tee "$RUNNER_TEMP/canary-chunk.log"
           if grep -q SKIPPED "$RUNNER_TEMP/canary-chunk.log"; then echo "the auto-chunk canary cell skipped"; exit 1; fi
 
+      # Native-vs-oracle parity: these files compare the native lane with the Python reference
+      # and skip without the companion, so nothing ran them in CI before and they went stale.
+      # The assert fails the step if the companion did not load; a skipped native test or an
+      # empty selection (pytest exit 5) also fails it.
+      - name: Native parity against the Python reference (companion-present case, must not skip)
+        run: |
+          set -o pipefail
+          python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); assert st.ok, st"
+          pytest tests/parity/*native*.py -v -rs --tb=short | tee "$RUNNER_TEMP/native-parity.log"
+          pytest tests/unit/execution/test_o1_when_routes.py -v -rs --tb=short | tee -a "$RUNNER_TEMP/native-parity.log"
+          if grep -q "^SKIPPED.*native" "$RUNNER_TEMP/native-parity.log"; then echo "a native parity test skipped"; exit 1; fi
+
       # Every tests/native file, so a companion-gated test that no step above names cannot rot
       # (58 such tests were red on main before this step existed). Same two-pass split as ci.yml:
       # xdist for everything but `serial`, then the serial tests alone.
