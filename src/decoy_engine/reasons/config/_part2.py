@@ -7,6 +7,7 @@ from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
+    "COLUMN_DUPLICATE",
     "CONFIG_VALUE_NOT_JSON",
     "DECLARED_TABLE_DROPPED",
     "ENTRY_INVALID",
@@ -22,6 +23,8 @@ __all__ = [
     "GENERATE_PER_PARENT_BOUNDS_CONFLICT",
     "GENERATE_PER_PARENT_INFEASIBLE",
     "GENERATE_PER_PARENT_NULL_CONFLICT",
+    "GENERATE_SELF_REFERENCE_KEY_INVALID",
+    "GENERATE_SELF_REFERENCE_OPTION_UNSUPPORTED",
     "GENERATE_UNIQUE_CONFLICT",
     "GENERATE_UNIQUE_DOMAIN_TOO_SMALL",
     "GENERATE_UNIQUE_UNSUPPORTED",
@@ -41,6 +44,7 @@ __all__ = [
     "POLICY_UNKNOWN_STRATEGY",
     "REMOTE_URI_INVALID",
     "SCAN_BASELINE_UNBOUND",
+    "TABLE_DUPLICATE",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -70,6 +74,16 @@ TARGET_SHARED_DESTINATION = _d(
     "target_shared_destination",
     "Two or more targets write to one destination. Give each table its own target.",
     since="1.28.0",
+)
+COLUMN_DUPLICATE = _d(
+    "column_duplicate",
+    "Two columns in one table have the same name. List each column once.",
+    since=UNRELEASED,
+)
+TABLE_DUPLICATE = _d(
+    "table_duplicate",
+    "Two tables in one config have the same name. Declare each table once.",
+    since=UNRELEASED,
 )
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",
@@ -124,6 +138,17 @@ GENERATE_PER_PARENT_INFEASIBLE = _d(
 GENERATE_PER_PARENT_NULL_CONFLICT = _d(
     "generate_per_parent_null_conflict",
     "Generate column null_probability cannot be combined with a per-parent option.",
+    since=UNRELEASED,
+)
+GENERATE_SELF_REFERENCE_KEY_INVALID = _d(
+    "generate_self_reference_key_invalid",
+    "Generate self-reference column must name an earlier sequence column of its own table with "
+    "no null_probability.",
+    since=UNRELEASED,
+)
+GENERATE_SELF_REFERENCE_OPTION_UNSUPPORTED = _d(
+    "generate_self_reference_option_unsupported",
+    "Generate self-reference column takes distribution random and an optional max_per_parent only.",
     since=UNRELEASED,
 )
 GENERATE_UNIQUE_CONFLICT = _d(

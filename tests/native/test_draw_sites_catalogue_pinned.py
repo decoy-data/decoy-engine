@@ -64,9 +64,11 @@ def test_lookup_by_id_returns_the_catalogued_entry() -> None:
 # Re-pinned for row 24ze G1: every call_site and mirror_call_sites entry is now `path::function[#n]`
 # instead of `path:line`. Metadata only: the output-bearing digests below stay byte-identical.
 # Re-pinned for GEN-REL E1: gen.reference notes and mirror call sites name the moved cardinality repair.
+# Re-pinned for GEN-REL E2: gen.reference notes and mirror call sites name the self-reference tree draw.
 # Re-pinned for E-F0: only the mask.text_mask_date_shift entry moves (an unparseable span now becomes
 # the redaction token, not its real text), and with it the catalogue digest.
-_CATALOGUE_DIGEST = "b64cea251740e312396ea37c5f8f9aafc1a968e1ea9005b24ae918cc3872e825"
+# Re-pinned for GEN-WINDOWED-BATCH S2, merged with GEN-REL E2: the windowed_date draw sites moved too.
+_CATALOGUE_DIGEST = "4cc3254a9c2ebce984ea0aed98259bba482b356a8ede94d421c1bf98efc18469"
 
 _ORDERED_IDS = [
     "mask.shuffle",
@@ -132,7 +134,7 @@ _ENTRY_DIGESTS = [
     "be681b808e8b20697ba82f1eca89d9b9e9973bb56c16fa54de62c35bdc5b664b",  # mask.windowed_date
     "b22ab37e973ad02b943c741bf53e598e9e213a56df6e184144ad95adeca516fd",  # gen.faker_per_row
     "c26b56c364cecf593b15abddab6bb7a4ca9ada7a578b0748f714e4637cd4c7fa",  # gen.categorical
-    "87f2153406c6b768556c6c729bdbc83b8d158d96a75375e8c409a0031cd996c0",  # gen.reference
+    "d708861d65e4f7efd8c6b39464a1200a8e2158e1c7b5862f7bbf40a84bbafe4e",  # gen.reference
     "8b47094cdc123d559a1b924657ac2d84aa012ed0d92fe1a4030b763b04c55f1c",  # gen.formula_per_row
     "8eee3a31f0bf72952a59e8528cecfda9a4d05e97b123e382b2cab08c76c1e1b9",  # gen.statistical_per_row
     "c5a8c289a8a94d363e365084d2148580330cdccdc27d4144bc983f482ddaab17",  # gen.null_probability

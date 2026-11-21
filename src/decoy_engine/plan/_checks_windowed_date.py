@@ -17,7 +17,10 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms.windowed_date import WINDOWED_DATE_DISTRIBUTIONS, validate_window_config
+from decoy_engine.transforms.windowed_date import (
+    WINDOWED_DATE_DISTRIBUTIONS,
+    validate_window_config,
+)
 
 
 def check_windowed_date_refs(config: dict[str, Any]) -> None:

@@ -56,6 +56,7 @@ def decide_chunk_route(
     table_kinds: Mapping[str, str],
     prepared_tables: frozenset[str],
     stream: StreamVerdict | None = None,
+    dispatcher_enabled: bool = True,
 ) -> tuple[ExecutionPlan | None, bool, Mapping[str, SourceFacts]]:
     """Auto-chunk go/no-go + explain surfacing.
 
@@ -101,6 +102,7 @@ def decide_chunk_route(
         auto_chunk_threshold_rows=auto_chunk_threshold_rows,
         source_facts=facts,
         ignore_size_threshold=stream is not None,
+        dispatcher_lane=dispatcher_enabled,
     )
     route_chunked = auto_chunk and decision.mode == "chunked"
     keep_lazy = _chunked_input.lazy_stream_candidates(
