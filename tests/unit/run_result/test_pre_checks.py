@@ -98,3 +98,45 @@ def test_d_t2_pre_checks_hold_only_scan_drift() -> None:
     )
     with pytest.raises(ValueError):
         build(pre_checks=(other,))
+
+
+# PRE-SCAN-RUN E1: the `pre_scan` check id, and the order of pre-checks.
+def pre_scan(status: str, blocking: bool, code: str) -> Check:
+    counts = CheckCounts(
+        **{
+            "pass": 0,
+            "warning": int(status == "warned"),
+            "fail": int(status == "failed"),
+            "error": 0,
+        }
+    )
+    return Check(id="pre_scan", status=status, blocking=blocking, counts=counts, codes=(code,))
+
+
+UNCOVERED_BLOCKED = str(reasons.pre_scan.UNCOVERED_PII_BLOCKED)
+
+
+def test_e1_t5_a_blocking_pre_scan_check_gives_findings_and_exit_4() -> None:
+    result = build(pre_checks=(pre_scan("failed", True, UNCOVERED_BLOCKED),))
+    assert result.status == "findings"
+    assert result.exit_code == EXIT_MAP[("findings", None)]
+    assert [c.id for c in result.checks] == ["pre_scan"]
+
+
+def test_e1_t5_pre_scan_comes_before_scan_drift_and_each_appears_once() -> None:
+    both = (pre_scan("warned", False, UNCOVERED_BLOCKED), drift("warned", False, DETECTED))
+    assert [c.id for c in build(pre_checks=both).checks] == ["pre_scan", "scan_drift"]
+    with pytest.raises(ValueError):
+        build(pre_checks=tuple(reversed(both)))
+    with pytest.raises(ValueError):
+        build(pre_checks=(both[0], both[0]))
+
+
+def test_e1_t6_the_read_model_keeps_the_pre_scan_check() -> None:
+    payload = build(pre_checks=(pre_scan("failed", True, UNCOVERED_BLOCKED),)).to_payload()
+    assert RunResultRead.model_validate(payload).checks[0].id == "pre_scan"
+    # An older reader that did not know the id keeps it as a plain token.
+    tolerant = RunResultRead.model_validate(
+        {**payload, "checks": [{**payload["checks"][0], "id": "pre_scan_next"}]}
+    )
+    assert tolerant.checks[0].id == "pre_scan_next"

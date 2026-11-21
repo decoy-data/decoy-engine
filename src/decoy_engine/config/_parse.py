@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic_core import ValidationError
@@ -9,6 +10,7 @@ from pydantic_core import ValidationError
 from decoy_engine.config._delivery import DeliveryConfig
 from decoy_engine.config._errors import PipelineConfigError
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.config._pre_scan import PreScanConfig, hash_input_of
 from decoy_engine.config._relationships import RelationshipConfig
 from decoy_engine.safe_output import ConfigProblem, validation_problems
 
@@ -51,3 +53,15 @@ def parse_delivery_config(raw: Any) -> DeliveryConfig:
     except ValidationError as exc:
         problems = validation_problems(exc)
     raise PipelineConfigError.from_problems(problems, prefix="delivery is invalid")
+
+
+def pre_scan_hash_input(block: Mapping[str, Any] | PreScanConfig | None) -> dict[str, Any] | None:
+    """The plan-hash input of a `pre_scan` block, parsed by the same value-free route."""
+    if block is None or isinstance(block, PreScanConfig):
+        return hash_input_of(block)
+    problems: tuple[ConfigProblem, ...]
+    try:
+        return hash_input_of(PreScanConfig.model_validate(dict(block)))
+    except ValidationError as exc:
+        problems = validation_problems(exc)
+    raise PipelineConfigError.from_problems(problems, prefix="pre_scan is invalid")
