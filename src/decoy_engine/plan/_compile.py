@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from decoy_engine.config import (
+    pre_scan_hash_input,
     refuse_fixed_width_output_types,
     refuse_unlisted_generate_families,
 )
@@ -639,7 +640,7 @@ def _hash_config(config: dict[str, Any]) -> str:
 
     The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
-    is called), `pre_scan` only suggests and `scan_baseline` is a pointer, so none is
+    is called), `pre_scan` is hashed only under `on_findings: fail` (below) and `scan_baseline` is a pointer, so none is
     masking semantics. The one exception is `scan_baseline.on_drift` (with its `sha256`), hashed when set (below). A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
@@ -660,6 +661,9 @@ def _hash_config(config: dict[str, Any]) -> str:
         if baseline.get("sha256") is not None:
             hashed["sha256"] = baseline["sha256"]
         semantic_config["scan_baseline"] = hashed
+    # Under `pre_scan.on_findings: fail` the block decides whether a run blocks, so it is hashed.
+    if (hashed_scan := pre_scan_hash_input(config.get("pre_scan"))) is not None:
+        semantic_config["pre_scan"] = hashed_scan
     global_settings = semantic_config.get("global_settings")
     if isinstance(global_settings, dict) and any(
         key in global_settings for key in _NON_SEMANTIC_GLOBAL_SETTINGS
