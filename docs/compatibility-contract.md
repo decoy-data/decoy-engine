@@ -1471,7 +1471,7 @@ acceptable cost.
 ## Pre-GA corpus action item
 
 The cross-version compatibility corpus (§6) exists and runs in CI, covering
-`decoy-vault/v2` and `distribution-snapshot/v1`. Before GA: capture a real
+`decoy-vault/v3` and `distribution-snapshot/v1`. Before GA: capture a real
 (`synthetic: false`) artifact of each read-back kind at the `0.2.0` cut and
 add it alongside the existing synthetic fixtures. The corpus cannot be
 retrofitted after users hold artifacts we no longer have fixtures for.

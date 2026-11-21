@@ -44,7 +44,7 @@ from decoy_engine.vault import VaultWriter, load_vault, vault_writer_for_config
 from tests._declared_schema import declare_rest
 from tests._keyed_secret import THROWAWAY_KEY_PROVIDER
 from tests.parity import _strict_compare as sc
-from tests.unit.vault._support import vault_writer
+from tests.unit.vault._support import prepared, vault_writer
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -266,7 +266,8 @@ class CountingWriter(VaultWriter):
     """A real VaultWriter that records every add() batch and every write() call."""
 
     def __init__(self, mask_key: bytes) -> None:
-        super().__init__(mask_key)
+        with prepared(mask_key) as secret:
+            super().__init__(secret)
         self.add_sizes: list[int] = []
         self.write_calls = 0
 
