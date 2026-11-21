@@ -19,11 +19,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal, NamedTuple
 
-from pydantic import TypeAdapter
-
 from decoy_engine import reasons
-from decoy_engine.config import classify_table_kinds
-from decoy_engine.config._transforms import TransformOp, final_bindings
+from decoy_engine.config import classify_table_kinds, final_bindings, parse_ops
 from decoy_engine.errors import DecoyError
 from decoy_engine.run_result import Check, CheckCounts
 
@@ -36,7 +33,6 @@ __all__ = [
     "evaluate_pre_scan",
 ]
 
-_OPS: Final = TypeAdapter(list[TransformOp])
 PreScanStatus = Literal["passed", "warned", "failed"]
 
 # The catalog name of the unmasked strategy (`support._shape.StrategyKind.PASSTHROUGH`). `support`
@@ -159,7 +155,7 @@ def _gated(rule: Mapping[str, Any]) -> bool:
 
 def _output_names(table: Mapping[str, Any], scan: Mapping[str, Any]) -> frozenset[str]:
     """Column names in the table output: the scanned source names after the ordered transforms."""
-    ops = _OPS.validate_python(table.get("transforms") or [])
+    ops = parse_ops(table.get("transforms") or [])
     source = [f["name"] for f in scan.get("fields") or ()]
     return frozenset(name for name, _ in final_bindings(source, ops))
 

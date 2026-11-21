@@ -33,12 +33,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
-from decoy_engine.config import TableConfig
-from decoy_engine.config._transforms import (
-    SOURCE_ORIGIN,
-    TransformOp,
-    final_bindings,
-)
+from decoy_engine.config import SOURCE_ORIGIN, TableConfig, TransformOp, final_bindings
 from decoy_engine.execution import _transforms
 from decoy_engine.execution._fk_keys import to_pandas_fk_safe
 from decoy_engine.execution._transforms_gate import find_table_config

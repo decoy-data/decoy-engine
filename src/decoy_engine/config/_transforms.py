@@ -40,7 +40,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 
 class FilterOp(BaseModel):
@@ -126,6 +126,14 @@ TransformOp = Annotated[
     FilterOp | SortOp | LimitOp | DedupeOp | DeriveOp | DropColumnOp,
     Field(discriminator="op"),
 ]
+
+
+_OPS_ADAPTER: TypeAdapter[list[TransformOp]] = TypeAdapter(list[TransformOp])
+
+
+def parse_ops(raw: Sequence[Any]) -> list[TransformOp]:
+    """Validate raw transform dicts into typed ops, the input `final_bindings` takes."""
+    return _OPS_ADAPTER.validate_python(list(raw))
 
 
 SOURCE_ORIGIN = "source"
