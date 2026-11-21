@@ -25,11 +25,11 @@ constant (S3 stamped 1; the F-series corrections bumped it to 2).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine.config import (
+    pre_scan_hash_input,
     refuse_fixed_width_output_types,
     refuse_unlisted_generate_families,
 )
@@ -51,6 +51,7 @@ from decoy_engine.config import (
 # deterministic_hash to keyed HMAC-SHA256 via _formula_hash_keyed. Bumping
 # requires a release-notes line per done-definition.md.
 from decoy_engine.config._subset_run import refuse_unapplied_subset
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks import (
@@ -115,7 +116,7 @@ from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
 if TYPE_CHECKING:
-    import pyarrow as pa
+    from decoy_engine.contracts.column_shape import SourceFacts
 
 
 @entry_point
@@ -128,12 +129,12 @@ def compile_plan(
     file_access: FileAccess | None = None,
     base_dir: str | Path | None = None,
     instance_default_locale: Any = DEFERRED,
-    source_schemas: Mapping[str, pa.Schema] | None = None,
+    sources: SourceFacts,
 ) -> Plan:
     """Compile (config, profile, engine_version) into a frozen Plan.
 
     Args:
-        source_schemas: Arrow schema by table name; it shapes a column the profile has no entry for.
+        sources: the tables the caller supplied (schema, resident); required, `NO_SOURCES` if none.
         instance_default_locale: the locale a faker column without `locale` will generate in,
             when the caller knows it (`None` is Faker's en_US). The default leaves those
             columns to the check `run_generation` repeats with the real locale.
@@ -211,31 +212,27 @@ def compile_plan(
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
     check_vault_columns(config)
-    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or structurally
-    # unsupported FPE checksum schemes at compile time. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or unsupported FPE checksum
+    # schemes at compile time. Config-only; both branches + run_config_only_checks.
     check_fpe_checksum_scheme(config)
     # Rows 16-20 (derived, derived_aggregate, grouped_series, windowed_date and group_key column
     # refs) and GEN-STRICT E2 (per-type generate column checks), through one wrapper. Config-only;
     # both branches + run_config_only_checks.
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by
-    # (entity-anchor) column is missing. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by (entity-anchor)
+    # column is missing. Config-only; both branches + run_config_only_checks.
     check_date_shift_group_by_refs(config)
     # D1c: preserve_values on date_shift / bucket_perturb. It reads the shapes: a typed date
     # needs no date_format for its sentinels.
-    column_shapes = build_column_shapes(config, profile=profile, source_schemas=source_schemas)
+    column_shapes = build_column_shapes(config, profile=profile, sources=sources)
     check_date_preserve_values(config, column_shapes)
     check_date_shift_window(config)
-    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
-    # compile-time manifest warnings for every active group. Config-only; runs
-    # in both branches and in run_config_only_checks.
+    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit compile-time
+    # manifest warnings for every active group. Config-only; both branches + run_config_only_checks.
     fpe_join_warnings = check_fpe_join_groups(config)
-    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns
-    # whose length/keep/mask_char cannot mask the column (the primary silent-
-    # passthrough leak, finding 0.4). Config-only; both branches +
-    # run_config_only_checks.
+    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns whose
+    # length/keep/mask_char cannot mask the column (the primary silent-passthrough leak,
+    # finding 0.4). Config-only; both branches + run_config_only_checks.
     check_truncate_config(config)
     # Row 23 (Sprint 13 / coercion-13 S3, GATE-1 Q4, 2026-07-03): reject
     # bucketize columns whose width cannot be resolved (sibling silent-
@@ -250,7 +247,7 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config, column_shapes)
+    check_required_strategy_settings(config, sources=sources, shapes=column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. WARN-ONLY --
@@ -547,7 +544,7 @@ def run_config_only_checks(
     # Row 27 (HC-3a): reject date_shift columns with a missing group_by
     # (entity-anchor) column ref. Config-only.
     check_date_shift_group_by_refs(config)
-    check_date_preserve_values(config, build_column_shapes(config))
+    check_date_preserve_values(config, build_column_shapes(config, sources=NO_SOURCES))
     check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
@@ -566,7 +563,7 @@ def run_config_only_checks(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config)
+    check_required_strategy_settings(config, sources=NO_SOURCES)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # F06: declared parsing/casting contracts. Reported only when a config declares any, so a
@@ -643,7 +640,7 @@ def _hash_config(config: dict[str, Any]) -> str:
 
     The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
-    is called), `pre_scan` only suggests and `scan_baseline` is a pointer, so none is
+    is called), `pre_scan` is hashed only under `on_findings: fail` (below) and `scan_baseline` is a pointer, so none is
     masking semantics. The one exception is `scan_baseline.on_drift` (with its `sha256`), hashed when set (below). A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
@@ -664,6 +661,9 @@ def _hash_config(config: dict[str, Any]) -> str:
         if baseline.get("sha256") is not None:
             hashed["sha256"] = baseline["sha256"]
         semantic_config["scan_baseline"] = hashed
+    # Under `pre_scan.on_findings: fail` the block decides whether a run blocks, so it is hashed.
+    if (hashed_scan := pre_scan_hash_input(config.get("pre_scan"))) is not None:
+        semantic_config["pre_scan"] = hashed_scan
     global_settings = semantic_config.get("global_settings")
     if isinstance(global_settings, dict) and any(
         key in global_settings for key in _NON_SEMANTIC_GLOBAL_SETTINGS

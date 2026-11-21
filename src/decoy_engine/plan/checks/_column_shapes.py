@@ -17,8 +17,10 @@ from decoy_engine.contracts.column_shape import (
     TEXT_SOURCE_FORMATS,
     ColumnShape,
     ColumnShapes,
+    SourceFacts,
     classify_column,
     declared_shape,
+    source_format_for,
 )
 from decoy_engine.contracts.strategy_requirements import SHAPE_REQUIREMENTS_BY_STRATEGY
 
@@ -54,12 +56,6 @@ def shape_reading_columns(config: Mapping[str, Any]) -> Iterator[tuple[str, Mapp
                 yield table["name"], col
 
 
-def _source_format(config: Mapping[str, Any], table: str) -> str | None:
-    descriptor = (config.get("sources") or {}).get(table)
-    fmt = descriptor.get("format") if isinstance(descriptor, Mapping) else None
-    return fmt if isinstance(fmt, str) else None
-
-
 def _profiled(profile: Profile | None, table: str, column: str) -> ColumnShape:
     if profile is None:
         return ColumnShape.UNKNOWN
@@ -87,13 +83,16 @@ def build_column_shapes(
     config: Mapping[str, Any],
     *,
     profile: Profile | None = None,
-    source_schemas: Mapping[str, pa.Schema] | None = None,
+    sources: SourceFacts,
 ) -> ColumnShapes:
-    """``(table, column) -> shape`` for every column under a shape-reading strategy."""
+    """``(table, column) -> shape`` for every column under a shape-reading strategy.
+
+    ``sources`` names the tables the caller supplied in memory: those are shaped by their own
+    schema, never by a config descriptor's file format."""
     out: dict[tuple[str, str], ColumnShape] = {}
     for table, col in shape_reading_columns(config):
         name = col["name"]
-        fmt = _source_format(config, table)
+        fmt = source_format_for(config.get("sources"), table, resident=sources.resident)
         if col.get("logical_type") is not None:
             shape = declared_shape(
                 logical_type=col["logical_type"], parse_format=col.get("parse_format")
@@ -101,8 +100,13 @@ def build_column_shapes(
         elif col.get("strategy") == "nested" or fmt in TEXT_SOURCE_FORMATS:
             shape = ColumnShape.TEXT
         else:
-            shape = _profiled(profile, table, name)
-            if shape is ColumnShape.UNKNOWN:
-                shape = _from_schema(source_schemas, table, name, fmt)
+            # A resident table's own schema outranks the profile, which may have read a
+            # descriptor file for the same table; any other table is read profile first.
+            observed = _profiled(profile, table, name)
+            from_schema = _from_schema(sources.schemas, table, name, fmt)
+            first, second = (
+                (from_schema, observed) if table in sources.resident else (observed, from_schema)
+            )
+            shape = second if first is ColumnShape.UNKNOWN else first
         out[(table, name)] = shape
     return dict(sorted(out.items()))

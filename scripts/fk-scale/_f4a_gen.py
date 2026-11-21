@@ -170,6 +170,7 @@ def probe_backends(config: dict[str, Any]) -> dict[str, Any]:
     import pytest
     from tests.parity import _f0_witness as w
 
+    from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.generation._admission import ADMISSION_MATRIX, classify_plan
     from decoy_engine.generation._plan_entry import generate_tables
     from decoy_engine.plan import compile_plan
@@ -184,7 +185,7 @@ def probe_backends(config: dict[str, Any]) -> dict[str, Any]:
     )
 
     def plan_of(cfg: dict[str, Any]) -> Any:
-        return compile_plan(cfg, profile, decoy_engine_version="f4a-probe")
+        return compile_plan(cfg, profile, decoy_engine_version="f4a-probe", sources=NO_SOURCES)
 
     witnessed_cfg = copy.deepcopy(config)
     for table in witnessed_cfg["tables"]:

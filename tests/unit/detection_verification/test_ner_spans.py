@@ -14,6 +14,7 @@ import unicodedata
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.detectors import Span, iter_spans
 from decoy_engine.detection.ner import (
     DEFAULT_NER_MODEL,
@@ -282,7 +283,9 @@ class TestModelVersionStamp:
         # Row 13 hard-fails when the model is absent; bypass it for the
         # stamp test (the stamp is independent of availability).
         monkeypatch.setattr(compile_mod, "check_text_redact_ner_available", lambda config: None)
-        plan = compile_plan(cfg, profile, decoy_engine_version="x", no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version="x", no_profile=True, sources=NO_SOURCES
+        )
         per_column = dict(plan.seed_envelope.per_table[0][1].per_column)
         assert per_column["notes"].ner_model_version == "9.9.9"
         assert per_column["email"].ner_model_version is None
@@ -318,7 +321,9 @@ class TestModelVersionStamp:
         profile = first_chunk_profile(
             pa.Table.from_pandas(df, preserve_index=False), table="t", engine_version="x"
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version="x", no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version="x", no_profile=True, sources=NO_SOURCES
+        )
         assert any("ner_model_version_unavailable" in w for w in plan.plan_compile.warnings)
 
 

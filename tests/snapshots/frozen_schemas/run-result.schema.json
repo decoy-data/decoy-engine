@@ -38,7 +38,8 @@
             "post_scan_integrity",
             "fidelity",
             "native_post_run",
-            "scan_drift"
+            "scan_drift",
+            "pre_scan"
           ],
           "title": "Id",
           "type": "string"

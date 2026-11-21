@@ -16,6 +16,7 @@ import pyarrow as pa
 import pytest
 import yaml
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import ValidationError
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.plan import plan_from_yaml, plan_to_yaml
@@ -197,7 +198,7 @@ def test_generate_tables_rejects_before_any_provider_call(
             }
         ],
     }
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     template = sup.ColumnSeed(
         namespace=None,
         strategy="redact",

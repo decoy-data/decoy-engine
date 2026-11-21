@@ -35,6 +35,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import (
     ExecutionError,
     PandasExecutionAdapter,
@@ -256,7 +257,7 @@ def oracle_outputs(cfg: dict[str, Any], tables: dict[str, pa.Table]) -> dict[str
     )
 
     profile = profile_source(cfg, seed=cfg["global_settings"]["seed"])
-    plan = compile_plan(cfg, profile, decoy_engine_version="r3-hypothesis")
+    plan = compile_plan(cfg, profile, decoy_engine_version="r3-hypothesis", sources=NO_SOURCES)
     ns = build_namespace_registry(cfg, profile)
     if profile.relationships:
         graph = build_relationship_graph(

@@ -113,6 +113,7 @@ def _run(args: argparse.Namespace, work: Path) -> dict[str, Any]:
 
     import pyarrow.parquet as pq
 
+    from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.execution import ParquetTransactionalSink
     from decoy_engine.generation._plan_entry import generate_tables_streamed
     from decoy_engine.plan import compile_plan
@@ -126,7 +127,10 @@ def _run(args: argparse.Namespace, work: Path) -> dict[str, Any]:
         decoy_engine_version="fr0-bench",
     )
     plan = compile_plan(
-        build_config(args.rows, args.plan), profile, decoy_engine_version="fr0-bench"
+        build_config(args.rows, args.plan),
+        profile,
+        decoy_engine_version="fr0-bench",
+        sources=NO_SOURCES,
     )
     committed = work / "committed"
     rss_before = _status_mb("VmRSS")

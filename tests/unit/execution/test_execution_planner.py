@@ -22,6 +22,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._planner import (
     EXECUTION_MODES,
@@ -214,7 +215,7 @@ def _planner_inputs(cfg: dict, *, substrate: str) -> dict[str, Any]:
     )
 
     profile = profile_source(cfg, seed=_normalize_job_seed_int(cfg))
-    plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+    plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
     ns_registry = build_namespace_registry(cfg, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(cfg, profile.relationships)

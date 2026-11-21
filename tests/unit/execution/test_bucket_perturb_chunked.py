@@ -15,7 +15,7 @@ This module proves:
 
 1. Byte-identity to the pandas oracle on the real `run_pipeline(auto_
    chunk=True)` route: week/month/quarter buckets, a chunk-boundary split,
-   nulls, an unparseable passthrough, a real `mask_key`, and multiple
+   nulls, a real `mask_key`, and multiple
    namespaces.
 2. Byte-identity to the out-of-core Group (c) route on the shared admitted
    shape (explicit date_format, string source, no `when:`).
@@ -42,6 +42,8 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
+from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._chunked import check_chunked_compatibility, concat_masked_chunks
 from decoy_engine.execution._chunked_bucket_perturb import (
     bucket_perturb_conditional_failures,
@@ -165,7 +167,7 @@ def _when_bearing_bucket_perturb_cfg(tmp_path: Path) -> dict:
 
 # ---------------------------------------------------------------------------
 # 1. Byte-identity across chunkings: buckets, boundary split, nulls,
-#    unparseable passthrough, a real mask_key, multiple namespaces.
+#    a real mask_key, multiple namespaces.
 # ---------------------------------------------------------------------------
 
 
@@ -173,16 +175,14 @@ class TestByteParity:
     @pytest.mark.parametrize("chunk_size", [1, 3, 4, 500])
     @pytest.mark.parametrize("bucket", ["week", "month", "quarter"])
     def test_chunked_equals_full_frame_oracle(self, tmp_path, chunk_size, bucket) -> None:
-        # A null every 4th row and an unparseable value every 5th, spanning
-        # several chunk sizes so at least one run splits a run across a
-        # boundary.
+        # A null every 4th row, spanning several chunk sizes so at least one run
+        # splits a run across a boundary. Every other cell parses: an unparseable
+        # cell is a row error, covered in tests/unit/execution/test_bucket_perturb_safety.py.
         dates = ["2021-03-15", "2020-11-02", "2019-07-28", "2022-01-09", "2023-05-19"]
         rows: list[str | None] = []
         for i in range(20):
             if i % 4 == 0:
                 rows.append(None)
-            elif i % 5 == 0:
-                rows.append("not-a-date")
             else:
                 rows.append(dates[i % len(dates)])
         table = pa.table({"d": pa.array(rows, type=pa.string())})
@@ -207,11 +207,8 @@ class TestByteParity:
         assert a.equals(f)
         masked = a.column("d").to_pylist()
         assert masked[0] is None  # nulls preserved
-        assert "not-a-date" in masked  # unparseable passthrough, byte-identical to source
         # A real masking happened: at least one parseable value changed.
-        assert any(
-            m != r for m, r in zip(masked, rows, strict=True) if r is not None and r != "not-a-date"
-        )
+        assert any(m != r for m, r in zip(masked, rows, strict=True) if r is not None)
 
     def test_multiple_distinct_namespaces_produce_independent_output(self, tmp_path) -> None:
         raw = "2021-03-15"
@@ -557,7 +554,7 @@ class TestAdmissionBoundary:
         reject_bucket_perturb_when(cfg["tables"][0], table="records")  # must not raise
 
     def test_when_auto_route_falls_back_to_full_frame(self, tmp_path) -> None:
-        rows = [f"2021-0{(i % 9) + 1}-15" for i in range(30)]
+        rows = [f"2021-0{(i % 9) + 1}-15+0000" for i in range(30)]
         table = pa.table({"d": pa.array(rows, type=pa.string())})
         cfg = _when_bearing_bucket_perturb_cfg(tmp_path)
         _write_csv_stub(tmp_path, "records", table)
@@ -609,14 +606,19 @@ class TestAdmissionBoundary:
         columns = [_bucket_perturb_col("d")]
         cfg = _config(tmp_path, columns)
         _write_csv_stub(tmp_path, "records", table)
-        result = run_pipeline(
-            cfg,
-            sources={"records": table},
-            engine_version=_ENGINE_VERSION,
-            auto_chunk_threshold_rows=_LOW_THRESHOLD,
-            chunk_size_rows=2,
-        )
-        assert result.quality_metrics["auto_chunk"]["mode"] == "full_frame"
+        # The ints do not parse as dates, so the full-frame run ends in row errors. The
+        # single-table `summary` is set only by the chunked legs, so its absence shows the
+        # auto route fell back.
+        with pytest.raises(RowErrorsFailedError) as caught:
+            run_pipeline(
+                cfg,
+                sources={"records": table},
+                engine_version=_ENGINE_VERSION,
+                auto_chunk_threshold_rows=_LOW_THRESHOLD,
+                chunk_size_rows=2,
+            )
+        assert caught.value.summary is None
+        assert caught.value.summaries_by_table
 
     def test_source_dtype_collector_flags_non_string_admits_string(self) -> None:
         from types import SimpleNamespace
@@ -801,7 +803,9 @@ class TestAdmissionBoundary:
         cfg = _config(tmp_path, columns)
         table = pa.table({"aaa": pa.array(["x"]), "dcol": pa.array(["2024-01-15"])})
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg, graph = get_default_registry(), RelationshipGraph(edges=(), ordering=())
         reject_bucket_perturb_missing_namespace(plan, reg, graph, table="records")
         edited = _strip_namespace(plan, "records", "dcol")
@@ -964,7 +968,9 @@ class TestRegistryLoadBearing:
             }
         )
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         assert bucket_perturb_source_columns(plan, reg, graph, table="records") == ["d"]
@@ -1018,7 +1024,9 @@ class TestRegistryLoadBearing:
         cfg = _validated_dump(cfg)
         profile = profile_source(cfg, seed=_SEED)
         plan = _strip_namespace(
-            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION), "b", "e"
+            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES),
+            "b",
+            "e",
         )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())

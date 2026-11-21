@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._plan_entry import generate_tables
 from decoy_engine.generation.pinned import compile_pinned_plan, execute_pinned
 from decoy_engine.generation.window import generate_rows
@@ -69,7 +70,7 @@ def all_columns(snap_file: str, *, with_void: bool = True, **extra: Any) -> list
 
 
 def plan_of(cfg: dict[str, Any]) -> Any:
-    return compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    return compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def whole(cfg: dict[str, Any]) -> pa.Table:

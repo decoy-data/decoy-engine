@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import _faker_pool
 from decoy_engine.generation.pool import _sampler as _pool_sampler
 from decoy_engine.generation.synthesize import generate_tables
@@ -208,7 +209,9 @@ def main() -> None:
     # compile_plan (validate) then generate_tables (time) -- never
     # run_pipeline, which would add compile/route/pipeline work this probe
     # is not measuring (module docstring).
-    plan = compile_plan(config_dict, _empty_profile(), decoy_engine_version="gp1-bench")
+    plan = compile_plan(
+        config_dict, _empty_profile(), decoy_engine_version="gp1-bench", sources=NO_SOURCES
+    )
 
     fired, restore_guards = install_vacuity_guards()
     try:

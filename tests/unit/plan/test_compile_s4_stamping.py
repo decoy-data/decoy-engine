@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import faker as faker_module
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile
 
 
 class TestRegistryStamps:
     def test_backend_type_from_registry(self, simple_config: dict, simple_profile: Profile) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         per_table = dict(plan.seed_envelope.per_table)
         per_column = dict(per_table["customers"].per_column)
         # `name` is the column with strategy in simple_config; its provider is
@@ -31,7 +34,9 @@ class TestRegistryStamps:
     def test_backend_version_from_registry(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         per_table = dict(plan.seed_envelope.per_table)
         per_column = dict(per_table["customers"].per_column)
         # H1: registry stamps the bound backend's real version, not the
@@ -73,7 +78,9 @@ class TestUserOverrideWarning:
                 }
             ],
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert any(
             "backend_stamp_user_override_ignored" in w and "backend_type" in w
             for w in plan.plan_compile.warnings
@@ -109,7 +116,9 @@ class TestUserOverrideWarning:
                 }
             ],
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert any(
             "backend_stamp_user_override_ignored" in w and "backend_version" in w
             for w in plan.plan_compile.warnings
@@ -145,7 +154,9 @@ class TestUserOverrideWarning:
                 }
             ],
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         # No backend_stamp warnings when user value matches registry.
         assert not any(
             "backend_stamp_user_override_ignored" in w for w in plan.plan_compile.warnings
@@ -185,7 +196,7 @@ class TestUnknownProviderViaRegistry:
             ],
         }
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert excinfo.value.code == "unknown_provider"
         assert "not_a_real_provider" in excinfo.value.message
 
@@ -225,7 +236,9 @@ class TestUnknownProviderViaRegistry:
                     }
                 ],
             }
-            plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            plan = compile_plan(
+                config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+            )
             per_table = dict(plan.seed_envelope.per_table)
             per_column = dict(per_table["customers"].per_column)
             assert per_column["name"].provider == new_provider

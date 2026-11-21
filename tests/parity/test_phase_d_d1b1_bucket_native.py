@@ -18,6 +18,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_PANDAS, RUST_COMPANION
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
@@ -34,7 +35,7 @@ from decoy_engine.execution.out_of_core._mask import mask_batch
 from decoy_engine.transforms.bucket_perturb import apply_bucket_perturb
 from tests.parity import _strict_compare as sc
 from tests.parity._d1a_hash_data import (
-    JOB_SEED,
+    MASK_KEY,
     chain_graph,
     chain_plan,
     chain_sources,
@@ -51,6 +52,7 @@ from tests.parity._d1b1_bucket_data import (
     declined_sources,
     main_payload,
     shape_payload,
+    unparseable_column,
 )
 from tests.parity._d1b1_bucket_expected import EXPECTED, EXPECTED_TYPES
 from tests.parity._kernel_witness import ExpectedMask, KernelWitness, force_companion_unavailable
@@ -125,16 +127,15 @@ def test_per_batch_shape_matches_the_pinned_output(
         assert run.tables["t"].column(name).to_pylist() == EXPECTED[name], name
     entries = {e["column"]: e for e in run.result.quality_metrics[KEY]}
     # Nothing in these two columns can be perturbed, so no compiled call ran for them.
-    for name in ("b_allnull", "b_unparse"):
-        assert entries[name]["executed_backend"] == "none", name
-        assert entries[name]["reason"] == "no_native_kernel_calls", name
+    assert entries["b_allnull"]["executed_backend"] == "none"
+    assert entries["b_allnull"]["reason"] == "no_native_kernel_calls"
     for name in ("b_tail_null", "b_head_null"):
         assert entries[name]["executed_backend"] == RUST_COMPANION, name
 
 
 def _reference(values: pa.Array, bucket: str, fmt: str, namespace: str = _NS) -> list[Any]:
     out = apply_bucket_perturb(
-        values.to_pandas(), bucket=bucket, job_seed=JOB_SEED, namespace=namespace, date_format=fmt
+        values.to_pandas(), bucket=bucket, job_seed=MASK_KEY, namespace=namespace, date_format=fmt
     )
     return pa.array(out, from_pandas=True).to_pylist()
 
@@ -153,7 +154,15 @@ def test_native_equals_the_python_reference_for_shared_version_input() -> None:
 def test_native_matches_the_pandas_oracle_strictly_across_buckets() -> None:
     # Payload columns on the FK-chain table `t` (which also carries a parent key and an FK).
     # Only the frozen D0 field_metadata gap may differ from the oracle.
-    dates = ["2024-03-05", "2024-02-29", "2023-12-31", None, "bad", "2021-01-01", "2020-02-29"]
+    dates = [
+        "2024-03-05",
+        "2024-02-29",
+        "2023-12-31",
+        None,
+        "2022-05-05",
+        "2021-01-01",
+        "2020-02-29",
+    ]
     payload = pa.table({b: pa.array(dates, pa.string()) for b in ("week", "month", "quarter")})
     seeds = tuple((b, bucket_seed(b)) for b in ("week", "month", "quarter"))
     ooc = run_chain(payload, seeds, batch_rows=3).tables
@@ -175,13 +184,15 @@ def test_an_all_null_column_reconciles_to_the_oracle_null_type() -> None:
     assert {dim for dim, agree in report.items() if not agree} <= {"field_metadata"}
 
 
-def test_an_all_unparseable_column_stays_a_string_like_the_oracle() -> None:
-    payload = pa.table({"u": pa.array(["nope", "bad", "", None], pa.string())})
+def test_an_unparseable_cell_refuses_on_the_out_of_core_route() -> None:
+    """No row-error channel here, so a cell that does not parse stops the run with a coded
+    error instead of reaching the output as its source text."""
+    payload = pa.table({"u": unparseable_column()})
     seeds = (("u", bucket_seed("month")),)
-    ooc = run_chain(payload, seeds, batch_rows=2).tables
-    oracle = _run_oracle(chain_plan(seeds), chain_sources(payload), chain_graph()).outputs
-    assert ooc["t"].column("u").type == oracle["t"].column("u").type == pa.string()
-    assert ooc["t"].column("u").to_pylist() == ["nope", "bad", "", None]
+    with pytest.raises(ExecutionError) as caught:
+        run_chain(payload, seeds, batch_rows=2)
+    assert caught.value.code == reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL
+    assert "nope" not in str(caught.value)
 
 
 # --- Declined columns stay Python even with the real companion present ---------------------
@@ -238,7 +249,7 @@ def _one(value: str, bucket: str, fmt: str = STAMP) -> tuple[str, Any]:
         got = native_bucket_perturb_array(
             arr,
             native=_native_handle(),
-            mask_key=JOB_SEED,
+            mask_key=MASK_KEY,
             namespace=_NS,
             bucket=bucket,
             date_format=fmt,
@@ -257,10 +268,10 @@ def test_the_raw_operator_wraps_or_fails_at_the_lower_bound_which_is_why_the_gua
             arr,
             bucket="week",
             date_format=STAMP,
-            mask_key=JOB_SEED,
+            mask_key=MASK_KEY,
             namespace=_NS,
             index_kernel=kernel,
-        ).to_pylist()
+        )[0].to_pylist()
     except Exception:  # either failure shape shows the operator cannot be trusted at the bound
         return
     assert raw != _reference(arr, "week", STAMP)
@@ -320,18 +331,21 @@ def test_the_same_boundary_column_masks_on_the_python_path(monkeypatch: pytest.M
     assert run.tables["t"].column("b_boundary").to_pylist() == EXPECTED["b_boundary"]
 
 
-def test_out_of_range_sentinels_pass_through_identically_on_both_paths(
+def test_out_of_range_values_refuse_identically_on_both_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """These dates do not parse under pandas, so they are unparseable cells. Neither path
+    writes them out as if masked: both stop with the same coded error."""
     values = ["9999-12-31", "2299-01-01", "0001-01-01", "2024-03-05"]
     table = pa.table({"d": pa.array(values, pa.string())})
     seeds = (("d", bucket_seed("quarter")),)
-    native = run_chain(table, seeds).tables["t"].column("d").to_pylist()
+    with pytest.raises(ExecutionError) as native:
+        run_chain(table, seeds)
     force_companion_unavailable(monkeypatch)
-    python = run_chain(table, seeds).tables["t"].column("d").to_pylist()
-    assert native == python
-    assert native[:3] == values[:3]
-    assert native[3] != values[3]
+    with pytest.raises(ExecutionError) as python:
+        run_chain(table, seeds)
+    assert native.value.code == python.value.code
+    assert native.value.code == reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL
 
 
 # --- The accepted Unicode-version divergence, and the guard that keeps it reviewed ---------

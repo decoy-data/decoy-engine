@@ -15,6 +15,7 @@ import copy
 import pytest
 
 from decoy_engine.config._tables import ColumnConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import Profile
 
@@ -45,7 +46,7 @@ class TestAllowCollisionsAlias:
         # allow_collisions implies reuse; drop the explicit mode to prove the
         # alias supplies it.
         cfg["tables"][0]["columns"][0].pop("cardinality_mode", None)
-        plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         seed = _name_seed(plan)
         assert seed.cardinality_mode == "reuse"
         assert seed.deterministic is True
@@ -59,7 +60,7 @@ class TestAllowCollisionsAlias:
             namespace="names_ns",
             cardinality_mode="reuse",
         )
-        plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         seed = _name_seed(plan)
         assert seed.cardinality_mode == "reuse"
         assert seed.deterministic is True
@@ -68,7 +69,9 @@ class TestAllowCollisionsAlias:
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
         # simple_config's name column is plain reuse, no allow_collisions.
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         seed = _name_seed(plan)
         assert seed.deterministic is False
 
@@ -82,14 +85,14 @@ class TestAllowCollisionsRejections:
             cardinality_mode="unique",
         )
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "allow_collisions_mode_conflict"
 
     def test_requires_namespace(self, simple_config: dict, simple_profile: Profile) -> None:
         cfg = _config_with_name_column(simple_config, allow_collisions=True)
         cfg["tables"][0]["columns"][0].pop("cardinality_mode", None)
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         # Reuses the deterministic-namespace gate (allow_collisions implies it).
         assert exc.value.code == "deterministic_namespace_missing"
 

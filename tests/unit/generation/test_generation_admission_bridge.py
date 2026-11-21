@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from decoy_engine.config._global_settings import GlobalSettings
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._pinned_compile import compile_pinned_plan
 from decoy_engine.generation._pinned_plan import PinnedModeError
 from decoy_engine.generation._window_admission import GenerationAdmissionError
@@ -45,7 +46,7 @@ def _outcome(fn: Any) -> Any:
 
 
 def _both(config: dict[str, Any], table: str, **kw: Any) -> tuple[Any, Any]:
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     full = _outcome(lambda: classify_window(plan, table, **kw))
     bridge = _outcome(lambda: classify_window_from_generation_plan(plan.generation, table, **kw))
     return full, bridge
@@ -107,7 +108,7 @@ def test_parity_window_end_and_max_cell_chars_change_verdict() -> None:
 
 def test_bridge_accepts_only_a_generation_plan() -> None:
     cfg = _config(_table("t", [{"name": "id", "type": "sequence", "start": 1}]))
-    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     pinned = compile_pinned_plan(cfg, REF)
     for bad in (cfg, plan, pinned):
         with pytest.raises(TypeError):
@@ -119,7 +120,9 @@ def test_bridge_accepts_only_a_generation_plan() -> None:
 
 def test_non_statistical_admission_builds_no_statistical_specs() -> None:
     cfg = _config(_table("t", [{"name": "id", "type": "sequence", "start": 1}]))
-    gen = compile_plan(cfg, empty_profile(), decoy_engine_version="test").generation
+    gen = compile_plan(
+        cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    ).generation
     assert gen is not None and not gen.statistical_specs
     assert classify_window_from_generation_plan(gen, "t").klass == "A"
 

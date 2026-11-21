@@ -45,6 +45,7 @@ from typing import Any, Literal
 import pyarrow as pa
 
 from decoy_engine.config._subset_run import refuse_unapplied_subset
+from decoy_engine.contracts.column_shape import build_source_facts
 from decoy_engine.execution._guards import prepare_declared_execution_sources
 from decoy_engine.execution._operator_registry import OPERATORS, POSITIONAL_FAKER_SOURCE_TYPES
 from decoy_engine.execution._transforms_gate import reject_per_table_transforms
@@ -268,6 +269,7 @@ def _static_route_decision(
         profile,
         engine_version=engine_version,
         registry=registry,
+        sources=build_source_facts(caller={table: first_schema}),
         resident_sources=sibling_resident_sources(config, table, first_schema),
     )
     table_nodes = [n for n in plan.nodes if n.table == table]

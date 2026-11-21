@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
     "BUCKETIZE_WIDTH_UNRESOLVABLE",
     "BUCKET_PERTURB_INVALID_CONFIG",
+    "BUCKET_PERTURB_REQUIRES_DATE_FORMAT",
     "BUCKET_PERTURB_REQUIRES_NAMESPACE",
+    "BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL",
     "BUCKET_PERTURB_UNRECOGNIZED_BUCKET",
     "BUNDLE_MISSING_OUTPUT_COLUMNS",
     "CARDINALITY_TARGET_EXCEEDS_POOL",
@@ -129,6 +132,16 @@ __all__ = [
 
 _d = _catalog.runtime("ExecutionError")
 
+BUCKET_PERTURB_REQUIRES_DATE_FORMAT = _d(
+    "bucket_perturb_requires_date_format",
+    "Bucket perturb requires date format.",
+    since=UNRELEASED,
+)
+BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL = _d(
+    "bucket_perturb_unparseable_no_row_channel",
+    "Bucket perturb found unparseable values on a route with no row error channel.",
+    since=UNRELEASED,
+)
 HANDLER_ROW_COUNT_CHANGED = _d(
     "handler_row_count_changed",
     "A mask handler returned a different number of rows, or a different index, than it was given.",

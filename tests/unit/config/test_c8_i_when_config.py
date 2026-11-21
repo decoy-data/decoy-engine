@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import ValidationError as EngineValidationError
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._serialize import plan_from_yaml, plan_to_yaml
@@ -99,7 +100,9 @@ def test_the_manifest_round_trips_the_predicate() -> None:
     config = PipelineConfig.model_validate(_raw("s != 'a'")).model_dump()
     first = pa.table({"s": ["a", "b"], "n": [1, 2]})
     profile = first_chunk_profile(first, table="t", engine_version=ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     seeds = dict(dict(plan.seed_envelope.per_table)["t"].per_column)
     assert seeds["s"].when == "s != 'a'" and seeds["n"].when is None
     again = plan_from_yaml(plan_to_yaml(plan))

@@ -13,6 +13,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked_carry import plan_carry, read_set
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.plan import compile_plan
@@ -382,7 +383,7 @@ def test_composite_outputs_are_never_carried(case: str) -> None:
 
     profile = _profile(df, "t")
     # (i) the config compiles
-    compile_plan(compile_config, profile, decoy_engine_version="0.1.0")
+    compile_plan(compile_config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     # (iii) the carry puts every composite-written column in the read set, not the carried set
     carry = plan_carry(
         compile_config,

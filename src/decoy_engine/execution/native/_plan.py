@@ -40,6 +40,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import SourceFacts
 from decoy_engine.execution._runner import (
     WorkNode,
     build_work_list,
@@ -147,6 +148,7 @@ def compile_native_plan(
     *,
     engine_version: str,
     registry: Any = None,
+    sources: SourceFacts,
     resident_sources: Mapping[str, Any] | None = None,
 ) -> NativeExecutionPlan:
     """Compile (config, profile) into a ``NativeExecutionPlan``.
@@ -160,7 +162,7 @@ def compile_native_plan(
     first chunk's group_by siblings, because the profile's coarse labels read an
     int64 column holding nulls as `double`.
     """
-    plan = compile_plan(config, profile, decoy_engine_version=engine_version)
+    plan = compile_plan(config, profile, decoy_engine_version=engine_version, sources=sources)
     if registry is None:
         registry = get_default_registry()
     work = build_work_list(plan, registry)

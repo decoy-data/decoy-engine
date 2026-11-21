@@ -81,6 +81,7 @@ def test_dp_fit_emits_marginal_v3_over_only_declared_carriers() -> None:
 def test_dp_snapshot_drives_generation_to_the_declared_shape(tmp_path) -> None:
     if not is_certified_dp_env():
         pytest.skip(_UNCERTIFIED)
+    from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.generation.synthesize import generate_tables
     from decoy_engine.plan import compile_plan
     from decoy_engine.profile import Profile
@@ -109,7 +110,7 @@ def test_dp_snapshot_drives_generation_to_the_declared_shape(tmp_path) -> None:
         profiled_at=datetime.now(timezone.utc),
         decoy_engine_version="testflight-dp",
     )
-    plan = compile_plan(config, profile, decoy_engine_version="testflight-dp")
+    plan = compile_plan(config, profile, decoy_engine_version="testflight-dp", sources=NO_SOURCES)
     out = generate_tables(plan)
 
     amounts = out["customers"]["amount"].to_pylist()

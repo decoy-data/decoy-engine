@@ -241,7 +241,8 @@ secret.
 - `bucket` (str, required): one of `week`, `month`, or `quarter`. An invalid
   or misspelled value raises `StrategyError(bucket_perturb_invalid_config)` at
   execution time, before any row is processed (fail-closed).
-- `date_format`: a strftime format; auto-detected from the column if omitted. It
+- `date_format`: a strftime format; detected from the column if omitted, and the run
+  stops when none can be detected (set it explicitly, as detection is going away). It
   must contain at least one date directive (`%Y`, `%m`, `%d`, ...) because the same
   format writes each perturbed date back. `ISO8601`, `mixed`, a bare `%Q` or a
   time-only format such as `%H:%M:%S` is rejected at compile time with
@@ -268,11 +269,15 @@ sharing the same mask key produce independent offsets. Same `(mask_key,
 namespace, value)` always produces the same output, byte-stable across runs
 and processes.
 
-Null values stay null. A non-null value that does not parse as a date is kept
-as it came in, with no row error. This differs from `date_shift`, which records
-a `format_error`. When no date format is detected, the column is passed through
-unchanged with a WARNING log (carry-forward: surfacing as a `QualityWarning`
-is deferred).
+Null values stay null. A non-null value that does not parse as a date is a
+`format_error` row error, as it is for `date_shift`: the run fails, or the row is
+quarantined when quarantine covers `format_error`. The source text is never written
+out as if it were masked. When no `date_format` is set and none can be detected from
+the data, the run stops with `bucket_perturb_requires_date_format`. The out-of-core
+route has no row-error channel, so on that route a value that does not parse stops
+the run with `bucket_perturb_unparseable_no_row_channel`. A date outside pandas' range (before 1677 or after 2262, such as 9999-12-31) is
+also a row error. To keep a known sentinel as it is, list it in `preserve_values`:
+it is kept unchanged even when it is out of that range.
 
 ```yaml
 columns:
@@ -301,8 +306,9 @@ ASCII formats never differ. And the companion computes buckets on pandas Timesta
 (1677-09-21 to 2262-04-11): a date that parses but sits within one bucket of either
 bound fails the job with `out_of_core_bucket_perturb_date_out_of_native_range`
 rather than risk a wrapped date. Dates outside the range entirely (such as
-`9999-12-31`) pass through unchanged on both paths. Run without the companion to
-perturb parseable dates near these bounds.
+`9999-12-31`) do not parse, so they are unparseable values (see above); list them in
+`preserve_values` to keep them. Run without the companion to perturb parseable dates
+near these bounds.
 
 (sentinel-dates-preserve-values)=
 #### Sentinel dates (preserve_values)
@@ -322,9 +328,9 @@ provider_config:
   zoned timestamp column needs none, and its sentinel rows keep their source value and type.
   The sentinel is matched by calendar date, so `01/01/2099` under `%d/%m/%Y` matches `2099-01-01` and a
   time of day is ignored. `%f`, `%Z`, `ISO8601` and `mixed` are rejected with it.
-- `9999-12-31` is matched explicitly. Without the option it passes through only
-  because pandas cannot represent it and the operator leaves unparseable values
-  alone. A date such as `2099-01-01` is in range, so without the option it is
+- `9999-12-31` is matched explicitly. Without the option, pandas cannot represent
+  it, so `date_shift` leaves it unchanged and `bucket_perturb` reports a row error
+  for it. A date such as `2099-01-01` is in range, so without the option it is
   perturbed.
 - A string source is emitted byte for byte. A typed date or timestamp source is
   rendered from its calendar date with `date_format`, so the output column stays

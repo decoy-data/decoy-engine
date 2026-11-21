@@ -18,6 +18,7 @@ from datetime import datetime
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import ColumnProfile, Profile, Relationship, TableProfile
 
@@ -133,7 +134,9 @@ _CONFIG = _config()
 
 def test_compile_plan_two_table_fk(benchmark) -> None:
     def _run():
-        return compile_plan(_CONFIG, _PROFILE, decoy_engine_version="codspeed-bench")
+        return compile_plan(
+            _CONFIG, _PROFILE, decoy_engine_version="codspeed-bench", sources=NO_SOURCES
+        )
 
     plan = benchmark(_run)
 

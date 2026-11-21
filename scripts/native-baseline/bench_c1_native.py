@@ -251,6 +251,7 @@ def _pool_duplicate_counts(config: dict[str, Any], key_provider: Any) -> dict[st
     pools are byte-identical to the oracle's own for the same identity --
     Task 3.1's HIGH 1 shared-identity guarantee -- so this is a bounded,
     O(pool_size) rebuild-and-count, not a second measurement method)."""
+    from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.generation.pool._builder import PoolBuilder
     from decoy_engine.plan import compile_plan
     from decoy_engine.plan._seed import _normalize_job_seed_int
@@ -258,11 +259,12 @@ def _pool_duplicate_counts(config: dict[str, Any], key_provider: Any) -> dict[st
 
     job_seed_int = _normalize_job_seed_int(config)
     profile = profile_source(config, seed=job_seed_int)
-    plan = compile_plan(config, profile, decoy_engine_version="phase3-c1-native-bench")
-    from decoy_engine.keyprovider import require_mask_key, resolve_key_provider
+    plan = compile_plan(
+        config, profile, decoy_engine_version="phase3-c1-native-bench", sources=NO_SOURCES
+    )
+    from decoy_engine.keyprovider import require_mask_key
 
-    resolved = resolve_key_provider(plan=plan, key_provider=key_provider, mask_secret_ref=None)
-    require_mask_key(plan, resolved)  # validated for parity with the oracle path; unused here
+    require_mask_key(plan, key_provider)  # validated for parity with the oracle path; unused here
 
     from decoy_engine.providers_v2 import get_default_registry
 

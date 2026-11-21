@@ -24,6 +24,7 @@ import pytest
 import yaml
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.fileaccess import FileRole
 from decoy_engine.fileaccess._openat2 import openat2_usable
 from decoy_engine.generation import _plan_entry
@@ -51,7 +52,9 @@ def _lookup(**extra: Any) -> dict[str, Any]:
 
 
 def _compile(config: dict[str, Any], **kwargs: Any) -> Any:
-    return compile_plan(config, empty_profile(), decoy_engine_version="test", **kwargs)
+    return compile_plan(
+        config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES, **kwargs
+    )
 
 
 def _column(out: dict[str, Any]) -> list[Any]:

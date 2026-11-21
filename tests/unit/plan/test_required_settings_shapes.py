@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from decoy_engine.contracts import strategy_requirements as sr
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.plan.checks import check_required_strategy_settings
 
@@ -31,39 +31,47 @@ def test_date_shift_rule_by_shape(shape: ColumnShape) -> None:
     refused with the mismatch code, format or not."""
     if shape in NEEDS:
         with pytest.raises(PlanCompileError) as exc:
-            check_required_strategy_settings(_cfg(), {("t", "d"): shape})
+            check_required_strategy_settings(_cfg(), shapes={("t", "d"): shape}, sources=NO_SOURCES)
         assert exc.value.code == CODE
     elif shape in RUNS_BARE:
-        check_required_strategy_settings(_cfg(), {("t", "d"): shape})
+        check_required_strategy_settings(_cfg(), shapes={("t", "d"): shape}, sources=NO_SOURCES)
     else:
         with pytest.raises(PlanCompileError) as exc:
-            check_required_strategy_settings(_cfg(), {("t", "d"): shape})
+            check_required_strategy_settings(_cfg(), shapes={("t", "d"): shape}, sources=NO_SOURCES)
         assert exc.value.code == MISMATCH
     if shape not in NEEDS | RUNS_BARE:
         with pytest.raises(PlanCompileError) as exc2:
             check_required_strategy_settings(
-                _cfg(provider_config={"date_format": "%Y-%m-%d"}), {("t", "d"): shape}
+                _cfg(provider_config={"date_format": "%Y-%m-%d"}),
+                shapes={("t", "d"): shape},
+                sources=NO_SOURCES,
             )
         assert exc2.value.code == MISMATCH
     else:
         check_required_strategy_settings(
-            _cfg(provider_config={"date_format": "%Y-%m-%d"}), {("t", "d"): shape}
+            _cfg(provider_config={"date_format": "%Y-%m-%d"}),
+            shapes={("t", "d"): shape},
+            sources=NO_SOURCES,
         )
 
 
 def test_declared_date_still_counts() -> None:
     cfg = _cfg(logical_type="date", parse_format={"id": "date/iso8601/v1"})
-    check_required_strategy_settings(cfg, {("t", "d"): S.DATE})
+    check_required_strategy_settings(cfg, shapes={("t", "d"): S.DATE}, sources=NO_SOURCES)
 
 
 def test_config_only_defers_unknown() -> None:
     """With no schema a column could be a typed date, so the config-only pass defers it and
     compile, which has the schema, refuses it like text."""
     run_config_only_checks(_cfg())
-    check_required_strategy_settings(_cfg(), {("t", "d"): S.DATE})  # a typed date runs bare
+    check_required_strategy_settings(
+        _cfg(), shapes={("t", "d"): S.DATE}, sources=NO_SOURCES
+    )  # a typed date runs bare
     for refused in (S.UNKNOWN, S.TEXT):
         with pytest.raises(PlanCompileError) as exc:
-            check_required_strategy_settings(_cfg(), {("t", "d"): refused})
+            check_required_strategy_settings(
+                _cfg(), shapes={("t", "d"): refused}, sources=NO_SOURCES
+            )
         assert exc.value.code == CODE
 
 
@@ -83,7 +91,9 @@ def test_nested_child_needs_the_format() -> None:
         "provider_config": {"strategy": "date_shift", "target": "$.a"},
     }
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings({"tables": [{"name": "t", "columns": [entry]}]}, {})
+        check_required_strategy_settings(
+            {"tables": [{"name": "t", "columns": [entry]}]}, shapes={}, sources=NO_SOURCES
+        )
     assert exc.value.code == CODE
 
 

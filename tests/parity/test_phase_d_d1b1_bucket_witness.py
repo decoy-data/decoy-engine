@@ -47,7 +47,6 @@ _PAYLOAD = pa.table(
 _SEEDS = (("a", bucket_seed("week")),)
 _EXPECTED = [ExpectedMask("t", "a", "bucket_perturb_array")]
 _MODES = ["resident", "sink-batch", "sink-reorder"]
-_UNPARSEABLE = ["nope", "bad", "2024-99-99", ""]
 
 
 def hide_hash_companion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,8 +130,8 @@ def test_a_discarded_native_result_fails_the_witness_on_the_real_route(
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize(
     "values",
-    [[None, None, None], _UNPARSEABLE[:3]],
-    ids=["all-null", "all-unparseable"],
+    [[None, None, None]],
+    ids=["all-null"],
 )
 def test_a_column_with_nothing_to_perturb_is_idle_not_a_native_execution(
     values: list[str | None], mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -155,15 +154,8 @@ def test_a_column_with_nothing_to_perturb_is_idle_not_a_native_execution(
     [
         ["2024-03-05", "2024-03-06", None, None],
         [None, None, "2024-03-05", "2024-03-06"],
-        ["2024-03-05", "2024-03-06", "nope", "bad"],
-        ["nope", "bad", "2024-03-05", "2024-03-06"],
     ],
-    ids=[
-        "populated-then-null",
-        "null-then-populated",
-        "populated-then-unparseable",
-        "unparseable-then-populated",
-    ],
+    ids=["populated-then-null", "null-then-populated"],
 )
 def test_an_idle_batch_does_not_overwrite_a_native_execution(
     values: list[str | None], mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -245,29 +237,6 @@ def test_an_unparseable_batch_is_idle_only_when_the_output_equals_the_input(
     assert bucket_verified_idle(pa.array([], pa.string()), pa.nulls(0), "%Y-%m-%d")
     assert bucket_verified_idle(pa.nulls(3), pa.nulls(3), "%Y-%m-%d")
     assert not bucket_verified_idle(pa.nulls(3), pa.array(["x", None, None]), "%Y-%m-%d")
-
-
-@pytest.mark.parametrize("mode", _MODES)
-def test_an_unparseable_batch_with_altered_output_is_not_idle(
-    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    install_index_companion(monkeypatch)
-    hide_hash_companion(monkeypatch)
-    payload = pa.table({"a": pa.array(["2024-03-05", "2024-03-06", "nope", "bad"], pa.string())})
-    real_adapter = _mask_group_c.native_bucket_perturb_array
-
-    def altering_adapter(values: Any, **kwargs: Any) -> pa.Array:
-        out = real_adapter(values, **kwargs)
-        if "nope" in values.to_pylist():
-            return pa.array(["changed", "bad"], pa.string())
-        return out
-
-    witness = KernelWitness()
-    with witness.observe(dispatch={BUCKET_ADAPTER: altering_adapter}):
-        run = run_chain(payload, _SEEDS, batch_rows=2, **mode_kwargs(mode, tmp_path))
-    assert UNKNOWN in backends_of(witness)
-    with pytest.raises(AssertionError, match="want native"):
-        witness.assert_native_ran(chain_sources(payload), run.tables, _EXPECTED)
 
 
 @pytest.mark.parametrize("mode", _MODES)

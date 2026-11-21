@@ -13,7 +13,7 @@ import pytest
 
 import decoy_engine.plan as plan_module
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import ColumnShape, SourceFacts
 from decoy_engine.execution._chunked_input import fixed_schema_chunks_from_resident
 from decoy_engine.execution._chunked_profile import empty_input_profile, first_chunk_profile
 from decoy_engine.profile import Profile
@@ -148,7 +148,9 @@ def test_cloud_csv_reader_inference_does_not_make_a_csv_column_typed() -> None:
     from decoy_engine.plan.checks._column_shapes import build_column_shapes
 
     schemas = {"t": pa.schema([("d", pa.int64())])}
-    got = build_column_shapes(_config(format="csv", path="s3://b/k.csv"), source_schemas=schemas)
+    got = build_column_shapes(
+        _config(format="csv", path="s3://b/k.csv"), sources=SourceFacts(schemas=schemas)
+    )
     assert got == {("t", "d"): S.TEXT}
 
 
@@ -167,7 +169,7 @@ def test_loader_table_shape_from_loader_schema(
     original = plan_module.compile_plan
 
     def spy(config: dict[str, Any], profile: Profile, **kw: Any) -> Any:
-        received.append(kw.get("source_schemas"))
+        received.append(kw["sources"].schemas)
         return original(config, profile, **kw)
 
     monkeypatch.setattr(plan_module, "compile_plan", spy)
