@@ -43,6 +43,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError, ValidationError
 
 from decoy_engine import reasons
+from decoy_engine._field_names import repeated_names
 from decoy_engine.config._delivery import DeliveryConfig
 from decoy_engine.config._generate_options import problem_details
 from decoy_engine.config._generate_relational import (
@@ -233,6 +234,25 @@ class PipelineConfig(BaseModel):
                     f"generate table {table.name!r} must declare a non-negative integer `row_count`"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _table_names_unique(self) -> PipelineConfig:
+        """One table declared twice: the later declaration wins on every lane.
+
+        A `redact` entry in the first declaration and a `passthrough` in the second ships the
+        column unmasked, the same leak as a repeated column inside one table. Exact-name
+        match, reported at each later repeat.
+        """
+        names = [t.name for t in self.tables]
+        if not repeated_names(names):
+            return self
+        seen: set[str] = set()
+        problems: list[tuple[tuple[str | int, ...], str]] = []
+        for index, name in enumerate(names):
+            if name in seen:
+                problems.append((("tables", index, "name"), str(reasons.config.TABLE_DUPLICATE)))
+            seen.add(name)
+        raise ValidationError.from_exception_data("PipelineConfig", problem_details(problems))
 
     @model_validator(mode="after")
     def _reference_graph_valid(self) -> PipelineConfig:
