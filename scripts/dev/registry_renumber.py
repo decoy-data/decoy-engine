@@ -189,14 +189,13 @@ def _literal_spans(text: str) -> list[tuple[int, int]]:
     ]
 
 
-def _unreleased_names(text: str) -> int:
-    toks = tokenize.generate_tokens(io.StringIO(text).readline)
-    return sum(1 for t in toks if t.type == tokenize.NAME and t.string == "UNRELEASED")
-
-
 def stamp_source(text: str, version: str) -> str:
     """``text`` with each ``since=UNRELEASED`` / ``deprecated_in=UNRELEASED`` argument set to
-    ``version``; strings and comments are untouched, and an UNRELEASED import nothing uses goes."""
+    ``version``; strings and comments are untouched. The UNRELEASED import stays even when nothing
+    uses it: a branch that adds a new ``since=UNRELEASED`` code merges clean against a main whose
+    stamp removed the import, then raises NameError at load. Every reason module binds it as the
+    re-export ``UNRELEASED as UNRELEASED`` (so F401 stays on), enforced by
+    tests/sentry/release/test_reason_unreleased_import.py."""
     if "=UNRELEASED" not in text:
         return text
     spans = _literal_spans(text)
@@ -204,12 +203,7 @@ def stamp_source(text: str, version: str) -> str:
     def sub(m: re.Match[str]) -> str:
         return m[0] if any(a <= m.start() < b for a, b in spans) else f'{m[1]}="{version}"'
 
-    out = PENDING_ARG.sub(sub, text)
-    if out == text or _unreleased_names(out) != 1:
-        return out
-    out = out.replace(f"{TYPES_IMPORT}UNRELEASED\n", "", 1).replace("\n    UNRELEASED,\n", "\n", 1)
-    one_line = rf"^({re.escape(TYPES_IMPORT)}.*?)(?:\bUNRELEASED, |, UNRELEASED\b)"
-    return re.sub(one_line, r"\1", out, count=1, flags=re.M)
+    return PENDING_ARG.sub(sub, text)
 
 
 def clear_pending_summaries(text: str) -> str:
