@@ -1,3 +1,3 @@
-### Fixed (numeric profile chart on a subnormal edge, 2026-11-21)
+### Fixed (numeric profile chart on a subnormal edge, 24f-e2-fix, 2026-11-21)
 
-A numeric column whose range reaches a subnormal float (for example a maximum near 2e-313) made the profiler's 10-bin chart raise a `ValueError` from pandas, so `distribution_snapshot_document` and `profile_columns` refused a legal column. The chart now falls back to bin codes and edges, with the same labels. Output for every other column is unchanged.
+A numeric column whose range reaches a subnormal float (for example a maximum near 2e-313, or a column made only of values near 1e-316) made the profiler's 10-bin chart raise a `ValueError` from pandas or return no bins, so `distribution_snapshot_document` and `profile_columns` refused or mis-charted a legal column. The chart now falls back to bin codes and edges, with the same labels. Output for every other column is unchanged.

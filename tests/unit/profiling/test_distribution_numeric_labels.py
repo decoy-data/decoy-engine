@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from decoy_engine.profiling import profile_columns
 from decoy_engine.profiling._distributions import _distribution_numeric
 
 
@@ -24,3 +25,10 @@ def test_narrow_range_labels_use_two_decimals() -> None:
 def test_a_subnormal_maximum_is_charted() -> None:
     dist = _distribution_numeric(pd.Series([2.2250738585e-313] * 2 + [0.0] * 17 + [-1.0]))
     assert dist is not None and sum(dist.data) == 20.0 and len(dist.labels) == 10
+
+
+def test_a_subnormal_only_range_is_charted_not_returned_empty() -> None:
+    cells = [-3.58244534e-316, -2e-316, -1e-316, 0.0, 1e-316, 2.43941943e-316] * 32
+    dist = _distribution_numeric(pd.Series(cells))
+    assert dist is not None and len(dist.labels) == 10 and sum(dist.data) == 192.0
+    assert len(profile_columns(pd.DataFrame({"x": cells}), "t").fields) == 1

@@ -46,9 +46,14 @@ def _edge_label(left: float, right: float) -> str:
 
 
 def _bin_counts_and_labels(series: pd.Series) -> tuple[list[int], list[str]]:
-    """The same 10 equal-width bins as `pd.cut`, labelled without its edge rounding."""
-    codes, edges = pd.cut(series, bins=10, include_lowest=True, labels=False, retbins=True)
-    counts = np.bincount(codes.to_numpy(dtype=int), minlength=len(edges) - 1).tolist()
+    """10 equal-width bins between min and max, labelled without `pd.cut`'s edge rounding.
+
+    `pd.cut` also refuses a range so small that its edges collide, so this builds the edges and
+    counts itself; `np.histogram` accepts repeated edges.
+    """
+    values = series.to_numpy(dtype=float)
+    edges = np.maximum.accumulate(np.linspace(values.min(), values.max(), 11))
+    counts = np.histogram(values, bins=edges)[0].tolist()
     # A tiny edge rounds to zero here instead of overflowing.
     rounded = [float(np.round(e, 3)) for e in edges]
     return counts, [_edge_label(lo, hi) for lo, hi in pairwise(rounded)]
@@ -73,14 +78,16 @@ def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
         )
     try:
         binned = pd.cut(series, bins=10, include_lowest=True)
-    except ValueError:
-        # pd.cut's label builder rounds an edge near the float floor (a subnormal max) to a
-        # non-finite value and refuses a legal column. Chart it from codes and edges instead.
-        data, labels = _bin_counts_and_labels(series)
-    else:
         bin_counts = binned.value_counts().sort_index()
         data = [int(c) for c in bin_counts.values]
         labels = [_edge_label(iv.left, iv.right) for iv in bin_counts.index]
+        charted = len(data) == 10 and sum(data) == len(series)
+    except ValueError:
+        charted = False
+    if not charted:
+        # pd.cut's label builder rounds an edge near the float floor (a subnormal edge) to a
+        # non-finite value. It then raises, or returns no bins at all. Chart from codes and edges.
+        data, labels = _bin_counts_and_labels(series)
     return Distribution(
         kind="numeric",
         data=[float(d) for d in data],

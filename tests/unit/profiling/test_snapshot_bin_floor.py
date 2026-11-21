@@ -266,9 +266,12 @@ def _columns(draw: Any) -> list[float]:
 # whole snapshot refused a legal column. Found by this property, 2026-11-21.
 _SUBNORMAL_MAX = [2.2250738585e-313] * 2 + [0.0] * 17 + [-1.0]
 
+_SUBNORMAL_ONLY = [-3.58244534e-316, -2e-316, -1e-316, 0.0, 1e-316, 2.43941943e-316] * 32
+
 
 @_SEEDED
 @example(cells=_SUBNORMAL_MAX, n=1)
+@example(cells=_SUBNORMAL_ONLY, n=10)
 @given(cells=_columns(), n=st.integers(1, 1000))
 def test_property_every_plain_histogram_is_floored_recounted_and_tail_stable(
     cells: list[float], n: int
