@@ -39,6 +39,7 @@ from typing import Any, Final, Literal
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.config import PipelineConfigError, RelationshipConfig, parse_relationship_config
 from decoy_engine.profiling._key_loading import (
     JOIN_KEY_KIND,
@@ -429,7 +430,8 @@ def _count(conn: Any, sql: str, *, probe: bool = False) -> int:
     cursor = conn.execute(sql)
     if probe:
         _before_fetch(conn)
-    return int(cursor.fetchone()[0])
+    # Drained read: a fetchone() here makes DuckDB 2.x reject the next conn.register().
+    return int(fetch_scalar(cursor))
 
 
 def _complete(alias: str, width: int) -> str:

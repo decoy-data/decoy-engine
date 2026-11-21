@@ -1,3 +1,0 @@
-### Fixed (tag census gaps, FREEZE-S7a, 2026-11-20)
-
-The tag census now also finds a constant that starts with a tag and then a non-letter, such as a bytes label or the leading part of an f-string. That found two derivation labels it missed: `decoy-publication-result/v1` (the stored result digest) and `fpe-sub-floor-synthetic/v1` (the HMAC input for synthetic masked bytes). Both are now in contract 3.3 and `DERIVATION_LABELS`. `policy-expansion/v1` and `secret-provider/v1` are format tags, so they moved from the derivation labels to contract 3.1 and the frozen-surface map. Nothing about written bytes changes.

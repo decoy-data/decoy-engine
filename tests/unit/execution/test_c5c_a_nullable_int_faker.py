@@ -95,7 +95,7 @@ class _SpyKernel:
 
 
 def _compiled_or_skip() -> Any:
-    kernel = _sampler._compiled_index_kernel()
+    kernel = _sampler.compiled_index_kernel()
     if kernel is None:
         pytest.skip("compiled index kernel not available")
     return kernel
@@ -122,7 +122,7 @@ def test_sampler_sees_exact_values_at_both_kernel_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     compiled = _compiled_or_skip()
-    ref = _sampler._reference_index_kernel()
+    ref = _sampler.reference_index_kernel()
     compiled_seen: list[list[Any]] = []
     ref_seen: list[list[Any]] = []
 

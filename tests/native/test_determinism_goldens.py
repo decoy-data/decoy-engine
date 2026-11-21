@@ -95,7 +95,6 @@ from decoy_engine.transforms.joint_mask import _KEYED_ROW_SOURCE
 from decoy_engine.transforms.windowed_date import (
     _DATE_FMT,
     WindowedDateConfig,
-    _sample_offset,
     apply_windowed_date,
 )
 
@@ -267,18 +266,28 @@ class TestWindowedDateGolden:
         namespace = "windowed/visit"
         anchors = ["2020-01-01", "2020-06-15", "2021-03-30", "2019-12-31", "2022-08-08"]
         df = pd.DataFrame({"anchor": anchors})
-        config = WindowedDateConfig(
-            anchor="anchor", min_days=-30, max_days=30, distribution="uniform"
-        )
-        shipped = apply_windowed_date(config, df, _MASK_KEY, namespace)
-
         p = provider_for("mask.windowed_date")
-        reproduced = []
-        for i, raw in enumerate(anchors):
-            rng = p.row_generator(_MASK_KEY, namespace, i)
-            offset = _sample_offset(rng, config.min_days, config.max_days, config.distribution)
-            reproduced.append((pd.Timestamp(raw) + timedelta(days=offset)).strftime(_DATE_FMT))
-        assert reproduced == shipped
+        for distribution in ("uniform", "early", "late"):
+            config = WindowedDateConfig(
+                anchor="anchor", min_days=-30, max_days=30, distribution=distribution
+            )
+            shipped = apply_windowed_date(config, df, _MASK_KEY, namespace)
+            offsets = [
+                p.partitioned_draw(
+                    _MASK_KEY,
+                    namespace,
+                    i,
+                    min_days=config.min_days,
+                    max_days=config.max_days,
+                    distribution=distribution,
+                )
+                for i in range(len(anchors))
+            ]
+            reproduced = [
+                (pd.Timestamp(raw) + timedelta(days=offset)).strftime(_DATE_FMT)
+                for raw, offset in zip(anchors, offsets, strict=True)
+            ]
+            assert reproduced == shipped, distribution
         _record("mask.windowed_date")
 
 
