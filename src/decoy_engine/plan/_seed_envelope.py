@@ -8,7 +8,6 @@ into _compile.py; SEED_PROTOCOL_VERSION and the persisted format are untouched.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from decoy_engine import reasons
@@ -281,7 +280,7 @@ def _build_seed_envelope(
                 for site in column_sites(table_profile.name, col_entry):
                     if (
                         site.strategy not in ("text_redact", "text_mask")
-                        or not isinstance(site.config, Mapping)
+                        or not isinstance(site.config, dict)
                         or not site.config.get("ner")
                     ):
                         continue
