@@ -129,6 +129,19 @@ baseline = "tests/sentry/baselines/package-fanout.json"
 [[sentry]]
 id = "import-layers"
 baseline = "tests/sentry/baselines/import-layers.json"
+approved_growth = [
+  { key = "policy-direction::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._seed_envelope -> decoy_engine.execution._technique_class", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._compile -> decoy_engine.fileaccess", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._generation -> decoy_engine.fileaccess", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan._serialize -> decoy_engine.fileaccess", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan.checks._lookup_tables -> decoy_engine.fileaccess", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.plan.validate._consolidator -> decoy_engine.fileaccess", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+  { key = "policy-direction::decoy_engine.delivery.resume._records -> decoy_engine.publication", decision = "owner 2026-11-21 approved in session: lock the current policy-to-I/O edges so the count cannot grow; records/2026-11-21-engine-clean-architecture-review.md" },
+]
 
 [[sentry]]
 id = "table-kind-truth-tests"
