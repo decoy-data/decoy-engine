@@ -21,6 +21,7 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 - a `text_mask` config that names a detector id the engine does not know, or a detector and strategy pair it cannot run (for example `date_shift` or `faker` on `email`, `fpe` on `email`), now fails at compile and in `decoy validate` instead of running
 - CUSIP `generate_random` now refuses locales other than `en_CA` and `en_US`. Pass one of those two locales.
 - a config that lists the same column name twice in one table's `columns` is now refused when it is validated. Before, the later entry won on every lane, so `[{name: s, strategy: redact}, {name: s, strategy: passthrough}]` shipped `s` unmasked and the redact entry was dropped without a message. Names are compared exactly, the same rule the source-schema checks use. The same name in two different tables is still allowed. The same leak through a table declared twice (`tables: [{name: t, columns: [s redact]}, {name: t, columns: [s passthrough]}]`) is closed too: a repeated table name is refused at `tables[i].name`. No shipped example, template or fixture config listed a column twice.
+- a column that reads a `formula` column with `references` while it is drawn (a `condition_on`, a `derived` expression, a `group_by` or an `anchor`) is now refused with `plan/generate_column_forward_reference`. Before, it read nulls. Move the reading column after the formula's inputs or drop the read.
 
 ### Changed (interior numeric bin floor and numeric_bins ceiling, 24F-E2, 2026-11-20)
 
