@@ -290,3 +290,33 @@ def test_messages_value_free() -> None:
         reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
     ):
         _no_marker(reasons.get("runtime", code).summary)
+
+
+# -- the one format_error builder, both operators --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy, reason",
+    [
+        ("bucket_perturb", "value is not a parseable date under bucket_perturb"),
+        ("date_shift", "value is not a parseable date under date_shift"),
+    ],
+)
+def test_one_builder_serves_both_operators_value_free(strategy: str, reason: str) -> None:
+    from decoy_engine.execution._operator_registry import OPERATORS
+    from decoy_engine.execution.native._chunked_row_errors import format_error_records
+    from decoy_engine.execution.native._date_shift_ext import format_error_row_errors
+
+    operator_id = OPERATORS[strategy].operator_id
+    rows = format_error_row_errors("c", (3, 5), operator_id)
+    assert [(r.column, r.row_index, r.trigger, r.reason) for r in rows] == [
+        ("c", 3, "format_error", reason),
+        ("c", 5, "format_error", reason),
+    ]
+    records = format_error_records(
+        "t", {"c": (3, 5)}, bucket_columns={"c"} if strategy == "bucket_perturb" else ()
+    )
+    assert [(r.table, r.column, r.row_index, r.reason) for r in records] == [
+        ("t", "c", 3, reason),
+        ("t", "c", 5, reason),
+    ]

@@ -176,7 +176,7 @@ class TestByteParity:
     def test_chunked_equals_full_frame_oracle(self, tmp_path, chunk_size, bucket) -> None:
         # A null every 4th row, spanning several chunk sizes so at least one run
         # splits a run across a boundary. Every other cell parses: an unparseable
-        # cell is a row error, covered in tests/unit/strategies.
+        # cell is a row error, covered in tests/unit/execution/test_bucket_perturb_safety.py.
         dates = ["2021-03-15", "2020-11-02", "2019-07-28", "2022-01-09", "2023-05-19"]
         rows: list[str | None] = []
         for i in range(20):

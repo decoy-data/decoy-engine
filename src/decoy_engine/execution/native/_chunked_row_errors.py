@@ -15,11 +15,11 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from decoy_engine.execution._row_errors import RowError, RowErrorRecord
+from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
 from decoy_engine.execution.native._date_shift_ext import (
     BUCKET_PERTURB_OPERATOR_ID,
     DATE_SHIFT_OPERATOR_ID,
-    format_error_reason,
+    format_error_row_errors,
 )
 
 
@@ -32,24 +32,14 @@ def format_error_records(
 
     A column in `bucket_columns` carries bucket_perturb's reason text, the rest date_shift's."""
     return tuple(
-        RowErrorRecord(
-            table=table,
-            column=column,
-            row_index=position,
-            trigger="format_error",
-            reason=format_error_reason(
-                BUCKET_PERTURB_OPERATOR_ID if column in bucket_columns else DATE_SHIFT_OPERATOR_ID
-            ),
-        )
+        record
         for column in sorted(positions_by_column)
-        for position in positions_by_column[column]
+        for record in drain_row_errors(
+            format_error_row_errors(
+                column,
+                positions_by_column[column],
+                BUCKET_PERTURB_OPERATOR_ID if column in bucket_columns else DATE_SHIFT_OPERATOR_ID,
+            ),
+            table=table,
+        )
     )
-
-
-def bucket_row_errors(column: str, positions: tuple[int, ...]) -> list[RowError]:
-    """bucket_perturb's `format_error` RowErrors for the sequential route, value-free."""
-    reason = format_error_reason(BUCKET_PERTURB_OPERATOR_ID)
-    return [
-        RowError(column=column, row_index=int(pos), trigger="format_error", reason=reason)
-        for pos in positions
-    ]

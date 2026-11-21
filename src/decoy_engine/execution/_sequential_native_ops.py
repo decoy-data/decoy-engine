@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -39,13 +40,13 @@ from decoy_engine import reasons
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._operator_registry import PYTHON_SCALAR
-from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._categorical_ext import native_categorical
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
 from decoy_engine.execution.native._date_shift_ext import (
+    BUCKET_PERTURB_OPERATOR_ID,
     DATE_SHIFT_OPERATOR_ID,
-    format_error_reason,
+    format_error_row_errors,
 )
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error, fpe_residual_warnings
 from decoy_engine.execution.native._kernels_scalar import native_text_redact
@@ -486,15 +487,9 @@ def text_redact_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
     )
 
 
-def date_shift_row_errors(
-    column: str, positions: tuple[int, ...], operator_id: str = DATE_SHIFT_OPERATOR_ID
-) -> list[RowError]:
-    """One `format_error` RowError per unparseable cell, as the Python handler records them."""
-    reason = format_error_reason(operator_id)
-    return [
-        RowError(column=column, row_index=int(pos), trigger="format_error", reason=reason)
-        for pos in positions
-    ]
+# The sequential route's two bindings of the one format_error builder.
+date_shift_row_errors = partial(format_error_row_errors, operator_id=DATE_SHIFT_OPERATOR_ID)
+bucket_row_errors = partial(format_error_row_errors, operator_id=BUCKET_PERTURB_OPERATOR_ID)
 
 
 def _date_shift_apply_unused(bound: Any, values: pa.Array, call: Any) -> NativeResult:
@@ -587,6 +582,7 @@ __all__ = [
     "NativeResult",
     "TextRedactCall",
     "bucket_perturb_op",
+    "bucket_row_errors",
     "categorical_op",
     "date_shift_op",
     "date_shift_row_errors",

@@ -83,6 +83,7 @@ from decoy_engine.execution._sequential_native_ops import (
     _load_text_redact,
     _table_columns,
     bucket_perturb_op,
+    bucket_row_errors,
     categorical_op,
     date_shift_op,
     date_shift_row_errors,
@@ -101,7 +102,6 @@ from decoy_engine.execution._strategies import strategy_catalog
 from decoy_engine.execution._strategies._faker_positional import resolve_selection_namespace
 from decoy_engine.execution.native._bucket_perturb_ext import native_range_exceeded
 from decoy_engine.execution.native._chunk_masking import pool_values_are_strings
-from decoy_engine.execution.native._chunked_row_errors import bucket_row_errors
 from decoy_engine.execution.native._crypto_ext import (
     CryptoExtensionUnavailableError,
     load_compiled_crypto_kernel,
