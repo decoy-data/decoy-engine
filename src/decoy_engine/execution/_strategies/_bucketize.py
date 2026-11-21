@@ -41,10 +41,10 @@ from decoy_engine.execution._adapter import (
     StrategyOption,
     option,
     provider_config_to_dict,
+    require_shape_declared,
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
-from decoy_engine.execution._strategies._shape_backstop import require_shape_declared
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 
@@ -71,7 +71,7 @@ class BucketizeStrategyHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
-        require_shape_declared("bucketize", column, cfg, ctx)
+        require_shape_declared("bucketize", column, ctx)
         width = resolve_bucketize_width(cfg)
         if width is None:
             # Invalid config: fail closed (Sprint 13 GATE-1 Q4). A masking

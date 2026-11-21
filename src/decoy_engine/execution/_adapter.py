@@ -25,6 +25,10 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
+from decoy_engine.contracts.strategy_requirements import (
+    SHAPE_REQUIREMENTS_BY_STRATEGY,
+    shape_declaration_needed,
+)
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
@@ -326,6 +330,26 @@ class StrategyContext:
                 for (table, column), count in sorted(self.date_preserved.items())
             ]
         }
+
+
+def require_shape_declared(strategy: str, column: str, ctx: StrategyContext) -> None:
+    """Refuse a column the plan does not list as typed or declared (a caller that skipped compile).
+
+    Plan compile refuses a text column with no F06 cast before any read. This keys on the shape
+    the plan recorded for the column, never on the pandas dtype, and reads the same table row.
+    """
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY[strategy]
+    shape = ctx.column_shapes.get(
+        (ctx.current_table, ctx.nested_outer_column or column), ColumnShape.UNKNOWN
+    )
+    if shaped.requirement is not None and shape_declaration_needed(
+        shaped, shape, config_only=False
+    ):
+        raise StrategyError(
+            code=reasons.runtime.COLUMN_SHAPE_REQUIRED,
+            strategy=strategy,
+            message=f"column {column!r}: {shaped.requirement.message}",
+        )
 
 
 class StrategyHandler(Protocol):
