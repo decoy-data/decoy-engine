@@ -322,6 +322,20 @@ def test_a_reference_runs_under_the_auto_route_when_another_table_chunks(tmp_pat
     full = run_pipeline(cfg, sources=big, execution_mode="full_frame", **kw)
     for name in big:
         assert auto.outputs[name].equals(full.outputs[name]), name
+    parent = dict(
+        zip(
+            big["customers"].column("id").to_pylist(),
+            auto.outputs["customers"].column("id").to_pylist(),
+            strict=True,
+        )
+    )
+    source_keys = [
+        json.loads(c)["customer_id"] for c in big["events"].column("payload").to_pylist()
+    ]
+    leaves = [
+        json.loads(c)["customer_id"] for c in auto.outputs["events"].column("payload").to_pylist()
+    ]
+    assert leaves == [parent[k] for k in source_keys]
 
 
 class FakeVault:
