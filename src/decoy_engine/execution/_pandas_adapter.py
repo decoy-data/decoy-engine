@@ -63,6 +63,7 @@ from decoy_engine.execution._fk_resolve import (
     gather_errored_parent_keys,
     resolve_fk_keys,
 )
+from decoy_engine.execution._gated_string_guard import require_same_rows
 from decoy_engine.execution._guards import run_chunk_ingest_guards
 from decoy_engine.execution._output_projection import enforce_output_projection
 from decoy_engine.execution._row_errors import RowErrorRecord, drain_row_errors
@@ -382,7 +383,15 @@ class PandasExecutionAdapter:
                 )
         if node.kind == "composite":
             with timed_strategy("composite", ",".join(node.columns)):
-                frames[node.table], node_warnings = self._composite_handler.run(df, node, ctx)
+                out, node_warnings = self._composite_handler.run(df, node, ctx)
+                require_same_rows(
+                    df.index,
+                    out,
+                    column=",".join(node.columns),
+                    strategy=node.strategy,
+                    table=node.table,
+                )
+                frames[node.table] = out
             return node_warnings
         if node.kind != "scalar":
             raise ExecutionError(

@@ -41,6 +41,7 @@ from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._exact_int_sources import gated_context, selected_positions
 from decoy_engine.execution._gated_string_guard import (
     reject_gated_string_on_numeric,
+    require_same_rows,
     widen_numeric_target_for_strings,
 )
 from decoy_engine.execution._row_errors import RowError
@@ -451,8 +452,12 @@ def run_with_when_gate(
     the typed error and fix the plan rather than silently
     passing-through a misconfigured gate.
     """
+    table = getattr(ctx, "current_table", "")  # test doubles may omit it
     if plan.when is None:
-        return handler.run(df, column, plan, ctx)
+        rows = df.index
+        out, warnings = handler.run(df, column, plan, ctx)
+        require_same_rows(rows, out, column=column, strategy=plan.strategy, table=table)
+        return out, warnings
 
     # Codex P2 FAIL-CLOSED VALIDATION BYPASSED BY A ZERO-MATCH `when` GATE
     # remediation: a handler's own fail-closed preflight (e.g. CodeSetHandler
@@ -476,8 +481,11 @@ def run_with_when_gate(
 
     positions = selected_positions(mask)
     sub_df = df.loc[mask].copy()
+    sub_rows = sub_df.index
     err_start = len(ctx.row_errors)
     sub_df, warnings = handler.run(sub_df, column, plan, gated_context(ctx, column, positions))
+    # Before the index-aligned write-back below, which would turn a dropped row into a null.
+    require_same_rows(sub_rows, sub_df, column=column, strategy=plan.strategy, table=table)
     # B1: remap subset-relative row-error indices to full-table positions
     # BEFORE they leave the gate (see _remap_gated_row_errors). The k-th
     # mask-True row's full-table position is positions[k], and the handler
@@ -501,7 +509,7 @@ def run_with_when_gate(
                 df[out_col],
                 sub_df[out_col],
                 mask,
-                table=getattr(ctx, "current_table", ""),  # test doubles may omit it
+                table=table,
                 column=out_col,
                 strategy=plan.strategy,
             )
