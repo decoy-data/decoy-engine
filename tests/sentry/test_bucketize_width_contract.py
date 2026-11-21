@@ -14,7 +14,9 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "decoy_engine"
 HOME = "contracts/bucketize_width.py"
-MODULE = "decoy_engine.contracts.bucketize_width"
+PACKAGE = "decoy_engine.contracts"
+LEAF = "bucketize_width"
+MODULE = f"{PACKAGE}.{LEAF}"
 RESOLVERS = ("resolve_bucketize_width", "unresolvable_width_field")
 KEYS = frozenset({"preset", "width"})
 
@@ -36,24 +38,53 @@ GUARDED: dict[str, str | None] = {
 }
 
 
+# The other files that read a `preset` or `width` key, and which width or preset it is. `top_code`
+# has a preset of its own, and a fixed-width layout has a `width`. Neither is a bucketize width.
+OTHER_KEY_READS: dict[str, str] = {
+    "contracts/_declared_formats.py": "the fixed-width layout width",
+    "declared_casting/_catalog.py": "the fixed-width layout width",
+    "plan/_checks_declared_casting.py": "the fixed-width layout width (outside the proof function)",
+    "plan/_checks_top_code.py": "top_code's own preset",
+    "execution/_strategies/_top_code.py": "top_code's own preset",
+}
+
+
 def _call_sites(root: Path) -> set[str]:
+    """Files that call a resolver: by name, through an alias, or through the module itself."""
     found: set[str] = set()
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
         if rel == HOME:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        imported = {
-            a.asname or a.name
-            for n in ast.walk(tree)
-            if isinstance(n, ast.ImportFrom) and n.module == MODULE
-            for a in n.names
-            if a.name in RESOLVERS
-        }
+        names: set[str] = set()
+        modules: set[str] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom) and n.module == MODULE:
+                names |= {a.asname or a.name for a in n.names if a.name in RESOLVERS}
+            elif isinstance(n, ast.ImportFrom) and n.module == PACKAGE:
+                modules |= {a.asname or a.name for a in n.names if a.name == LEAF}
+            elif isinstance(n, ast.Import):
+                modules |= {a.asname or a.name for a in n.names if a.name == MODULE}
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in imported:
-                    found.add(rel)
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (
+                (isinstance(func, ast.Name) and func.id in names)
+                or (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in RESOLVERS
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id in modules
+                )
+                or (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in RESOLVERS
+                    and ast.unparse(func.value) == MODULE
+                )
+            ):
+                found.add(rel)
     return found
 
 
@@ -90,6 +121,21 @@ def _key_reads(path: Path, function: str | None = None) -> list[int]:
 
 def test_only_the_named_files_call_the_resolver() -> None:
     assert _call_sites(SRC) == set(ALLOWED_CALLERS)
+
+
+def _all_key_reads(root: Path) -> dict[str, list[int]]:
+    """Every file under ``root`` but the contract that reads a ``preset`` or ``width`` key."""
+    out: dict[str, list[int]] = {}
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        lines = [] if rel == HOME else _key_reads(path)
+        if lines:
+            out[rel] = lines
+    return out
+
+
+def test_no_other_file_reads_the_keys() -> None:
+    assert set(_all_key_reads(SRC)) == set(OTHER_KEY_READS)
 
 
 def test_every_allowance_has_a_reason() -> None:
@@ -137,3 +183,33 @@ def test_a_function_scope_ignores_reads_elsewhere(tmp_path: Path) -> None:
     )
     assert _key_reads(probe, "proof") == [5]
     assert _key_reads(probe, "missing") == []
+
+
+def test_the_sentry_catches_a_module_alias_caller(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text(
+        "import decoy_engine.contracts.bucketize_width as bw\nx = bw.resolve_bucketize_width({})\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "b.py").write_text(
+        "from decoy_engine.contracts import bucketize_width\n"
+        "x = bucketize_width.unresolvable_width_field({})\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "c.py").write_text(
+        "from decoy_engine.contracts import bucketize_width as w\nx = w.resolve_bucketize_width({})\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "d.py").write_text(
+        "import decoy_engine.contracts.bucketize_width\n"
+        "x = decoy_engine.contracts.bucketize_width.resolve_bucketize_width({})\n",
+        encoding="utf-8",
+    )
+    assert _call_sites(tmp_path) == {"a.py", "b.py", "c.py", "d.py"}
+
+
+def test_the_sentry_catches_a_key_read_in_any_file(tmp_path: Path) -> None:
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "p.py").write_text(
+        "def f(c):\n    return c.get('preset')\n", encoding="utf-8"
+    )
+    assert _all_key_reads(tmp_path) == {"x/p.py": [2]}

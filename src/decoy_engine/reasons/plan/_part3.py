@@ -6,6 +6,7 @@ from decoy_engine.reasons import _catalog
 from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 
 __all__ = [
+    "COLUMN_SHAPE_FORMAT_UNUSED",
     "COLUMN_SHAPE_MISMATCH",
     "COLUMN_SHAPE_REQUIRED",
     "CONFIG_VALUE_NOT_JSON",
@@ -130,7 +131,12 @@ COLUMN_SHAPE_REQUIRED = _d(
 )
 COLUMN_SHAPE_MISMATCH = _d(
     "column_shape_mismatch",
-    "A strategy cannot read the column's type; cast it or change the strategy.",
+    "A strategy cannot read the shape of the column it is set on.",
+    since=UNRELEASED,
+)
+COLUMN_SHAPE_FORMAT_UNUSED = _d(
+    "column_shape_format_unused",
+    "A date_format is set on a column that is already a date, so it is not used.",
     since=UNRELEASED,
 )
 CONFIG_VALUE_NOT_JSON = _d(

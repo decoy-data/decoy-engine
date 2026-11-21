@@ -51,8 +51,6 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import ColumnShape
-from decoy_engine.contracts.strategy_requirements import shape_problem
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
@@ -61,6 +59,7 @@ from decoy_engine.execution._adapter import (
 )
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution._strategies._shape_backstop import require_shape_declared
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 
@@ -132,24 +131,6 @@ def _parse_exact(value: Any) -> tuple[str, int]:
     return ("int", int(dec)) if dec == dec.to_integral_value() else ("frac", 0)
 
 
-def _require_typed_or_declared(column: str, cfg: dict[str, Any], ctx: StrategyContext) -> None:
-    """Refuse a column the plan does not list as typed or declared (a caller that skipped compile).
-
-    Plan compile refuses a text column with no F06 declaration before any read. This is the
-    backstop: it keys on what the plan recorded for the column, never on the pandas dtype.
-    """
-    shape = ctx.column_shapes.get(
-        (ctx.current_table, ctx.nested_outer_column or column), ColumnShape.UNKNOWN
-    )
-    problem = shape_problem("top_code", shape, cfg)
-    if problem is not None and problem.code == reasons.plan.COLUMN_SHAPE_REQUIRED:
-        raise StrategyError(
-            code=reasons.runtime.COLUMN_SHAPE_REQUIRED,
-            strategy="top_code",
-            message=f"column {column!r}: {problem.message}",
-        )
-
-
 class TopCodeStrategyHandler:
     """Generalize the rare tail(s) of a numeric column into an aggregate label."""
 
@@ -172,7 +153,7 @@ class TopCodeStrategyHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
-        _require_typed_or_declared(column, cfg, ctx)
+        require_shape_declared("top_code", column, cfg, ctx)
         bound = self._resolve_top_bound(cfg)
         if bound is None:
             # Fail closed (mirrors bucketize's `_resolve_width is None` raise):

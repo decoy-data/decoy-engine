@@ -23,6 +23,7 @@ __all__ = [
     "EXACT_FLOAT_DECIMAL_DIGITS",
     "NO_SOURCES",
     "TEXT_SOURCE_FORMATS",
+    "TYPED_DATE_SHAPES",
     "ColumnShape",
     "ColumnShapes",
     "SourceFacts",
@@ -127,6 +128,10 @@ class ColumnShape(str, Enum):
 
 
 ColumnShapes = Mapping[tuple[str, str], ColumnShape]
+
+# The shapes a date strategy reads as dates with no parse format. Every site that asks "is this
+# column a native date" reads this set, and a sentry test fails if one keeps its own copy.
+TYPED_DATE_SHAPES = frozenset({ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ})
 
 
 def is_bounded_decimal(precision: Any, scale: Any) -> bool:

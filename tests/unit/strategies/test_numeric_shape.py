@@ -21,7 +21,7 @@ import pytest
 from decoy_engine.contracts.bucketize_width import BUCKETIZE_PRESETS
 from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape, SourceFacts
 from decoy_engine.execution._adapter import StrategyContext
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import DeclaredCastValueError, StrategyError
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
 from decoy_engine.execution._strategies._top_code import TopCodeStrategyHandler
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
@@ -34,6 +34,7 @@ from tests._declared_schema import declare_rest
 from tests.acceptance._f06_support import (
     DEC_5_2,
     INT64,
+    PROTECTED_QUARANTINE,
     column,
     config,
     run,
@@ -266,6 +267,24 @@ def _shape_cfg(strategy: str, pc: dict[str, Any], **fields: Any) -> dict[str, An
     return {"tables": [{"name": "people", "columns": [col]}]}
 
 
+@pytest.mark.parametrize(("strategy", "pc"), [("top_code", TOP), ("bucketize", {"width": 10})])
+@pytest.mark.parametrize("shape", [S.TEXT, S.UNKNOWN])
+def test_undeclared_numeric_text_is_required_not_mismatch(
+    strategy: str, pc: dict[str, Any], shape: ColumnShape
+) -> None:
+    with pytest.raises(PlanCompileError) as exc:
+        check_required_strategy_settings(
+            _shape_cfg(strategy, pc), sources=NO_SOURCES, shapes={("people", "n"): shape}
+        )
+    assert exc.value.code == "column_shape_required"
+    assert exc.value.path == "tables.people.columns.n.logical_type"
+
+
+def test_text_date_shift_with_a_format_is_not_refused() -> None:
+    cfg = _shape_cfg("date_shift", {"date_format": "%Y-%m-%d"}, namespace="d")
+    check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes={("people", "n"): S.TEXT})
+
+
 def test_bucketize_negative_scale_decimal_refused() -> None:
     schema = {"people": pa.schema([("n", pa.decimal128(15, -5))])}
     cfg = _shape_cfg("bucketize", {"width": 10})
@@ -285,23 +304,28 @@ def test_bucketize_negative_scale_decimal_refused() -> None:
     assert exc2.value.code == "column_shape_mismatch"
 
 
-@pytest.mark.parametrize("width", [0, 10**15 + 1, 2**63])
-def test_bucketize_decimal_width_out_of_range_refused(width: int) -> None:
-    cfg = _shape_cfg("bucketize", {"width": width})
-    with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(
-            cfg, sources=NO_SOURCES, shapes={("people", "n"): S.DECIMAL}
-        )
-    assert exc.value.code == "column_shape_mismatch"
+def _decimal_parquet_cfg(tmp_path: Path, width: int) -> dict[str, Any]:
+    table = pa.table({"n": pa.array([Decimal("1.50")], pa.decimal128(12, 2))})
+    return _parquet_cfg(tmp_path, table, _num("bucketize", {"width": width}))
+
+
+@pytest.mark.parametrize(
+    ("width", "code"),
+    [
+        (0, "bucketize_width_unresolvable"),
+        (10**15 + 1, "column_shape_mismatch"),
+        (2**63, "column_shape_mismatch"),
+    ],
+)
+def test_bucketize_decimal_width_out_of_range_refused(
+    tmp_path: Path, width: int, code: str
+) -> None:
+    assert _code(_decimal_parquet_cfg(tmp_path, width)) == code
 
 
 @pytest.mark.parametrize("width", [1, 10**15])
-def test_bucketize_decimal_width_in_range_admitted(width: int) -> None:
-    check_required_strategy_settings(
-        _shape_cfg("bucketize", {"width": width}),
-        sources=NO_SOURCES,
-        shapes={("people", "n"): S.DECIMAL},
-    )
+def test_bucketize_decimal_width_in_range_admitted(tmp_path: Path, width: int) -> None:
+    assert _compile(_decimal_parquet_cfg(tmp_path, width)) is not None
 
 
 @pytest.mark.parametrize("preset", sorted(BUCKETIZE_PRESETS))
@@ -508,9 +532,36 @@ def test_handler_refuses_unlisted_column(handler: Any, strategy: str, pc: dict[s
 def test_bad_cell_follows_error_policy_fail(tmp_path: Path) -> None:
     col = _num("top_code", TOP, **_declared("integer", INT64, error_policy="fail"))
     cfg = _csv_cfg(tmp_path, col)
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(DeclaredCastValueError) as exc:
         run(cfg, {"people": text_table(n=["42", MARKER])}, **FULL)
+    assert exc.value.code == "declared_integer_invalid"
     assert MARKER not in str(exc.value)
+
+
+def test_bad_cell_under_quarantine_policy_is_quarantined(tmp_path: Path) -> None:
+    from decoy_engine.declared_casting import (
+        LocalProtectedQuarantineSink,
+        ProtectedQuarantineRuntime,
+    )
+    from decoy_engine.keyprovider import SecretKeyProvider
+
+    sink = LocalProtectedQuarantineSink(
+        tmp_path / "quarantine", key_provider=SecretKeyProvider(secret=b"q" * 32)
+    )
+    runtime = ProtectedQuarantineRuntime(sink=sink, owner="tenant-1", run_id="run-A")
+    col = _num("bucketize", {"width": 10}, **_declared("integer", INT64, error_policy="quarantine"))
+    src = write_csv(tmp_path / "s.csv", ["n"], [["1"]])
+    cfg = config([col], source_path=src, top={"protected_quarantine": PROTECTED_QUARANTINE})
+    result = run(
+        cfg, {"people": text_table(n=["42", MARKER, "7"])}, quarantine_runtime=runtime, **FULL
+    )
+    assert result.outputs["people"].num_rows == 2
+    assert (
+        result.quality_metrics["declared_casting"]["by_table"]["people"]["by_column"]["n"][
+            "parse_quarantine"
+        ]
+        == 1
+    )
 
 
 @pytest.mark.parametrize(

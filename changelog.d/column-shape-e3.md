@@ -8,4 +8,6 @@ A column the strategy cannot compute exactly is refused at compile with `plan/co
 
 The F06 proof now admits `top_code` on a declared integer and `bucketize` on a declared decimal with an integer width. `bucketize` takes its width from one contract, `contracts/bucketize_width.py`, shared by the handler, the compile check and the shape rule.
 
-Plans record a shape for every `bucketize`, `top_code` and `fpe` column, so the plan and physical plan hashes of pipelines that use them change once. All three reasons are pending: `plan/column_shape_required`, `plan/column_shape_mismatch` and `runtime/column_shape_required`.
+Adding the recommended declaration changes typed output: `bucketize` under `lower` writes integers where it wrote text.
+
+Plans record a shape for every `bucketize`, `top_code` and `fpe` column, so the plan and physical plan hashes of pipelines that use them change once. The reasons `plan/column_shape_required` and `runtime/column_shape_required` are pending; `plan/column_shape_mismatch` comes from the date slice.

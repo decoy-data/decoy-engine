@@ -24,13 +24,13 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
 
 if TYPE_CHECKING:
-    from decoy_engine.contracts.column_shape import ColumnShape
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
     from decoy_engine.execution._sequential_native import SeqNativeRun
     from decoy_engine.generation.pool._cache import PoolCache
@@ -255,13 +255,12 @@ class StrategyContext:
     # strategies rely on.
     row_offset: int = 0
     # (table, column) of every top-level date_shift column whose declared parse format supplies
-    # its date shape, so it needs no `provider_config.date_format`. Set from the plan by the
-    # routes that build a context; empty otherwise, which makes the date_shift handler refuse a
-    # missing format.
+    # its date shape. It keeps the legacy text output. Set from the plan by the routes that build
+    # a context; empty otherwise.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
     # The plan's shape for each column under a shape-reading strategy, keyed (table, column). The
-    # numeric handlers read it to refuse a column the plan does not list as typed when it has no
-    # declaration. Empty for a caller that skipped compile, which refuses.
+    # handlers read it to refuse a column the plan does not list as typed when it has no
+    # declaration or format. Empty for a caller that skipped compile, which refuses.
     column_shapes: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
@@ -288,6 +287,17 @@ class StrategyContext:
         # defaults to the job_seed so no-secret runs feed the identical IKM.
         if not self.mask_key:
             object.__setattr__(self, "mask_key", self.job_seed)
+
+    @property
+    def native_date_columns(self) -> dict[tuple[str, str], ColumnShape]:
+        """The plan's native date and zoned-timestamp columns, derived from ``column_shapes``.
+
+        A declared date column keeps its legacy text output, so it is not in the view."""
+        return {
+            key: shape
+            for key, shape in self.column_shapes.items()
+            if shape in TYPED_DATE_SHAPES and key not in self.declared_date_columns
+        }
 
     def code_set_corpora_metrics(self) -> dict[str, Any]:
         """HC-1 slice 1: the code_set corpus-provenance evidence block, or {}.

@@ -918,11 +918,6 @@ def test_chunked_route_declines_a_large_string_date_shift_source(tmp_path: Path)
     "label, source, column",
     [
         (
-            "int_source",
-            pa.table({"c": pa.array([20240101, 20231231], type=pa.int64())}),
-            _ds_column(date_format="%Y%m%d"),
-        ),
-        (
             "tz_format",
             pa.table({"c": pa.array(["2024-01-01+0000", None], type=pa.string())}),
             _ds_column(date_format="%Y-%m-%d%z"),
@@ -938,6 +933,18 @@ def test_ineligible_job_takes_oracle_on_both_arms(
     assert QUALITY_METRICS_KEY not in on.quality_metrics
     assert off.outputs["t"].column("c").to_pylist() == on.outputs["t"].column("c").to_pylist()
     assert off.outputs["t"].schema.field("c").type == on.outputs["t"].schema.field("c").type
+
+
+def test_int_source_is_refused_at_compile(tmp_path: Path) -> None:
+    """A number column is not a date: COLUMN-SHAPE E1b refuses it at compile, where the oracle
+    used to parse an int64 `20240101` under `%Y%m%d`. It never reaches either route."""
+    source = pa.table({"c": pa.array([20240101, 20231231], type=pa.int64())})
+    path = write_read_only_fixture(tmp_path, source, "ds")
+    config = build_config(tmp_path, "t", path, [_ds_column(date_format="%Y%m%d")])
+    for flag in (False, True):
+        with pytest.raises(PlanCompileError) as exc:
+            _run(config, path, flag=flag)
+        assert exc.value.code == "column_shape_mismatch"
 
 
 def test_quarantine_configured_job_takes_oracle(tmp_path: Path) -> None:

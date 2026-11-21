@@ -324,6 +324,7 @@ class PandasExecutionAdapter:
                     f,
                     sources[t].schema,
                     untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
+                    [c for (table, c) in ctx.native_date_columns if table == t],
                 )
                 for t, f in frames.items()
             },

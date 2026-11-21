@@ -17,6 +17,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.execution._errors import DeclaredCastValueError
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.plan import PlanCompileError
 
@@ -296,8 +297,9 @@ class TestBucketizeNeedsADeclaration:
         )
         src_path = _write_source(tmp_path, src)
         config = _bucketize_config(src_path, str(tmp_path / "t.out.parquet"), declared=True)
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(DeclaredCastValueError) as exc_info:
             run_pipeline(config, {"t": pq.read_table(src_path)}, engine_version="0.1.0")
+        assert exc_info.value.code == "declared_integer_invalid"
         assert "bad1" not in str(exc_info.value)
         assert not (tmp_path / "t.out.parquet").exists()
 

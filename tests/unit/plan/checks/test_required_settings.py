@@ -61,7 +61,9 @@ _EMPTY = Profile(
 
 def _config(strategy: str, **column: Any) -> dict[str, Any]:
     entry = {"name": "name", "strategy": strategy, **column}
-    return {"tables": [{"name": "customers", "columns": [entry]}]}
+    # A CSV source is text, so a strategy that reads dates is refused config-only, before any read.
+    sources = {"customers": {"type": "file", "format": "csv", "path": "/dev/null"}}
+    return {"sources": sources, "tables": [{"name": "customers", "columns": [entry]}]}
 
 
 def _without(strategy: str, path: tuple[str, ...]) -> dict[str, Any]:

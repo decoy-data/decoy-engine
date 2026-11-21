@@ -167,7 +167,7 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
     """(table, column) of each date_shift column that declares a date parse format.
 
     These are the columns that may run `date_shift` with no `date_format`: the declared contract
-    parses the cells first and the handler sees dates. The one list the runtime backstop reads.
+    parses the cells first and the handler sees dates. They keep their legacy text output.
     """
     block = getattr(plan, "declared_casting", None)
     return frozenset(

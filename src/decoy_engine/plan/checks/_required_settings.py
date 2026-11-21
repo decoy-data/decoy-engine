@@ -12,33 +12,40 @@ message only: no submitted value and no callable predicate, so a refusal cannot 
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterator
 from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes, SourceFacts
+from decoy_engine.contracts.column_shape import (
+    TYPED_DATE_SHAPES,
+    ColumnShape,
+    ColumnShapes,
+    SourceFacts,
+)
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
-    ShapeProblem,
+    SHAPE_REQUIREMENTS_BY_STRATEGY,
     StrategyRequirement,
     lookup_path,
     requirement_applies,
     requirement_missing,
     requirements_for,
     shape_declaration_needed,
-    shape_problem,
+    shape_mismatch_message,
     shape_requirement_for,
 )
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.plan.checks._column_shapes import build_column_shapes
+from decoy_engine.plan.checks._column_shapes import build_column_shapes, shape_reading_columns
 from decoy_engine.relationships import composite_bindings
 
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
     "StrategyRequirement",
     "check_required_strategy_settings",
+    "column_shape_warnings",
     "requirements_for",
 ]
 
@@ -65,47 +72,95 @@ def _shape_satisfied(
     shaped = shape_requirement_for(strategy, req)
     if shaped is None:
         return False
+    given = lookup_path(col, req.path)
+    if given is not None and not isinstance(given, str):
+        return False  # a non-string setting is refused whatever the shape, never ignored
     if shaped.declared_counts and _declared_date_format(col):
         return True
     return not shape_declaration_needed(shaped, shape, config_only=config_only)
 
 
-def _shape_problems(
-    table: dict[str, Any], col: dict[str, Any], shapes: ColumnShapes, *, config_only: bool
-) -> Iterator[tuple[ShapeProblem, str]]:
-    """Each refusal the column's shape gives its strategy, with its config path.
+def _shape_mismatch(
+    table: dict[str, Any], col: dict[str, Any], shapes: ColumnShapes
+) -> PlanCompileError | None:
+    """The refusal for a column whose shape its strategy cannot read, or None."""
+    strategy = col.get("strategy")
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy) if isinstance(strategy, str) else None
+    if shaped is None:
+        return None
+    t, c = table.get("name", "?"), col.get("name", "?")
+    provider_config = col.get("provider_config")
+    message = shape_mismatch_message(
+        str(strategy),
+        shaped,
+        shapes.get((t, c), ColumnShape.UNKNOWN),
+        c,
+        t,
+        provider_config if isinstance(provider_config, dict) else None,
+    )
+    if message is None:
+        return None
+    return PlanCompileError(
+        code=reasons.plan.COLUMN_SHAPE_MISMATCH, path=f"tables.{t}.columns.{c}", message=message
+    )
 
-    A `nested` child reads text whatever its parent says: it has no declaration of its own.
+
+def _undeclared_casts(
+    table: dict[str, Any], col: dict[str, Any], shapes: ColumnShapes, *, config_only: bool
+) -> Iterator[tuple[StrategyRequirement, str]]:
+    """Each numeric strategy that reads text without the F06 cast that makes it a number.
+
+    The cast is the column's own, so a `nested` child, which reads text whatever its parent says,
+    has none and is always refused.
     """
     where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
     strategy = col.get("strategy")
-    if isinstance(strategy, str):
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy) if isinstance(strategy, str) else None
+    if shaped is not None and shaped.cast_declared and shaped.requirement is not None:
         shape = shapes.get((table.get("name", "?"), col.get("name", "?")), ColumnShape.UNKNOWN)
-        problem = shape_problem(
-            strategy, shape, _provider_config(col.get("provider_config")), config_only=config_only
-        )
-        if problem is not None:
-            leaf = (
-                "logical_type" if problem.code == reasons.plan.COLUMN_SHAPE_REQUIRED else "strategy"
-            )
-            yield problem, f"{where}.{leaf}"
+        if shape_declaration_needed(shaped, shape, config_only=config_only):
+            yield shaped.requirement, f"{where}." + ".".join(shaped.requirement.path)
     if strategy != "nested" or not isinstance(col.get("provider_config"), dict):
         return
     for child in nested_children(col["provider_config"]):
-        if not isinstance(child.strategy, str):
-            continue
-        problem = shape_problem(
-            child.strategy,
-            ColumnShape.TEXT,
-            _provider_config(child.strategy_config),
-            config_only=config_only,
+        child_shaped = (
+            SHAPE_REQUIREMENTS_BY_STRATEGY.get(child.strategy)
+            if isinstance(child.strategy, str)
+            else None
         )
-        if problem is not None:
-            yield problem, f"{where}.{child.config_path}.strategy"
+        if (
+            child_shaped is not None
+            and child_shaped.cast_declared
+            and child_shaped.requirement is not None
+            and shape_declaration_needed(child_shaped, ColumnShape.TEXT, config_only=config_only)
+        ):
+            yield child_shaped.requirement, f"{where}.{child.config_path}.strategy"
 
 
-def _provider_config(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def column_shape_warnings(config: dict[str, Any], shapes: ColumnShapes) -> tuple[str, ...]:
+    """One value-free warning per ``date_format`` set on a column that is already a date.
+
+    The format is accepted and not used: the strategy reads the typed value and writes the same
+    type back. A column that declares its own F06 parse format is not warned (F06 refuses the pair).
+    """
+    out: list[str] = []
+    for table, col in shape_reading_columns(config):
+        shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(col.get("strategy", ""))
+        if (
+            shaped is None
+            or shaped.requirement is None
+            or shaped.family != "date"
+            or col.get("logical_type") is not None
+        ):
+            continue
+        shape = shapes.get((table, col["name"]), ColumnShape.UNKNOWN)
+        fmt = lookup_path(col, shaped.requirement.path)
+        if shape in TYPED_DATE_SHAPES and not requirement_missing(fmt):
+            out.append(
+                f"{reasons.plan.COLUMN_SHAPE_FORMAT_UNUSED}: column {col['name']!r} in table "
+                f"{table!r}: date_format is not used: the source column is already a date."
+            )
+    return tuple(out)
 
 
 def _missing_in_nested(
@@ -192,8 +247,12 @@ def check_required_strategy_settings(
         for col in table.get("columns") or []:
             if not isinstance(col, dict):
                 continue
-            for req, path in _missing_requirements(
-                table, col, derived, resolved, config_only=config_only
+            mismatch = _shape_mismatch(table, col, resolved)
+            if mismatch is not None:
+                raise mismatch
+            for req, path in itertools.chain(
+                _missing_requirements(table, col, derived, resolved, config_only=config_only),
+                _undeclared_casts(table, col, resolved, config_only=config_only),
             ):
                 raise PlanCompileError(
                     code=req.code,
@@ -201,14 +260,5 @@ def check_required_strategy_settings(
                     message=(
                         f"column {col.get('name', '?')!r} in table "
                         f"{table.get('name', '?')!r}: {req.message}"
-                    ),
-                )
-            for problem, path in _shape_problems(table, col, resolved, config_only=config_only):
-                raise PlanCompileError(
-                    code=problem.code,
-                    path=path,
-                    message=(
-                        f"column {col.get('name', '?')!r} in table "
-                        f"{table.get('name', '?')!r}: {problem.message}"
                     ),
                 )

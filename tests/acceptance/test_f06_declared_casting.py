@@ -15,6 +15,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.contracts.column_shape import NO_SOURCES
+from tests._column_shapes import INT_DECL
 from tests.acceptance._f06_support import (
     INT64,
     ISO_DATE,
@@ -878,3 +879,31 @@ def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) ->
             sources=NO_SOURCES,
         )
     assert refused_plan.value.code == "column_shape_required"
+
+    # With the recommended declaration on `age` the config compiles, and every other plan line is
+    # the frozen baseline's: only the age column, its shape, the hashes and the version move.
+    import yaml
+
+    from decoy_engine.plan._serialize import plan_to_yaml
+
+    declared_cfg = copy.deepcopy(run_cfg)
+    declared_cfg["tables"][0]["columns"][1].update(INT_DECL)
+    declared = compile_plan(
+        declared_cfg,
+        profile_source(declared_cfg, seed=7),
+        decoy_engine_version="legacy-fixture",
+        sources=NO_SOURCES,
+    )
+    got = yaml.safe_load(plan_to_yaml(declared))
+    frozen = yaml.safe_load(fixture["plan_yaml_at_baseline"])
+    for plan_dict in (got, frozen):
+        for key in (
+            "plan_version",
+            "pipeline_config_hash",
+            "profile_hash",
+            "column_shapes",
+            "declared_casting",
+        ):
+            plan_dict.pop(key, None)
+        plan_dict["seed_envelope"]["per_table"]["p"]["per_column"].pop("age")
+    assert got == frozen

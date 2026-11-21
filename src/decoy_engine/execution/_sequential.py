@@ -529,6 +529,7 @@ def run_sequential(
                         untouched_columns(
                             nodes_by_table.get(table, ()), src_schema.names, registry
                         ),
+                        [c for (t, c) in ctx.native_date_columns if t == table],
                     ),
                     faker_pin,
                 )
