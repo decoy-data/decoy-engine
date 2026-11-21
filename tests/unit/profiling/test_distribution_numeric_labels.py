@@ -56,3 +56,21 @@ def test_fallback_counts_match_pd_cut_right_closed() -> None:
     expected = pd.cut(pd.Series(values), bins=10, include_lowest=True).value_counts().sort_index()
     counts, _ = histogram_for_range(values, 10, 0.0, 10.0, right_closed=True)
     assert list(counts) == [int(c) for c in expected.values] == [2, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+
+def test_fallback_counts_match_pd_cut_on_a_float_boundary() -> None:
+    """A value one ULP from an edge must land in the bin pandas picks."""
+    from decoy_engine.internal.pandas_compat import histogram_for_range
+
+    lo, hi = -0.25593567343955326, 0.2580577921582976
+    values = np.array([lo, -0.15313698031998307, hi])
+    expected = pd.cut(pd.Series(values), bins=10, include_lowest=True).value_counts().sort_index()
+    counts, _ = histogram_for_range(values, 10, lo, hi, right_closed=True)
+    assert list(counts) == [int(c) for c in expected.values] == [1, 1, 0, 0, 0, 0, 0, 0, 0, 1]
+
+
+def test_a_ten_bin_pandas_result_with_an_infinite_edge_is_not_charted_from_pandas() -> None:
+    cells = -1.8e305 * (1 - np.linspace(0, 1, 11))
+    dist = _distribution_numeric(pd.Series(cells))
+    assert dist is not None and len(dist.labels) == 10 and sum(dist.data) == len(cells)
+    assert not any("nan" in label or "inf" in label for label in dist.labels)

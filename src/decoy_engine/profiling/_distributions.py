@@ -79,7 +79,11 @@ def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
         bin_counts = binned.value_counts().sort_index()
         data = [int(c) for c in bin_counts.values]
         labels = [_edge_label(iv.left, iv.right) for iv in bin_counts.index]
-        charted = len(data) == 10 and sum(data) == len(series)
+        # pd.cut widens the outer edges by 0.1 percent, which can pass float max to +-inf.
+        finite_edges = all(
+            math.isfinite(iv.left) and math.isfinite(iv.right) for iv in bin_counts.index
+        )
+        charted = len(data) == 10 and sum(data) == len(series) and finite_edges
     except ValueError:
         charted = False
     if not charted:

@@ -131,13 +131,18 @@ def _right_closed_histogram(
 ) -> tuple[Any, Any]:
     """`bins` equal-width bins over `[lo, hi]`, each `(left, right]` and `lo` in the first.
 
-    This is the `pd.cut(include_lowest=True)` rule. Each edge is `lo*(1-t) + hi*t`, so no
-    intermediate passes float max (`hi - lo` does for `[-max, max]`), and the edges never
-    decrease. Edges may repeat when the range sits at the float floor; the counts still add up.
+    This is the `pd.cut(include_lowest=True)` rule. When `hi - lo` is finite the edges are
+    exactly `np.linspace(lo, hi, bins + 1)`, as in pandas, so a value on a boundary lands in
+    the same bin. Only when `hi - lo` overflows (`[-max, max]`) is each edge `lo*(1-t) + hi*t`,
+    which never passes float max, with the edges kept nondecreasing. Edges may repeat when the
+    range sits at the float floor; the counts still add up.
     """
-    t = np.linspace(0.0, 1.0, bins + 1)
-    edges = np.maximum.accumulate(lo * (1.0 - t) + hi * t)
-    edges[0], edges[-1] = lo, hi
+    if np.isfinite(hi - lo):
+        edges = np.linspace(lo, hi, bins + 1)
+    else:
+        t = np.linspace(0.0, 1.0, bins + 1)
+        edges = np.maximum.accumulate(lo * (1.0 - t) + hi * t)
+        edges[0], edges[-1] = lo, hi
     codes = np.clip(np.searchsorted(edges, values, side="left") - 1, 0, bins - 1)
     return np.bincount(codes, minlength=bins), edges
 
