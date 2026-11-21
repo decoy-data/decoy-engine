@@ -309,7 +309,10 @@ def _gated_case(tmp: Path, strategy: str) -> tuple[dict[str, Any], dict[str, pa.
 
 
 # The gated strategies unified admission takes today; the others fall back to the full-frame lane.
-UNIFIED_STRATEGIES = {"redact", "truncate", "text_redact"}
+# hash and bucket_perturb are admitted only when the companion is installed.
+UNIFIED_STRATEGIES = {"redact", "truncate", "text_redact"} | (
+    {"hash", "bucket_perturb"} if COMPANION else set()
+)
 
 
 ALL_GATED = sorted({*GATED, *GATED_SOURCES})
