@@ -201,6 +201,20 @@ class WindowedDateConfig:
         )
 
 
+def validate_window_config(cfg: dict[str, Any]) -> None:
+    """Run the parse-time window checks on a mask column's `provider_config` at plan compile.
+
+    Skipped when the anchor or a day bound is absent or not an integer: those shapes are refused
+    elsewhere, with their own codes, and this must not change which error a config raises.
+    """
+
+    def _is_int(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
+
+    if cfg.get("anchor") and _is_int(cfg.get("max_days")) and _is_int(cfg.get("min_days", 0)):
+        WindowedDateConfig.from_dict(cfg)
+
+
 def _draw_offsets(
     rows: Sequence[int], config: WindowedDateConfig, seed: bytes, namespace: str
 ) -> npt.NDArray[np.int64]:
