@@ -193,8 +193,9 @@ def stamp_source(text: str, version: str) -> str:
     """``text`` with each ``since=UNRELEASED`` / ``deprecated_in=UNRELEASED`` argument set to
     ``version``; strings and comments are untouched. The UNRELEASED import stays even when nothing
     uses it: a branch that adds a new ``since=UNRELEASED`` code merges clean against a main whose
-    stamp removed the import, then raises NameError at load. Every spec module keeps it (ruff
-    ignores F401 there, see pyproject.toml), and tests/sentry/test_reason_unreleased_import.py enforces that."""
+    stamp removed the import, then raises NameError at load. Every reason module binds it as the
+    re-export ``UNRELEASED as UNRELEASED`` (so F401 stays on), enforced by
+    tests/sentry/release/test_reason_unreleased_import.py."""
     if "=UNRELEASED" not in text:
         return text
     spans = _literal_spans(text)

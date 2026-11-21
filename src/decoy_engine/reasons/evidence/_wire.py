@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from enum import Enum
 from types import MappingProxyType
 
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 from decoy_engine.reasons._types import ReasonCode
 from decoy_engine.reasons.evidence import _composite as _c
 from decoy_engine.reasons.evidence import _signed as _s
