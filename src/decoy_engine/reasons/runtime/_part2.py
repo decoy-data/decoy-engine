@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -349,12 +349,12 @@ CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE = _d(
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
     "generate_fitted_reference_bounds_conflict",
     "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 PARENT_LOOKUP_KEY_MISSING = _d(
     "parent_lookup_key_missing",
@@ -374,17 +374,17 @@ PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
 REFERENCE_BOUNDS_UNSATISFIED = _d(
     "reference_bounds_unsatisfied",
     "Reference column per-parent bounds did not hold after the repair.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 REFERENCE_PARENT_POOL_EMPTY = _d(
     "reference_parent_pool_empty",
     "Reference column has rows to fill but its parent column has no keys.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
     "reference_weights_length_mismatch",
     "Reference column weights count does not match its parent key count.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 
 # Date-window refusals, raised where the anchor is parsed and shifted, for masked and generated

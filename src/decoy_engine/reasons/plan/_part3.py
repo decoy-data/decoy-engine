@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CONFIG_VALUE_NOT_JSON",
@@ -160,32 +161,32 @@ GENERATE_LOCALE_UNKNOWN = _d(
 GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER = _d(
     "generate_faker_type_is_domain_provider",
     "Generate column names a registry provider in faker_type; use type provider instead.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_FIELD_REQUIRED = _d(
     "generate_provider_field_required",
     "Generate column uses a composite provider without naming the field it takes.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_FIELD_UNEXPECTED = _d(
     "generate_provider_field_unexpected",
     "Generate column sets field or group on a provider that has no fields.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_LOCALE_UNSUPPORTED = _d(
     "generate_provider_locale_unsupported",
     "Generate column asks for a locale the provider does not support.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_UNKNOWN = _d(
     "generate_provider_unknown",
     "Generate column names a provider that is not in the registry.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_PROVIDER_UNSUPPORTED = _d(
     "generate_provider_unsupported",
     "Generate column names a provider that generation cannot draw from.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 GENERATE_OPTION_INVALID = _d(
     "generate_option_invalid",
@@ -266,7 +267,7 @@ PINNED_LOOKUP_UNSUPPORTED = _d(
 PINNED_PROVIDER_UNSUPPORTED = _d(
     "pinned_provider_unsupported",
     "Provider columns are not available in pinned mode.",
-    since="1.32.0",
+    since=UNRELEASED,
 )
 # A summary is the whole message beside the table and column names. The run-time twin in the
 # `runtime` namespace carries the same text for a plan that never went through pinned compile.

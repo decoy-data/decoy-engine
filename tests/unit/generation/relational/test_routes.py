@@ -435,9 +435,11 @@ def test_at13_a_weights_length_mismatch_refuses_at_run(route: str, tmp_path: Pat
 
 
 @pytest.mark.parametrize(("namespace", "code"), NEW_CODES)
-def test_at14_new_codes_are_registered_in_the_right_catalog(namespace: str, code: str) -> None:
+def test_at14_new_codes_are_registered_unreleased_in_the_right_catalog(
+    namespace: str, code: str
+) -> None:
     spec = reasons.get(namespace, code)
-    assert spec.since == "1.32.0"
+    assert spec.since == reasons.UNRELEASED
     phases = {rule.phase for rule in spec.rules}
     if namespace == "config":
         assert phases == {reasons.Phase.CONFIGURATION}
