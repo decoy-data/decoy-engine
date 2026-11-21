@@ -6,6 +6,6 @@ column's child, so the one reader lives below them.
 
 from __future__ import annotations
 
-from decoy_engine._nested_json._rules import NestedChild, nested_children
+from decoy_engine._nested_json._rules import UNSET, NestedChild, effective_provider, nested_children
 
-__all__ = ["NestedChild", "nested_children"]
+__all__ = ["UNSET", "NestedChild", "effective_provider", "nested_children"]

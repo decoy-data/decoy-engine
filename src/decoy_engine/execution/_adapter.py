@@ -211,6 +211,10 @@ class StrategyContext:
     # mirroring `_orphan.py`'s prior_table save/restore since nested
     # dispatch can itself run mid-dispatch of an enclosing node.
     nested_outer_column: str = ""
+    # The draw identity of one rule of a nested column (`<column>.rules[<i>]`), so two rules never
+    # share a draw. Empty for the single form and outside a nested child. `nested_outer_column`
+    # stays the real column for evidence.
+    nested_draw_column: str = ""
     # Codex round-7 P2 CROSS-INVOCATION MASKING/EVIDENCE DIVERGENCE
     # remediation: the job-wide pinned corpus record per (table, column). The
     # round-6 fix pinned one corpus record within a SINGLE `CodeSetHandler.run`
@@ -502,10 +506,12 @@ def column_draw_identity(table: str, column: str) -> str:
 
 
 def draw_column(ctx: Any, column: str) -> str:
-    """The column a draw is keyed on: the outer column when running as a nested child.
+    """The column a draw is keyed on: the rule identity or outer column of a nested child.
 
     `getattr` because a handler may be given a minimal context that predates the field."""
-    return str(getattr(ctx, "nested_outer_column", "") or column)
+    return str(
+        getattr(ctx, "nested_draw_column", "") or getattr(ctx, "nested_outer_column", "") or column
+    )
 
 
 def context_draw_identity(ctx: Any, column: str, *, strategy: str) -> str:

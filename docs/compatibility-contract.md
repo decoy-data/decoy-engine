@@ -1266,6 +1266,24 @@ the child as integers and a null, not as `float64` with `NaN`, so `hash` and `to
 output of `NaN` or a pandas null is written as JSON `null`; an infinite output fails the row
 (`nested_child_non_finite`). A null-free leaf list and an all-float-exact cell give the bytes they gave before.
 
+**Nested `rules` form (F07 E3b).** Additive, unreleased: a `nested` column may set
+`provider_config.rules`, a list of rules each with `target`, `strategy`, `strategy_config` and an optional
+`namespace` (absent means the column's), instead of the single `target` and `strategy`. Setting both is refused
+(`nested_rules_and_target_both_set`), as is an empty or non-list `rules` (`nested_rules_empty`), two rules with one
+target (`nested_rule_target_duplicate`) and a second `code_set` rule (`nested_rules_code_set_repeated`). The
+required-settings rows for `nested` carry an additive `unless_present` path, so a `rules` column is not refused for
+a missing top-level target or strategy. At run time every rule matches on the parsed cell before any write; two
+rules that reach the same position, or an ancestor and its descendant, fail the column (`nested_rules_overlap`).
+Each rule draws on its own identity (`<column>.rules[<i>]`) while `code_set` evidence and attribution keep the real
+column. The draw identity is the rule's position in the list, so reordering rules changes their draws. A
+rule is a closed set of keys (`target`, `strategy`, `strategy_config`, `namespace`); any other key, such as
+`when`, is refused (`nested_rule_key_unknown`), and a `namespace` that is not a non-blank string is refused
+(`nested_rule_namespace_invalid`). A `faker` rule takes its provider from its own `strategy_config.provider`, else
+from the column's `provider`; with neither it is refused (`nested_rule_faker_provider_missing`), and a rule that
+sets the `provider` key to anything but a non-blank string is refused (`nested_rule_provider_invalid`) with no
+fallback to the column's. A rule provider the registry does not know, or that is not poolable, is refused at the rule. The single form
+is unchanged and keeps taking the column's `provider`.
+
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,

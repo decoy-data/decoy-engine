@@ -48,6 +48,7 @@ __all__ = [
     "NESTED_CHILD_STRATEGY_UNKNOWN",
     "NESTED_JSONPATH_PARSE_ERROR",
     "NESTED_RECURSIVE_NESTED_REJECTED",
+    "NESTED_RULES_OVERLAP",
     "NESTED_STRATEGY_UNSET",
     "NESTED_TARGET_MATCHED_NOTHING",
     "NESTED_TARGET_UNSET",
@@ -173,6 +174,11 @@ NESTED_CHILD_STRATEGY_UNKNOWN = _d(
 NESTED_JSONPATH_PARSE_ERROR = _d("nested_jsonpath_parse_error", "Nested jsonpath parse error.")
 NESTED_RECURSIVE_NESTED_REJECTED = _d(
     "nested_recursive_nested_rejected", "Nested recursive nested rejected."
+)
+NESTED_RULES_OVERLAP = _d(
+    "nested_rules_overlap",
+    "Two rules of one nested column select the same position or an ancestor and its descendant.",
+    since=UNRELEASED,
 )
 NESTED_STRATEGY_UNSET = _d("nested_strategy_unset", "Nested strategy unset.")
 NESTED_TARGET_MATCHED_NOTHING = _d(
