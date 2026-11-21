@@ -50,7 +50,6 @@ _SHAPES: dict[str, list[str | None]] = {
     "all_null": [None] * 7,
     "single_row": [date_value(3)],
     "ragged": _RAGGED,
-    "unparseable_mixed": [date_value(1), "not-a-date", None, "2021-13-45", date_value(2), ""],
     "null_block_then_valued": [None] * 7 + [date_value(i) for i in range(9)],
     "valued_then_null_block": [date_value(i) for i in range(9)] + [None] * 7,
 }
@@ -180,11 +179,6 @@ def _reassembled(run_out: list[pa.Table]) -> pa.DataType:
 _TYPE_CASES: dict[str, tuple[Callable[[], list[pa.Table]], list[pa.DataType], pa.DataType]] = {
     "zero_row": (lambda: [source([])], [pa.null()], pa.null()),
     "non_empty_all_null": (lambda: [source([None] * 5)], [pa.null()], pa.null()),
-    "all_unparseable_non_null": (
-        lambda: [source(["bad", "worse", "2021-13-45"])],
-        [pa.string()],
-        pa.string(),
-    ),
     "valued": (lambda: [source([date_value(i) for i in range(5)])], [pa.string()], pa.string()),
     "null_then_valued": (
         lambda: [source([None] * 4), source([date_value(i) for i in range(4)])],
@@ -276,7 +270,6 @@ def test_derive_calls_are_one_per_distinct_bucket_size_per_column_chunk(
     chunks_values: list[list[str | None]] = [
         ["2020-02-10", "2021-02-10", "2024-02-29", "2020-03-05"],
         [None, None],
-        ["not-a-date", "bad"],
         [],
         ["2020-02-10", "2020-02-11"],
         ["2021-01-01", "2021-04-01", "2021-07-01", "2021-10-01", None, "2020-01-01"],
@@ -289,20 +282,37 @@ def test_derive_calls_are_one_per_distinct_bucket_size_per_column_chunk(
     assert run.ev[0].native_admitted is True
     expected = [expected_derive_sizes(v, bucket) for v in chunks_values]
     assert sorted(spy.pool_sizes()) == sorted(s for sizes in expected for s in sizes)
-    # Degenerate chunks (null-only, unparseable-only, empty) contribute no derive call.
-    assert expected[1] == expected[2] == expected[3] == []
+    # Degenerate chunks (null-only, empty) contribute no derive call.
+    assert expected[1] == expected[2] == []
     # kernel_calls counts branch executions, a different counter from derive calls.
     assert run.ev[0].kernel_calls["bucket_perturb"] == len(chunks_values)
 
 
 # ---------------------------------------------------------------------------
-# 5. Null and unparseable preservation across chunk boundaries.
+# 5. Null preservation, and unparseable cells as row errors, across chunk boundaries.
 # ---------------------------------------------------------------------------
 
 
 @NEEDS_COMPANION
 @pytest.mark.parametrize("size", [1, 2, 3, 50])
-def test_nulls_and_unparseable_values_pass_through_unchanged(size: int) -> None:
+def test_nulls_stay_null_across_chunk_boundaries(size: int) -> None:
+    values: list[str | None] = [date_value(1), None, date_value(2), None, None, date_value(3)]
+    native, forced = run_pair([bp_col(), passthrough("p")], split(source(values), size))
+    assert_same_as_oracle(native, forced)
+    got = column_values(native.out, "d")
+    for src, out in zip(values, got, strict=True):
+        if src is None:
+            assert out is None
+    assert any(got[k] != values[k] for k in (0, 2, 5))
+
+
+@NEEDS_COMPANION
+@pytest.mark.parametrize("size", [1, 2, 3, 50])
+def test_unparseable_cells_are_the_same_row_errors_on_both_legs(size: int) -> None:
+    """The native chunk leg and the oracle chunk leg both stop on the same cells with the
+    same value-free records; neither yields a chunk that holds the source text."""
+    from decoy_engine.errors import RowErrorsFailedError
+
     values: list[str | None] = [
         date_value(1),
         None,
@@ -313,24 +323,19 @@ def test_nulls_and_unparseable_values_pass_through_unchanged(size: int) -> None:
         "",
         date_value(3),
     ]
-    native, forced = run_pair([bp_col(), passthrough("p")], split(source(values), size))
-    assert_same_as_oracle(native, forced)
-    got = column_values(native.out, "d")
-    for src, out in zip(values, got, strict=True):
-        if src is None or src in ("not-a-date", "2021-13-45", ""):
-            assert out == src
-    parseable = (0, 3, 7)
-    assert any(got[k] != values[k] for k in parseable)
-
-
-@NEEDS_COMPANION
-def test_an_all_unparseable_chunk_stays_string_typed() -> None:
-    run = run_one(
-        make_config([bp_col(), passthrough("p")]),
-        [source(["junk", "more junk"]), source([date_value(1)])],
-    )
-    assert _types(run.out) == [pa.string(), pa.string()]
-    assert column_values(run.out, "d")[:2] == ["junk", "more junk"]
+    chunks = split(source(values), size)
+    with pytest.raises(RowErrorsFailedError) as native:
+        run_one(make_config([bp_col(), passthrough("p")]), chunks)
+    with pytest.raises(RowErrorsFailedError) as oracle:
+        run_one(
+            make_config([bp_col(), passthrough("p"), force_oracle(FORCE)]),
+            [with_force(c) for c in chunks],
+        )
+    assert native.value.records == oracle.value.records
+    assert {r.reason for r in native.value.records} == {
+        "value is not a parseable date under bucket_perturb"
+    }
+    assert "not-a-date" not in str(native.value)
 
 
 # ---------------------------------------------------------------------------

@@ -504,18 +504,21 @@ class TestApplyBucketPerturbCore:
         out = apply_bucket_perturb(pd.Series(["2024-06-15"]), "month", _SEED, "dates", None)
         assert list(out) == ["2024-06-12"]
 
-    def test_unparseable_value_passes_through_unchanged(self):
-        """An unparseable cell is preserved verbatim while its neighbours are
-        bucketed. Pins `errors="coerce"` (else the parse raises) and the `~null_mask`
-        term (else the NaT cell is processed, not skipped)."""
+    def test_unparseable_value_is_reported_not_perturbed(self):
+        """An unparseable cell is reported as a format error and left out of the bucketing,
+        while its neighbours are bucketed. Pins `errors="coerce"` (else the parse raises)
+        and the `~null_mask` term (else the NaT cell is processed, not skipped)."""
+        errors: list[int] = []
         out = apply_bucket_perturb(
             pd.Series(["2024-06-15", "not-a-date", "2024-08-20"]),
             "month",
             _SEED,
             "dates",
             "%Y-%m-%d",
+            errors,
         )
         assert list(out) == ["2024-06-12", "not-a-date", "2024-08-11"]
+        assert errors == [1]
 
     def test_value_after_a_null_is_still_bucketed(self):
         """A null cell is skipped with `continue`, not `break`; the value after it

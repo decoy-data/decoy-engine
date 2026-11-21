@@ -32,11 +32,6 @@ STAMP = "%Y-%m-%d %H:%M:%S"
 _BASE = [
     "2024-03-05",
     None,
-    "not-a-date",
-    "",
-    "2024-13-45",
-    "9999-12-31",
-    "2299-01-01",
     "1900-01-01",
     "2024-02-29",
     "2023-12-31",
@@ -59,7 +54,8 @@ def _generated(fmt: str) -> list[str]:
 
 
 def iso_column() -> pa.Array:
-    """Nulls, unparseable text, out-of-range sentinels and leap-year quarter edges, then dates."""
+    """Nulls and leap-year quarter edges, then dates. Every non-null cell parses: bucket_perturb
+    refuses an unparseable cell, so such cells live only in the refusal tests."""
     return pa.array([*_BASE, *_generated(ISO)], pa.string())
 
 
@@ -79,7 +75,7 @@ def stamp_column() -> pa.Array:
 
 
 def unparseable_column() -> pa.Array:
-    """Present but never parseable under ISO: the output stays a string column."""
+    """Present but never parseable under ISO: bucket_perturb refuses it (row errors or a coded error)."""
     text = ["nope", "", "2024-99-99", None, "x" * 40, "31/12/2024"]
     return pa.array([*text, *text], pa.string())
 
@@ -127,8 +123,8 @@ def declined_sources() -> dict[str, pa.Array]:
 
 # Formats that clear preflight and mask on Python but carry a tz directive, which native declines.
 TZ_COLUMNS: dict[str, tuple[str, list[str | None]]] = {
-    "d_tz_z": ("%Y-%m-%d %z", ["2024-03-05 +0100", None, "2024-03-05 junk", "2021-12-31 +0100"]),
-    "d_tz_name": ("%Y-%m-%d %Z", ["2024-03-05 UTC", None, "2024-03-05 junk", "2021-12-31 UTC"]),
+    "d_tz_z": ("%Y-%m-%d %z", ["2024-03-05 +0100", None, "2024-03-05 +0100", "2021-12-31 +0100"]),
+    "d_tz_name": ("%Y-%m-%d %Z", ["2024-03-05 UTC", None, "2024-03-05 UTC", "2021-12-31 UTC"]),
 }
 
 
@@ -203,7 +199,6 @@ MAIN_SEEDS: tuple[tuple[str, Any], ...] = (
     ("b_stamp", bucket_seed("month", STAMP)),
 )
 SHAPE_SEEDS: tuple[tuple[str, Any], ...] = (
-    ("b_unparse", bucket_seed("week")),
     ("b_allnull", bucket_seed("week")),
     ("b_tail_null", bucket_seed("month")),
     ("b_head_null", bucket_seed("month")),
@@ -225,10 +220,9 @@ def main_payload() -> pa.Table:
 
 
 def shape_payload() -> pa.Table:
-    """Twelve-row columns whose per-batch shape (all-null, all-unparseable) differs by batch."""
+    """Twelve-row columns whose per-batch shape (all-null, null head or tail) differs by batch."""
     return pa.table(
         {
-            "b_unparse": unparseable_column(),
             "b_allnull": all_null_column(),
             "b_tail_null": tail_null_column(),
             "b_head_null": head_null_column(),

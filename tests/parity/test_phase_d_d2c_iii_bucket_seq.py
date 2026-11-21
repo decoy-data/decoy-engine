@@ -36,7 +36,6 @@ from tests.parity._d1b1_bucket_data import (
     TZ_COLUMNS,
     all_null_column,
     declined_sources,
-    unparseable_column,
 )
 from tests.parity._d2a_seq_data import RecordingSink, callable_sink
 from tests.parity._d2b_shapes import (
@@ -73,7 +72,7 @@ from tests.parity._seq_witness import install as install_hash
 NATIVE = "rust_companion"
 PYTHON = "python_scalar"
 SENTINEL = "2262-04-10"
-NEAR_BOUNDARY = ["2024-03-05", SENTINEL, None, "2023-07-19", "not-a-date", "2021-01-01"]
+NEAR_BOUNDARY = ["2024-03-05", SENTINEL, None, "2023-07-19", "2022-12-12", "2021-01-01"]
 
 
 def _entries(result: Any) -> list[dict[str, Any]]:
@@ -207,7 +206,7 @@ def _decline_cases() -> list[tuple[str, pa.Array, Any, str]]:
         ),
         (
             "d_noformat",
-            strs(["2024-03-05", None, "2021-11-14", "junk"]),
+            strs(["2024-03-05", None, "2021-11-14", "2022-02-02"]),
             bucket_seed("month", None),
             "bucket_perturb_config_declined:d_noformat:bucket_perturb_requires_date_format",
         ),
@@ -334,8 +333,8 @@ def test_a_preserved_near_boundary_sentinel_survives_without_triggering_the_rang
     [entry] = _entries(result)
     assert entry["executed_backend"] == NATIVE and entry["preserved_rows"] == 1
     assert result.outputs["P"].column("b").to_pylist()[1] == SENTINEL
-    # The kernel saw the three parseable non-preserved rows and never the sentinel.
-    assert sum(c.rows for c in kernel.calls) == 3
+    # The kernel saw the four parseable non-preserved rows and never the sentinel.
+    assert sum(c.rows for c in kernel.calls) == 4
     _assert_matches_oracle(result, oracle)
     assert result.quality_metrics["date_preserve"][0]["preserved_rows"] == 1
 
@@ -380,12 +379,12 @@ def test_an_all_preserved_column_makes_no_kernel_call_and_reports_none(
 def test_a_preserve_list_that_matches_nothing_records_a_zero_count_like_the_oracle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cells = ["2024-03-05", None, "2023-07-19", "junk"]
+    cells = ["2024-03-05", None, "2023-07-19", "2022-02-02"]
     seed = bucket_seed("month", extra=_preserve("2000-01-01"))
     result, oracle, kernel = _preserve_run(monkeypatch, cells, seed)
     [entry] = _entries(result)
     assert entry["executed_backend"] == NATIVE and entry["preserved_rows"] == 0
-    assert [c.rows for c in kernel.calls] == [2]
+    assert [c.rows for c in kernel.calls] == [1, 2]  # one call per distinct bucket size
     assert result.quality_metrics["date_preserve"][0]["preserved_rows"] == 0
     _assert_matches_oracle(result, oracle)
 
@@ -541,10 +540,8 @@ def test_a_bucket_call_inside_a_remap_scope_returns_to_python_untouched() -> Non
     "source",
     [
         all_null_column(),
-        unparseable_column(),
-        pa.array(["not-a-date", None, "2024-13-45", "9999-12-31"], pa.string()),
     ],
-    ids=["all_null", "all_unparseable", "null_unparseable_out_of_range"],
+    ids=["all_null"],
 )
 def test_a_column_that_parses_nothing_makes_no_kernel_call_and_claims_no_backend(
     source: pa.Array, monkeypatch: pytest.MonkeyPatch
@@ -562,7 +559,7 @@ def test_a_single_parseable_row_is_enough_to_claim_the_kernel_ran(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     kernel = install_bucket(monkeypatch, BucketMarkingKernel())
-    cells = [None, "junk", "2024-03-05", ""]
+    cells = [None, None, "2024-03-05", None]
     result = run_seq(bucket_payload_shape({"b": (strs(cells), bucket_seed("week"))}))
     [entry] = _entries(result)
     assert [c.rows for c in kernel.calls] == [1]
@@ -624,7 +621,9 @@ def _mixed_shape(order: list[str]) -> Shape:
         "f": (strs(["1234567890"] * 7), fpe_seed()),
         "c": (strs(SRC), cat_seed()),
         "b": (
-            strs(["2024-03-05", None, "junk", "2021-11-14", "2020-02-29", "", "2023-07-19"]),
+            strs(
+                ["2024-03-05", None, "2022-02-02", "2021-11-14", "2020-02-29", None, "2023-07-19"]
+            ),
             bucket_seed("month"),
         ),
     }

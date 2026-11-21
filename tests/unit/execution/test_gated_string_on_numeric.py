@@ -195,14 +195,16 @@ class TestNullablePredicateAndBucketPerturb:
                 strategy="faker",
             )
 
-    def test_bucket_perturb_passthrough_config_runs_and_preserves_numbers(
+    def test_bucket_perturb_without_a_format_refuses_instead_of_passing_numbers_through(
         self, tmp_path: Path
     ) -> None:
         nums = pa.table({"c": pa.array([1, 2, 3, 4], pa.int64())})
         col = _gate_col(
             "bucket_perturb", namespace="ns_bp", provider_config={"bucket": "month"}, when="c > 2"
         )
-        assert _run(tmp_path, nums, col).column("c").to_pylist() == [1, 2, 3, 4]
+        with pytest.raises(ExecutionError) as exc:
+            _run(tmp_path, nums, col)
+        assert exc.value.code == "bucket_perturb_requires_date_format"
 
     def test_bucket_perturb_that_emits_strings_is_caught_by_execution_guard(
         self, tmp_path: Path

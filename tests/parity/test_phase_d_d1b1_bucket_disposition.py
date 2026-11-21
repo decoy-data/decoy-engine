@@ -43,7 +43,7 @@ UNAVAILABLE = "index_extension_unavailable"
 MODES = ["resident", "sink-batch", "sink-reorder"]
 _PAYLOAD = pa.table(
     {
-        "a": pa.array(["2024-03-05", "2023-07-19", None, "bad"], pa.string()),
+        "a": pa.array(["2024-03-05", "2023-07-19", None, "2022-05-05"], pa.string()),
         "b": pa.array(["2021-01-01", None, "2020-02-29", "2019-12-31"], pa.string()),
     }
 )

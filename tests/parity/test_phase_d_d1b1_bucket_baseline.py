@@ -65,18 +65,15 @@ def test_ooc_bucket_perturb_matches_the_pinned_baseline(
 def test_per_batch_shape_does_not_change_the_pinned_output(
     mode: str, batch_rows: int | None, tmp_path: Path
 ) -> None:
-    """All-null, all-unparseable and trailing/leading-null batches reconcile to the whole-column type."""
+    """All-null and trailing/leading-null batches reconcile to the whole-column type."""
     run = run_chain(
         shape_payload(), SHAPE_SEEDS, batch_rows=batch_rows, **mode_kwargs(mode, tmp_path)
     )
     _check(run.tables, [n for n, _ in SHAPE_SEEDS], sink=mode != "resident")
 
 
-def test_all_null_column_is_null_typed_and_unparseable_present_stays_string() -> None:
+def test_all_null_column_is_null_typed() -> None:
     assert EXPECTED_TYPES["b_allnull"] == "null"
-    assert EXPECTED_TYPES["b_unparse"] == "string"
-    # Unparseable values pass through unchanged, including the empty string and a wrong-format date.
-    assert EXPECTED["b_unparse"][:6] == ["nope", "", "2024-99-99", None, "x" * 40, "31/12/2024"]
 
 
 def test_secret_backed_mask_key_differs_from_job_seed() -> None:
@@ -92,12 +89,11 @@ def test_namespace_binds_the_offset() -> None:
     assert EXPECTED["b_month_ns"] != EXPECTED["b_month"]
 
 
-def test_out_of_range_sentinels_pass_through_unchanged() -> None:
+def test_every_non_null_expected_cell_is_a_parsed_date() -> None:
+    """bucket_perturb refuses unparseable cells, so the frozen fixture holds none."""
     for name in ("b_week", "b_month", "b_quarter"):
-        assert EXPECTED[name][5] == "9999-12-31"
-        assert EXPECTED[name][6] == "2299-01-01"
-        assert EXPECTED[name][2] == "not-a-date"
         assert EXPECTED[name][1] is None
+        assert all(v is None or v[:1].isdigit() for v in EXPECTED[name])
 
 
 @pytest.mark.parametrize("mode", _MODES)

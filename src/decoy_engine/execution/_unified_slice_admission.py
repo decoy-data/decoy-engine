@@ -138,8 +138,8 @@ _OPERATOR_REQUIRED_KERNEL: dict[str, str] = {
     if spec.required_kernel is not None
 }
 
-# The ONE diagnostic obligation the coordinator routes, per operator: date_shift's
-# format_error row errors, which the coordinator collects, rebases, and hands to
+# The one diagnostic obligation the coordinator routes, per operator: the format_error row
+# errors of date_shift and bucket_perturb, which the coordinator collects, rebases, and hands to
 # `finalize_validators_and_quarantine` (a non-empty set raises there and the
 # unified slice reroutes the table to the oracle, which fails identically). Any
 # other obligation (a warning reducer, a second trigger) or any other operator

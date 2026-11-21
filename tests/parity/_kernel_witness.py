@@ -254,7 +254,10 @@ class KernelWitness:
             calls = kwargs.get("derive_calls")
             if calls is not None and sum(calls) > 0:
                 self.native_attempts += 1
-                self._provenance[id(result)] = (NATIVE, result)
+                # An operator that also reports row errors returns `(array, positions)`; the
+                # adapter hands the array on, so that is the object whose provenance is read.
+                out = result[0] if isinstance(result, tuple) else result
+                self._provenance[id(out)] = (NATIVE, out)
             return result
 
         return attempted
