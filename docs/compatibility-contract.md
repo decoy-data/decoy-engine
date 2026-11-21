@@ -291,7 +291,7 @@ The engine already version-tags every persisted artifact with a `name/vN` tag.
 As of this writing the tags include:
 
 ```
-distribution-snapshot/v1   decoy-vault/v2        vault-key/v1
+distribution-snapshot/v1   decoy-vault/v3        vault-key/v2
 ff1-key/v1                 quality-report/v1     synth-report/v1
 quality-diagnostic/v1      quality-fidelity/v1   quality-policy/v1
 quality-shape-fidelity/v1  post-scan-integrity/v3    name-hints/v1
@@ -474,7 +474,7 @@ refuses a config that sets it: see the SUB-STOP correction in section 1); it is 
 
 ### 3.2 The vault (the catastrophic one)
 
-`decoy-vault/v2` + `vault-key/v1` back re-identification. If a new engine version
+`decoy-vault/v3` + `vault-key/v2` back re-identification. If a new engine version
 cannot read an old vault, **users can never unmask the data they already
 masked.** That is unrecoverable, not inconvenient.
 
@@ -488,6 +488,17 @@ by `decoy-vault/v2` without a v1 reader. This is legal only pre-GA because no
 vaults exist in the wild. The forever-readable rule begins at the first
 in-the-wild `decoy-vault/v2` vault. From that point forward, a v2 reader is
 permanent and any future format bump must add a v3 alongside a kept v2 reader.
+
+**Pre-GA hard cutover to v3 (F09 E1, owner decision 2026-11-18):** `decoy-vault/v3`
+(libsodium secretstream, an authenticated header, a key per vault) replaces `decoy-vault/v2`
+(Fernet) with no v2 reader. The owner approved the cut as the PO review that this section and the
+section 5 decision table ask for, because no real v2 vault exists outside Decoy's own machines. It
+differs from the B-6 cut (2026-11-13), which dropped seed-keyed vaults that the 32-byte key floor
+could no longer open; this cut drops secret-keyed v2 vaults that opened before. A v2 file now gives
+`vault_format_unsupported` with the re-mask remedy. The forever-readable rule begins at the first
+real `decoy-vault/v3` vault: from then on the v3 reader, `VAULT_KEY_LABEL` (`vault-key/v2`) and the
+key check label are permanent. Breaking, no shim: `VaultWriter` takes a `PreparedSecret`
+(`VaultWriter(prepared, *, file_access=None)`) and owns a clone, closed by `close()`.
 
 **GA-flip checklist (vault key floor, 2026-11-12).** The section 3.2 forever-readable freeze takes effect
 at the first real `decoy-vault/v2` vault, which after slice 0 can only be written under a secret of at
@@ -526,11 +537,12 @@ output bytes or a stored digest with no error, so each is part of the determinis
 `fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
 
 ```
-canary-span-normalization/v1   decoy-engine/determinism/v1       decoy-engine/keyprovider/v1
-decoy-engine/protected-quarantine/v1   decoy-probe/v1            decoy-resume-key-check/v1
-decoy.shuffle.unkeyed/v1       joint_mask/gen_row/v1     joint_mask/keyed_row/v1
-joint_mask/null_fallback/v1    name_email/v1             pinned-plan-fingerprint/v1
-tokenize-key/v1                decoy-publication-result/v1   fpe-sub-floor-synthetic/v1
+canary-span-normalization/v1           decoy-engine/determinism/v1   decoy-engine/keyprovider/v1
+decoy-engine/protected-quarantine/v1   decoy-probe/v1                decoy-publication-result/v1
+decoy-resume-key-check/v1              decoy-vault-key-check/v1      decoy.shuffle.unkeyed/v1
+fpe-sub-floor-synthetic/v1             joint_mask/gen_row/v1         joint_mask/keyed_row/v1
+joint_mask/null_fallback/v1            name_email/v1                 pinned-plan-fingerprint/v1
+tokenize-key/v1
 ```
 
 **Rules:**
@@ -1479,7 +1491,7 @@ acceptable cost.
 ## Pre-GA corpus action item
 
 The cross-version compatibility corpus (§6) exists and runs in CI, covering
-`decoy-vault/v2` and `distribution-snapshot/v1`. Before GA: capture a real
+`decoy-vault/v3` and `distribution-snapshot/v1`. Before GA: capture a real
 (`synthetic: false`) artifact of each read-back kind at the `0.2.0` cut and
 add it alongside the existing synthetic fixtures. The corpus cannot be
 retrofitted after users hold artifacts we no longer have fixtures for.

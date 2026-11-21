@@ -108,12 +108,12 @@ def test_harness_bites_on_corruption(tmp_path: Path) -> None:
     assert vaults, "expected at least one vault artifact in the corpus"
     art = vaults[0]
     blob = bytearray((HERE / art["path"]).read_bytes())
-    blob[-1] ^= 0xFF  # flip the last byte of the ciphertext
+    blob[-1] ^= 0xFF  # flip the last byte of the final segment
     tampered = tmp_path / "tampered.vault"
     tampered.write_bytes(bytes(blob))
     with pytest.raises(VaultError) as exc:
         load_vault(tampered, bytes.fromhex(art["mask_key_hex"]))
-    assert exc.value.code == "vault_key_mismatch"
+    assert exc.value.code == "vault_tampered"
 
 
 def test_harness_bites_on_corruption_snapshot(tmp_path: Path) -> None:
