@@ -262,9 +262,8 @@ def build_run_context(
     check_required_strategy_settings(config)
 
     # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
-    # substrate or count knob fails at submit time with a typed error instead of after the expensive
-    # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
-    # (which never use it) lose nothing.
+    # substrate or count knob fails at submit time with a typed error. Construction is cheap and
+    # side-effect free for both adapters, so pure-generate jobs (which never use it) lose nothing.
     resolved_substrate = SUBSTRATE
     adapter = select_execution_adapter(fpe_chunk_count=fpe_chunk_count)
     # Auto-chunk knobs share the substrate knobs' fail-early contract.
