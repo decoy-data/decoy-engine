@@ -11,6 +11,7 @@
    "SAMPLE_MISS_LIMIT": "src/decoy_engine/detection/_scoring.py",
    "_series_str": "src/decoy_engine/detection/_scoring.py",
    "_evaluate": "src/decoy_engine/detection/_scoring.py",
+   "_every_hit_parses": "src/decoy_engine/detection/_scoring.py",
    "_confidence_bucket": "src/decoy_engine/detection/_scoring.py",
    "_dominant_variant": "src/decoy_engine/detection/_scoring.py",
    "PreparedValues": "src/decoy_engine/detection/_scoring.py",
@@ -166,6 +167,7 @@
   "src/decoy_engine/detection/detectors.py": [
    "DetectorFn",
    "REGISTERED_DETECTORS",
+   "SPAN_DETECTOR_IDS",
    "Span",
    "_SPAN_DETECTORS",
    "_STREET_ADDRESS_RE",

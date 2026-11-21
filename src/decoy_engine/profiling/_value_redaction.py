@@ -117,14 +117,15 @@ VALUE_FREE_FIELDS: Final[frozenset[tuple[str, str]]] = frozenset(
         "name", "inferred_type", "dtype_raw", "row_count", "null_count", "null_rate",
         "distinct_count", "unique_rate", "is_likely_unique", "min_length",
         "max_length", "avg_length", "date_format", "invalid_count", "casing_pattern",
-        "format_pattern", "alphabet", "value_set_size_class", "numeric_range_class",
+        "format_pattern", "format_pattern_complete", "alphabet", "value_set_size_class", "numeric_range_class",
         "mode_freq", "top_values", "detector_matches", "sentinels", "pii_score",
         "distribution", "detection_trail", "domain",
     )
     | _free("TopValue", "count", "pct")
     | _free(
         "DetectorMatch",
-        "detector_id", "match_rate", "format_pattern", "confidence", "domain",
+        "detector_id", "match_rate", "format_pattern", "format_pattern_complete", "confidence",
+        "domain",
     )
     | _free("Distribution", "kind", "data")
     | _free("SentinelFlag", "kind", "count")

@@ -140,12 +140,13 @@ class TestFpeJoinGroupColumns:
 
 
 # --------------------------------------------------------------------------
-# _whole_column_state_rejections: when-predicate and undated-date_shift gates
+# _whole_column_state_rejections: the when-predicate gate (an undated date_shift is refused by
+# plan compile now, so it is no longer a chunk decline)
 # --------------------------------------------------------------------------
 
 
 class TestWholeColumnStateRejections:
-    def test_flags_when_and_undated_date_shift_columns(self):
+    def test_flags_when_columns_and_never_a_date_shift_column(self):
         cfg = {
             "tables": [
                 {
@@ -162,28 +163,14 @@ class TestWholeColumnStateRejections:
         joined = "; ".join(_whole_column_state_rejections(cfg, table="t"))
         assert "when_predicate_not_chunk_stable" in joined
         assert "wa, wb" in joined  # sorted, comma-joined column list
-        assert "date_shift_requires_explicit_format" in joined
-        assert "da, db" in joined
+        assert "date_shift" not in joined
 
     def test_nameless_offending_columns_render_question_mark(self):
-        cfg = {
-            "tables": [
-                {
-                    "name": "t",
-                    "columns": [
-                        {"strategy": "redact", "when": "x"},
-                        {"strategy": "date_shift"},
-                    ],
-                }
-            ]
-        }
+        cfg = {"tables": [{"name": "t", "columns": [{"strategy": "redact", "when": "x"}]}]}
         joined = "; ".join(_whole_column_state_rejections(cfg, table="t"))
         assert "when_predicate_not_chunk_stable: column(s) ? " in joined
-        assert "date_shift_requires_explicit_format: column(s) ? " in joined
 
-    def test_date_shift_with_explicit_format_is_not_flagged(self):
-        # Kills the mutations that invert/loosen the date_format lookup so a
-        # PINNED-format date_shift column gets wrongly flagged.
+    def test_date_shift_columns_are_not_flagged(self):
         cfg = {
             "tables": [
                 {

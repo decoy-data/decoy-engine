@@ -32,6 +32,7 @@ from decoy_engine.fileaccess._entry import (
     scope,
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
+from decoy_engine.fileaccess._fdtree import STAGE_MARKER, stage_entries
 from decoy_engine.fileaccess._local import (
     LocalFileAccess,
     engine_dir_handle,
@@ -49,9 +50,15 @@ from decoy_engine.fileaccess._protected_dir import (
     protected_scratch_dir,
 )
 from decoy_engine.fileaccess._read import keeps_class, read_all, read_checked, read_text, shown
+from decoy_engine.fileaccess._reclaim import reclaim_stages
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess
 from decoy_engine.fileaccess._scratch import ScratchArena, scratch_native, scratch_native_iter
-from decoy_engine.fileaccess._scratch_reports import CleanupReport, QuotaReport
+from decoy_engine.fileaccess._scratch_reports import (
+    CleanupReport,
+    QuotaReport,
+    ReclaimOutcome,
+    ReclaimReport,
+)
 from decoy_engine.fileaccess._types import (
     CONTRACT_VERSION,
     CommitUncertain,
@@ -132,6 +139,7 @@ __all__ = [
     "CONTRACT_VERSION",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "STAGE_MARKER",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
@@ -152,6 +160,8 @@ __all__ = [
     "ProtectedDirAclFailed",
     "ProtectedDirUnsafe",
     "QuotaReport",
+    "ReclaimOutcome",
+    "ReclaimReport",
     "Root",
     "RootedFileAccess",
     "ScratchArena",
@@ -181,6 +191,7 @@ __all__ = [
     "read_all",
     "read_checked",
     "read_text",
+    "reclaim_stages",
     "redact_locators",
     "require_ambient",
     "reset_for_tests",
@@ -190,5 +201,6 @@ __all__ = [
     "scratch_native_iter",
     "scrub",
     "shown",
+    "stage_entries",
     "write_private",
 ]

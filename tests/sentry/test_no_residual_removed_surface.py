@@ -93,6 +93,11 @@ def _non_history_text(changelog: str) -> str:
     return "\n".join(keep)
 
 
+# The contract's public renames table records each old name next to its new one, so it is history
+# in the same way a released CHANGELOG section is. Only the block between its markers is skipped.
+_RENAMES_TABLE = re.compile(r"<!-- renames-table:start -->.*?<!-- renames-table:end -->", re.S)
+
+
 def _is_binary(data: bytes) -> bool:
     return b"\0" in data[:8000]  # git's own rule
 
@@ -131,6 +136,8 @@ def scan(root: pathlib.Path, rel_paths: list[str]) -> list[str]:
             text = data.decode("latin-1")
         if rel == "CHANGELOG.md":
             text = _non_history_text(text)
+        if rel == "docs/compatibility-contract.md":
+            text = _RENAMES_TABLE.sub("", text)
         if RETIRED_PATTERN.search(text):
             hits.append(f"{rel}: content")
         if rel != SENTRY_REL and any(

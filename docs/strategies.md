@@ -204,7 +204,11 @@ output as it came in. Needs a namespace.
 - `jitter_days`: `N` means the range `[-N, N]`. A non-negative integer up to
   106,751. It cannot be combined with `min_days` or `max_days`; the plan is
   refused (`date_shift_window_invalid`) if it is.
-- `date_format`: a strftime format; auto-detected from the column if omitted.
+- `date_format`: a strftime format. Required: a `date_shift` column without one is refused at
+  plan compile (`date_shift_requires_date_format`), and nothing guesses it from the cells. A
+  top-level column whose own declared parse format supplies the date shape is exempt; a nested
+  child is not. The starter writes the variant the scan detected, and only when every detected
+  value parses with it; otherwise it writes `redact`.
 - `preserve_values`: a list of ISO dates (`YYYY-MM-DD`) that pass through
   unchanged, for sentinels such as `9999-12-31` ("never expires") that
   downstream logic tests with `date = <sentinel>`. See
@@ -467,11 +471,23 @@ so the output is more useful than blanket redaction for columns such as
 clinical notes or support tickets.
 
 - `detectors` (list or null): detector IDs to run. Null or absent runs all
-  built-in span detectors. Unknown IDs are skipped silently.
+  built-in span detectors. Only the built-in span detector IDs are accepted
+  (`email`, `ssn`, `us_phone`, `us_zip`, `pan`, `iban`, `ipv4`, `icd10`, `npi`,
+  `url`, `street_address`). Any other ID is refused at compile and in
+  `decoy validate` with `mask.text_mask_detector_unknown`.
 - `per_detector_strategy` (dict): per-detector strategy overrides. Keys are
   detector IDs; values are `fpe`, `faker`, `date_shift`, `redact`, or
   `passthrough`. Unspecified detectors fall back to the built-in
-  `DETECTOR_DEFAULTS` table.
+  `DETECTOR_DEFAULTS` table. A key that is not a known detector ID, and a
+  detector and strategy pair that cannot run, are refused at compile with
+  `mask.text_mask_detector_unknown` or `mask.text_mask_strategy_unsupported`.
+  The supported pairs are:
+  `fpe` on `ssn`, `us_phone`, `us_zip`, `pan`, `npi`, `fax_number`;
+  `faker` on `person_name`, `first_name`, `last_name`, `address`, `location`;
+  `date_shift` on `iso_date`, `us_date`, `eu_date`;
+  `redact` and `passthrough` on any known detector ID.
+  A date span that does not parse (for example `2024-02-30`) is replaced by
+  `token`, never written through.
 - `unmatched_span_policy` (str, default `redact`): controls text in each cell
   not covered by any detector match. See the policy table below.
 - `token` (str, default `[REDACTED]`): replacement token for the `redact`
@@ -1472,6 +1488,7 @@ take it.
 | `constant` | `value` | `output_type` | |
 | `distribution` | `family` | `low`, `high`, `min`, `max`, `output_type` | `low`, `high` if `family: uniform` |
 | `lookup` | | `file`, `codeset`, `value_column`, `weight_column`, `output_type` | |
+| `provider` | `provider` | `locale`, `field`, `group` | |
 
 `derived_aggregate` is the one type whose required keys are checked at plan compile, not at
 config parse: its transform refuses a missing `op` or `column` with `derived_aggregate_op_missing`
@@ -1498,7 +1515,8 @@ same configs:
   but generates later (`generate_column_forward_reference`), `group_by` equal to `order_by`
   (`grouped_series_group_by_equals_order_by`), the formula rules below, `weighted` reference
   weights whose length differs from a `sequence` parent's `row_count`
-  (`reference_weights_length_mismatch`), and every other parse rule a type's transform has. Those
+  (`reference_weights_length_mismatch`; any other parent is checked against its real keys at
+  run), and every other parse rule a type's transform has. Those
   keep the transform's own code, such as `derived_aggregate_op_missing`,
   `derived_bounds_inverted`, `grouped_series_generator_invalid`,
   `windowed_date_min_exceeds_max` or `group_key_length_odd`; `generate_option_invalid` is used
@@ -1577,10 +1595,13 @@ child can point at a generated parent's keys.
   to draw from (both required).
 - `distribution`: how draws are spread across the parent values: `random`
   (default), `sequential`, `weighted`, or `fitted` (below). Any other value is refused.
-- `weights`: per-value weights, required when `distribution` is `weighted`. Against a
-  `sequence` parent with no nulls, the list must have one weight per parent row.
+- `weights`: per-value weights, required when `distribution` is `weighted`. The list must have
+  one weight per distinct parent key. Against a `sequence` parent with no nulls that is one per
+  parent row, checked at plan compile; for any other parent the run checks the real key count and
+  refuses a mismatch with `runtime.reference_weights_length_mismatch`. It never falls back to
+  uniform draws.
 - `min_per_parent` / `max_per_parent`: optional per-parent cardinality bounds
-  (0 = unbounded). These bounds do not compose with `sequential`.
+  (0 = unbounded). These bounds do not compose with `sequential`. See "Per-parent bounds" below.
 - `snapshot_file` / `source_column`: only with `distribution: fitted` (below).
   Any other distribution refuses them with `config.generate_option_unknown`.
 
@@ -1588,6 +1609,50 @@ child can point at a generated parent's keys.
 parents and 60 children almost every parent gets 1 to 4 children. A source
 where a few parents hold most of the children, or many parents hold none, loses
 that shape. `distribution: fitted` keeps it.
+
+#### Per-parent bounds (`min_per_parent`, `max_per_parent`)
+
+A positive bound is exact: every distinct parent key gets at least `min_per_parent` and at most
+`max_per_parent` child rows, or the config is refused. Nothing is repaired on a best-effort basis.
+
+With `P` distinct non-null parent keys and `N` child rows the bounds can hold exactly when
+`min_per_parent * P <= N` and, with a maximum, `N <= max_per_parent * P`. Equality fits on both
+sides.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `min_per_parent` above a positive `max_per_parent` | `config.generate_per_parent_bounds_conflict` |
+| Validate | a positive bound with `distribution: fitted` | `config.generate_fitted_reference_bounds_conflict` |
+| Validate | a positive bound with `null_probability` above 0 (nulls would undo the bounds) | `config.generate_per_parent_null_conflict` |
+| Validate | `max_per_parent` times the parent table's `row_count` is below the child `row_count` | `config.generate_per_parent_infeasible` |
+| Run | the bounds cannot hold for the real distinct parent keys | `runtime.generate_per_parent_infeasible` |
+
+Validate judges the maximum only, against the parent's `row_count`, which is an upper bound on
+`P`. A parent column that repeats or nulls keys has fewer, so the run checks both bounds on the
+keys it actually drew from. A caller that skips validation gets
+`runtime.generate_fitted_reference_bounds_conflict` for a bound on a fitted column, and
+`runtime.reference_bounds_unsatisfied` if a repaired column still breaks a bound. Each message is
+the fixed summary plus the table and column names.
+
+A bounded reference runs on the whole-table route. A capacity probe keeps the bounds and loosens
+them to its scaled row counts, so a config that passes at full size is never refused by its probe.
+
+#### Empty parent and `orphan_policy`
+
+When the parent column has no non-null keys and the child has rows, a `relationships` entry whose
+parent is `(reference_table, [reference_column])` and whose child is this table and column decides:
+
+| `orphan_policy` | Result |
+| --- | --- |
+| `fail` | the run stops with `runtime.reference_parent_pool_empty` |
+| `warn` | the column is null and one `warning.reference_parent_pool_empty` is raised, naming the table and column |
+| `preserve`, `remap`, or no matching relationship | the column is null, with no warning |
+
+The rule is the same on the in-memory, streamed and pinned routes. A pinned plan records the
+policy of each covered reference column as plan metadata (`reference_policies`), so the plan
+fingerprint follows the policy while the column's values and seed do not. A `fitted` column is
+the exception: an empty parent always stops with `plan.reference_parent_pool_empty`, whatever the
+policy.
 
 #### Fitted fan-out (`distribution: fitted`)
 
@@ -1702,7 +1767,11 @@ every column, not only the columns the profiler flags.
   column keeps its labels.
 - A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
   cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
-  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+  side of it. The histogram has one bin when the column also releases an `exact_values` or
+  `quantile_grid` block. Otherwise `numeric_bins` sets the finest grid step, and the step widens
+  until every non-empty bin holds at least 10 rows, so the histogram can have fewer bins than
+  requested. `numeric_bins` is an int from 1 to 1000; any other value is refused with
+  `quality.numeric_bins_invalid` before any histogram is computed.
 - A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
   10 rows each. A flagged column gets the same ranges.
 - A short string column whose labels read as sentences (median of 3 or more words) is written as
@@ -1826,6 +1895,34 @@ and `lookup_not_pinned`), never a cell value or a path.
 
 These two top-level blocks run after all column passes complete. They operate on
 the assembled output tables, not on individual columns mid-run.
+
+### provider
+
+Draws each row from a scalar provider in the masking provider registry, by the same name and
+through the same adapter. Every value is text, including the providers that return a number or
+a date (`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
+
+```yaml
+- name: npi
+  type: provider
+  provider: synthetic_npi   # any scalar registry name, such as person_phone or synthetic_iban
+  locale: en_US             # optional; must be a locale the provider declares
+```
+
+- `provider`: a registry name. The nine synthetic identifiers keep their check digits. An unknown
+  name is refused at `decoy validate` with `generate_provider_unknown`; `composite_custom` and the
+  composite providers are refused (`generate_provider_unsupported`,
+  `generate_provider_field_required`) until a later release.
+- `locale`: refused with `generate_provider_locale_unsupported` unless the provider declares it.
+  With no `locale`, the instance default applies and is checked before any draw. SSN, EIN, NPI
+  and NDC declare `en_US` only; CUSIP declares `en_CA` and `en_US`.
+- `field` and `group` are refused on a scalar provider (`generate_provider_field_unexpected`).
+- `unique` is refused. A provider column runs on the resident route only and is refused in
+  pinned mode (`pinned_provider_unsupported`). Values repeat when the provider's domain is small.
+- A `faker` column with a registry name in `faker_type` is refused with
+  `generate_faker_type_is_domain_provider`, which points here.
+- A failure inside a draw is reported as `generation_provider_failed` with the table and column
+  only, never the provider text.
 
 ### validators:
 

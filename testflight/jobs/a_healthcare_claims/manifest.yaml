@@ -167,6 +167,8 @@ config:
         - name: dob
           strategy: date_shift
           namespace: dob_ns
+          provider_config:
+            date_format: "%Y-%m-%d"
 
         # age: passthrough (used as source for plan_tier correlation check).
         - name: age

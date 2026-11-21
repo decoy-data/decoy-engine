@@ -126,6 +126,7 @@ from decoy_engine.transforms._codeset_loader import (
     verify_corpus,  # noqa: F401 -- re-exported public API (see below)
 )
 from decoy_engine.transforms._codeset_loader import load_corpus as load_corpus
+from decoy_engine.transforms._codeset_provenance import CODESET_REGISTRY
 
 # Stable salt for HMAC-keyed row derivation. Same purpose as
 # reference_tables._KEYED_ACCESS_SALT: determinism, not secrecy.
@@ -557,3 +558,12 @@ def _pick_gen(
 
 # Public, immutable view of the shipped corpus names for callers outside `transforms/`.
 SHIPPED_CODE_SETS: tuple[str, ...] = tuple(sorted(_SHIPPED_CORPORA))
+
+
+def code_set_catalog() -> dict[str, str]:
+    """Shipped code set name to its one-line description, in name order.
+
+    Reads ``CODESET_REGISTRY`` only (no corpus file) and builds a new dict per
+    call, so callers cannot change the registry through the result.
+    """
+    return {name: CODESET_REGISTRY[name].description for name in SHIPPED_CODE_SETS}

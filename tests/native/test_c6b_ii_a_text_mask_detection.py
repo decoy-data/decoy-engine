@@ -131,7 +131,9 @@ def spies(monkeypatch: pytest.MonkeyPatch) -> _Spies:
     return spy
 
 
-# T-a1: detection reuse is byte-identical across the four span strategies.
+# T-a1: detection reuse is byte-identical across the span strategies a config can reach. E-F0: faker
+# and date_shift need person_name or date spans, covered by the direct cells in
+# tests/unit/plan/test_text_mask_strategy_check.py.
 
 STRATEGY_CONFIGS: dict[str, dict[str, Any]] = {
     "default_fpe_redact": {},
@@ -141,11 +143,6 @@ STRATEGY_CONFIGS: dict[str, dict[str, Any]] = {
     "all_passthrough": {
         "per_detector_strategy": {d: "passthrough" for d in (*SUPPORTED_IDS, "ssn", "us_zip")},
         "unmatched_span_policy": "passthrough",
-    },
-    "faker": {"per_detector_strategy": {"email": "faker", "ssn": "faker", "us_phone": "faker"}},
-    "date_shift": {
-        "per_detector_strategy": {"ssn": "date_shift"},
-        "date_shift_bounds": (("min_days", -10), ("max_days", 10)),
     },
     "unmatched_replace": {"unmatched_span_policy": "replace_with_token", "token": "<X>"},
 }

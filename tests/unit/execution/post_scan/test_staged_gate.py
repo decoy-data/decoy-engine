@@ -24,6 +24,7 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution.pipeline import _post_scan
 from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.verification.postmask import PostScanBlockedError, from_staged
 from tests.unit.execution import _subset_run_support as subset_sup
@@ -72,7 +73,12 @@ def test_at16_a_blocking_verdict_on_a_staged_sink_commits_nothing(
     control = tmp_path / "control"
     result, routes = _run(_config(tmp_path), route, sink=ParquetTransactionalSink(control))
     assert routes == [route]
-    assert _published(control) == ["_decoy_publication.json", "child.parquet", "parent.parquet"]
+    assert _published(control) == [
+        STAGE_MARKER,
+        "_decoy_publication.json",
+        "child.parquet",
+        "parent.parquet",
+    ]
     assert result.quality_metrics["post_scan_integrity"]["verdict"]["blocking"] is False
 
 
@@ -370,7 +376,12 @@ def test_at28_a_subclass_of_the_engine_sink_is_foreign(tmp_path: Path) -> None:
     result, routes = _run(_config(tmp_path), "auto", sink=Subclassed(out))
     assert routes != ["full_frame"]
     assert commits == ["commit"]
-    assert _published(out) == ["_decoy_publication.json", "child.parquet", "parent.parquet"]
+    assert _published(out) == [
+        STAGE_MARKER,
+        "_decoy_publication.json",
+        "child.parquet",
+        "parent.parquet",
+    ]
     assert "post_scan_gate_deferred" in result.quality_metrics
     assert len(_unreadable_warnings(result)) == 1
 

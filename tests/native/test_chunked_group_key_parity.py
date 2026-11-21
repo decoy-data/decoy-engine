@@ -237,7 +237,7 @@ def test_a_different_mask_key_changes_every_key_and_matches_the_formula() -> Non
 @NEEDS_COMPANION
 def test_length_prefix_and_target_column_each_change_the_key() -> None:
     table = gk_source(["alice"], pa.string())
-    table = table.append_column("k2", pa.array(["x"], pa.string()))
+    with_k2 = table.append_column("k2", pa.array(["x"], pa.string()))
     base = _run_keys(columns(), table)[0]
     assert base == _ALICE
     assert _run_keys(columns(gk_col(length=32)), table)[0] == expected_key("alice", length=32)
@@ -246,7 +246,7 @@ def test_length_prefix_and_target_column_each_change_the_key() -> None:
     out = list(
         run_mask_chunked(
             make_config(cols),
-            [table],
+            [with_k2],
             table=TABLE,
             engine_version=ENGINE_VERSION,
             key_provider=key_provider(),

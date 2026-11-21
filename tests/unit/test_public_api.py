@@ -228,6 +228,8 @@ def test_all_lists_every_public_name():
         "StrategyInfo",
         "StrategyOption",
         "strategy_catalog",
+        # Public read-only view of the shipped code set registry (GEN-CATALOG GC3-E).
+        "code_set_catalog",
         # engine-v2 S10 (Validator: compile consolidator + post-validation).
         "PlanCheckError",
         "PlanValidationResult",
@@ -463,7 +465,7 @@ class TestV2BehaviorRegressionPinsS11:
             backend_version="v",
             cardinality_mode=cardinality_mode,
             deterministic=deterministic,
-            provider_config=(),
+            provider_config=(("date_format", "%Y-%m-%d"),) if strategy == "date_shift" else (),
             coherent_with=(),
         )
 
