@@ -147,7 +147,7 @@ ALLOWLIST: dict[str, int] = {
     "scripts/bench-unified-slice/bench_compare.py": 894,
     "scripts/build_golden_fixtures.py": 626,
     "scripts/fk_memory_probe.py": 1046,
-    "scripts/gen_proof_manifest.py": 1230,
+    "scripts/gen_proof_manifest.py": 1229,
     "scripts/native-baseline/bench_c1_oracle.py": 759,
     "scripts/tb3_cgroup_validation.py": 623,
     "scripts/tq_mutate.py": 822,

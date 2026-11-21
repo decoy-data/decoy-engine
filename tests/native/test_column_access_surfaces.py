@@ -269,6 +269,7 @@ _PINNED_RUN_CALLS = frozenset(
         "row_error_records.extend",
         "run_chunk_ingest_guards",
         "self._dispatch_mask_node",
+        "plan_column_shapes",
         "set",
         "sources.items",
         "time.perf_counter",

@@ -177,10 +177,17 @@ def test_a_split_with_a_resident_group_or_extra_frame_stays_resident(
 
 
 def test_a_group_row_error_leaves_the_sink_untouched(tmp_path: Path) -> None:
-    # `bucketize` over a text column keeps the group resident (its source is not a null-free
-    # number) and records a format error for the cell that is not a number.
-    bad = pa.table({"d": pa.array(["12"] * (mt.BIG - 1) + ["not-a-number"])})
-    cols = [{"name": "d", "strategy": "bucketize", "provider_config": {"width": 10}}]
+    # `date_shift` over a text column keeps the group resident (its source is not a typed date)
+    # and records a format error for the cell that is not a date.
+    bad = pa.table({"d": pa.array(["2020-01-12"] * (mt.BIG - 1) + ["not-a-date"])})
+    cols = [
+        {
+            "name": "d",
+            "strategy": "date_shift",
+            "namespace": "d_ns",
+            "provider_config": {"date_format": "%Y-%m-%d"},
+        }
+    ]
     cfg, sources = mt.build_job(
         tmp_path,
         {"a": (mt.std_columns("a_ns"), mt.string_table(mt.BIG, "a")), "c": (cols, bad)},

@@ -35,6 +35,7 @@ from decoy_engine.plan._types import ColumnSeed, GroupSeed, SeedEnvelope, TableS
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge, RelationshipGraph
 from decoy_engine.relationships._namespace import NamespaceRegistry
+from tests._column_shapes import integer_shapes
 from tests._declared_schema import declare_rest
 from tests.perf_fixtures.fk_relational import build_fk_relational
 
@@ -523,7 +524,8 @@ def _bucketize_row_error_plan() -> Any:
         seed_envelope=SeedEnvelope(
             job_seed=_SEED,
             per_table=(("t", TableSeed(per_column=(("age", seed),), per_group=())),),
-        )
+        ),
+        column_shapes=integer_shapes("t", "age"),
     )
 
 
