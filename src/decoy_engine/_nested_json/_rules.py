@@ -3,7 +3,7 @@
 A `nested` column keeps its child under `provider_config` (`target`, `strategy`,
 `strategy_config`, `namespace`), or a list of them under `rules`. Every site that needs the child
 calls `nested_children` instead of reading those keys, so a new child form reaches every site at
-once.
+once. `path_relations` lists the rules that `references` a parent column.
 `tests/sentry/defects/test_nested_child_choke_point.py` fails on a module that reads the keys
 itself.
 
@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 SINGLE_FORM_PATH: Final = "provider_config"
+# The planner writes the leaf kind into a rule's `references` under this key; no config may set it.
+KEY_KIND: Final = "key_kind"
 UNSET: Final = object()
 
 
@@ -35,6 +37,8 @@ class NestedChild:
     strategy: Any
     strategy_config: Any
     namespace: Any
+    # Empty when the rule has no `references`; else the one raw value, so a check still sees a
+    # value that is not a mapping.
     references: tuple[Any, ...]
     config_path: str
     # A rule's own `strategy_config.provider`, `UNSET` when the key is absent.
@@ -67,6 +71,7 @@ def nested_children(provider_config: Mapping[str, Any]) -> tuple[NestedChild, ..
 
 def _rule_child(index: int, rule: Any) -> NestedChild:
     get = rule.get if isinstance(rule, Mapping) else (lambda _key: None)
+    rule = rule if isinstance(rule, Mapping) else {}
     cfg = get("strategy_config")
     return NestedChild(
         index=index,
@@ -74,7 +79,7 @@ def _rule_child(index: int, rule: Any) -> NestedChild:
         strategy=get("strategy"),
         strategy_config=get("strategy_config"),
         namespace=get("namespace"),
-        references=(),
+        references=(get("references"),) if "references" in rule else (),
         config_path=f"{SINGLE_FORM_PATH}.rules[{index}]",
         provider=cfg.get("provider", UNSET) if isinstance(cfg, Mapping) else UNSET,
     )
@@ -93,3 +98,74 @@ def effective_provider(child: NestedChild, column_provider: str | None) -> str |
         return column_provider if isinstance(column_provider, str) else None
     own = child.provider
     return own if isinstance(own, str) and own.strip() else None
+
+
+@dataclass(frozen=True)
+class PathRelation:
+    """A nested rule's reference: the parent key column and the child payload column and path."""
+
+    parent_table: str
+    parent_column: str
+    child_table: str
+    child_column: str
+    path: str
+
+
+def reference_ends(child: NestedChild) -> tuple[str, str] | None:
+    """The `(table, column)` a rule references, or `None` for no reference or a malformed one."""
+    if not child.references or not isinstance(child.references[0], Mapping):
+        return None
+    table, column = child.references[0].get("table"), child.references[0].get("column")
+    if isinstance(table, str) and isinstance(column, str) and table and column:
+        return table, column
+    return None
+
+
+def reference_key_kind(child: NestedChild) -> str | None:
+    """The key kind the planner bound into a rule's `references`, `None` when there is none."""
+    refs = child.references[0] if child.references else None
+    kind = refs.get(KEY_KIND) if isinstance(refs, Mapping) else None
+    return kind if kind in ("integer", "string") else None
+
+
+def bound_references(references: Mapping[str, Any], kind: str) -> dict[str, Any]:
+    """A copy of a rule's `references` with the planner's key kind written in."""
+    return {**references, KEY_KIND: kind}
+
+
+def path_relations(config: Mapping[str, Any]) -> tuple[PathRelation, ...]:
+    """One relation per rule with a well-formed `references`, in config order.
+
+    The one place the relations are listed. A malformed `references` is skipped here and refused
+    by the plan check. Nothing reads the result before 82-E4b: path relations never enter the
+    config's `relationships`, so no FK route, subset or orphan remap sees them.
+    """
+    found: list[PathRelation] = []
+    tables = config.get("tables")
+    for table in tables if isinstance(tables, list) else []:
+        if not isinstance(table, Mapping):
+            continue
+        for col in table.get("columns") or []:
+            pc = col.get("provider_config") if isinstance(col, Mapping) else None
+            if not isinstance(col, Mapping) or col.get("strategy") != "nested":
+                continue
+            if not isinstance(pc, Mapping):
+                continue
+            names = (table.get("name"), col.get("name"))
+            for child in nested_children(pc):
+                ends = reference_ends(child)
+                if (
+                    ends is not None
+                    and isinstance(child.target, str)
+                    and all(isinstance(n, str) and n for n in names)
+                ):
+                    found.append(
+                        PathRelation(
+                            ends[0],
+                            ends[1],
+                            str(table.get("name")),
+                            str(col.get("name")),
+                            child.target,
+                        )
+                    )
+    return tuple(found)

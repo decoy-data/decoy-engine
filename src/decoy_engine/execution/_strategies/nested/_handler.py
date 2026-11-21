@@ -73,8 +73,11 @@ from decoy_engine.execution._adapter import StrategyContext, StrategyOption, pro
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._apply import (
     match_path,
+    record_reference_mismatch,
+    reference_leaves_match,
     refuse_corrupting_write,
     refuse_rule_overlap,
+    rule_key_kind,
     run_rule_child,
 )
 from decoy_engine.execution._strategies.nested._leaves import (
@@ -97,6 +100,8 @@ class _Rule:
     seed: ColumnSeed
     expr: Any
     draw_column: str
+    # `integer` or `string` for a rule that `references` a parent column, else `None`.
+    key_kind: str | None = None
 
 
 class NestedStrategyHandler:
@@ -292,7 +297,7 @@ class NestedStrategyHandler:
                 ) from exc
             # Two rules never share a draw; the single form keeps the outer column identity.
             draw = f"{column}.rules[{child.index}]" if child.index is not None else ""
-            rules.append(_Rule(child, target, handler, seed, expr, draw))
+            rules.append(_Rule(child, target, handler, seed, expr, draw, rule_key_kind(child)))
         return rules
 
     def run(
@@ -371,6 +376,11 @@ class NestedStrategyHandler:
                     cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
                 except StrictJsonError as exc:
                     record_fault(ctx, warnings, column, pos, exc.token)
+                    rule_fault[ri] = True  # the target matched; the row error fails it
+                    faulted = True
+                    continue
+                if rule.key_kind and not reference_leaves_match(cell_leaves, rule.key_kind):
+                    record_reference_mismatch(ctx, warnings, column, pos)
                     rule_fault[ri] = True  # the target matched; the row error fails it
                     faulted = True
                     continue

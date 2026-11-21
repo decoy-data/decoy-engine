@@ -1,4 +1,4 @@
-"""Catalog of the ``plan`` namespace: the ``rules`` form of a nested column."""
+"""Catalog of the ``plan`` namespace: the ``rules`` form of a nested column and its references."""
 
 from __future__ import annotations
 
@@ -6,6 +6,17 @@ from decoy_engine.reasons import _catalog
 from decoy_engine.reasons._types import UNRELEASED, Phase
 
 __all__ = [
+    "NESTED_REFERENCE_KEY_KIND_RESERVED",
+    "NESTED_REFERENCE_NAMESPACE_MISMATCH",
+    "NESTED_REFERENCE_PARENT_CONDITIONAL",
+    "NESTED_REFERENCE_PARENT_TYPE_UNPROVEN",
+    "NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED",
+    "NESTED_REFERENCE_PARENT_UNKNOWN",
+    "NESTED_REFERENCE_PATH_NOT_SINGULAR",
+    "NESTED_REFERENCE_REQUIRES_PROFILE",
+    "NESTED_REFERENCE_REQUIRES_RULES",
+    "NESTED_REFERENCE_STRATEGY_MISMATCH",
+    "NESTED_REFERENCE_STRATEGY_NOT_JOIN_SAFE",
     "NESTED_RULES_AND_TARGET_BOTH_SET",
     "NESTED_RULES_CODE_SET_REPEATED",
     "NESTED_RULES_EMPTY",
@@ -65,6 +76,74 @@ NESTED_RULE_FAKER_PROVIDER_MISSING = _d(
 NESTED_RULE_PROVIDER_INVALID = _d(
     "nested_rule_provider_invalid",
     "A nested rule sets a provider that is not a non-blank string.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+
+
+NESTED_REFERENCE_PATH_NOT_SINGULAR = _d(
+    "nested_reference_path_not_singular",
+    "A nested rule with references targets a path that is not a singular path of names.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_PARENT_UNKNOWN = _d(
+    "nested_reference_parent_unknown",
+    "A nested rule references a parent table or column that the config does not declare.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_STRATEGY_NOT_JOIN_SAFE = _d(
+    "nested_reference_strategy_not_join_safe",
+    "A nested rule references a parent column masked by a strategy other than hash or tokenize.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_STRATEGY_MISMATCH = _d(
+    "nested_reference_strategy_mismatch",
+    "A nested rule masks with a different strategy or config than the parent column it references.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_NAMESPACE_MISMATCH = _d(
+    "nested_reference_namespace_mismatch",
+    "A nested rule uses a different namespace than the parent column it references.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_PARENT_CONDITIONAL = _d(
+    "nested_reference_parent_conditional",
+    "A nested rule references a parent column that is masked only when a condition holds.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_KEY_KIND_RESERVED = _d(
+    "nested_reference_key_kind_reserved",
+    "A nested rule sets key_kind in references, which the planner fills from the profile.",
+    phases=_BOTH,
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_PARENT_TYPE_UNSUPPORTED = _d(
+    "nested_reference_parent_type_unsupported",
+    "A nested rule references a parent column that is neither an integer nor a string key.",
+    phases=(Phase.COMPILE,),
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_REQUIRES_PROFILE = _d(
+    "nested_reference_requires_profile",
+    "A nested rule with references has no profiled key kind: compile it with a profile.",
+    phases=(Phase.COMPILE,),
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_PARENT_TYPE_UNPROVEN = _d(
+    "nested_reference_parent_type_unproven",
+    "A nested rule references a hash column of object type that was not observed to hold only strings.",
+    phases=(Phase.COMPILE,),
+    since=UNRELEASED,
+)
+NESTED_REFERENCE_REQUIRES_RULES = _d(
+    "nested_reference_requires_rules",
+    "A nested column sets references outside the rules form, where it would be ignored.",
     phases=_BOTH,
     since=UNRELEASED,
 )

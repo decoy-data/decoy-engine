@@ -16,6 +16,7 @@ from typing import Any
 import jsonpath_ng
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import NestedChild, reference_key_kind
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
@@ -26,8 +27,11 @@ from decoy_engine.plan._types import ColumnSeed
 __all__ = [
     "RuleOutput",
     "match_path",
+    "record_reference_mismatch",
+    "reference_leaves_match",
     "refuse_corrupting_write",
     "refuse_rule_overlap",
+    "rule_key_kind",
     "run_rule_child",
 ]
 
@@ -214,3 +218,51 @@ def _remap_row_errors(
                 reason=e.reason,
             )
         )
+
+
+def rule_key_kind(child: NestedChild) -> str | None:
+    """The key kind a rule's leaf must have, `None` for a rule without `references`.
+
+    `compile_plan` binds the kind from the parent's profiled dtype. A hand-written plan that has
+    `references` and no kind fails the column closed: without it `42` and `"42"` would hash apart.
+    """
+    if not child.references:
+        return None
+    kind = reference_key_kind(child)
+    if kind is not None:
+        return kind
+    raise StrategyError(
+        code=reasons.runtime.NESTED_REFERENCE_KEY_KIND_UNBOUND,
+        strategy="nested",
+        message="a nested rule with `references` has no key kind: compile the plan with a profile.",
+    )
+
+
+def reference_leaves_match(leaves: list[Any], kind: str) -> bool:
+    """True when every leaf is a JSON null or of the key kind: no coercion of `"42"` to `42`."""
+    want = int if kind == "integer" else str
+    return all(
+        leaf is None or (isinstance(leaf, want) and not isinstance(leaf, bool)) for leaf in leaves
+    )
+
+
+def record_reference_mismatch(
+    ctx: Any, warnings: list[QualityWarning], column: str, pos: int
+) -> None:
+    """Fail the row closed for a leaf of the wrong kind: one row error and one warning, no value."""
+    ctx.row_errors.append(
+        RowError(
+            column=column,
+            row_index=pos,
+            trigger="mask_error",
+            reason="a referenced path holds a value of another kind than the parent key",
+        )
+    )
+    warnings.append(
+        QualityWarning(
+            code=reasons.warning.NESTED_REFERENCE_LEAF_TYPE_MISMATCH,
+            provider="nested",
+            column=column,
+            detail={"row_pos": str(pos)},
+        )
+    )

@@ -96,6 +96,7 @@ CHUNK_VARIANT_WARNING_CODES: frozenset[str] = frozenset(
         reasons.warning.NESTED_CELL_DUPLICATE_KEY,
         reasons.warning.NESTED_CELL_NUMBER_OUT_OF_RANGE,
         reasons.warning.NESTED_CHILD_NON_FINITE,
+        reasons.warning.NESTED_REFERENCE_LEAF_TYPE_MISMATCH,
     }
 )
 

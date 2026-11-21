@@ -126,6 +126,7 @@ def test_warning_codes_match_handler_return_surface() -> None:
         "nested_cell_duplicate_key",
         "nested_cell_number_out_of_range",
         "nested_child_non_finite",
+        "nested_reference_leaf_type_mismatch",
     }
     # text_mask's handler returns one aggregate sub-floor warning (C6b-i declares it so the
     # routed-diagnostic gate admits text_mask on the unified route).

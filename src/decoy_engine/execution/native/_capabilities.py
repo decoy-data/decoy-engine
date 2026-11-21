@@ -371,6 +371,7 @@ _MASK: dict[str, _Ortho] = {
             "nested_cell_duplicate_key",
             "nested_cell_number_out_of_range",
             "nested_child_non_finite",
+            "nested_reference_leaf_type_mismatch",
         ),
         uncertain=True,
         notes=(
