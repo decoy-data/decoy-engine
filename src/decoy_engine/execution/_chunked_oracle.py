@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from ..contracts.column_shape import source_format_for
 from . import _chunked as _chunked_mod
 from . import _chunked_bucket_perturb as bucket_perturb_gate
 from . import _chunked_code_set as code_set_gate
@@ -232,12 +233,11 @@ def _oracle_preflight_admitted(
         if when_guard is not None:
             when_guard.check_schema(first.schema, table=table)
             chunk_iter = when_guard.wrap(chunk_iter, table=table)
-    # A keyed job with zero rows and a missing or invalid mask secret must still
-    # fail the fail-closed gate, so the profile/plan/gate sequence runs for an
-    # empty source too (from `empty_input_profile`) and the empty-input return
-    # comes after the gate.
+    # A keyed job with zero rows and a missing or invalid mask secret must still fail the
+    # fail-closed gate, so the profile/plan/gate sequence runs for an empty source too
+    # (`empty_input_profile`) and the empty-input return comes after the gate.
     carry = None
-    fmt = ((config.get("sources") or {}).get(table) or {}).get("format")
+    fmt = source_format_for(config.get("sources"), table, resident=(table,))
     seen: dict[str, Any] = {"table": table, "engine_version": engine_version, "source_format": fmt}
     if first is None:
         profile = empty_input_profile(config, source_schema=source_schema, **seen)

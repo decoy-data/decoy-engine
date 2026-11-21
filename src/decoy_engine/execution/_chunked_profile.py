@@ -39,8 +39,12 @@ def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | Non
     stays text whatever the chunk reader inferred) makes it agree with the full-frame profile."""
     import random
 
-    from decoy_engine.profile._walk import walk_dataframe
+    from decoy_engine.profile._walk import _is_nested, walk_dataframe
 
+    # Nested columns stay out of the schema so the walk still refuses them here, as the public
+    # oracle always has (a list, struct or map cell is unhashable to pandas); only the shape of
+    # the other columns comes from the schema.
+    flat = pa.schema([f for f in table.schema if not _is_nested(f.type)])
     return walk_dataframe(
         table.to_pandas(),
         table_name=table_name,
@@ -48,7 +52,7 @@ def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | Non
         fk_specs={},
         sample_rows=None,
         rng=random.Random(0),
-        arrow_schema=table.schema,
+        arrow_schema=flat,
         source_format=source_format,
     )
 

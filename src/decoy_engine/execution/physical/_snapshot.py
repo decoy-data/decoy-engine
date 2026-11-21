@@ -171,6 +171,7 @@ def capture_physical_plan_inputs(
         decoy_engine_version=engine_version,
         base_dir=base_dir,
         source_schemas={**caller_schemas, **(source_loader_schemas or {})},
+        resident_tables=caller_sources,
     )
 
     ns_registry = build_namespace_registry(config, profile)

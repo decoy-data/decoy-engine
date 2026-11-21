@@ -25,7 +25,7 @@ constant (S3 stamped 1; the F-series corrections bumped it to 2).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -128,6 +128,7 @@ def compile_plan(
     base_dir: str | Path | None = None,
     instance_default_locale: Any = DEFERRED,
     source_schemas: Mapping[str, pa.Schema] | None = None,
+    resident_tables: Collection[str] = (),
 ) -> Plan:
     """Compile (config, profile, engine_version) into a frozen Plan.
 
@@ -210,25 +211,22 @@ def compile_plan(
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
     check_vault_columns(config)
-    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or structurally
-    # unsupported FPE checksum schemes at compile time. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 15 (SP-04 / P5.INFRA.1, 2026-06-27): reject unknown or unsupported FPE checksum
+    # schemes at compile time. Config-only; both branches + run_config_only_checks.
     check_fpe_checksum_scheme(config)
     # Rows 16-20 (derived, derived_aggregate, grouped_series, windowed_date and group_key column
     # refs) and GEN-STRICT E2 (per-type generate column checks), through one wrapper. Config-only;
     # both branches + run_config_only_checks.
     check_generate_columns(config, default_locale=instance_default_locale)
-    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by
-    # (entity-anchor) column is missing. Config-only; both branches +
-    # run_config_only_checks.
+    # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by (entity-anchor)
+    # column is missing. Config-only; both branches + run_config_only_checks.
     check_date_shift_group_by_refs(config)
     # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
     # shape). Config-only; runs inside the date_shift_group_by_refs slot.
     check_date_preserve_values(config)
     check_date_shift_window(config)
-    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
-    # compile-time manifest warnings for every active group. Config-only; runs
-    # in both branches and in run_config_only_checks.
+    # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit compile-time
+    # manifest warnings for every active group. Config-only; both branches + run_config_only_checks.
     fpe_join_warnings = check_fpe_join_groups(config)
     # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns
     # whose length/keep/mask_char cannot mask the column (the primary silent-
@@ -250,7 +248,9 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    column_shapes = build_column_shapes(config, profile=profile, source_schemas=source_schemas)
+    column_shapes = build_column_shapes(
+        config, profile=profile, source_schemas=source_schemas, resident_tables=resident_tables
+    )
     check_required_strategy_settings(config, column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
