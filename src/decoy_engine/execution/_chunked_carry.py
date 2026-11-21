@@ -203,7 +203,7 @@ def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any)
     for node in nodes:
         seed = node.plan_slice
         if not isinstance(seed, ColumnSeed):  # a composite FK group: every column is masked
-            masked.update(node.columns)
+            masked |= set(node.columns)
             continue
         entries.append(
             {
@@ -216,7 +216,7 @@ def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any)
             }
         )
         if node.kind != "scalar" or node.strategy != "passthrough":
-            masked.update(node.columns)
+            masked |= set(node.columns)
     written = handler_written_columns(entries, registry)
     if written is None:  # a handler writes columns no declaration can name: nothing is untouched
         return frozenset()
