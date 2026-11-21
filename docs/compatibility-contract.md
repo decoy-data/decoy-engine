@@ -284,6 +284,18 @@ The three codes are registered unreleased. `compile_plan(..., source_schemas=Non
 moves in this slice: `date_shift` still needs `date_format` on every shape. A code rollback is safe: an engine
 from before this slice ignores `column_shapes` and the profile's `shape`.
 
+**Pre-GA correction (COLUMN-SHAPE E1b, 2026-11-21).** `date_shift` reads a source column that is natively a
+date (`date`) or a zoned timestamp (`timestamp_tz`) with no `date_format`, and writes the same Arrow type back
+(a zoned timestamp keeps its unit, zone and time of day and moves by whole days). A typed date was text before.
+A `date_format` on such a column is accepted and not used (compile warning `plan/column_shape_format_unused`),
+and `preserve_values` needs no format there. A `timestamp_naive`, integer, float, decimal, boolean or other
+column is refused at compile with `plan/column_shape_mismatch` (a naive timestamp failed at run time with
+`timezone_naive_datetime` before). The digest input of a typed date is its ISO text, so one namespace gives one
+offset across a CSV table and a Parquet table. A text column keeps `date_shift_requires_date_format`. The config-only
+pass (`decoy validate`) defers a column whose type it cannot see, so a missing `date_format` on a Parquet
+pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
+date columns keep their text output. Both new codes are registered unreleased. No stored format moves.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

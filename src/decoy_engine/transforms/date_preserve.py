@@ -23,7 +23,9 @@ The format domain is restricted for the same reason. ``%f`` and ``%Z`` cannot de
 date-only sentinel and pandas and ``strptime`` disagree on them, and ``ISO8601`` / ``mixed`` are
 pandas-only format names with no ``strftime`` meaning. A rendering format is also required, so a
 preserved typed row has a defined string form: the output column stays one homogeneous string
-column and never holds a raw date object.
+column and never holds a raw date object. The one exception is a column the plan proves is
+natively typed (a date or a zoned timestamp): it needs no format, and a sentinel row keeps its
+source value so the output keeps the source type.
 
 Messages carry the column's shape and an entry index, never a literal or a cell value.
 """
@@ -39,6 +41,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from decoy_engine.contracts.column_shape import ColumnShape
+
 PRESERVE_KEY = "preserve_values"
 
 # YYYY-MM-DD only. Python 3.11 widened `date.fromisoformat` to basic and week forms, so the
@@ -49,6 +53,11 @@ _LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}")
 # sentinel. `ISO8601` and `mixed` are pandas-only `format=` values.
 _UNSUPPORTED_DIRECTIVES = frozenset("fZ")
 _PANDAS_ONLY_FORMATS = frozenset({"ISO8601", "mixed"})
+
+# A natively typed column needs no rendering format: its sentinels keep their source values and a
+# `date_format` is not used. An `unknown` column may still be one, so a missing format is not
+# refused here; the required-settings check refuses it later when it turns out to be text.
+_TYPED_SHAPES = frozenset({ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ})
 
 
 def _directives(date_format: str) -> Iterator[str]:
@@ -77,11 +86,13 @@ def has_preserve_values(cfg: Mapping[str, Any]) -> bool:
     return _is_set(cfg.get(PRESERVE_KEY))
 
 
-def preserve_config_problem(cfg: Mapping[str, Any]) -> str | None:
+def preserve_config_problem(cfg: Mapping[str, Any], shape: ColumnShape | None = None) -> str | None:
     """Why the ``preserve_values`` config is invalid, or None when it is unset or valid.
 
     Checked in one place for the plan-compile checks, the handler preflights, the oracle and the
-    native admission, so every route rejects the same configs with the same reason.
+    native admission, so every route rejects the same configs with the same reason. ``shape`` is
+    the column's resolved shape when the caller has it: a ``date_format`` is then not needed
+    on a typed column, and a missing one is deferred on a not-yet-known column.
     """
     raw = cfg.get(PRESERVE_KEY)
     if not _is_set(raw):
@@ -99,6 +110,10 @@ def preserve_config_problem(cfg: Mapping[str, Any]) -> str | None:
                 "Write each sentinel as a real calendar date such as 9999-12-31."
             )
     date_format = cfg.get("date_format")
+    if shape in _TYPED_SHAPES or (
+        shape is ColumnShape.UNKNOWN and not isinstance(date_format, str)
+    ):
+        return None
     if not isinstance(date_format, str) or date_format == "":
         return (
             f"{PRESERVE_KEY} requires an explicit date_format, so a preserved row has a "
@@ -149,7 +164,7 @@ class PreserveSet:
     """The resolved ``preserve_values`` of one column: literal dates plus the rendering format."""
 
     dates: frozenset[datetime.date]
-    date_format: str
+    date_format: str | None
 
     def mask(self, series: pd.Series) -> np.ndarray[Any, Any]:
         """True where a row is a sentinel, in one matching pass over ``series``."""
@@ -170,6 +185,8 @@ class PreserveSet:
         return hits
 
     def _text_hits(self, text: pd.Series) -> np.ndarray[Any, Any]:
+        if self.date_format is None:  # a natively typed column holds no text
+            return np.zeros(len(text), dtype=bool)
         parsed = pd.to_datetime(text, format=self.date_format, errors="coerce")
         hits = _parsed_hits(parsed, self.dates)
         # pandas could not represent the cell. Retry only those under the same format with
@@ -182,42 +199,49 @@ class PreserveSet:
         return hits
 
     def _strptime_date(self, text: str) -> datetime.date | None:
+        if self.date_format is None:
+            return None
         try:
             return datetime.datetime.strptime(text, self.date_format).date()
         except (ValueError, OverflowError):
             return None
 
-    def render(self, series: pd.Series, preserved: np.ndarray[Any, Any]) -> list[str]:
-        """The output text of each preserved row.
+    def render(self, series: pd.Series, preserved: np.ndarray[Any, Any]) -> list[Any]:
+        """The output of each preserved row.
 
         A string source is emitted byte for byte. A typed source is rendered from its calendar
-        date with ``date_format`` so the output column stays homogeneous text.
+        date with ``date_format`` so the output column stays homogeneous text. With no
+        ``date_format`` (a natively typed column) the source value is kept as it is.
         """
-        out: list[str] = []
+        out: list[Any] = []
         for value in series.iloc[np.flatnonzero(preserved)]:
-            if isinstance(value, str):
+            if isinstance(value, str) or self.date_format is None:
                 out.append(value)
             else:
-                out.append(self._format_date(_calendar_date(value)))
+                out.append(self._format_date(_calendar_date(value), self.date_format))
         return out
 
-    def _format_date(self, value: datetime.date) -> str:
-        return value.strftime(self.date_format)
+    @staticmethod
+    def _format_date(value: datetime.date, date_format: str) -> str:
+        return value.strftime(date_format)
 
 
-def preserve_set_from_config(cfg: Mapping[str, Any]) -> PreserveSet | None:
+def preserve_set_from_config(cfg: Mapping[str, Any], *, typed: bool = False) -> PreserveSet | None:
     """The column's ``PreserveSet``, or None when ``preserve_values`` is unset or empty.
+
+    ``typed`` says the plan proves the column natively typed: its sentinels then keep their source
+    values and any ``date_format`` is not used.
 
     Raises:
         ValueError: the config is invalid (see ``preserve_config_problem``).
     """
-    problem = preserve_config_problem(cfg)
+    problem = preserve_config_problem(cfg, ColumnShape.DATE if typed else None)
     if problem is not None:
         raise ValueError(problem)
     if not _is_set(cfg.get(PRESERVE_KEY)):
         return None
     dates = frozenset(d for d in (_parse_literal(e) for e in cfg[PRESERVE_KEY]) if d is not None)
-    return PreserveSet(dates, str(cfg["date_format"]))
+    return PreserveSet(dates, None if typed else str(cfg["date_format"]))
 
 
 def apply_excluding_preserved(

@@ -254,10 +254,13 @@ class StrategyContext:
     # strategies rely on.
     row_offset: int = 0
     # (table, column) of every top-level date_shift column whose declared parse format supplies
-    # its date shape, so it needs no `provider_config.date_format`. Set from the plan by the
-    # routes that build a context; empty otherwise, which makes the date_shift handler refuse a
-    # missing format.
+    # its date shape. It keeps the legacy text output. Set from the plan by the routes that build
+    # a context; empty otherwise.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
+    # (table, column) of every column the plan proves is a date or a zoned timestamp, declared or
+    # native, so it needs no `provider_config.date_format`. Empty otherwise, which makes the
+    # date_shift handler refuse a missing format.
+    typed_date_columns: frozenset[tuple[str, str]] = frozenset()
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.

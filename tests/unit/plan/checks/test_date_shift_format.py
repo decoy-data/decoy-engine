@@ -59,7 +59,9 @@ def _cfg(**provider_config: Any) -> dict[str, Any]:
     entry: dict[str, Any] = {"name": "dob", "strategy": "date_shift", "namespace": "ns"}
     if provider_config:
         entry["provider_config"] = provider_config
-    return {"tables": [{"name": "t", "columns": [entry]}]}
+    # A CSV source is text, so the config-only pass can refuse a missing format before any read.
+    sources = {"t": {"type": "file", "format": "csv", "path": "/dev/null"}}
+    return {"sources": sources, "tables": [{"name": "t", "columns": [entry]}]}
 
 
 def _nested_cfg(child: str, **strategy_config: Any) -> dict[str, Any]:

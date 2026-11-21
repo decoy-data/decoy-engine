@@ -139,7 +139,11 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.declared_casting._boundary import declared_date_shift_columns, seal_evidence
+from decoy_engine.declared_casting._boundary import (
+    declared_date_shift_columns,
+    seal_evidence,
+    typed_date_columns,
+)
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution._adapter import ExecutionResult, StrategyContext
@@ -345,6 +349,7 @@ def run_sequential(
         mask_key=require_mask_key(plan, key_provider),
         seq_native=native_run,
         declared_date_columns=declared_date_shift_columns(plan),
+        typed_date_columns=typed_date_columns(plan),
     )
 
     parent_map_cache: dict[_NodeKey, dict[_KeyTuple, _KeyTuple]] = {}
