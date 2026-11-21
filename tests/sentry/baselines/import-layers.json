@@ -26,9 +26,6 @@
   "layers::decoy_engine.declared_casting._stream -> decoy_engine.execution.out_of_core._scratch": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
-  "layers::decoy_engine.delivery.resume._records -> decoy_engine.publication": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
   "layers::decoy_engine.errors -> decoy_engine.execution._row_error_summary": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
@@ -68,23 +65,8 @@
   "layers::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
   },
-  "layers::decoy_engine.plan._compile -> decoy_engine.fileaccess": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
-  "layers::decoy_engine.plan._generation -> decoy_engine.fileaccess": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
   "layers::decoy_engine.plan._seed_envelope -> decoy_engine.execution._technique_class": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
-  },
-  "layers::decoy_engine.plan._serialize -> decoy_engine.fileaccess": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
-  "layers::decoy_engine.plan.checks._lookup_tables -> decoy_engine.fileaccess": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
-  },
-  "layers::decoy_engine.plan.validate._consolidator -> decoy_engine.fileaccess": {
-   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
   },
   "layers::decoy_engine.profile._declared_columns -> decoy_engine.execution._pipeline_context": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
@@ -109,6 +91,39 @@
   },
   "layers::decoy_engine.telemetry._vocab -> decoy_engine.progress": {
    "reason": "back import measured when LAYOUT E3 declared the tiers; may only shrink"
+  },
+  "policy-direction::decoy_engine.delivery.resume._records -> decoy_engine.publication": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._compile -> decoy_engine.fileaccess": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._generation -> decoy_engine.fileaccess": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._seed_envelope -> decoy_engine.execution._technique_class": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan._serialize -> decoy_engine.fileaccess": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan.checks._lookup_tables -> decoy_engine.fileaccess": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
+  },
+  "policy-direction::decoy_engine.plan.validate._consolidator -> decoy_engine.fileaccess": {
+   "reason": "policy -> I/O edge measured when R1 added the policy-direction contract (2026-11-21 review); may only shrink"
   }
  }
 }

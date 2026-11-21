@@ -3,8 +3,10 @@
 # exhaustive = true: a new top-level package or module is red until it is placed here and in
 # the snapshot in tests/sentry/layout/test_import_layers.py. Each ignore line is a measured
 # back import that exists today; the list may only shrink (baseline import-layers.json).
-# Both sides of an ignore name a leaf module, never a package: import-linter exempts the whole
-# module edge, so an ignore on a package facade would let every later symbol through it.
+# In the tiers contract both sides of an ignore name a leaf module, never a package: import-linter
+# exempts the whole module edge, so an ignore on a package facade would let every later symbol
+# through it. The policy-direction contract at the end follows the same rule for the importer;
+# its imported side may be the forbidden package itself.
 
 [importlinter]
 root_package = decoy_engine
