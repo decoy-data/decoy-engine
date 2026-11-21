@@ -43,7 +43,7 @@ N = 12
 # name -> (columns, data, expected fragment of the chunked rejection or None when none is named)
 GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | None]] = {
     "int_with_nulls": (
-        [support.redact_col("x")],
+        [support.truncate_col("x")],
         {"x": pa.array(_nulls(N), pa.int64())},
         "x (integer with nulls)",
     ),
@@ -62,12 +62,12 @@ GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | Non
         "is not numeric",
     ),
     "decimal_column": (
-        [support.redact_col("x")],
+        [support.truncate_col("x")],
         {"x": pa.array([decimal.Decimal(i) for i in range(N)], pa.decimal128(10, 2))},
         "non-chunk-stable pandas round-trip dtypes",
     ),
     "dictionary_column": (
-        [support.redact_col("x")],
+        [support.truncate_col("x")],
         {"x": pa.array([f"c{i % 3}" for i in range(N)]).dictionary_encode()},
         "non-chunk-stable pandas round-trip dtypes",
     ),

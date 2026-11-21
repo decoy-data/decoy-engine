@@ -75,7 +75,10 @@ from decoy_engine.execution._planner_columns import (
     _fpe_join_group_columns,
     _table_column_entries,
 )
-from decoy_engine.execution.chunked._source_dtype_gate import unstable_source_columns
+from decoy_engine.execution.chunked._source_dtype_gate import (
+    admitted_masked_columns,
+    unstable_source_columns,
+)
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:
@@ -477,16 +480,19 @@ def _runtime_source_rejections(
     # with no FK edge exempts its carried columns, from the footer null-count gate and the
     # dtype gate alike.
     carried: frozenset[str] = frozenset()
+    masked_ok: frozenset[str] = frozenset()
     if carry_inputs is not None:
-        carried = carried_columns(
-            carry_inputs[0], table=table, names=schema.names, registry=carry_inputs[1]
+        cfg, registry = carry_inputs
+        carried = carried_columns(cfg, table=table, names=schema.names, registry=registry)
+        masked_ok = admitted_masked_columns(
+            facts, _table_column_entries(dict(cfg), table=table), registry
         )
     gap = _ci.null_count_gap_reason(facts, bucketize_columns or [], table, carried)
     if gap:
         reasons.append(gap)
     stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
     unstable = unstable_source_columns(
-        facts, declared_stable=stable, declared_bad=bad, carried=carried
+        facts, declared_stable=stable, declared_bad=bad, carried=carried, masked_ok=masked_ok
     )
     if unstable:
         reasons.append(
