@@ -137,7 +137,7 @@ def run_pipeline(
     auto_chunk: bool = _pipeline_finalize.AUTO_CHUNK_DEFAULT,
     chunk_size_rows: int = _pipeline_finalize.CHUNK_SIZE_ROWS_DEFAULT,
     auto_chunk_threshold_rows: int = _pipeline_finalize.AUTO_CHUNK_THRESHOLD_DEFAULT,
-    native_threads: int = 1,
+    native_threads: int | None = None,
     chunked_dispatcher_enabled: bool = True,
     stream_chunked_output: bool = True,
     multi_table_dispatch_enabled: bool = True,

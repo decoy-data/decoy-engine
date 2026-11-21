@@ -18,6 +18,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from decoy_engine import reasons
 from decoy_engine.generation._column_streams import WindowedDateStream
 from decoy_engine.generation.pool._sampler import (
     compiled_index_kernel,
@@ -288,7 +289,9 @@ def test_bulk_fallback_matches_per_row_and_keeps_first_error() -> None:
     bad[9] = "also bad"
     with pytest.raises(WindowedDateError) as exc:
         apply_windowed_date(cfg, _frame(bad), SEED8, "windowed_date/d", row_offset=40)
-    assert "row 43" in str(exc.value)
+    # The message names no row (value-free); the first bad row in row order is an invalid anchor.
+    assert exc.value.code == reasons.runtime.WINDOWED_DATE_ANCHOR_INVALID
+    assert "43" not in str(exc.value)
 
 
 @pytest.mark.serial

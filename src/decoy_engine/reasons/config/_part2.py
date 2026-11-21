@@ -12,6 +12,8 @@ __all__ = [
     "DECLARED_TABLE_DROPPED",
     "ENTRY_INVALID",
     "ENV_FLAG_INVALID",
+    "GENERATE_AGGREGATE_INPUT_NOT_NUMERIC",
+    "GENERATE_AGGREGATE_READ_BEFORE_FILL",
     "GENERATE_COLUMN_DUPLICATE",
     "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT",
     "GENERATE_FORMULA_INVALID",
@@ -20,6 +22,8 @@ __all__ = [
     "GENERATE_OPTION_UNKNOWN",
     "GENERATE_OPTION_VALUE_UNKNOWN",
     "GENERATE_OUTPUT_TYPE_UNSUPPORTED",
+    "GENERATE_PARENT_LOOKUP_KEY_NOT_UNIQUE",
+    "GENERATE_PARENT_LOOKUP_SELF_REFERENCE",
     "GENERATE_PER_PARENT_BOUNDS_CONFLICT",
     "GENERATE_PER_PARENT_INFEASIBLE",
     "GENERATE_PER_PARENT_NULL_CONFLICT",
@@ -85,6 +89,17 @@ TABLE_DUPLICATE = _d(
     "Two tables in one config have the same name. Declare each table once.",
     since=UNRELEASED,
 )
+GENERATE_AGGREGATE_INPUT_NOT_NUMERIC = _d(
+    "generate_aggregate_input_not_numeric",
+    "Generate per-parent aggregate reads a child column that is not numeric; give it a numeric "
+    "output_type or aggregate a numeric column.",
+    since=UNRELEASED,
+)
+GENERATE_AGGREGATE_READ_BEFORE_FILL = _d(
+    "generate_aggregate_read_before_fill",
+    "Generate column reads a per-parent aggregate, which is filled only after every table exists.",
+    since=UNRELEASED,
+)
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",
     "Two generate columns in one table have the same name.",
@@ -124,6 +139,17 @@ GENERATE_OUTPUT_TYPE_UNSUPPORTED = _d(
     "generate_output_type_unsupported",
     "Generate column type or target cannot carry the requested output type.",
     since="1.23.0",
+)
+GENERATE_PARENT_LOOKUP_KEY_NOT_UNIQUE = _d(
+    "generate_parent_lookup_key_not_unique",
+    "Generate column reads a parent row through a column that is not a reference to a sequence "
+    "key with no null_probability.",
+    since=UNRELEASED,
+)
+GENERATE_PARENT_LOOKUP_SELF_REFERENCE = _d(
+    "generate_parent_lookup_self_reference",
+    "Generate column reads a parent row through a reference to its own table.",
+    since=UNRELEASED,
 )
 GENERATE_PER_PARENT_BOUNDS_CONFLICT = _d(
     "generate_per_parent_bounds_conflict",

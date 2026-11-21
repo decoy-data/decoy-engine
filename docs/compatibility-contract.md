@@ -996,7 +996,7 @@ only this site moves.
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
   `string`. The unified full-frame route and out-of-core still decline `when:`.
   `run_pipeline` gains two keyword-only arguments (2026-10-01): `native_threads: int = 1`
-  (1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
+  (the default moved on 2026-11-20 to `None`, see the ENGINE-THREADS-DEFAULT entry below; 1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
   byte depends on it) and `chunked_dispatcher_enabled: bool = True` (the kill switch that
   restores the previous auto-chunk lane). This is an owner-approved pre-GA
   output-contract cutover: on the auto-chunk route masked values are route-neutral
@@ -1123,6 +1123,22 @@ only this site moves.
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and
   running, or be deprecated through §4.4.
+
+  Pre-GA default change (ENGINE-THREADS-DEFAULT, 2026-11-20).
+  `run_pipeline(..., native_threads: int | None = None)`: `None` uses the usable cores
+  (`detect_usable_cpus`, capped at 1024; 1 if detection fails). Explicit values are unchanged and
+  never fall back. Output data does not depend on the thread count. Default runs now read lazy
+  Parquet sources with Arrow threads and record `native_thread_clamp` under `auto_chunk`. Every
+  run records `quality_metrics["execution"]["native_threads"] = {"count": int, "source": str}`,
+  where `source` is one of `explicit`, `auto` or `auto_fallback` (a closed set). `count` is the
+  requested value; the native kernels apply at most their own knee (4 threads), which
+  `auto_chunk["native_thread_clamp"]` reports. `run_pipeline_isolated` with a `mem_cap_bytes`
+  and no `native_threads` forwards `native_threads=1`, because the Rust shared pool is sized to
+  the host's cores and its thread stacks count against RLIMIT_DATA. `run_job_with_governor` with
+  no `native_threads` also forwards 1, because a governed job shares the host with other slots.
+  Both runs record source `explicit`. The thread count now
+  differs by host for library callers, as it already does for the CLI. Re-pin checklist: the
+  platform passes its own thread grant; check any platform call that omits `native_threads`.
 
 `run_pipeline` gained `token_vault_writer` on 2026-10-26 (B-6 tokenization
 write-seam). It is keyword-only, defaults to `None`, and is additive under §4.1:

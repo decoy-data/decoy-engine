@@ -5,6 +5,8 @@ from origin/main 75fba3d855d71e3980a62afc3ce7f1187b72073d before any fast-path c
 (S1, byte-identical). S2 changed the offset derivation on purpose, so the digest and the
 oracle's draws moved once, in the S2 commit that moves the draw site. A failure in this file
 is a stop, never an edit to the digest or the corpus.
+Re-pinned once at the main merge of the reason-coded errors (3a5aadc3c): the hash covers error
+class names and messages, and S2 moved the draws, so the two changes move it together.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ from tests.unit.generation._windowed_date_corpus import (
     reference_apply_windowed_date,
 )
 
-DIGEST = "3f127bc623219b200c6737a1f06997799f800374c29257f23e6f9067be936ea0"
+DIGEST = "eff3f16d994866360d797932020cf01f5d580b75f625c512697f929337a5b846"
 
 CASES = build_cases()
 CASE_IDS = [c.name for c in CASES]

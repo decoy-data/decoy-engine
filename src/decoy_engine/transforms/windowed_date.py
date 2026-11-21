@@ -82,17 +82,45 @@ _ISO_ANCHOR = re.compile(
 
 
 class WindowedDateError(DecoyError, ValueError):
-    """A non-null anchor cannot be windowed (grammar, NaT, out of range, or overflow).
+    """A non-null anchor cannot be windowed. This class is the invalid-anchor failure (grammar,
+    type, timezone or NaT); each other failure is a subclass with its own code.
 
-    The message names the row position and the reason only, never the anchor value, so a
-    failure cannot leak cell content into logs.
+    `code` is the registered `runtime` reason, fixed per class. The message is that reason's
+    summary, with the table and column names when the caller knows them. It never holds the
+    anchor value, its type name or a row position, so a failure cannot leak cell content into
+    logs.
     """
+
+    code: reasons.ReasonCode = reasons.runtime.WINDOWED_DATE_ANCHOR_INVALID
+
+    def __init__(self, *, table: str = "", column: str = "") -> None:
+        where = f" Table {table!r}, column {column!r}." if table and column else ""
+        self.message = f"{self.code.spec.summary}{where}"
+        super().__init__(f"[{self.code}] {self.message}")
+
+
+class WindowedDateAnchorRangeError(WindowedDateError):
+    """The anchor is a date outside ``SUPPORTED_MIN``..``SUPPORTED_MAX``."""
+
+    code = reasons.runtime.WINDOWED_DATE_ANCHOR_OUT_OF_RANGE
+
+
+class WindowedDateOffsetRangeError(WindowedDateError):
+    """The anchor plus its offset leaves the supported range, or the arithmetic overflows."""
+
+    code = reasons.runtime.WINDOWED_DATE_OFFSET_OUT_OF_RANGE
+
+
+class WindowedDateParentAnchorNullError(WindowedDateError):
+    """The parent row a foreign key points at has no anchor to count from."""
+
+    code = reasons.runtime.WINDOWED_DATE_PARENT_ANCHOR_NULL
 
 
 class WindowedDateRowNumberError(WindowedDateError):
-    """A global row number is outside the draw's domain; the message names no number."""
+    """A global row number is outside the draw's domain (below 0 or at or above 2**62)."""
 
-    code: str = reasons.runtime.WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE
+    code = reasons.runtime.WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE
 
 
 # The draw source is `2 * row + k`, so `2 * row + 1` must fit int64 and stay in the range where
@@ -234,9 +262,7 @@ def _draw_offsets(
         if count == 0:
             return np.empty(0, dtype=np.int64)
         if min(rows) < 0 or max(rows) >= _ROW_NUMBER_LIMIT:
-            raise WindowedDateRowNumberError(
-                "windowed_date global row number is outside 0 to 2**62 - 1"
-            )
+            raise WindowedDateRowNumberError()
         lo, hi = config.min_days, config.max_days
         # Same seed and namespace refusals as `derive`, with the same text.
         DeriveContext.for_column(seed, namespace)
@@ -280,54 +306,59 @@ def _is_null_cell(raw: Any) -> bool:
     return isinstance(raw, float) and raw != raw  # NaN is the only self-unequal float
 
 
-def _parse_anchor(raw: Any, position: int) -> pd.Timestamp:
+def _names_a_real_instant(raw: str) -> bool:
+    """Whether a grammar-valid anchor is a real calendar date and clock time.
+
+    pandas refuses both an impossible date (`2024-02-30`) and a real one outside its nanosecond
+    bounds with one error type. The stdlib calendar (`datetime.date`, years 1 to 9999) tells
+    them apart, so the second is reported as out of range rather than as not a date.
+    """
+    try:
+        _dt.date(int(raw[0:4]), int(raw[5:7]), int(raw[8:10]))
+    except ValueError:
+        return False
+    clock = [int(part) for part in re.findall(r"\d+", raw[11:19])]
+    return all(value < top for value, top in zip(clock, (24, 60, 60), strict=False))
+
+
+def _parse_anchor(raw: Any) -> pd.Timestamp:
     """Validate one non-null anchor against the supported grammar and range, then parse it."""
-    ts: pd.Timestamp
-    failed = False
+    ts: pd.Timestamp | None = None
     if isinstance(raw, str):
         if _ISO_ANCHOR.match(raw) is None:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is not an ISO date or datetime "
-                "without a timezone"
-            )
+            raise WindowedDateError()
         # The pandas error text embeds the raw cell (e.g. "day is out of range for month:
         # 2024-02-30"). Raise outside the except block so neither __cause__ nor __context__
         # carries it into a formatted traceback.
         try:
             ts = pd.Timestamp(raw)
         except (ValueError, OverflowError):
-            failed = True
-        if failed:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is not a valid calendar date"
-            ) from None
+            pass
+        if ts is None and _names_a_real_instant(raw):
+            raise WindowedDateAnchorRangeError()
+        if ts is None:
+            raise WindowedDateError()
     elif isinstance(raw, (pd.Timestamp, _dt.datetime, _dt.date)):
         # Typed date32 / timestamp anchors (and datetime64 mask-side columns) arrive as these.
         if getattr(raw, "tzinfo", None) is not None:
-            raise WindowedDateError(f"windowed_date anchor at row {position} carries a timezone")
+            raise WindowedDateError()
         # Same leak as above: the pandas bounds error quotes the cell value.
         try:
             ts = pd.Timestamp(raw)
         except (ValueError, OverflowError):
-            failed = True
-        if failed:
-            raise WindowedDateError(
-                f"windowed_date anchor at row {position} is outside the supported range"
-            ) from None
+            pass
+        if ts is None:
+            raise WindowedDateAnchorRangeError()
     else:
-        raise WindowedDateError(
-            f"windowed_date anchor at row {position} has unsupported type {type(raw).__name__}"
-        )
+        raise WindowedDateError()
     if ts is pd.NaT or pd.isna(ts):
-        raise WindowedDateError(f"windowed_date anchor at row {position} parses to NaT")
+        raise WindowedDateError()
     if not (SUPPORTED_MIN <= ts <= SUPPORTED_MAX):
-        raise WindowedDateError(
-            f"windowed_date anchor at row {position} is outside the supported range"
-        )
+        raise WindowedDateAnchorRangeError()
     return ts
 
 
-def _shift_and_format(anchor: pd.Timestamp, offset: int, position: int) -> str:
+def _shift_and_format(anchor: pd.Timestamp, offset: int) -> str:
     # The pandas/strftime error text can quote the anchor or shifted date, so the cause is
     # dropped (raised outside the except block: no __cause__, no __context__).
     try:
@@ -336,9 +367,7 @@ def _shift_and_format(anchor: pd.Timestamp, offset: int, position: int) -> str:
             return str(out.strftime(_DATE_FMT))
     except (OverflowError, ValueError):
         pass
-    raise WindowedDateError(
-        f"windowed_date result at row {position} is outside the supported range"
-    ) from None
+    raise WindowedDateOffsetRangeError()
 
 
 # Largest |offset| in days that `pd.Timedelta` represents (ns int64). The per-row reference path
@@ -476,10 +505,13 @@ def apply_windowed_date(
         anchor cell yields ``None`` and consumes no draw.
 
     Raises:
-        WindowedDateRowNumberError: a global row number is below 0 or at or above 2**62.
-        WindowedDateError: a non-null anchor fails the accepted grammar, parses to NaT (including
-            ``""`` and ``"NaT"``), lies outside ``SUPPORTED_MIN``..``SUPPORTED_MAX``, or the
-            window arithmetic or formatting overflows. Fail-closed: no row is clamped.
+        WindowedDateRowNumberError: with ``windowed_date_row_number_out_of_range`` when a global
+            row number is below 0 or at or above 2**62.
+        WindowedDateError: with ``windowed_date_anchor_invalid`` when a non-null anchor fails the
+            accepted grammar, has an unsupported type or a timezone, or parses to NaT (including
+            ``""`` and ``"NaT"``); with ``windowed_date_anchor_out_of_range`` when it lies outside
+            ``SUPPORTED_MIN``..``SUPPORTED_MAX``; with ``windowed_date_offset_out_of_range`` when
+            the shifted date does, or the arithmetic overflows. Fail-closed: no row is clamped.
     """
     try:
         anchor_series = df[config.anchor]
@@ -525,13 +557,13 @@ def apply_windowed_date(
             if _is_null_cell(raw_anchor):
                 result.append(None)
                 continue
-            anchor_ts = _parse_anchor(raw_anchor, int(i))
+            anchor_ts = _parse_anchor(raw_anchor)
             if bulk is not None:
                 offset = bulk[cursor]
                 cursor += 1
             else:
                 offset = int(_draw_offsets([int(i)], config, seed, namespace)[0])
-            result.append(_shift_and_format(anchor_ts, offset, int(i)))
+            result.append(_shift_and_format(anchor_ts, offset))
 
         return result
     except BaseException:

@@ -33,6 +33,7 @@ VALID = {
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"file": "x.csv"},
     "provider": {"provider": "synthetic_npi"},
+    "inherit": {"via": "a", "column": "b"},
 }
 OTHER_ELEVEN = sorted(VALID)
 

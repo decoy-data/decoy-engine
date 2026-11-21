@@ -167,9 +167,10 @@ def _check_column(
     elif kind == "reference":
         _check_reference_weights(table, col, tables)
     _check_parse_rules(table, col)
-    _check_forward_references(table, cols, index)
+    # A formula's own reference rules keep their codes, so they run before the input edges.
     if kind == "formula":
         _check_formula(table, cols, index, types)
+    _check_input_edges(table, cols, index, tables)
 
 
 # ---- provider -------------------------------------------------------------------------------
@@ -277,11 +278,17 @@ class _FakerView:
 
 
 def _check_categories(table: str, col: dict[str, Any]) -> None:
-    """Refuse a list Arrow cannot type, the inference ``pa.table`` applies at run."""
+    """Refuse a list Arrow cannot type, the inference ``pa.table`` applies at run.
+
+    A conditional column's list is every category it can draw: the top-level list and each
+    `by` entry's, which the run's inference sees together.
+    """
     import pyarrow as pa
 
-    categories = col.get("categories")
-    if not isinstance(categories, list):
+    from decoy_engine.config import categorical_categories
+
+    categories = categorical_categories(col) if isinstance(col.get("categories"), list) else None
+    if categories is None:
         return
     mixed = False
     try:
@@ -369,47 +376,37 @@ def _check_parse_rules(table: str, col: dict[str, Any]) -> None:
         raise _refusal(failure[0], table, col["name"], failure[1])
 
 
-# ---- forward references -----------------------------------------------------------------------
+# ---- input edges ------------------------------------------------------------------------------
 
 
-def _expression_refs(expression: str) -> frozenset[str]:
-    from decoy_engine.expressions import compile_expr
-    from decoy_engine.transforms.derived import _get_column_refs
+def _check_input_edges(
+    table: str, cols: list[dict[str, Any]], index: int, tables: Mapping[str, dict[str, Any]]
+) -> None:
+    """Every column this column reads must exist where the registry says, and be ready.
 
-    try:
-        return frozenset(_get_column_refs(compile_expr(expression)))
-    except Exception:
-        return frozenset()
-
-
-def _referenced(kind: str | None, value: Any) -> frozenset[str]:
-    if kind == "column" and isinstance(value, str):
-        return frozenset({value})
-    if kind == "column_list" and isinstance(value, list):
-        return frozenset(v for v in value if isinstance(v, str))
-    if kind == "expression" and isinstance(value, str):
-        return _expression_refs(value)
-    return frozenset()
-
-
-def _check_forward_references(table: str, cols: list[dict[str, Any]], index: int) -> None:
-    """A column the registry marks as a reference must be generated earlier in the table.
-
-    A generate table holds only generate columns, so any name not among the earlier ones is
-    missing or declared later. The generators read siblings in declared order, so a later or
-    missing name gives nulls, an empty aggregate, one group or a crash, never the intended value.
-    This is the single owner of that rule, including `statistical.condition_on`.
+    The inputs come resolved from `config.iter_generate_input_refs`; this is the single owner of
+    whether the source table exists, the source column exists in it, and an input read while the
+    column is drawn was generated earlier. The generators read siblings in declared order, so a
+    later or missing name gives nulls, an empty aggregate, one group or a crash, never the
+    intended value. A formula with `references` is not ready for such a read either: it holds
+    None until the post-pass after every other column is drawn. An input in another table, or
+    one read after its table is filled (a per-parent aggregate's child column, a formula's
+    `references`), is ready whenever it exists: its table is finished before the read.
     """
-    from decoy_engine.config._generate_options import GENERATE_OPTIONS
+    from decoy_engine.config import generate_columns_of, iter_generate_input_refs
 
     col = cols[index]
-    spec = GENERATE_OPTIONS.get(str(col.get("type")))
-    if spec is None:
-        return
-    earlier = {c["name"] for c in cols[:index]}
-    for key, option in spec.keys.items():
-        if any(r not in earlier for r in _referenced(option.ref_kind, col.get(key))):
-            raise _refusal(reasons.plan.GENERATE_COLUMN_FORWARD_REFERENCE, table, col["name"], key)
+    earlier = {c["name"] for c in cols[:index] if not _has_references(c)}
+    for edge in iter_generate_input_refs(tables[table], col):
+        if edge.must_be_earlier:
+            ready = edge.source_column in earlier
+        else:
+            source = tables.get(edge.source_table)
+            names = generate_columns_of(source) if source is not None else []
+            ready = any(isinstance(c, dict) and c.get("name") == edge.source_column for c in names)
+        if not ready:
+            code = reasons.plan.GENERATE_COLUMN_FORWARD_REFERENCE
+            raise _refusal(code, table, col["name"], edge.option)
 
 
 # ---- formulas ---------------------------------------------------------------------------------
