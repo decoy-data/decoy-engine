@@ -348,8 +348,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
-            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
-            "text_mask_strategies",
+            "text_mask_strategies",  # E-F0, tail-appended
+            "nested_rules",
         )
         checks_skipped: tuple[str, ...] = (
             "basic_uniqueness_pre_flight",
@@ -430,8 +430,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
-            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
-            "text_mask_strategies",
+            "text_mask_strategies",  # E-F0, tail-appended
+            "nested_rules",
         )
         checks_skipped = ()
 
@@ -610,6 +610,7 @@ def run_config_only_checks(
         "faker_requires_provider",
         *declared,
         "text_mask_strategies",  # E-F0, tail-appended
+        "nested_rules",
     )
 
 

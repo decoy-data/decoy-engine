@@ -28,6 +28,7 @@ from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
+from decoy_engine.plan._provider_sites import provider_sites
 from decoy_engine.profile._types import Profile
 
 # Strategies under which a null-bearing integer source column is ambiguous: an
@@ -71,29 +72,18 @@ def check_unknown_provider(config: dict[str, Any]) -> None:
     from decoy_engine.providers_v2 import get_default_registry
 
     known = get_default_registry().known_providers()
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            provider = col_entry.get("provider")
-            if provider is None:
-                continue
-            if provider not in known:
-                col_name = col_entry.get("name", "?")
-                raise PlanCompileError(
-                    code=reasons.plan.UNKNOWN_PROVIDER,
-                    path=f"tables.{table_name}.columns.{col_name}.provider",
-                    message=(
-                        f"Provider {provider!r} is not in the default registry. "
-                        f"Known providers: {sorted(known)!r}. Custom providers "
-                        "land via `register_faker_provider_v2` (V2) or "
-                        "`register_faker_provider` (V1; until S9)."
-                    ),
-                )
+    for site in provider_sites(config):
+        if site.provider not in known:
+            raise PlanCompileError(
+                code=reasons.plan.UNKNOWN_PROVIDER,
+                path=site.path,
+                message=(
+                    f"Provider {site.provider!r} is not in the default registry. "
+                    f"Known providers: {sorted(known)!r}. Custom providers "
+                    "land via `register_faker_provider_v2` (V2) or "
+                    "`register_faker_provider` (V1; until S9)."
+                ),
+            )
 
 
 def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> None:
@@ -107,7 +97,8 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
     providers is guaranteed dead at `run` while passing schema
     validation. This check moves that failure to compile time. The
     capacity pre-flight (row 7) deliberately SKIPS non-poolable
-    providers, so nothing else catches the combination.
+    providers, so nothing else catches the combination. A nested faker
+    rule builds a pool the same way and is checked at its own site.
 
     Config + registry only (no profile): safe to run in --no-profile
     mode and in config-only validation paths.
@@ -116,33 +107,22 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
 
     registry = get_default_registry()
     known = registry.known_providers()
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            if col_entry.get("strategy") != "faker":
-                continue
-            provider = col_entry.get("provider")
-            if provider is None or provider not in known:
-                continue  # unknown_provider (row 2) owns missing/unknown
-            if not registry.get_capabilities(provider).poolable:
-                col_name = col_entry.get("name", "?")
-                raise PlanCompileError(
-                    code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,
-                    path=f"tables.{table_name}.columns.{col_name}.provider",
-                    message=(
-                        f"Provider {provider!r} declares poolable=False but column "
-                        f"{table_name}.{col_name} uses strategy 'faker', which always "
-                        "routes through the pool backend and fails at runtime with "
-                        "provider_not_poolable. Use a poolable provider, a keyed "
-                        "strategy (hash / fpe) for deterministic identifiers, or "
-                        "redact."
-                    ),
-                )
+    for site in provider_sites(config):
+        if not site.pooled or site.provider not in known:
+            continue  # unknown_provider (row 2) owns missing/unknown
+        if not registry.get_capabilities(site.provider).poolable:
+            raise PlanCompileError(
+                code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,
+                path=site.path,
+                message=(
+                    f"Provider {site.provider!r} declares poolable=False but {site.label} "
+                    "uses strategy 'faker', which always "
+                    "routes through the pool backend and fails at runtime with "
+                    "provider_not_poolable. Use a poolable provider, a keyed "
+                    "strategy (hash / fpe) for deterministic identifiers, or "
+                    "redact."
+                ),
+            )
 
 
 def check_basic_uniqueness_pre_flight(config: dict[str, Any], profile: Profile) -> None:

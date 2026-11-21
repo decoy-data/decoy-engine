@@ -233,3 +233,49 @@ class TestFakerRuleProvider:
         own = _rule("$.b", "faker", strategy_config={"provider": "person_email"})
         run_config_only_checks(_config({"rules": [own]}))
         run_config_only_checks(_config({"rules": [_rule("$.b", "faker")]}, provider="person_email"))
+
+
+class TestNestedTextMaskRunsTheTopLevelStrategyCheck:
+    """A nested `text_mask` child is held to the same detector and strategy check."""
+
+    @pytest.mark.parametrize(
+        "strategy_config",
+        [
+            {"detectors": ["emial"], "unmatched_span_policy": "passthrough"},
+            {"per_detector_strategy": {"ssn": "date_shift"}},
+        ],
+    )
+    @pytest.mark.parametrize("form", ["rules", "single"])
+    def test_a_bad_nested_text_mask_is_refused_by_both_entry_points(
+        self, strategy_config: dict[str, Any], form: str, simple_profile: Profile
+    ) -> None:
+        child = {"target": "$.note", "strategy": "text_mask", "strategy_config": strategy_config}
+        config = _config({"rules": [child]} if form == "rules" else child)
+        for error in _refused(config, simple_profile):
+            assert error.code in {
+                "mask.text_mask_detector_unknown",
+                "mask.text_mask_strategy_unsupported",
+            }
+            at = f"{COL}.provider_config" + (".rules[0]" if form == "rules" else "")
+            assert error.path is not None and error.path.startswith(f"{at}.strategy_config.")
+
+    def test_a_valid_nested_text_mask_passes(self) -> None:
+        child = {
+            "target": "$.note",
+            "strategy": "text_mask",
+            "strategy_config": {"detectors": ["email"]},
+        }
+        run_config_only_checks(_config({"rules": [child]}))
+
+
+class TestCompileResultNamesTheNestedRulesCheck:
+    def test_both_entry_points_report_it(
+        self, simple_config: dict, simple_profile: Profile
+    ) -> None:
+        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        assert plan.plan_compile.checks_passed[-1] == "nested_rules"
+        assert run_config_only_checks(simple_config)[-1] == "nested_rules"
+        no_profile = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", no_profile=True
+        )
+        assert "nested_rules" in no_profile.plan_compile.checks_passed

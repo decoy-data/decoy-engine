@@ -96,6 +96,7 @@ class TestCompilePlanHappyPath:
             "bucket_perturb_config",
             "freetext_advisory",
             "text_mask_strategies",
+            "nested_rules",
         }
 
     def test_compile_no_warnings_no_errors_no_skipped(

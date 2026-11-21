@@ -96,7 +96,7 @@ class _Rule:
     handler: Any
     seed: ColumnSeed
     expr: Any
-    draw_column: str
+    rule_index: int | None
 
 
 class NestedStrategyHandler:
@@ -279,20 +279,21 @@ class NestedStrategyHandler:
             # all-null or zero-match column, which return before the child runs.
             if seed.strategy == "bucket_perturb":
                 handler.preflight(seed, ctx)
+            expr = None
             try:
                 expr = jsonpath_ng.parse(target)
-            except Exception as exc:
+            except Exception:
+                pass  # refused below, outside the handler, so no parser text rides along
+            if expr is None:
                 raise StrategyError(
                     code=reasons.runtime.NESTED_JSONPATH_PARSE_ERROR,
                     strategy="nested",
                     message=(
-                        f"nested target {target!r} is not a valid JSONPath "
-                        f"expression (column={column!r}): {exc}"
+                        f"a nested target is not a valid JSONPath expression (column={column!r})."
                     ),
-                ) from exc
+                )
             # Two rules never share a draw; the single form keeps the outer column identity.
-            draw = f"{column}.rules[{child.index}]" if child.index is not None else ""
-            rules.append(_Rule(child, target, handler, seed, expr, draw))
+            rules.append(_Rule(child, target, handler, seed, expr, child.index))
         return rules
 
     def run(
@@ -415,7 +416,7 @@ class NestedStrategyHandler:
             if not leaves[i]:
                 continue
             out = run_rule_child(
-                rule.handler, rule.seed, column, ctx, leaves[i], leaf_outer_pos[i], rule.draw_column
+                rule.handler, rule.seed, column, ctx, leaves[i], leaf_outer_pos[i], rule.rule_index
             )
             warnings.extend(out.warnings)
             new_values[i] = out.values
@@ -447,26 +448,6 @@ class NestedStrategyHandler:
         return df, warnings
 
 
-def _path_segments(match: Any) -> tuple[str, ...]:
-    """Return the dotted segments of a jsonpath_ng match's full_path.
-
-    `match.full_path` is a chain of Fields / Index / Slice nodes; its
-    `str` representation yields a dotted expression like `user.name`
-    or `(user.email)` (recursive-descent compound paths wrap in
-    parens). We strip the wrapping parens before splitting on `.` so
-    that `(user.email)` -> ("user", "email") aligns with the bare
-    `user` segment from the recursive root match for prefix-overlap
-    detection.
-    """
-    raw = str(match.full_path).strip()
-    # Strip a single outer paren wrapper if present (jsonpath_ng emits
-    # these for compound recursive paths). Inner parens, if any,
-    # remain inside the segment.
-    if raw.startswith("(") and raw.endswith(")"):
-        raw = raw[1:-1]
-    return tuple(raw.split("."))
-
-
 def _order_matches_deepest_first(matches: list) -> list:
     """Return matches sorted by path depth descending.
 
@@ -479,7 +460,7 @@ def _order_matches_deepest_first(matches: list) -> list:
     recursive selector (`$..*` -> mask the root, then nothing else
     matters; the inner-leaf writes are discarded by the parent write).
     """
-    return sorted(matches, key=lambda m: -len(_path_segments(m)))
+    return sorted(matches, key=lambda m: -len(match_path(m)))
 
 
 def _has_prefix_overlap(ordered_matches: list) -> bool:
@@ -491,7 +472,7 @@ def _has_prefix_overlap(ordered_matches: list) -> bool:
     the number of matches in a single cell (typically <50), and the
     function only runs when matches are non-empty.
     """
-    seg_lists = [_path_segments(m) for m in ordered_matches]
+    seg_lists = [match_path(m) for m in ordered_matches]
     n = len(seg_lists)
     for i in range(n):
         deeper = seg_lists[i]

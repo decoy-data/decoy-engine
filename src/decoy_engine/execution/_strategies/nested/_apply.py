@@ -142,20 +142,20 @@ def run_rule_child(
     ctx: StrategyContext,
     leaf_values: list[Any],
     leaf_outer_pos: list[int],
-    draw_column: str,
+    rule_index: int | None,
 ) -> RuleOutput:
     """Run one rule's child over its collected leaves in one batch.
 
     The child sees the synthetic `_nested_leaves` column, so the real outer column and the rule's
-    draw identity are stamped on `ctx` for the call and restored after (the prior values are
+    rule index are stamped on `ctx` for the call and restored after (the prior values are
     saved: nested dispatch can itself run inside another node). Row errors the child records at a
     leaf position are remapped to the outer row, or the job fails when one cannot be placed.
     """
     temp_df = leaf_frame(_LEAF_COLUMN, leaf_values)
     prior_outer_column = getattr(ctx, "nested_outer_column", "")
-    prior_draw_column = getattr(ctx, "nested_draw_column", "")
+    prior_rule_index = getattr(ctx, "nested_rule_index", None)
     object.__setattr__(ctx, "nested_outer_column", column)
-    object.__setattr__(ctx, "nested_draw_column", draw_column)
+    object.__setattr__(ctx, "nested_rule_index", rule_index)
     # A positional child keys on its leaf ordinal, not the outer row, so the outer gate's
     # positions must not reach it.
     prior_gate_positions = getattr(ctx, "gate_positions", None)
@@ -167,7 +167,7 @@ def run_rule_child(
         temp_df, child_warnings = handler.run(temp_df, _LEAF_COLUMN, seed, ctx)
     finally:
         object.__setattr__(ctx, "nested_outer_column", prior_outer_column)
-        object.__setattr__(ctx, "nested_draw_column", prior_draw_column)
+        object.__setattr__(ctx, "nested_rule_index", prior_rule_index)
         object.__setattr__(ctx, "gate_positions", prior_gate_positions)
     if ctx_row_errors is not None:
         _remap_row_errors(ctx_row_errors, n_err_before, leaf_outer_pos, column)

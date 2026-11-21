@@ -211,10 +211,11 @@ class StrategyContext:
     # mirroring `_orphan.py`'s prior_table save/restore since nested
     # dispatch can itself run mid-dispatch of an enclosing node.
     nested_outer_column: str = ""
-    # The draw identity of one rule of a nested column (`<column>.rules[<i>]`), so two rules never
-    # share a draw. Empty for the single form and outside a nested child. `nested_outer_column`
-    # stays the real column for evidence.
-    nested_draw_column: str = ""
+    # The index of the rule of a nested column that is running, so two rules never share a draw.
+    # It is a separate component of the draw identity, never joined into the column name, because
+    # column names are unrestricted. `None` for the single form and outside a nested child.
+    # `nested_outer_column` stays the real column for evidence.
+    nested_rule_index: int | None = None
     # Codex round-7 P2 CROSS-INVOCATION MASKING/EVIDENCE DIVERGENCE
     # remediation: the job-wide pinned corpus record per (table, column). The
     # round-6 fix pinned one corpus record within a SINGLE `CodeSetHandler.run`
@@ -497,25 +498,26 @@ def pandas_column_to_kernel_input(column: pd.Series) -> pa.Array | list[Any]:
         return [None if is_na else value for is_na, value in zip(na_mask, column, strict=True)]
 
 
-def column_draw_identity(table: str, column: str) -> str:
+def column_draw_identity(table: str, column: str, rule: int | None = None) -> str:
     """`<len>:<table>/<len>:<column>`, the (table, column) identity a table-keyed draw binds.
 
     Names are unrestricted strings, so a plain `table/column` join would let table `a/b` +
-    column `c` collide with table `a` + column `b/c`; the length prefixes rule that out."""
-    return f"{len(table)}:{table}/{len(column)}:{column}"
+    column `c` collide with table `a` + column `b/c`; the length prefixes rule that out. A nested
+    rule adds a `/rule:<index>` suffix after the framed column. The framed column ends the
+    identity of a plain column, so no column name can read as a rule suffix."""
+    base = f"{len(table)}:{table}/{len(column)}:{column}"
+    return base if rule is None else f"{base}/rule:{rule}"
 
 
 def draw_column(ctx: Any, column: str) -> str:
-    """The column a draw is keyed on: the rule identity or outer column of a nested child.
+    """The column a draw is keyed on: the outer column of a nested child, else `column`.
 
     `getattr` because a handler may be given a minimal context that predates the field."""
-    return str(
-        getattr(ctx, "nested_draw_column", "") or getattr(ctx, "nested_outer_column", "") or column
-    )
+    return str(getattr(ctx, "nested_outer_column", "") or column)
 
 
 def context_draw_identity(ctx: Any, column: str, *, strategy: str) -> str:
-    """`column_draw_identity` of the context's table and `draw_column`, failing closed.
+    """`column_draw_identity` of the context's table, `draw_column` and nested rule, failing closed.
 
     An unstamped table would key every same-named column of every table on one draw, so an
     empty `current_table` raises instead. The code predates the second caller and keeps its
@@ -531,4 +533,5 @@ def context_draw_identity(ctx: Any, column: str, *, strategy: str) -> str:
                 "caller that does not must set it."
             ),
         )
-    return column_draw_identity(table, draw_column(ctx, column))
+    rule = getattr(ctx, "nested_rule_index", None)
+    return column_draw_identity(table, draw_column(ctx, column), rule)

@@ -235,10 +235,20 @@ class TestDrawIdentityPerRule:
         ]
 
     @staticmethod
-    def _flat_shuffle(values: list[int], column: str) -> list[Any]:
+    def _flat_shuffle(values: list[int], column: str, rule: int | None = None) -> list[Any]:
+        """A flat shuffle of `column`; with `rule`, as the handler runs rule `rule` of `column`."""
         seed = dataclasses.replace(_seed({}, "events"), strategy="shuffle", provider_config=())
-        out, _ = ShuffleStrategyHandler().run(pd.DataFrame({column: values}), column, seed, _ctx())
-        return out[column].tolist()
+        ctx = _ctx()
+        if rule is not None:
+            object.__setattr__(ctx, "nested_outer_column", column)
+            object.__setattr__(ctx, "nested_rule_index", rule)
+            run_column = "_nested_leaves"
+        else:
+            run_column = column
+        out, _ = ShuffleStrategyHandler().run(
+            pd.DataFrame({run_column: values}), run_column, seed, ctx
+        )
+        return out[run_column].tolist()
 
     def test_two_unkeyed_shuffle_rules_draw_independent_permutations(self) -> None:
         out, _, _ = _run(self.CELLS, self._shuffle_rules())
@@ -246,8 +256,26 @@ class TestDrawIdentityPerRule:
         b = [json.loads(c)["b"] for c in out["payload"]]
         assert sorted(a) == sorted(b) == list(range(12))
         assert a != b
-        assert a == self._flat_shuffle(list(range(12)), "payload.rules[0]")
-        assert b == self._flat_shuffle(list(range(12)), "payload.rules[1]")
+        assert a == self._flat_shuffle(list(range(12)), "payload", 0)
+        assert b == self._flat_shuffle(list(range(12)), "payload", 1)
+
+    def test_a_column_named_like_a_rule_does_not_share_the_rules_draw(self) -> None:
+        """Column names are unrestricted, so `payload.rules[0]` is a legal top-level column."""
+        out, _, _ = _run(self.CELLS, self._shuffle_rules())
+        rule0 = [json.loads(c)["a"] for c in out["payload"]]
+        lookalike = self._flat_shuffle(list(range(12)), "payload.rules[0]")
+        assert rule0 != lookalike
+        assert rule0 == self._flat_shuffle(list(range(12)), "payload", 0)
+
+    def test_the_rule_is_its_own_framed_component_of_the_identity(self) -> None:
+        from decoy_engine.execution._adapter import column_draw_identity
+
+        assert column_draw_identity("t", "payload", 0) == "1:t/7:payload/rule:0"
+        assert column_draw_identity("t", "payload", 0) != column_draw_identity(
+            "t", "payload.rules[0]"
+        )
+        assert column_draw_identity("t", "c") == "1:t/1:c"  # no rule: the pinned form
+        assert column_draw_identity("t", "c", 0) != column_draw_identity("t", "c/rule:0")
 
     def test_the_single_form_still_draws_on_the_real_column(self) -> None:
         seed = _seed({"target": "$.a", "strategy": "shuffle"}, "events")
@@ -260,7 +288,7 @@ class TestDrawIdentityPerRule:
     def test_the_draw_identity_is_restored_after_the_call(self) -> None:
         ctx = _ctx()
         _run(self.CELLS, self._shuffle_rules(), ctx=ctx)
-        assert ctx.nested_draw_column == "" and ctx.nested_outer_column == ""
+        assert ctx.nested_rule_index is None and ctx.nested_outer_column == ""
 
 
 def _write_corpus(path: pathlib.Path, codes: list[str]) -> None:

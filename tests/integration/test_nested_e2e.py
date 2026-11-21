@@ -93,3 +93,54 @@ def test_nested_manifest_carries_nested_config_tree():
     cfg = dict(seed_out.provider_config)
     assert cfg["target"] == "$.user.email"
     assert cfg["strategy"] == "redact"
+
+
+def test_a_nested_text_mask_with_a_misspelled_detector_is_refused_before_any_output(tmp_path):
+    """A nested text_mask child gets the top-level detector check, so no cleartext is written."""
+    import pandas as pd
+    import pytest
+
+    from decoy_engine.config import PipelineConfig
+    from decoy_engine.execution import run_pipeline
+    from decoy_engine.plan import PlanCompileError
+    from tests._keyed_secret import THROWAWAY_SECRET
+
+    cells = [json.dumps({"note": "write to real@example.com"})]
+    src, out = tmp_path / "t.csv", tmp_path / "t_out.csv"
+    pd.DataFrame({"payload": cells}).to_csv(src, index=False)
+    key = tmp_path / "throwaway.key"
+    key.write_text(THROWAWAY_SECRET.hex())
+    key.chmod(0o600)
+    rule = {
+        "target": "$.note",
+        "strategy": "text_mask",
+        "strategy_config": {"detectors": ["emial"], "unmatched_span_policy": "passthrough"},
+    }
+    cfg = PipelineConfig.model_validate(
+        {
+            "version": 2,
+            "global_settings": {"seed": 42, "mask_secret_ref": f"file:{key}"},
+            "sources": {
+                "t": {"type": "file", "format": "csv", "has_header": True, "path": str(src)}
+            },
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
+                        {
+                            "name": "payload",
+                            "strategy": "nested",
+                            "namespace": "ns",
+                            "provider_config": {"rules": [rule]},
+                        }
+                    ],
+                }
+            ],
+            "targets": {"t": {"type": "file", "format": "csv", "path": str(out)}},
+        }
+    ).model_dump()
+    sources = {"t": pa.Table.from_pandas(pd.DataFrame({"payload": cells}), preserve_index=False)}
+    with pytest.raises(PlanCompileError) as err:
+        run_pipeline(cfg, sources, engine_version="f07-nested")
+    assert err.value.code == "mask.text_mask_detector_unknown"
+    assert not out.exists()

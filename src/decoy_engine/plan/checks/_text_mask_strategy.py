@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._generate_columns import _located
 from decoy_engine.transforms.text_mask import (
@@ -38,38 +39,44 @@ def check_text_mask_strategies(config: dict[str, Any]) -> None:
         if not isinstance(table, dict):
             continue
         for col in table.get("columns") or []:
-            if not isinstance(col, dict) or col.get("strategy") != "text_mask":
+            if not isinstance(col, dict):
                 continue
             pc = col.get("provider_config")
-            if isinstance(pc, dict):
-                where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
-                _check_column(pc, where, f"table {table.get('name')!r}, column {col.get('name')!r}")
+            if not isinstance(pc, dict):
+                continue
+            where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+            label = f"table {table.get('name')!r}, column {col.get('name')!r}"
+            if col.get("strategy") == "text_mask":
+                _check_column(pc, f"{where}.provider_config", label)
+            elif col.get("strategy") == "nested":
+                # A nested child masks text through the same engine, so it is held to the same
+                # check: a misspelled detector would otherwise pass cleartext through.
+                for child in nested_children(pc):
+                    cfg = child.strategy_config
+                    if child.strategy == "text_mask" and isinstance(cfg, dict):
+                        at = f"{where}.{child.config_path}"
+                        rule = "" if child.index is None else f", rule {child.index}"
+                        _check_column(cfg, f"{at}.strategy_config", f"{label}{rule}")
 
 
-def _check_column(pc: dict[str, Any], where: str, label: str) -> None:
+def _check_column(pc: dict[str, Any], at: str, label: str) -> None:
     code_unknown = reasons.config.MASK_TEXT_MASK_DETECTOR_UNKNOWN
     code_unsupported = reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED
     selectors = pc.get("detectors")
     if selectors is not None and not isinstance(selectors, (list, tuple)):
-        raise _refuse(
-            code_unknown, f"{where}.provider_config.detectors", f"{label}: {_shown(selectors)}"
-        )
+        raise _refuse(code_unknown, f"{at}.detectors", f"{label}: {_shown(selectors)}")
     for det in selectors or ():
         if not isinstance(det, str) or det not in SELECTABLE_TEXT_MASK_DETECTORS:
-            raise _refuse(
-                code_unknown, f"{where}.provider_config.detectors", f"{label}: {_shown(det)}"
-            )
+            raise _refuse(code_unknown, f"{at}.detectors", f"{label}: {_shown(det)}")
     overrides = pc.get("per_detector_strategy")
     if overrides is not None and not isinstance(overrides, dict):
         raise _refuse(
             code_unsupported,
-            f"{where}.provider_config.per_detector_strategy",
+            f"{at}.per_detector_strategy",
             f"{label}: {_shown(overrides)}",
         )
     for det, strategy in (overrides or {}).items():
-        path = (
-            f"{where}.provider_config.per_detector_strategy.{det if isinstance(det, str) else '?'}"
-        )
+        path = f"{at}.per_detector_strategy.{det if isinstance(det, str) else '?'}"
         if not isinstance(det, str) or det not in TEXT_MASK_STRATEGY_DETECTORS:
             raise _refuse(code_unknown, path, f"{label}: {_shown(det)}")
         if not isinstance(strategy, str) or not strategy_supported(det, strategy):
