@@ -28,7 +28,7 @@ from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._pool_size import resolve_pool_size
-from decoy_engine.plan._provider_sites import provider_sites
+from decoy_engine.plan.checks._provider_sites import provider_sites
 from decoy_engine.profile._types import Profile
 
 # Strategies under which a null-bearing integer source column is ambiguous: an
