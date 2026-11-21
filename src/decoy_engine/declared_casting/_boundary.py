@@ -188,10 +188,11 @@ def native_date_columns(plan: Any) -> Mapping[tuple[str, str], ColumnShape]:
     The one list the runtime backstop reads: a column the plan does not list is never typed
     here, whatever its data looks like. Declared date columns are not in it (they keep text).
     """
+    declared = declared_date_shift_columns(plan)  # an F06 declaration also shapes as a date
     return {
         (s.table, s.column): s.shape
         for s in getattr(plan, "column_shapes", None) or ()
-        if s.shape in TYPED_DATE_SHAPES
+        if s.shape in TYPED_DATE_SHAPES and (s.table, s.column) not in declared
     }
 
 

@@ -200,3 +200,103 @@ def test_non_string_date_format_refused_on_a_typed_column(tmp_path: Path) -> Non
     with pytest.raises(PlanCompileError) as exc2:
         _compile(cfg, table)  # a date32 column, which needs no format, still refuses a bad one
     assert exc2.value.code == NEEDS_FORMAT
+
+
+@pytest.mark.parametrize("route", ["full_frame", "chunked", "sequential"])
+def test_declared_date_column_keeps_its_text_output(route: str) -> None:
+    """Kills: listing an F06-declared date column as native, which writes a date, not text."""
+    from tests.acceptance._f06_support import (
+        ISO_DATE,
+        column,
+        config,
+        run,
+        text_table,
+        write_csv,
+    )
+
+    rows = ["2026-01-01", "2026-03-04", "1999-12-31"]
+    window = {"min_days": -400, "max_days": 400}
+    declared = column(
+        "d",
+        "date_shift",
+        namespace="d",
+        logical_type="date",
+        parse_format=ISO_DATE,
+        error_policy="fail",
+        provider_config=window,
+    )
+    plain = column(
+        "d", "date_shift", namespace="d", provider_config={**window, "date_format": "%Y-%m-%d"}
+    )
+
+    def go(col: dict[str, Any], tmp: str) -> pa.Table:
+        src = write_csv(Path(tmp) / "p.csv", ["d"], [[r] for r in rows])
+        raw = config([col], source_path=src)
+        tables = {"people": text_table(d=rows)}
+        if route == "sequential":  # this route needs a parent/child edge
+            ids = [f"r{i}" for i in range(len(rows))]
+            psrc = write_csv(Path(tmp) / "parent.csv", ["id"], [[i] for i in ids])
+            table = raw["tables"][0]
+            table["columns"].insert(0, column("ref", "hash", namespace="fk"))
+            raw["tables"].append(
+                {"name": "parent", "columns": [column("id", "hash", namespace="fk")]}
+            )
+            raw["sources"]["parent"] = {**raw["sources"]["people"], "path": psrc}
+            raw["targets"]["parent"] = {**raw["targets"]["people"], "path": "/dev/null.parent"}
+            raw["relationships"] = [
+                {
+                    "parent": {"table": "parent", "columns": ["id"]},
+                    "children": [{"table": "people", "columns": ["ref"]}],
+                    "orphan_policy": "preserve",
+                    "namespace": "fk",
+                }
+            ]
+            tables = {"people": text_table(ref=ids, d=rows), "parent": text_table(id=ids)}
+            src = write_csv(
+                Path(tmp) / "p.csv", ["ref", "d"], [[i, r] for i, r in zip(ids, rows, strict=True)]
+            )
+            raw["sources"]["people"]["path"] = src
+        return run(raw, tables, execution_mode=route, key_provider=key_provider()).outputs["people"]
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+        got, legacy = go(declared, a), go(plain, b)
+    assert pa.types.is_string(got.schema.field("d").type)
+    assert got.column("d").to_pylist() == legacy.column("d").to_pylist() != rows
+
+
+def test_mixed_batch_dst_and_fixed_offset(tmp_path: Path) -> None:
+    """One column with both ambiguous choices, a gap, an ordinary time, a null and a fixed zone."""
+    from decoy_engine.execution._strategies._date_shift import _shift_zoned
+
+    ny = ZoneInfo(NY)
+    cells = [
+        _local(2024, 10, 30, 1, 30, dst=True),  # +4 d: 2024-11-03 01:30 twice, DST copy
+        _local(2025, 1, 1, 1, 30, dst=False),  # +305 d: 2025-11-02 01:30 twice, standard copy
+        _local(2024, 3, 7, 2, 30, dst=False),  # +3 d: 2024-03-10 02:30 does not exist
+        _local(2024, 6, 1, 9, 15, dst=True),  # +20 d: ordinary
+        None,
+    ]
+    days = [4, 305, 3, 20, 0]
+    parsed = pd.Series(pd.to_datetime(cells, utc=True).tz_convert(NY)).astype(
+        "datetime64[us, America/New_York]"
+    )
+    out = _shift_zoned(parsed, days)
+    walls = [None if pd.isna(v) else v.tz_localize(None).to_pydatetime() for v in out]
+    assert walls == [
+        dt.datetime(2024, 11, 3, 1, 30),
+        dt.datetime(2025, 11, 2, 1, 30),
+        dt.datetime(2024, 3, 10, 3, 0),
+        dt.datetime(2024, 6, 21, 9, 15),
+        None,
+    ]
+    offsets = [None if pd.isna(v) else v.utcoffset() for v in out]
+    assert offsets[:2] == [dt.timedelta(hours=-4), dt.timedelta(hours=-5)]
+    assert ny.key == NY
+    fixed = pd.Series(pd.to_datetime(["2024-03-05 10:00", None], utc=True)).dt.tz_convert(
+        dt.timezone(dt.timedelta(hours=5, minutes=30))
+    )
+    moved = _shift_zoned(fixed, [10, 0])
+    assert moved.iloc[0].tz_localize(None) == pd.Timestamp("2024-03-15 15:30")
+    assert str(moved.dt.tz) == str(fixed.dt.tz) and pd.isna(moved.iloc[1])
