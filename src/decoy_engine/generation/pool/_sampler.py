@@ -124,7 +124,9 @@ def derive_validated_indices(
     pool_size: int,
     kernel: IndexDerivationKernel | None = None,
 ) -> np.ndarray[Any, Any]:
-    """One checked pool index per source value: the one place a batch draw is made.
+    """One checked pool index per source value, the batch draw shared by its callers.
+
+    The pool sampler, the faker positional path and windowed_date offsets all draw through here.
 
     Uses `kernel` when given, else the compiled kernel when the native companion is present and
     the byte-identical reference otherwise. The pool size is refused first, as `derive_index`

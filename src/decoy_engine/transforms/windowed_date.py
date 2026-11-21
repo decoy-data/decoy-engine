@@ -166,15 +166,13 @@ class WindowedDateConfig:
         min_days = int(cfg.get("min_days", 0))
         max_days = int(cfg["max_days"])
 
-        if max(abs(min_days), abs(max_days)) > _MAX_TIMEDELTA_DAYS:
-            raise PlanCompileError(
-                code=reasons.plan.WINDOWED_DATE_WINDOW_OUT_OF_RANGE,
-                path="provider_config.max_days",
-                message=(
-                    f"'min_days' and 'max_days' must each be within {_MAX_TIMEDELTA_DAYS} days "
-                    "of the anchor."
-                ),
-            )
+        for field, days in (("min_days", min_days), ("max_days", max_days)):
+            if abs(days) > _MAX_TIMEDELTA_DAYS:
+                raise PlanCompileError(
+                    code=reasons.plan.WINDOWED_DATE_WINDOW_OUT_OF_RANGE,
+                    path=f"provider_config.{field}",
+                    message=f"'{field}' must be within {_MAX_TIMEDELTA_DAYS} days of the anchor.",
+                )
 
         if min_days > max_days:
             raise PlanCompileError(

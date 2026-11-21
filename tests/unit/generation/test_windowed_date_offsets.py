@@ -263,6 +263,8 @@ def test_window_beyond_the_date_range_is_refused_at_parse(key: str, days: int) -
     if days > 0 or key == "min_days":
         assert exc.value.code == "windowed_date_window_out_of_range"
     assert str(abs(days)) not in str(exc.value)
+    if exc.value.code == "windowed_date_window_out_of_range":
+        assert exc.value.path == f"provider_config.{key}"
     WindowedDateConfig.from_dict({"anchor": "a", "min_days": -106_751, "max_days": 106_751})
 
 

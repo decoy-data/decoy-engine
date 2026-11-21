@@ -420,6 +420,29 @@ class TestWindowedDateCompileVocab:
         with pytest.raises(PlanCompileError, match="normal"):
             check_windowed_date_refs(cfg)
 
+    @pytest.mark.parametrize("field", ["min_days", "max_days"])
+    def test_mask_column_window_past_date_range_rejected_at_compile(self, field: str) -> None:
+        """A mask-kind column gets the same 106751-day refusal as a generate column."""
+        from decoy_engine.plan._checks_windowed_date import check_windowed_date_refs
+
+        pc = {"anchor": "start", "min_days": -5, "max_days": 5, field: 106_752}
+        cfg = {
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [
+                        {"name": "start"},
+                        {"name": "end", "strategy": "windowed_date", "provider_config": pc},
+                    ],
+                }
+            ]
+        }
+        with pytest.raises(PlanCompileError) as exc:
+            check_windowed_date_refs(cfg)
+        assert exc.value.code == "windowed_date_window_out_of_range"
+        assert exc.value.path == f"provider_config.{field}"
+        assert "106752" not in str(exc.value)
+
     def test_valid_distribution_passes_compile(self) -> None:
         """Known distributions pass the compile check."""
         from decoy_engine.plan._checks_windowed_date import check_windowed_date_refs

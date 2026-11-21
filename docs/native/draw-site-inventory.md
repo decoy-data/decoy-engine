@@ -243,7 +243,7 @@ valid `derive` IKM lengths. Wired into output via the provider registry
 `derive_value` call.
 
 ### mask.windowed_date (UNCERTAIN)
-`transforms/windowed_date.py::_index_draw`, called from `_draw_offsets`. For global row
+`transforms/windowed_date.py::_draw_offsets`. For global row
 number `r` and draw `k` (0, or 1 for the second draw of `early`/`late`) the offset is
 `min_days + derive_index(seed, namespace, encode_int(2 * r + k), pool_size=span + 1)`,
 one batch call per draw through the pool sampler's index kernel (compiled when the
