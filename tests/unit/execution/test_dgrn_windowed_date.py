@@ -12,21 +12,21 @@ traps the plan-gate caught:
 3. A null anchor yields a null output on both routes (FR1 changed this from a raised
    `ValueError`; see `TestNullAnchorPropagation`).
 4. The DGRN domain (`0 <= i <= 2**64-1`) is guarded with a coded error, both
-   at entry (`base_row_offset`) and per chunk.
+   at entry (`base_row_offset`) and per chunk. windowed_date's own draw narrows it to
+   `0 <= i < 2**62` (GEN-WINDOWED-BATCH S2) and raises `WindowedDateRowNumberError` above.
 """
 
 from __future__ import annotations
 
 import traceback
 
-import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
 
 from decoy_engine import ExecutionError, run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
-from decoy_engine.determinism._derive import derive
+from decoy_engine.determinism._derive import derive_index
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_dgrn import (
     CHUNK_DGRN_STRATEGIES,
@@ -35,12 +35,13 @@ from decoy_engine.execution._chunked_dgrn import (
     validate_chunk_row_offset_range,
 )
 from decoy_engine.execution._chunked_fk import CHUNK_SAFE_STRATEGIES
+from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.plan import PlanCompileError
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.windowed_date import (
     WindowedDateConfig,
     WindowedDateError,
-    _sample_offset,
+    WindowedDateRowNumberError,
     apply_windowed_date,
 )
 from tests._declared_schema import declared_schema
@@ -288,20 +289,23 @@ class TestBaseOffsetBoundary:
         actual = pa.concat_tables(chunked).combine_chunks()
         assert actual.to_pylist() == expected_suffix.to_pylist()
 
-    def test_offset_near_max_domain_matches_direct_derivation_oracle(self) -> None:
-        """The 2**64-1 boundary: a full-frame table there is infeasible, so
-        compare against a DIRECT derive()/default_rng() oracle built from the
-        transform's own primitives (not another offset-aware helper)."""
-        i = ROW_OFFSET_DOMAIN_MAX  # 2**64 - 1, the largest legal row index
+    def test_offset_near_draw_domain_matches_direct_derivation_oracle(self) -> None:
+        """The 2**62-1 boundary: a full-frame table there is infeasible, so compare against a
+        DIRECT derive_index oracle built from the transform's own primitives (not another
+        offset-aware helper). `2 * i + 1` is the second draw's source, still inside int64."""
+        i = 2**62 - 1  # the largest row number windowed_date draws for
         seed = b"\x07" * 8
         namespace = "windowed_date/end_date"
         anchor = "2024-06-15"
         min_days, max_days, distribution = -5, 60, "late"
 
-        row_seed_int = int.from_bytes(derive(seed, namespace, i.to_bytes(8, "big"))[:8], "big")
-        rng = np.random.default_rng(row_seed_int)
-        offset = _sample_offset(rng, min_days, max_days, distribution)
-        expected = (pd.Timestamp(anchor) + pd.Timedelta(days=offset)).strftime("%Y-%m-%d")
+        pool_size = max_days - min_days + 1
+        draws = [
+            min_days
+            + derive_index(seed, namespace, _canonicalize_source(2 * i + k), pool_size=pool_size)
+            for k in (0, 1)
+        ]
+        expected = (pd.Timestamp(anchor) + pd.Timedelta(days=max(draws))).strftime("%Y-%m-%d")
 
         df = pd.DataFrame({"start_date": [anchor]})
         cfg = WindowedDateConfig.from_dict(
@@ -315,9 +319,20 @@ class TestBaseOffsetBoundary:
         result = apply_windowed_date(cfg, df, seed=seed, namespace=namespace, row_offset=i)
         assert result == [expected]
 
+    @pytest.mark.parametrize("row", [2**62, ROW_OFFSET_DOMAIN_MAX])
+    def test_row_number_past_the_draw_domain_raises_value_free(self, row: int) -> None:
+        df = pd.DataFrame({"start_date": ["2024-06-15"]})
+        cfg = WindowedDateConfig.from_dict({"anchor": "start_date", "max_days": 9})
+        with pytest.raises(WindowedDateRowNumberError) as exc:
+            apply_windowed_date(
+                cfg, df, seed=b"\x07" * 8, namespace="windowed_date/e", row_offset=row
+            )
+        assert str(row) not in str(exc.value)
+        assert exc.value.__cause__ is None and exc.value.__context__ is None
+
     def test_max_domain_offset_admitted_by_chunked_route(self, tmp_path) -> None:
-        """base_row_offset == ROW_OFFSET_DOMAIN_MAX with a single-row chunk is
-        exactly at the boundary and must NOT raise."""
+        """The last row number windowed_date draws for (2**62 - 1), as a single-row chunk, does
+        not raise. Past it the column raises `WindowedDateRowNumberError` (below)."""
         df = _anchor_frame(1)
         df.to_csv(tmp_path / "in.csv", index=False)
         cfg = _windowed_date_cfg(tmp_path)
@@ -328,11 +343,30 @@ class TestBaseOffsetBoundary:
                 table="accounts",
                 source_schema=declared_schema(cfg, "accounts"),
                 engine_version=_ENGINE_VERSION,
-                base_row_offset=ROW_OFFSET_DOMAIN_MAX,
+                base_row_offset=2**62 - 1,
             )
         )
         assert len(out) == 1
         assert out[0].num_rows == 1
+
+    def test_row_number_past_the_draw_domain_raises_through_the_chunked_route(
+        self, tmp_path
+    ) -> None:
+        df = _anchor_frame(1)
+        df.to_csv(tmp_path / "in.csv", index=False)
+        cfg = _windowed_date_cfg(tmp_path)
+        with pytest.raises(Exception) as exc:
+            list(
+                run_mask_pipeline_chunked(
+                    cfg,
+                    _chunks(df, 1),
+                    table="accounts",
+                    source_schema=declared_schema(cfg, "accounts"),
+                    engine_version=_ENGINE_VERSION,
+                    base_row_offset=2**62,
+                )
+            )
+        assert isinstance(exc.value, WindowedDateRowNumberError), type(exc.value)
 
     @pytest.mark.parametrize(
         "bad_offset",

@@ -19,7 +19,10 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms.windowed_date import WINDOWED_DATE_DISTRIBUTIONS
+from decoy_engine.transforms.windowed_date import (
+    WINDOWED_DATE_DISTRIBUTIONS,
+    validate_window_config,
+)
 
 
 def check_windowed_date_refs(config: dict[str, Any]) -> None:
@@ -52,7 +55,8 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
         config: Raw pipeline config dict.
 
     Raises:
-        PlanCompileError: The anchor column ref is missing from the same table.
+        PlanCompileError: The anchor column ref is missing from the same table, or a mask
+            column's window is past the date range or inverted.
     """
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
@@ -103,6 +107,9 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
                         f"table. Available columns: {sorted(all_col_names)!r}."
                     ),
                 )
+            # The generate path runs the same parse, so a window past the date range, or an
+            # inverted one, is refused at compile time for mask columns too.
+            validate_window_config(pc)
 
         # Check generate-kind columns (type: windowed_date).
         for col_entry in table_entry.get("generate_columns") or []:

@@ -103,10 +103,15 @@ _SCENARIOS: dict[str, Callable[[], Any]] = {
     "mask.grouped_series_monotone_walk": lambda: provider_for(
         "mask.grouped_series_monotone_walk"
     ).walk(_MK, _NS, "grp", 5, start=10, step=1, max_step=4),
-    "mask.windowed_date": lambda: (
-        provider_for("mask.windowed_date").row_seed_int(_MK, _NS, 3),
-        _np(provider_for("mask.windowed_date").row_generator(_MK, _NS, 3)),
-    ),
+    "mask.windowed_date": lambda: [
+        [
+            provider_for("mask.windowed_date").partitioned_draw(
+                _MK, _NS, r, min_days=-30, max_days=90, distribution=d
+            )
+            for r in (0, 3, 2**62 - 1)
+        ]
+        for d in ("uniform", "early", "late")
+    ],
     "gen.faker_per_row": lambda: (
         provider_for("gen.faker_per_row").row_seed(_ctx(), 2),
         _faker_run("gen.faker_per_row"),
@@ -267,7 +272,7 @@ _GOLDEN_OUTPUT: dict[str, str] = {
     "mask.text_mask_date_shift": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
     "mask.text_mask_faker": "eef779676d353b92d67b9797c6b3c3b020185d961487ae78af44ca7981ab8489",
     "mask.tokenize": "b931e4cddb5420a92e65ac3c8a1368bcf04c2d1724787ff94053377dd97fd2be",
-    "mask.windowed_date": "e7155d227e2e065ea4ad6de21ddd5f12c08f5d6a9654351f208c5f6f7b2b612a",
+    "mask.windowed_date": "c00f0e9a8e266473107e648a8260ddf81dbd4ef5a59dc24ab8110cf72f16931f",
 }
 
 # Re-captured for DUP-FREEZE E2: the two joint_mask stream providers join the registry.

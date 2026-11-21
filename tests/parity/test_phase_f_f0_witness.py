@@ -589,7 +589,7 @@ def test_unwrapped_production_sampler_really_uses_the_compiled_kernel(
     """No marking at all: a counting wrapper on the production loader shows the compiled kernel is
     what `_derive_pool_indices` calls for an admitted source when the companion is installed."""
     calls: list[str] = []
-    real = _sampler._compiled_index_kernel()
+    real = _sampler.compiled_index_kernel()
     assert real is not None
     kernel = real
 
@@ -598,7 +598,7 @@ def test_unwrapped_production_sampler_really_uses_the_compiled_kernel(
             calls.append("compiled")
             return kernel.derive_index_batch(values, **kw)
 
-    monkeypatch.setattr(_sampler, "_compiled_index_kernel", lambda: Counting())
+    monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: Counting())
     PoolSampler().sample(
         w.marked_value_pool(),
         len(_int_source()),
