@@ -95,17 +95,25 @@ def test_zero_error_zero_warning_set_is_machine_classifiable() -> None:
     assert capabilities_for("bucketize").row_error_modes != ()
 
 
-def test_row_error_strategies_are_exactly_the_five_emitters() -> None:
+def test_row_error_strategies_are_exactly_the_six_emitters() -> None:
     # Sourced from the handlers' actual `ctx.row_errors.append(RowError(...))`
     # sites: bucketize/date_shift/top_code (format_error), code_set (mask_error),
-    # nested (format_error + propagated child trigger).
+    # nested (format_error + propagated child trigger), bucket_perturb (format_error).
     error_capable = {s for s in SCALAR_HANDLERS if capabilities_for(s).row_error_modes}
-    assert error_capable == {"bucketize", "date_shift", "top_code", "code_set", "nested"}
+    assert error_capable == {
+        "bucketize",
+        "bucket_perturb",
+        "date_shift",
+        "top_code",
+        "code_set",
+        "nested",
+    }
 
 
 def test_row_error_triggers_match_handler_surface() -> None:
     assert capabilities_for("bucketize").row_error_modes == ("format_error",)
     assert capabilities_for("date_shift").row_error_modes == ("format_error",)
+    assert capabilities_for("bucket_perturb").row_error_modes == ("format_error",)
     assert capabilities_for("top_code").row_error_modes == ("format_error",)
     assert capabilities_for("code_set").row_error_modes == ("mask_error",)
     assert set(capabilities_for("nested").row_error_modes) == {"format_error", "mask_error"}

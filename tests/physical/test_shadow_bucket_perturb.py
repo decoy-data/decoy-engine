@@ -42,6 +42,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.determinism import derive
+from decoy_engine.errors import RowErrorsFailedError
+from decoy_engine.execution import _unified_slice_admission as admission
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._chunked_profile import first_chunk_profile
 from decoy_engine.execution._unified_slice import QUALITY_METRICS_KEY
@@ -53,7 +55,10 @@ from decoy_engine.execution.native._operator_params import BucketPerturbParams
 from decoy_engine.execution.native._plan import native_route_eligibility
 from decoy_engine.execution.physical._compiler import compile_physical_plan
 from decoy_engine.execution.physical._plan import ExecutionBinding, KeyBinding
+from decoy_engine.execution.physical._shadow_context import ShadowContext
+from decoy_engine.execution.physical._shadow_coordinator import ShadowCoordinator
 from decoy_engine.execution.physical._shadow_operators import OperatorCallEvidence, run_operator
+from decoy_engine.execution.physical._shadow_snapshot import capture_shadow_snapshot
 from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.keyprovider import SecretKeyProvider
@@ -655,3 +660,44 @@ def test_unparseable_cells_fail_on_both_arms(tmp_path: Path, bucket: str, values
         assert {r.reason for r in caught.value.records} == {
             "value is not a parseable date under bucket_perturb"
         }
+
+
+# -- Unified admission takes a bucket_perturb node and carries its row errors ----------
+
+
+@_NEEDS_COMPANION
+def test_unified_admission_takes_a_bucket_perturb_node_and_its_row_errors_match(
+    tmp_path: Path,
+) -> None:
+    values = ["2024-01-01", "2023-05-05", "2022-02-02", "not-a-date", None, "also bad"]
+    source = pa.table({"c": pa.array(values, type=pa.string())})
+    path = write_read_only_fixture(tmp_path, source, "bp")
+    config = build_config(tmp_path, "t", path, [_bp_column()])
+    inputs = capture_physical_plan_inputs(config, {"t": source}, engine_version=ENGINE_VERSION)
+    plan = compile_physical_plan(inputs)
+    (node,) = plan.tables[0].nodes
+    assert node.execution.diagnostic_obligations == ("reduce_row_error:format_error",)
+    admitted = admission.resident_contract_admission(
+        plan,
+        table="t",
+        source=source,
+        plan=inputs.plan,
+        registry=inputs.registry,
+        graph=inputs.graph,
+    )
+    assert admitted is not None
+
+    ctx = ShadowContext.from_key_provider(plan=inputs.plan, key_provider=_kp(), batch_size_rows=2)
+    shadow = ShadowCoordinator(ctx=ctx, registry=inputs.registry).run(
+        plan, capture_shadow_snapshot({"t": source})
+    )
+    assert [r.row_index for r in shadow.row_errors] == [3, 5]
+    with pytest.raises(RowErrorsFailedError) as oracle_exc:
+        run_pipeline(
+            config,
+            {"t": pq.read_table(path)},
+            engine_version=ENGINE_VERSION,
+            key_provider=_kp(),
+            unified_slice_enabled=False,
+        )
+    assert tuple(oracle_exc.value.records) == shadow.row_errors
