@@ -31,6 +31,8 @@ FAMILY_NAMESPACE: dict[str, str] = {
     "SubsetConfigError": "config",
     "CanonicalJsonError": "config",
     "BaselineBindingError": "pre_scan",
+    "PreScanBlockedError": "pre_scan",
+    "PreScanFailedError": "pre_scan",
     "NamespaceConfigError": "config",
     "PlanCompileError": "plan",
     "PlanCheckError": "plan",
