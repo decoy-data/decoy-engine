@@ -15,6 +15,7 @@ Requires ``plan.namespace`` (same contract as date_shift): namespace is required
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
@@ -25,9 +26,11 @@ from decoy_engine.execution._adapter import (
     provider_config_to_dict,
 )
 from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.bucket_perturb import (
+    FORMAT_ERROR_REASON,
     VALID_BUCKETS,
     apply_bucket_perturb,
     validate_bucket_perturb_config,
@@ -121,6 +124,9 @@ class BucketPerturbStrategyHandler:
                 return df, []
 
         col = df[column]
+        # Positions are within the series the transform sees; for a preserve-filtered
+        # remainder they are rebased to the frame below.
+        error_positions: list[int] = []
 
         def perturb(series: pd.Series) -> pd.Series:
             return apply_bucket_perturb(
@@ -129,13 +135,26 @@ class BucketPerturbStrategyHandler:
                 job_seed=ctx.mask_key,
                 namespace=namespace,
                 date_format=date_format,
+                format_errors=error_positions,
             )
 
         if preserve is None:
             perturbed = perturb(col)
+            rows = error_positions
         else:
             perturbed, preserved = apply_excluding_preserved(col, preserve, perturb)
             ctx.record_date_preserved(column, preserved)
+            kept = np.flatnonzero(~preserve.mask(col))
+            rows = [int(kept[p]) for p in error_positions]
+        for i in rows:
+            ctx.row_errors.append(
+                RowError(
+                    column=column,
+                    row_index=i,
+                    trigger="format_error",
+                    reason=FORMAT_ERROR_REASON,
+                )
+            )
         result = df.copy()
         result[column] = perturbed
         return result, []
