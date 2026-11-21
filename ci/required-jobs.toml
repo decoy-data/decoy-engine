@@ -13,7 +13,6 @@ jobs = [
   "dp-certified-gate",
   "determinism",
   "pg-gate",
-  "duckdb2-gate",
   "import-smoke",
   "faker-output-lock",
 ]
@@ -47,6 +46,11 @@ jobs = ["changelog-fragment"]
 workflow = "regression-proof.yml"
 job = "prove-regression"
 reason = "runs only on PRs labelled bugfix"
+
+[[merge_exempt]]
+workflow = "ci.yml"
+job = "duckdb2-gate"
+reason = "duckdb 2.x compatibility lane; not a merge requirement until the owner adds it to main branch protection"
 
 [[merge_exempt]]
 workflow = "docs.yml"
