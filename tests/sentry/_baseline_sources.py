@@ -304,6 +304,11 @@ SOURCES: tuple[Source, ...] = (
         "test_wave_b_no_registry_version_literal.py",
         in_code("test_wave_b_no_registry_version_literal.py", "E0_TEST_FILES"),
     ),
+    Source(
+        "handler-row-guard-exempt",
+        "test_handler_row_guard_call_sites.py",
+        in_code("test_handler_row_guard_call_sites.py", "_ALLOWED"),
+    ),
     Source(  # live keys: the registry rows marked private that are not on write_private yet
         "private-file-sinks",
         "tests/sentry/baselines/private-file-sinks.json",
