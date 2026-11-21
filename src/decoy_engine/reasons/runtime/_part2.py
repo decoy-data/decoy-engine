@@ -38,6 +38,7 @@ __all__ = [
     "GENERATION_TABLE_UNKNOWN",
     "GENERATION_WINDOW_INVALID",
     "GENERATION_WINDOW_TIMEOUT",
+    "HANDLER_ROW_COUNT_CHANGED",
     "INDEX_BATCH_LENGTH_MISMATCH",
     "INDEX_BATCH_NULL_MASK_MISMATCH",
     "INDEX_BATCH_OUT_OF_BOUNDS",
@@ -140,7 +141,11 @@ BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL = _d(
     "Bucket perturb found unparseable values on a route with no row error channel.",
     since=UNRELEASED,
 )
-
+HANDLER_ROW_COUNT_CHANGED = _d(
+    "handler_row_count_changed",
+    "A mask handler returned a different number of rows, or a different index, than it was given.",
+    since=UNRELEASED,
+)
 OUT_OF_CORE_REORDER_THRESHOLD_INVALID = _d(
     "out_of_core_reorder_threshold_invalid", "Out of core reorder threshold invalid."
 )

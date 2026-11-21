@@ -10,6 +10,12 @@ rows keep their numbers; one Arrow column cannot hold both, and the raw failure 
 late `pyarrow.ArrowTypeError`/`ArrowInvalid` at reconstruction. This raises a coded
 error instead, before the write. A gate that selects every non-null row replaces the
 whole column with strings and is fine, so it is not rejected.
+
+`require_same_rows` is the other guard at this choke point: a mask handler must hand back
+the rows it was given. Every pandas handler runs through `run_with_when_gate` (plain or gated)
+or the composite dispatch in `_pandas_adapter._dispatch_mask_node`, and chunked runs call that
+adapter once per chunk. The gated write-back is index-aligned, so without the check a dropped
+row becomes a null and the run reports success.
 """
 
 from __future__ import annotations
@@ -97,3 +103,24 @@ def widen_numeric_target_for_strings(df: pd.DataFrame, column: str, produced: pd
     """
     if pd.api.types.is_numeric_dtype(df[column]) and _string_and_number_flags(produced)[0]:
         df[column] = df[column].astype(object)
+
+
+def require_same_rows(
+    before: pd.Index, after: pd.DataFrame, *, column: str, strategy: str, table: str = ""
+) -> None:
+    """Raise `handler_row_count_changed` unless `after` has exactly `before`'s index, in order.
+
+    The message carries the table, column, strategy and the two counts; never a value or label.
+    """
+    if after.index is before or after.index.equals(before):
+        return
+    where = f"table {table!r} " if table else ""
+    detail = (
+        f"returned {len(after)} rows for {len(before)} given"
+        if len(after) != len(before)
+        else f"kept {len(before)} rows but changed their index labels or order"
+    )
+    raise ExecutionError(
+        code=reasons.runtime.HANDLER_ROW_COUNT_CHANGED,
+        message=f"the {strategy!r} handler on {where}column {column!r} {detail}.",
+    )
