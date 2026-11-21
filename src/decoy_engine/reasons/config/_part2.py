@@ -7,6 +7,7 @@ from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CANONICAL_JSON_INVALID_STRING",
+    "COLUMN_DUPLICATE",
     "CONFIG_VALUE_NOT_JSON",
     "DECLARED_TABLE_DROPPED",
     "ENTRY_INVALID",
@@ -41,6 +42,7 @@ __all__ = [
     "POLICY_UNKNOWN_STRATEGY",
     "REMOTE_URI_INVALID",
     "SCAN_BASELINE_UNBOUND",
+    "TABLE_DUPLICATE",
     "TARGET_SHARED_DESTINATION",
     "VARIABLE_UNKNOWN_SCOPE",
     "VARIABLE_UNRESOLVED",
@@ -70,6 +72,16 @@ TARGET_SHARED_DESTINATION = _d(
     "target_shared_destination",
     "Two or more targets write to one destination. Give each table its own target.",
     since="1.28.0",
+)
+COLUMN_DUPLICATE = _d(
+    "column_duplicate",
+    "Two columns in one table have the same name. List each column once.",
+    since=UNRELEASED,
+)
+TABLE_DUPLICATE = _d(
+    "table_duplicate",
+    "Two tables in one config have the same name. Declare each table once.",
+    since=UNRELEASED,
 )
 GENERATE_COLUMN_DUPLICATE = _d(
     "generate_column_duplicate",

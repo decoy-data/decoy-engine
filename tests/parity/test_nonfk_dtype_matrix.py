@@ -17,6 +17,7 @@ import pytest
 from decoy_engine.execution import _chunked_carry as carry
 from decoy_engine.execution._chunked_carry import is_stock_adapter
 from tests.parity._nonfk_dtype_cases import CARRIED_TYPES, LAYOUTS, source_table
+from tests.sentry._call_resolution import resolved_calls
 from tests.unit.execution import _auto_chunk_support as support
 
 CELLS = [(t, lay) for t in CARRIED_TYPES for lay in LAYOUTS]
@@ -191,6 +192,8 @@ def test_at_a6_nested_columns_profile_without_error_and_carry(tmp_path: Path) ->
     out = got.outputs[support.TABLE]
     assert out.column("p").to_pylist() == table.column("p").to_pylist()
     assert out.column("q").to_pylist() == table.column("q").to_pylist()
+    assert out.column("p").type == table.column("p").type
+    assert out.column("q").type == table.column("q").type
 
 
 def test_at_a7_the_decline_carries_a_registered_code(tmp_path: Path) -> None:
@@ -216,32 +219,20 @@ def test_at_a9_small_nested_table_on_full_frame_is_exact(tmp_path: Path) -> None
 
 
 def _scan(source: str, filename: str, target: str) -> list[str]:
-    """`file:function` of every call to `target` in `source`, by AST. A call counts whether it
-    names the function directly, through a `from ... import ... as` alias or a rebinding, or as
-    an attribute of a module, and whether it sits in a function or at module level."""
+    """`file:function` of every call to `target` in `source`. Which calls count comes from the
+    shared resolver; only the enclosing-scope label is built here."""
     tree = ast.parse(source)
-    names = {target}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            names |= {a.asname for a in node.names if a.name == target and a.asname}
-    for node in ast.walk(tree):  # `rs = read_set` rebinds the function under a new name
-        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute)):
-            bound = node.value.id if isinstance(node.value, ast.Name) else node.value.attr
-            if bound in names:
-                names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
-    found: list[str] = []
+    scope_of: dict[int, str] = {}
 
-    def visit(node: ast.AST, scope: str) -> None:
+    def label(node: ast.AST, scope: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.Call):
-                f = child.func
-                if (f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")) in names:
-                    found.append(f"{filename}:{scope}")
+                scope_of[id(child)] = scope
             is_def = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-            visit(child, child.name if is_def else scope)
+            label(child, child.name if is_def else scope)
 
-    visit(tree, "<module>")
-    return found
+    label(tree, "<module>")
+    return [f"{filename}:{scope_of[id(call)]}" for call in resolved_calls(tree, target)]
 
 
 def _production_callers(target: str) -> list[str]:
