@@ -228,10 +228,9 @@ def compile_plan(
     # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit compile-time
     # manifest warnings for every active group. Config-only; both branches + run_config_only_checks.
     fpe_join_warnings = check_fpe_join_groups(config)
-    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns
-    # whose length/keep/mask_char cannot mask the column (the primary silent-
-    # passthrough leak, finding 0.4). Config-only; both branches +
-    # run_config_only_checks.
+    # Row 22 (Sprint 13 / coercion-13 S3, 2026-07-03): reject truncate columns whose
+    # length/keep/mask_char cannot mask the column (the primary silent-passthrough leak,
+    # finding 0.4). Config-only; both branches + run_config_only_checks.
     check_truncate_config(config)
     # Row 23 (Sprint 13 / coercion-13 S3, GATE-1 Q4, 2026-07-03): reject
     # bucketize columns whose width cannot be resolved (sibling silent-
