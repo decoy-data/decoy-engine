@@ -268,8 +268,9 @@ quarantined when quarantine covers `format_error`. The source text is never writ
 out as if it were masked. When no `date_format` is set and none can be detected from
 the data, the run stops with `bucket_perturb_requires_date_format`. The out-of-core
 route has no row-error channel, so on that route a value that does not parse stops
-the run with `bucket_perturb_unparseable_no_row_channel`. To keep a known sentinel
-as it is, list it in `preserve_values`.
+the run with `bucket_perturb_unparseable_no_row_channel`. A date outside pandas' range (before 1677 or after 2262, such as 9999-12-31) is
+also a row error. To keep a known sentinel as it is, list it in `preserve_values`:
+it is kept unchanged even when it is out of that range.
 
 ```yaml
 columns:

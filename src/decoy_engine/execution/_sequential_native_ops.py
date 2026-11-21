@@ -43,7 +43,7 @@ from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._categorical_ext import native_categorical
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
-from decoy_engine.execution.native._date_shift_ext import FORMAT_ERROR_REASON
+from decoy_engine.execution.native._date_shift_ext import format_error_reason
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error, fpe_residual_warnings
 from decoy_engine.execution.native._kernels_scalar import native_text_redact
 from decoy_engine.execution.native._operator_config_rejections import (
@@ -74,7 +74,6 @@ from decoy_engine.execution.out_of_core._hash_native import (
     decline_reason,
     native_hash_array,
 )
-from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as BUCKET_FORMAT_ERROR_REASON
 
 if TYPE_CHECKING:
     from decoy_engine.generation.pool import ValuePool
@@ -485,17 +484,14 @@ def text_redact_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
 
 
 def date_shift_row_errors(
-    column: str, positions: tuple[int, ...], reason: str = FORMAT_ERROR_REASON
+    column: str, positions: tuple[int, ...], operator_id: str = "native_date_shift"
 ) -> list[RowError]:
     """One `format_error` RowError per unparseable cell, as the Python handler records them."""
+    reason = format_error_reason(operator_id)
     return [
         RowError(column=column, row_index=int(pos), trigger="format_error", reason=reason)
         for pos in positions
     ]
-
-
-def bucket_row_errors(column: str, positions: tuple[int, ...]) -> list[RowError]:
-    return date_shift_row_errors(column, positions, BUCKET_FORMAT_ERROR_REASON)
 
 
 def _date_shift_apply_unused(bound: Any, values: pa.Array, call: Any) -> NativeResult:
@@ -588,7 +584,6 @@ __all__ = [
     "NativeResult",
     "TextRedactCall",
     "bucket_perturb_op",
-    "bucket_row_errors",
     "categorical_op",
     "date_shift_op",
     "date_shift_row_errors",

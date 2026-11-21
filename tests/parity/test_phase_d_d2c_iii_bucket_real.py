@@ -126,6 +126,36 @@ def test_unparseable_cells_are_the_same_row_errors_on_both_routes(kernel_rows: l
     assert "nope" not in str(seq.value)
 
 
+def test_non_ascii_unparseable_cells_are_the_same_row_errors_on_both_routes(
+    kernel_rows: list[int],
+) -> None:
+    """The precomposed-versus-decomposed literal, bare accented text, CJK text and an empty cell
+    all fail the decomposed format. Both routes record the same value-free errors for them."""
+    from decoy_engine.errors import RowErrorsFailedError
+
+    fmt = f"%Y-%m-%d {DECOMPOSED}"
+    cells = [
+        f"2024-03-05 {DECOMPOSED}",
+        f"2024-03-06 {PRECOMPOSED}",
+        "日本",
+        DECOMPOSED,
+        PRECOMPOSED,
+        "",
+        None,
+        f"2022-05-05 {DECOMPOSED}",
+    ]
+    shape = bucket_payload_shape({"u": (strs(cells), bucket_seed("month", fmt))})
+    oracle = run_full(shape)
+    with pytest.raises(RowErrorsFailedError) as seq:
+        run_seq(shape)
+    assert seq.value.records == oracle.row_errors
+    assert {r.row_index for r in seq.value.records} >= {2, 3, 4, 5}
+    assert {r.reason for r in seq.value.records} == {
+        "value is not a parseable date under bucket_perturb"
+    }
+    assert "日本" not in str(seq.value)
+
+
 def test_a_near_boundary_date_declines_to_python_and_the_job_still_succeeds(
     kernel_rows: list[int],
 ) -> None:

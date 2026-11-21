@@ -23,7 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
-from decoy_engine.execution.native._date_shift_ext import FORMAT_ERROR_REASON
+from decoy_engine.execution.native._date_shift_ext import format_error_reason
 from decoy_engine.execution.native._faker_null_mask import faker_missing_mask
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error
 from decoy_engine.execution.native._operator_params import (
@@ -50,7 +50,6 @@ from decoy_engine.execution.physical._shadow_diff_codes import (
     ShadowDifference,
 )
 from decoy_engine.generation.pool import GenerationError
-from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as BUCKET_FORMAT_ERROR_REASON
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
@@ -426,11 +425,7 @@ def run_operator(
     if result.format_error_positions:
         if column is None:  # pragma: no cover - the date_shift guard above requires a column
             raise AssertionError("a format-error node reached run_operator with no target column")
-        reason = (
-            BUCKET_FORMAT_ERROR_REASON
-            if binding.operator_id == _BUCKET_PERTURB
-            else FORMAT_ERROR_REASON
-        )
+        reason = format_error_reason(binding.operator_id)
         row_errors = tuple(
             RowError(column=column, row_index=i, trigger="format_error", reason=reason)
             for i in result.format_error_positions

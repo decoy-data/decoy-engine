@@ -138,6 +138,17 @@ def test_unparseable_cell_is_row_error() -> None:
         _no_marker(repr(record))
 
 
+def test_row_error_index_is_the_frame_position_past_a_preserved_row() -> None:
+    result = _run_handler(
+        ["9999-12-31", "2024-06-15", _MARKER, "2024-08-20"],
+        (("bucket", "month"), ("date_format", _FMT), ("preserve_values", ["9999-12-31"])),
+    )
+    assert [r.row_index for r in result.row_errors] == [2]
+    assert result.output.column("d").to_pylist()[0] == "9999-12-31"
+    for record in result.row_errors:
+        _no_marker(repr(record))
+
+
 # Recorded from origin/main before this slice: valid rows must not move.
 _CLEAN = ["2024-06-15", None, "2024-08-20", "2023-02-28"]
 _GOLDEN = {

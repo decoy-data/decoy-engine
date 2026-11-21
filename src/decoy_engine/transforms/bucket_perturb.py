@@ -184,8 +184,8 @@ def apply_bucket_perturb(
             raise ExecutionError(
                 code=reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT,
                 message=(
-                    "bucket_perturb needs provider_config.date_format, "
-                    "the strftime format of its dates."
+                    "bucket_perturb could not detect a date format from the column; "
+                    "set provider_config.date_format to the strftime format of its dates."
                 ),
             )
 

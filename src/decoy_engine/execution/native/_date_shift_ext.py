@@ -50,6 +50,7 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as _BUCKET_REASON
 from decoy_engine.transforms.date_shift import order_window
 
 if TYPE_CHECKING:
@@ -58,6 +59,14 @@ if TYPE_CHECKING:
 # The oracle's `reason` string for a parse failure, reproduced verbatim so the
 # native and oracle `RowError` records compare equal.
 FORMAT_ERROR_REASON = "value is not a parseable date under date_shift"
+
+# The registry id of the bucket_perturb operator (`OPERATORS["bucket_perturb"].operator_id`).
+BUCKET_PERTURB_OPERATOR_ID = "native_bucket_perturb"
+
+
+def format_error_reason(operator_id: str) -> str:
+    """The one choice of `format_error` reason text: bucket_perturb's, else date_shift's."""
+    return _BUCKET_REASON if operator_id == BUCKET_PERTURB_OPERATOR_ID else FORMAT_ERROR_REASON
 
 
 def resolve_shift_range(min_days: int, max_days: int) -> tuple[int, int]:
@@ -219,7 +228,9 @@ def native_date_shift(
 
 
 __all__ = [
+    "BUCKET_PERTURB_OPERATOR_ID",
     "FORMAT_ERROR_REASON",
+    "format_error_reason",
     "native_date_shift",
     "resolve_shift_range",
 ]
