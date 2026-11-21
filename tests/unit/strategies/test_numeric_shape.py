@@ -19,7 +19,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.contracts.bucketize_width import BUCKETIZE_PRESETS
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape, SourceFacts
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
@@ -79,7 +79,7 @@ def _parquet_cfg(tmp_path: Path, table: pa.Table, col: dict[str, Any]) -> dict[s
 def _compile(cfg: dict[str, Any], supplied: dict[str, Any] | None = None) -> Any:
     valid = validate(cfg)
     profile = profile_source(valid, seed=7, supplied_sources=supplied)
-    return compile_plan(valid, profile, decoy_engine_version="t")
+    return compile_plan(valid, profile, decoy_engine_version="t", sources=NO_SOURCES)
 
 
 def _code(cfg: dict[str, Any], supplied: dict[str, Any] | None = None) -> str:
@@ -121,7 +121,9 @@ def test_csv_bucketize_without_declaration_refused(tmp_path: Path) -> None:
 
 def test_string_declaration_is_not_a_numeric_declaration(tmp_path: Path) -> None:
     col = _num("top_code", TOP, **_declared("string", {"id": "string/utf8/v1"}))
-    shapes = build_column_shapes({"tables": [{"name": "people", "columns": [col]}]})
+    shapes = build_column_shapes(
+        {"tables": [{"name": "people", "columns": [col]}]}, sources=NO_SOURCES
+    )
     assert shapes == {("people", "n"): S.TEXT}
 
 
@@ -267,10 +269,10 @@ def _shape_cfg(strategy: str, pc: dict[str, Any], **fields: Any) -> dict[str, An
 def test_bucketize_negative_scale_decimal_refused() -> None:
     schema = {"people": pa.schema([("n", pa.decimal128(15, -5))])}
     cfg = _shape_cfg("bucketize", {"width": 10})
-    shapes = build_column_shapes(cfg, source_schemas=schema)
+    shapes = build_column_shapes(cfg, sources=SourceFacts(schemas=schema))
     assert shapes == {("people", "n"): S.DECIMAL_WIDE}
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, shapes)
+        check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes=shapes)
     assert exc.value.code == "column_shape_mismatch"
     declared = _shape_cfg(
         "bucketize",
@@ -287,14 +289,18 @@ def test_bucketize_negative_scale_decimal_refused() -> None:
 def test_bucketize_decimal_width_out_of_range_refused(width: int) -> None:
     cfg = _shape_cfg("bucketize", {"width": width})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, {("people", "n"): S.DECIMAL})
+        check_required_strategy_settings(
+            cfg, sources=NO_SOURCES, shapes={("people", "n"): S.DECIMAL}
+        )
     assert exc.value.code == "column_shape_mismatch"
 
 
 @pytest.mark.parametrize("width", [1, 10**15])
 def test_bucketize_decimal_width_in_range_admitted(width: int) -> None:
     check_required_strategy_settings(
-        _shape_cfg("bucketize", {"width": width}), {("people", "n"): S.DECIMAL}
+        _shape_cfg("bucketize", {"width": width}),
+        sources=NO_SOURCES,
+        shapes={("people", "n"): S.DECIMAL},
     )
 
 
@@ -368,9 +374,11 @@ def test_parquet_date_under_bucketize_refused(tmp_path: Path) -> None:
 )
 def test_other_types_under_numeric_strategy_refused(arrow: pa.DataType) -> None:
     cfg = _shape_cfg("top_code", TOP)
-    shapes = build_column_shapes(cfg, source_schemas={"people": pa.schema([("n", arrow)])})
+    shapes = build_column_shapes(
+        cfg, sources=SourceFacts(schemas={"people": pa.schema([("n", arrow)])})
+    )
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, shapes)
+        check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes=shapes)
     assert exc.value.code == "column_shape_mismatch"
 
 
@@ -404,16 +412,18 @@ def test_fpe_float_refused_integer_runs_text_runs(tmp_path: Path) -> None:
 )
 def test_fpe_refuses_dates_decimals_and_booleans(arrow: pa.DataType) -> None:
     cfg = _shape_cfg("fpe", {"charset": "digits"}, namespace="ns")
-    shapes = build_column_shapes(cfg, source_schemas={"people": pa.schema([("n", arrow)])})
+    shapes = build_column_shapes(
+        cfg, sources=SourceFacts(schemas={"people": pa.schema([("n", arrow)])})
+    )
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, shapes)
+        check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes=shapes)
     assert exc.value.code == "column_shape_mismatch"
 
 
 def test_fpe_on_unknown_is_not_refused() -> None:
     cfg = _shape_cfg("fpe", {"charset": "digits"}, namespace="ns")
     run_config_only_checks(cfg)
-    check_required_strategy_settings(cfg, {("people", "n"): S.UNKNOWN})
+    check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes={("people", "n"): S.UNKNOWN})
 
 
 # -- nested children read text -----------------------------------------------------------------
@@ -431,7 +441,9 @@ def test_nested_bucketize_child_needs_a_declaration() -> None:
     }
     cfg = {"tables": [{"name": "people", "columns": [col]}]}
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, {("people", "doc"): S.TEXT})
+        check_required_strategy_settings(
+            cfg, sources=NO_SOURCES, shapes={("people", "doc"): S.TEXT}
+        )
     assert exc.value.code == "column_shape_required"
 
 
@@ -511,9 +523,11 @@ def test_bad_cell_follows_error_policy_fail(tmp_path: Path) -> None:
 )
 def test_messages_value_free(strategy: str, pc: dict[str, Any], arrow: pa.DataType) -> None:
     cfg = _shape_cfg(strategy, {**pc, "note": MARKER})
-    shapes = build_column_shapes(cfg, source_schemas={"people": pa.schema([("n", arrow)])})
+    shapes = build_column_shapes(
+        cfg, sources=SourceFacts(schemas={"people": pa.schema([("n", arrow)])})
+    )
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(cfg, shapes)
+        check_required_strategy_settings(cfg, sources=NO_SOURCES, shapes=shapes)
     assert MARKER not in exc.value.message and MARKER not in exc.value.path
     assert "people" in exc.value.message and "'n'" in exc.value.message
 
