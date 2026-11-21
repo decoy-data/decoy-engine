@@ -14,7 +14,7 @@ from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.plan import PlanCompileError, compile_plan, plan_from_yaml, plan_to_yaml
 from decoy_engine.plan._compile import PLAN_VERSION
 from decoy_engine.profile._source import profile_source
-from tests.acceptance._f06_support import ISO_DATE, column, config, validate, write_csv
+from tests.acceptance._f06_support import INT64, ISO_DATE, column, config, validate, write_csv
 
 S = ColumnShape
 
@@ -90,8 +90,24 @@ _FAMILIES: dict[str, list[dict[str, Any]]] = {
     "bucket_perturb_no_format": [
         column("d", "bucket_perturb", namespace="ns", provider_config={"bucket": "month"})
     ],
-    "bucketize": [column("n", "bucketize", provider_config={"width": 10})],
-    "top_code": [column("n", "top_code", provider_config={"cap": 89, "over_label": "90+"})],
+    "bucketize": [
+        column(
+            "n",
+            "bucketize",
+            logical_type="integer",
+            parse_format=INT64,
+            provider_config={"width": 10},
+        )
+    ],
+    "top_code": [
+        column(
+            "n",
+            "top_code",
+            logical_type="integer",
+            parse_format=INT64,
+            provider_config={"cap": 89, "over_label": "90+"},
+        )
+    ],
     "fpe": [column("n", "fpe", namespace="ns")],
 }
 

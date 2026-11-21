@@ -15,17 +15,20 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
 from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
+    ShapeProblem,
     StrategyRequirement,
     lookup_path,
     requirement_applies,
     requirement_missing,
     requirements_for,
     shape_declaration_needed,
+    shape_problem,
     shape_requirement_for,
 )
 from decoy_engine.plan._errors import PlanCompileError
@@ -65,6 +68,44 @@ def _shape_satisfied(
     if shaped.declared_counts and _declared_date_format(col):
         return True
     return not shape_declaration_needed(shaped, shape, config_only=config_only)
+
+
+def _shape_problems(
+    table: dict[str, Any], col: dict[str, Any], shapes: ColumnShapes, *, config_only: bool
+) -> Iterator[tuple[ShapeProblem, str]]:
+    """Each refusal the column's shape gives its strategy, with its config path.
+
+    A `nested` child reads text whatever its parent says: it has no declaration of its own.
+    """
+    where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
+    strategy = col.get("strategy")
+    if isinstance(strategy, str):
+        shape = shapes.get((table.get("name", "?"), col.get("name", "?")), ColumnShape.UNKNOWN)
+        problem = shape_problem(
+            strategy, shape, _provider_config(col.get("provider_config")), config_only=config_only
+        )
+        if problem is not None:
+            leaf = (
+                "logical_type" if problem.code == reasons.plan.COLUMN_SHAPE_REQUIRED else "strategy"
+            )
+            yield problem, f"{where}.{leaf}"
+    if strategy != "nested" or not isinstance(col.get("provider_config"), dict):
+        return
+    for child in nested_children(col["provider_config"]):
+        if not isinstance(child.strategy, str):
+            continue
+        problem = shape_problem(
+            child.strategy,
+            ColumnShape.TEXT,
+            _provider_config(child.strategy_config),
+            config_only=config_only,
+        )
+        if problem is not None:
+            yield problem, f"{where}.{child.config_path}.strategy"
+
+
+def _provider_config(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _missing_in_nested(
@@ -160,5 +201,14 @@ def check_required_strategy_settings(
                     message=(
                         f"column {col.get('name', '?')!r} in table "
                         f"{table.get('name', '?')!r}: {req.message}"
+                    ),
+                )
+            for problem, path in _shape_problems(table, col, resolved, config_only=config_only):
+                raise PlanCompileError(
+                    code=problem.code,
+                    path=path,
+                    message=(
+                        f"column {col.get('name', '?')!r} in table "
+                        f"{table.get('name', '?')!r}: {problem.message}"
                     ),
                 )

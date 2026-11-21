@@ -15,11 +15,13 @@ from types import MappingProxyType
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.contracts.bucketize_width import MAX_EXACT_DECIMAL_WIDTH, resolve_bucketize_width
 from decoy_engine.contracts.column_shape import ColumnShape
 
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
     "SHAPE_REQUIREMENTS_BY_STRATEGY",
+    "ShapeProblem",
     "ShapeRequirement",
     "StrategyRequirement",
     "lookup_path",
@@ -27,6 +29,7 @@ __all__ = [
     "requirement_missing",
     "requirements_for",
     "shape_declaration_needed",
+    "shape_problem",
     "shape_requirement_for",
 ]
 
@@ -108,26 +111,140 @@ REQUIREMENTS_BY_STRATEGY: Mapping[str, tuple[StrategyRequirement, ...]] = Mappin
 class ShapeRequirement:
     """A setting a strategy needs for the column shapes in ``needs_declaration``.
 
-    ``requirement`` is the setting itself, the same descriptor ``REQUIREMENTS_BY_STRATEGY`` holds,
-    so its code, path and message live in one place. A column whose resolved shape is not in
+    ``requirement`` is the setting itself (None for a strategy that needs none, such as ``fpe``),
+    the same descriptor ``REQUIREMENTS_BY_STRATEGY`` holds, so its code, path and message live in
+    one place. A column whose resolved shape is not in
     ``needs_declaration`` runs without the setting. ``declared_counts`` says that a top-level F06
     date declaration also satisfies it.
+
+    ``admitted`` is set for the strategies that read numbers (and ``fpe``): the shapes the strategy
+    computes on. A shape in neither set is a mismatch (``shape_problem``). A numeric strategy's
+    declaration is an F06 ``logical_type``, which gives the column its shape, so a text or unknown
+    column is the one that lacks it.
     """
 
     family: str
-    requirement: StrategyRequirement
+    requirement: StrategyRequirement | None
     needs_declaration: frozenset[ColumnShape]
     declared_counts: bool = False
+    admitted: frozenset[ColumnShape] = frozenset()
 
 
-# Today's rule: ``date_shift`` needs its format on every shape.
+def _number_declaration(strategy: str, tail: str) -> StrategyRequirement:
+    return StrategyRequirement(
+        ("logical_type",),
+        reasons.plan.COLUMN_SHAPE_REQUIRED,
+        f"{strategy} reads numbers from text; declare logical_type integer with a parse_format{tail}.",
+    )
+
+
+_NEEDS_NUMBER_DECLARATION = frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN})
+_S = ColumnShape
+
+# Today's rule: ``date_shift`` needs its format on every shape. The numeric strategies need an F06
+# integer declaration on text (``bucketize`` also takes a bounded decimal) and compute as they do
+# today on typed numbers. ``fpe`` needs no declaration: a text column is its charset's business.
 SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyType(
     {
         "date_shift": ShapeRequirement(
             "date", _DATE_SHIFT_FORMAT, frozenset(ColumnShape), declared_counts=True
         ),
+        "bucketize": ShapeRequirement(
+            "number",
+            _number_declaration("bucketize", ", or decimal with precision 15 or less"),
+            _NEEDS_NUMBER_DECLARATION,
+            admitted=frozenset({_S.INTEGER, _S.FLOAT, _S.DECIMAL}),
+        ),
+        "top_code": ShapeRequirement(
+            "number",
+            _number_declaration("top_code", ""),
+            _NEEDS_NUMBER_DECLARATION,
+            admitted=frozenset({_S.INTEGER, _S.FLOAT}),
+        ),
+        "fpe": ShapeRequirement(
+            "text-or-integer",
+            None,
+            frozenset(),
+            admitted=frozenset({_S.TEXT, _S.INTEGER, _S.UNKNOWN}),
+        ),
     }
 )
+
+
+@dataclass(frozen=True)
+class ShapeProblem:
+    """A refusal a column's shape gives a strategy: a registered code and a fixed message.
+
+    The message names the strategy and the shape only, never a cell or a config value.
+    """
+
+    code: str
+    message: str
+
+
+_MISMATCH_HINT = {
+    ("bucketize", ColumnShape.DECIMAL_WIDE): (
+        "more than 15 significant digits, or a negative scale, cannot be bucketed exactly; "
+        "reduce the precision or cast to float."
+    ),
+    ("top_code", ColumnShape.DECIMAL): "top_code reads integers; cast the column to an integer.",
+    (
+        "top_code",
+        ColumnShape.DECIMAL_WIDE,
+    ): "top_code reads integers; cast the column to an integer.",
+    (
+        "fpe",
+        ColumnShape.FLOAT,
+    ): "fpe reads text or integers; cast the column to text or an integer.",
+}
+
+
+def _exact_decimal_width(provider_config: Mapping[str, Any]) -> bool:
+    """Whether a decimal column's effective width is an integer float64 divides exactly.
+
+    An unresolved width fails too: the bucketize width check names it first at compile, and a
+    plan that skipped it has no width to bucket a decimal by.
+    """
+    width = resolve_bucketize_width(provider_config)
+    return type(width) is int and 1 <= width <= MAX_EXACT_DECIMAL_WIDTH
+
+
+def shape_problem(
+    strategy: str,
+    shape: ColumnShape,
+    provider_config: Mapping[str, Any],
+    *,
+    config_only: bool = False,
+) -> ShapeProblem | None:
+    """Why ``strategy`` cannot read a column of ``shape``, or None when it can.
+
+    Only the strategies with ``admitted`` shapes have a rule here. A text or unknown column needs
+    an F06 declaration (``column_shape_required``); any other shape the strategy cannot compute on
+    is ``column_shape_mismatch``. A config-only pass defers an ``unknown`` column.
+    """
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(strategy)
+    if shaped is None or not shaped.admitted:
+        return None
+    if config_only and shape is ColumnShape.UNKNOWN:
+        return None
+    if shape in shaped.needs_declaration and shaped.requirement is not None:
+        return ShapeProblem(shaped.requirement.code, shaped.requirement.message)
+    ok = shape in shaped.admitted
+    if ok and strategy == "bucketize" and shape is ColumnShape.DECIMAL:
+        ok = _exact_decimal_width(provider_config)
+        hint = (
+            "a decimal column needs an integer width from 1 to 10^15 so float64 buckets it exactly."
+        )
+    else:
+        hint = _MISMATCH_HINT.get(
+            (strategy, shape), f"cast the column to a type {strategy} can read."
+        )
+    if ok:
+        return None
+    return ShapeProblem(
+        reasons.plan.COLUMN_SHAPE_MISMATCH,
+        f"{strategy} cannot read a {shape.value} column; {hint}",
+    )
 
 
 def shape_requirement_for(strategy: str, req: StrategyRequirement) -> ShapeRequirement | None:

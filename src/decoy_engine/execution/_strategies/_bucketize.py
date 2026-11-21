@@ -37,6 +37,9 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.contracts.bucketize_width import resolve_bucketize_width
+from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.strategy_requirements import shape_problem
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
@@ -48,16 +51,25 @@ from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 
-_PRESETS: dict[str, int] = {
-    "by_year": 1,
-    "by_2_years": 2,
-    "by_5_years": 5,
-    "by_decade": 10,
-    "by_century": 100,
-    "by_thousand": 1_000,
-    "by_ten_thousand": 10_000,
-}
 _FORMATS = frozenset({"lower", "range", "midpoint"})
+
+
+def _require_typed_or_declared(column: str, cfg: dict[str, Any], ctx: StrategyContext) -> None:
+    """Refuse a column the plan does not list as typed or declared (a caller that skipped compile).
+
+    Plan compile refuses a text column with no F06 declaration before any read. This is the
+    backstop: it keys on what the plan recorded for the column, never on the pandas dtype.
+    """
+    shape = ctx.column_shapes.get(
+        (ctx.current_table, ctx.nested_outer_column or column), ColumnShape.UNKNOWN
+    )
+    problem = shape_problem("bucketize", shape, cfg)
+    if problem is not None and problem.code == reasons.plan.COLUMN_SHAPE_REQUIRED:
+        raise StrategyError(
+            code=reasons.runtime.COLUMN_SHAPE_REQUIRED,
+            strategy="bucketize",
+            message=f"column {column!r}: {problem.message}",
+        )
 
 
 class BucketizeStrategyHandler:
@@ -80,7 +92,8 @@ class BucketizeStrategyHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
-        width = self._resolve_width(cfg)
+        _require_typed_or_declared(column, cfg, ctx)
+        width = resolve_bucketize_width(cfg)
         if width is None:
             # Invalid config: fail closed (Sprint 13 GATE-1 Q4). A masking
             # strategy must never silently pass the source column through.
@@ -89,8 +102,7 @@ class BucketizeStrategyHandler:
                 strategy="bucketize",
                 message=(
                     f"column {column!r} uses bucketize but neither a known "
-                    f"preset ({cfg.get('preset')!r}) nor a resolvable numeric "
-                    f"width ({cfg.get('width')!r}) is configured."
+                    "preset nor a resolvable numeric width is configured."
                 ),
             )
         fmt = str(cfg.get("format", "lower")).lower()
@@ -141,13 +153,3 @@ class BucketizeStrategyHandler:
             )
         df[column] = formatted.where(nums.notna(), col)
         return df, []
-
-    @staticmethod
-    def _resolve_width(cfg: dict[str, Any]) -> int | float | None:
-        preset = cfg.get("preset")
-        if preset is not None:
-            return _PRESETS.get(preset)
-        raw = cfg.get("width")
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-            return None
-        return raw if raw > 0 else None

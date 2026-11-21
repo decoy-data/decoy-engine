@@ -26,6 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
@@ -179,6 +180,15 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
             has_parse_format=True,
         )
     )
+
+
+def plan_column_shapes(plan: Any) -> dict[tuple[str, str], ColumnShape]:
+    """(table, column) -> the shape the plan recorded for each column under a shape-reading strategy.
+
+    The one list the numeric handlers' backstop reads: a handler skips its declaration only when
+    the plan lists the column with a shape that needs none, never from the pandas dtype.
+    """
+    return {(c.table, c.column): c.shape for c in getattr(plan, "column_shapes", None) or ()}
 
 
 @dataclass

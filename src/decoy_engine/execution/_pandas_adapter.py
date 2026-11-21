@@ -37,7 +37,10 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.declared_casting._boundary import declared_date_shift_columns
+from decoy_engine.declared_casting._boundary import (
+    declared_date_shift_columns,
+    plan_column_shapes,
+)
 from decoy_engine.execution._adapter import (
     ExecutionAdapter,
     ExecutionResult,
@@ -233,6 +236,7 @@ class PandasExecutionAdapter:
             code_set_records=dict(code_set_records) if code_set_records else {},
             vault_writer=token_vault_writer,
             declared_date_columns=declared_date_shift_columns(plan),
+            column_shapes=plan_column_shapes(plan),
         )
 
         ordered = order_work(build_work_list(plan, registry), relationship_graph)

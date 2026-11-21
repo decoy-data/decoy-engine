@@ -30,6 +30,7 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
 
 if TYPE_CHECKING:
+    from decoy_engine.contracts.column_shape import ColumnShape
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
     from decoy_engine.execution._sequential_native import SeqNativeRun
     from decoy_engine.generation.pool._cache import PoolCache
@@ -258,6 +259,10 @@ class StrategyContext:
     # routes that build a context; empty otherwise, which makes the date_shift handler refuse a
     # missing format.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
+    # The plan's shape for each column under a shape-reading strategy, keyed (table, column). The
+    # numeric handlers read it to refuse a column the plan does not list as typed when it has no
+    # declaration. Empty for a caller that skipped compile, which refuses.
+    column_shapes: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.

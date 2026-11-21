@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from decoy_engine.expressions._when_parser import BoolOp, Compare, InList, Not, parse_when
 
@@ -77,6 +78,12 @@ ID_SOURCE = list(range(1, 7))
 def _csv_stub(tmp: Path, name: str, header: list[str]) -> str:
     path = tmp / f"{name}.csv"
     path.write_text(",".join(header) + "\n" + ",".join("x" for _ in header) + "\n")
+    return str(path)
+
+
+def _parquet_stub(tmp: Path, name: str, table: pa.Table) -> str:
+    path = tmp / f"{name}.parquet"
+    pq.write_table(table.slice(0, 1), path)
     return str(path)
 
 
@@ -153,12 +160,17 @@ def build_case(
         "version": 2,
         "global_settings": {"seed": 7},
         "sources": {
-            n: {
-                "type": "file",
-                "format": "csv",
-                "has_header": True,
-                "path": _csv_stub(tmp, n, t.column_names),
-            }
+            n: (
+                # `top_code` reads typed integers with no declaration only from a typed source.
+                {"type": "file", "format": "parquet", "path": _parquet_stub(tmp, n, t)}
+                if cls == "top_code" and n == "t"
+                else {
+                    "type": "file",
+                    "format": "csv",
+                    "has_header": True,
+                    "path": _csv_stub(tmp, n, t.column_names),
+                }
+            )
             for n, t in tables.items()
         },
         "tables": [{"name": "t", "columns": cols}, *extra],
