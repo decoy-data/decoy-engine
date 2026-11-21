@@ -1,4 +1,4 @@
-Status: plan
+Status: plan (revision 2, 2026-11-21; Dennis round 1 BLOCK 0/2/2/3 remediated, see section 15)
 
 # NATIVE-MISSING-WARN: one stderr warning when a run used no compiled kernel because the companion is missing
 
@@ -61,15 +61,16 @@ def native_fallback_code(plan: Plan, availability: KernelAvailability | None = N
 
 `ExecutionResult` gains `native_fallback_code: str | None = field(default=None, repr=False, compare=False)` as its last field, after `publication_receipt` (`src/decoy_engine/execution/_adapter.py:81`). `run_pipeline` sets it once, after `execute_route` and before `stage.stamp` (`_pipeline.py:359`), with `dataclasses.replace`. No route module changes.
 
-New reason in `src/decoy_engine/reasons/warning/_part1.py` (133 lines today): `NATIVE_COMPANION_MISSING = _d("native_companion_missing", "No compiled kernel ran: the native companion is not installed, so masking ran in Python.", since=UNRELEASED)`.
+New reason in `src/decoy_engine/reasons/warning/_part1.py` (133 lines today): `NATIVE_COMPANION_MISSING = _d("native_companion_missing", "No compiled kernel ran: a native kernel this run needs is not available, so masking ran in Python.", since=UNRELEASED)`.
 
 The field is set after `execute_route`, so a run refused before it starts never reports a fallback.
 
 ### 3.2 CLI (C1, after an engine release that carries E1 and the re-pin)
 
-- `C:src/decoy/cli/run/_execute.py`, after `ctx._execution = result` (`:390` and `:442`): when `ctx.native_intent == "default"`, `getattr(result, "native_fallback_code", None)` is set and the mode is not quiet, print one line on `ctx.state.err_console` with `warn("warning:")`, the summary from `decoy_engine.reasons.find("warning", code)`, and the fixed hint "Install the signed bundle for compiled kernels; see `decoy explain native`." The hint is one constant in `C:src/decoy/_native_gate.py`.
+- `C:src/decoy/cli/run/_execute.py`, after `ctx._execution = result` (`:390` and `:442`): when `ctx.native_intent == "default"`, `getattr(result, "native_fallback_code", None)` is set and the mode is not quiet, print one line on `ctx.state.err_console` with `warn("warning:")`, the summary from `decoy_engine.reasons.find("warning", code)`, and the fixed hint "Compiled kernels come with the signed bundle; run `decoy explain native` to see what is missing." The hint does not say "not installed", because a present companion can lack one kernel or fail its probe The hint is one constant in `C:src/decoy/_native_gate.py`.
 - `C:src/decoy/_native_gate.py:368-375`: the default-intent absent branch returns `PreGateResult(unified_slice_enabled=True)` with no `info_message`. The `require` and broken-companion branches stay.
-- `C:src/decoy/api.py` (`decoy.mask()`): unchanged. A library caller can read the field.
+- `C:src/decoy/api.py` (`decoy.mask()`): no behaviour change. A library caller can read the field. The comment at `C:src/decoy/api.py:583-589` is reworded: the absent companion is now reported after the run through `ExecutionResult.native_fallback_code`, and the library still never calls `warnings.warn` for it.
+- Kept, with reasons: the `PreGateResult.info_message` field (`C:src/decoy/_native_gate.py:106`) and its print (`C:src/decoy/cli/run/_prepare.py:564-568`). After C1 no branch sets the field, but `C:tests/unit/test_native_gate.py:558`, `:640`, `:649` and `:661` read it, and it is the gate's only hint channel. Removing a dataclass field and its print is cleanup, not this row. V2-LOG line: "remove the unused `PreGateResult.info_message` and its print".
 
 ### 3.3 Design notes
 
@@ -101,7 +102,7 @@ The field is set after `execute_route`, so a run refused before it starts never 
 | `native_kernel_availability()` raises | It cannot: it catches every import and KAT failure (`_companion_status.py:416-436`) |
 | Strategy not in `OPERATORS` (for example `shuffle`) | Not counted in `needed` |
 | Generate-only plan | No mask `ColumnSeed`, `needed` empty, no probe |
-| `run_pipeline_isolated` | The child sets the field and the returned result carries it (AT-6) |
+| `run_pipeline_isolated` | Out of scope. `IsolatedRunResult` (`src/decoy_engine/execution/_isolated_common.py:401`) is rebuilt field by field, in process (`src/decoy_engine/execution/_isolated_run.py:335-348`) and from the child envelope (`:581-595`), so the field is not carried. The CLI never calls this entry. V2-LOG line: "carry `native_fallback_code` on `IsolatedRunResult`" |
 | Older engine under a newer CLI | `getattr(..., None)` reads None, no warning |
 | text_redact or text_mask only | `required_kernel` is None for both (`_operator_registry.py:167`, `:178`), so no warning. Accepted V1 gap, V2-LOG line in section 12 |
 
@@ -160,9 +161,12 @@ One rule, one choke point: `native_fallback_code` in `execution/pipeline/_native
 |---|---|---|
 | Which kernel a strategy needs | `OPERATORS`, `operator_spec` (`_operator_registry.py:288-295`) | none |
 | Whether a kernel is present | `native_kernel_availability()` | none |
+| Existing not-installed reader | `route_summary()` sets `native == NATIVE_NOT_INSTALLED` and `native_executed` (`src/decoy_engine/execution/pipeline/_route_summary.py:24-31`, `:119-155`); CLI `classify_route` reads it (`C:src/decoy/_native_gate.py:427-435`) | none; AT-8 checks the two agree |
 | Message text | reasons registry (`reasons/warning/_part1.py`) | one new reason |
 | Hidden result field | SAMPLE SE2 pattern (`_adapter.py:78`) | one new field |
 | CLI warning style | `warn("warning:")` on `err_console` (`C:src/decoy/cli/run/_prepare.py:569-570`) | none |
+
+Why a static predicate and not `route_summary()`: `route_summary` reads lane evidence only (`auto_chunk`, `chunked_route`, the multi-table split and the mixed route, `_route_summary.py:95-117`). SEQ and OOC write no lane evidence, so it returns `native=None` and `native_executed=None` there, and the unified slice records `unified_slice_activation` instead. A pip-install FK job would get no warning. The plan-and-probe predicate gives the same answer on every route. AT-8 pins agreement where both apply.
 
 ## 7. Acceptance tests, red first
 
@@ -170,17 +174,21 @@ Each test below fails on `035543388` (the function and field do not exist) and p
 
 Engine, `tests/unit/execution/test_native_fallback_notice.py` (new, about 140 lines):
 
+Patch target for AT-1, AT-2, AT-7 and AT-8: `decoy_engine.execution.pipeline._native_notice.native_kernel_availability`. The module imports the function by name and calls it through its own module attribute, so patching that attribute replaces the probe.
+
 - AT-1: `native_fallback_code` returns the code for a hash plan with all-False availability; None with `crypto=True`; None for a redact-only plan, and the probe is not called (spy).
 - AT-2: `run_pipeline` with the probe patched all-False sets the field on four fixtures: a 10-row hash table (unified slice), a hash table over a lowered `auto_chunk_threshold_rows` (auto-chunk lane), and a parent and child with hash keys under `execution_mode="sequential"` and under `"out_of_core"`.
-- AT-3: the field is exactly `reasons.warning.NATIVE_COMPANION_MISSING.code`, and the reason passes the existing reason registry sentries.
+- AT-3: the field is exactly `reasons.warning.NATIVE_COMPANION_MISSING.code`; the summary is exactly "No compiled kernel ran: a native kernel this run needs is not available, so masking ran in Python."; the reason passes the existing reason registry sentries.
 - AT-4: `FROZEN_RESULT_FIELDS` in `test_r3_public_signature_freeze.py` gains `("native_fallback_code", "None", False, False)` as its last row.
-- AT-5: the same hash fixture run with the probe all-False and all-True gives equal `outputs`, equal `quality_metrics` and an equal projected run result.
-- AT-6: `run_pipeline_isolated` (no memory cap) returns the field set.
+- AT-5: the same hash fixture run with the probe all-False and all-True gives equal `outputs`, equal `quality_metrics` and an equal projected run result, and the serialized run result contains no `native_companion_missing` string.
+- AT-6: dropped in revision 2. The isolated entry rebuilds its result field by field, so it cannot carry the field, and the CLI never calls it (section 5, V2-LOG).
 - AT-7: partial companion, `raw_hex=False` and the rest True. Hash plus group_key: None. group_key only: the code.
+- AT-8: agreement on auto-chunk runs. With the probe all-False, `route_summary(result.quality_metrics).native == "not_installed"` and the field is set. With the probe all-True, `native != "not_installed"` and the field is None.
+- AT-9: a mixed job (a generate table with a faker column, plus a mask table with redact only) gives None with the probe all-False: generate columns do not count.
 
 CLI, `C:tests/cli/test_run_native_missing_warn.py` (new, about 90 lines), with the field set on a faked result:
 
-- AT-C1: default intent, field set: exactly one stderr line that starts with `warning:`; stdout and the JSON record unchanged.
+- AT-C1: default intent, field set: exactly one stderr line that starts with `warning:`; stdout and the JSON record are byte-equal to a baseline run of the same fixture with the field None.
 - AT-C2: absent companion: no `native:` line before the run.
 - AT-C3: the line has no table, column or source path from the fixture.
 - AT-C4: `--no-native`, `--chunked` and `--quiet` print nothing.
@@ -191,7 +199,7 @@ Mutations (each must turn a named test red): remove the call at `_pipeline.py` (
 ### 7b. Existing tests that change
 
 - `tests/unit/execution/test_r3_public_signature_freeze.py:126-137` (AT-4).
-- CLI tests that assert the absent hint text "native acceleration is not installed": a grep of `C:tests/` at `8d17419c` finds none.
+- `C:tests/unit/test_native_gate.py:651-662` (`test_default_on_eligible_shape_with_absent_companion_hints_install`): it asserts `info_message is not None` and "decoy explain native". After C1 it asserts `info_message is None` for the absent companion. Rename it to say the gate is silent.
 
 ## 8. Placement
 
@@ -231,6 +239,7 @@ C1 waits on an engine release that carries E1 and the CLI re-pin (engine re-pin 
 - Do not write the code into `quality_metrics` or any document.
 - Do not copy the strategy-to-kernel map into the CLI.
 - Do not widen or skip an existing test to make the field list pass. Update `FROZEN_RESULT_FIELDS` only.
+- Do not delete `test_default_on_eligible_shape_with_absent_companion_hints_install`; change its assertions only.
 - Stop and report if a route returns without passing `_pipeline.py:359`. That is a second choke point and a plan change.
 
 ## 12. Owner questions (recommended option first)
@@ -245,10 +254,24 @@ None blocking. Recorded calls, go with recommended:
 - The R3 freeze test fails on field order: the field goes last, after `publication_receipt`.
 - A test node has the companion and AT-2 passes for the wrong reason: availability is injected (class 8).
 - Five engine tests turn warnings into errors (`tests/unit/execution/test_ooc_residency_warning.py` and four others). This design emits no Python warning, so they are not affected.
-- Probe cost on a bundle install: four known-answer calls once per run, only when the plan needs a kernel. The builder records the measured time in the PR.
+- Probe cost on a bundle install: `native_kernel_availability()` runs four known-answer probes and is not cached. A CLI bundle run pays it twice: once in the CLI pre-run gate (`native_companion_status`) and once in `native_fallback_code`, only when the plan needs a kernel. The builder records the measured time in the PR. V2-LOG line: "cache one companion probe per process".
 - A builder reaches for `warnings.warn` because it is shorter: stop line 1.
 
 ## 14. Sources
 
 - Record `docs/records/2026-11-19-engine-speed-and-route-completeness.md` sections 2.5, 5.1 M3, 8 Q6, 10 class 1.
 - CLI `C:src/decoy/api.py:583-591` (M4 remediation).
+
+## 15. Revision map
+
+### Revision 2 (Dennis round 1: BLOCK, 0 critical, 2 high, 2 medium, 3 low)
+
+| Finding | Change |
+|---|---|
+| HIGH 1: `IsolatedRunResult` drops the field, AT-6 cannot pass | AT-6 dropped with a written reason; isolated path out of scope in section 5; V2-LOG line |
+| HIGH 2: an existing not-installed reader is not named | `route_summary` and `classify_route` named in 7a; why a static predicate (SEQ and OOC write no lane evidence); AT-8 agreement test |
+| MEDIUM 3: "not installed" is false for a partial or broken companion | reason summary and CLI hint reworded; AT-3 pins the text |
+| MEDIUM 4: an existing CLI test asserts the hint | `C:tests/unit/test_native_gate.py:651-662` listed in 7b; stop line against deleting it |
+| LOW 5: dead `info_message` | kept with reasons; `api.py` comment reworded; V2-LOG line |
+| LOW 6: test details | patch target named; AT-5 checks the serialized result; AT-9 mixed job; AT-C1 JSON baseline |
+| LOW 7: probe cost | recorded in section 13; V2-LOG line for one cached probe per process |
