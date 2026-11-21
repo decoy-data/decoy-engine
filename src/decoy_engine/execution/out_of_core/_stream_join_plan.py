@@ -18,6 +18,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine import reasons
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._join import _q
 
@@ -61,7 +62,7 @@ def _disable_join_optimizers(conn: Any) -> None:
     connections that never register an unsized Arrow stream as a join side.
     """
     names = {row[0] for row in conn.execute("SELECT name FROM duckdb_optimizers()").fetchall()}
-    existing = conn.execute("SELECT current_setting('disabled_optimizers')").fetchone()[0]
+    existing = fetch_scalar(conn.execute("SELECT current_setting('disabled_optimizers')"))
     disabled = {name for name in existing.split(",") if name}
     for optimizer in _PINNED_DISABLED_OPTIMIZERS:
         if optimizer in names:
@@ -74,7 +75,7 @@ def _disable_join_optimizers(conn: Any) -> None:
 
 
 def _read_disabled_optimizers(conn: Any) -> frozenset[str]:
-    value = conn.execute("SELECT current_setting('disabled_optimizers')").fetchone()[0]
+    value = fetch_scalar(conn.execute("SELECT current_setting('disabled_optimizers')"))
     return frozenset(name for name in value.split(",") if name)
 
 
