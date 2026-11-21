@@ -12,9 +12,9 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine._nested_json import nested_children
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._generate_columns import _located
+from decoy_engine.plan.checks._strategy_sites import strategy_sites
 from decoy_engine.transforms.text_mask import (
     SELECTABLE_TEXT_MASK_DETECTORS,
     TEXT_MASK_STRATEGY_DETECTORS,
@@ -33,30 +33,13 @@ def _shown(item: Any) -> str:
 
 
 def check_text_mask_strategies(config: dict[str, Any]) -> None:
-    """Refuse a `text_mask` column whose `detectors` or `per_detector_strategy` cannot run."""
-    tables = config.get("tables")
-    for table in tables if isinstance(tables, list) else []:
-        if not isinstance(table, dict):
-            continue
-        for col in table.get("columns") or []:
-            if not isinstance(col, dict):
-                continue
-            pc = col.get("provider_config")
-            if not isinstance(pc, dict):
-                continue
-            where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
-            label = f"table {table.get('name')!r}, column {col.get('name')!r}"
-            if col.get("strategy") == "text_mask":
-                _check_column(pc, f"{where}.provider_config", label)
-            elif col.get("strategy") == "nested":
-                # A nested child masks text through the same engine, so it is held to the same
-                # check: a misspelled detector would otherwise pass cleartext through.
-                for child in nested_children(pc):
-                    cfg = child.strategy_config
-                    if child.strategy == "text_mask" and isinstance(cfg, dict):
-                        at = f"{where}.{child.config_path}"
-                        rule = "" if child.index is None else f", rule {child.index}"
-                        _check_column(cfg, f"{at}.strategy_config", f"{label}{rule}")
+    """Refuse a `text_mask` column or nested child whose `detectors` or strategies cannot run."""
+    for site in strategy_sites(config):
+        if site.strategy == "text_mask" and isinstance(site.config, dict):
+            label = f"table {site.table!r}, column {site.column!r}"
+            if site.rule is not None:
+                label += f", rule {site.rule}"
+            _check_column(site.config, site.config_path, label)
 
 
 def _check_column(pc: dict[str, Any], at: str, label: str) -> None:

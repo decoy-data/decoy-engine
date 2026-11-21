@@ -16,22 +16,20 @@ from typing import Any
 import jsonpath_ng
 
 from decoy_engine import reasons
-from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._row_errors import RowError
-from decoy_engine.execution._strategies.nested._leaves import leaf_frame, written_leaf
 from decoy_engine.generation.pool._events import QualityWarning
-from decoy_engine.plan._types import ColumnSeed
 
 __all__ = [
+    "LEAF_COLUMN",
     "RuleOutput",
     "match_path",
     "refuse_corrupting_write",
     "refuse_rule_overlap",
-    "run_rule_child",
+    "remap_row_errors",
 ]
 
-_LEAF_COLUMN = "_nested_leaves"
+LEAF_COLUMN = "_nested_leaves"
 
 
 def match_path(match: Any) -> tuple[Any, ...]:
@@ -135,53 +133,7 @@ class RuleOutput:
     warnings: list[QualityWarning]
 
 
-def run_rule_child(
-    handler: Any,
-    seed: ColumnSeed,
-    column: str,
-    ctx: StrategyContext,
-    leaf_values: list[Any],
-    leaf_outer_pos: list[int],
-    rule_index: int | None,
-) -> RuleOutput:
-    """Run one rule's child over its collected leaves in one batch.
-
-    The child sees the synthetic `_nested_leaves` column, so the real outer column and the rule's
-    rule index are stamped on `ctx` for the call and restored after (the prior values are
-    saved: nested dispatch can itself run inside another node). Row errors the child records at a
-    leaf position are remapped to the outer row, or the job fails when one cannot be placed.
-    """
-    temp_df = leaf_frame(_LEAF_COLUMN, leaf_values)
-    prior_outer_column = getattr(ctx, "nested_outer_column", "")
-    prior_rule_index = getattr(ctx, "nested_rule_index", None)
-    object.__setattr__(ctx, "nested_outer_column", column)
-    object.__setattr__(ctx, "nested_rule_index", rule_index)
-    # A positional child keys on its leaf ordinal, not the outer row, so the outer gate's
-    # positions must not reach it.
-    prior_gate_positions = getattr(ctx, "gate_positions", None)
-    object.__setattr__(ctx, "gate_positions", None)
-    # `getattr`: a minimal ctx double has no `row_errors`; a real context always does.
-    ctx_row_errors = getattr(ctx, "row_errors", None)
-    n_err_before = len(ctx_row_errors) if ctx_row_errors is not None else 0
-    try:
-        temp_df, child_warnings = handler.run(temp_df, _LEAF_COLUMN, seed, ctx)
-    finally:
-        object.__setattr__(ctx, "nested_outer_column", prior_outer_column)
-        object.__setattr__(ctx, "nested_rule_index", prior_rule_index)
-        object.__setattr__(ctx, "gate_positions", prior_gate_positions)
-    if ctx_row_errors is not None:
-        _remap_row_errors(ctx_row_errors, n_err_before, leaf_outer_pos, column)
-    values: list[Any] = []
-    non_finite: set[int] = set()
-    for leaf_pos, out in zip(leaf_outer_pos, temp_df[_LEAF_COLUMN].tolist(), strict=True):
-        out, finite = written_leaf(out)
-        values.append(out)
-        if not finite:
-            non_finite.add(leaf_pos)
-    return RuleOutput(values, non_finite, list(child_warnings))
-
-
-def _remap_row_errors(
+def remap_row_errors(
     errors: list[RowError], first: int, leaf_outer_pos: list[int], column: str
 ) -> None:
     """Move the child's row errors from leaf positions to the real (outer row, outer column).

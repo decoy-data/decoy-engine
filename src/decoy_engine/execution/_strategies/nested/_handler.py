@@ -72,19 +72,78 @@ from decoy_engine._nested_json import NestedChild, effective_provider, nested_ch
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies.nested._apply import (
+    LEAF_COLUMN,
+    RuleOutput,
     match_path,
     refuse_corrupting_write,
     refuse_rule_overlap,
-    run_rule_child,
+    remap_row_errors,
 )
 from decoy_engine.execution._strategies.nested._leaves import (
     find_matches,
+    leaf_frame,
     read_cell,
     record_fault,
+    written_leaf,
 )
 from decoy_engine.execution._technique_class import technique_class_for
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
+
+
+def _child_ner_version(plan: ColumnSeed, strategy: str, config: Any) -> str | None:
+    """The NER model version the outer seed pinned for this child's model, for its drift guard."""
+    if strategy not in ("text_redact", "text_mask") or not isinstance(config, dict):
+        return None
+    from decoy_engine.detection.ner import pinned_ner_version, resolve_column_ner
+
+    return pinned_ner_version(plan.ner_model_version, resolve_column_ner(config.get("ner"))[0])
+
+
+def run_rule_child(
+    handler: Any,
+    seed: ColumnSeed,
+    column: str,
+    ctx: StrategyContext,
+    leaf_values: list[Any],
+    leaf_outer_pos: list[int],
+    rule_index: int | None,
+) -> RuleOutput:
+    """Run one rule's child over its collected leaves in one batch.
+
+    The child sees the synthetic `_nested_leaves` column, so the real outer column and the rule's
+    rule index are stamped on `ctx` for the call and restored after (the prior values are
+    saved: nested dispatch can itself run inside another node). Row errors the child records at a
+    leaf position are remapped to the outer row, or the job fails when one cannot be placed.
+    """
+    temp_df = leaf_frame(LEAF_COLUMN, leaf_values)
+    prior_outer_column = getattr(ctx, "nested_outer_column", "")
+    prior_rule_index = getattr(ctx, "nested_rule_index", None)
+    object.__setattr__(ctx, "nested_outer_column", column)
+    object.__setattr__(ctx, "nested_rule_index", rule_index)
+    # A positional child keys on its leaf ordinal, not the outer row, so the outer gate's
+    # positions must not reach it.
+    prior_gate_positions = getattr(ctx, "gate_positions", None)
+    object.__setattr__(ctx, "gate_positions", None)
+    # `getattr`: a minimal ctx double has no `row_errors`; a real context always does.
+    ctx_row_errors = getattr(ctx, "row_errors", None)
+    n_err_before = len(ctx_row_errors) if ctx_row_errors is not None else 0
+    try:
+        temp_df, child_warnings = handler.run(temp_df, LEAF_COLUMN, seed, ctx)
+    finally:
+        object.__setattr__(ctx, "nested_outer_column", prior_outer_column)
+        object.__setattr__(ctx, "nested_rule_index", prior_rule_index)
+        object.__setattr__(ctx, "gate_positions", prior_gate_positions)
+    if ctx_row_errors is not None:
+        remap_row_errors(ctx_row_errors, n_err_before, leaf_outer_pos, column)
+    values: list[Any] = []
+    non_finite: set[int] = set()
+    for leaf_pos, out in zip(leaf_outer_pos, temp_df[LEAF_COLUMN].tolist(), strict=True):
+        out, finite = written_leaf(out)
+        values.append(out)
+        if not finite:
+            non_finite.add(leaf_pos)
+    return RuleOutput(values, non_finite, list(child_warnings))
 
 
 @dataclass(frozen=True)
@@ -209,6 +268,7 @@ class NestedStrategyHandler:
             coherent_with=plan.coherent_with,
             technique_class=technique_class_for(child_strategy_name),
             when=None,
+            ner_model_version=_child_ner_version(plan, child_strategy_name, child_strategy_config),
         )
         return child_handler, child_seed
 

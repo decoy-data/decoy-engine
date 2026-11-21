@@ -19,7 +19,7 @@ _FRAME_ARGS = {"df", "sub_df", "temp_df", "tmp", "frame", "out"}
 # Exempt call sites: file -> why the result never reaches the table frame.
 _ALLOWED = {
     "_strategies/_orphan.py": "orphan-REMAP lookup runs on a private scratch frame",
-    "_strategies/nested/_apply.py": "child cell runs on a scratch frame the caller rebuilds",
+    "_strategies/nested/_handler.py": "child cell runs on a scratch frame the caller rebuilds",
 }
 
 

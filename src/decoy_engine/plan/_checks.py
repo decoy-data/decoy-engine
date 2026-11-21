@@ -68,7 +68,7 @@ def check_unknown_provider(config: dict[str, Any]) -> None:
     (faker is already loaded by other engine modules at package import time);
     cycle prevention is. Dennis Session 22 L1.
     """
-    from decoy_engine.plan.checks._provider_sites import provider_sites
+    from decoy_engine.plan.checks._strategy_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     known = get_default_registry().known_providers()
@@ -103,7 +103,7 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
     Config + registry only (no profile): safe to run in --no-profile
     mode and in config-only validation paths.
     """
-    from decoy_engine.plan.checks._provider_sites import provider_sites
+    from decoy_engine.plan.checks._strategy_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     registry = get_default_registry()
@@ -379,34 +379,26 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
     installed packages only (no model load, no profile): safe for `decoy validate`.
     """
     from decoy_engine.detection import ner  # module import keeps the legacy-file LOC flat
+    from decoy_engine.plan.checks._strategy_sites import strategy_sites
 
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
+    for site in strategy_sites(config):
+        if site.strategy != strategy or not isinstance(site.config, dict):
             continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            if col_entry.get("strategy") != strategy:
-                continue
-            provider_config = col_entry.get("provider_config") or {}
-            ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
-            if not ner_cfg:
-                continue
-            col_name = col_entry.get("name", "?")
-            refusal = None
-            try:
-                model = str(ner.resolve_column_ner(ner_cfg)[0])
-                ner.ensure_ner_available(model, ner.NerSurface(strategy))
-            except ner.NerUnavailableError as exc:
-                refusal = exc
-            if refusal is not None:  # raised outside the handler: no cause, no context
-                raise PlanCompileError(
-                    code=refusal.code,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.ner",
-                    message=refusal.message,
-                )
+        ner_cfg = site.config.get("ner")
+        if not ner_cfg:
+            continue
+        refusal = None
+        try:
+            model = str(ner.resolve_column_ner(ner_cfg)[0])
+            ner.ensure_ner_available(model, ner.NerSurface(strategy))
+        except ner.NerUnavailableError as exc:
+            refusal = exc
+        if refusal is not None:  # raised outside the handler: no cause, no context
+            raise PlanCompileError(
+                code=refusal.code,
+                path=f"{site.config_path}.ner",
+                message=refusal.message,
+            )
 
 
 def check_text_redact_ner_available(config: dict[str, Any]) -> None:

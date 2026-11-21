@@ -5,7 +5,7 @@
   "_strategies/_orphan.py": {
    "reason": "orphan-REMAP lookup runs on a private scratch frame"
   },
-  "_strategies/nested/_apply.py": {
+  "_strategies/nested/_handler.py": {
    "reason": "child cell runs on a scratch frame the caller rebuilds"
   }
  }
