@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ParquetTransactionalSink
 from decoy_engine.execution._transactional_sink import _CallableSinkAdapter
 from decoy_engine.generation import _column_streams
@@ -270,6 +271,7 @@ def test_plan_without_a_generation_payload_is_rejected() -> None:
         {"version": 2, "global_settings": {}, "sources": {}, "tables": [], "targets": {}},
         fx._profile(),
         decoy_engine_version="fr0",
+        sources=NO_SOURCES,
     )
     with pytest.raises(TypeError, match="no generation payload"):
         generate_tables_streamed(mask_only, sink=None)

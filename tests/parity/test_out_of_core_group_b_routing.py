@@ -21,6 +21,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._pipeline import run_pipeline
 from decoy_engine.execution._sequential import table_topo_order
 from tests._declared_schema import declare_rest
@@ -174,7 +175,7 @@ def test_m1_forced_out_of_core_lazy_source_loader(tmp_path: Path) -> None:
     )
 
     profile = profile_source(config, seed=11)
-    plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     ns_registry = build_namespace_registry(config, profile)
     lookup = check_orphan_fk_policy_completeness(config, profile.relationships)
     graph = build_relationship_graph(

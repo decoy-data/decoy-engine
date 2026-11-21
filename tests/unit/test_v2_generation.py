@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from tests.unit._dps_helpers import compile_and_generate
 
 
@@ -715,7 +716,7 @@ class TestQA7Coverage:
             ],
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+            compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert exc.value.code == "seed_not_numeric"
         assert "global_settings.seed" in str(exc.value)
 

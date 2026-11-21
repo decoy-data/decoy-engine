@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.subset import SubsetConfigError, split_subset_config
 from tests.unit.execution import _subset_run_support as sup
 
@@ -37,7 +38,9 @@ def test_config_hash_equals_that_of_the_same_config_without_a_subset(
     plain["subset"] = None
     hashes = []
     for c in (split_subset_config(cfg).run_config, plain):
-        plan = plan_pkg.compile_plan(c, profile_source(c), decoy_engine_version="t")
+        plan = plan_pkg.compile_plan(
+            c, profile_source(c), decoy_engine_version="t", sources=NO_SOURCES
+        )
         hashes.append(plan.pipeline_config_hash)
     assert hashes[0] == hashes[1]
 

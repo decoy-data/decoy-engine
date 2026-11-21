@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
+from ..contracts.column_shape import build_source_facts, source_format_for
 from . import _chunked as _chunked_mod
 from . import _chunked_bucket_perturb as bucket_perturb_gate
 from . import _chunked_code_set as code_set_gate
@@ -104,6 +105,7 @@ def _oracle_preflight(
     carry_passthrough: bool = False,
     secret_registry: Any = None,
     secret_cache_policy: Any = None,
+    source_schema: pa.Schema | None = None,
 ) -> OraclePreflightState:
     """Admit the keyed-mask secret, THEN run the eager half of the oracle.
 
@@ -141,6 +143,7 @@ def _oracle_preflight(
             pool_cache=pool_cache,
             warm_pools=warm_pools,
             carry_passthrough=carry_passthrough,
+            source_schema=source_schema,
         )
     except BaseException:
         admitted.close()
@@ -180,6 +183,7 @@ def _oracle_preflight_admitted(
     pool_cache: Any,
     warm_pools: bool,
     carry_passthrough: bool,
+    source_schema: pa.Schema | None = None,
 ) -> OraclePreflightState:
     """The eager half of the oracle: every check that runs before a chunk masks.
 
@@ -220,24 +224,24 @@ def _oracle_preflight_admitted(
 
         # A stored-index change after chunk 0 is schema drift on both public entries.
         chunk_iter = stored_index_guard(first, chunk_iter, table=table)
-        # A positional draw under `when:` runs chunked only with a string target and string
-        # references; the config veto cannot see Arrow types, so the first chunk is checked here
-        # and every later chunk through the wrap, before it masks (C8-iii-d-2). Shared by both
-        # entries: the native route wraps `validated_rest` outside this, so a positional-column
-        # drift still raises this code first.
+        # A positional draw under `when:` runs chunked only with string target and references;
+        # the config veto cannot see Arrow types, so the first chunk is checked here and every
+        # later chunk through the wrap (C8-iii-d-2). Shared by both entries: the native route
+        # wraps `validated_rest` outside this, so a positional drift still raises here first.
         when_guard = plan_positional_when_guard(config, table)
         if when_guard is not None:
             when_guard.check_schema(first.schema, table=table)
             chunk_iter = when_guard.wrap(chunk_iter, table=table)
-    # A keyed job with zero rows and a missing or invalid mask secret must still
-    # fail the fail-closed gate, so the profile/plan/gate sequence runs for an
-    # empty source too (from `empty_input_profile`) and the empty-input return
-    # comes after the gate.
+    # A keyed job with zero rows and a bad mask secret must still fail the fail-closed gate, so
+    # the profile/plan/gate sequence runs for an empty source too; its return comes after.
     carry = None
+    facts = build_source_facts(caller={table: first.schema if first is not None else source_schema})
+    fmt = source_format_for(config.get("sources"), table, resident=facts.resident)
+    seen: dict[str, Any] = {"table": table, "engine_version": engine_version, "source_format": fmt}
     if first is None:
-        profile = empty_input_profile(config, table=table, engine_version=engine_version)
+        profile = empty_input_profile(config, source_schema=source_schema, **seen)
     elif not carry_passthrough:
-        profile = first_chunk_profile(first, table=table, engine_version=engine_version)
+        profile = first_chunk_profile(first, **seen)
     else:
         carry = plan_carry(
             config,
@@ -247,13 +251,13 @@ def _oracle_preflight_admitted(
             registry=resolved_registry,
         )
         try:
-            profile = first_chunk_profile(
-                first, table=table, engine_version=engine_version, carried=carry.carried
-            )
+            profile = first_chunk_profile(first, carried=carry.carried, **seen)
         except Exception as exc:
             carry.diagnose_profile(exc, profile_input(first, carry.carried), table=table)
             raise
-    plan = compile_plan(config, profile, decoy_engine_version=engine_version, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=engine_version, no_profile=True, sources=facts
+    )
     # Late defense in depth: the plan may not need more than admission (config-only) covered.
     # The per-chunk adapter.run() re-gates via require_mask_key.
     from decoy_engine._opaque import OpaqueBox
@@ -263,9 +267,8 @@ def _oracle_preflight_admitted(
     assert_plan_requirements_admitted(plan, admitted)
     # Boxed (`_opaque`): this frame outlives the raises below.
     resolved = OpaqueBox(require_mask_key(plan, key_provider))
-    # The vault holds reversible plaintext PII and cannot be written under a key
-    # that differs from the resolved mask key, so this entry runs the same
-    # vault-key guard as run_pipeline.
+    # The vault holds reversible plaintext PII and cannot be written under a key that differs
+    # from the resolved mask key, so this entry runs the same vault-key guard as run_pipeline.
     if vault_writer is not None:
         from decoy_engine.vault import assert_vault_writer_keyed
 
@@ -545,6 +548,7 @@ def _mask_pipeline_chunked(
         chunk_result_sink=chunk_result_sink,
         key_provider=key_provider,
         base_row_offset=base_row_offset,
+        source_schema=source_schema,
     )
 
 
@@ -561,6 +565,7 @@ def _mask_declared(
     chunk_result_sink: list[Any] | None = None,
     key_provider: Any = None,
     base_row_offset: int = 0,
+    source_schema: pa.Schema | None = None,
 ) -> Iterator[pa.Table]:
     """The oracle preflight and per-chunk masking, after the entry's checks and gate."""
     from decoy_engine.execution.chunked import observe_chunked
@@ -577,6 +582,7 @@ def _mask_declared(
         key_provider=key_provider,
         base_row_offset=base_row_offset,
         pool_cache=None,
+        source_schema=source_schema,
     )
     if state.first is None:
         # Admission cleared (or the plan is unkeyed); there is genuinely nothing to mask.

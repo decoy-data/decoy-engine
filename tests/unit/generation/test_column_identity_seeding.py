@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 from decoy_engine.context import make_key_resolver
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._plan_entry import generate_tables
 from decoy_engine.generators.derivation import GenDeriveContext
 from decoy_engine.plan import compile_plan
@@ -32,7 +33,7 @@ def _plan(cols: list[dict[str, Any]], *, rows: int = ROWS, table: str = "t", see
         "global_settings": {"seed": seed},
         "tables": [{"name": table, "row_count": rows, "generate_columns": cols}],
     }
-    return compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    return compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _gen(cols, *, key: str | None = None, **kw) -> dict[str, list[Any]]:
@@ -89,7 +90,9 @@ def test_same_column_name_in_two_tables_differs() -> None:
             for t in ("t1", "t2")
         ],
     }
-    out = generate_tables(compile_plan(cfg, empty_profile(), decoy_engine_version="test"))
+    out = generate_tables(
+        compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
+    )
     assert out["t1"].column("x").to_pylist() != out["t2"].column("x").to_pylist()
 
 
@@ -147,7 +150,9 @@ def _two_tables(col: dict[str, Any]) -> dict[str, list[Any]]:
             {"name": t, "row_count": 200, "generate_columns": [*base, col]} for t in ("t1", "t2")
         ],
     }
-    out = generate_tables(compile_plan(cfg, empty_profile(), decoy_engine_version="test"))
+    out = generate_tables(
+        compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
+    )
     return {t: tbl.column("x").to_pylist() for t, tbl in out.items()}
 
 

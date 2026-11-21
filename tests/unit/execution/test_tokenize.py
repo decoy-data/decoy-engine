@@ -17,6 +17,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ExecutionError, PandasExecutionAdapter
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
@@ -87,7 +88,7 @@ def _run(df: pd.DataFrame, namespace: str | None = "pan_ns", *, vault: Any) -> d
         "global_settings": {"seed": 7},
         "tables": [{"name": "t", "columns": [pan_col]}],
     }
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
     ns = build_namespace_registry(config, profile)
     res = PandasExecutionAdapter().run(
         plan,
@@ -325,7 +326,7 @@ def _run_through_transactional_sink(df: pd.DataFrame, vault: Any, target_dir: An
             {"name": "t", "columns": [{"name": "pan", "strategy": "tokenize", "namespace": "ns"}]}
         ],
     }
-    plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
     ns = build_namespace_registry(config, profile)
     try:
         res = PandasExecutionAdapter().run(

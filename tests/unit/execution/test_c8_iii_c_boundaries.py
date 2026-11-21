@@ -14,6 +14,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import ValidationError
 from decoy_engine.execution import PandasExecutionAdapter, run_pipeline
 from decoy_engine.execution._errors import StrategyError
@@ -349,7 +350,12 @@ def test_no_raising_boundary_renders_the_predicate(boundary: str, tmp_path: Path
             _via_run_pipeline(LEAKY, tmp_path / "rp")
         elif boundary == "compile_plan":
             raw = sup.with_when(config, "t", "s", LEAKY)
-            compile_plan(raw, profile_source(config, seed=7), decoy_engine_version="0.1.0")
+            compile_plan(
+                raw,
+                profile_source(config, seed=7),
+                decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
+            )
         elif boundary == "config_only":
             run_config_only_checks(sup.with_when(config, "t", "s", LEAKY))
         elif boundary in {"run_mask_chunked", "run_mask_pipeline_chunked"}:

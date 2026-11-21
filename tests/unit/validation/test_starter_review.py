@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 
 from decoy_engine import strategy_catalog
 from decoy_engine.config import PipelineConfig, parse_pipeline_config
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.ner import DEFAULT_NER_MODEL, model_installed, spacy_installed
 from decoy_engine.detection.types import ModelRef
 from decoy_engine.plan import compile_plan, run_config_only_checks
@@ -51,7 +52,9 @@ V = ReviewVerdict
 
 def _compile(config: dict[str, Any]) -> Any:
     dumped = PipelineConfig.model_validate(config).model_dump()
-    return compile_plan(dumped, profile_source(dumped, seed=1), decoy_engine_version="test")
+    return compile_plan(
+        dumped, profile_source(dumped, seed=1), decoy_engine_version="test", sources=NO_SOURCES
+    )
 
 
 def _sources(root: Path) -> dict[str, dict[str, Any]]:
@@ -473,7 +476,9 @@ def test_property_random_decision_sets(
     result = apply_review(base, decisions)
     parse_pipeline_config(result.config)
     run_config_only_checks(swap_placeholder_namespaces(result.config)[0])
-    check_required_strategy_settings(result.config)  # every namespace-needing entry has one
+    check_required_strategy_settings(
+        result.config, sources=NO_SOURCES
+    )  # every namespace-needing entry has one
     named = {(d.table, d.column) for d in decisions}
     for table in base.config["tables"]:
         kept = {c["name"] for c in _table(result, table["name"])["columns"]}

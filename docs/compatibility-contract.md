@@ -270,6 +270,22 @@ disguise application path (parked row PLATFORM-DISGUISE-DATE-FORMAT), `api/templ
 platform fixtures with `date_shift`, and any config built without `date_format`. The CLI follow-up
 (DATE-SHIFT-FORMAT-CLI) must merge before the CLI re-pins to the release that carries this.
 
+**Pre-GA correction (COLUMN-SHAPE E1a, 2026-11-21).** Breaking for stored artifacts, no shim. A profile
+column now carries `shape` (`text`, `date`, `timestamp_tz`, `timestamp_naive`, `integer`, `float`, `decimal`,
+`decimal_wide`, `boolean`, `other`, `unknown`). Profile JSON gains the field and `schema_version` stays 1: a
+profile written before it loads as `unknown`, which fails closed, and a token the engine does not know is refused
+with a `ValueError` that names the field. `shape` is in `profile_hash`, so every `profile_hash` moves once (the
+pinned digest in `tests/unit/profile/test_hash_regression.py`), and the physical `plan_hash` moves with it.
+`PLAN_VERSION` goes from 4 to 5 and `Plan.column_shapes` (the shape of each column under a shape-reading
+strategy, omitted from the YAML when empty) joins the physical `plan_hash`; `pipeline_config_hash` does not move.
+A stored plan is checked for its `plan_version` before any other field: a version-4 plan is refused with
+`plan/plan_recompile_required` (compile it again from its config), a newer, missing or non-integer version with
+`plan/plan_version_unsupported`, and a stored shape token the engine does not know with `plan/stored_shape_unknown`.
+The three codes are registered unreleased. `compile_plan(..., source_schemas=None)` and
+`capture_physical_plan_inputs(..., source_loader_schemas=None)` are additive keywords. No masking behaviour
+moves in this slice: `date_shift` still needs `date_format` on every shape. A code rollback is safe: an engine
+from before this slice ignores `column_shapes` and the profile's `shape`.
+
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
 

@@ -15,6 +15,7 @@ from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
 from decoy_engine.config import _generate_option_catalog as catalog
 from decoy_engine.config import _generate_options as opts
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.generators.derivation import GenDeriveContext, with_table
 from decoy_engine.plan import compile_plan
@@ -256,7 +257,7 @@ def test_a_fixed_width_target_refuses_types_its_writer_cannot_print(output: str)
         "output_type": output,
     }
     with pytest.raises(PipelineValidationError) as info:
-        compile_plan(config, empty_profile(), decoy_engine_version="test")
+        compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert info.value.code == UNSUPPORTED
     assert info.value.path == "targets.t.layout.columns.x"
     assert info.value.__cause__ is None
@@ -264,7 +265,12 @@ def test_a_fixed_width_target_refuses_types_its_writer_cannot_print(output: str)
 
 @pytest.mark.parametrize("output", [None, "int"])
 def test_a_fixed_width_target_accepts_int_and_untyped_columns(output: str | None) -> None:
-    compile_plan(_fixed_width_config(output), empty_profile(), decoy_engine_version="test")
+    compile_plan(
+        _fixed_width_config(output),
+        empty_profile(),
+        decoy_engine_version="test",
+        sources=NO_SOURCES,
+    )
 
 
 def test_a_csv_target_accepts_every_output_type() -> None:
@@ -272,7 +278,7 @@ def test_a_csv_target_accepts_every_output_type() -> None:
         config = cfg(
             [table("t", 3, [{"name": "x", "type": "constant", "value": 1, "output_type": output}])]
         )
-        compile_plan(config, empty_profile(), decoy_engine_version="test")
+        compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def test_config_only_checks_refuse_the_same_fixed_width_column() -> None:
@@ -298,6 +304,6 @@ def test_the_plan_embeds_the_output_type_in_the_pinned_config() -> None:
             )
         ]
     )
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     col = json.loads(plan.generation.config_json)["tables"][0]["generate_columns"][0]
     assert col["output_type"] == "decimal(2)"

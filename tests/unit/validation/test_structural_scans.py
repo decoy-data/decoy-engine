@@ -18,6 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ExecutionResult, run_pipeline
 from decoy_engine.generation.pool._runtime_pool_size import DEFAULT_POOL_SIZE
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
@@ -290,7 +291,13 @@ class TestCardinalityCollisionsSeed:
         from decoy_engine.plan import compile_plan
 
         cfg, src = _faker_cfg(tmp_path, _DISTINCT, [_fcol("a")])
-        plan = compile_plan(cfg, _profile_for(src), decoy_engine_version=_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg,
+            _profile_for(src),
+            decoy_engine_version=_VERSION,
+            no_profile=True,
+            sources=NO_SOURCES,
+        )
         seed = dict(dict(plan.seed_envelope.per_table)["t"].per_column)["a"]
         assert seed.pool_size is None
         assert faker_pool_precondition_met_seed(seed) is False

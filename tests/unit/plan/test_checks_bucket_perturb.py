@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan, run_config_only_checks
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 
@@ -86,7 +87,7 @@ def _nested(child_config: dict[str, Any]) -> dict:
 
 
 def _compile(config: dict, profile: Profile, **kw: Any) -> Any:
-    return compile_plan(config, profile, decoy_engine_version="0.1.0", **kw)
+    return compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES, **kw)
 
 
 @pytest.fixture

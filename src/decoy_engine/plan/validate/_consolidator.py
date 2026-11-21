@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._errors import PoolCapacityError
@@ -108,6 +109,7 @@ def validate_plan(
             decoy_engine_version=decoy_engine_version,
             no_profile=no_profile,
             base_dir=base_dir,
+            sources=NO_SOURCES,
         )
     except PlanCompileError as exc:
         return PlanValidationResult(

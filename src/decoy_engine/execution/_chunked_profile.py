@@ -17,6 +17,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine._arrow_types import is_text
+from decoy_engine.contracts.column_shape import is_nested_type
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -33,12 +34,18 @@ def profile_input(first_chunk: pa.Table, carried: Collection[str] = frozenset())
     return first_chunk
 
 
-def walk_one_table(table: pa.Table, *, table_name: str) -> Any:
-    """The pandas half of the first-chunk profile: one conversion and one walk."""
+def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | None = None) -> Any:
+    """The pandas half of the first-chunk profile: one conversion and one walk. The table's own
+    schema gives each column its shape, and `source_format` (the descriptor's, so a csv column
+    stays text whatever the chunk reader inferred) makes it agree with the full-frame profile."""
     import random
 
     from decoy_engine.profile._walk import walk_dataframe
 
+    # Nested columns stay out of the schema so the walk still refuses them here, as the public
+    # oracle always has (a list, struct or map cell is unhashable to pandas); only the shape of
+    # the other columns comes from the schema.
+    flat = pa.schema([f for f in table.schema if not is_nested_type(f.type)])
     return walk_dataframe(
         table.to_pandas(),
         arrow_schema=table.schema,
@@ -47,6 +54,8 @@ def walk_one_table(table: pa.Table, *, table_name: str) -> Any:
         fk_specs={},
         sample_rows=None,
         rng=random.Random(0),
+        arrow_schema=flat,
+        source_format=source_format,
     )
 
 
@@ -71,6 +80,7 @@ def first_chunk_profile(
     table: str,
     engine_version: str,
     carried: Collection[str] = frozenset(),
+    source_format: str | None = None,
 ) -> Any:
     """Profile the FIRST chunk so compile_plan can build the seed envelope.
 
@@ -97,10 +107,12 @@ def first_chunk_profile(
     from the real Arrow column, so the profile equals the full pandas one."""
     from decoy_engine.profile import Profile
 
-    table_profile = walk_one_table(profile_input(first_chunk, carried), table_name=table)
+    table_profile = walk_one_table(
+        profile_input(first_chunk, carried), table_name=table, source_format=source_format
+    )
     if carried:
         real = {
-            name: arrow_column_profile(name, first_chunk.column(name))
+            name: arrow_column_profile(name, first_chunk.column(name), source_format=source_format)
             for name in carried
             if name in first_chunk.column_names
         }
@@ -118,7 +130,14 @@ def first_chunk_profile(
     )
 
 
-def empty_input_profile(config: dict[str, Any], *, table: str, engine_version: str) -> Any:
+def empty_input_profile(
+    config: dict[str, Any],
+    *,
+    table: str,
+    engine_version: str,
+    source_schema: pa.Schema | None = None,
+    source_format: str | None = None,
+) -> Any:
     """Placeholder Profile for a chunked source with ZERO chunks (no data at all).
 
     There is no real chunk to derive dtypes from, so this profiles an EMPTY
@@ -133,6 +152,11 @@ def empty_input_profile(config: dict[str, Any], *, table: str, engine_version: s
     (`keyprovider.plan_has_keyed_strategy`) a real chunk would -- no
     duplicated keyed-strategy logic, and no behavior change to the non-empty
     path.
+
+    `source_schema` is the schema the entry was given for this source. When there is one, the
+    empty frame takes its columns and types from it, so a typed zero-chunk input gets the shapes
+    a non-empty one would. A config column the schema lacks stays an object placeholder. An
+    arbitrary iterable has no schema, so its columns stay `unknown`.
     """
     import random
 
@@ -149,6 +173,12 @@ def empty_input_profile(config: dict[str, Any], *, table: str, engine_version: s
         if isinstance(col, dict) and col.get("name")
     ]
     empty_df = pd.DataFrame({name: pd.Series([], dtype="object") for name in columns})
+    if source_schema is not None:
+        typed = source_schema.empty_table().to_pandas()
+        for name in columns:
+            if name not in typed.columns:
+                typed[name] = pd.Series([], dtype="object")
+        empty_df = typed
     table_profile = walk_dataframe(
         empty_df,
         table_name=table,
@@ -156,6 +186,8 @@ def empty_input_profile(config: dict[str, Any], *, table: str, engine_version: s
         fk_specs={},
         sample_rows=None,
         rng=random.Random(0),
+        arrow_schema=source_schema,
+        source_format=source_format,
     )
     return Profile(
         schema_version=1,
@@ -167,7 +199,9 @@ def empty_input_profile(config: dict[str, Any], *, table: str, engine_version: s
     )
 
 
-def arrow_column_profile(name: str, column: pa.Array | pa.ChunkedArray) -> Any:
+def arrow_column_profile(
+    name: str, column: pa.Array | pa.ChunkedArray, *, source_format: str | None = None
+) -> Any:
     """The `ColumnProfile` `walk_dataframe` would produce for `column`, computed
     from Arrow without pandas (rule R3, pinned field by field by test 20).
 
@@ -181,6 +215,7 @@ def arrow_column_profile(name: str, column: pa.Array | pa.ChunkedArray) -> Any:
     their defaults."""
     from decoy_engine.internal.pandas_compat import canonical_dtype_label
     from decoy_engine.profile._types import ColumnProfile
+    from decoy_engine.profile._walk import observed_shape
 
     arr = _normalize(column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column)
     t = arr.type
@@ -223,6 +258,7 @@ def arrow_column_profile(name: str, column: pa.Array | pa.ChunkedArray) -> Any:
         pii_class=None,
         avg_length=avg_length,
         max_length=max_length,
+        shape=observed_shape(column.type, source_format),
     )
 
 

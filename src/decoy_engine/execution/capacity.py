@@ -78,6 +78,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.config import FILE_SOURCE_PATH_FIELDS
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline import classify_table_kinds
 from decoy_engine.execution._pipeline_route_exec import (
@@ -346,7 +347,11 @@ def estimate_job_capacity(
 
     registry = get_default_registry()
     plan = compile_plan(
-        config, profile, decoy_engine_version=engine_version, base_dir=base_dir_path
+        config,
+        profile,
+        decoy_engine_version=engine_version,
+        base_dir=base_dir_path,
+        sources=NO_SOURCES,
     )
     ns_registry = build_namespace_registry(config, profile)
     orphan_lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

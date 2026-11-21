@@ -23,7 +23,8 @@ from decoy_engine.profile import (
 class TestColumnProfile:
     def test_has_expected_fields(self, sample_column: ColumnProfile) -> None:
         field_names = {f.name for f in fields(sample_column)}
-        # HC-7 added the additive avg_length / max_length string-stat fields.
+        # HC-7 added the additive avg_length / max_length string-stat fields; COLUMN-SHAPE added
+        # `shape`.
         assert field_names == {
             "name",
             "dtype",
@@ -38,6 +39,7 @@ class TestColumnProfile:
             "pii_class",
             "avg_length",
             "max_length",
+            "shape",
         }
 
     def test_is_frozen(self, sample_column: ColumnProfile) -> None:

@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import (
     ColumnProfile,
@@ -139,7 +140,7 @@ class TestRelationalParentChildInvariants:
         # Build config from the manifest's relationships (carries the
         # orphan_policy + namespace).
         config = _config_from_manifest(manifest)
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         nodes = [(o.table, o.columns) for o in plan.ordering]
         parent_pos = nodes.index(("customers", ("customer_id",)))
         for child in ("orders", "invoices", "addresses"):
@@ -204,7 +205,7 @@ class TestCompositeKeyInvariants:
             decoy_engine_version="0.1.0",
         )
         config = _config_from_manifest(_load_manifest("composite_key"))
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         nodes = [(o.table, o.columns) for o in plan.ordering]
         assert ("enrollments", ("member_id", "plan_id", "effective_date")) in nodes
         assert ("enrollments", ("member_id",)) not in nodes
@@ -265,7 +266,7 @@ class TestNullableFkInvariants:
             decoy_engine_version="0.1.0",
         )
         config = _config_from_manifest(_load_manifest("nullable_fk"))
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         # Both relationships present in the plan.
         nodes = [(o.table, o.columns) for o in plan.ordering]
         assert ("reviews", ("employee_id",)) in nodes
@@ -322,7 +323,7 @@ class TestOrphanFkInvariants:
                 }
             ],
         }
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert plan.relationships[0].orphan_policy == policy
 
     def test_missing_orphan_policy_fails_compile(self) -> None:
@@ -371,7 +372,9 @@ class TestOrphanFkInvariants:
             ],
         }
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(config_missing_policy, profile, decoy_engine_version="0.1.0")
+            compile_plan(
+                config_missing_policy, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+            )
         assert excinfo.value.code == "orphan_fk_policy_missing"
 
 
@@ -406,7 +409,7 @@ class TestRepeatedAcrossTablesInvariants:
                 "login_pool": {"declared_by": ["login_emails.email"]},
             },
         }
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         # Both namespaces appear in the plan; they're independent slots.
         ns_names = {ns.namespace for ns in plan.namespaces}
         assert "primary_pool" in ns_names
@@ -440,7 +443,7 @@ class TestRepeatedAcrossTablesInvariants:
                 },
             },
         }
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         ns_names = {ns.namespace for ns in plan.namespaces}
         assert "shared_email_pool" in ns_names
         # Only one namespace; both columns share it.
@@ -523,7 +526,7 @@ class TestMultiParentFkSyntheticConfig:
                 },
             ],
         }
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         parents_of_child = {
             r.parent.table
             for r in plan.relationships
@@ -533,7 +536,7 @@ class TestMultiParentFkSyntheticConfig:
 
         config["relationships"][1]["orphan_policy"] = "preserve"
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(config, profile, decoy_engine_version="0.1.0")
+            compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert excinfo.value.code == "orphan_policy_conflict"
 
 
@@ -579,7 +582,7 @@ class TestSelfFkInvariants:
             decoy_engine_version="0.1.0",
         )
         config = _config_from_manifest(_load_manifest("self_fk"))
-        plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         nodes = [(o.table, o.columns) for o in plan.ordering]
         parent_idx = nodes.index(("employees", ("id",)))
         child_idx = nodes.index(("employees", ("manager_id",)))

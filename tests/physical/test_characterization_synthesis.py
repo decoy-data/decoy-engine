@@ -12,6 +12,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution.physical.drivers import SynthesisStageAdapter
 from decoy_engine.generation.synthesize import generate_tables
@@ -52,7 +53,7 @@ def _generate_config(row_count: int = 24) -> dict[str, Any]:
 
 def test_synthesis_stage_adapter_byte_identical() -> None:
     config = _generate_config()
-    plan = compile_plan(config, _empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, _empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
     direct = generate_tables(plan)
     via_adapter = SynthesisStageAdapter().run(plan)
@@ -64,7 +65,7 @@ def test_synthesis_stage_adapter_byte_identical() -> None:
 
 def test_synthesis_stage_adapter_scope_bookkeeping() -> None:
     config = _generate_config()
-    plan = compile_plan(config, _empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, _empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     adapter = SynthesisStageAdapter()
     assert adapter.last_invocation is None
     adapter.run(plan)

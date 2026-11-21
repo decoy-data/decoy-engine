@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons, run_pipeline
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation._fidelity_gate import score_generated_fidelity
 from decoy_engine.generation._plan_entry import generate_tables_streamed
 from decoy_engine.generation.statistical import load_spec
@@ -52,7 +53,7 @@ def _plan(threshold: float | None = None) -> Any:
     config = stat_config()
     if threshold is not None:
         config["global_settings"]["fidelity_warn_threshold"] = threshold
-    return compile_plan(config, empty_profile(), decoy_engine_version="test")
+    return compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _entries(plan: Any, sink: Any) -> list[Any]:

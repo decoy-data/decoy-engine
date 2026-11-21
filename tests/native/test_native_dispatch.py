@@ -14,6 +14,7 @@ from datetime import datetime
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution._chunked_fk import fk_passthrough_columns_for_table
 from decoy_engine.execution.native import _dispatch
@@ -362,7 +363,7 @@ def test_fk_composite_group_node_capabilities_read_native_ready_today() -> None:
     from decoy_engine.execution.native._plan import compile_native_plan
 
     plan = compile_native_plan(
-        _composite_fk_config(), _composite_fk_profile(), engine_version="0.1.0"
+        _composite_fk_config(), _composite_fk_profile(), engine_version="0.1.0", sources=NO_SOURCES
     )
     group_nodes = [n for n in plan.nodes if n.kind == "composite_fk_group"]
     assert group_nodes

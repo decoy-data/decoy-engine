@@ -15,6 +15,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _unified_slice_admission
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution.native._companion_status import native_companion_status
@@ -41,7 +42,7 @@ def _build(tmp_path: Path, columns: list[dict], source: pa.Table) -> tuple[dict,
 
 def _profile_and_plan(config: dict, source: pa.Table):
     profile = profile_source(config, seed=20260914)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, sources=NO_SOURCES)
     return profile, plan
 
 

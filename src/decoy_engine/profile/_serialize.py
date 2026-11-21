@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from decoy_engine._canonical import canonical_json_bytes
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.profile._types import (
     ColumnProfile,
     PIIClass,
@@ -121,6 +122,8 @@ def _column_to_dict(column: ColumnProfile, *, include_length_stats: bool = True)
         "is_fk": column.is_fk,
         "fk_target": list(column.fk_target) if column.fk_target is not None else None,
         "pii_class": column.pii_class.value if column.pii_class is not None else None,
+        # In the hash on purpose (see ColumnProfile.shape), unlike the length stats below.
+        "shape": column.shape.value,
     }
     # HC-7: kept out of the hash-bytes call (see _data_shape_bytes) but
     # present in the full round-trip so a serialized-then-deserialized
@@ -184,7 +187,24 @@ def _column_from_dict(data: dict[str, Any]) -> ColumnProfile:
         # this reader.
         avg_length=data.get("avg_length"),
         max_length=data.get("max_length"),
+        shape=_shape_from_stored(data.get("shape")),
     )
+
+
+def _shape_from_stored(raw: Any) -> ColumnShape:
+    """A stored shape token. Absent means a profile from before the field: `unknown`, which
+    fails closed. A token this engine does not know is refused, never read as `other`; the
+    message names the field and holds no stored value, and the raise is outside the lookup's
+    handler so the token cannot reach `__context__`."""
+    if raw is None:
+        return ColumnShape.UNKNOWN
+    known = _SHAPES_BY_TOKEN.get(raw) if isinstance(raw, str) else None
+    if known is None:
+        raise ValueError("profile_from_json: column field 'shape' is not a known shape.")
+    return known
+
+
+_SHAPES_BY_TOKEN = {s.value: s for s in ColumnShape}
 
 
 def _relationship_from_dict(data: dict[str, Any]) -> Relationship:

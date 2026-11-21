@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from decoy_engine import reasons, run_config_only_checks
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._window_admission import classify_window_table
 from decoy_engine.generation.pinned import PinnedModeError, compile_pinned_plan
@@ -43,7 +44,9 @@ def p(column: str, key: str | None = None) -> str:
 
 def _compile(config: dict[str, Any], **kwargs: Any) -> Any:
     kwargs.setdefault("instance_default_locale", None)
-    return compile_plan(config, empty_profile(), decoy_engine_version="test", **kwargs)
+    return compile_plan(
+        config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES, **kwargs
+    )
 
 
 def refusal(config: dict[str, Any], site: Any) -> PlanCompileError:
@@ -189,7 +192,7 @@ LOCALE_CODE = "generate_provider_locale_unsupported"
 
 
 def _plan(config: dict[str, Any]) -> Any:
-    return compile_plan(config, empty_profile(), decoy_engine_version="test")
+    return compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 @pytest.mark.parametrize("default", ["fr_FR", "de_DE"])

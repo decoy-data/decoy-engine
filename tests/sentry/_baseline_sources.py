@@ -184,6 +184,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_date_shift_window_reader.py", "CENSUS"),
     ),
     Source(
+        "column-shape-classifier",
+        "test_column_shape_classifier.py",
+        in_code("test_column_shape_classifier.py", "ALLOWED_CALLERS", nested=True),
+    ),
+    Source(
         "package-fanout",
         "layout/test_package_fanout.py",
         in_code("layout/test_package_fanout.py", "FANOUT_ALLOWLIST"),
