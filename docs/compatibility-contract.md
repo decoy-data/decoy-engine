@@ -1454,7 +1454,8 @@ acceptable cost.
 - [ ] No `name/vN` artifact shape changed under its existing tag (or: I minted a
       new version and kept the old reader).
 - [ ] No determinism golden baseline changed (or: I made a reviewed,
-      version-gated decision and said so in the PR).
+      version-gated decision, or before GA a dated entry in this document,
+      and said so in the PR).
 - [ ] Vault read/write is untouched (or: PO-reviewed new-version + permanent old
       reader).
 - [ ] No released disguise version was edited in place.
