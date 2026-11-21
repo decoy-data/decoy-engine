@@ -155,7 +155,7 @@ def walk_dataframe(
     return TableProfile(name=table_name, row_count=row_count, columns=tuple(columns))
 
 
-def _is_nested(arrow_type: pa.DataType) -> bool:
+def is_nested(arrow_type: pa.DataType) -> bool:
     return bool(
         pat.is_list(arrow_type)
         or pat.is_large_list(arrow_type)
@@ -192,7 +192,7 @@ def _walk_column(
     """
     null_count = int(series.isna().sum())
     distinct_count: int | None = None
-    if arrow_type is None or not _is_nested(arrow_type):
+    if arrow_type is None or not is_nested(arrow_type):
         distinct_count_raw = sample_series.dropna().nunique()
         distinct_count = int(distinct_count_raw) if not pd.isna(distinct_count_raw) else None
 

@@ -105,7 +105,7 @@ def test_v4_plans_need_recompile(tmp_path: Path, family: str) -> None:
     with pytest.raises(PlanCompileError) as exc:
         plan_from_yaml(yaml.safe_dump(v4_data, sort_keys=False))
     assert exc.value.code == reasons.plan.PLAN_RECOMPILE_REQUIRED
-    assert "plan_version 4" in exc.value.message and "compile it again" in exc.value.message
+    assert "compile it again" in exc.value.message and "4" not in exc.value.message
     # Compiling the unchanged config again on this engine gives a plan that loads.
     again = _compile(tmp_path, _FAMILIES[family])
     assert again.plan_version == PLAN_VERSION
@@ -123,6 +123,7 @@ def test_newer_plan_version_refused(tmp_path: Path) -> None:
         plan_from_yaml(yaml.safe_dump(data, sort_keys=False))
     assert exc.value.code == reasons.plan.PLAN_VERSION_UNSUPPORTED
     assert "newer engine" in exc.value.message
+    assert str(PLAN_VERSION + 1) not in exc.value.message
 
 
 @pytest.mark.parametrize("bad", ["missing", True, "5", 5.0, [5], None])
