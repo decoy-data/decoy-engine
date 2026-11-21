@@ -264,6 +264,8 @@ def generate_plus_mask(tmp: Path) -> tuple[dict[str, Any], dict[str, pa.Table]]:
 
 
 def _go(cfg: dict[str, Any], sources: Any, **kw: Any) -> Any:
+    # One thread, so the baselines do not depend on the host's core count (ENGINE-THREADS-DEFAULT).
+    kw.setdefault("native_threads", 1)
     return run_pipeline(cfg, sources, engine_version=ENGINE_VERSION, **kw)
 
 

@@ -23,8 +23,9 @@ from __future__ import annotations
 import functools
 import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
@@ -37,7 +38,13 @@ from decoy_engine.execution.pipeline._cgroup import (
     select_mount,
 )
 
-__all__ = ["detect_usable_cpus", "native_thread_clamp"]
+__all__ = [
+    "RunThreads",
+    "ThreadSource",
+    "detect_usable_cpus",
+    "native_thread_clamp",
+    "native_threads_for_run",
+]
 
 
 def _unreadable(detail: str) -> ExecutionError:
@@ -154,11 +161,48 @@ def detect_usable_cpus(*, fs_root: Path | None = None, affinity: int | None = No
     return _compute(fs_root or Path("/"), affinity)
 
 
+ThreadSource = Literal["explicit", "auto", "auto_fallback"]
+
+
+@dataclass(frozen=True)
+class RunThreads:
+    """The native thread count a run uses and where it came from (a closed set of three words)."""
+
+    count: int
+    source: ThreadSource
+
+
+def native_threads_for_run(requested: int | None) -> RunThreads:
+    """Resolve `run_pipeline(native_threads=...)`: an explicit value is kept as given (the caller
+    validates it), `None` is the usable cores capped at `MAX_NATIVE_THREADS`.
+
+    An unreadable cgroup must not fail a run that worked with one thread, and no output byte
+    depends on the count, so auto falls back to 1 and says so in `source`. An explicit value never
+    falls back.
+    """
+    if requested is not None:
+        return RunThreads(requested, "explicit")
+    from decoy_engine.execution.native import MAX_NATIVE_THREADS
+
+    try:
+        usable = detect_usable_cpus()
+    except ExecutionError as exc:
+        if exc.code != reasons.runtime.CPU_DETECTION_FAILED:
+            raise
+        return RunThreads(1, "auto_fallback")
+    return RunThreads(min(usable, MAX_NATIVE_THREADS), "auto")
+
+
 def _affinity_cpus() -> int:
     getaffinity = getattr(os, "sched_getaffinity", None)
-    if getaffinity is None:
-        return os.cpu_count() or 1
-    return len(getaffinity(0))
+    if getaffinity is not None:
+        return len(getaffinity(0))
+    # Python 3.13 on macOS and Windows: the process count honours `-X cpu_count` and
+    # PYTHON_CPU_COUNT, which the machine-wide `os.cpu_count()` ignores.
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    if callable(process_cpu_count):
+        return process_cpu_count() or 1
+    return os.cpu_count() or 1
 
 
 def _compute(fs_root: Path, affinity: int | None) -> int:

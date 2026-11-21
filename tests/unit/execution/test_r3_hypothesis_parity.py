@@ -444,6 +444,7 @@ EXECUTION_KEYS = {
     "eviction",
     "outputs_streamed",
     "loaded_fully_in_memory",
+    "native_threads",  # ENGINE-THREADS-DEFAULT: the resolved count and where it came from
 }
 
 
