@@ -11,10 +11,8 @@ the V2 strategy handlers in ``execution/_strategies/_date_shift.py``,
 §6.2 ("use established methodology; we do not roll our own"). The V2
 docstrings explicitly cite the reuse.
 
-The package's __init__.py is intentionally minimal: only the
-``BaseMaskingStrategy`` ABC is re-exported because the three kept
-strategies depend on it. The V1 ``StrategyManager`` / ``create_strategy``
-registry was deleted alongside the V1 graph runner; V2 strategy
+The package's __init__.py exports nothing: the V1 ``BaseMaskingStrategy`` ABC and the
+``internal/base`` strategy ABC were removed in the 1.0 freeze batch (S1). V2 strategy
 dispatch lives in ``execution/_adapter.py``.
 
 A future sprint may move these three files to
@@ -23,8 +21,4 @@ namespace. Deferred because the move is structural churn without
 behavioral change, and the V2 strategy import paths would shift.
 """
 
-from decoy_engine.transforms.base import BaseMaskingStrategy
-
-__all__ = [
-    "BaseMaskingStrategy",
-]
+__all__: list[str] = []

@@ -32,6 +32,204 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.2", "A numeric column whose range reaches a subnormal float (for "): (
+        "a fix: the profiler charted these columns with an error before, and now returns bins"
+    ),
+    ("0.28.2", "- Refusals reuse the existing codes: a `via` that is not a `"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A `formula` with `references` is filled after every other "): (
+        "the new Breaking bullet on a column reading a formula with `references` covers it"
+    ),
+    ("0.28.2", "- New `runtime/categorical_condition_column_unavailable`: a "): (
+        "a guard for a config that skipped the checks; no validated config reaches it"
+    ),
+    ("0.28.2", "- The lookup column must be a `reference` to another table w"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- At run time a foreign key with no parent row is refused (`"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A generated `windowed_date` column whose `anchor` is missi"): (
+        "the same config was already refused; only the code and the stage (plan compile) change"
+    ),
+    ("0.28.2", "- An `anchor_via` column runs in memory on the whole-table r"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- `via` must be a `reference` to this table whose key is an "): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- The child column must hold numbers as numeric typing types"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Any column input, child `anchor` or `reference` that names"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A per-parent aggregate runs in memory on the whole-table r"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A generated `derived_aggregate` whose `column` is missing "): (
+        "the same config was already refused; only the code and the stage (plan compile) change"
+    ),
+    ("0.28.2", "- The key must be an earlier `sequence` column of the same t"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Only the self-edge is exempt from the reference-cycle chec"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A self-reference runs in memory on the whole-table route. "): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Pinned execute now refuses a recorded `reference_policies`"): (
+        "the same plan was already refused; only the reason code changes, and decoding still gives pinned_plan_malformed"
+    ),
+    ("0.28.2", "A source with a list, struct or map column no longer raises "): (
+        "a fix: the profile call raised before and now returns a document"
+    ),
+    ("0.28.2", "The `TableConfig` validator that refused repeated generate c"): (
+        "the Breaking bullet on a repeated column name covers it"
+    ),
+    ("0.28.2", "A generate column can now use `type: provider` with `provide"): (
+        "new generate type; the refusals named are its own new codes and no existing config meets them"
+    ),
+    ("0.28.2", "Each synthetic identifier now reads one locale constant for "): (
+        "the Breaking bullet on CUSIP `generate_random` locales covers it"
+    ),
+    ("0.28.2", "`per_detector_strategy: {ssn: date_shift}` (and `email: date"): (
+        "the Breaking bullet on text_mask detector and strategy pairs covers it"
+    ),
+    ("0.28.2", "`decoy_engine.fileaccess.reclaim_stages(directory, apply=Fal"): (
+        "new function; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.2", "A plain numeric histogram no longer holds a bin of 1 to 9 ro"): (
+        "the Breaking bullet on the plain `decoy fit` histogram bins covers it"
+    ),
+    ("0.28.2", "A numeric histogram that numpy refuses for the range (narrow"): (
+        "a fix that removes a raise; no run that passed before is refused"
+    ),
+    ("0.28.2", "Every `publication` stage, on both POSIX policies, now holds"): (
+        "additive lock and marker; no run that passed before is refused"
+    ),
+    ("0.28.2", "A generated `reference` column now gets the parent and child"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `min_per_parent` and `max_per_parent` are exact. The repai"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- An empty parent with child rows follows the `orphan_policy"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `distribution: weighted` with a weights list that does not"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.1", "`decoy_engine.validation.finding_review` adds `finding_edits"): (
+        "new experimental names; the refusals named are their own and no 1.0 command calls them"
+    ),
+    ("0.28.1", "A table in `scan-set/v1` now has `basis` (`whole` or `sample"): (
+        "the Breaking bullet on `scan_sources` and `basis` covers it"
+    ),
+    ("0.28.1", "Every open flag the engine uses now comes from one module, `"): (
+        "Windows-only; the engine did not import there before, and POSIX behavior is unchanged"
+    ),
+    ("0.28.1", "The 0.28.0 release certified the CLI runtime profile from th"): (
+        "describes the 0.28.0 bug this release fixes; no run that passed before is refused"
+    ),
+    ("0.28.1", "Release prep now refuses a CLI pin file that leaves out any "): (
+        "release tooling only; no engine consumer sees it"
+    ),
+    ("0.28.0", "New base dependencies `joserfc` and `rfc8785`. Artifact file"): (
+        "new verifier; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.0", "The `out_of_core_caller_managed_residency` warning carried a"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`EvidencePayload` refuses an empty `provider` and any non-sc"): (
+        "the Breaking bullet on `QualityWarning` detail shapes covers it"
+    ),
+    ("0.28.0", "`subset_inputs_from_config(config, *, local_copies=None)` ta"): (
+        "new optional argument; without it the existing refusal stands"
+    ),
+    ("0.28.0", "Three codes are registered ahead of the callers that raise t"): (
+        "new codes ahead of their callers; nothing raises them yet"
+    ),
+    ("0.28.0", "`scan_baseline.sha256` pins the baseline file's bytes. `deco"): (
+        "the Breaking bullet on `on_drift: fail` without a digest covers the refusal; the rest is new surface"
+    ),
+    ("0.28.0", "When a Postgres source host dropped the connection attempt w"): (
+        "a different reason code for a host that never answered; the run failed before too"
+    ),
+    ("0.28.0", "`tolerance_pct` must be a number above 0 and at most 100. `o"): (
+        "new config block; the refusals named are its own"
+    ),
+    ("0.28.0", "A run that asks for the check is refused before any route re"): (
+        "new opt-in check; the refusals named are its own"
+    ),
+    ("0.28.0", "The `nested` strategy no longer rewrites a number it does no"): (
+        "the Breaking bullet on the `nested` strategy covers it"
+    ),
+    ("0.28.0", "`estimate_job` now returns three more fields on `JobEstimate"): (
+        "new fields; the estimate is advisory and never raises, gates or changes a route"
+    ),
+    ("0.28.0", "`expand_policy` now checks the `policy.prohibit` list on eve"): (
+        "new package not read by any config yet; the refusals named are its own"
+    ),
+    ("0.28.0", "`expansion_to_dict` writes the `policy-expansion/v1` explana"): (
+        "new writer not called yet; the refusal is its own"
+    ),
+    ("0.28.0", "`PublicationRequest(vault=VaultBinding(writer, out))` is acc"): (
+        "new opt-in binding; the refusals named are its own"
+    ),
+    ("0.28.0", "A missing NER model is now refused with one message for ever"): (
+        "same refusal with one message across surfaces; no run that passed before is refused"
+    ),
+    ("0.28.0", "`build_fingerprint` now adds one engine-owned `decoy-ner:<su"): (
+        "the Breaking bullet on `build_fingerprint` covers it"
+    ),
+    ("0.28.0", "New package `decoy_engine.config.policy` with the models of "): (
+        "new package; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `run_probe()`, `probe_status()` "): (
+        "new function; the refusals named are its own"
+    ),
+    ("0.28.0", "`lock/v1` gains an optional `probe` field. `build_runtime_lo"): (
+        "new optional field; a lock written without it still reads, and the refusal is for a null value no engine wrote"
+    ),
+    ("0.28.0", "The Postgres snapshot primitive now shares its session helpe"): (
+        "new shape guard on a new snapshot primitive; the refusal is its own"
+    ),
+    ("0.28.0", "`decoy_engine.profiling` gains `scan-diff/v1`, the drift rul"): (
+        "new document; the refusals named are its own"
+    ),
+    ("0.28.0", "A statistical snapshot with a negative or non-finite weight "): (
+        "the Breaking bullet on a negative or non-finite weight or count covers it"
+    ),
+    ("0.28.0", "`DeclarationRequest.for_validate(config)` reads the header o"): (
+        "new constructor; `decoy run` keeps its existing refusal"
+    ),
+    ("0.28.0", "`decoy_engine.support` adds `build_runtime_lock()`, `Runtime"): (
+        "new function and reader; the refusals named are its own"
+    ),
+    ("0.28.0", "`decoy_engine.keyprovider.is_key_version_label()` is the one"): (
+        "new check of an existing label rule; the new reason is raised only by the new lock"
+    ),
+    ("0.28.0", "The NER hit threshold is now per model (`NER_MIN_RATES`): en"): (
+        "the Breaking bullet on an NER model without a calibrated rate covers it"
+    ),
+    ("0.28.0", "A distribution snapshot may now store a datetime column as y"): (
+        "new opt-in v2 form no writer emits yet; the refusal is for a malformed bucket list"
+    ),
+    ("0.28.0", "A source-hygiene sentry now fails on any MD5 call or `noqa: "): (
+        "test-only sentry; the failure is a CI failure, not a consumer-visible one"
+    ),
+    ("0.28.0", "A relationship whose parent and child tables are both genera"): (
+        "relaxation: a relationship between generated tables now runs; the refusal for a mask-table edge is unchanged"
+    ),
+    ("0.28.0", "The `cli-local-1` evidence payload takes an optional `scan_b"): (
+        "new optional payload member and config key; an older reader refusing them is why the CLI writes them only after it pins this engine"
+    ),
+    ("0.28.0", "`VaultWriter.publish(out)` writes the vault and returns a `V"): (
+        "new method; the refusals named are its own"
+    ),
     ("0.27.0", "`run_pipeline_isolated` publishes `output_dir` through `publ"): (
         "the Breaking bullet on `run_pipeline_isolated` covers it"
     ),
@@ -500,7 +698,8 @@ def test_released_sections_match_their_pins() -> None:
 
 def test_the_ratchet_catches_a_break_filed_outside_the_list() -> None:
     text = CHANGELOG.read_text(encoding="utf-8")
-    newest = _releases(text)[0][0]
+    # A patch release may carry no Breaking list; the ratchet only reads releases that do.
+    newest = next(v for v, sec in _releases(text) if _entries_outside_breaking(sec) is not None)
     marker = f"## [{newest}]"
     head, tail = text.split(marker, 1)
     planted = "\n### Changed (planted)\n\n- A planted option now fails with `planted_code`.\n"

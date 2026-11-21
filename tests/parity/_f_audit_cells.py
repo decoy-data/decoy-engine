@@ -167,7 +167,8 @@ def cfg_reference_repair() -> dict[str, Any]:
         "reference_table": "par",
         "reference_column": "k",
         "min_per_parent": 2,
-        "max_per_parent": 4,
+        # 14 children over the parent's three keys: a maximum of 4 could not hold them.
+        "max_per_parent": 5,
     }
     return fx.config([_t("child", 14, [ref]), _parent()])
 
@@ -264,6 +265,25 @@ def cfg_derived_aggregate() -> dict[str, Any]:
 def cfg_lookup() -> dict[str, Any]:
     """A shipped code set: the column needs no file, so the cell stays self-contained."""
     return fx.config([_t("t", 30, [{"name": "x", "type": "lookup", "codeset": "hcpcs"}])])
+
+
+def cfg_inherit() -> dict[str, Any]:
+    """`kids.copied` copies `par.label` through `kids.pid`."""
+    parent = [
+        {"name": "id", "type": "sequence", "start": 1},
+        {"name": "label", "type": "categorical", "categories": ["a", "b"]},
+    ]
+    kids = [
+        {"name": "pid", "type": "reference", "reference_table": "par", "reference_column": "id"},
+        {"name": "copied", "type": "inherit", "via": "pid", "column": "label"},
+    ]
+    return fx.config([_t("par", 10, parent), _t("kids", 30, kids)])
+
+
+def cfg_provider() -> dict[str, Any]:
+    return fx.config(
+        [_t("t", 30, [{"name": "x", "type": "provider", "provider": "synthetic_npi"}])]
+    )
 
 
 def cfg_fresh() -> dict[str, Any]:
@@ -679,6 +699,8 @@ def legacy_cells(unmarked_windowed: Callable[..., list[Any]]) -> tuple[Cell, ...
         Cell("grouped-series", fx.cfg_grouped_windowed, {}, admission_key=("gw", "cum")),
         Cell("group-key", fx.cfg_grouped_windowed, {}, admission_key=("gw", "gkey")),
         Cell("lookup", cfg_lookup, {}, admission_key=("t", "x")),
+        Cell("inherit", cfg_inherit, {}, admission_key=("kids", "copied")),
+        Cell("provider", cfg_provider, {}, admission_key=("t", "x")),
         Cell(
             "determinism-fresh",
             cfg_fresh,

@@ -110,11 +110,12 @@ def test_when_mask_equals_the_oracle_selection_over_generated_predicates_and_typ
     assert _native_selection(chunk, expr, protected) == _oracle_selection(chunk, expr, protected)
 
 
-def test_a_protected_nullable_integer_reference_excludes_na_like_df_loc() -> None:
+def test_a_protected_nullable_integer_reference_treats_a_blank_as_nan() -> None:
     chunk = pa.table({"n": pa.array([1, None, 3, 1], pa.int64())})
     assert _native_selection(chunk, "n == 1", {"n"}) == [True, False, False, True]
-    assert _native_selection(chunk, "n != 1", {"n"}) == [False, False, True, False]
-    # Unprotected, the column widens to float64 and a null is an ordinary NaN.
+    # FREEZE-O1: protected, the blank row is `NaN` as well, so `!=` selects it (it did not before).
+    assert _native_selection(chunk, "n != 1", {"n"}) == [False, True, True, False]
+    # Unprotected, the column widens to float64 and a null is an ordinary NaN: the same answer.
     assert _native_selection(chunk, "n != 1", set()) == [False, True, True, False]
 
 

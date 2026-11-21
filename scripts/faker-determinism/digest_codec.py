@@ -34,6 +34,12 @@ Per-type payload:
              values, because two Faker providers that emit different
              normalization forms are not interchangeable pool entries.
     BYTES -- the raw bytes, unchanged.
+    DECIMAL, DATE, DATETIME_UTC, DATETIME_NAIVE -- UTF-8 text: `str(Decimal)`, the ISO 8601 date,
+             the ISO 8601 datetime of an aware value normalized to UTC, and the ISO 8601 datetime
+             of a naive value. The naive and aware forms have separate tags, so a naive value
+             never collides with the UTC value of the same wall time. These four tags are only
+             used by the output lock's adapter surface; the pool harness values never reach them,
+             so existing digests are unchanged and `CODEC_VERSION` stays 1.
 
 `bool` is checked before `int` (`isinstance(True, int)` is `True` in
 Python; encoding a bool through the INT branch would collide `True`/`1` and
@@ -42,13 +48,16 @@ forbids).
 
 Any other type raises `PoolDigestTypeError` -- pool values are Faker
 provider return types (str, and the handful of scalar Python types Faker's
-non-str providers return), never something this codec cannot express.
+non-str providers return), never something this codec cannot express. The
+error names the index and the type class only, never the value.
 """
 
 from __future__ import annotations
 
 import struct
 from collections.abc import Sequence
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 CODEC_VERSION = 1
@@ -59,6 +68,10 @@ _TAG_INT = 0x02
 _TAG_FLOAT = 0x03
 _TAG_STR = 0x04
 _TAG_BYTES = 0x05
+_TAG_DECIMAL = 0x06
+_TAG_DATE = 0x07
+_TAG_DATETIME_UTC = 0x08
+_TAG_DATETIME_NAIVE = 0x09
 
 _U64_STRUCT = struct.Struct(">Q")
 _F64_STRUCT = struct.Struct(">d")
@@ -90,9 +103,17 @@ def _encode_item(index: int, value: Any) -> tuple[int, bytes]:
         return _TAG_STR, value.encode("utf-8")
     if isinstance(value, (bytes, bytearray)):
         return _TAG_BYTES, bytes(value)
+    if isinstance(value, Decimal):
+        return _TAG_DECIMAL, str(value).encode("utf-8")
+    if isinstance(value, datetime):  # must precede date: datetime is a date subclass
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return _TAG_DATETIME_UTC, value.astimezone(timezone.utc).isoformat().encode("utf-8")
+        return _TAG_DATETIME_NAIVE, value.isoformat().encode("utf-8")
+    if isinstance(value, date):
+        return _TAG_DATE, value.isoformat().encode("utf-8")
     raise PoolDigestTypeError(
-        f"pool value at index {index} has unsupported type {type(value).__name__!r} "
-        f"({value!r}); _pool_digest only encodes None/bool/int/float/str/bytes"
+        f"pool value at index {index} has unsupported type {type(value).__name__!r}; "
+        "_pool_digest only encodes None/bool/int/float/str/bytes/Decimal/date/datetime"
     )
 
 

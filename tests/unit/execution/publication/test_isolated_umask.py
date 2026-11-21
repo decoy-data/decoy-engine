@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.fileaccess import STAGE_MARKER
 from tests.fileaccess.publication._dirmode_support import mode, run_child
 from tests.unit.execution.publication._isolated_support import (
     FAKE_WORKER_SRC,
@@ -53,7 +54,7 @@ def test_umask_0477_first_attempt_publishes(tmp_path: Path, child: str) -> None:
     assert got["receipt"] == "published", got
     leaf = base / "out" / "leaf"
     assert mode(leaf) == 0o700
-    assert sorted(p.name for p in leaf.iterdir()) == [DESCRIPTOR, "t.parquet"]
+    assert sorted(p.name for p in leaf.iterdir()) == [STAGE_MARKER, DESCRIPTOR, "t.parquet"]
     assert mode(leaf / "t.parquet") == 0o600
     assert mode(leaf / DESCRIPTOR) == 0o600
     assert stages_left(base / "out") == []

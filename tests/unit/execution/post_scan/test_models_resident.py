@@ -20,12 +20,13 @@ from decoy_engine.execution._chunked_output_sink import decide_output_mode
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution._transforms_gate import post_scan_resident_for
 from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.verification.postmask import PostScanBlockedError
 from tests.security.test_f29_remediation import _decide
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _subset_run_support as subset_sup
 from tests.unit.execution._auto_chunk_support import NEEDS_COMPANION
-from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _run
+from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _fail_row, _run
 from tests.unit.execution.run_stream import _support as rs
 from tests.unit.execution.test_auto_chunk_routing import _single_column_job
 
@@ -36,7 +37,6 @@ MODEL_ASKS = {
         "post_scan": {"integrity": True, "detectors": ["regex", "ner"], "ner_findings": "fail"}
     },
 }
-FAIL = {"severity": "fail"}
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +50,10 @@ def _code(reason: Any) -> str | None:
 
 def _failing_suite(table: str, column: str) -> Any:
     def failing(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        finding = {"table": table, "column": column, "detector_id": "email"}
-        return {"schema_version": "post-scan-integrity/v3", "residual_pii": [finding | FAIL]}
+        return {
+            "schema_version": "post-scan-integrity/v3",
+            "residual_pii": [_fail_row(table, column)],
+        }
 
     return failing
 
@@ -132,6 +134,7 @@ def test_regex_integrity_takes_the_bounded_route_with_a_staged_sink(
     )
     assert routes == [route]
     assert sorted(p.name for p in out.iterdir()) == [
+        STAGE_MARKER,
         "_decoy_publication.json",
         "child.parquet",
         "parent.parquet",

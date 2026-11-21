@@ -19,16 +19,18 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.declared_casting import _stream as _declared
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
+from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
 from decoy_engine.execution._output_projection import (
     UnconfiguredColumnPolicy,
     enforce_output_projection,
 )
+from decoy_engine.execution._strategies._text_mask import text_mask_sub_floor_warning
 from decoy_engine.execution._transactional_sink import TransactionalSink
 from decoy_engine.execution.out_of_core import _join as _join_ooc
-from decoy_engine.execution.out_of_core import _mask_group_c, _runner, _validate_batch
+from decoy_engine.execution.out_of_core import _runner, _validate_batch
 from decoy_engine.execution.out_of_core._batch_join import ChildFkBatchJoiner
 from decoy_engine.execution.out_of_core._emit import (
     assemble_resident,
@@ -36,7 +38,6 @@ from decoy_engine.execution.out_of_core._emit import (
     empty_output_table,
 )
 from decoy_engine.execution.out_of_core._hash_run import OocHashRun
-from decoy_engine.execution.out_of_core._join import orphan_fk_warning
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
 from decoy_engine.execution.out_of_core._memory_estimate import resolve_phase_memory_limits
 from decoy_engine.execution.out_of_core._relation import build_parent_key_relation_aligned
@@ -45,9 +46,13 @@ from decoy_engine.execution.out_of_core._stream_driver_support import (
     _code_set_records_and_evidence_for_table,
     open_joiner,
 )
+from decoy_engine.execution.out_of_core._stream_driver_support import (  # noqa: F401 -- patch seam
+    iter_source_batches as _iter_source_batches,
+)
 from decoy_engine.execution.out_of_core._vault_collect import collect_batch_vault
 from decoy_engine.progress import get_active_channel
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -87,6 +92,7 @@ def _stream_table(
     vault_config: Mapping[str, Any] | None = None,
     validators: Any = None,
     cast_run: Any = None,
+    run_widths: dict[str, dict[str, TextWidthState]] | None = None,
 ) -> None:
     """Rewrite pass for one table: mask + join per batch, then emit.
 
@@ -137,6 +143,8 @@ def _stream_table(
         # aggregate (never per-batch, which would fragment one column's notice
         # across however many batches the stream happened to use).
         text_mask_sub_floor_totals: dict[str, dict[str, int]] = {}
+        # One width state per pass-through text column, shared by every batch of the table.
+        text_widths = (run_widths if run_widths is not None else {}).setdefault(table_name, {})
         # Phase-local caps (Part A + HIGH): a resident-path joiner stays live
         # through this table's own build, so it opens at the build's cap; sink-ness
         # selects the joiner cap here since memory_limit is fixed at open.
@@ -162,6 +170,7 @@ def _stream_table(
                         Path(temp_dir.create_dir(f"edge_{idx}").local_path()),
                         joiner_memory_limit,
                         mask_key=mask_key,
+                        parent_widths=(run_widths or {}).get(edge.parent_table),
                     )
                 )
             for edge, joiner in zip(incoming_edges, joiners, strict=True):
@@ -187,7 +196,9 @@ def _stream_table(
             orphan_totals = [0] * len(joiners)
 
             def rewritten() -> Iterator[pa.RecordBatch]:
-                for raw_batch in _runner._iter_source_batches(raw, batch_rows):
+                for raw_batch in _runner._iter_source_batches(
+                    raw, batch_rows, fixed_schema=sink is not None
+                ):
                     get_active_channel().rows(table_name, raw_batch.num_rows)
                     for column, seen in code_set_null_seen.items():
                         if seen:
@@ -214,6 +225,8 @@ def _stream_table(
                         code_set_corpus_records=code_set_corpus_records,
                         sub_floor_totals=text_mask_sub_floor_totals,
                         hash_plan=hash_plan,
+                        text_widths=text_widths,
+                        fixed_schema=sink is not None,
                     )
                     # Before the join: FK child keys are not yet remapped here (they decline admission).
                     collect_batch_vault(vault_config, table_name, raw_batch, out, vault_writer)
@@ -297,8 +310,10 @@ def _stream_table(
                         cfg = provider_config_to_dict(column_seed.provider_config)
                         policy = cfg.get("sub_floor_span")
                         warnings.append(
-                            _mask_group_c.text_mask_sub_floor_warning(
-                                column, str(policy) if policy is not None else None, by_detector
+                            text_mask_sub_floor_warning(
+                                by_detector,
+                                policy=str(policy) if policy is not None else None,
+                                column=column,
                             )
                         )
         finally:
@@ -323,13 +338,6 @@ def _raise_on_total_orphans(
         total += joiner.count_batch_orphans(raw_batch)
     if total:
         raise orphan_fk_violation_error(edge, total)
-
-
-def _iter_source_batches(src: TableSource, batch_rows: int) -> Iterator[pa.RecordBatch]:
-    if isinstance(src, LazySource):
-        yield from src.iter_batches(batch_rows)
-        return
-    yield from src.to_batches(max_chunksize=batch_rows)
 
 
 def _fk_component_map(
@@ -372,7 +380,8 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    carried = [f.name for f in source_schema if f.name not in fk_components and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 __all__ = ["_stream_table"]

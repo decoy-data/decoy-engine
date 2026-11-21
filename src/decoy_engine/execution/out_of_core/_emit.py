@@ -23,6 +23,7 @@ from decoy_engine.execution.out_of_core._join import _unified_chunk_type, fk_out
 from decoy_engine.execution.out_of_core._mask import mask_table
 from decoy_engine.execution.out_of_core._relation import build_parent_key_relation_aligned
 from decoy_engine.execution.out_of_core._stage import MaskedKeyStager
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
@@ -254,7 +255,13 @@ def assemble_resident(
         columns.append(column)
         field = template.field(idx)
         fields.append(field if field.type.equals(column.type) else pa.field(name, column.type))
-    return pa.Table.from_arrays(columns, schema=pa.schema(fields, metadata=template.metadata))
+    # The streamed batches already follow the fixed schema, whose masked fields are bare; an FK
+    # column is rebuilt from the joiner, so it is never the source field.
+    carried = [n for n in template.names if n not in fk_components]
+    return pa.Table.from_arrays(
+        columns,
+        schema=attach_output_metadata(pa.schema(fields), template.metadata, carried=carried),
+    )
 
 
 def _merged_column(chunks: list[pa.Array]) -> pa.ChunkedArray:

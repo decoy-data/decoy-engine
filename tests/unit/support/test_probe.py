@@ -141,7 +141,7 @@ def test_a_failing_part_raises_a_value_free_probe_error(monkeypatch: pytest.Monk
 
 def test_the_probe_reason_is_cataloged_as_unreleased() -> None:
     spec = reasons.get_reason("runtime", "probe_failed")
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.30.0"
 
 
 def test_the_ci_import_smoke_job_runs_the_probe_step() -> None:

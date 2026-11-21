@@ -13,6 +13,11 @@ what keeps masked values stable and joinable.
 
 ## Mask strategies
 
+List each column once per table and declare each table once. A repeated column name in a
+table is refused with `column_duplicate`, and a repeated table name with `table_duplicate`
+(both at the later entry), because the later entry would otherwise win and a `redact` could be
+silently replaced by a `passthrough`.
+
 [capability-matrix](capability-matrix.md) lists every mask strategy and is
 generated from the strategy registry. This page has a section for each of
 them. `passthrough` and the internal composite and nested handlers share the
@@ -199,8 +204,16 @@ parse as a date records a `format_error` row error and is never written to the
 output as it came in. Needs a namespace.
 
 - `min_days` / `max_days`: the offset range (defaults -365 and 365). If
-  reversed, they are swapped.
-- `date_format`: a strftime format; auto-detected from the column if omitted.
+  reversed, they are swapped. Each must be a whole number of days within
+  +/- 106,751.
+- `jitter_days`: `N` means the range `[-N, N]`. A non-negative integer up to
+  106,751. It cannot be combined with `min_days` or `max_days`; the plan is
+  refused (`date_shift_window_invalid`) if it is.
+- `date_format`: a strftime format. Required: a `date_shift` column without one is refused at
+  plan compile (`date_shift_requires_date_format`), and nothing guesses it from the cells. A
+  top-level column whose own declared parse format supplies the date shape is exempt; a nested
+  child is not. The starter writes the variant the scan detected, and only when every detected
+  value parses with it; otherwise it writes `redact`.
 - `preserve_values`: a list of ISO dates (`YYYY-MM-DD`) that pass through
   unchanged, for sentinels such as `9999-12-31` ("never expires") that
   downstream logic tests with `date = <sentinel>`. See
@@ -463,11 +476,23 @@ so the output is more useful than blanket redaction for columns such as
 clinical notes or support tickets.
 
 - `detectors` (list or null): detector IDs to run. Null or absent runs all
-  built-in span detectors. Unknown IDs are skipped silently.
+  built-in span detectors. Only the built-in span detector IDs are accepted
+  (`email`, `ssn`, `us_phone`, `us_zip`, `pan`, `iban`, `ipv4`, `icd10`, `npi`,
+  `url`, `street_address`). Any other ID is refused at compile and in
+  `decoy validate` with `mask.text_mask_detector_unknown`.
 - `per_detector_strategy` (dict): per-detector strategy overrides. Keys are
   detector IDs; values are `fpe`, `faker`, `date_shift`, `redact`, or
   `passthrough`. Unspecified detectors fall back to the built-in
-  `DETECTOR_DEFAULTS` table.
+  `DETECTOR_DEFAULTS` table. A key that is not a known detector ID, and a
+  detector and strategy pair that cannot run, are refused at compile with
+  `mask.text_mask_detector_unknown` or `mask.text_mask_strategy_unsupported`.
+  The supported pairs are:
+  `fpe` on `ssn`, `us_phone`, `us_zip`, `pan`, `npi`, `fax_number`;
+  `faker` on `person_name`, `first_name`, `last_name`, `address`, `location`;
+  `date_shift` on `iso_date`, `us_date`, `eu_date`;
+  `redact` and `passthrough` on any known detector ID.
+  A date span that does not parse (for example `2024-02-30`) is replaced by
+  `token`, never written through.
 - `unmatched_span_policy` (str, default `redact`): controls text in each cell
   not covered by any detector match. See the policy table below.
 - `token` (str, default `[REDACTED]`): replacement token for the `redact`
@@ -649,8 +674,9 @@ Cascade decisions are recorded in a frozen `CascadeEvidence` dataclass
 (a `decisions` tuple, one label per input row). When at least one row was
 generalized past the top configured cascade level, the handler surfaces a
 `QualityWarning` with code `geo_generalize_cascade` in
-`ExecutionResult.warnings`. The warning's `cascade_decisions` map includes
-only the rows that cascaded below the top level.
+`ExecutionResult.warnings`. The warning's `rows_generalized` counts the rows that cascaded below
+the top level, and one `rows_<decision>` key per decision holds its count (for example
+`rows_suppressed: 2`, `rows_zip3: 5`). Neither holds a row position.
 
 Config validation runs at execution time, pre-mutation, fail-closed. Raises
 `PlanCompileError` on unsupported `type`, empty `cascade`, or missing
@@ -1092,7 +1118,8 @@ that read them.
 expression) and `derived_aggregate` (intra-table scalar aggregate). Neither
 implements `conditioned_on`: `case_when` is a conditional expression construct
 in the closed grammar; `conditioned_on` is a separate planned parameter on the
-`categorical` strategy (per-row nested weight tables) and is not yet built.
+`categorical` strategy (per-row nested weight tables). For generated columns it is built as
+`condition_on` with `by` on a `categorical` column (see [categorical](#categorical)).
 
 `grouped_series`, `windowed_date` and `group_key` are built; their keys are in
 the table under [Options are checked per type](#options-are-checked-per-type).
@@ -1138,10 +1165,10 @@ Computes a single aggregate scalar over a named source column in the same table
 and fills every row of the target column with that scalar (SP-10b /
 ISO/IEC 9075-1 set-function semantics).
 
-**Intra-table only.** Source and target must be columns in the same table. The
-FK-driven cross-table aggregate (parent.total = sum(child.amount), closing Gen
-Gap 4) is not yet built; it is deferred to SP-10c. Do not use this strategy
-expecting cross-table or parent-from-children aggregate behaviour.
+**Intra-table in mask mode.** A masked column aggregates a column of its own
+table. In generate mode a column can instead aggregate each parent row's own
+children (`parent.total = sum(child.amount)`) with `from_table` and `via`; see
+"Per-parent aggregates" under the generation strategies.
 
 Config keys:
 
@@ -1150,7 +1177,8 @@ Config keys:
   time before any DataFrame is touched.
 - `column` (str, required): name of the source column in the same table. A
   missing reference raises `PlanCompileError(derived_aggregate_missing_column_ref)`
-  at plan-compile time.
+  at plan-compile time for a masked column, and
+  `PlanCompileError(generate_column_forward_reference)` for a generated one.
 
 Works in both mask mode (`strategy: derived_aggregate` on a column with `op`
 and `column` under `provider_config:`) and generate mode (`type: derived_aggregate`
@@ -1258,10 +1286,11 @@ stops the run. The error names the row position and never the value. No row is
 clamped. The column is refused when the run has no mask secret.
 
 Refusals at compile time: `windowed_date_anchor_missing`,
-`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`,
+`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`, `windowed_date_window_out_of_range`,
 `windowed_date_distribution_invalid` and `windowed_date_missing_anchor_ref`.
 At run time `windowed_date_position_out_of_domain` refuses a row position it
-cannot encode.
+cannot encode, and `windowed_date_row_number_out_of_range` refuses a global row number below 0 or at
+or above 2**62 (the offset draw keys on `2 * row + draw`).
 
 ### passthrough and structural handlers
 
@@ -1339,15 +1368,26 @@ lists, bare references, bytes and f-string literals, backtick-quoted names and
 names with characters other than ASCII letters, digits and `_`. There is no null
 check in the grammar. `x >= ''` (string) and `x < 0 or x >= 0` (numeric) select the
 non-null rows. Their negations select the null rows only on numpy-backed columns; on a
-pandas nullable dtype (`string`, `Int64`, `Float64`, including Parquet written by pandas)
+pandas nullable dtype (`string`, `Float64`, including Parquet written by pandas)
 the negation selects no rows, so there is no way to gate on "is null" there (see the
-CHANGELOG migration table). A name that pandas would not
+CHANGELOG migration table). An integer column is the exception: every integer column
+follows the rule in the next paragraph, whatever its role. A name that pandas would not
 read as a column is reserved and refused as a reference: the numexpr function
 names (`sin`, `abs`, `where` and the rest), the pandas eval names (`inf`, `nan`,
 `index`, `columns`, `Timestamp`, `datetime`, `list`, `tuple`) and the Python
-keywords. Rename the column or compare it through another one.
+keywords. Nine more words are held back for later grammar and are refused too: `null`,
+`true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith`, `endswith`. Matching
+is exact and case-sensitive, so `NULL` and `Between` stay ordinary columns. Rename the
+column or compare it through another one.
 
-A null cell behaves as pandas treats it. It equals no literal, so `==`, `in` and
+An integer column compares exactly on every route, including values and literals beyond
+2**53, and a blank integer cell is treated as `NaN`: `!=`, `not in` and `not (...)` around a
+comparison that is false for it select the blank row, and `==`, `in` and the ordering tests do
+not. This holds for plain columns and for FK keys, declared integers, `date_shift` anchors,
+`top_code` columns and `group_key` siblings alike. A null cell in any other column behaves as
+pandas treats it.
+
+A null cell equals no literal, so `==`, `in` and
 the ordering tests do not select it, while `!=`, `not in` and `not (...)` do. A
 nullable column can give a missing result for a test, and a missing result
 selects nothing. The native chunked route takes the selection from the same pandas
@@ -1444,18 +1484,20 @@ take it.
 |---|---|---|---|
 | `sequence` | `start` | `step`, `prefix`, `suffix`, `pad_length`, `output_type` | |
 | `faker` | `faker_type` | `locale`, `faker_kwargs`, `output_type` | |
-| `categorical` | `categories` | `weights`, `output_type` | |
-| `reference` | `reference_table`, `reference_column` | `distribution`, `weights`, `min_per_parent`, `max_per_parent`, `snapshot_file`, `source_column` | `weights` if `distribution: weighted` |
+| `categorical` | `categories` | `weights`, `condition_on`, `by`, `output_type` | |
+| `reference` | `reference_table`, `reference_column` | `distribution`, `weights`, `min_per_parent`, `max_per_parent`, `root_count`, `snapshot_file`, `source_column` | `weights` if `distribution: weighted` |
 | `formula` | `formula` | `references`, `output_type` | |
 | `statistical` | `snapshot_file` | `source_column`, `high_cardinality`, `allow_real_categories`, `other_mode`, `condition_on` | |
 | `derived` | `expression` | `bounds`, `null_propagation`, `output_type` | |
-| `derived_aggregate` | `op`, `column` (at plan compile) | `output_type` | |
+| `derived_aggregate` | `op`, `column` (at plan compile) | `from_table`, `via`, `output_type` | |
 | `grouped_series` | `group_by`, `order_by` | `generator`, `step`, `max_step`, `start`, `output_type` | |
-| `windowed_date` | `anchor`, `max_days` | `min_days`, `distribution`, `output_type` | |
+| `windowed_date` | `anchor`, `max_days` | `anchor_via`, `min_days`, `distribution`, `output_type` | |
 | `group_key` | `group_by` | `length`, `prefix` | |
 | `constant` | `value` | `output_type` | |
 | `distribution` | `family` | `low`, `high`, `min`, `max`, `output_type` | `low`, `high` if `family: uniform` |
 | `lookup` | | `file`, `codeset`, `value_column`, `weight_column`, `output_type` | |
+| `inherit` | `via`, `column` | | |
+| `provider` | `provider` | `locale`, `field`, `group` | |
 
 `derived_aggregate` is the one type whose required keys are checked at plan compile, not at
 config parse: its transform refuses a missing `op` or `column` with `derived_aggregate_op_missing`
@@ -1476,13 +1518,16 @@ same configs:
   type or faker keyword (`generate_locale_unknown`, `generate_faker_type_unknown`,
   `generate_faker_kwargs_unknown`), categories Arrow cannot put in one column
   (`generate_categories_mixed`), a key that names a column the table does not have
-  (`derived_missing_column_ref`, `derived_aggregate_missing_column_ref`,
-  `grouped_series_missing_group_by_ref`, `grouped_series_missing_order_by_ref`,
-  `windowed_date_missing_anchor_ref`, `group_key_missing_group_by_ref`), a column the table has
-  but generates later (`generate_column_forward_reference`), `group_by` equal to `order_by`
+  (`derived_missing_column_ref`, `grouped_series_missing_group_by_ref`,
+  `grouped_series_missing_order_by_ref`, `group_key_missing_group_by_ref`), a column the table
+  has but generates later, a `windowed_date` anchor or `derived_aggregate` input that is missing
+  or generated later, an `anchor_via` or parent anchor that does not exist, and a per-parent
+  aggregate's `column` or `via` that the child table does not have
+  (`generate_column_forward_reference`), `group_by` equal to `order_by`
   (`grouped_series_group_by_equals_order_by`), the formula rules below, `weighted` reference
   weights whose length differs from a `sequence` parent's `row_count`
-  (`reference_weights_length_mismatch`), and every other parse rule a type's transform has. Those
+  (`reference_weights_length_mismatch`; any other parent is checked against its real keys at
+  run), and every other parse rule a type's transform has. Those
   keep the transform's own code, such as `derived_aggregate_op_missing`,
   `derived_bounds_inverted`, `grouped_series_generator_invalid`,
   `windowed_date_min_exceeds_max` or `group_key_length_odd`; `generate_option_invalid` is used
@@ -1551,6 +1596,52 @@ Draws each row from a fixed category pool.
 - `categories`: the pool. The values must fit one Arrow column type (`[1, 2.5]` and
   `["a", null]` do; `["a", 1]` does not).
 - `weights`: optional, one non-negative number per category with a positive sum.
+- `condition_on` and `by`: optional, and given together (either one alone is `missing` on the
+  other). `condition_on` names an earlier column of the table, of any type except a `formula`
+  with `references` (that formula is filled only after every other column is drawn); `by` maps a
+  value of that column to its own mix, an entry with `weights` (for the top-level `categories`)
+  or with `categories` and optional `weights`:
+
+  ```yaml
+  - {name: region, type: categorical, categories: [north, south]}
+  - name: tier
+    type: categorical
+    categories: [basic, plus, premium]   # the fallback mix
+    weights: [5, 3, 2]
+    condition_on: region
+    by:
+      north: {weights: [2, 3, 5]}
+      south: {categories: [basic, plus], weights: [9, 1]}
+  ```
+
+  Each row draws from the entry its parent value selects. The parent is matched by its text, the
+  rule a fitted `condition_on` uses: `1` matches the key `"1"`, `true` matches `"True"` and a null
+  parent matches `"None"`. So every `by` key must be a quoted string; a YAML `1:` or `true:` key
+  is refused (`generate_option_type`, at the key's position; the message says to quote it). An
+  entry with another key is `generate_option_unknown`, an entry with neither key, a `categories`
+  that is not a non-empty list or a `by` that is not a mapping is `generate_option_type`, and entry
+  weights follow the `weights` rule against the entry's own categories, else the top-level ones
+  (`generate_weights_invalid`). Locations name an entry by position, never by its key.
+  `condition_on` naming a later or missing column, or a `formula` with `references`, is
+  `plan.generate_column_forward_reference`, and
+  the top-level and entry categories together must fit one Arrow type
+  (`plan.generate_categories_mixed`). `unique: true` with `condition_on` is
+  `generate_unique_conflict`.
+- A row whose parent value has no `by` entry draws from the top-level `categories` and `weights`.
+  On the whole-table route the run then reports `warning.generation_condition_parent_unseen` once
+  for the column, with `provider: categorical` and the same detail keys as a fitted
+  `condition_on` (row counts and a capped distinct-key count, never a value). Pinned mode draws the
+  same rows and raises no warning, as for a fitted `condition_on`. The streaming route declines
+  the column (`categorical_condition_on`) and the run stays on the whole-table route.
+- The column draws one value per row from its one seeded stream, so it consumes as many draws as a
+  plain column; its seed hashes `condition_on` and `by` with the rest of the column, so its values
+  differ from the plain column's. A plain `categorical` keeps its bytes and its type.
+- The column's type is the type of every category it can draw (top-level and entries). The
+  parent column is read as text, so a `sequence` parent stays text, as under a fitted
+  `condition_on`.
+- If the conditioning column is missing from the generated data at run time (a config that
+  skipped the checks), the run refuses with `runtime.categorical_condition_column_unavailable`
+  rather than sending every row to the fallback mix.
 
 ### reference
 
@@ -1561,17 +1652,281 @@ child can point at a generated parent's keys.
   to draw from (both required).
 - `distribution`: how draws are spread across the parent values: `random`
   (default), `sequential`, `weighted`, or `fitted` (below). Any other value is refused.
-- `weights`: per-value weights, required when `distribution` is `weighted`. Against a
-  `sequence` parent with no nulls, the list must have one weight per parent row.
+- `weights`: per-value weights, required when `distribution` is `weighted`. The list must have
+  one weight per distinct parent key. Against a `sequence` parent with no nulls that is one per
+  parent row, checked at plan compile; for any other parent the run checks the real key count and
+  refuses a mismatch with `runtime.reference_weights_length_mismatch`. It never falls back to
+  uniform draws.
 - `min_per_parent` / `max_per_parent`: optional per-parent cardinality bounds
-  (0 = unbounded). These bounds do not compose with `sequential`.
+  (0 = unbounded). These bounds do not compose with `sequential`. See "Per-parent bounds" below.
 - `snapshot_file` / `source_column`: only with `distribution: fitted` (below).
   Any other distribution refuses them with `config.generate_option_unknown`.
+- `root_count`: only on a reference to the column's own table (see "Self-reference trees"
+  below). On any other reference it is refused with `config.generate_option_unknown`.
 
 `random` and `weighted` pick a parent for each child row on its own, so on 30
 parents and 60 children almost every parent gets 1 to 4 children. A source
 where a few parents hold most of the children, or many parents hold none, loses
 that shape. `distribution: fitted` keeps it.
+
+#### Per-parent bounds (`min_per_parent`, `max_per_parent`)
+
+A positive bound is exact: every distinct parent key gets at least `min_per_parent` and at most
+`max_per_parent` child rows, or the config is refused. Nothing is repaired on a best-effort basis.
+
+With `P` distinct non-null parent keys and `N` child rows the bounds can hold exactly when
+`min_per_parent * P <= N` and, with a maximum, `N <= max_per_parent * P`. Equality fits on both
+sides.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `min_per_parent` above a positive `max_per_parent` | `config.generate_per_parent_bounds_conflict` |
+| Validate | a positive bound with `distribution: fitted` | `config.generate_fitted_reference_bounds_conflict` |
+| Validate | a positive bound with `null_probability` above 0 (nulls would undo the bounds) | `config.generate_per_parent_null_conflict` |
+| Validate | `max_per_parent` times the parent table's `row_count` is below the child `row_count` | `config.generate_per_parent_infeasible` |
+| Run | the bounds cannot hold for the real distinct parent keys | `runtime.generate_per_parent_infeasible` |
+
+Validate judges the maximum only, against the parent's `row_count`, which is an upper bound on
+`P`. A parent column that repeats or nulls keys has fewer, so the run checks both bounds on the
+keys it actually drew from. A caller that skips validation gets
+`runtime.generate_fitted_reference_bounds_conflict` for a bound on a fitted column, and
+`runtime.reference_bounds_unsatisfied` if a repaired column still breaks a bound. Each message is
+the fixed summary plus the table and column names.
+
+A bounded reference runs on the whole-table route. A capacity probe keeps the bounds and loosens
+them to its scaled row counts, so a config that passes at full size is never refused by its probe.
+
+#### Empty parent and `orphan_policy`
+
+When the parent column has no non-null keys and the child has rows, a `relationships` entry whose
+parent is `(reference_table, [reference_column])` and whose child is this table and column decides:
+
+| `orphan_policy` | Result |
+| --- | --- |
+| `fail` | the run stops with `runtime.reference_parent_pool_empty` |
+| `warn` | the column is null and one `warning.reference_parent_pool_empty` is raised, naming the table and column |
+| `preserve`, `remap`, or no matching relationship | the column is null, with no warning |
+
+The rule is the same on the in-memory, streamed and pinned routes. A pinned plan records the
+policy of each covered reference column as plan metadata (`reference_policies`), so the plan
+fingerprint follows the policy while the column's values and seed do not. A `fitted` column is
+the exception: an empty parent always stops with `plan.reference_parent_pool_empty`, whatever the
+policy.
+
+#### Self-reference trees (`reference_table` is the column's own table)
+
+A `reference` column whose `reference_table` is its own table is a self-reference: a manager
+for each employee, a parent category for each category. The rows are generated as a forest.
+
+```yaml
+- name: employees
+  row_count: 200
+  generate_columns:
+    - {name: id, type: sequence, start: 1}
+    - name: manager_id
+      type: reference
+      reference_table: employees
+      reference_column: id
+      root_count: 1        # optional, default 1
+      max_per_parent: 8    # optional
+```
+
+- The first `root_count` rows are roots: their value is null. `root_count` defaults to 1 (one
+  tree) and must lie between 1 and the table's `row_count`. A table with `row_count: 0` ignores
+  it.
+- Every later row takes the key of a row above it, chosen uniformly (a random recursive tree,
+  Smythe and Mahmoud 1995). A parent always comes earlier in the table, so every chain ends at a
+  root and there is never a cycle.
+- With `max_per_parent`, a row picks uniformly among the earlier rows that have fewer than
+  `max_per_parent` children. No key gets more children than that. This is a degree-bounded
+  variant, not the uniform recursive tree.
+- The same seed gives the same tree. The column copies the key's drawn values and has the key
+  column's Arrow type. A reference cannot declare `output_type`, so a key that declares one is
+  refused: its cast values would match none of the copied keys.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `reference_column` is not an earlier `sequence` column of the same table, or that column has `null_probability` above 0 or declares `output_type` | `config.generate_self_reference_key_invalid` |
+| Validate | `distribution` other than `random`, a positive `min_per_parent`, `null_probability` above 0, `unique: true`, or the column is a `unique_together` member | `config.generate_self_reference_option_unsupported` |
+| Validate | `root_count` below 1 or above a positive `row_count` | `config.generate_option_range` |
+| Validate | `root_count` on a reference to another table | `config.generate_option_unknown` |
+| Pinned compile | any self-reference | `plan.pinned_relational_option_unsupported` |
+| Pinned execute | a self-reference in a plan that did not come from pinned compile, or a recorded `reference_policies` field that does not decode | `runtime.pinned_relational_option_unsupported` (a `GenerationError`) |
+
+Only the self-edge is exempt from the cycle check: two tables that reference each other are
+still refused as a reference cycle. A self-reference runs on the whole-table route (streaming
+admission declines it with `reference_to_own_table`). A capacity probe holds an explicit
+`root_count` to its scaled row count, so a config that validates at full size is never refused
+by its probe.
+
+#### Parent-anchored dates (`windowed_date` with `anchor_via`)
+
+A child date can follow a date of its parent row: a visit after the patient's birth date, an
+order after the customer's signup date.
+
+```yaml
+- name: customers
+  row_count: 100
+  generate_columns:
+    - {name: id, type: sequence, start: 1}
+    - {name: signup, type: faker, faker_type: date_of_birth}
+- name: orders
+  row_count: 500
+  generate_columns:
+    - {name: customer_id, type: reference, reference_table: customers, reference_column: id}
+    - name: ordered_on
+      type: windowed_date
+      anchor: signup            # a column of customers, not of orders
+      anchor_via: customer_id   # an earlier reference column of this table
+      min_days: 1
+      max_days: 365
+```
+
+- `anchor_via` names an earlier `reference` column of the same table. `anchor` is then a column
+  of the table that reference points at. A column of the child table with the same name is
+  never read, and the child does not need one.
+- Each date is the parent row's anchor plus an offset in `min_days` to `max_days`, drawn as for
+  a same-table anchor. The same seed gives the same dates.
+- A null foreign key gives a null date. A foreign key whose parent row has a null anchor is
+  refused, not nulled.
+- Without `anchor_via`, `anchor` is an earlier column of the same table, as before.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `anchor_via` is not a `reference` column, or the parent key it references is not a `sequence` column with no `null_probability` | `config.generate_parent_lookup_key_not_unique` |
+| Validate | `anchor_via` is a reference to the column's own table | `config.generate_parent_lookup_self_reference` |
+| Plan compile | `anchor_via` is missing or declared later, or `anchor` is not a column of the parent table | `plan.generate_column_forward_reference` |
+| Pinned compile | any `anchor_via` | `plan.pinned_relational_option_unsupported` |
+| Pinned execute | an `anchor_via` in a plan that did not come from pinned compile | `runtime.pinned_relational_option_unsupported` (a `GenerationError`) |
+| Run | a foreign key value with no parent row | `runtime.parent_lookup_key_missing` (a `GenerationError`) |
+| Run | a parent key value that occurs more than once | `runtime.parent_lookup_key_not_unique` (a `GenerationError`) |
+| Run | the parent row's anchor is null | `runtime.windowed_date_parent_anchor_null` |
+
+The date failures below apply to every `windowed_date`, generated or masked, with or without
+`anchor_via`. Each is a `WindowedDateError` whose message is the fixed summary: it holds no
+cell value, type name or row position.
+
+| Failure | Code |
+| --- | --- |
+| The anchor is not an ISO date or datetime without a timezone, is not a date type, or is not a real calendar date | `runtime.windowed_date_anchor_invalid` |
+| The anchor is outside 1700-01-01 to 2200-12-31 | `runtime.windowed_date_anchor_out_of_range` |
+| The anchor plus its offset is outside that range | `runtime.windowed_date_offset_out_of_range` |
+
+A column with `anchor_via` runs on the whole-table route: streaming admission declines it with
+`windowed_date_anchor_via`, and a windowed read does not serve its table.
+
+#### Per-parent aggregates (`derived_aggregate` with `from_table` and `via`)
+
+A parent column can aggregate its own children: an order total as the sum of its line items, a
+customer's order count.
+
+```yaml
+- name: orders
+  row_count: 100
+  generate_columns:
+    - {name: id, type: sequence, start: 1}
+    - name: total
+      type: derived_aggregate
+      op: sum
+      from_table: lines   # the child table
+      via: order_id       # the child's reference column back to this table
+      column: amount      # a column of lines, not of orders
+- name: lines
+  row_count: 400
+  generate_columns:
+    - {name: order_id, type: reference, reference_table: orders, reference_column: id}
+    - {name: amount, type: distribution, family: uniform, low: 1, high: 50}
+```
+
+- With `from_table`, `column` and `via` are columns of that child table, declared anywhere in
+  it. A column of the parent with the same name is never read, and the parent does not need
+  one. `via` must be a `reference` to this table whose key is an earlier `sequence` column with
+  no `null_probability`.
+- Each parent row gets `op` over the children whose `via` names it (SQL `GROUP BY` over the
+  child with a `LEFT JOIN` from the parent). Null values are skipped, as for the same-table
+  form, and a child with a null foreign key belongs to no parent.
+- A parent with no children gets 0 for `sum` and `count` and a null for `mean`, `min` and `max`,
+  never NaN.
+- Without an `output_type` the column's Arrow type follows the op and the child column, not the
+  values, even when no parent has children: `count` is `int64`, `mean` `float64`, and `sum`,
+  `min` and `max` take the child column's type (a `decimal(n)` child gives that decimal).
+- The column is filled after every table has been generated, and the returned parent table holds
+  the filled values. No other column can read it: a same-table reader, a child's `anchor`, a
+  reference, a formula or another aggregate that names it is refused at validate.
+- The child column must hold numbers when the aggregate reads it. Numeric typing keeps a
+  `sequence` or `faker` column text while an aggregate reads it, so such a column is refused at
+  validate, before any data is read, as is a text `categorical` or `constant` and a column whose
+  values the config does not type (`derived`, `formula`, `lookup`, ...). Aggregate a
+  `distribution`, a `categorical` or `constant` of numbers, a `reference` copying one, or give
+  the child column a numeric `output_type` (`int` or `decimal(n)`). The refusal names the child
+  table, the column and the aggregate. The same-table form is unchanged.
+- Without `from_table`, `column` is an earlier column of the same table, as before.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `via` is not a `reference` to this table, or the key it references is not an earlier `sequence` column with no `null_probability` | `config.generate_parent_lookup_key_not_unique` |
+| Validate | `via` is a reference to its own table (including `from_table` naming the parent itself) | `config.generate_parent_lookup_self_reference` |
+| Validate | `via` without `from_table` | `config.generate_option_unknown` |
+| Validate | `from_table` without `via` | `missing` |
+| Validate | `null_probability` on the aggregate | `config.generate_per_parent_null_conflict` |
+| Validate | any column input or reference that names the aggregate | `config.generate_aggregate_read_before_fill` |
+| Validate | the child `column` does not hold numbers (see above) | `config.generate_aggregate_input_not_numeric` |
+| Plan compile | `from_table` names no table, or `column` or `via` is not a column of it | `plan.generate_column_forward_reference` |
+| Pinned compile | any per-parent aggregate | `plan.pinned_relational_option_unsupported` |
+| Pinned execute | a per-parent aggregate in a plan that did not come from pinned compile | `runtime.pinned_relational_option_unsupported` (a `GenerationError`) |
+
+A config with a per-parent aggregate runs on the whole-table route: streaming admission
+declines every `derived_aggregate` column, and a windowed read does not serve its table.
+
+#### Copying a parent column (`inherit`)
+
+A child column can carry a value of its parent row: a claim's member state, an order line's
+currency. An independent `categorical` would give claims in states their member never lived in.
+
+```yaml
+- name: members
+  row_count: 50
+  generate_columns:
+    - {name: member_id, type: sequence, start: 1}
+    - {name: state, type: categorical, categories: [CA, NY, TX]}
+- name: claims
+  row_count: 1000
+  generate_columns:
+    - {name: member_id, type: reference, reference_table: members, reference_column: member_id}
+    - {name: member_state, type: inherit, via: member_id, column: state}
+```
+
+- `via` names an earlier `reference` column of the same table; `column` is then a column of the
+  table that reference points at. A column of the child, or of any other table, with the same
+  name is never read, and the child does not need one.
+- Each row gets `column` from the parent row whose key equals the row's `via` value (a SQL
+  `LEFT JOIN` on a unique key). Nothing is drawn, so the column is the same under every seed
+  for the same foreign keys. It works with every reference distribution, `fitted` included.
+- A null foreign key gives a null; a parent row whose value is null gives a null.
+  `null_probability` applies after the copy, as on every type.
+- The column has the parent column's Arrow type, nulls and declared `output_type` included,
+  even when every copied value is null. `inherit` takes no `output_type` and no `unique`.
+- Copies chain across tables: a `claim_lines` column can `inherit` `claims.member_state`, itself
+  inherited from `members.state`. A `categorical` can condition on an inherited column.
+- Numeric typing judges the copy with the column it copies: a child `formula` that reads the
+  copy as text keeps the parent column text in both tables, as a reader of a `reference`
+  does.
+
+| When | Refused | Code |
+| --- | --- | --- |
+| Validate | `via` is not a `reference` column, or the parent key it references is not a `sequence` column with no `null_probability` | `config.generate_parent_lookup_key_not_unique` |
+| Validate | `via` is a reference to the column's own table | `config.generate_parent_lookup_self_reference` |
+| Validate | `via` or `column` missing | `missing` |
+| Validate | `column` names a per-parent aggregate | `config.generate_aggregate_read_before_fill` |
+| Validate | `unique: true` | `config.generate_unique_unsupported` |
+| Plan compile | `via` is missing or declared later, or `column` is not a column of the parent table | `plan.generate_column_forward_reference` |
+| Pinned compile | any `inherit` column | `plan.pinned_relational_option_unsupported` |
+| Pinned execute | an `inherit` column in a plan that did not come from pinned compile | `runtime.pinned_relational_option_unsupported` (a `GenerationError`) |
+| Run | a foreign key value with no parent row | `runtime.parent_lookup_key_missing` (a `GenerationError`) |
+| Run | a parent key value that occurs more than once | `runtime.parent_lookup_key_not_unique` (a `GenerationError`) |
+
+A config with an `inherit` column runs on the whole-table route: streaming admission declines
+it (`family_declined:inherit`), and a windowed read does not serve its table.
 
 #### Fitted fan-out (`distribution: fitted`)
 
@@ -1686,7 +2041,11 @@ every column, not only the columns the profiler flags.
   column keeps its labels.
 - A numeric column's `min`, `max` and histogram edges come from the 10th smallest and 10th largest
   cell, on a 1, 2 or 5 times power-of-ten grid. A quantile is kept only when 10 rows lie on each
-  side of it. The requested `numeric_bins` is a minimum: the grid can write a few more bins.
+  side of it. The histogram has one bin when the column also releases an `exact_values` or
+  `quantile_grid` block. Otherwise `numeric_bins` sets the finest grid step, and the step widens
+  until every non-empty bin holds at least 10 rows, so the histogram can have fewer bins than
+  requested. `numeric_bins` is an int from 1 to 1000; any other value is refused with
+  `quality.numeric_bins_invalid` before any histogram is computed.
 - A datetime column is stored as contiguous year ranges `{start_year, end_year, count}` of at least
   10 rows each. A flagged column gets the same ranges.
 - A short string column whose labels read as sentences (median of 3 or more words) is written as
@@ -1716,6 +2075,12 @@ the formula scope provides, such as `abs` or `sqrt` (`round` and `random` are in
 (`generate_formula_name_unknown`), wraps a sibling in braces as `{a} * 2` (`generate_formula_template_syntax`), or reads itself or a later formula
 that has `references` (`generate_column_forward_reference`). Declare dependencies
 before the columns that read them.
+
+A formula with `references` is filled after every other column of the table is drawn, so only
+another formula may read it. A column of any other type that reads it (a `derived` expression,
+a `condition_on`, a `group_by`, an `anchor`) is refused with `generate_column_forward_reference`,
+as a read of a later column is. A formula without `references` is drawn in declared order and any
+later column may read it.
 
 A formula reads each referenced column as the type the column has. A plain `sequence` (no
 prefix, suffix or padding), an int or float `faker` column and a numeric `categorical`,
@@ -1810,6 +2175,34 @@ and `lookup_not_pinned`), never a cell value or a path.
 
 These two top-level blocks run after all column passes complete. They operate on
 the assembled output tables, not on individual columns mid-run.
+
+### provider
+
+Draws each row from a scalar provider in the masking provider registry, by the same name and
+through the same adapter. Every value is text, including the providers that return a number or
+a date (`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
+
+```yaml
+- name: npi
+  type: provider
+  provider: synthetic_npi   # any scalar registry name, such as person_phone or synthetic_iban
+  locale: en_US             # optional; must be a locale the provider declares
+```
+
+- `provider`: a registry name. The nine synthetic identifiers keep their check digits. An unknown
+  name is refused at `decoy validate` with `generate_provider_unknown`; `composite_custom` and the
+  composite providers are refused (`generate_provider_unsupported`,
+  `generate_provider_field_required`) until a later release.
+- `locale`: refused with `generate_provider_locale_unsupported` unless the provider declares it.
+  With no `locale`, the instance default applies and is checked before any draw. SSN, EIN, NPI
+  and NDC declare `en_US` only; CUSIP declares `en_CA` and `en_US`.
+- `field` and `group` are refused on a scalar provider (`generate_provider_field_unexpected`).
+- `unique` is refused. A provider column runs on the resident route only and is refused in
+  pinned mode (`pinned_provider_unsupported`). Values repeat when the provider's domain is small.
+- A `faker` column with a registry name in `faker_type` is refused with
+  `generate_faker_type_is_domain_provider`, which points here.
+- A failure inside a draw is reported as `generation_provider_failed` with the table and column
+  only, never the provider text.
 
 ### validators:
 

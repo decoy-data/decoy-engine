@@ -340,6 +340,11 @@ def derive_index(seed: bytes, namespace: str, source: bytes, *, pool_size: int) 
         raise
 
 
+def check_pool_size(pool_size: int) -> None:
+    """Raise the coded pool-size error `derive_index` raises, for callers that batch the draw."""
+    _check_pool_size(pool_size)
+
+
 def _check_pool_size(pool_size: int) -> None:
     if pool_size > _POOL_SIZE_MAX:
         raise DeterminismError(

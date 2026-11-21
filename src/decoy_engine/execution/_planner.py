@@ -69,10 +69,15 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine.declared_casting._eligibility import chunk_stability, declared_rejection
 from decoy_engine.execution import _chunked_input as _ci
+from decoy_engine.execution._chunked_carry import carried_columns
 from decoy_engine.execution._planner_columns import (
     _bucketize_columns,
     _fpe_join_group_columns,
     _table_column_entries,
+)
+from decoy_engine.execution.chunked._source_dtype_gate import (
+    admitted_masked_columns,
+    unstable_source_columns,
 )
 from decoy_engine.profile._readers import LazySource
 
@@ -188,6 +193,7 @@ def classify_job(
     auto_chunk_threshold_rows: int = AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT,
     source_facts: Mapping[str, _ci.SourceFacts] | None = None,
     ignore_size_threshold: bool = False,
+    dispatcher_lane: bool = True,
 ) -> ExecutionPlan:
     """Classify a job into exactly one execution mode, without executing.
 
@@ -213,6 +219,10 @@ def classify_job(
 
     `ignore_size_threshold` drops the row-count gate, for a run that requires streaming: a
     table of any size, empty included, may take the lane. Every other gate still applies.
+
+    `dispatcher_lane` is False when the run's chunked lane is the legacy oracle (kill switch
+    `chunked_dispatcher_enabled=False`). That lane converts every column to pandas, so a carried
+    passthrough column gets no exemption from the dtype gate.
     """
     from decoy_engine.execution._pipeline import classify_table_kinds
     from decoy_engine.execution._runner import build_work_list, order_work
@@ -243,6 +253,7 @@ def classify_job(
         registry=registry,
         source_facts=facts,
         ignore_size_threshold=ignore_size_threshold,
+        carry_exempt=not has_fk and dispatcher_lane,
     ) or declared_rejection("chunked", plan=plan)  # F06: declared casting is full-frame only
     if chunked_rejection is None:
         reason = (
@@ -292,6 +303,7 @@ def _chunked_rejection(
     registry: ProviderRegistry,
     source_facts: dict[str, _ci.SourceFacts],
     ignore_size_threshold: bool = False,
+    carry_exempt: bool = False,
 ) -> str | None:
     """None when the job is admissible for chunked streaming; else why not.
 
@@ -381,6 +393,7 @@ def _chunked_rejection(
                     source_facts=source_facts,
                     declared=chunk_stability(config, table),
                     ignore_size_threshold=ignore_size_threshold,
+                    carry_inputs=(config, registry) if carry_exempt else None,
                 )
             )
     return "; ".join(reasons) if reasons else None
@@ -408,27 +421,15 @@ def _whole_column_state_rejections(
     """
     reasons: list[str] = []
     when_cols: list[str] = []
-    undated_cols: list[str] = []
     for col_entry in _table_column_entries(config, table=table):
         name = str(col_entry.get("name", "?"))
         if col_entry.get("when") and name not in relaxed_when:
             when_cols.append(name)
-        if col_entry.get("strategy") == "date_shift" and not (
-            col_entry.get("provider_config") or {}
-        ).get("date_format"):
-            undated_cols.append(name)
     if when_cols:
         reasons.append(
             f"when_predicate_not_chunk_stable: column(s) {', '.join(sorted(when_cols))} "
             "carry a `when` predicate, which is evaluated per frame; per-chunk "
             "evaluation is a different scope than the whole frame"
-        )
-    if undated_cols:
-        reasons.append(
-            f"date_shift_requires_explicit_format: column(s) {', '.join(sorted(undated_cols))} "
-            "use date_shift without provider_config.date_format; format detection "
-            "samples the whole column, so per-chunk detection can lock a different "
-            "format"
         )
     return reasons
 
@@ -443,6 +444,7 @@ def _runtime_source_rejections(
     source_facts: dict[str, _ci.SourceFacts] | None = None,
     declared: tuple[frozenset[str], frozenset[str]] = (frozenset(), frozenset()),
     ignore_size_threshold: bool = False,
+    carry_inputs: tuple[Mapping[str, Any], ProviderRegistry] | None = None,
 ) -> list[str]:
     """Runtime (loaded-source) gates: presence, size threshold, dtypes,
     and the bucketize source shape.
@@ -474,30 +476,24 @@ def _runtime_source_rejections(
             f"threshold ({auto_chunk_threshold_rows}); full-frame is cheaper "
             "than streaming at this size"
         )
-    gap = _ci.null_count_gap_reason(facts, bucketize_columns or [], table)
+    # FK jobs and the legacy oracle lane keep their routing: only the dispatcher lane of a job
+    # with no FK edge exempts its carried columns, from the footer null-count gate and the
+    # dtype gate alike.
+    carried: frozenset[str] = frozenset()
+    masked_ok: frozenset[str] = frozenset()
+    if carry_inputs is not None:
+        cfg, registry = carry_inputs
+        carried = carried_columns(cfg, table=table, names=schema.names, registry=registry)
+        masked_ok = admitted_masked_columns(
+            facts, _table_column_entries(dict(cfg), table=table), registry
+        )
+    gap = _ci.null_count_gap_reason(facts, bucketize_columns or [], table, carried)
     if gap:
         reasons.append(gap)
     stable, bad = declared  # F06: judged by the type a declared column leaves the cast with
-    unstable: list[str] = [f"{n} (declared, no output_format)" for n in sorted(bad)]
-    for schema_field in schema:
-        t = schema_field.type
-        if schema_field.name in stable | bad:
-            continue
-        if pat.is_integer(t):
-            # pandas widens int+null to float PER FRAME, so a null-free
-            # chunk keeps int64 while a null-bearing one becomes float64;
-            # only a null-free integer column round-trips chunk-stably.
-            if (facts.null_count(schema_field.name) or 0) > 0:
-                unstable.append(f"{schema_field.name} (integer with nulls)")
-        elif not (
-            pat.is_string(t)
-            or pat.is_large_string(t)
-            or pat.is_floating(t)
-            or pat.is_boolean(t)
-            or pat.is_temporal(t)
-            or pat.is_null(t)
-        ):
-            unstable.append(f"{schema_field.name} ({t})")
+    unstable = unstable_source_columns(
+        facts, declared_stable=stable, declared_bad=bad, carried=carried, masked_ok=masked_ok
+    )
     if unstable:
         reasons.append(
             "column(s) with non-chunk-stable pandas round-trip dtypes: "

@@ -48,6 +48,17 @@ def _source(arr: pa.Array, values: list[str | None]) -> pa.Table:
     return pa.table({**_strs(values), "x": arr})
 
 
+def _o3_narrowed(table: pa.Table) -> pa.Table:
+    """O3: a pass-through `large_string` column leaves the route as `string` while its values
+    fit 32-bit offsets, so that is the carried column's expected type."""
+    for i, field in enumerate(table.schema):
+        if pa.types.is_large_string(field.type):
+            table = table.set_column(
+                i, field.with_type(pa.string()), table.column(i).cast(pa.string())
+            )
+    return table
+
+
 def _x_column(run: Run) -> list[pa.ChunkedArray]:
     return [t.column("x") for t in run.out]
 
@@ -62,7 +73,7 @@ def test_type_catalogue_as_an_unconfigured_column(name: str, null: bool) -> None
     chunks = [full, empty, full]
     native, forced = run_pair([redact("s"), truncate("t"), hash_col("h")], chunks)
     assert_same_as_oracle(native, forced)
-    for out, src in zip(native.out, chunks, strict=True):
+    for out, src in zip(native.out, map(_o3_narrowed, chunks), strict=True):
         assert same_field(out.schema.field("x"), src.schema.field("x"))
         assert identical(out.select(["x"]), src.select(["x"]))
 
@@ -238,9 +249,10 @@ def test_many_unusual_columns_in_one_table() -> None:
     assert len(unconfigured) >= 30
     native, forced = run_pair([redact("s"), truncate("t"), hash_col("h"), faker_col("f")], chunks)
     assert_same_as_oracle(native, forced)
-    for result, out, src in zip(native.sink, native.out, chunks, strict=True):
+    for result, out, src in zip(native.sink, native.out, map(_o3_narrowed, chunks), strict=True):
         (warning,) = result.warnings
-        assert warning.detail["undeclared_columns"] == unconfigured
+        # A name list in a warning detail is joined by the QualityWarning constructor.
+        assert warning.detail["undeclared_columns"] == ", ".join(unconfigured)
         for name in unconfigured:
             assert same_field(out.schema.field(name), src.schema.field(name)), name
             assert identical(out.select([name]), src.select([name])), name

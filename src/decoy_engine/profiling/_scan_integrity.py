@@ -32,12 +32,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final, Literal
 
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.config import PipelineConfigError, RelationshipConfig, parse_relationship_config
 from decoy_engine.profiling._key_loading import (
     JOIN_KEY_KIND,
@@ -152,12 +154,59 @@ class KeyFacts:
 
 
 def declare(
-    sources: Mapping[str, Mapping[str, Any]], relationships: Sequence[Mapping[str, Any]]
+    sources: Mapping[str, Mapping[str, Any]],
+    relationships: Sequence[Mapping[str, Any]],
+    positions: Sequence[int] | None = None,
 ) -> tuple[DeclaredRelationship, ...]:
-    """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data."""
+    """Validate each relationship against `RelationshipConfig` and `sources`. Reads no data.
+    `positions` are the entries' places in the user's file (default: 1, 2, ...), so a refusal
+    names the right one after a caller kept only some of them."""
+    if positions is not None and not _usable_positions(positions, len(relationships)):
+        raise PipelineConfigError(
+            "relationship_positions must be strictly increasing positive integers, "
+            "one per relationship"
+        )
+    return _declare(sources, relationships, positions or (), set_aside_generate=False)[0]
+
+
+def _usable_positions(positions: Sequence[Any], count: int) -> bool:
+    """Facts are keyed by position, so a repeat would merge two relationships into one."""
+    ints = all(type(p) is int and p > 0 for p in positions)
+    return ints and len(positions) == count and all(a < b for a, b in pairwise(positions))
+
+
+def declare_pipeline(
+    sources: Mapping[str, Mapping[str, Any]], relationships: Sequence[Mapping[str, Any]]
+) -> tuple[tuple[DeclaredRelationship, ...], int]:
+    """`declare` for a full pipeline. A relationship with an end whose table is not in
+    `sources` (a generate table) is set aside and counted, not refused; scan has no rows to
+    count for it. Every entry is parsed first, so a malformed one is a refusal either way."""
+    return _declare(sources, relationships, (), set_aside_generate=True)
+
+
+def _declare(
+    sources: Mapping[str, Mapping[str, Any]],
+    relationships: Sequence[Mapping[str, Any]],
+    positions: Sequence[int],
+    *,
+    set_aside_generate: bool,
+) -> tuple[tuple[DeclaredRelationship, ...], int]:
+    numbered = zip(positions or range(1, len(relationships) + 1), relationships, strict=True)
+    parsed = [
+        (
+            position,
+            parse_relationship_config(dict(raw), prefix=f"relationship {position} is invalid"),
+        )
+        for position, raw in numbered
+    ]
     declared = []
-    for position, raw in enumerate(relationships, 1):
-        config = parse_relationship_config(dict(raw), prefix=f"relationship {position} is invalid")
+    unchecked = 0
+    for position, config in parsed:
+        if set_aside_generate and any(
+            e.table not in sources for e in (config.parent, *config.children)
+        ):
+            unchecked += 1
+            continue
         for end in (config.parent, *config.children):
             if end.table not in sources:
                 raise PipelineConfigError(
@@ -170,7 +219,7 @@ def declare(
         if any(len(c.columns) != len(config.parent.columns) for c in config.children):
             raise PipelineConfigError(f"relationship {position} has key widths that differ")
         declared.append(DeclaredRelationship(position, config))
-    return tuple(declared)
+    return tuple(declared), unchecked
 
 
 def relationship_facts(
@@ -381,7 +430,8 @@ def _count(conn: Any, sql: str, *, probe: bool = False) -> int:
     cursor = conn.execute(sql)
     if probe:
         _before_fetch(conn)
-    return int(cursor.fetchone()[0])
+    # Drained read: a fetchone() here makes DuckDB 2.x reject the next conn.register().
+    return int(fetch_scalar(cursor))
 
 
 def _complete(alias: str, width: int) -> str:

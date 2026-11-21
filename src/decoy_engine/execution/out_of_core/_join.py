@@ -17,6 +17,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import exact_key_cast
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import (
     FK_KEY_DTYPE_UNSUPPORTED_CODE,
@@ -24,7 +25,7 @@ from decoy_engine.execution._fk_keys import (
     fk_join_key_tuple,
     fk_key_value,
 )
-from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
+from decoy_engine.execution._fk_resolve import orphan_fk_violation_error, orphan_fk_warning
 from decoy_engine.execution.out_of_core._duckdb import connect_duckdb
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.relationships._graph import OrphanPolicy, RelationshipEdge
@@ -41,22 +42,6 @@ if TYPE_CHECKING:
 # streaming runner reads this at call time, so it is the one batch-size knob
 # for the whole out-of-core route.
 _JOIN_BATCH_ROWS: Final = 65_536
-
-
-def orphan_fk_warning(edge: RelationshipEdge, orphan_count: int) -> QualityWarning:
-    """The WARN-policy warning, shared so every join surface reports one shape."""
-    return QualityWarning(
-        code=reasons.warning.ORPHAN_FK,
-        provider=edge.namespace,
-        column=",".join(edge.child_columns),
-        detail={
-            "parent_table": edge.parent_table,
-            "parent_columns": list(edge.parent_columns),
-            "child_table": edge.child_table,
-            "child_columns": list(edge.child_columns),
-            "orphan_rows": orphan_count,
-        },
-    )
 
 
 def mask_child_fk(
@@ -123,8 +108,9 @@ def mask_child_fk(
         if edge.orphan_policy is OrphanPolicy.FAIL:
             # Streaming anti-join reducer: the total orphan count is the only
             # thing resident, and it raises before any output is produced.
-            fail_count = conn.execute(
-                f"""
+            fail_count = fetch_scalar(
+                conn.execute(
+                    f"""
                 SELECT count(*)
                 FROM child_keys c
                 LEFT JOIN parent_keys p
@@ -132,7 +118,8 @@ def mask_child_fk(
                 WHERE c.__decoy_fk_join_key IS NOT NULL
                   AND p.{_q(parent_relation.join_key_column)} IS NULL
                 """
-            ).fetchone()[0]
+                )
+            )
             if fail_count:
                 raise orphan_fk_violation_error(edge, fail_count)
         select_list = [f"c.{_q('__decoy_row_nr')}", f"c.{_q('__decoy_fk_join_key')}"]
@@ -516,6 +503,79 @@ def _q(identifier: str) -> str:
 
 def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _fk_key_value_roundtrip_type(dtype: pa.DataType) -> pa.DataType:
+    """The round-trip type of a value AFTER it passes through `fk_key_value`.
+
+    Used only for the two call sites whose value genuinely goes through
+    `fk_key_value` before becoming FK output: a PRESERVE/WARN orphan
+    (`_append_output_batch`) and a REMAP mint's input (`_batch_remap_values`).
+    A MATCHED row's value never does (it is the parent's masked value,
+    verbatim), which is why `_resolve_output_types`'s masked_types candidate
+    stays on the plain `_python_roundtrip_type` below.
+
+    bool is the one type family `fk_key_value` unconditionally moves
+    cross-family (`int(value)` in its bool branch, with no int-equality
+    check gating it, unlike the whole-float narrowing) -- so a bool source
+    column's fk_key_value round-trip type is int64, not bool (Codex round-5
+    Finding B). Every other type is untouched by fk_key_value in a way that
+    would change its round-trip image, so this defers to
+    `_python_roundtrip_type` for everything else.
+    """
+    if pa.types.is_boolean(dtype):
+        return pa.int64()
+    return _python_roundtrip_type(dtype)
+
+
+def _python_roundtrip_type(dtype: pa.DataType) -> pa.DataType:
+    """The FK output image of dtype: `pa.array(values, from_pandas=True)` inference, except a
+    tz-naive timestamp, which `fk_output_array` builds at its own unit.
+
+    The whole-child path rebuilds every FK output chunk from Python values, so
+    parity requires candidate types in that same inference image. Types whose
+    round-trip inference depends on the values (decimals digit-fit precision
+    and scale; uint64 lands in int64 or uint64 by magnitude) have no fixed
+    image and are rejected fail closed, as is anything unverified. This is the
+    MATCHED-row image (a masked_types candidate, or REMAP's `masked_output_type`
+    result); an orphan/REMAP-input value that passes through `fk_key_value`
+    first needs `_fk_key_value_roundtrip_type` instead (its bool handling
+    genuinely differs).
+    """
+    if pa.types.is_null(dtype):
+        return dtype
+    if pa.types.is_boolean(dtype):
+        return pa.bool_()
+    if pa.types.is_integer(dtype):
+        if pa.types.is_uint64(dtype):
+            raise _dtype_unsupported(dtype, "its Python round trip is value-dependent")
+        return pa.int64()
+    if pa.types.is_floating(dtype):
+        return pa.float64()
+    if pa.types.is_string(dtype) or pa.types.is_large_string(dtype):
+        return pa.string()
+    if pa.types.is_binary(dtype) or pa.types.is_large_binary(dtype):
+        return pa.binary()
+    if pa.types.is_timestamp(dtype):
+        if dtype.tz is not None:
+            raise _dtype_unsupported(dtype, "zone-aware round trips are not pinned by tests")
+        # Unit preserved: the seam builds timestamps at the fixed type, never by inference.
+        return dtype
+    if pa.types.is_date32(dtype):
+        return pa.date32()
+    if pa.types.is_decimal(dtype):
+        raise _dtype_unsupported(dtype, "inference digit-fits precision and scale from values")
+    raise _dtype_unsupported(dtype, "no fixed inference image is established for it")
+
+
+def _dtype_unsupported(dtype: pa.DataType, reason: str) -> ExecutionError:
+    return ExecutionError(
+        code=FK_KEY_DTYPE_UNSUPPORTED_CODE,
+        message=(
+            f"out-of-core FK key type {dtype} cannot be typed up front ({reason}); "
+            "rejected rather than allowed to drift from whole-column inference."
+        ),
+    )
 
 
 __all__ = ["fk_output_array", "mask_child_fk", "mask_child_fk_fail"]

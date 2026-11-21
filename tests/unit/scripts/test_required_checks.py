@@ -25,8 +25,9 @@ REPO = "decoy-data/decoy-engine"
 MAIN = "a" * 40
 HEAD = "b" * 40
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
+GATE_CONTEXT = "engine-gate/verdict"
 
-# The 16 names GitHub showed for native-companion.yml in run 42170946535.
+# The 16 names GitHub showed for native-companion.yml in run 42170946535, plus two path-scope jobs.
 NATIVE_NAMES = [
     "companion-wheel-linux (3.10, x86_64)",
     "companion-wheel-linux (3.10, aarch64)",
@@ -44,7 +45,10 @@ NATIVE_NAMES = [
     "core-companion-present",
     "companion-fuzz-sanitizer",
     "core-companion-absent",
+    "native-changes",
+    "companion-wheel-macos-ok",
 ]
+NATIVE_MERGE = [n for n in NATIVE_NAMES if not n.startswith("companion-wheel-macos (")]
 CI_NAMES = [
     "packaging-gate",
     "ml-gate",
@@ -55,9 +59,14 @@ CI_NAMES = [
     "pg-gate",
 ]
 IMPORT_SMOKE = ["import-smoke (3.11.9)", "import-smoke (3.12.7)"]
+FAKER_LOCK = [
+    "faker-output-lock (3.10.20)",
+    "faker-output-lock (3.11.9)",
+    "faker-output-lock (3.12.7)",
+]
 MERGE = {
-    "ci.yml": CI_NAMES + IMPORT_SMOKE,
-    "native-companion.yml": NATIVE_NAMES,
+    "ci.yml": CI_NAMES + IMPORT_SMOKE + FAKER_LOCK,
+    "native-companion.yml": NATIVE_MERGE,
     "docs.yml": ["docs-build"],
     "compat-preflight.yml": ["compat-preflight"],
     "changelog-fragment.yml": ["changelog-fragment"],
@@ -97,6 +106,7 @@ class FakeGitHub:
         self.runs: dict[str, list[dict[str, Any]]] = {}
         self.jobs: dict[int, list[dict[str, Any]]] = {}
         self.main = MAIN
+        self.statuses: list[Any] = [{"id": 1, "context": GATE_CONTEXT, "state": "success"}]
         self.error: Exception | None = None
         self.job_pages: list[int] = []
         self.job_requests: list[tuple[int, int]] = []
@@ -133,36 +143,32 @@ class FakeGitHub:
         self.jobs[rid] = [{"name": n, "conclusion": over.get(n, "success")} for n in names]
         return rid
 
+    def _listing(self, path: str, key: str, items: list[Any]) -> tuple[int, Any]:
+        qs = parse_qs(urlparse(path).query)
+        page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
+        out = {"total_count": len(items), key: items[(page - 1) * size : page * size]}
+        return page, (self.response_transform(path, out) if self.response_transform else out)
+
     def __call__(self, path: str) -> Any:
         if self.error:
             raise self.error
         if path == f"repos/{REPO}/branches/main":
             return {"commit": {"sha": self.main}}
+        if path.startswith(f"repos/{REPO}/commits/{HEAD}/status?"):
+            return self._listing(path, "statuses", self.statuses)[1]
         for wf, runs in self.runs.items():
             if path.startswith(f"repos/{REPO}/actions/workflows/{wf}/runs?"):
-                qs = parse_qs(urlparse(path).query)
-                page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
-                out = {
-                    "total_count": len(runs),
-                    "workflow_runs": runs[(page - 1) * size : page * size],
-                }
-                return self.response_transform(path, out) if self.response_transform else out
+                return self._listing(path, "workflow_runs", runs)[1]
         for rid, jobs in self.jobs.items():
             if path.startswith(f"repos/{REPO}/actions/runs/{rid}/jobs"):
-                qs = parse_qs(urlparse(path).query)
-                page, size = int(qs.get("page", ["1"])[0]), int(qs["per_page"][0])
-                self.job_pages.append(page)
-                self.job_requests.append((rid, page))
                 for i, job in enumerate(jobs):
                     job.setdefault("id", rid * 10_000 + i)
-                out = {
-                    "total_count": len(jobs),
-                    "jobs": jobs[(page - 1) * size : page * size],
-                }
-                return self.response_transform(path, out) if self.response_transform else out
+                page, out = self._listing(path, "jobs", jobs)
+                self.job_pages.append(page)
+                self.job_requests.append((rid, page))
+                return out
         if "/actions/workflows/" in path and path.split("?")[0].endswith("/runs"):
-            out = {"total_count": 0, "workflow_runs": []}
-            return self.response_transform(path, out) if self.response_transform else out
+            return self._listing(path, "workflow_runs", [])[1]
         raise AssertionError(f"unexpected API path {path}")
 
 
@@ -192,7 +198,7 @@ def names_of(doc: dict[Any, Any]) -> list[str]:
     return [n for k, j in doc["jobs"].items() for n in rc.job_check_names(k, j)]
 
 
-def test_native_companion_yields_the_sixteen_names_github_showed() -> None:
+def test_native_companion_yields_the_names_github_shows() -> None:
     assert sorted(names_of(workflow("native-companion.yml"))) == sorted(NATIVE_NAMES)
 
 
@@ -201,6 +207,7 @@ def test_ci_yml_merge_jobs_are_named_by_key() -> None:
     for key in CI_NAMES:
         assert rc.job_check_names(key, doc["jobs"][key]) == [key]
     assert rc.job_check_names("import-smoke", doc["jobs"]["import-smoke"]) == IMPORT_SMOKE
+    assert rc.job_check_names("faker-output-lock", doc["jobs"]["faker-output-lock"]) == FAKER_LOCK
 
 
 def test_literal_name_beats_the_key() -> None:
@@ -243,12 +250,12 @@ def test_derivation_error_exits_two_with_the_job(
             argv = list(args)
             if argv[0] == "show" and argv[1].endswith("native-companion.yml"):
                 doc = workflow("native-companion.yml")
-                doc["jobs"]["companion-wheel-macos"]["strategy"]["matrix"]["exclude"] = [{}]
+                doc["jobs"]["companion-wheel-windows"]["strategy"]["matrix"]["exclude"] = [{}]
                 return yaml.safe_dump(doc)
             return super().__call__(args)
 
     assert run_main(["contexts", "--ref", MAIN], FakeGitHub(), Git()) == 2
-    assert "companion-wheel-macos" in capsys.readouterr().err
+    assert "companion-wheel-windows" in capsys.readouterr().err
 
 
 def test_contexts_prints_the_merge_tier_as_json(
@@ -258,7 +265,7 @@ def test_contexts_prints_the_merge_tier_as_json(
     out = capsys.readouterr().out
     got = json.loads(out)
     assert sorted(got) == sorted(n for names in MERGE.values() for n in names)
-    assert len(got) == len(set(got)) == 28
+    assert len(got) == len(set(got)) == 30
 
 
 # --- AT-21: verify --tier merge -------------------------------------------------------------

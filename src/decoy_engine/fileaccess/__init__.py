@@ -11,6 +11,7 @@ Docs: docs/security/file-access-policy.md. Pattern: object capabilities (see `_t
 
 from __future__ import annotations
 
+from decoy_engine.fileaccess._ambient_tree import open_ambient_tree
 from decoy_engine.fileaccess._component import is_valid_component
 from decoy_engine.fileaccess._config_path import config_relative
 from decoy_engine.fileaccess._entry import (
@@ -31,6 +32,7 @@ from decoy_engine.fileaccess._entry import (
     scope,
 )
 from decoy_engine.fileaccess._errors import encode_field_key, redact_locators, scrub
+from decoy_engine.fileaccess._fdtree import STAGE_MARKER, stage_entries
 from decoy_engine.fileaccess._local import (
     LocalFileAccess,
     engine_dir_handle,
@@ -48,9 +50,15 @@ from decoy_engine.fileaccess._protected_dir import (
     protected_scratch_dir,
 )
 from decoy_engine.fileaccess._read import keeps_class, read_all, read_checked, read_text, shown
+from decoy_engine.fileaccess._reclaim import reclaim_stages
 from decoy_engine.fileaccess._rooted import Root, RootedFileAccess
 from decoy_engine.fileaccess._scratch import ScratchArena, scratch_native, scratch_native_iter
-from decoy_engine.fileaccess._scratch_reports import CleanupReport, QuotaReport
+from decoy_engine.fileaccess._scratch_reports import (
+    CleanupReport,
+    QuotaReport,
+    ReclaimOutcome,
+    ReclaimReport,
+)
 from decoy_engine.fileaccess._types import (
     CONTRACT_VERSION,
     CommitUncertain,
@@ -122,14 +130,16 @@ ENTRY_POINTS: tuple[str, ...] = (
     "decoy_engine.transforms.joint_mask.validate_joint_mask_config",
     "decoy_engine.unmask.unmask_pipeline",
     "decoy_engine.validation._config.validate_config",
-    "decoy_engine.vault.load_vault",
-    "decoy_engine.vault.vault_writer_for_config",
+    "decoy_engine.validation.starter_review.apply_review",
+    "decoy_engine.vault._reader.load_vault",
+    "decoy_engine.vault._writer.vault_writer_for_config",
 )
 
 __all__ = [
     "CONTRACT_VERSION",
     "DIRECTORY_PUBLISH_LABELS",
     "ENTRY_POINTS",
+    "STAGE_MARKER",
     "CleanupReport",
     "CommitUncertain",
     "DirHandle",
@@ -150,6 +160,8 @@ __all__ = [
     "ProtectedDirAclFailed",
     "ProtectedDirUnsafe",
     "QuotaReport",
+    "ReclaimOutcome",
+    "ReclaimReport",
     "Root",
     "RootedFileAccess",
     "ScratchArena",
@@ -171,6 +183,7 @@ __all__ = [
     "is_valid_component",
     "keeps_class",
     "map_in_context",
+    "open_ambient_tree",
     "open_protected_dir",
     "own_entry",
     "position_key",
@@ -178,6 +191,7 @@ __all__ = [
     "read_all",
     "read_checked",
     "read_text",
+    "reclaim_stages",
     "redact_locators",
     "require_ambient",
     "reset_for_tests",
@@ -187,5 +201,6 @@ __all__ = [
     "scratch_native_iter",
     "scrub",
     "shown",
+    "stage_entries",
     "write_private",
 ]

@@ -78,8 +78,9 @@ def _classifier(file_access: FileAccess | None = None) -> tuple[ModelStatus, dic
     if disabled:
         return down("disabled")
     try:  # a missing libomp raises OSError here, not ImportError
-        import lightgbm
-        import sklearn  # noqa: F401
+        from decoy_engine.profiling.model_pack._mlstack import import_ml_stack
+
+        lightgbm = import_ml_stack()
     except Exception:
         return down("import")
     try:

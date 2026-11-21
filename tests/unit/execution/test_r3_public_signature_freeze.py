@@ -53,7 +53,7 @@ FROZEN_PARAMETERS: tuple[tuple[str, str, str, str], ...] = (
     ("auto_chunk", "KEYWORD_ONLY", "True", "bool"),
     ("chunk_size_rows", "KEYWORD_ONLY", "50000", "int"),
     ("auto_chunk_threshold_rows", "KEYWORD_ONLY", "100000", "int"),
-    ("native_threads", "KEYWORD_ONLY", "1", "int"),
+    ("native_threads", "KEYWORD_ONLY", "None", "int | None"),
     ("chunked_dispatcher_enabled", "KEYWORD_ONLY", "True", "bool"),
     ("stream_chunked_output", "KEYWORD_ONLY", "True", "bool"),
     ("multi_table_dispatch_enabled", "KEYWORD_ONLY", "True", "bool"),

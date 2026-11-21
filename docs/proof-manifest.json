@@ -1,9 +1,9 @@
 {
-  "engine_version": "0.27.0",
+  "engine_version": "0.28.2",
   "generated_at": "2026-06-14",
   "surface": {
     "mask": 24,
-    "generate": 14,
+    "generate": 16,
     "providers": 34
   },
   "hero": {
@@ -472,7 +472,7 @@
       "kind": "mask",
       "title": "Date shifting",
       "column": "dob",
-      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: dob\n    strategy: date_shift\n    namespace: dob\n    provider_config:\n      min_days: 30\n      max_days: 90",
+      "config_yaml": "tables:\n- name: t\n  columns:\n  - name: dob\n    strategy: date_shift\n    namespace: dob\n    provider_config:\n      min_days: 30\n      max_days: 90\n      date_format: '%Y-%m-%d'",
       "input": [
         {
           "dob": "1980-01-15"
@@ -968,7 +968,7 @@
       "output": [
         {
           "anchor": "2024-01-15",
-          "event_date": "2024-01-18"
+          "event_date": "2024-02-08"
         },
         {
           "anchor": "2024-06-30",
@@ -976,7 +976,7 @@
         },
         {
           "anchor": "2024-11-02",
-          "event_date": "2024-11-17"
+          "event_date": "2024-11-20"
         }
       ],
       "invariant": "Each output date falls within [min_days, max_days] of the anchor column value in the same row. The exact offset is seeded per-row from the job seed; the same input always produces the same output across runs. The original column value is not preserved."
@@ -1250,7 +1250,9 @@
     "formula",
     "group_key",
     "grouped_series",
+    "inherit",
     "lookup",
+    "provider",
     "reference",
     "sequence",
     "statistical",

@@ -23,6 +23,10 @@ Re-captured (column identity joined the seed): every fixture that draws random v
 because a column's stream now derives from (table, column) as well as its strategy config. Sequence,
 derived and other draw-free tables are unchanged. Captured with `python -m tests.parity._f0_capture`.
 
+Re-baselined 2026-11-20 (windowed_date offsets, GEN-WINDOWED-BATCH S2): the `grouped_windowed`
+fixture's `win` column and table digest moved because windowed_date now draws from the keyed index
+kernel. Every other column and fixture is unchanged. The `manifest.json` entry carries the same table digest.
+
 Added 2026-11-10 (GEN-TYPES E1): the `source_free` fixture (constant and distribution columns).
 Captured under numpy 2.2.6 (identical on arm64 and x86); uniform and constant only; no existing entry moved.
 
@@ -238,10 +242,10 @@ EXPECTED: dict[str, dict[str, dict[str, Any]]] = {
                 ("anchor", "eed25f4fd8063d542f6d10619f45145e89d2dfa995a8cd32a3184392997a98a8"),
                 ("cum", "28e18779a86e630d1d972b3094e3529723e6ffcd43726fb603cd09eb4fe0dc6a"),
                 ("walk", "467a155068aa427583b4970e79cd1c921a2954bdf58ed76791650a62da96be22"),
-                ("win", "9607068222953d25090fce72edfc0c05f7780ef138388c74266caeca850cb2c6"),
+                ("win", "6715cc240164483fee2ea53840ab091831c5bf14af05ef1be03c0f78ff413ed4"),
                 ("gkey", "1f1257b96d35a13ef2a21e12d6d7c865cf1644d1002736a512b09e182c2e2e7c"),
             ],
-            "table": "42e36d728df63493caf355c0e9603f09aed5f35961d251fd1a94bd671651ee34",
+            "table": "c70ab6a082796d9913c3d95554f22e2d87ad31fdde33b0a50d44c10c7a3031eb",
         }
     },
     "source_free": {

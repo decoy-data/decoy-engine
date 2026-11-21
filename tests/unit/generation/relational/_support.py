@@ -1,0 +1,212 @@
+"""Shared builders for the GEN-REL acceptance tests (test-side only)."""
+
+from __future__ import annotations
+
+import copy
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from decoy_engine.generation._plan_entry import generate_tables, generate_tables_streamed
+from decoy_engine.generation.pinned import compile_pinned_plan, execute_pinned
+from decoy_engine.plan import compile_plan
+from tests.parity._f0_canonical import table_fingerprint
+from tests.unit._dps_helpers import empty_profile
+from tests.unit.generation.unique._gu_e2_support import cfg, ref, seq_parent, table
+
+REF = datetime(2026, 10, 22, tzinfo=timezone.utc)
+SEED = 4242
+ROUTES = ("resident", "streamed", "legacy", "pinned")
+POLICIES = ("fail", "warn", "preserve", "remap")
+CID = {"name": "cid", "type": "sequence", "start": 1}
+# A column the streaming core declines, so the whole plan takes the whole-table route.
+LEGACY_ONLY = {"name": "twice", "type": "derived", "expression": "cid * 2"}
+SECOND_SEED = 977
+# The parent-anchored date fixture: a window of 36 days, anchors far from either range end.
+WINDOW = (5, 40)
+PARENT_ID = {"name": "id", "type": "sequence", "start": 1}
+# "1990-01-10", "1990-01-11", ...: one distinct ISO date per parent row.
+PARENT_BIRTH = {"name": "birth", "type": "sequence", "start": 10, "prefix": "1990-01-"}
+# The child's own `birth` is a plain counter. Read as the anchor it is not a date at all.
+CHILD_BIRTH = {"name": "birth", "type": "sequence", "start": 1000}
+
+
+def relationship(
+    policy: str, parent: str = "parents", children: tuple[tuple[str, str], ...] = (("kids", "pid"),)
+) -> dict[str, Any]:
+    return {
+        "parent": {"table": parent, "columns": ["id"]},
+        "children": [{"table": t, "columns": [c]} for t, c in children],
+        "orphan_policy": policy,
+    }
+
+
+def family(
+    parent_rows: int,
+    child_rows: int,
+    *,
+    policy: str | None = None,
+    legacy: bool = False,
+    parent: dict[str, Any] | None = None,
+    seed: int = SEED,
+    **ref_options: Any,
+) -> dict[str, Any]:
+    """`parents` and `kids`, with `kids.pid` referencing `parents.id`."""
+    child_cols = [CID, ref("pid", "parents", **ref_options)]
+    if legacy:
+        child_cols.append(LEGACY_ONLY)
+    config = cfg(
+        [parent or seq_parent("parents", parent_rows), table("kids", child_rows, child_cols)],
+        seed,
+    )
+    if policy is not None:
+        config["relationships"] = [relationship(policy)]
+    return config
+
+
+def plan_of(config: dict[str, Any]) -> Any:
+    return compile_plan(copy.deepcopy(config), empty_profile(), decoy_engine_version="test")
+
+
+def run_route(
+    route: str, config: dict[str, Any], tmp_path: Path, on_warning: Any = None
+) -> dict[str, pa.Table]:
+    """Generate `config` on one of the four routes and return its tables.
+
+    `legacy` needs a config built with `legacy=True`; the caller asserts the admission verdict.
+    """
+    if route == "pinned":
+        return execute_pinned(compile_pinned_plan(copy.deepcopy(config), REF), SEED)
+    plan = plan_of(config)
+    if route == "streamed":
+        from decoy_engine.execution import ParquetTransactionalSink
+
+        target = tmp_path / "out"
+        result = generate_tables_streamed(
+            plan,
+            sink=ParquetTransactionalSink(target),
+            budget_bytes=256 * 1024 * 1024,
+            batch_rows=4,
+            on_warning=on_warning,
+        )
+        assert result.mode == "streamed", result.reason
+        return {p.stem: pq.read_table(p) for p in sorted(target.glob("*.parquet"))}
+    return generate_tables(plan, on_warning=on_warning)
+
+
+def digest(tbl: pa.Table) -> str:
+    """The canonical table digest the Phase F oracle uses (layout independent)."""
+    return str(table_fingerprint(tbl.replace_schema_metadata(None))["table"])
+
+
+def is_safe(exc: BaseException) -> bool:
+    return exc.__cause__ is None and exc.__context__ is None
+
+
+def anchored(
+    child_rows: int = 64,
+    *,
+    seed: int = SEED,
+    parent_rows: int = 4,
+    parent_cols: list[dict[str, Any]] | None = None,
+    pid: dict[str, Any] | None = None,
+    **date_options: Any,
+) -> dict[str, Any]:
+    """`parents(id, birth)` and `kids(cid, pid, birth, visit)`.
+
+    `kids.visit` is a `windowed_date` anchored to `parents.birth` through `kids.pid`. The child
+    carries an unrelated numeric column that is also named `birth`.
+    """
+    visit = {
+        "name": "visit",
+        "type": "windowed_date",
+        "anchor": "birth",
+        "anchor_via": "pid",
+        "min_days": WINDOW[0],
+        "max_days": WINDOW[1],
+        **date_options,
+    }
+    kids = [CID, ref("pid", "parents", **(pid or {})), CHILD_BIRTH, visit]
+    return cfg(
+        [
+            table("parents", parent_rows, parent_cols or [PARENT_ID, PARENT_BIRTH]),
+            table("kids", child_rows, kids),
+        ],
+        seed,
+    )
+
+
+def anchored_dates(out: dict[str, pa.Table]) -> list[str | None]:
+    return [None if v is None else str(v) for v in out["kids"].column("visit").to_pylist()]
+
+
+def dates_outside_parent_window(out: dict[str, pa.Table]) -> list[int]:
+    """Row numbers whose `visit` is not inside its own parent's `birth` window, or is null
+    beside a non-null `pid` (or non-null beside a null one)."""
+    births = dict(
+        zip(
+            out["parents"].column("id").to_pylist(),
+            out["parents"].column("birth").to_pylist(),
+            strict=True,
+        )
+    )
+    bad: list[int] = []
+    rows = zip(out["kids"].column("pid").to_pylist(), anchored_dates(out), strict=True)
+    for row, (pid, visit) in enumerate(rows):
+        if pid is None or visit is None:
+            if pid is not None or visit is not None:
+                bad.append(row)
+            continue
+        anchor = date.fromisoformat(str(births[pid]))
+        low, high = (anchor + timedelta(days=d) for d in WINDOW)
+        if not low <= date.fromisoformat(visit) <= high:
+            bad.append(row)
+    return bad
+
+
+# The per-parent aggregate fixture: `orders(id, amount, total)` and `lines(lid, oid, amount)`.
+ORDER_ID = {"name": "id", "type": "sequence", "start": 1}
+# The parent's own `amount` is a plain counter, unrelated to the line amounts it totals.
+ORDER_AMOUNT = {"name": "amount", "type": "sequence", "start": 100}
+LINE_ID = {"name": "lid", "type": "sequence", "start": 1}
+LINE_AMOUNT = {
+    "name": "amount",
+    "type": "categorical",
+    "categories": [2, 3, 5, 7, 11],
+    "null_probability": 0.2,
+}
+AGGREGATE_OPS = ("sum", "count", "mean", "min", "max")
+
+
+def aggregate_column(op: str = "sum", **options: Any) -> dict[str, Any]:
+    """`orders.total`: `op` over `lines.amount` of each order's own lines, through `lines.oid`."""
+    return {
+        "name": "total",
+        "type": "derived_aggregate",
+        "op": op,
+        "column": "amount",
+        "from_table": "lines",
+        "via": "oid",
+        **options,
+    }
+
+
+def per_parent(
+    op: str = "sum",
+    *,
+    orders: int = 10,
+    lines: int = 14,
+    seed: int = SEED,
+    order_cols: list[dict[str, Any]] | None = None,
+    line_cols: list[dict[str, Any]] | None = None,
+    **options: Any,
+) -> dict[str, Any]:
+    """`orders` with a per-parent aggregate over `lines`, whose `oid` references `orders.id`."""
+    parents = order_cols if order_cols is not None else [ORDER_ID, ORDER_AMOUNT]
+    if order_cols is None:
+        parents = [*parents, aggregate_column(op, **options)]
+    kids = line_cols or [LINE_ID, ref("oid", "orders", null_probability=0.1), LINE_AMOUNT]
+    return cfg([table("orders", orders, parents), table("lines", lines, kids)], seed)

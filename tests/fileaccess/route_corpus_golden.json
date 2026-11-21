@@ -12,7 +12,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "mode": "resident",
       "reason": "no_sink"
@@ -94,7 +93,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 4,
@@ -164,7 +162,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "reason": "multi_table_split: 1 of 2 mask tables dispatched (big)",
      "source_rows": null,
      "tables": [
@@ -177,7 +174,6 @@
        },
        "lane": "dispatcher",
        "lane_reason": null,
-       "native_threads": 1,
        "output": {
         "mode": "resident",
         "reason": "split_full_frame_present"
@@ -339,7 +335,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 0,
@@ -412,7 +407,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 0,
@@ -502,7 +496,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "mode": "resident",
       "reason": "no_sink"
@@ -593,7 +586,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 4,
@@ -647,6 +639,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -672,7 +667,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "reason": "multi_table_split: 1 of 2 mask tables dispatched (big)",
      "source_rows": null,
      "tables": [
@@ -685,7 +679,6 @@
        },
        "lane": "dispatcher",
        "lane_reason": null,
-       "native_threads": 1,
        "output": {
         "mode": "resident",
         "reason": "split_full_frame_present"
@@ -763,7 +756,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "mode": "resident",
       "reason": "no_sink"
@@ -826,6 +818,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -860,6 +855,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -896,7 +894,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 0,
@@ -950,6 +947,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [
@@ -978,7 +978,6 @@
      "lane": "dispatcher",
      "lane_reason": null,
      "mode": "chunked",
-     "native_threads": 1,
      "output": {
       "byte_cut_row_groups": 0,
       "held_back_chunks": 0,
@@ -1032,6 +1031,9 @@
    },
    "outputs": {},
    "published": {
+    ".decoy-publication-stage": {
+     "stage_marker": true
+    },
     "_decoy_publication.json": {
      "artifacts": [
       [

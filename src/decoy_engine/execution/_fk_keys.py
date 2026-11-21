@@ -48,8 +48,9 @@ contract now covers signed, unsigned, and narrower-than-int64 FK keys, not
 from __future__ import annotations
 
 import numbers
-from collections.abc import Collection, Iterable, Sequence
-from typing import TYPE_CHECKING, Final, NoReturn
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 import pandas as pd
 import pyarrow as pa
@@ -69,6 +70,8 @@ from decoy_engine.internal.pandas_compat import (
 )
 
 if TYPE_CHECKING:
+    from decoy_engine.plan._types import Plan
+    from decoy_engine.providers_v2 import ProviderRegistry
     from decoy_engine.relationships._graph import RelationshipEdge
 
 # The SAME stable code every route raises for "no dtype can hold this FK
@@ -311,6 +314,119 @@ def fk_columns_for_table(edges: Iterable[RelationshipEdge], table: str) -> set[s
     return cols
 
 
+def _when_read_columns(
+    per_table_columns: Iterable[tuple[str, Iterable[tuple[str, object]]]],
+) -> dict[str, set[str]]:
+    """Per table, the columns any column's `when:` predicate reads (an integer among them must
+    ingest losslessly, or a null widens it to float64 and the predicate compares rounded values)."""
+    from decoy_engine.errors import ValidationError
+    from decoy_engine.expressions._when_parser import parse_when_cached, when_column_refs
+
+    out: dict[str, set[str]] = {}
+    for table, columns in per_table_columns:
+        for _name, when in columns:
+            if not isinstance(when, str):
+                continue
+            try:
+                refs = when_column_refs(parse_when_cached(when))
+            except ValidationError:
+                continue  # the evaluator raises its coded error; nothing to protect here
+            out[table] = out.get(table, set()) | set(refs)
+    return out
+
+
+@dataclass(frozen=True)
+class LosslessInts:
+    """The columns that must ingest as exact nullable integers, per table.
+
+    `exact` columns always do (FK keys, source anchors, `top_code`, `group_key` siblings, declared
+    integers). `when_read` columns are only the ones a `when:` predicate reads: a null-free integer
+    column is already exact in NumPy, so converting it would change how a strategy may write to it
+    (an integer redacted to `0.5` fails on a nullable `Int64`). Only a column that holds a null
+    needs the exact dtype, and only the table in hand can say which.
+    """
+
+    exact: Mapping[str, frozenset[str]]
+    when_read: Mapping[str, frozenset[str]]
+
+    def for_table(self, table: str, source: pa.Table | None = None) -> set[str]:
+        """The columns of `table` to pass to `to_pandas_fk_safe`. Without `source` every
+        `when:`-read column is included (a superset: naming a non-integer column is harmless)."""
+        cols = set(self.exact.get(table, ()))
+        names = self.when_read.get(table, frozenset())
+        if source is None:
+            return cols | set(names)
+        schema = source.schema
+        return cols | {
+            n
+            for n in names
+            if n in schema.names
+            and pa.types.is_integer(schema.field(n).type)
+            and source.column(n).null_count > 0
+        }
+
+
+def lossless_int_columns(plan: Plan, registry: ProviderRegistry, graph: Any) -> LosslessInts:
+    """Every column that must ingest as an exact nullable integer, per table.
+
+    The ONE construction of the set every Arrow-to-pandas ingestion site passes to
+    `to_pandas_fk_safe`: FK parent and child keys, `date_shift`/`joint_mask` source anchors,
+    `top_code` columns, `group_key` `group_by` siblings, declared integers, and the columns a
+    `when:` predicate reads (see `LosslessInts` for how those are narrowed). A column that is not
+    Arrow-integer-typed is left alone by the conversion, so naming a string column is harmless.
+    """
+    from decoy_engine.declared_casting._boundary import declared_integer_columns
+    from decoy_engine.execution._runner import (
+        group_key_group_by_columns,
+        source_anchor_columns,
+        top_code_columns,
+    )
+
+    exact: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        for table in (edge.parent_table, edge.child_table):
+            exact[table] = exact.get(table, set()) | fk_columns_for_table(graph.edges, table)
+    for source in (
+        source_anchor_columns(plan, registry),
+        top_code_columns(plan, registry),
+        group_key_group_by_columns(plan, registry),
+        declared_integer_columns(plan),
+    ):
+        for table, cols in source.items():
+            exact[table] = exact.get(table, set()) | set(cols)
+    when_read = _when_read_columns(
+        (table, ((n, seed.when) for n, seed in table_seed.per_column))
+        for table, table_seed in plan.seed_envelope.per_table
+    )
+    return LosslessInts(
+        {t: frozenset(c) for t, c in exact.items()}, {t: frozenset(c) for t, c in when_read.items()}
+    )
+
+
+def lossless_int_columns_from_config(
+    config: Mapping[str, Any], table: str, source: pa.Table
+) -> set[str]:
+    """`lossless_int_columns(...).for_table(table, source)` from the validated config, for a
+    caller that has no compiled plan (unified admission). It covers what that route admits:
+    declared integers, `group_key` `group_by` siblings, and the columns a `when:` reads.
+    Relationships are declined upstream and `date_shift`/`top_code` never reach it."""
+    from decoy_engine._lexeme import integer_columns_by_table
+    from decoy_engine.execution._runner import group_by_sibling
+
+    exact: set[str] = set(integer_columns_by_table(config).get(table, ()))
+    entries = next(
+        (t.get("columns") or () for t in config.get("tables") or () if t.get("name") == table), ()
+    )
+    for entry in entries:
+        group_by = group_by_sibling(entry.get("provider_config"))
+        if entry.get("strategy") == "group_key" and group_by is not None:
+            exact.add(group_by)
+    when_read = _when_read_columns([(table, ((e.get("name"), e.get("when")) for e in entries))])
+    return LosslessInts(
+        {table: frozenset(exact)}, {table: frozenset(when_read.get(table, ()))}
+    ).for_table(table, source)
+
+
 def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFrame:
     """Convert one Arrow table to pandas, keeping every FK-relevant integer
     column exact.
@@ -366,9 +482,40 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
+def table_from_pandas_keeping_maps(
+    frame: pd.DataFrame, schema: pa.Schema | None, untouched: Collection[str]
+) -> pa.Table:
+    """`pa.Table.from_pandas(frame)` that gives every untouched map column the source held its
+    map type back. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot
+    infer a type from; the declared type rebuilds it exactly. `schema` is the source table's and
+    `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
+    map column holds the strategy's own values and converts as it always did, like every other
+    column."""
+    maps = (
+        [
+            f
+            for f in schema
+            if pa.types.is_map(f.type) and f.name in frame.columns and f.name in untouched
+        ]
+        if schema is not None
+        else []
+    )
+    if not maps:
+        return pa.Table.from_pandas(frame, preserve_index=False)
+    table = pa.Table.from_pandas(frame.drop(columns=[f.name for f in maps]), preserve_index=False)
+    for field in sorted(maps, key=lambda f: frame.columns.get_loc(f.name)):
+        table = table.add_column(
+            frame.columns.get_loc(field.name),
+            field.name,
+            pa.array(frame[field.name], type=field.type, from_pandas=True),
+        )
+    return table
+
+
 __all__ = [
     "FK_KEY_DTYPE_UNSUPPORTED_CODE",
     "NULL_FK_KEY",
+    "LosslessInts",
     "fk_all_null_array",
     "fk_columns_for_table",
     "fk_join_key",
@@ -376,5 +523,8 @@ __all__ = [
     "fk_key_value",
     "fk_nullable_int_array",
     "lossless_fk_int_values",
+    "lossless_int_columns",
+    "lossless_int_columns_from_config",
+    "table_from_pandas_keeping_maps",
     "to_pandas_fk_safe",
 ]

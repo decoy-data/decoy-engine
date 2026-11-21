@@ -20,8 +20,10 @@ from functools import lru_cache, partial
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine.config import is_exact_sequence_key
 from decoy_engine.errors import ValidationError
 from decoy_engine.expressions import formula_is_evaluable
+from decoy_engine.generators.derivation import DEFAULT_GENERATE_LOCALE
 from decoy_engine.plan._checks import check_derived_column_refs
 from decoy_engine.plan._checks_derived_aggregate import check_derived_aggregate_refs
 from decoy_engine.plan._checks_group_key import check_group_key_refs
@@ -29,6 +31,7 @@ from decoy_engine.plan._checks_grouped_series import check_grouped_series_refs
 from decoy_engine.plan._checks_windowed_date import check_windowed_date_refs
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._formula_types import check_formula_text_use
+from decoy_engine.plan.checks._generate_providers import registry_provider_names
 from decoy_engine.plan.checks._relationship_keys import check_generated_parent_keys
 
 __all__ = ["DEFERRED", "check_faker_default_locale", "check_generate_columns"]
@@ -157,14 +160,34 @@ def _check_column(
     kind = col.get("type")
     if kind == "faker":
         fakers.check(table, col, default_locale)
+    elif kind == "provider":
+        _check_provider(table, col, default_locale)
     elif kind == "categorical":
         _check_categories(table, col)
     elif kind == "reference":
         _check_reference_weights(table, col, tables)
     _check_parse_rules(table, col)
-    _check_forward_references(table, cols, index)
+    # A formula's own reference rules keep their codes, so they run before the input edges.
     if kind == "formula":
         _check_formula(table, cols, index, types)
+    _check_input_edges(table, cols, index, tables)
+
+
+# ---- provider -------------------------------------------------------------------------------
+
+
+def _check_provider(
+    table: str, col: dict[str, Any], default_locale: str | None | _Deferred
+) -> None:
+    """A deferred default leaves a locale-less column to `check_faker_default_locale`."""
+    from decoy_engine.plan.checks._generate_providers import check_provider_column
+
+    known = (
+        None
+        if isinstance(default_locale, _Deferred)
+        else (default_locale or DEFAULT_GENERATE_LOCALE)
+    )
+    check_provider_column(table, col, default_locale=known)
 
 
 # ---- faker ----------------------------------------------------------------------------------
@@ -220,7 +243,11 @@ class _FakerView:
         fake, names = self._locale(effective)
         faker_type = col.get("faker_type", "word")
         if faker_type not in names and not has_custom_faker_override(faker_type, self._snapshot):
-            raise _refusal(reasons.plan.GENERATE_FAKER_TYPE_UNKNOWN, table, name, "faker_type")
+            if faker_type in registry_provider_names():
+                code = reasons.plan.GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER
+            else:
+                code = reasons.plan.GENERATE_FAKER_TYPE_UNKNOWN
+            raise _refusal(code, table, name, "faker_type")
         kwargs = col.get("faker_kwargs")
         if isinstance(kwargs, dict) and kwargs and not self._kwargs_known(fake, faker_type, kwargs):
             raise _refusal(reasons.plan.GENERATE_FAKER_KWARGS_UNKNOWN, table, name, "faker_kwargs")
@@ -251,11 +278,17 @@ class _FakerView:
 
 
 def _check_categories(table: str, col: dict[str, Any]) -> None:
-    """Refuse a list Arrow cannot type, the inference ``pa.table`` applies at run."""
+    """Refuse a list Arrow cannot type, the inference ``pa.table`` applies at run.
+
+    A conditional column's list is every category it can draw: the top-level list and each
+    `by` entry's, which the run's inference sees together.
+    """
     import pyarrow as pa
 
-    categories = col.get("categories")
-    if not isinstance(categories, list):
+    from decoy_engine.config import categorical_categories
+
+    categories = categorical_categories(col) if isinstance(col.get("categories"), list) else None
+    if categories is None:
         return
     mixed = False
     try:
@@ -343,47 +376,37 @@ def _check_parse_rules(table: str, col: dict[str, Any]) -> None:
         raise _refusal(failure[0], table, col["name"], failure[1])
 
 
-# ---- forward references -----------------------------------------------------------------------
+# ---- input edges ------------------------------------------------------------------------------
 
 
-def _expression_refs(expression: str) -> frozenset[str]:
-    from decoy_engine.expressions import compile_expr
-    from decoy_engine.transforms.derived import _get_column_refs
+def _check_input_edges(
+    table: str, cols: list[dict[str, Any]], index: int, tables: Mapping[str, dict[str, Any]]
+) -> None:
+    """Every column this column reads must exist where the registry says, and be ready.
 
-    try:
-        return frozenset(_get_column_refs(compile_expr(expression)))
-    except Exception:
-        return frozenset()
-
-
-def _referenced(kind: str | None, value: Any) -> frozenset[str]:
-    if kind == "column" and isinstance(value, str):
-        return frozenset({value})
-    if kind == "column_list" and isinstance(value, list):
-        return frozenset(v for v in value if isinstance(v, str))
-    if kind == "expression" and isinstance(value, str):
-        return _expression_refs(value)
-    return frozenset()
-
-
-def _check_forward_references(table: str, cols: list[dict[str, Any]], index: int) -> None:
-    """A column the registry marks as a reference must be generated earlier in the table.
-
-    A generate table holds only generate columns, so any name not among the earlier ones is
-    missing or declared later. The generators read siblings in declared order, so a later or
-    missing name gives nulls, an empty aggregate, one group or a crash, never the intended value.
-    This is the single owner of that rule, including `statistical.condition_on`.
+    The inputs come resolved from `config.iter_generate_input_refs`; this is the single owner of
+    whether the source table exists, the source column exists in it, and an input read while the
+    column is drawn was generated earlier. The generators read siblings in declared order, so a
+    later or missing name gives nulls, an empty aggregate, one group or a crash, never the
+    intended value. A formula with `references` is not ready for such a read either: it holds
+    None until the post-pass after every other column is drawn. An input in another table, or
+    one read after its table is filled (a per-parent aggregate's child column, a formula's
+    `references`), is ready whenever it exists: its table is finished before the read.
     """
-    from decoy_engine.config._generate_options import GENERATE_OPTIONS
+    from decoy_engine.config import generate_columns_of, iter_generate_input_refs
 
     col = cols[index]
-    spec = GENERATE_OPTIONS.get(str(col.get("type")))
-    if spec is None:
-        return
-    earlier = {c["name"] for c in cols[:index]}
-    for key, option in spec.keys.items():
-        if any(r not in earlier for r in _referenced(option.ref_kind, col.get(key))):
-            raise _refusal(reasons.plan.GENERATE_COLUMN_FORWARD_REFERENCE, table, col["name"], key)
+    earlier = {c["name"] for c in cols[:index] if not _has_references(c)}
+    for edge in iter_generate_input_refs(tables[table], col):
+        if edge.must_be_earlier:
+            ready = edge.source_column in earlier
+        else:
+            source = tables.get(edge.source_table)
+            names = generate_columns_of(source) if source is not None else []
+            ready = any(isinstance(c, dict) and c.get("name") == edge.source_column for c in names)
+        if not ready:
+            code = reasons.plan.GENERATE_COLUMN_FORWARD_REFERENCE
+            raise _refusal(code, table, col["name"], edge.option)
 
 
 # ---- formulas ---------------------------------------------------------------------------------
@@ -506,8 +529,7 @@ def _check_reference_weights(
     for candidate in parent.get("generate_columns") or []:
         if not isinstance(candidate, dict) or candidate.get("name") != col.get("reference_column"):
             continue
-        keeps_all_keys = not (candidate.get("null_probability") or 0) > 0
-        if candidate.get("type") == "sequence" and keeps_all_keys and len(weights) != rows:
+        if is_exact_sequence_key(candidate) and len(weights) != rows:
             raise _refusal(
                 reasons.plan.REFERENCE_WEIGHTS_LENGTH_MISMATCH, table, col["name"], "weights"
             )
@@ -536,10 +558,8 @@ def check_faker_default_locale(
         if table is not None and entry["name"] != table:
             continue
         for col in entry.get("generate_columns") or []:
-            if (
-                isinstance(col, dict)
-                and isinstance(col.get("name"), str)
-                and col.get("type") == "faker"
-                and not col.get("locale")
-            ):
-                view.check(entry["name"], col, instance_default_locale)
+            if isinstance(col, dict) and isinstance(col.get("name"), str) and not col.get("locale"):
+                if col.get("type") == "faker":
+                    view.check(entry["name"], col, instance_default_locale)
+                elif col.get("type") == "provider":
+                    _check_provider(entry["name"], col, instance_default_locale)

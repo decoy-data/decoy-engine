@@ -98,6 +98,21 @@ def ext_dir(tmp_path_factory):
     return d
 
 
+def _statements(sql: str) -> list[str]:
+    """Split fixture SQL on semicolons that sit outside single-quoted literals."""
+    out: list[str] = []
+    start = 0
+    quoted = False
+    for i, ch in enumerate(sql):
+        if ch == "'":
+            quoted = not quoted
+        elif ch == ";" and not quoted:
+            out.append(sql[start:i])
+            start = i + 1
+    out.append(sql[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
 class PgAdmin:
     """Runs DDL/DML on the source through DuckDB's postgres_execute."""
 
@@ -111,7 +126,10 @@ class PgAdmin:
         )
 
     def run(self, sql: str) -> None:
-        self._c.execute("CALL postgres_execute('admin', ?)", [sql])
+        # postgres_execute prepares its text on the server, and Postgres refuses several
+        # statements in one prepared statement (DuckDB 2 reports it as a BinderException).
+        for statement in _statements(sql):
+            self._c.execute("CALL postgres_execute('admin', ?)", [statement])
 
     def close(self) -> None:
         self._c.close()

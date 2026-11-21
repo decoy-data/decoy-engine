@@ -25,22 +25,17 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from typing import Any, TypeVar
 
+from decoy_engine.fileaccess import _osflags
 from decoy_engine.fileaccess._component import validate_component
 from decoy_engine.fileaccess._entry import is_ambient, require_ambient
 from decoy_engine.fileaccess._errors import deny, guarded, guarded_iter
-from decoy_engine.fileaccess._output import (
-    _call,
-    _close,
-    _rmtree_fd,
-    create_private_at,
-    make_stage_dir_at,
-)
+from decoy_engine.fileaccess._fdtree import _close, _exact_stat, _rmtree_fd, _write_marker
+from decoy_engine.fileaccess._output import _call, create_private_at, make_stage_dir_at
 from decoy_engine.fileaccess._protected_dir import (
     ProtectedDirUnsafe,
     _allocate,
     _key,
     _live_root,
-    _owned_private,
     _parent_base,
     _register,
     _unregister,
@@ -68,15 +63,17 @@ def _open(name: str, dir_fd: int | None = None, *, directory: bool = True) -> in
         return _call(
             os.open,
             name,
-            flags=os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            flags=_osflags.RDONLY | _osflags.DIRECTORY | _osflags.NOFOLLOW | _osflags.CLOEXEC,
             dir_fd=dir_fd,
         )
-    return _call(os.open, name, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    return _call(
+        os.open, name, flags=_osflags.RDONLY | _osflags.NOFOLLOW | _osflags.CLOEXEC, dir_fd=dir_fd
+    )
 
 
 def _open_base(path: str) -> int:
     # The policy already vetted `path`, and a temp directory may be a link (macOS /tmp).
-    return _call(os.open, path, flags=os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    return _call(os.open, path, flags=_osflags.RDONLY | _osflags.DIRECTORY | _osflags.CLOEXEC)
 
 
 def _rename(src: str, dst: str, dir_fd: int) -> None:
@@ -98,14 +95,7 @@ def _quietly(fn: Callable[..., object], *args: object) -> None:
 
 def _exact(fd: int, kind: int, mode: int) -> bool:
     """The descriptor is of `kind`, owned by the effective user, with exactly `mode`."""
-    found = os.fstat(fd)
-    same = stat.S_IFMT(found.st_mode) == kind and stat.S_IMODE(found.st_mode) == mode
-    return same and _owned_private(found)
-
-
-def _write_marker(fd: int, token: str) -> None:
-    if os.pwrite(fd, data := _MAGIC + token.encode("ascii") + b"\n", 0) != len(data):
-        raise OSError(errno.EIO, os.strerror(errno.EIO))
+    return _exact_stat(os.fstat(fd), kind, mode)
 
 
 class _Fd:  # one descriptor, closed at most once by its arena's finalizer or the root's reclaim
@@ -170,7 +160,7 @@ def _mark_and_publish(fd: int, base_fd: int, pending: str) -> str:
         if not _exact(marker, stat.S_IFREG, 0o600):
             raise ProtectedDirUnsafe
         token = secrets.token_hex(8)
-        _write_marker(marker, token)
+        _write_marker(marker, _MAGIC, token)
         fcntl.flock(fd, fcntl.LOCK_SH)
         for _ in range(8):
             try:
@@ -180,7 +170,7 @@ def _mark_and_publish(fd: int, base_fd: int, pending: str) -> str:
                 if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY):
                     raise
             token = secrets.token_hex(8)  # the marker is fixed-length, so rewrite it in place
-            _write_marker(marker, token)
+            _write_marker(marker, _MAGIC, token)
         raise OSError(errno.EEXIST, os.strerror(errno.EEXIST))
     finally:
         _close(marker)

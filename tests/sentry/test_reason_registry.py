@@ -109,7 +109,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("quality/snapshot.py", "DistributionSnapshotError.__init__"): _CTOR,
     ("subset/_errors.py", "SubsetError.__init__"): _CTOR,
     ("subset/_errors.py", "SubsetPreflightError.__init__"): _CTOR,
-    ("vault.py", "VaultError.__init__"): _CTOR,
+    ("vault/_format.py", "VaultError.__init__"): _CTOR,
     ("publication/_types.py", "_CodedOutcome.__init__"): _CTOR,
     ("delivery/resume/_plan.py", "ResumeRefusedError.__init__"): _CTOR,
     ("publication/_types.py", "raise_for_outcome"): (
@@ -150,6 +150,7 @@ ADAPTERS: dict[tuple[str, str], str] = {
     ("profile/_csv_reader.py", "source_refusal"): _HELPER,
     ("publication/_publish.py", "_receipt"): _HELPER,
     ("plan/_checks_top_code.py", "_reject_unusable_bound"): _HELPER,
+    ("quality/snapshot.py", "_check_int_param"): _HELPER,
     # -- re-wraps of an already-registered exception code ------------------------------------
     ("execution/_chunked_when_guard.py", "PositionalWhenGuard.check_schema"): _REWRAP,
     ("execution/native/_fpe_route.py", "fpe_fail_closed_error"): _REWRAP,
@@ -549,7 +550,6 @@ UNCLASSIFIED: dict[str, str] = {
     "NameHintLoaderError": "a reference-data load error; no stable code",
     "ModelPackLoadError": "a model-pack load error; no stable code",
     "Ff1Error": "an FF1 primitive error; surfaces as FpeUnencryptable/Checksum where it matters",
-    "WindowedDateError": "a windowed-date primitive error; wrapped by PinnedModeError at the edge",
     "LicenseError": "platform-owned license state, not a run failure",
     "LicenseExpiredError": "platform-owned license state, not a run failure",
     "FieldMissing": "an internal memwatch parse signal, never surfaced",

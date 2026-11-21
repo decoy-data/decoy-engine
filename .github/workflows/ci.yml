@@ -78,6 +78,25 @@ jobs:
       - name: Probe
         run: python -c 'from decoy_engine.support import probe_status, run_probe; assert probe_status(run_probe()) == "ok"'
 
+  # faker-output-lock: the frozen-clock Faker workers against scripts/faker-determinism/output_lock.json
+  # on each supported CPython minor. The default marker expression excludes them, so this job is
+  # their lane. It is separate from import-smoke, which installs no extras.
+  faker-output-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10.20", "3.11.9", "3.12.7"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          extras: dev
+          python: ${{ matrix.python }}
+      - name: Faker output lock
+        run: pytest tests/sentry/dependencies -m faker_output_lock --tb=short
+
   mypy:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -115,18 +134,19 @@ jobs:
   regression-gate:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    # Measured 2026-11-05 on the pip install: job 66m44s, pytest 1:05:34 (run 42026173384).
+    # Single-process pytest took 66m44s on 2026-11-05 and 72m on 2026-11-15 (last green nightly),
+    # then hit the old 75 minute cap every night from 2026-11-16. With xdist on the 4 vCPU
+    # runner (2026-11-19, same commit range): parallel pass 29m and 41m, serial pass 4.5m and 8m,
+    # so the job takes 35 to 50m depending on the runner. The cap only guards against a hang.
     # See the ruff job note on why a cap is needed.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:
-          # fetch-depth: 0 so origin/main is reachable in the checkout.
-          # tests/sentry/test_physical_seam_disconnection.py's byte-identical
-          # diff gate (Part 2) diffs against merge-base(origin/main, HEAD) and
-          # SKIPS when origin/main is absent; the default depth-1 checkout made
-          # it skip on every run, so the refactor-safety gate never actually
-          # ran in CI (§SEAM-SENTRY-CI). Matches compat-preflight / regression-proof.
+          # fetch-depth: 0 so origin/main is reachable in the checkout:
+          # scripts/dev/ratchet_check.py compares the baselines against the merge
+          # base with origin/main and fails with no merge base. Matches
+          # compat-preflight / regression-proof.
           fetch-depth: 0
       # The Mac gate's profile (bootstrap.sh): dev, lint, vault, cloud. cloud: tests/unit/test_v2_cloud_sources.py
       # mocks google.cloud.storage and boto3 directly; lint: scripts/dev/gates.sh needs ruff. No mimesis, ner, geo, ml or perf.
@@ -149,7 +169,11 @@ jobs:
             tests/privacy ; do
             test -d "$d" || { echo "MISSING SUITE DIR: $d"; exit 1; }
           done
-      - name: Regression gate (full suite, benchmarks excluded)
+      - name: Regression gate (full suite, benchmarks excluded; parallel pass)
+        # Same two-pass split as scripts/dev/gates.sh: xdist (-n 4 --dist loadfile, one worker per
+        # vCPU) for everything except tests marked `serial`, which assert on wall-clock, memory or
+        # CPU ratios and run alone in the next step. Together the two passes select the same tests
+        # as the old single invocation.
         # `not packaging` too: the packaging module is collected here (it lives
         # under tests/) and only skips today because `build` is absent from
         # .[dev]; excluding the marker makes the dedicated packaging-gate its
@@ -167,11 +191,20 @@ jobs:
         # --ignore: the layer test needs import-linter, which this certified profile lacks; the
         # layers-gate job below owns it.
         run: >
-          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness"
+          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and not serial"
+          -n 4 --dist loadfile
           --ignore=tests/sentry/layout/test_import_layers.py
           --tb=short --durations=25 --junitxml=junit-results.xml
+      - name: Regression gate (serial-marked tests, run alone)
+        # Runs even when the parallel pass failed, so one run reports both. Exit 5 (no tests
+        # collected) is not expected: the serial marker has members.
+        if: ${{ !cancelled() }}
+        run: >
+          pytest tests -m "not benchmark and not packaging and not codspeed and not determinism_harness and not faker_output_lock and serial"
+          --ignore=tests/sentry/layout/test_import_layers.py
+          --tb=short --durations=25 --junitxml=junit-results-serial.xml
 
-      # Mergify consumes this artifact for merge-queue flaky-test detection
+      # Mergify consumes these artifacts for merge-queue flaky-test detection
       # once the app is installed (CAM-STEPS.md). `if: always()` so a failing
       # run still uploads its results -- that is the case Mergify most needs
       # to see. No-op today: nothing reads this artifact until the Mergify
@@ -181,7 +214,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-results
-          path: junit-results.xml
+          path: junit-results*.xml
           retention-days: 14
 
   # layers-gate: the engine import-layer contract (.importlinter, LAYOUT E3). Same isolated route
@@ -380,6 +413,39 @@ jobs:
           -m determinism_harness --tb=short --junitxml=determinism.xml
       - name: Guard -- the harness actually executed (passed>0, none skipped/errored/failed)
         run: python scripts/dev/junit_ran.py determinism.xml
+
+  # duckdb2-gate: uv.lock pins duckdb 1.5.4 but pyproject allows >=0.10.0, so a user install can
+  # resolve 2.x. DuckDB 2 rejects conn.register() while an earlier SELECT result is unfinished,
+  # which made the post-scan gate report check_error on every run. This lane overrides the lock
+  # with duckdb 2.0.0 on Python 3.12 (2.x needs 3.11+) and runs the DuckDB-touching suites.
+  duckdb2-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/lock-env
+        with:
+          extras: "dev"
+          python: "3.12"
+      - name: Override the lock with duckdb 2.x
+        run: |
+          uv pip install --python "$RUNNER_TEMP/venv/bin/python" "duckdb==2.0.0"
+          python -c "import duckdb; assert duckdb.__version__.startswith('2.'), duckdb.__version__"
+      - name: DuckDB-touching suites on duckdb 2.x
+        run: >
+          pytest tests/unit/profiling/test_scan_integrity.py
+          tests/unit/profiling/test_scan_integrity_duckdb_result.py
+          tests/unit/execution/test_out_of_core_batch_join.py
+          tests/unit/execution/test_out_of_core_join_chunked.py
+          tests/unit/execution/test_out_of_core_stream_join.py
+          tests/unit/execution/test_out_of_core_stream_join_unordered.py
+          tests/unit/execution/test_out_of_core_relation_split_dedup.py
+          tests/unit/execution/test_ooc_spill_reader_lifecycle.py
+          tests/unit/execution/test_slim_sort_reorder_acceptance.py
+          tests/connectors/test_postgres_session.py
+          tests/connectors/test_postgres_duckdb_drain.py
+          tests/connectors/test_postgres_snapshot.py
+          --tb=short -p no:cacheprovider
 
   # pg-gate: the pg_integration suites against a Postgres service container. The default marker
   # expression still selects them, but they skip without a server, so this job is their lane.

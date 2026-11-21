@@ -28,6 +28,7 @@ first-class `deterministic: bool` field, composed orthogonally with
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, get_args
 
 from pydantic import (
@@ -294,6 +295,8 @@ class GenerateColumnConfig(BaseModel):
         "constant",
         "distribution",
         "lookup",
+        "provider",
+        "inherit",
     ]
 
     # GP2 (Codex round-2 spec A/G7): the ONLY validated `type: faker` knob.
@@ -391,19 +394,23 @@ class TableConfig(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _generate_names_unique(self) -> TableConfig:
-        """Two generate columns with one name would silently drop one at run time."""
-        seen: set[str] = set()
+    def _column_names_unique(self) -> TableConfig:
+        """One name twice in a table's column list: the later entry would win on every lane.
+
+        For a mask table that silently drops the user's mask entry and ships the column
+        unmasked; for a generate table it drops a generated column. Exact-name match, the
+        same rule the source-schema guards use.
+        """
         problems: list[tuple[tuple[str | int, ...], str]] = []
-        for index, col in enumerate(self.generate_columns):
-            if col.name in seen:
-                problems.append(
-                    (
-                        ("generate_columns", index, "name"),
-                        str(reasons.config.GENERATE_COLUMN_DUPLICATE),
-                    )
-                )
-            seen.add(col.name)
+        for field, code in (
+            ("columns", reasons.config.COLUMN_DUPLICATE),
+            ("generate_columns", reasons.config.GENERATE_COLUMN_DUPLICATE),
+        ):
+            seen: set[str] = set()
+            for index, col in enumerate(getattr(self, field)):
+                if col.name in seen:
+                    problems.append(((field, index, "name"), str(code)))
+                seen.add(col.name)
         if problems:
             raise ValidationError.from_exception_data("TableConfig", problem_details(problems))
         return self
@@ -475,6 +482,11 @@ class TableConfig(BaseModel):
         return self
 
 
+def generate_columns_of(table: Mapping[str, Any]) -> list[Any]:
+    """A table's `generate_columns`; an empty list when the key is missing, None or empty."""
+    return table.get("generate_columns") or []
+
+
 def classify_table_kinds(config: dict[str, Any]) -> dict[str, str]:
     """Return `{table_name: "mask" | "generate"}` for every table in the config.
 
@@ -492,5 +504,5 @@ def classify_table_kinds(config: dict[str, Any]) -> dict[str, str]:
         name = table.get("name")
         if not isinstance(name, str):
             continue
-        out[name] = "generate" if table.get("generate_columns") else "mask"
+        out[name] = "generate" if generate_columns_of(table) else "mask"
     return out

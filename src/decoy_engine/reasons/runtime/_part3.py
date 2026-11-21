@@ -20,6 +20,7 @@ __all__ = [
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISALIGNED",
     "DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING",
     "DATE_SHIFT_INVALID_CONFIG",
+    "DATE_SHIFT_REQUIRES_DATE_FORMAT",
     "DATE_SHIFT_REQUIRES_NAMESPACE",
     "DEDUPE_COLUMN_MISSING",
     "DEDUPE_UNSUPPORTED_TYPE",
@@ -38,6 +39,7 @@ __all__ = [
     "FPE_UNENCRYPTABLE_LENGTH",
     "FPE_UNENCRYPTABLE_VALUE",
     "GENERATION_NOT_REPRODUCIBLE",
+    "GENERATION_PROVIDER_FAILED",
     "INVALID_SUBSTRATE",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISALIGNED",
     "JOINT_MASK_KEY_BY_SNAPSHOT_MISSING",
@@ -66,6 +68,7 @@ __all__ = [
     "SORT_ASCENDING_LENGTH_MISMATCH",
     "SORT_COLUMN_MISSING",
     "SORT_UNSUPPORTED_TYPE",
+    "SPOOL_DISK_FULL",
     "SUBSET_CLOSURE_INVARIANT_VIOLATED",
     "SUBSET_CLOSURE_NONTERMINATION",
     "SUBSET_MATERIALIZE_COUNT_MISMATCH",
@@ -101,6 +104,7 @@ __all__ = [
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
     "WHEN_PREDICATE_READS_MASKED_COLUMN",
     "WINDOWED_DATE_POSITION_OUT_OF_DOMAIN",
+    "WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE",
 ]
 
 _d = _catalog.runtime("StrategyError")
@@ -133,6 +137,9 @@ DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING = _d(
     "date_shift_group_anchor_snapshot_missing", "Date shift group anchor snapshot missing."
 )
 DATE_SHIFT_INVALID_CONFIG = _d("date_shift_invalid_config", "Date shift invalid config.")
+DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
+    "date_shift_requires_date_format", "Date shift requires date format.", since="1.32.0"
+)
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace."
 )
@@ -420,5 +427,33 @@ POST_SCAN_DISTRIBUTION_DEFERRED = _d(
     "The Post-scan distribution check cannot read this run's inputs back, so the run is refused.",
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
+    since="1.30.0",
+)
+# A spool is input staging before any output exists, so `decoy.storage_capacity_exhausted`
+# (a publication outcome) would name the wrong stage.
+SPOOL_DISK_FULL = _d(
+    "spool_disk_full",
+    "The disk or quota for the local copy of a remote source is too small.",
+    retry=RetryClass.ENVIRONMENT_REPAIR,
+    since="1.30.0",
+)
+
+_d = _catalog.runtime("WindowedDateRowNumberError")
+
+# The draw keys on `2 * row + draw`, so a row number must leave room for the odd draw in int64.
+# `windowed_date_position_out_of_domain` (the wider 0 to 2**64 - 1 position domain of the mask
+# route) is a different check: this one guards the draw's own domain.
+WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE = _d(
+    "windowed_date_row_number_out_of_range",
+    "A windowed_date global row number is below 0 or at or above 2**62.",
     since=UNRELEASED,
+)
+
+_d = _catalog.runtime("GenerationError")
+
+# The one fixed-text translation of an adapter or pool failure on a provider column.
+GENERATION_PROVIDER_FAILED = _d(
+    "generation_provider_failed",
+    "A provider column could not be generated.",
+    since="1.32.0",
 )

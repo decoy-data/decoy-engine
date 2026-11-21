@@ -48,14 +48,9 @@ import textwrap
 
 import pytest
 
-pytestmark = pytest.mark.benchmark
+from decoy_engine.execution._isolated_common import CAPPED_ENV
 
-# Allocator pinning, BEFORE the worker process starts -- same reasoning as
-# `test_ooc_external_sort_memory.py`'s own `_CAPPED_ENV`.
-_CAPPED_ENV = {
-    "ARROW_DEFAULT_MEMORY_POOL": "system",
-    "MALLOC_ARENA_MAX": "2",
-}
+pytestmark = pytest.mark.benchmark
 
 # K chosen so the O(distinct-key) aggregate state is a small multiple of L
 # (measured on this box: a 10M-group `max(int) GROUP BY` peaks ~1.3x L under a
@@ -254,7 +249,7 @@ def _run_worker(tmp_path, *, mode: str, keys: int, rows: int, limit_mib: int) ->
     worker_path = tmp_path / f"_dedup_memory_worker_{mode}_{keys}.py"
     worker_path.write_text(_WORKER_SCRIPT)
     work_dir = tmp_path / f"work_{mode}_{keys}"
-    env = {**os.environ, **_CAPPED_ENV}
+    env = {**os.environ, **CAPPED_ENV}
     cmd = [
         sys.executable,
         str(worker_path),

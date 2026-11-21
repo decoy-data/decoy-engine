@@ -496,8 +496,8 @@ class _ElsewhereConn:
 
     def execute(self, sql, params=None):
         class _Result:
-            def fetchone(self):
-                return (True, "/somewhere/else/postgres_scanner")
+            def fetchall(self):
+                return [(True, "/somewhere/else/postgres_scanner")]
 
         return _Result()
 

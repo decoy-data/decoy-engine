@@ -12,12 +12,16 @@ The public catalog and the editor-schema hook read it from ``_generate_option_ca
 
 Refusal text is the registered reason's fixed summary, so a submitted value never reaches a
 message. Check functions return ``(relative location, reason code)`` pairs.
+
+The registry is also the one place that says which columns an option reads (``OptionSpec.ref_kind``
+with ``ref_context_key`` and ``ref_phase``). ``iter_generate_input_refs`` resolves those
+descriptors to table and column edges; the plan check, numeric typing and the reproducibility
+report consume the edges and hold no option-key table of their own.
 """
 
 from __future__ import annotations
 
 import ast
-import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -27,11 +31,13 @@ from pydantic_core import InitErrorDetails, PydanticCustomError
 from decoy_engine import reasons
 from decoy_engine.config._generate_type_checks import (
     OUTPUT_TYPE_KINDS,
+    by_entries,
     clip_bound,
     constant_value,
     finite,
     high_bound,
     output_type_value,
+    weights_list,
 )
 from decoy_engine.config._generate_unique import unique_flag
 from decoy_engine.errors import PipelineValidationError
@@ -46,6 +52,7 @@ __all__ = [
     "TypeOptions",
     "generate_family_problems",
     "option_problems",
+    "parent_lookup_keys",
     "problem_details",
     "refuse_unlisted_generate_families",
 ]
@@ -53,29 +60,37 @@ __all__ = [
 _TYPE = str(reasons.config.GENERATE_OPTION_TYPE)
 _RANGE = str(reasons.config.GENERATE_OPTION_RANGE)
 _VALUE = str(reasons.config.GENERATE_OPTION_VALUE_UNKNOWN)
-_WEIGHTS = str(reasons.config.GENERATE_WEIGHTS_INVALID)
 _FORMULA = str(reasons.config.GENERATE_FORMULA_INVALID)
 UNKNOWN = str(reasons.config.GENERATE_OPTION_UNKNOWN)
 
 Problem = tuple[tuple[str | int, ...], str]
+# A problem whose message adds value-free text (names, or a fixed hint) to the code's summary.
+NamedProblem = tuple[tuple[str | int, ...], str, str]
+Found = Problem | NamedProblem
 ContextProblem = tuple[tuple[str | int, ...], str, Mapping[str, str]]
-Check = Callable[[Any, Mapping[str, Any]], list[Problem]]
+Check = Callable[[Any, Mapping[str, Any]], Sequence[Found]]
 
 _OK: list[Problem] = []
 
 
 @dataclass(frozen=True)
 class OptionSpec:
-    """One option: a static check and whether the value names sibling columns.
+    """One option: a static check and which columns the value reads.
 
-    ``ref_kind`` is ``None``, ``column``, ``column_list`` or ``expression``. A key that names a
-    sibling column carries it, and the plan check refuses a name not generated earlier: a column
-    read before it exists is a null, an empty aggregate or a single group, never the value the
-    config meant.
+    ``ref_kind`` is ``None`` or how the value names columns: ``column``, ``column_list`` and
+    ``expression`` name columns of the same table. ``column_via_reference`` names a column of the
+    table that the `reference` column named by ``ref_context_key`` points at, and
+    ``column_in_named_table`` a column of the table that key names; without the companion key
+    both fall back to the same table. ``ref_phase`` is ``inline`` (read while the column is
+    drawn, so a same-table input must be generated earlier) or ``post_fill`` (read after the
+    source table is complete). The plan check refuses an input that is missing or not ready: a
+    column read before it exists is a null, an empty aggregate or a single group.
     """
 
     check: Check | None = None
     ref_kind: str | None = None
+    ref_context_key: str | None = None
+    ref_phase: str = "inline"
 
 
 @dataclass(frozen=True)
@@ -93,6 +108,9 @@ class TypeOptions:
     ``one_of`` names keys of which exactly one must be given (a `lookup` column's `file` or
     `codeset`): none is ``missing`` on the first, and each one after the first given is
     ``generate_option_value_unknown``.
+
+    ``together`` names keys that are given all or none (a conditional categorical's
+    `condition_on` and `by`): when one is given, each other one not given is ``missing``.
     """
 
     keys: Mapping[str, OptionSpec]
@@ -100,6 +118,7 @@ class TypeOptions:
     closed_by: str | None = None
     plan_required: tuple[str, ...] = ()
     one_of: tuple[str, ...] = ()
+    together: tuple[str, ...] = ()
 
 
 def _is_int(value: Any) -> bool:
@@ -218,44 +237,6 @@ def generate_family_problems(config: Mapping[str, Any]) -> list[tuple[str, str]]
     return found
 
 
-def _weight_ok(w: Any) -> bool:
-    """A non-negative weight the generators can turn into a finite float.
-
-    Ints compare directly (`math.isfinite` overflows on a huge int); an int too large for a
-    float is refused because the samplers call `float()` on it.
-    """
-    if type(w) is float:
-        return math.isfinite(w) and w >= 0
-    if type(w) is int:
-        if w < 0:
-            return False
-        try:
-            float(w)
-        except OverflowError:
-            return False
-        return True
-    return False
-
-
-def _weights(value: Any, extras: Mapping[str, Any]) -> list[Problem]:
-    """A list of non-negative finite int or float with a positive sum (bool is not a number)."""
-    if not isinstance(value, list):
-        return [((), _TYPE)]
-    bad: list[Problem] = [((i,), _WEIGHTS) for i, w in enumerate(value) if not _weight_ok(w)]
-    if bad:
-        return bad
-    categories = extras.get("categories")
-    # Categorical weights pair with categories; a reference's pair with the parent (plan check).
-    if extras.get("type") == "categorical" and isinstance(categories, list):
-        if len(value) != len(categories):
-            return [((), _WEIGHTS)]
-    try:
-        total = math.fsum(value)
-    except OverflowError:
-        return [((), _WEIGHTS)]
-    return _OK if math.isfinite(total) and total > 0 else [((), _WEIGHTS)]
-
-
 _S = OptionSpec(_str)
 _B = OptionSpec(_bool)
 _I = OptionSpec(_int_at_least(None))
@@ -287,6 +268,9 @@ CONDITIONAL_REQUIRED: Mapping[str, Mapping[str, Mapping[str, tuple[str, ...]]]] 
 
 _N = OptionSpec(finite)
 _OUT = OptionSpec(output_type_value)
+_IN_CHILD = OptionSpec(
+    _str, ref_kind="column_in_named_table", ref_context_key="from_table", ref_phase="post_fill"
+)
 
 _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "faker": TypeOptions(
@@ -310,14 +294,18 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "categorical": TypeOptions(
         {
             "categories": OptionSpec(_categories),
-            "weights": OptionSpec(_weights),
+            "weights": OptionSpec(weights_list),
+            # An earlier column whose value picks the `by` entry the row draws from.
+            "condition_on": OptionSpec(_str, ref_kind="column"),
+            "by": OptionSpec(by_entries),
         },
         required=("categories",),
+        together=("condition_on", "by"),
     ),
     "formula": TypeOptions(
         {
             "formula": OptionSpec(_formula),
-            "references": OptionSpec(_str_list),
+            "references": OptionSpec(_str_list, ref_kind="column_list", ref_phase="post_fill"),
         },
         required=("formula",),
     ),
@@ -326,9 +314,12 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
             "reference_table": _S,
             "reference_column": _S,
             "distribution": OptionSpec(_distribution),
-            "weights": OptionSpec(_weights),
+            "weights": OptionSpec(weights_list),
             "min_per_parent": OptionSpec(_int_at_least(0)),
             "max_per_parent": OptionSpec(_int_at_least(0)),
+            # A self-reference only; its range depends on the table's row count, so
+            # `_generate_relational.self_reference_problems` checks it and its scope.
+            "root_count": _I,
             "snapshot_file": OptionSpec(_fitted_only_str),
             "source_column": OptionSpec(_fitted_only_str),
         },
@@ -356,7 +347,11 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "derived_aggregate": TypeOptions(
         {
             "op": _S,
-            "column": OptionSpec(_str, ref_kind="column"),
+            "column": _IN_CHILD,
+            # A child table whose `via` references this one: `op` is then taken per parent row,
+            # after the child exists (`_generate_relational.aggregate_problems`).
+            "from_table": _S,
+            "via": _IN_CHILD,
         },
         plan_required=("op", "column"),
     ),
@@ -373,12 +368,25 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     ),
     "windowed_date": TypeOptions(
         {
-            "anchor": OptionSpec(_str, ref_kind="column"),
+            "anchor": OptionSpec(
+                _str, ref_kind="column_via_reference", ref_context_key="anchor_via"
+            ),
+            # An earlier `reference` column of this table: `anchor` is then its parent's column.
+            "anchor_via": OptionSpec(_str, ref_kind="column"),
             "max_days": _I,
             "min_days": _I,
             "distribution": _S,
         },
         required=("anchor", "max_days"),
+    ),
+    # A copy of `column` of the parent row that `via`, an earlier `reference` column of this
+    # table, points at (`generation/relational/_inherit.py`).
+    "inherit": TypeOptions(
+        {
+            "via": OptionSpec(_str, ref_kind="column"),
+            "column": OptionSpec(_str, ref_kind="column_via_reference", ref_context_key="via"),
+        },
+        required=("via", "column"),
     ),
     "group_key": TypeOptions(
         {"group_by": OptionSpec(_str, ref_kind="column"), "length": _I, "prefix": _S},
@@ -391,6 +399,12 @@ _BASE_OPTIONS: Mapping[str, TypeOptions] = {
     "lookup": TypeOptions(
         {"file": _S, "codeset": _S, "value_column": _S, "weight_column": _S},
         one_of=("file", "codeset"),
+    ),
+    # A registry provider by name. `field` and `group` bind one slot of a composite provider to a
+    # row; the plan check decides which providers take them.
+    "provider": TypeOptions(
+        {"provider": _S, "locale": _S, "field": _S, "group": _S},
+        required=("provider",),
     ),
     "distribution": TypeOptions(
         {
@@ -466,7 +480,11 @@ def _family_keys(type_: str, extras: Mapping[str, Any]) -> tuple[tuple[str, ...]
     return tuple(required), frozenset(foreign)
 
 
-def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
+def _given(key: str, extras: Mapping[str, Any]) -> bool:
+    return key in extras and (extras[key] is not None or key not in _NONE_MEANS_ABSENT)
+
+
+def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Found]:
     """Every problem with a column's flat options, in a stable order, as (location, code).
 
     Reads ``extras`` and never changes it. A `None` value means "not given" only for the keys in
@@ -474,7 +492,7 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
     missing, and any other key with None is a type error. Nothing here quotes a submitted value.
     """
     spec = GENERATE_OPTIONS[type_]
-    found: list[Problem] = []
+    found: list[Found] = []
     check_input = {**extras, "type": type_}
     family_required, foreign = _family_keys(type_, extras)
     for key, value in extras.items():
@@ -496,7 +514,7 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
             continue
         if option.check is None:
             continue
-        found.extend(((key, *rel), code) for rel, code in option.check(value, check_input))
+        found.extend(((key, *p[0]), *p[1:]) for p in option.check(value, check_input))
     given_missing = [k for k in spec.required if _missing(k, extras.get(k))]
     found.extend(((k,), "missing") for k in given_missing)
     found.extend(((k,), "missing") for k in family_required if extras.get(k) is None)
@@ -504,17 +522,35 @@ def option_problems(type_: str, extras: Mapping[str, Any]) -> list[Problem]:
     if spec.one_of and not given:
         found.append(((spec.one_of[0],), "missing"))
     found.extend(((k,), _VALUE) for k in given[1:])
+    if any(_given(k, extras) for k in spec.together):
+        found.extend(((k,), "missing") for k in spec.together if not _given(k, extras))
     return found
 
 
+def parent_lookup_keys(type_: Any) -> tuple[str, ...]:
+    """The options of generate type `type_` that name a lookup column, in registry order.
+
+    Each is the companion key of a `column_via_reference` input (`windowed_date.anchor_via`,
+    `inherit.via`): a column of this table that must lead to exactly one parent row.
+    """
+    spec = GENERATE_OPTIONS.get(type_) if isinstance(type_, str) else None
+    options = spec.keys.values() if spec is not None else ()
+    return tuple(
+        o.ref_context_key
+        for o in options
+        if o.ref_kind == "column_via_reference" and o.ref_context_key is not None
+    )
+
+
 def problem_details(
-    problems: Sequence[Problem | ContextProblem],
+    problems: Sequence[Problem | ContextProblem | NamedProblem],
     templates: Mapping[str, str] | None = None,
 ) -> list[InitErrorDetails]:
     """Pydantic line errors for ``problems``: fixed text per code, no input kept.
 
-    A problem with a third member is a ``(loc, code, context)``: its text is the code's entry in
-    ``templates`` filled from ``context``, which holds config identifiers only.
+    A text third item is value-free text (table and column names, or a fixed hint) added after
+    the summary. A mapping third item is a context: the text is the code's entry in
+    ``templates`` filled from it, and it holds config identifiers only.
     """
     details: list[InitErrorDetails] = []
     for problem in problems:
@@ -522,9 +558,12 @@ def problem_details(
         kind: Any = "missing"
         if code != "missing":
             summary = reasons.lookup(code)[0].summary
-            context = problem[2] if len(problem) == 3 else None
-            template = (templates or {}).get(code, summary) if context is not None else summary
-            kind = PydanticCustomError(code, template, dict(context) if context else None)
+            extra = problem[2] if len(problem) == 3 else None
+            if isinstance(extra, Mapping):
+                template = (templates or {}).get(code, summary)
+                kind = PydanticCustomError(code, template, dict(extra))
+            else:
+                kind = PydanticCustomError(code, " ".join((summary, *problem[2:])))
         details.append({"type": kind, "loc": loc, "input": None})
     return details
 

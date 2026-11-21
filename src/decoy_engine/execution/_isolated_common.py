@@ -27,7 +27,6 @@ import errno
 import functools
 import os
 import re
-import resource
 import signal
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -41,10 +40,15 @@ from decoy_engine import reasons
 from decoy_engine.execution._isolated_memwatch import MemoryEvidence
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution._transactional_sink import StagedParquetWriter
-from decoy_engine.fileaccess import handed_stage_dir
+from decoy_engine.fileaccess import _osflags, handed_stage_dir
 from decoy_engine.internal.env_flags import env_flag
 from decoy_engine.reasons import ReasonRecord
 from decoy_engine.validation_result import CODES
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows has no rlimits; the isolated route refuses there
+    resource = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -110,9 +114,20 @@ ISOLATED_OUTCOMES: tuple[str, ...] = get_args(IsolatedRunOutcome)
 # caps brk + anonymous mmaps on Linux >= 4.7 -- the allocations that actually
 # OOM here -- without tripping on pyarrow/DuckDB's reserved-but-untouched
 # address space the way 'as' can; 'as' is the blunter total-address-space cap.
-RLIMIT_KINDS: dict[str, int] = {"as": resource.RLIMIT_AS, "data": resource.RLIMIT_DATA}
+RLIMIT_KINDS: dict[str, int] = (
+    {"as": resource.RLIMIT_AS, "data": resource.RLIMIT_DATA} if resource is not None else {}
+)
 
-# Ported verbatim from fk_memory_probe._CAPPED_ENV: MALLOC_ARENA_MAX pins
+# Exit codes that mean the kernel or the allocator killed the child. Windows reports no signal
+# exit codes and has no SIGKILL, so the set is empty there.
+if not _osflags.WINDOWS:
+    _OOM_SIGNALS: tuple[int, ...] = (-signal.SIGKILL, -signal.SIGABRT)
+else:
+    _OOM_SIGNALS = ()
+
+# The one capped env: `scripts/fk_memory_probe.py`, the bench and perf
+# scripts and tests import this constant instead of keeping copies.
+# MALLOC_ARENA_MAX pins
 # glibc to the system allocator's per-thread-arena count and
 # ARROW_DEFAULT_MEMORY_POOL="system" retires Arrow's jemalloc/mimalloc pool,
 # both of which otherwise reserve address space far beyond live data (~2.5 GB
@@ -196,6 +211,8 @@ def peak_rss_mb() -> float:
                 return int(line.split()[1]) / 1024.0
     except (OSError, ValueError, IndexError):
         pass
+    if resource is None:
+        raise OSError(errno.ENOSYS, "peak RSS needs the resource module")
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 
 
@@ -207,6 +224,8 @@ def apply_mem_cap(cap_bytes: int, rlimit_kind: str) -> None:
     per spec §12: "`resource.setrlimit` applied in-child before workload
     allocation").
     """
+    if resource is None:
+        raise OSError(errno.ENOSYS, "a memory cap needs the resource module")
     resource.setrlimit(RLIMIT_KINDS[rlimit_kind], (cap_bytes, cap_bytes))
 
 
@@ -330,7 +349,7 @@ def abnormal_exit_reason(returncode: int, stderr: str) -> str:
         pattern.search(stderr) for pattern in _MEMORY_ERROR_PATTERNS
     ):
         return "memory_marker_in_stderr"
-    if returncode in (-signal.SIGKILL, -signal.SIGABRT):
+    if returncode in _OOM_SIGNALS:
         return "memory_shaped_signal"
     return "no_result_envelope"
 
@@ -373,7 +392,7 @@ def classify_abnormal_exit(returncode: int, stderr: str) -> IsolatedRunOutcome:
         return "oom_killed"
     if any(pattern.search(stderr) for pattern in _MEMORY_ERROR_PATTERNS):
         return "oom_killed"
-    if returncode in (-signal.SIGKILL, -signal.SIGABRT):
+    if returncode in _OOM_SIGNALS:
         return "oom_killed"
     return "crashed"
 

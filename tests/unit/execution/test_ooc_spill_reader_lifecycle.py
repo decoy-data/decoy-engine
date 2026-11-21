@@ -18,6 +18,7 @@ import duckdb
 import pyarrow as pa
 import pytest
 
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution.out_of_core._payload_store import (
     RawParentKeySpill,
     SpillChildKeys,
@@ -120,7 +121,7 @@ def test_duckdb_registration_path_closes_after_unregister(keys: SpillChildKeys) 
             conn.register("child_keys", reader)
             try:
                 assert _open_fds(keys._path) == 1
-                count = conn.execute("SELECT count(*) FROM child_keys").fetchone()[0]
+                count = fetch_scalar(conn.execute("SELECT count(*) FROM child_keys"))
             finally:
                 conn.unregister("child_keys")
         assert count == 5
@@ -128,7 +129,7 @@ def test_duckdb_registration_path_closes_after_unregister(keys: SpillChildKeys) 
         with keys.open_reader() as reader:  # second scan needs its own reader
             conn.register("child_keys", reader)
             try:
-                assert conn.execute("SELECT count(*) FROM child_keys").fetchone()[0] == 5
+                assert fetch_scalar(conn.execute("SELECT count(*) FROM child_keys")) == 5
             finally:
                 conn.unregister("child_keys")
     finally:

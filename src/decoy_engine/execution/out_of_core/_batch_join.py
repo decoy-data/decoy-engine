@@ -62,6 +62,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState, promoted_text_type
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import FK_KEY_DTYPE_UNSUPPORTED_CODE, NULL_FK_KEY, fk_key_value
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
@@ -70,6 +72,8 @@ from decoy_engine.execution.out_of_core._join import (
     _append_output_batch,
     _child_key_batches,
     _child_key_schema,
+    _fk_key_value_roundtrip_type,
+    _python_roundtrip_type,
     _q,
     _sql_string,
     _unified_chunk_type,
@@ -79,6 +83,7 @@ from decoy_engine.execution.out_of_core._join import (
 from decoy_engine.execution.out_of_core._mask import mask_column, masked_output_type
 from decoy_engine.execution.out_of_core._relation import _column_seed
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -110,6 +115,7 @@ class ChildFkBatchJoiner:
         memory_limit: str | None = None,
         remap_seeds: tuple[ColumnSeed, ...] | None = None,
         job_seed: bytes | None = None,
+        text_widths: tuple[TextWidthState | None, ...] = (),
     ) -> None:
         try:
             if len(child_key_types) != len(edge.child_columns):
@@ -145,6 +151,7 @@ class ChildFkBatchJoiner:
                 masked_types=masked_types,
                 child_key_types=child_key_types,
                 remap_seeds=remap_seeds,
+                text_widths=text_widths,
             )
             self._observed_types: tuple[set[pa.DataType], ...] = tuple(
                 set() for _ in edge.child_columns
@@ -309,8 +316,9 @@ class ChildFkBatchJoiner:
         )
 
     def _batch_orphan_count(self) -> int:
-        count = self._conn.execute(
-            f"""
+        count = fetch_scalar(
+            self._conn.execute(
+                f"""
             SELECT count(*)
             FROM child_batch_keys c
             LEFT JOIN parent_keys p
@@ -318,7 +326,8 @@ class ChildFkBatchJoiner:
             WHERE c.__decoy_fk_join_key IS NOT NULL
               AND p.{_q(self._relation.join_key_column)} IS NULL
             """
-        ).fetchone()[0]
+            )
+        )
         return int(count)
 
     def _raise_on_batch_orphans(self) -> None:
@@ -354,7 +363,13 @@ class ChildFkBatchJoiner:
             # Same field semantics as Table.set_column with a bare name (the
             # whole-child path): the field follows the new array's type.
             fields[idx] = pa.field(child_col, dtype)
-        return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+        carried = [n for n in batch.schema.names if n not in self._edge.child_columns]
+        return pa.record_batch(
+            arrays,
+            schema=attach_output_metadata(
+                pa.schema(fields), batch.schema.metadata, carried=carried
+            ),
+        )
 
 
 def _resolve_output_types(
@@ -363,6 +378,7 @@ def _resolve_output_types(
     masked_types: tuple[pa.DataType, ...],
     child_key_types: tuple[pa.DataType, ...],
     remap_seeds: tuple[ColumnSeed, ...] | None,
+    text_widths: tuple[TextWidthState | None, ...] = (),
 ) -> tuple[pa.DataType, ...]:
     """Fix one output type per FK component from schema-level candidates.
 
@@ -400,7 +416,8 @@ def _resolve_output_types(
                     )
                 )
             )
-        resolved.append(_fixed_component_type(candidates))
+        state = text_widths[idx] if idx < len(text_widths) else None
+        resolved.append(promoted_text_type(_fixed_component_type(candidates), state))
     return tuple(resolved)
 
 
@@ -479,79 +496,6 @@ def _fixed_component_type(candidates: set[pa.DataType]) -> pa.DataType:
             "with binary, would silently drift scalar values whenever a run "
             "exercises only the narrower candidate, so it is rejected before "
             "any output exists."
-        ),
-    )
-
-
-def _fk_key_value_roundtrip_type(dtype: pa.DataType) -> pa.DataType:
-    """The round-trip type of a value AFTER it passes through `fk_key_value`.
-
-    Used only for the two call sites whose value genuinely goes through
-    `fk_key_value` before becoming FK output: a PRESERVE/WARN orphan
-    (`_append_output_batch`) and a REMAP mint's input (`_batch_remap_values`).
-    A MATCHED row's value never does (it is the parent's masked value,
-    verbatim), which is why `_resolve_output_types`'s masked_types candidate
-    stays on the plain `_python_roundtrip_type` below.
-
-    bool is the one type family `fk_key_value` unconditionally moves
-    cross-family (`int(value)` in its bool branch, with no int-equality
-    check gating it, unlike the whole-float narrowing) -- so a bool source
-    column's fk_key_value round-trip type is int64, not bool (Codex round-5
-    Finding B). Every other type is untouched by fk_key_value in a way that
-    would change its round-trip image, so this defers to
-    `_python_roundtrip_type` for everything else.
-    """
-    if pa.types.is_boolean(dtype):
-        return pa.int64()
-    return _python_roundtrip_type(dtype)
-
-
-def _python_roundtrip_type(dtype: pa.DataType) -> pa.DataType:
-    """The FK output image of dtype: `pa.array(values, from_pandas=True)` inference, except a
-    tz-naive timestamp, which `fk_output_array` builds at its own unit.
-
-    The whole-child path rebuilds every FK output chunk from Python values, so
-    parity requires candidate types in that same inference image. Types whose
-    round-trip inference depends on the values (decimals digit-fit precision
-    and scale; uint64 lands in int64 or uint64 by magnitude) have no fixed
-    image and are rejected fail closed, as is anything unverified. This is the
-    MATCHED-row image (a masked_types candidate, or REMAP's `masked_output_type`
-    result); an orphan/REMAP-input value that passes through `fk_key_value`
-    first needs `_fk_key_value_roundtrip_type` instead (its bool handling
-    genuinely differs).
-    """
-    if pa.types.is_null(dtype):
-        return dtype
-    if pa.types.is_boolean(dtype):
-        return pa.bool_()
-    if pa.types.is_integer(dtype):
-        if pa.types.is_uint64(dtype):
-            raise _dtype_unsupported(dtype, "its Python round trip is value-dependent")
-        return pa.int64()
-    if pa.types.is_floating(dtype):
-        return pa.float64()
-    if pa.types.is_string(dtype) or pa.types.is_large_string(dtype):
-        return pa.string()
-    if pa.types.is_binary(dtype) or pa.types.is_large_binary(dtype):
-        return pa.binary()
-    if pa.types.is_timestamp(dtype):
-        if dtype.tz is not None:
-            raise _dtype_unsupported(dtype, "zone-aware round trips are not pinned by tests")
-        # Unit preserved: the seam builds timestamps at the fixed type, never by inference.
-        return dtype
-    if pa.types.is_date32(dtype):
-        return pa.date32()
-    if pa.types.is_decimal(dtype):
-        raise _dtype_unsupported(dtype, "inference digit-fits precision and scale from values")
-    raise _dtype_unsupported(dtype, "no fixed inference image is established for it")
-
-
-def _dtype_unsupported(dtype: pa.DataType, reason: str) -> ExecutionError:
-    return ExecutionError(
-        code=FK_KEY_DTYPE_UNSUPPORTED_CODE,
-        message=(
-            f"out-of-core FK key type {dtype} cannot be typed up front ({reason}); "
-            "rejected rather than allowed to drift from whole-column inference."
         ),
     )
 

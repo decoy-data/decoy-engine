@@ -23,7 +23,9 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-LIST_NAME = re.compile(r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE")
+LIST_NAME = re.compile(
+    r"ALLOW|EXEMPT|WAIVER|SEAMS|DELIBERATELY|E0_TEST_FILES|BASELINE|EXCEPTION|CENSUS"
+)
 DATA_LITERAL = re.compile(r"[\w.\-]+\.(?:json|toml)$")
 IGNORED_DATA = {"pyproject.toml", "Cargo.toml", "package.json", "e1-1.json"}
 
@@ -108,9 +110,24 @@ def _data_files() -> set[str]:
     }
 
 
+def _scanned(path: Path) -> bool:
+    """Every sentry test, in any subfolder, plus the helper modules that hold a table.
+
+    Seeded fixture sources are inputs to a sentry, not sentries, so they are not read.
+    """
+    rel = path.relative_to(bs.SENTRY).parts
+    return rel[0] not in {"fixtures", "fa_fixtures", "__pycache__"} and not path.name.startswith(
+        "conftest"
+    )
+
+
 def test_no_sentry_reads_an_unregistered_baseline() -> None:
     consts, files = _covered()
-    sources = {p.name: p.read_text(encoding="utf-8") for p in bs.SENTRY.glob("test_*.py")}
+    sources = {
+        p.relative_to(bs.SENTRY).as_posix(): p.read_text(encoding="utf-8")
+        for p in bs.SENTRY.rglob("*.py")
+        if _scanned(p)
+    }
     sources.pop("test_baseline_registry.py")  # holds the seeded fixtures below
     assert unregistered_readers(sources, _data_files(), consts, files) == []
 
@@ -125,3 +142,22 @@ def test_seeded_unregistered_readers_are_caught() -> None:
     assert unregistered_readers(seeded_file, {"fresh-list.json"}, consts, files) == [
         "test_new.py: data file fresh-list.json"
     ]
+
+
+def test_exception_and_census_tables_in_subfolders_are_caught() -> None:
+    """The EW1 gap: inline `*_EXCEPTIONS` and `*_CENSUS` tables, one in a subfolder, bypassed this."""
+    consts, files = _covered()
+    seeded = {
+        "layout/_new.py": 'SCOPED_EXCEPTIONS = {("a.py", "u"): "why"}\n',
+        "test_new.py": 'CENSUS: dict[str, int] = {"a.py": 1}\n',
+    }
+    assert unregistered_readers(seeded, set(), consts, files) == [
+        "layout/_new.py: constant SCOPED_EXCEPTIONS",
+        "test_new.py: constant CENSUS",
+    ]
+
+
+def test_the_scan_reaches_sentry_subfolders() -> None:
+    names = {p.relative_to(bs.SENTRY).as_posix() for p in bs.SENTRY.rglob("*.py") if _scanned(p)}
+    assert "layout/_scoped_changes.py" in names
+    assert "layout/test_package_fanout.py" in names

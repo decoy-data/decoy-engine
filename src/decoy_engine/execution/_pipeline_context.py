@@ -41,7 +41,9 @@ from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._errors import vault_requires_resident_output
 from decoy_engine.execution._transforms_admission import out_of_core_declined, routing_profile
 from decoy_engine.execution._transforms_gate import reject_any_per_table_transforms
+from decoy_engine.execution.pipeline._host import ThreadSource, native_threads_for_run
 from decoy_engine.execution.pipeline._lazy_input import read_resident_fallback
+from decoy_engine.execution.pipeline._route_decision import decide_split
 from decoy_engine.execution.pipeline._routing_facts import RoutingFacts, build_routing_facts
 from decoy_engine.fileaccess import config_relative
 from decoy_engine.profile._readers import LazySource
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
     from decoy_engine.execution._adapter import ExecutionAdapter
     from decoy_engine.execution._mixed_static import MixedStaticPlan
     from decoy_engine.execution._output_projection import UnconfiguredColumnPolicy
+    from decoy_engine.execution._pipeline_multi_table import MultiTableSplit
     from decoy_engine.execution._planner import ExecutionPlan
     from decoy_engine.execution._transactional_sink import TransactionalSink
     from decoy_engine.execution._transforms_prepare import PreparedSources
@@ -125,6 +128,7 @@ class PipelineRunContext:
     chunk_size_rows: int
     auto_chunk_threshold_rows: int
     native_threads: int
+    native_threads_source: ThreadSource
     chunked_dispatcher_enabled: bool
     multi_table_dispatch_enabled: bool
     out_of_core_threshold_rows: int
@@ -160,6 +164,9 @@ class RouteDecision:
     mixed: MixedStaticPlan | None = None
     # Set only for a run that requires streaming and takes the chunked lane.
     stream: StreamVerdict | None = None
+    # The B7 per-table split the full-frame executor runs, decided here so one decision serves
+    # the executor and anything that prices the run; `None` leaves the job whole.
+    split: MultiTableSplit | None = None
 
 
 def refuse_vault_with_sink(sink: Any, vault_writer: Any) -> None:
@@ -194,7 +201,7 @@ def build_run_context(
     auto_chunk: bool,
     chunk_size_rows: int,
     auto_chunk_threshold_rows: int,
-    native_threads: int,
+    native_threads: int | None,
     chunked_dispatcher_enabled: bool,
     stream_chunked_output: bool,
     multi_table_dispatch_enabled: bool,
@@ -247,17 +254,25 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
+    # Required strategy settings (a namespace, a date_shift format) are config-only too, so a
+    # column missing one is refused before the source is profiled or read, with the code
+    # `compile_plan` raises later.
+    from decoy_engine.plan.checks import check_required_strategy_settings
+
+    check_required_strategy_settings(config)
+
     # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
-    # substrate or count knob fails at submit time with a typed error instead of after the expensive
-    # stages. Construction is cheap and side-effect free for both adapters, so pure-generate jobs
-    # (which never use it) lose nothing.
+    # substrate or count knob fails at submit time with a typed error. Construction is cheap and
+    # side-effect free for both adapters, so pure-generate jobs (which never use it) lose nothing.
     resolved_substrate = SUBSTRATE
     adapter = select_execution_adapter(fpe_chunk_count=fpe_chunk_count)
     # Auto-chunk knobs share the substrate knobs' fail-early contract.
     require_bool("auto_chunk", auto_chunk)
     require_positive_int("chunk_size_rows", chunk_size_rows)
     require_positive_int("auto_chunk_threshold_rows", auto_chunk_threshold_rows)
-    _pipeline_auto_chunk.require_lane_knobs(native_threads, chunked_dispatcher_enabled)
+    lane_threads = 1 if native_threads is None else native_threads
+    _pipeline_auto_chunk.require_lane_knobs(lane_threads, chunked_dispatcher_enabled)
+    threads = native_threads_for_run(native_threads)
     publish = OutputPublish(sink, stream_chunked_output, post_validation)  # B6a; validates the knob
     require_bool("multi_table_dispatch_enabled", multi_table_dispatch_enabled)
     # SC2 out-of-core routing thresholds share the same fail-early contract.
@@ -430,7 +445,8 @@ def build_run_context(
         auto_chunk=auto_chunk,
         chunk_size_rows=chunk_size_rows,
         auto_chunk_threshold_rows=auto_chunk_threshold_rows,
-        native_threads=native_threads,
+        native_threads=threads.count,
+        native_threads_source=threads.source,
         chunked_dispatcher_enabled=chunked_dispatcher_enabled,
         multi_table_dispatch_enabled=multi_table_dispatch_enabled,
         out_of_core_threshold_rows=out_of_core_threshold_rows,
@@ -534,6 +550,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         has_mask_table=ctx.has_mask_table,
         table_kinds=ctx.table_kinds,
         prepared_tables=ctx.prepared.prepared,
+        dispatcher_enabled=ctx.chunked_dispatcher_enabled,
     )
     ooc_declined = out_of_core_declined(
         ctx.config,
@@ -552,6 +569,7 @@ def decide_route(ctx: PipelineRunContext) -> RouteDecision:
         keep_lazy=keep_lazy,
         ooc_declined=ooc_declined,
         mixed=mixed if route == "mixed" else None,
+        split=decide_split(ctx, route, route_chunked, keep_lazy),
     )
 
 

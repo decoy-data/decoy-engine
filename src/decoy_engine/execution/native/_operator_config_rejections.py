@@ -134,16 +134,12 @@ _ABSENT = object()
 
 
 def _date_shift_bound_rejection(name: str, key: str, value: Any) -> str | None:
+    # The native lane takes plain integer bounds. A float or numeric string keeps its window on
+    # the oracle, which coerces it the way `shift_window` does.
     if value is _ABSENT:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         return f"date_shift_{key}_not_int:{name}"
-    # Imported lazily: the kernel module pulls in pandas, which the planning
-    # boundary keeps off its module-load path.
-    from decoy_engine.execution.native._date_shift_ext import MAX_ABS_SHIFT_DAYS
-
-    if abs(value) > MAX_ABS_SHIFT_DAYS:
-        return f"date_shift_{key}_out_of_range:{name}"
     return None
 
 
@@ -159,10 +155,10 @@ def date_shift_config_rejection(
     """The coded reason a `date_shift` column cannot run natively, or None.
 
     v1 admits ONLY the namespaced, string-source, explicit-`date_format`,
-    tz-free, no-`group_by` variant with integer day bounds. The oracle treats a
-    missing/empty format as whole-column autodetect (`_detect_format`, a
-    `format_detect` prepass) and a truthy `group_by` as a pre-mask sibling
-    anchor; both stay on the oracle. `min_days`/`max_days` pass through the
+    tz-free, no-`group_by` variant with integer day bounds. A missing format only
+    reaches here for a top-level column whose declared parse format supplies it (plan compile
+    refuses every other one), and that stays on the oracle; so does a truthy `group_by`, a
+    pre-mask sibling anchor. `min_days`/`max_days` pass through the
     oracle's `int()`, which also accepts floats and numeric strings; v1 narrows
     to real ints so the native bound resolution cannot diverge from it.
     """
@@ -183,10 +179,17 @@ def date_shift_config_rejection(
 
     if preserve_config_problem(provider_config) is not None:
         return f"date_shift_preserve_values_invalid:{name}"
-    for key in ("min_days", "max_days"):
+    # Imported lazily: the transform module pulls in pandas, which the planning boundary keeps
+    # off its module-load path.
+    from decoy_engine.transforms.date_shift import WINDOW_BOUND_KEYS, shift_window_problem
+
+    for key in WINDOW_BOUND_KEYS:
         reason = _date_shift_bound_rejection(name, key, provider_config.get(key, _ABSENT))
         if reason is not None:
             return reason
+    problem = shift_window_problem(provider_config)
+    if problem is not None:
+        return f"date_shift_{problem}:{name}"
     # With neither a profile nor a resident source, the input type is
     # unknowable and this defers to the unified-slice resident-type gate
     # (matches hash/bucket_perturb); a RESOLVED non-string type rejects here.

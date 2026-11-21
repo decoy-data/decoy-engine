@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ import pytest
 from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
+from decoy_engine.fileaccess._fdtree import STAGE_HEX, STAGE_MAGIC, STAGE_MARKER, _prove_marker
 from decoy_engine.profile._readers import LazySource
 from decoy_engine.publication import DESCRIPTOR_NAME
 from tests._declared_schema import declare_rest
@@ -61,17 +63,32 @@ def _strip(value: Any, tmp: Path) -> Any:
     return value
 
 
+_HOST_DEPENDENT_KEYS = frozenset({"native_threads", "native_thread_clamp"})
+
+
+def _without_host_keys(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _without_host_keys(v) for k, v in value.items() if k not in _HOST_DEPENDENT_KEYS}
+    if isinstance(value, list):
+        return [_without_host_keys(v) for v in value]
+    return value
+
+
+def _route_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    """The route blocks, without the run's thread count and its clamp record: both are read
+    from the host's CPUs and cgroup, so they differ per machine and say nothing about the route."""
+    kept = {
+        k: v
+        for k, v in metrics.items()
+        if k in ("execution", "auto_chunk", "chunked_route", "chunked_route_by_table")
+    }
+    return _without_host_keys(kept)  # type: ignore[no-any-return]
+
+
 def _record(result: Any, tmp: Path, published: Path | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {
         "outputs": {n: _digest(t) for n, t in sorted(result.outputs.items())},
-        "metrics": _strip(
-            {
-                k: v
-                for k, v in result.quality_metrics.items()
-                if k in ("execution", "auto_chunk", "chunked_route", "chunked_route_by_table")
-            },
-            tmp,
-        ),
+        "metrics": _strip(_route_metrics(result.quality_metrics), tmp),
         "row_errors": len(result.row_errors),
     }
     if published is not None and published.is_dir():
@@ -81,7 +98,16 @@ def _record(result: Any, tmp: Path, published: Path | None = None) -> dict[str, 
 
 def _published(path: Path) -> Any:
     """A table's digest; for the F22 descriptor, its fields that do not depend on the Parquet
-    writer (its sizes and digests carry the footer's pyarrow version, as file bytes do)."""
+    writer (its sizes and digests carry the footer's pyarrow version, as file bytes do); for the
+    reserved stage marker (F26), whether it proves (its token is random per stage)."""
+    if path.name == STAGE_MARKER:
+        unit = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            return {
+                "stage_marker": _prove_marker(unit, path.name, STAGE_MAGIC, STAGE_HEX) is not None
+            }
+        finally:
+            os.close(unit)
     if path.name != DESCRIPTOR_NAME:
         return _digest(pq.read_table(path))
     doc = json.loads(path.read_bytes())

@@ -13,7 +13,7 @@ back to a pure-Python reference kernel otherwise.
 
 This script instruments that call INSIDE this one-shot subprocess (never
 editing src/): it monkeypatches
-`decoy_engine.generation.pool._sampler._compiled_index_kernel` with a
+`decoy_engine.generation.pool._sampler.compiled_index_kernel` with a
 counting wrapper around the real kernel object's `derive_index_batch`
 method, then runs one cell, and reports how many times the compiled kernel
 was actually invoked. A 0 count with the companion present would mean the
@@ -77,7 +77,7 @@ def _write_parquet(name: str, table) -> str:
 
 # ---------------------------------------------------------------------------
 # Instrumentation: wraps the compiled-kernel selector inside THIS subprocess
-# only. `_compiled_index_kernel()` is a module-level function looked up by
+# only. `compiled_index_kernel()` is a module-level function looked up by
 # name at call time inside `_derive_pool_indices`, so replacing the module
 # attribute here is enough -- no src/ edit, no import-time patch of anything
 # shipped.
@@ -88,7 +88,7 @@ def _install_compiled_call_counter() -> dict:
     import decoy_engine.generation.pool._sampler as sampler_mod
 
     counters = {"derive_index_batch_calls": 0, "kernel_was_none_calls": 0}
-    original = sampler_mod._compiled_index_kernel
+    original = sampler_mod.compiled_index_kernel
     wrapped_cache: dict[int, Any] = {}
 
     def counting_selector():
@@ -110,7 +110,7 @@ def _install_compiled_call_counter() -> dict:
             wrapped_cache[key] = _CountingKernelProxy(kernel)
         return wrapped_cache[key]
 
-    sampler_mod._compiled_index_kernel = counting_selector
+    sampler_mod.compiled_index_kernel = counting_selector
     return counters
 
 

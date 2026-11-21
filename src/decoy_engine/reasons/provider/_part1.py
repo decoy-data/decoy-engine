@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, RetryClass
+from decoy_engine.reasons._types import Outcome, RetryClass
 
 __all__ = [
     "BATCH_DETERMINISTIC_UNSUPPORTED",
@@ -56,7 +56,7 @@ _d = _catalog.provider("NerUnavailableError")
 NER_MODEL_INCOMPATIBLE = _d("ner_model_incompatible", "NER model incompatible.", since="1.8.0")
 NER_MODEL_NOT_INSTALLED = _d("ner_model_not_installed", "NER model not installed.")
 NER_MODEL_UNCALIBRATED = _d(
-    "ner_model_uncalibrated", "NER model has no calibrated hit rate.", since=UNRELEASED
+    "ner_model_uncalibrated", "NER model has no calibrated hit rate.", since="1.30.0"
 )
 NER_SPACY_NOT_INSTALLED = _d("ner_spacy_not_installed", "NER spacy not installed.")
 
