@@ -208,7 +208,7 @@ _MASK: dict[str, _Ortho] = {
             "no node needs a detect prepass."
         ),
     ),
-    "bucket_perturb": _Ortho(True, False, False, False, True),
+    "bucket_perturb": _Ortho(True, False, False, False, True, row_error_modes=("format_error",)),
     "group_key": _Ortho(True, False, False, False, True),
     "code_set": _Ortho(
         True,

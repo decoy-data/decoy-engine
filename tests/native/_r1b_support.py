@@ -94,7 +94,7 @@ def _stub_result(kernel: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> 
     derive_calls = kwargs.get("derive_calls")
     if isinstance(derive_calls, list):
         derive_calls.append(1)
-    if kernel == "native_date_shift":
+    if kernel in ("native_date_shift", "native_bucket_perturb"):
         return out, ()
     return out
 

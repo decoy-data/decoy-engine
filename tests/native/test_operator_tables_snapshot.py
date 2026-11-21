@@ -123,6 +123,7 @@ def test_routed_diagnostic_obligations_date_shift_and_fpe() -> None:
     # residual-risk warnings; text_mask routes its one aggregate sub-floor warning (C6b-i). Each
     # fail-closed kill is a StrategyError, not a routed RowError.
     assert {
+        "native_bucket_perturb": frozenset({"reduce_row_error:format_error"}),
         "native_date_shift": frozenset({"reduce_row_error:format_error"}),
         "native_fpe": frozenset(
             {

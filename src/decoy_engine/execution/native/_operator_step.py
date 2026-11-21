@@ -254,7 +254,7 @@ class StepResult:
     out: pa.Array
     # None: an unkeyed transform, which makes no compiled-kernel claim.
     ran: bool | None
-    # Batch-local positions of non-null date_shift values that did not parse.
+    # Batch-local positions of non-null date_shift or bucket_perturb values that did not parse.
     format_error_positions: tuple[int, ...] = ()
     # text_mask's per-detector sub-floor counts for THIS batch/chunk, built by the handler
     # OUTSIDE `mask_cell`. The unified route sums them across a column's batches into one warning;
@@ -457,7 +457,7 @@ def run_kernel_step(
         derive_calls: list[int] = []
         if isinstance(params, BucketPerturbParams):
             preserved = _preserved_mask(params.preserve, source)
-            out = native_bucket_perturb(
+            out, positions = native_bucket_perturb(
                 source,
                 bucket=params.bucket,
                 date_format=params.date_format,
@@ -468,7 +468,9 @@ def run_kernel_step(
                 derive_calls=derive_calls,
                 **_preserved_kwargs(preserved),
             )
-            return StepResult(out, sum(derive_calls) > 0, preserved_rows=_count(preserved))
+            return StepResult(
+                out, sum(derive_calls) > 0, positions, preserved_rows=_count(preserved)
+            )
         if isinstance(params, GroupKeyParams):
             if sibling is None:  # pragma: no cover - the caller slices the sibling for group_key
                 raise AssertionError("GroupKeyParams reached the kernel step with no sibling.")

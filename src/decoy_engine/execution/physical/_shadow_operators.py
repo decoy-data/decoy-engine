@@ -23,7 +23,7 @@ from decoy_engine import reasons
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._crypto_ext import CryptoExtensionUnavailableError
-from decoy_engine.execution.native._date_shift_ext import FORMAT_ERROR_REASON
+from decoy_engine.execution.native._date_shift_ext import format_error_reason
 from decoy_engine.execution.native._faker_null_mask import faker_missing_mask
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error
 from decoy_engine.execution.native._operator_params import (
@@ -424,9 +424,10 @@ def run_operator(
     row_errors: tuple[RowError, ...] = ()
     if result.format_error_positions:
         if column is None:  # pragma: no cover - the date_shift guard above requires a column
-            raise AssertionError("date_shift node reached run_operator with no target column")
+            raise AssertionError("a format-error node reached run_operator with no target column")
+        reason = format_error_reason(binding.operator_id)
         row_errors = tuple(
-            RowError(column=column, row_index=i, trigger="format_error", reason=FORMAT_ERROR_REASON)
+            RowError(column=column, row_index=i, trigger="format_error", reason=reason)
             for i in result.format_error_positions
         )
     evidence.actual_operator = binding.operator_id
