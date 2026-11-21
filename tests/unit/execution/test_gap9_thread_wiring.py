@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from decoy_engine.execution.pipeline import _host
 from tests.parity import _gap9_jobs as jobs
 
 
@@ -24,11 +25,15 @@ def test_sequential_route_hands_the_grant_to_its_native_run(threads: int, tmp_pa
     assert objs.seq_runs == [threads]
 
 
-def test_sequential_route_default_is_one(tmp_path: Path) -> None:
+@pytest.mark.serial
+def test_sequential_route_default_is_the_usable_cores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 3)  # ENGINE-THREADS-DEFAULT
     config, sources = jobs.seq_job(tmp_path, legacy_faker=False)
     with jobs.spy_run_objects() as objs:
         jobs.run_seq(config, sources)
-    assert objs.seq_runs == [1]
+    assert objs.seq_runs == [3]
 
 
 @pytest.mark.parametrize("lane", ["batch", "reorder"])
@@ -48,8 +53,12 @@ def test_out_of_core_route_builds_one_configured_run_for_every_driver(
     )
 
 
-def test_out_of_core_route_default_is_one(tmp_path: Path) -> None:
+@pytest.mark.serial
+def test_out_of_core_route_default_is_the_usable_cores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 3)  # ENGINE-THREADS-DEFAULT
     config, paths = jobs.ooc_job(tmp_path)
     with jobs.spy_run_objects() as objs:
         jobs.run_ooc(config, paths, tmp_path / "out", lane="batch")
-    assert objs.ooc_runs == [1]
+    assert objs.ooc_runs == [3]

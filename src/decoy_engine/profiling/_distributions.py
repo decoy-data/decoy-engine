@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import math
 from decimal import Decimal
+from itertools import pairwise
 from typing import Final
 
 import numpy as np
 import pandas as pd
 
 from decoy_engine.detection.types import DetectorMatch
+from decoy_engine.internal.pandas_compat import histogram_for_range
 from decoy_engine.profiling.types import Distribution
 
 # Cardinality threshold for "categorical" object columns. Below this we group
@@ -34,6 +36,27 @@ OTHER_LABEL: Final = "other"
 FREETEXT_BUCKET_LABELS: Final = ("<20", "20-50", "50-100", ">100")
 
 
+def _edge_label(left: float, right: float) -> str:
+    """Label one bin: whole numbers when it spans more than 1 unit, else two decimals."""
+    if not (math.isfinite(left) and math.isfinite(right)):
+        # pd.cut widens the range, so an edge can pass float max and has no int form.
+        return f"{left:.6g}-{right:.6g}"
+    if (right - left) >= 1:
+        return f"{int(left)}-{int(right)}"
+    return f"{left:.2f}-{right:.2f}"
+
+
+def _bin_counts_and_labels(series: pd.Series) -> tuple[list[int], list[str]]:
+    """10 bins and labels from the shared histogram, for a range `pd.cut` cannot label."""
+    values = series.to_numpy(dtype=float)
+    counts, edges = histogram_for_range(
+        values, 10, float(values.min()), float(values.max()), right_closed=True
+    )
+    # Python's round() leaves a large finite edge alone; a tiny edge rounds to zero.
+    rounded = [round(float(e), 3) for e in edges]
+    return [int(c) for c in counts], [_edge_label(lo, hi) for lo, hi in pairwise(rounded)]
+
+
 def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
     """10 equal-width bins between min and max, with counts + min/max/mean."""
     series = pd.to_numeric(non_null, errors="coerce").dropna()
@@ -51,20 +74,22 @@ def _distribution_numeric(non_null: pd.Series) -> Distribution | None:
             max=str(series.max()),
             mean=round(float(series.mean()), 4),
         )
-    binned = pd.cut(series, bins=10, include_lowest=True)
-    bin_counts = binned.value_counts().sort_index()
-    data = [int(c) for c in bin_counts.values]
-    # Label format: prefer integers when bin width spans more than 1 unit;
-    # otherwise show two decimals so tight ranges stay readable.
-    labels = []
-    for iv in bin_counts.index:
-        if not (math.isfinite(iv.left) and math.isfinite(iv.right)):
-            # pd.cut widens the range, so an edge can pass float max and has no int form.
-            labels.append(f"{iv.left:.6g}-{iv.right:.6g}")
-        elif (iv.right - iv.left) >= 1:
-            labels.append(f"{int(iv.left)}-{int(iv.right)}")
-        else:
-            labels.append(f"{iv.left:.2f}-{iv.right:.2f}")
+    try:
+        binned = pd.cut(series, bins=10, include_lowest=True)
+        bin_counts = binned.value_counts().sort_index()
+        data = [int(c) for c in bin_counts.values]
+        labels = [_edge_label(iv.left, iv.right) for iv in bin_counts.index]
+        # pd.cut widens the outer edges by 0.1 percent, which can pass float max to +-inf.
+        finite_edges = all(
+            math.isfinite(iv.left) and math.isfinite(iv.right) for iv in bin_counts.index
+        )
+        charted = len(data) == 10 and sum(data) == len(series) and finite_edges
+    except ValueError:
+        charted = False
+    if not charted:
+        # pd.cut's label builder rounds an edge near the float floor (a subnormal edge) to a
+        # non-finite value. It then raises, or returns no bins at all. Chart from codes and edges.
+        data, labels = _bin_counts_and_labels(series)
     return Distribution(
         kind="numeric",
         data=[float(d) for d in data],

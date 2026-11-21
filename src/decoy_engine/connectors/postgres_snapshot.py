@@ -64,6 +64,7 @@ from pydantic import (
 )
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._duckdb_read import fetch_row
 from decoy_engine.connectors._postgres_session import (
     ATTACH_ALIAS,
     Deadline,
@@ -299,9 +300,9 @@ def _guard_values(conn: Any, sel: RelationSelection, classes: dict[str, str]) ->
     counts: Any = None
     cause_type = ""
     try:
-        counts = conn.execute(
-            f"SELECT * FROM postgres_query({sql_literal(ATTACH_ALIAS)}, ?)", [sql]
-        ).fetchone()
+        counts = fetch_row(
+            conn.execute(f"SELECT * FROM postgres_query({sql_literal(ATTACH_ALIAS)}, ?)", [sql])
+        )
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:

@@ -275,16 +275,21 @@ def test_t2_out_of_core_fpe_row_errors_are_identical_across_thread_counts(
 
 
 # ---------------------------------------------------------------------------
-# T3: the default is unchanged
+# T3: the default is the usable cores (ENGINE-THREADS-DEFAULT)
 # ---------------------------------------------------------------------------
 
 
-def test_t3_omitted_grant_equals_an_explicit_one_on_both_routes(tmp_path: Path) -> None:
+def test_t3_omitted_grant_follows_the_usable_cores_on_both_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.pipeline import _host
+
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 3)
     config, sources = jobs.seq_job(tmp_path)
     with jobs.spy_run_objects() as objs:
         omitted = jobs.run_seq(config, sources)
     explicit = jobs.run_seq(config, sources, native_threads=1)
-    assert objs.seq_runs == [1]
+    assert objs.seq_runs == [3]
     assert jobs.digest(omitted.outputs) == jobs.digest(explicit.outputs)
 
     (tmp_path / "ooc").mkdir()
@@ -295,7 +300,7 @@ def test_t3_omitted_grant_equals_an_explicit_one_on_both_routes(tmp_path: Path) 
         _, explicit_out = jobs.run_ooc(
             ooc_config, paths, tmp_path / f"e-{lane}", lane=lane, native_threads=1
         )
-        assert ooc_objs.ooc_runs == [1]
+        assert ooc_objs.ooc_runs == [3]
         assert jobs.digest(omitted_out) == jobs.digest(explicit_out), lane
 
 

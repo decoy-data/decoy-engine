@@ -63,6 +63,7 @@ import pyarrow.parquet as pq
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, promoted_text_type
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import FK_KEY_DTYPE_UNSUPPORTED_CODE, NULL_FK_KEY, fk_key_value
 from decoy_engine.execution._fk_resolve import orphan_fk_violation_error
@@ -315,8 +316,9 @@ class ChildFkBatchJoiner:
         )
 
     def _batch_orphan_count(self) -> int:
-        count = self._conn.execute(
-            f"""
+        count = fetch_scalar(
+            self._conn.execute(
+                f"""
             SELECT count(*)
             FROM child_batch_keys c
             LEFT JOIN parent_keys p
@@ -324,7 +326,8 @@ class ChildFkBatchJoiner:
             WHERE c.__decoy_fk_join_key IS NOT NULL
               AND p.{_q(self._relation.join_key_column)} IS NULL
             """
-        ).fetchone()[0]
+            )
+        )
         return int(count)
 
     def _raise_on_batch_orphans(self) -> None:

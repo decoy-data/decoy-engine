@@ -37,7 +37,7 @@ import pyarrow as pa
 from faker import Faker
 
 from decoy_engine.config import is_self_reference
-from decoy_engine.generation import _faker_pool
+from decoy_engine.generation import _faker_pool, relational
 from decoy_engine.generation._numeric_typing import (
     numeric_plan,
     provider_text_columns,
@@ -48,26 +48,30 @@ from decoy_engine.generation._statistical_column import (
     arrow_table,
     null_seed_digests,
     statistical_generate,
+    warn_on_table_fidelity,
     warn_on_unseen_parents,
 )
 from decoy_engine.generation._synthesize_derived import _derived_generate, _formula, _reference
 from decoy_engine.generation.kinds import (
     LookupList,
+    condition_values,
+    conditional_tables,
     constant_values,
     parametric_values,
     provider_column_values,
 )
 from decoy_engine.generation.kinds._lookup import lookup_column_values
 from decoy_engine.generation.relational import reference_draw_extras, reference_policies
+from decoy_engine.generation.relational._aggregate import aggregate_values, with_aggregates
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
-from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec
+from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
 from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
     from decoy_engine.generation.pool._events import QualityWarning
 
@@ -156,10 +160,8 @@ def _generate_tables_from_config(
         table = generate_by_name[name]
         gcols = table["generate_columns"]
         n = int(table.get("row_count") or 0)
-        # Declared order, explicit loop: a `statistical` column with
-        # `condition_on` reads its already-generated sibling from `data`
-        # (WS3 sequential conditional sampling). Iteration order is the
-        # same as the prior dict comprehension; parity unaffected.
+        # Declared order: a `statistical` column with `condition_on` reads its already-generated
+        # sibling from `data` (WS3 sequential conditional sampling).
         data: dict[str, list[Any]] = {}
         # GEN-UNIQUE pair hook: a `unique_together` entry is drawn at its first-declared member's
         # turn; the second member's values wait here until the loop reaches it.
@@ -197,6 +199,7 @@ def _generate_tables_from_config(
                     lookup_lists=lookup_lists,
                     reference_policy=policies.get((name, cname)),
                     on_warning=on_warning,
+                    siblings=gcols,
                 )
                 warn_on_unseen_parents(
                     col,
@@ -206,51 +209,32 @@ def _generate_tables_from_config(
                     statistical_specs=statistical_specs,
                     on_warning=on_warning,
                 )
-        # Cross-column formula post-pass: a `formula` column carrying
-        # `references` was filled with None placeholders by `_formula`
-        # above (the per-column loop cannot read siblings that may not
-        # exist yet). Now that every sibling column is finalized in
-        # `data`, `fill_referenced_formula_columns` overwrites them in
-        # declared order from the finished values. Lazy import (mirrors
-        # the fidelity-gate dispatch) so configs without reference-bearing
-        # formulas never pay pandas.
-        if any(c.get("type") == "formula" and (c.get("references") or []) for c in gcols):
-            from decoy_engine.generation._referenced_formula import (
-                fill_referenced_formula_columns,
-            )
+        # A `formula` with `references` holds None placeholders until every sibling is final. The
+        # post-pass returns before it imports pandas when the table has no such column.
+        from decoy_engine.generation._referenced_formula import fill_referenced_formula_columns
 
-            fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
+        fill_referenced_formula_columns(gcols, data, seed, derive_key, name, types=types)
         tbl = arrow_table(
             data,
             table_name=name,
             statistical_specs=statistical_specs,
             columns=gcols,
+            parent_types=relational.inherit_types(name, gcols, pools),
             text_columns=provider_text_columns(config).get(name, ()),
         )
-        # Generation-time fidelity warn-gate (deferred follow-up 5,
-        # 2026-06-12): score statistical columns against their source
-        # snapshot and warn below global_settings.fidelity_warn_threshold.
-        # Warn-only; output bytes are untouched. Lazy import mirrors the
-        # `statistical` dispatch so non-statistical configs never pay it.
-        if any(c.get("type") == "statistical" for c in gcols):
-            from decoy_engine.generation._fidelity_gate import (
-                fidelity_warn_threshold,
-                warn_on_low_fidelity,
-            )
-
-            warn_on_low_fidelity(
-                gcols,
-                data,
-                table_name=name,
-                threshold=fidelity_warn_threshold(config),
-                statistical_specs=statistical_specs,
-                snapshot_index_for_column=snapshot_index_for_column,
-                snapshot_artifacts=snapshot_artifacts,
-                on_warning=on_warning,
-            )
+        warn_on_table_fidelity(
+            config,
+            gcols,
+            data,
+            table_name=name,
+            statistical_specs=statistical_specs,
+            snapshot_index_for_column=snapshot_index_for_column,
+            snapshot_artifacts=snapshot_artifacts,
+            on_warning=on_warning,
+        )
         pools[name] = tbl
         out[name] = tbl
-    return out
+    return with_aggregates(config, out)
 
 
 def generation_order(config: dict[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -330,6 +314,7 @@ def _generate_column(
     lookup_lists: dict[tuple[str, str], LookupList] | None = None,
     reference_policy: str | None = None,
     on_warning: Callable[[QualityWarning], None] | None = None,
+    siblings: Sequence[Mapping[str, Any]] = (),
 ) -> list[Any]:
     """Dispatch a generate column to its generator by ``type`` (mirrors V1
     ``ColumnGenerator.generators``), then apply the V1 ``null_probability``
@@ -344,13 +329,14 @@ def _generate_column(
     here (guide section 4.8). ``provider_snapshot`` (5a-faker) forwards to the ``faker`` branch
     only. ``reference_date`` (pinned execution only) anchors ``windowed_date`` ``now``/``today``.
     ``reference_policy`` is the orphan policy of the relationship covering a ``reference`` column;
-    with ``on_warning`` it decides what an empty parent does (see ``_reference``)."""
+    with ``on_warning`` it decides what an empty parent does (see ``_reference``).
+    ``siblings`` are the table's column configs, for a column that reads its parent's row."""
     col = with_table(col, table_name)
     kind = col.get("type")
     if kind == "sequence":
         values: list[Any] = _sequence(col, n, numeric_type is not None)
     elif kind == "categorical":
-        values = _categorical(col, n, seed, derive_key)
+        values = _categorical(col, n, seed, derive_key, generated)
     elif kind == "faker":
         values = _faker(
             col, n, seed, derive_key, instance_default_locale, provider_snapshot=provider_snapshot
@@ -366,6 +352,8 @@ def _generate_column(
             col, table_name, reference_fanouts, reference_policy, on_warning
         )
         values = _reference(col, n, seed, derive_key, pools or {}, **extra)
+    elif kind == "inherit":
+        values = relational.inherit_values(col, table_name, generated or {}, pools or {}, siblings)
     elif kind == "constant":
         values = constant_values(col, n)
     elif kind == "distribution":
@@ -385,12 +373,13 @@ def _generate_column(
     elif kind == "derived":
         values = _derived_generate(col, n, generated or {})
     elif kind == "derived_aggregate":
-        values = generate_derived_aggregate_column(col, n, generated or {})
+        # Parity tests wrap the scalar generator by this module's name for it.
+        values = aggregate_values(generate_derived_aggregate_column, col, n, generated or {})
     elif kind in ("grouped_series", "windowed_date", "group_key"):
         from decoy_engine.generation._grouped_windowed_generators import grouped_windowed_values
 
         values = grouped_windowed_values(
-            kind, col, n, seed, generated or {}, reference_date=reference_date
+            col, n, seed, generated or {}, pools, siblings, reference_date=reference_date
         )
     elif kind == "provider":
         ctx = GenDeriveContext.for_column(
@@ -423,7 +412,9 @@ def _sequence(col: dict[str, Any], n: int, numeric: bool = False) -> list[Any]:
     return SequenceStream(col, numeric=numeric).next_batch(0, n)
 
 
-def _categorical(col: dict[str, Any], n: int, seed: int, derive_key: Any = None) -> list[Any]:
+def _categorical(
+    col: dict[str, Any], n: int, seed: int, derive_key: Any = None, generated: Any = None
+) -> list[Any]:
     """Weighted / uniform random choice over ``categories``, parity-frozen vs V1
     ``_generate_categorical_column`` (``columns.py:321-353``).
 
@@ -433,6 +424,10 @@ def _categorical(col: dict[str, Any], n: int, seed: int, derive_key: Any = None)
     is uniform. We reuse V1 ``GenDeriveContext`` for the per-column derivation
     (import V1's helper, do not reinvent), so seed-only output is byte-identical
     to V1's under the same ``seed`` + ``derive_key=None``.
+
+    With ``condition_on`` each row draws from the table its parent value selects in
+    ``generated`` (``kinds.conditional_tables``), one ``choices`` call per row on the same
+    ``Random``.
     """
     if col.get("unique") is True:
         from decoy_engine.generation._unique import unique_categorical
@@ -446,7 +441,15 @@ def _categorical(col: dict[str, Any], n: int, seed: int, derive_key: Any = None)
     # Instance-local Random: parity-preserving (same Mersenne Twister state
     # initialization as random.seed); thread-safe (no module-global mutation).
     rng = random.Random(col_seed)
-    return rng.choices(cats, weights=weights, k=n)
+    if col.get("condition_on") is None:
+        return rng.choices(cats, weights=weights, k=n)
+    parents = condition_values(col, generated)
+    marginal, tables = conditional_tables(col)
+    out: list[Any] = []
+    for i in range(n):
+        population, cum_weights, _ = select_table(tables, marginal, parents, i)
+        out.append(rng.choices(population, cum_weights=cum_weights)[0])
+    return out
 
 
 def _faker(

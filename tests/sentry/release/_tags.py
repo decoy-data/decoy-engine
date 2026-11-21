@@ -4,9 +4,10 @@ A tag literal is a frozen format (contract 3.1), a frozen derivation label (cont
 `DERIVATION_LABELS` table), a declared-casting format id (the F06 registries, documented in
 `docs/declared-casting.md`) or an internal tag (`INTERNAL_TAGS`, with a reason). The census
 parses every `.py` file under `src` and reads each string or bytes constant, so comments and
-docstrings never count and any quoting style is seen. A tag must be the whole constant, with
-one or more `/`-separated segments before `/vN`. Known limits (S7A-KL-2): tags built with
-f-strings or concatenation, and tags in Rust or YAML files, are outside the scan.
+docstrings never count and any quoting style is seen. A tag is a whole constant, or a constant that starts with the tag and then a non-letter
+(`\\x00`, `:`), which covers the leading part of an f-string. Each tag has one or more
+`/`-separated segments before `/vN`. Known limits (S7A-KL-2): tags built by
+concatenation or formatted in the middle, and tags in Rust or YAML files, are outside the scan.
 """
 
 from __future__ import annotations
@@ -26,7 +27,9 @@ CONTRACT = ROOT / "docs" / "compatibility-contract.md"
 
 TAG = r"[a-z][a-z0-9._-]*(?:/[a-z0-9._-]+)*/v[0-9]+"
 WHOLE = re.compile(TAG)
-BARE = re.compile(TAG)
+# A constant that starts with a tag and then a non-letter (`\x00`, `:`), e.g. a bytes label or the
+# leading part of an f-string, still names a derivation label.
+PREFIXED = re.compile(TAG + r"(?![a-z0-9._/-])")
 H31 = "### 3.1 Persisted artifact formats (the biggest surface)"
 H33 = "### 3.3 The determinism guarantee (the silent one)"
 LABELS_LEAD = "**Derivation labels (frozen).**"
@@ -37,16 +40,26 @@ PROSE_ONLY_3_1 = frozenset(
 )
 
 
+def _constants(node: ast.AST) -> list[str]:
+    """Every str or bytes constant under `node`, decoded, including f-string literal parts."""
+    out = []
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, (str, bytes)):
+            value = sub.value
+            out.append(
+                value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+            )
+    return out
+
+
 def literals(text: str) -> set[str]:
-    """Every string or bytes constant in `text` that is exactly one tag."""
+    """Tags in `text`: a constant that is one tag, or starts with a tag then a non-letter."""
     found: set[str] = set()
-    for node in ast.walk(ast.parse(text)):
-        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
-            value = node.value
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="replace")
-            if WHOLE.fullmatch(value):
-                found.add(value)
+    for value in _constants(ast.parse(text)):
+        if WHOLE.fullmatch(value):
+            found.add(value)
+        elif (m := PREFIXED.match(value)) is not None:
+            found.add(m.group(0))
     return found
 
 
@@ -70,7 +83,7 @@ def contract_3_1_tags(contract: str) -> set[str]:
     """Tags in the contract 3.1 code block, plus the allowlisted tags the prose names."""
     prose = section(contract, H31)
     named = {tag for tag in PROSE_ONLY_3_1 if tag in prose}
-    return set(BARE.findall(contract_3_1_block(contract))) | named
+    return set(WHOLE.findall(contract_3_1_block(contract))) | named
 
 
 def contract_3_3_labels(contract: str) -> set[str]:
@@ -78,7 +91,7 @@ def contract_3_3_labels(contract: str) -> set[str]:
     body = section(contract, H33)
     assert LABELS_LEAD in body, "contract 3.3 lost its derivation-label list"
     block = body.split(LABELS_LEAD, 1)[1].split("```")[1]
-    return set(BARE.findall(block))
+    return set(WHOLE.findall(block))
 
 
 def declared_format_ids() -> set[str]:
