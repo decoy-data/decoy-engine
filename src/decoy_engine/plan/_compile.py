@@ -105,6 +105,7 @@ from decoy_engine.plan.checks import (
     check_required_strategy_settings,
 )
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
+from decoy_engine.plan.checks._nested_rules import check_nested_rules
 from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
@@ -251,6 +252,7 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
+    check_nested_rules(config)
     check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
@@ -346,8 +348,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
-            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
-            "text_mask_strategies",
+            "text_mask_strategies",  # E-F0, tail-appended
+            "nested_rules",
         )
         checks_skipped: tuple[str, ...] = (
             "basic_uniqueness_pre_flight",
@@ -428,8 +430,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
-            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
-            "text_mask_strategies",
+            "text_mask_strategies",  # E-F0, tail-appended
+            "nested_rules",
         )
         checks_skipped = ()
 
@@ -562,6 +564,7 @@ def run_config_only_checks(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
+    check_nested_rules(config)
     check_required_strategy_settings(config)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
@@ -607,6 +610,7 @@ def run_config_only_checks(
         "faker_requires_provider",
         *declared,
         "text_mask_strategies",  # E-F0, tail-appended
+        "nested_rules",
     )
 
 

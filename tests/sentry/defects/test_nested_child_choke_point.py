@@ -26,14 +26,12 @@ from tests.sentry._call_resolution import resolved_calls
 from tests.sentry.defects import _defect_scan as scan
 
 OWNER = "_nested_json/_rules.py"
-# The seven modules that read a nested child at the slice base; each must call the choke point.
+# The modules that read a nested child on their own; each must call the choke point. The plan
+# checks that used to are routed through the strategy-site walker, which calls it for them.
 READERS = (
     "execution/_column_access.py",
     "execution/_pipeline_multi_table.py",
     "execution/_strategies/nested/_handler.py",
-    "plan/_checks_bucket_perturb.py",
-    "plan/_checks_date_shift.py",
-    "plan/_checks_top_code.py",
     "secret_providers/_requirements.py",
 )
 

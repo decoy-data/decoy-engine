@@ -14,6 +14,7 @@ from typing import Any
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan.checks._generate_columns import _located
+from decoy_engine.plan.checks._strategy_sites import strategy_sites
 from decoy_engine.transforms.text_mask import (
     SELECTABLE_TEXT_MASK_DETECTORS,
     TEXT_MASK_STRATEGY_DETECTORS,
@@ -32,44 +33,33 @@ def _shown(item: Any) -> str:
 
 
 def check_text_mask_strategies(config: dict[str, Any]) -> None:
-    """Refuse a `text_mask` column whose `detectors` or `per_detector_strategy` cannot run."""
-    tables = config.get("tables")
-    for table in tables if isinstance(tables, list) else []:
-        if not isinstance(table, dict):
-            continue
-        for col in table.get("columns") or []:
-            if not isinstance(col, dict) or col.get("strategy") != "text_mask":
-                continue
-            pc = col.get("provider_config")
-            if isinstance(pc, dict):
-                where = f"tables.{table.get('name', '?')}.columns.{col.get('name', '?')}"
-                _check_column(pc, where, f"table {table.get('name')!r}, column {col.get('name')!r}")
+    """Refuse a `text_mask` column or nested child whose `detectors` or strategies cannot run."""
+    for site in strategy_sites(config):
+        if site.strategy == "text_mask" and isinstance(site.config, dict):
+            label = f"table {site.table!r}, column {site.column!r}"
+            if site.rule is not None:
+                label += f", rule {site.rule}"
+            _check_column(site.config, site.config_path, label)
 
 
-def _check_column(pc: dict[str, Any], where: str, label: str) -> None:
+def _check_column(pc: dict[str, Any], at: str, label: str) -> None:
     code_unknown = reasons.config.MASK_TEXT_MASK_DETECTOR_UNKNOWN
     code_unsupported = reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED
     selectors = pc.get("detectors")
     if selectors is not None and not isinstance(selectors, (list, tuple)):
-        raise _refuse(
-            code_unknown, f"{where}.provider_config.detectors", f"{label}: {_shown(selectors)}"
-        )
+        raise _refuse(code_unknown, f"{at}.detectors", f"{label}: {_shown(selectors)}")
     for det in selectors or ():
         if not isinstance(det, str) or det not in SELECTABLE_TEXT_MASK_DETECTORS:
-            raise _refuse(
-                code_unknown, f"{where}.provider_config.detectors", f"{label}: {_shown(det)}"
-            )
+            raise _refuse(code_unknown, f"{at}.detectors", f"{label}: {_shown(det)}")
     overrides = pc.get("per_detector_strategy")
     if overrides is not None and not isinstance(overrides, dict):
         raise _refuse(
             code_unsupported,
-            f"{where}.provider_config.per_detector_strategy",
+            f"{at}.per_detector_strategy",
             f"{label}: {_shown(overrides)}",
         )
     for det, strategy in (overrides or {}).items():
-        path = (
-            f"{where}.provider_config.per_detector_strategy.{det if isinstance(det, str) else '?'}"
-        )
+        path = f"{at}.per_detector_strategy.{det if isinstance(det, str) else '?'}"
         if not isinstance(det, str) or det not in TEXT_MASK_STRATEGY_DETECTORS:
             raise _refuse(code_unknown, path, f"{label}: {_shown(det)}")
         if not isinstance(strategy, str) or not strategy_supported(det, strategy):

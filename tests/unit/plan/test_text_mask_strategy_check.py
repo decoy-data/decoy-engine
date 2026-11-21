@@ -215,8 +215,8 @@ def test_checks_passed_lists_the_new_check(simple_config: dict, simple_profile: 
         }
     ]
     plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-    assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
-    assert run_config_only_checks(simple_config)[-1] == "text_mask_strategies"
+    assert plan.plan_compile.checks_passed[-2] == "text_mask_strategies"
+    assert run_config_only_checks(simple_config)[-2] == "text_mask_strategies"
 
 
 # AT-A1d direct kernel cells. After E-F0 no config can send a person_name or date span to the

@@ -462,3 +462,27 @@ def iter_ner_spans_batch(
             out.append(Span(detector_id, ent.start_char, ent.end_char, ent.text))
         results[idx] = out
     return results
+
+
+def pin_ner_versions(versions: Mapping[str, str | None]) -> str | None:
+    """The one stamp for a column's NER models: a bare version for one model, else `m=v;m=v`.
+
+    A nested column can run several NER children on different models. One model keeps the plain
+    version string a top-level column has always carried. A model with no installed metadata is
+    left out, so its guard stays off.
+    """
+    if len(versions) == 1:
+        return next(iter(versions.values()))
+    pins = sorted((m, v) for m, v in versions.items() if v is not None)
+    return ";".join(f"{m}={v}" for m, v in pins) or None
+
+
+def pinned_ner_version(stamp: str | None, model: str | None) -> str | None:
+    """The version `pin_ner_versions` recorded for `model`, or None when it recorded none."""
+    if stamp is None or model is None or "=" not in stamp:
+        return stamp
+    for part in stamp.split(";"):
+        name, _, version = part.partition("=")
+        if name == model:
+            return version
+    return None

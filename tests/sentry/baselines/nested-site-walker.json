@@ -1,0 +1,21 @@
+{
+ "sentry_id": "nested-site-walker",
+ "created_in": "F07-E3B",
+ "entries": {
+  "plan/checks/_nested_rules.py::nested_children": {
+   "reason": "validates the rules form itself, rule by rule"
+  },
+  "plan/checks/_nested_rules.py::rules": {
+   "reason": "validates the rules form itself, rule by rule"
+  },
+  "execution/_column_access.py::nested_children": {
+   "reason": "column read set of a nested child at run time"
+  },
+  "execution/_pipeline_multi_table.py::nested_children": {
+   "reason": "run-time child lookup on a column seed"
+  },
+  "execution/_strategies/nested/_handler.py::nested_children": {
+   "reason": "the nested handler runs its children"
+  }
+ }
+}

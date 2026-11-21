@@ -68,32 +68,22 @@ def check_unknown_provider(config: dict[str, Any]) -> None:
     (faker is already loaded by other engine modules at package import time);
     cycle prevention is. Dennis Session 22 L1.
     """
+    from decoy_engine.plan.checks._strategy_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     known = get_default_registry().known_providers()
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            provider = col_entry.get("provider")
-            if provider is None:
-                continue
-            if provider not in known:
-                col_name = col_entry.get("name", "?")
-                raise PlanCompileError(
-                    code=reasons.plan.UNKNOWN_PROVIDER,
-                    path=f"tables.{table_name}.columns.{col_name}.provider",
-                    message=(
-                        f"Provider {provider!r} is not in the default registry. "
-                        f"Known providers: {sorted(known)!r}. Custom providers "
-                        "land via `register_faker_provider_v2` (V2) or "
-                        "`register_faker_provider` (V1; until S9)."
-                    ),
-                )
+    for site in provider_sites(config):
+        if site.provider not in known:
+            raise PlanCompileError(
+                code=reasons.plan.UNKNOWN_PROVIDER,
+                path=site.path,
+                message=(
+                    f"Provider {site.provider!r} is not in the default registry. "
+                    f"Known providers: {sorted(known)!r}. Custom providers "
+                    "land via `register_faker_provider_v2` (V2) or "
+                    "`register_faker_provider` (V1; until S9)."
+                ),
+            )
 
 
 def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> None:
@@ -107,42 +97,33 @@ def check_non_poolable_provider_with_pool_backend(config: dict[str, Any]) -> Non
     providers is guaranteed dead at `run` while passing schema
     validation. This check moves that failure to compile time. The
     capacity pre-flight (row 7) deliberately SKIPS non-poolable
-    providers, so nothing else catches the combination.
+    providers, so nothing else catches the combination. A nested faker
+    rule builds a pool the same way and is checked at its own site.
 
     Config + registry only (no profile): safe to run in --no-profile
     mode and in config-only validation paths.
     """
+    from decoy_engine.plan.checks._strategy_sites import provider_sites
     from decoy_engine.providers_v2 import get_default_registry
 
     registry = get_default_registry()
     known = registry.known_providers()
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
-            continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            if col_entry.get("strategy") != "faker":
-                continue
-            provider = col_entry.get("provider")
-            if provider is None or provider not in known:
-                continue  # unknown_provider (row 2) owns missing/unknown
-            if not registry.get_capabilities(provider).poolable:
-                col_name = col_entry.get("name", "?")
-                raise PlanCompileError(
-                    code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,
-                    path=f"tables.{table_name}.columns.{col_name}.provider",
-                    message=(
-                        f"Provider {provider!r} declares poolable=False but column "
-                        f"{table_name}.{col_name} uses strategy 'faker', which always "
-                        "routes through the pool backend and fails at runtime with "
-                        "provider_not_poolable. Use a poolable provider, a keyed "
-                        "strategy (hash / fpe) for deterministic identifiers, or "
-                        "redact."
-                    ),
-                )
+    for site in provider_sites(config):
+        if not site.pooled or site.provider not in known:
+            continue  # unknown_provider (row 2) owns missing/unknown
+        if not registry.get_capabilities(site.provider).poolable:
+            raise PlanCompileError(
+                code=reasons.plan.NON_POOLABLE_PROVIDER_WITH_POOL_BACKEND,
+                path=site.path,
+                message=(
+                    f"Provider {site.provider!r} declares poolable=False but {site.label} "
+                    "uses strategy 'faker', which always "
+                    "routes through the pool backend and fails at runtime with "
+                    "provider_not_poolable. Use a poolable provider, a keyed "
+                    "strategy (hash / fpe) for deterministic identifiers, or "
+                    "redact."
+                ),
+            )
 
 
 def check_basic_uniqueness_pre_flight(config: dict[str, Any], profile: Profile) -> None:
@@ -398,34 +379,26 @@ def _check_ner_available_for_strategy(config: dict[str, Any], strategy: str) -> 
     installed packages only (no model load, no profile): safe for `decoy validate`.
     """
     from decoy_engine.detection import ner  # module import keeps the legacy-file LOC flat
+    from decoy_engine.plan.checks._strategy_sites import strategy_sites
 
-    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
-    for table_entry in tables:
-        if not isinstance(table_entry, dict):
+    for site in strategy_sites(config):
+        if site.strategy != strategy or not isinstance(site.config, dict):
             continue
-        table_name = table_entry.get("name", "?")
-        for col_entry in table_entry.get("columns", []) or []:
-            if not isinstance(col_entry, dict):
-                continue
-            if col_entry.get("strategy") != strategy:
-                continue
-            provider_config = col_entry.get("provider_config") or {}
-            ner_cfg = provider_config.get("ner") if isinstance(provider_config, dict) else None
-            if not ner_cfg:
-                continue
-            col_name = col_entry.get("name", "?")
-            refusal = None
-            try:
-                model = str(ner.resolve_column_ner(ner_cfg)[0])
-                ner.ensure_ner_available(model, ner.NerSurface(strategy))
-            except ner.NerUnavailableError as exc:
-                refusal = exc
-            if refusal is not None:  # raised outside the handler: no cause, no context
-                raise PlanCompileError(
-                    code=refusal.code,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.ner",
-                    message=refusal.message,
-                )
+        ner_cfg = site.config.get("ner")
+        if not ner_cfg:
+            continue
+        refusal = None
+        try:
+            model = str(ner.resolve_column_ner(ner_cfg)[0])
+            ner.ensure_ner_available(model, ner.NerSurface(strategy))
+        except ner.NerUnavailableError as exc:
+            refusal = exc
+        if refusal is not None:  # raised outside the handler: no cause, no context
+            raise PlanCompileError(
+                code=refusal.code,
+                path=f"{site.config_path}.ner",
+                message=refusal.message,
+            )
 
 
 def check_text_redact_ner_available(config: dict[str, Any]) -> None:

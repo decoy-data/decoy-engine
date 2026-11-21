@@ -266,27 +266,36 @@ def _build_seed_envelope(
                 # stamp + drift guard as text_redact -- without it, a model
                 # upgrade between compile and run would silently change which
                 # spans mask_cell synthesizes for the same config + seed.
-                ner_model_version = None
-                if strategy in ("text_redact", "text_mask") and isinstance(
-                    provider_config_raw, dict
-                ):
-                    ner_cfg = provider_config_raw.get("ner")
-                    if ner_cfg:
-                        from decoy_engine.detection.ner import (
-                            installed_model_version,
-                            resolve_column_ner,
-                        )
+                # A nested child that opts in is stamped too: its text_mask or text_redact runs
+                # through the same model, so it gets the same drift guard. The sites come from
+                # the one strategy walker, so a child cannot be missed.
+                from decoy_engine.detection.ner import (
+                    installed_model_version,
+                    pin_ner_versions,
+                    resolve_column_ner,
+                )
+                from decoy_engine.plan.checks._strategy_sites import column_sites
 
-                        ner_model = str(resolve_column_ner(ner_cfg)[0])
-                        ner_model_version = installed_model_version(ner_model)
-                        if ner_model_version is None:
-                            warnings.append(
-                                f"ner_model_version_unavailable: column "
-                                f"{table_profile.name}.{col_name} uses ner model "
-                                f"{ner_model!r} which has no installed package "
-                                f"metadata; {strategy} output is byte-stable only "
-                                "within this environment."
-                            )
+                ner_versions: dict[str, str | None] = {}
+                for site in column_sites(table_profile.name, col_entry):
+                    if (
+                        site.strategy not in ("text_redact", "text_mask")
+                        or not isinstance(site.config, dict)
+                        or not site.config.get("ner")
+                    ):
+                        continue
+                    ner_model = str(resolve_column_ner(site.config["ner"])[0])
+                    version = installed_model_version(ner_model)
+                    ner_versions[ner_model] = version
+                    if version is None:
+                        warnings.append(
+                            f"ner_model_version_unavailable: column "
+                            f"{site.label} uses ner model "
+                            f"{ner_model!r} which has no installed package "
+                            f"metadata; {site.strategy} output is byte-stable only "
+                            "within this environment."
+                        )
+                ner_model_version = pin_ner_versions(ner_versions)
                 if when is not None and coherent_with:
                     raise PlanCompileError(
                         code=reasons.plan.WHEN_WITH_COHERENT_WITH_UNSUPPORTED,

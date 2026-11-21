@@ -42,6 +42,15 @@ Config (`provider_config`):
     strategy_config dict            Provider config for the child
                                     strategy. Optional, defaults to
                                     empty.
+    rules           list            Instead of target/strategy: several
+                                    rules, each with target, strategy,
+                                    strategy_config and an optional
+                                    namespace (default: the column's).
+                                    Matches of every rule are collected
+                                    before any write; two rules that
+                                    reach the same position or an
+                                    ancestor and its descendant fail the
+                                    column closed.
 
 Established methodology citation: jsonpath-ng is the maintained
 Python implementation of the JSONPath specification (RFC 9535 draft
@@ -51,6 +60,7 @@ posture for numexpr / polars (we don't reinvent parsers).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import jsonpath_ng
@@ -58,10 +68,17 @@ import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine._canonical import StrictJsonError, strict_json_plain, strict_json_write
-from decoy_engine._nested_json import nested_children
+from decoy_engine._nested_json import NestedChild, effective_provider, nested_children
 from decoy_engine.execution._adapter import StrategyContext, StrategyOption, provider_config_to_dict
 from decoy_engine.execution._errors import StrategyError
-from decoy_engine.execution._row_errors import RowError
+from decoy_engine.execution._strategies.nested._apply import (
+    LEAF_COLUMN,
+    RuleOutput,
+    match_path,
+    refuse_corrupting_write,
+    refuse_rule_overlap,
+    remap_row_errors,
+)
 from decoy_engine.execution._strategies.nested._leaves import (
     find_matches,
     leaf_frame,
@@ -74,33 +91,71 @@ from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 
 
-def _writeback_would_corrupt(full_path: Any, root: Any) -> bool:
-    """True if `full_path.update(root, value)` would misplace the write.
+def _child_ner_version(plan: ColumnSeed, strategy: str, config: Any) -> str | None:
+    """The NER model version the outer seed pinned for this child's model, for its drift guard."""
+    if strategy not in ("text_redact", "text_mask") or not isinstance(config, dict):
+        return None
+    from decoy_engine.detection.ner import pinned_ner_version, resolve_column_ner
 
-    jsonpath-ng coerces an array selector (`[*]`, `[i]`, a slice) applied to a
-    dict into a synthetic singleton list, so the match's `full_path` ends in an
-    `Index` even though the real parent container is the dict. `.update()` then
-    writes an integer key onto the dict instead of replacing the object, leaving
-    the original value in place (a cleartext leak). The signature is a
-    segment-vs-parent-type mismatch: an `Index` whose parent is not a list, or a
-    `Fields` whose parent is not a dict. Reliable writes (Fields->dict,
-    Index->list) and root/`this` targets (handled by capturing the update
-    return) are not flagged.
+    return pinned_ner_version(plan.ner_model_version, resolve_column_ner(config.get("ner"))[0])
+
+
+def run_rule_child(
+    handler: Any,
+    seed: ColumnSeed,
+    column: str,
+    ctx: StrategyContext,
+    leaf_values: list[Any],
+    leaf_outer_pos: list[int],
+    rule_index: int | None,
+) -> RuleOutput:
+    """Run one rule's child over its collected leaves in one batch.
+
+    The child sees the synthetic `_nested_leaves` column, so the real outer column and the rule's
+    rule index are stamped on `ctx` for the call and restored after (the prior values are
+    saved: nested dispatch can itself run inside another node). Row errors the child records at a
+    leaf position are remapped to the outer row, or the job fails when one cannot be placed.
     """
-    if isinstance(full_path, jsonpath_ng.Child):
-        parent_path, last = full_path.left, full_path.right
-        found = parent_path.find(root)
-        if not found:
-            return True  # parent unresolvable -> cannot verify the write, fail closed
-        parent_val = found[0].value
-    else:
-        last = full_path
-        parent_val = root
-    if isinstance(last, jsonpath_ng.Index):
-        return not isinstance(parent_val, list)
-    if isinstance(last, jsonpath_ng.Fields):
-        return not isinstance(parent_val, dict)
-    return False
+    temp_df = leaf_frame(LEAF_COLUMN, leaf_values)
+    prior_outer_column = getattr(ctx, "nested_outer_column", "")
+    prior_rule_index = getattr(ctx, "nested_rule_index", None)
+    object.__setattr__(ctx, "nested_outer_column", column)
+    object.__setattr__(ctx, "nested_rule_index", rule_index)
+    # A positional child keys on its leaf ordinal, not the outer row, so the outer gate's
+    # positions must not reach it.
+    prior_gate_positions = getattr(ctx, "gate_positions", None)
+    object.__setattr__(ctx, "gate_positions", None)
+    # `getattr`: a minimal ctx double has no `row_errors`; a real context always does.
+    ctx_row_errors = getattr(ctx, "row_errors", None)
+    n_err_before = len(ctx_row_errors) if ctx_row_errors is not None else 0
+    try:
+        temp_df, child_warnings = handler.run(temp_df, LEAF_COLUMN, seed, ctx)
+    finally:
+        object.__setattr__(ctx, "nested_outer_column", prior_outer_column)
+        object.__setattr__(ctx, "nested_rule_index", prior_rule_index)
+        object.__setattr__(ctx, "gate_positions", prior_gate_positions)
+    if ctx_row_errors is not None:
+        remap_row_errors(ctx_row_errors, n_err_before, leaf_outer_pos, column)
+    values: list[Any] = []
+    non_finite: set[int] = set()
+    for leaf_pos, out in zip(leaf_outer_pos, temp_df[LEAF_COLUMN].tolist(), strict=True):
+        out, finite = written_leaf(out)
+        values.append(out)
+        if not finite:
+            non_finite.add(leaf_pos)
+    return RuleOutput(values, non_finite, list(child_warnings))
+
+
+@dataclass(frozen=True)
+class _Rule:
+    """One rule ready to run: its child, resolved handler and seed, and parsed target."""
+
+    child: NestedChild
+    target: str
+    handler: Any
+    seed: ColumnSeed
+    expr: Any
+    rule_index: int | None
 
 
 class NestedStrategyHandler:
@@ -112,7 +167,9 @@ class NestedStrategyHandler:
     wizard_options: tuple[StrategyOption, ...] = ()
     offer_in_wizard: bool = False
 
-    def _resolve_child(self, plan: ColumnSeed, column: str | None = None) -> tuple[Any, ColumnSeed]:
+    def _resolve_child(
+        self, plan: ColumnSeed, column: str | None = None, child: NestedChild | None = None
+    ) -> tuple[Any, ColumnSeed]:
         """Resolve the child strategy handler + a synthetic child `ColumnSeed`.
 
         Shared by `run()` (real masking dispatch) and `preflight()` (corpus-
@@ -143,7 +200,7 @@ class NestedStrategyHandler:
         # SCALAR_HANDLERS dict imports nested strategy at module load).
         from decoy_engine.execution._strategies import SCALAR_HANDLERS
 
-        (child,) = nested_children(provider_config_to_dict(plan.provider_config))
+        child = child or self._children(plan)[0]
         child_strategy_name = child.strategy
         child_strategy_config = child.strategy_config or {}
         column_suffix = f" (column={column!r})" if column is not None else ""
@@ -181,7 +238,13 @@ class NestedStrategyHandler:
         # carrying the child strategy + config.
         child_provider_config: tuple[tuple[str, Any], ...]
         if isinstance(child_strategy_config, dict):
-            child_provider_config = tuple(sorted(child_strategy_config.items()))
+            # A rule's `provider` is the seed's provider, not a setting the child passes on.
+            kept = {
+                k: v
+                for k, v in child_strategy_config.items()
+                if not (child.index is not None and k == "provider")
+            }
+            child_provider_config = tuple(sorted(kept.items()))
         else:
             child_provider_config = ()
         # QA-3 F7 (2026-05-31): resolve the CHILD's technique class. The
@@ -191,9 +254,12 @@ class NestedStrategyHandler:
         # class of the strategy it actually runs (e.g. redact ->
         # anonymisation).
         child_seed = ColumnSeed(
-            namespace=plan.namespace,
+            # A rule may name its own namespace; absent means the column's.
+            namespace=child.namespace
+            if child.index is not None and child.namespace
+            else plan.namespace,
             strategy=child_strategy_name,
-            provider=plan.provider,
+            provider=effective_provider(child, plan.provider),
             backend_type=plan.backend_type,
             backend_version=plan.backend_version,
             cardinality_mode=plan.cardinality_mode,
@@ -202,6 +268,7 @@ class NestedStrategyHandler:
             coherent_with=plan.coherent_with,
             technique_class=technique_class_for(child_strategy_name),
             when=None,
+            ner_model_version=_child_ner_version(plan, child_strategy_name, child_strategy_config),
         )
         return child_handler, child_seed
 
@@ -228,10 +295,66 @@ class NestedStrategyHandler:
         `masked_any`) stays exclusively `run()`'s job, same contract as
         `CodeSetHandler.preflight`.
         """
-        child_handler, child_seed = self._resolve_child(plan)
-        child_preflight = getattr(child_handler, "preflight", None)
-        if child_preflight is not None:
-            child_preflight(child_seed, ctx)
+        for child in self._children(plan):
+            child_handler, child_seed = self._resolve_child(plan, child=child)
+            child_preflight = getattr(child_handler, "preflight", None)
+            if child_preflight is not None:
+                child_preflight(child_seed, ctx)
+
+    @staticmethod
+    def _children(plan: ColumnSeed) -> tuple[NestedChild, ...]:
+        children = nested_children(provider_config_to_dict(plan.provider_config))
+        if not children:
+            raise StrategyError(
+                code=reasons.runtime.NESTED_TARGET_UNSET,
+                strategy="nested",
+                message="nested has no rule to run: `rules` must be a non-empty list.",
+            )
+        return children
+
+    def _prepare_rules(self, plan: ColumnSeed, column: str, ctx: StrategyContext) -> list[_Rule]:
+        """Validate and resolve every rule before any cell is read, in config order.
+
+        QA-3 F12 (security): a config error raises `StrategyError` so the runner fails the job;
+        returning the frame unchanged would pass PII through on a typoed target or child name.
+        """
+        rules: list[_Rule] = []
+        for child in self._children(plan):
+            target = child.target
+            if not isinstance(target, str) or not target:
+                raise StrategyError(
+                    code=reasons.runtime.NESTED_TARGET_UNSET,
+                    strategy="nested",
+                    message=(
+                        f"nested target is required and must be a non-empty string "
+                        f"(column={column!r}). Pre-fix this returned the column "
+                        "unchanged with a QualityWarning; misconfigured targets "
+                        "silently passed PII through."
+                    ),
+                )
+            # Child resolution (name check, nested-of-nested rejection, SCALAR_HANDLERS lookup,
+            # technique class) is shared with `preflight()` so the two cannot drift.
+            handler, seed = self._resolve_child(plan, column, child)
+            # A bucket_perturb child must reject an unwritable date_format even for an empty,
+            # all-null or zero-match column, which return before the child runs.
+            if seed.strategy == "bucket_perturb":
+                handler.preflight(seed, ctx)
+            expr = None
+            try:
+                expr = jsonpath_ng.parse(target)
+            except Exception:
+                pass  # refused below, outside the handler, so no parser text rides along
+            if expr is None:
+                raise StrategyError(
+                    code=reasons.runtime.NESTED_JSONPATH_PARSE_ERROR,
+                    strategy="nested",
+                    message=(
+                        f"a nested target is not a valid JSONPath expression (column={column!r})."
+                    ),
+                )
+            # Two rules never share a draw; the single form keeps the outer column identity.
+            rules.append(_Rule(child, target, handler, seed, expr, child.index))
+        return rules
 
     def run(
         self,
@@ -240,56 +363,7 @@ class NestedStrategyHandler:
         plan: ColumnSeed,
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
-        (nested_child,) = nested_children(provider_config_to_dict(plan.provider_config))
-        target_path = nested_child.target
-
-        # QA-3 F12 (2026-05-31, security): config errors below promote to
-        # StrategyError so the runner fails the job. Pre-fix they returned
-        # df UNCHANGED with a QualityWarning -- a misconfigured target
-        # (e.g. `$.patient_name` typoed as `$.patientName`, or a child
-        # strategy name typo) silently passed PII through. The warning
-        # surfaced only in the Post-scan integrity report, not at job failure, and
-        # operators who don't audit Post-scan integrity output had no signal.
-        # Sparse-path passthrough (some cells have matches, some don't)
-        # stays a non-error case per spec; that branch is handled below
-        # by the "if not leaf_values" early-return without raising.
-        if not isinstance(target_path, str) or not target_path:
-            raise StrategyError(
-                code=reasons.runtime.NESTED_TARGET_UNSET,
-                strategy="nested",
-                message=(
-                    f"nested target is required and must be a non-empty string "
-                    f"(column={column!r}). Pre-fix this returned the column "
-                    "unchanged with a QualityWarning; misconfigured targets "
-                    "silently passed PII through."
-                ),
-            )
-
-        # Codex round-5 P2 remediation: child handler + child seed
-        # resolution (strategy-name validation, nested-of-nested rejection,
-        # SCALAR_HANDLERS lookup, technique_class) now lives in
-        # `_resolve_child`, shared with `preflight()`. Resolving it here --
-        # before the jsonpath parse below, same position the inline checks
-        # occupied pre-refactor -- keeps every error code, message, and raise
-        # order byte-identical to the pre-extraction behavior (passing
-        # `column` preserves the "(column=...)" message suffix).
-        child_handler, child_seed = self._resolve_child(plan, column)
-        # A bucket_perturb child must reject an unwritable date_format even for an
-        # empty, all-null or zero-match column, which return before the child runs.
-        if child_seed.strategy == "bucket_perturb":
-            child_handler.preflight(child_seed, ctx)
-
-        try:
-            jsonpath_expr = jsonpath_ng.parse(target_path)
-        except Exception as exc:
-            raise StrategyError(
-                code=reasons.runtime.NESTED_JSONPATH_PARSE_ERROR,
-                strategy="nested",
-                message=(
-                    f"nested target {target_path!r} is not a valid JSONPath "
-                    f"expression (column={column!r}): {exc}"
-                ),
-            ) from exc
+        rules = self._prepare_rules(plan, column, ctx)
 
         col = df[column]
         if pd.api.types.is_extension_array_dtype(col.dtype):
@@ -297,36 +371,23 @@ class NestedStrategyHandler:
         else:
             col = col.copy()
 
-        # QA-3 F2 (2026-05-31): positional enumeration replaces the
-        # index-keyed dict. Pre-fix, this strategy iterated `col.index`
-        # and keyed per_row_state on `row_idx`. On a DataFrame with
-        # duplicate indexes (which is legal pandas and can arise from
-        # `pd.concat` without reset_index), `col.at[row_idx]` returns a
-        # SERIES of all matching rows -- not a single cell -- breaking
-        # the parse step. And a dict keyed on row_idx only retains ONE
-        # state entry per duplicate, silently dropping the others.
-        # Positional iteration over `col.iloc[i]` removes both failure
-        # modes: each row is visited exactly once, and the cursor /
-        # writeback is position-indexed.
+        # QA-3 F2: positional enumeration, not an index-keyed dict, so duplicate index labels
+        # cannot return a Series for one cell or drop a row's state.
         col_values = col.to_list()
 
         warnings: list[QualityWarning] = []
-        leaf_values: list[Any] = []
-        # Outer row position each collected leaf came from, parallel to
-        # `leaf_values`. Lets child-produced RowErrors (which the child records
-        # against the flattened-leaf position) be remapped back to the real outer
-        # row after the child runs. Without it, quarantine drops the wrong outer
-        # row and the real bad row leaks (TEST-3 P1-1).
-        leaf_outer_pos: list[int] = []
-        # True once a non-null cell parses as valid JSON. Distinguishes an all-null
-        # or all-malformed column (nothing to match, handled elsewhere) from a
-        # valid column where the target matched NOTHING -- a misconfiguration that
-        # must fail closed rather than pass every cell through raw (TEST-3 P1-2).
+        # Per rule: the collected leaves and the outer row position each came from, so a
+        # child-produced RowError (recorded at the flattened-leaf position) is remapped to the
+        # real outer row (TEST-3 P1-1).
+        leaves: list[list[Any]] = [[] for _ in rules]
+        leaf_outer_pos: list[list[int]] = [[] for _ in rules]
+        # True once a non-null cell parses as valid JSON: separates an all-null or all-malformed
+        # column (nothing to match) from a valid column where a target matched NOTHING, which is
+        # a misconfiguration that must fail closed (TEST-3 P1-2).
         saw_parseable = False
-        saw_matched_fault = False
-        # Per-position: (parsed_object, list[jsonpath_match]). Position
-        # is the row's 0-indexed offset in the column, not its label.
-        per_position_state: dict[int, tuple[Any, list]] = {}
+        rule_fault = [False] * len(rules)
+        # Per position: the parsed cell and, per matching rule, its matches (rule order).
+        per_position_state: dict[int, tuple[Any, list[tuple[int, list]]]] = {}
 
         for pos, cell in enumerate(col_values):
             if pd.isna(cell):
@@ -334,67 +395,71 @@ class NestedStrategyHandler:
             try:
                 parsed = read_cell(cell)
             except StrictJsonError as exc:
-                # A faulty cell cannot be masked, so it fails closed like every sibling
-                # cell-parsing strategy: a RowError (never the cell text, trap T3) so the row is
-                # quarantined or the job fails, never emitted with its cleartext intact.
+                # A faulty cell cannot be masked: a RowError (never the cell text, trap T3) so
+                # the row is quarantined or the job fails, never emitted with cleartext intact.
                 record_fault(ctx, warnings, column, pos, exc.token)
                 continue
             saw_parseable = True
-            matches = find_matches(jsonpath_expr, parsed, column)
-            if not matches:
-                continue
-            # QA-3 F14 (2026-05-31, security): detect prefix-overlap
-            # among matches. Recursive (`$..ssn`) or wildcard (`$.*.name`)
-            # JSONPaths on structurally-nested matches can produce
-            # results where one match's path is a prefix of another's.
-            # If we then call `m.full_path.update(parsed, new_value)`
-            # in match-order, an earlier write into an outer container
-            # can erase a later write into its nested child (or vice
-            # versa) -- the leaf is silently NOT masked.
-            # Fix: sort matches deepest-first by path depth before
-            # writeback. This makes the ordering deterministic and the
-            # outer container's masked value always reflects the last
-            # write. We also emit a typed QualityWarning so operators
-            # auditing the Post-scan integrity report can see the path was ambiguous.
-            ordered_matches = _order_matches_deepest_first(matches)
-            if _has_prefix_overlap(ordered_matches):
-                warnings.append(
-                    QualityWarning(
-                        code=reasons.warning.NESTED_JSONPATH_PATH_OVERLAP,
-                        provider="nested",
-                        column=column,
-                        detail={
-                            "row_pos": str(pos),
-                            "target": target_path,
-                            "match_count": str(len(ordered_matches)),
-                        },
+            # Every rule matches on the parsed tree before any write.
+            found: list[tuple[int, list, list[Any]]] = []
+            faulted = False
+            for ri, rule in enumerate(rules):
+                matches = find_matches(rule.expr, parsed, column)
+                if not matches:
+                    continue
+                # QA-3 F14 (security): within one rule, an outer container's write can erase a
+                # nested child's, so matches go deepest-first and an ambiguous path is flagged.
+                ordered_matches = _order_matches_deepest_first(matches)
+                if _has_prefix_overlap(ordered_matches):
+                    warnings.append(
+                        QualityWarning(
+                            code=reasons.warning.NESTED_JSONPATH_PATH_OVERLAP,
+                            provider="nested",
+                            column=column,
+                            detail={
+                                "row_pos": str(pos),
+                                "target": rule.target,
+                                "match_count": str(len(ordered_matches)),
+                            },
+                        )
                     )
-                )
-            try:
-                cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
-            except StrictJsonError as exc:
-                record_fault(ctx, warnings, column, pos, exc.token)
-                saw_matched_fault = True  # the target did match; the row error already fails it
+                if faulted:
+                    # An earlier rule already failed this row. The rule still matched, so it is
+                    # not a zero-match misconfiguration.
+                    rule_fault[ri] = True
+                    continue
+                try:
+                    cell_leaves = [strict_json_plain(m.value) for m in ordered_matches]
+                except StrictJsonError as exc:
+                    record_fault(ctx, warnings, column, pos, exc.token)
+                    rule_fault[ri] = True  # the target matched; the row error fails it
+                    faulted = True
+                    continue
+                found.append((ri, ordered_matches, cell_leaves))
+            if faulted:
+                # Rules that matched before the fault lose this row's leaves; none of them is a
+                # zero-match misconfiguration.
+                for ri, _matches, _leaves in found:
+                    rule_fault[ri] = True
                 continue
-            per_position_state[pos] = (parsed, ordered_matches)
-            leaf_values.extend(cell_leaves)
-            leaf_outer_pos.extend([pos] * len(cell_leaves))
+            if not found:
+                continue
+            refuse_rule_overlap(column, [(i, [match_path(m) for m in ms]) for i, ms, _ in found])
+            for i, _matches, cell_leaves in found:
+                leaves[i].extend(cell_leaves)
+                leaf_outer_pos[i].extend([pos] * len(cell_leaves))
+            per_position_state[pos] = (parsed, [(i, ms) for i, ms, _ in found])
 
-        if not leaf_values:
-            # A valid non-null cell existed but the target matched NOTHING in the
-            # whole column. That is a misconfiguration (a typoed / wrong path, e.g.
-            # `$.patientName` for `$.patient_name`), not a sparse-path no-op:
-            # silently returning the column would emit every cell's cleartext
-            # unmasked (TEST-3 P1-2). Fail closed. Per-cell sparse no-match (where
-            # SOME cell matched) never reaches here -- `leaf_values` is non-empty.
-            # An all-null or all-malformed column (saw_parseable False) is handled
-            # by the null passthrough / the malformed-cell RowError above.
-            if saw_parseable and not saw_matched_fault:
+        # A rule that matched NOTHING in the whole column is a typoed or wrong path, not a sparse
+        # path: returning the column would emit every cell's cleartext unmasked. Sparse per-cell
+        # no-match (some cell matched) never reaches here.
+        for rule, rule_leaves, faulted in zip(rules, leaves, rule_fault, strict=True):
+            if saw_parseable and not rule_leaves and not faulted:
                 raise StrategyError(
                     code=reasons.runtime.NESTED_TARGET_MATCHED_NOTHING,
                     strategy="nested",
                     message=(
-                        f"nested target {target_path!r} matched no value in any "
+                        f"nested target {rule.target!r} matched no value in any "
                         f"non-null cell of column {column!r}. A target that matches "
                         "nothing across the whole column is treated as a "
                         "misconfiguration (a typoed or wrong path) rather than a "
@@ -402,157 +467,45 @@ class NestedStrategyHandler:
                         "Verify the target path."
                     ),
                 )
+        if not any(leaves):
             return df, warnings
 
-        # Run the child handler on the collected leaves in one batch.
-        # `child_handler` and `child_seed` were resolved earlier via
-        # `_resolve_child` (shared with `preflight()`).
-        temp_col = "_nested_leaves"
-        temp_df = leaf_frame(temp_col, leaf_values)
-        # Codex round-4 P2 NESTED CODE_SET MIS-KEYED EVIDENCE remediation:
-        # the child is invoked with the synthetic `temp_col` name, not the
-        # real column this nested strategy is configured on. A child handler
-        # that stamps column-keyed evidence (CodeSetHandler) needs the OUTER
-        # column identity, so stamp it onto ctx before dispatch and restore
-        # afterward (prior value saved, not just cleared -- nested dispatch
-        # can itself run mid-dispatch of another node, same rationale as
-        # `_orphan.py`'s prior_table save/restore). `getattr` with a default
-        # tolerates test doubles (e.g. `_FakeCtx` in test_nested_strategy.py)
-        # that predate this field and do not define it.
-        prior_outer_column = getattr(ctx, "nested_outer_column", "")
-        object.__setattr__(ctx, "nested_outer_column", column)
-        # C8-iii-d: a positional child keys on its leaf ordinal, not the outer row. The outer
-        # gate's `gate_positions` must not reach the child, or it would miskey (or fail the
-        # length check) against the flattened leaves. Clear it for the child, restore after.
-        prior_gate_positions = getattr(ctx, "gate_positions", None)
-        object.__setattr__(ctx, "gate_positions", None)
-        # `getattr` (like `nested_outer_column` above) tolerates a minimal ctx
-        # double -- the perf/preview harness's `_FakeCtx` has no `row_errors`. Such
-        # a ctx cannot collect child errors, so there is nothing to remap; a real
-        # StrategyContext always carries the list, so the fail-closed remap runs.
-        ctx_row_errors = getattr(ctx, "row_errors", None)
-        n_err_before = len(ctx_row_errors) if ctx_row_errors is not None else 0
-        try:
-            temp_df, child_warnings = child_handler.run(temp_df, temp_col, child_seed, ctx)
-        finally:
-            object.__setattr__(ctx, "nested_outer_column", prior_outer_column)
-            object.__setattr__(ctx, "gate_positions", prior_gate_positions)
-        # Remap any RowError the child recorded from the flattened-leaf position
-        # back to the real (outer row, outer column). The child ran on the
-        # synthetic `_nested_leaves` column, so it recorded row_index = leaf
-        # position and column = "_nested_leaves"; leaving those unmapped makes
-        # quarantine drop the WRONG outer row and leak the real one (TEST-3 P1-1).
-        # trigger/reason are preserved; the child appends in leaf order, so
-        # `leaf_outer_pos[row_index]` is its outer row.
-        if ctx_row_errors is not None:
-            child_errs = ctx_row_errors[n_err_before:]
-            if child_errs:
-                del ctx_row_errors[n_err_before:]
-                for e in child_errs:
-                    if not 0 <= e.row_index < len(leaf_outer_pos):
-                        # A child recorded a RowError at a leaf position outside the
-                        # collected-leaf range. No registered child does this, but in a
-                        # leak-prevention path an unattributable error must fail the job
-                        # rather than guess an outer row and risk quarantining the wrong
-                        # one (dennis LOW-2 / Codex P2).
-                        raise StrategyError(
-                            code=reasons.runtime.NESTED_CHILD_ROW_ERROR_UNMAPPABLE,
-                            strategy="nested",
-                            message=(
-                                f"nested child recorded a RowError at leaf position "
-                                f"{e.row_index}, outside the collected-leaf range "
-                                f"[0, {len(leaf_outer_pos)}) for column {column!r}; it "
-                                "cannot be mapped to an outer row. Failing closed."
-                            ),
-                        )
-                    ctx_row_errors.append(
-                        RowError(
-                            column=column,
-                            row_index=leaf_outer_pos[e.row_index],
-                            trigger=e.trigger,
-                            reason=e.reason,
-                        )
-                    )
-        warnings.extend(child_warnings)
-        new_leaf_values: list[Any] = []
+        new_values: dict[int, list[Any]] = {}
         non_finite_pos: set[int] = set()
-        for leaf_pos, out in zip(leaf_outer_pos, temp_df[temp_col].tolist(), strict=True):
-            out, finite = written_leaf(out)
-            new_leaf_values.append(out)
-            if not finite:
-                non_finite_pos.add(leaf_pos)
+        for i, rule in enumerate(rules):
+            if not leaves[i]:
+                continue
+            out = run_rule_child(
+                rule.handler, rule.seed, column, ctx, leaves[i], leaf_outer_pos[i], rule.rule_index
+            )
+            warnings.extend(out.warnings)
+            new_values[i] = out.values
+            non_finite_pos |= out.non_finite_positions
 
-        # Writeback: walk matches in the same order leaves were
-        # collected, replace each, re-serialize the cell. Positional
-        # writeback (QA-3 F2) means we reassemble the column from
-        # `col_values` rather than mutating by index label.
-        cursor = 0
-        for pos, (parsed, matches) in per_position_state.items():
+        # Writeback walks matches in the order the leaves were collected, then writes each cell
+        # once. The column is rebuilt from `col_values` by position (QA-3 F2).
+        cursor = dict.fromkeys(new_values, 0)
+        for pos, (parsed, per_rule) in per_position_state.items():
             if pos in non_finite_pos:
                 # The cell keeps its input text and the row fails closed, so no `Infinity` is written.
-                cursor += len(matches)
+                for i, ms in per_rule:
+                    cursor[i] += len(ms)
                 record_fault(ctx, warnings, column, pos, "child_non_finite")
                 continue
-            for m in matches:
-                new_value = new_leaf_values[cursor]
-                cursor += 1
-                # Fail closed if jsonpath_ng would misapply this writeback. When
-                # an array selector (`[*]`, `[i]`, a slice) targets a dict,
-                # jsonpath_ng coerces the dict into a synthetic singleton list, so
-                # `full_path` becomes an Index that `.update()` writes as a NEW
-                # integer key on the dict instead of replacing the object -- the
-                # original cleartext survives (Codex 2026-07-31 BLOCKER: `$[*]` on
-                # `{"ssn": ...}` added key "0" and republished the SSN). The
-                # segment-vs-parent-type mismatch is the coercion signature; a
-                # reliable write must not leak, so reject the whole run.
-                if _writeback_would_corrupt(m.full_path, parsed):
-                    raise StrategyError(
-                        code=reasons.runtime.NESTED_TARGET_UNWRITABLE_CONTAINER,
-                        strategy="nested",
-                        message=(
-                            f"nested target resolved to a match whose masked value "
-                            f"cannot be written back reliably for column {column!r} "
-                            f"(an array/index selector applied to a JSON object; "
-                            f"jsonpath-ng coerces it and the write would not replace "
-                            f"the object). Failing closed to avoid leaking the source "
-                            f"value. Use an object-appropriate target (e.g. `$.*` or a "
-                            f"field path) instead of an array selector on an object."
-                        ),
-                    )
-                # Capture the return value. For a field/index path jsonpath_ng
-                # mutates `parsed` in place and returns it, but for a ROOT target
-                # (`$`, or the backtick-`this` selector) the root has no parent to
-                # write into, so `Root.update()` returns the replacement WITHOUT
-                # mutating `parsed`. Discarding it re-serialized the original
-                # cleartext -- a masked-root cell (e.g. target `$` + redact) would
-                # publish raw PII with no error or warning. Reassigning `parsed`
-                # applies the mask for the root case and is a no-op-equivalent for
-                # in-place field writes (same object returned).
-                parsed = m.full_path.update(parsed, new_value)
+            for i, matches in per_rule:
+                for m in matches:
+                    new_value = new_values[i][cursor[i]]
+                    cursor[i] += 1
+                    # Refuse a write jsonpath-ng would misapply: it would leave the source value
+                    # in place (a cleartext leak), so the whole run fails.
+                    refuse_corrupting_write(m, parsed, column)
+                    # Capture the return: a ROOT target has no parent to write into, so
+                    # `update()` returns the replacement without mutating `parsed`.
+                    parsed = m.full_path.update(parsed, new_value)
             col_values[pos] = strict_json_write(parsed)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
         return df, warnings
-
-
-def _path_segments(match: Any) -> tuple[str, ...]:
-    """Return the dotted segments of a jsonpath_ng match's full_path.
-
-    `match.full_path` is a chain of Fields / Index / Slice nodes; its
-    `str` representation yields a dotted expression like `user.name`
-    or `(user.email)` (recursive-descent compound paths wrap in
-    parens). We strip the wrapping parens before splitting on `.` so
-    that `(user.email)` -> ("user", "email") aligns with the bare
-    `user` segment from the recursive root match for prefix-overlap
-    detection.
-    """
-    raw = str(match.full_path).strip()
-    # Strip a single outer paren wrapper if present (jsonpath_ng emits
-    # these for compound recursive paths). Inner parens, if any,
-    # remain inside the segment.
-    if raw.startswith("(") and raw.endswith(")"):
-        raw = raw[1:-1]
-    return tuple(raw.split("."))
 
 
 def _order_matches_deepest_first(matches: list) -> list:
@@ -567,7 +520,7 @@ def _order_matches_deepest_first(matches: list) -> list:
     recursive selector (`$..*` -> mask the root, then nothing else
     matters; the inner-leaf writes are discarded by the parent write).
     """
-    return sorted(matches, key=lambda m: -len(_path_segments(m)))
+    return sorted(matches, key=lambda m: -len(match_path(m)))
 
 
 def _has_prefix_overlap(ordered_matches: list) -> bool:
@@ -579,7 +532,7 @@ def _has_prefix_overlap(ordered_matches: list) -> bool:
     the number of matches in a single cell (typically <50), and the
     function only runs when matches are non-empty.
     """
-    seg_lists = [_path_segments(m) for m in ordered_matches]
+    seg_lists = [match_path(m) for m in ordered_matches]
     n = len(seg_lists)
     for i in range(n):
         deeper = seg_lists[i]

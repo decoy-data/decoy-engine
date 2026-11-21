@@ -305,6 +305,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_wave_b_no_registry_version_literal.py", "E0_TEST_FILES"),
     ),
     Source(
+        "nested-site-walker",
+        "test_nested_site_walker.py",
+        in_code("test_nested_site_walker.py", "_ALLOWED"),
+    ),
+    Source(
         "handler-row-guard-exempt",
         "test_handler_row_guard_call_sites.py",
         in_code("test_handler_row_guard_call_sites.py", "_ALLOWED"),

@@ -89,6 +89,10 @@ id = "handler-row-guard-exempt"
 baseline = "tests/sentry/baselines/handler-row-guard-exempt.json"
 
 [[sentry]]
+id = "nested-site-walker"
+baseline = "tests/sentry/baselines/nested-site-walker.json"
+
+[[sentry]]
 id = "private-file-sinks"
 baseline = "tests/sentry/baselines/private-file-sinks.json"
 

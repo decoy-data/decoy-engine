@@ -23,10 +23,10 @@ import pytest
 
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._strategies.nested._apply import match_path
 from decoy_engine.execution._strategies.nested._handler import (
     NestedStrategyHandler,
     _has_prefix_overlap,
-    _path_segments,
 )
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
@@ -553,15 +553,14 @@ class _SpyChild:
 
 
 def _match_with_path(path_str: str) -> Any:
-    """A jsonpath_ng match double whose `full_path` stringifies to
-    `path_str`, for exercising `_path_segments` / `_has_prefix_overlap`
-    at their documented (deepest-first) contract boundary."""
+    """A real jsonpath-ng match for the dotted `path_str`, for exercising `_has_prefix_overlap`
+    at its documented (deepest-first) contract boundary."""
+    import jsonpath_ng
 
-    class _FullPath:
-        def __str__(self) -> str:
-            return path_str
-
-    return SimpleNamespace(full_path=_FullPath())
+    doc: Any = 1
+    for key in reversed(path_str.split(".")):
+        doc = {key: doc}
+    return jsonpath_ng.parse(path_str).find(doc)[0]
 
 
 class TestJsonPathParseErrorFields:
@@ -855,19 +854,27 @@ class TestWritebackIndexAlignment:
         assert json.loads(out["data"].loc[20])["a"] == "REDACTED"
 
 
-class TestPathSegments:
-    """`_path_segments` strips a single outer paren pair ONLY when both
-    parens are present, slicing exactly one char off each end."""
+class TestMatchPath:
+    """`match_path` is the one structured path extraction; ancestry never reads path text."""
 
-    def test_unbalanced_leading_paren_is_not_stripped(self):
-        # Both-parens guard: `and` (not `or`). A leading-only paren keeps
-        # the raw segment; an `or` mutant would wrongly slice it.
-        assert _path_segments(_match_with_path("(user")) == ("(user",)
+    def test_a_dotted_path_is_its_field_names(self):
+        assert match_path(_match_with_path("a.bc")) == ("a", "bc")
 
-    def test_balanced_parens_strip_one_char_each_end(self):
-        # `raw[1:-1]`, not `[1:-2]`: the closing paren is the only trailing
-        # char removed, so the last segment keeps its full text.
-        assert _path_segments(_match_with_path("(a.bc)")) == ("a", "bc")
+    def test_a_key_that_holds_a_dot_is_one_segment(self):
+        import jsonpath_ng
+
+        (m,) = jsonpath_ng.parse("$['a.b']").find({"a.b": 1})
+        assert match_path(m) == ("a.b",)
+        assert match_path(m) != match_path(_match_with_path("a.b"))
+
+    def test_a_list_index_is_a_segment(self):
+        import jsonpath_ng
+
+        (m,) = jsonpath_ng.parse("$.a[1]").find({"a": [0, 1]})
+        assert match_path(m) == ("a", 1)
+
+    def test_a_key_that_starts_like_another_is_not_its_descendant(self):
+        assert _has_prefix_overlap([_match_with_path("ab"), _match_with_path("a")]) is False
 
 
 class TestHasPrefixOverlap:
