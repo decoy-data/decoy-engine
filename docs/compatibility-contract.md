@@ -296,7 +296,7 @@ therefore stops compiling, and their per-row `format_error` can no longer come f
 `contracts/bucketize_width.py`; a sentry pins its callers. The F06 declared-casting output rule now covers
 `top_code` on an integer and `bucketize` on a decimal, and a preset on a declared integer is admitted. The plan
 hash and the physical plan hash move for any pipeline that uses `bucketize`, `top_code` or `fpe`. The three codes
-are registered unreleased. A code rollback is safe: an older engine accepts the declarations and ignores them.
+are registered unreleased.
 
 Until GA: use this document as the design target so we don't paint ourselves
 into a corner. After GA: this document is binding.
