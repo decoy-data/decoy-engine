@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import kinds
 from decoy_engine.generation._admission import classify_plan
 from decoy_engine.generation.kinds import _lookup
@@ -41,7 +42,7 @@ def _col(**extra: Any) -> dict[str, Any]:
 
 def _code(config: dict[str, Any]) -> str:
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(config, empty_profile(), decoy_engine_version="test")
+        compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     return exc.value.code
 
 

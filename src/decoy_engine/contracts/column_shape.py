@@ -11,6 +11,7 @@ loaded. This module imports ``pyarrow`` and ``_arrow_types`` only.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -20,12 +21,17 @@ from decoy_engine._arrow_types import is_text
 
 __all__ = [
     "EXACT_FLOAT_DECIMAL_DIGITS",
+    "NO_SOURCES",
     "TEXT_SOURCE_FORMATS",
     "ColumnShape",
     "ColumnShapes",
+    "SourceFacts",
+    "build_source_facts",
     "classify_column",
     "declared_shape",
     "is_bounded_decimal",
+    "is_nested_type",
+    "source_facts_of",
     "source_format_for",
 ]
 
@@ -53,6 +59,56 @@ def source_format_for(
     descriptor = (descriptors or {}).get(table)
     fmt = descriptor.get("format") if isinstance(descriptor, Mapping) else None
     return fmt if isinstance(fmt, str) else None
+
+
+@dataclass(frozen=True)
+class SourceFacts:
+    """What the caller holds for each table it supplied: its Arrow schema (when known) and
+    whether it is resident. A resident table is shaped by its own schema, never by the file
+    format of a config descriptor. Every compile route builds this with `build_source_facts`
+    and `compile_plan` requires it, so no route can forget either half."""
+
+    schemas: Mapping[str, pa.Schema] = field(default_factory=dict)
+    resident: frozenset[str] = frozenset()
+
+
+NO_SOURCES = SourceFacts()
+
+
+def build_source_facts(
+    *,
+    caller: Mapping[str, pa.Schema | None],
+    loader: Mapping[str, pa.Schema] | None = None,
+) -> SourceFacts:
+    """The one builder of `SourceFacts`: tables the caller supplied in memory (``None`` when
+    its schema is unknown, e.g. a chunk iterable with no chunks) and tables a source loader
+    supplies with typed schemas. Both are resident."""
+    schemas = {n: s for n, s in caller.items() if s is not None}
+    schemas.update(loader or {})
+    return SourceFacts(schemas=schemas, resident=frozenset(caller) | frozenset(loader or ()))
+
+
+def source_facts_of(
+    tables: Mapping[str, Any] | None, loader: Mapping[str, pa.Schema] | None = None
+) -> SourceFacts:
+    """`build_source_facts` for a map of caller tables (``pa.Table`` or a lazy source): each
+    table's ``schema`` is its schema."""
+    return build_source_facts(
+        caller={n: t.schema for n, t in (tables or {}).items()}, loader=loader
+    )
+
+
+def is_nested_type(arrow_type: pa.DataType) -> bool:
+    """A list, struct, map or union type: its cells are unhashable to pandas."""
+    t = pa.types
+    return bool(
+        t.is_list(arrow_type)
+        or t.is_large_list(arrow_type)
+        or t.is_fixed_size_list(arrow_type)
+        or t.is_struct(arrow_type)
+        or t.is_map(arrow_type)
+        or t.is_union(arrow_type)
+    )
 
 
 class ColumnShape(str, Enum):

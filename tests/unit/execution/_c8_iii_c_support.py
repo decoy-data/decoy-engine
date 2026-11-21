@@ -17,6 +17,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._types import ColumnSeed, Plan, SeedEnvelope, TableSeed
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _multi_table_support as mt
@@ -48,7 +49,7 @@ def compile_job(config: dict[str, Any]) -> tuple[Plan, Any, Any, Any]:
     )
 
     profile = profile_source(config, seed=_normalize_job_seed_int(config))
-    plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     ns = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

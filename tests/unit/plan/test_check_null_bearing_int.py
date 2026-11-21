@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._checks import check_null_bearing_int_unsupported
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.plan._errors import PlanCompileError
@@ -110,7 +111,11 @@ class TestNullBearingIntUnderNoProfile:
         # Profile-dependent, so under no_profile the check is recorded in
         # checks_skipped (not silently dropped); the execution-time guard backstops.
         plan = compile_plan(
-            simple_config, simple_profile, decoy_engine_version="0.1.0", no_profile=True
+            simple_config,
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            no_profile=True,
+            sources=NO_SOURCES,
         )
         assert "null_bearing_int_unsupported" in plan.plan_compile.checks_skipped
         assert "null_bearing_int_unsupported" not in plan.plan_compile.checks_passed

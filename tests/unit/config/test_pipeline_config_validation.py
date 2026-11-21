@@ -19,6 +19,7 @@ import yaml
 from pydantic import ValidationError
 
 from decoy_engine.config import PipelineConfig, PipelineConfigError, override_sources
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import Plan, compile_plan
 from decoy_engine.profile import Profile, profile_source
 
@@ -447,7 +448,7 @@ class TestSliceOneAcceptance:
     def test_validated_config_compiles_to_a_plan(self, tmp_path: Path) -> None:
         cfg = PipelineConfig.model_validate(_acceptance_config(tmp_path)).model_dump()
         profile = profile_source(cfg, seed=42)
-        plan = compile_plan(cfg, profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(cfg, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert isinstance(plan, Plan)
 
 

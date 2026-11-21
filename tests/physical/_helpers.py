@@ -20,6 +20,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._types import Plan
 from decoy_engine.profile import profile_source
@@ -119,7 +120,7 @@ def build_job(
     registry = get_default_registry()
     job_seed = (config.get("global_settings") or {}).get("seed") or 0
     profile = profile_source(config, seed=job_seed)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, sources=NO_SOURCES)
     ns_registry = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

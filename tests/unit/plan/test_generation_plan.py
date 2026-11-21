@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile
 from decoy_engine.quality.dp import fit_dp_snapshot
@@ -91,7 +92,7 @@ def test_compile_plan_reads_each_snapshot_path_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "open", _counting_open)
 
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
     assert open_calls == [path]
     assert plan.generation is not None
@@ -112,7 +113,7 @@ def test_compile_plan_embeds_snapshot_bytes_and_digest(tmp_path):
         raw_on_disk = fh.read()
 
     cfg = _dp_cfg(table_columns=[{"name": "state", "type": "statistical", "snapshot_file": path}])
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
     assert plan.generation is not None
     (snapshot,) = plan.generation.snapshots
@@ -129,7 +130,7 @@ def test_compiled_generation_plan_is_recursively_immutable(tmp_path):
     frozen field out from under later readers."""
     path = _dp_fit_mixed(tmp_path)
     cfg = _dp_cfg(table_columns=[{"name": "state", "type": "statistical", "snapshot_file": path}])
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
     assert plan.generation is not None
     (spec,) = plan.generation.statistical_specs

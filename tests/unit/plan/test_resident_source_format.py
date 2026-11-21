@@ -13,7 +13,12 @@ import pytest
 
 import decoy_engine.plan as plan_module
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
-from decoy_engine.contracts.column_shape import ColumnShape, source_format_for
+from decoy_engine.contracts.column_shape import (
+    ColumnShape,
+    SourceFacts,
+    build_source_facts,
+    source_format_for,
+)
 from decoy_engine.execution._chunked_input import fixed_schema_chunks_from_resident
 from decoy_engine.execution.pipeline._routing_facts import build_routing_facts
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
@@ -80,13 +85,15 @@ def test_csv_descriptor_with_resident_table_classifies_by_schema(
     arrow_type: pa.DataType, shape: ColumnShape
 ) -> None:
     schemas = {"t": pa.schema([("d", arrow_type)])}
-    got = build_column_shapes(_config(), source_schemas=schemas, resident_tables={"t"})
+    got = build_column_shapes(_config(), sources=build_source_facts(caller=schemas))
     assert got == {("t", "d"): shape}
 
 
 def test_csv_descriptor_read_from_a_file_is_text() -> None:
     schemas = {"t": pa.schema([("d", pa.int64())])}
-    assert build_column_shapes(_config(), source_schemas=schemas) == {("t", "d"): S.TEXT}
+    assert build_column_shapes(_config(), sources=SourceFacts(schemas=schemas)) == {
+        ("t", "d"): S.TEXT
+    }
 
 
 def test_csv_file_profile_is_text_and_a_supplied_table_is_not(tmp_path: Path) -> None:
@@ -98,22 +105,60 @@ def test_csv_file_profile_is_text_and_a_supplied_table_is_not(tmp_path: Path) ->
     assert _shape(profile_source(cfg, seed=7, supplied_sources={"t": ints})) is not S.TEXT
 
 
-def test_pandas_arrow_and_chunked_routes_agree(
-    tmp_path: Path, compiled_profiles: list[Profile]
-) -> None:
+@pytest.fixture
+def compiled_plans(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
+    """Every plan each route compiles, keyed by the module that called `compile_plan`."""
+    import decoy_engine.execution.native._plan as native_plan
+
+    seen: dict[str, list[Any]] = {"plan": [], "native": []}
+
+    def spy(key: str, original: Any) -> Any:
+        def call(config: dict[str, Any], profile: Profile, **kw: Any) -> Any:
+            plan = original(config, profile, **kw)
+            seen[key].append(plan)
+            return plan
+
+        return call
+
+    monkeypatch.setattr(plan_module, "compile_plan", spy("plan", plan_module.compile_plan))
+    monkeypatch.setattr(native_plan, "compile_plan", spy("native", native_plan.compile_plan))
+    return seen
+
+
+def _plan_shapes(plan: Any) -> list[tuple[str, str, ColumnShape]]:
+    return [(c.table, c.column, c.shape) for c in plan.column_shapes]
+
+
+def _csv(tmp_path: Path) -> Path:
     path = tmp_path / "t.csv"
     path.write_text("d\n2024-01-15\n2024-02-03\n", encoding="utf-8")
-    cfg = _config(str(path))
-    facts = build_routing_facts(
+    return path
+
+
+def _facts(cfg: dict[str, Any], tables: dict[str, Any], **kw: Any) -> Any:
+    return build_routing_facts(
         cfg,
-        {"t": DATES},
+        tables,
         registry=get_default_registry(),
-        source_loader_schemas=None,
+        source_loader_schemas=kw.get("loader"),
         engine_version="t",
         base_dir=None,
         instance_default_locale=None,
     )
-    plan_shape = [c.shape for c in facts.plan.column_shapes]
+
+
+# One entry per route. Each returns the plans that route compiled for the same input.
+def _full_frame(cfg: dict[str, Any], plans: dict[str, list[Any]]) -> list[Any]:
+    return [_facts(cfg, {"t": DATES}).plan]
+
+
+def _snapshot(cfg: dict[str, Any], plans: dict[str, list[Any]]) -> list[Any]:
+    from decoy_engine.execution.physical._snapshot import capture_physical_plan_inputs
+
+    return [capture_physical_plan_inputs(cfg, {"t": DATES}, engine_version="t").plan]
+
+
+def _chunked(cfg: dict[str, Any], plans: dict[str, list[Any]]) -> list[Any]:
     list(
         run_mask_pipeline_chunked(
             cfg,
@@ -124,7 +169,10 @@ def test_pandas_arrow_and_chunked_routes_agree(
             key_provider=key_provider(),
         )
     )
-    oracle = _shape(compiled_profiles[-1])
+    return plans["plan"]
+
+
+def _native_chunked(cfg: dict[str, Any], plans: dict[str, list[Any]]) -> list[Any]:
     list(
         run_mask_chunked(
             cfg,
@@ -134,6 +182,47 @@ def test_pandas_arrow_and_chunked_routes_agree(
             key_provider=key_provider(),
         )
     )
-    native = _shape(compiled_profiles[-1])
-    assert plan_shape == [S.DATE]
-    assert oracle is native is S.DATE
+    return [*plans["plan"], *plans["native"]]
+
+
+ROUTES = {
+    "full_frame": _full_frame,
+    "snapshot": _snapshot,
+    "chunked": _chunked,
+    "native_chunked": _native_chunked,
+}
+
+
+@pytest.mark.parametrize("route", sorted(ROUTES))
+def test_every_route_shapes_a_resident_typed_table_by_its_schema(
+    route: str, tmp_path: Path, compiled_plans: dict[str, list[Any]]
+) -> None:
+    """A csv descriptor plus a resident date table: the same `column_shapes` on every route,
+    never `text` from the descriptor."""
+    cfg = _config(str(_csv(tmp_path)))
+    got = ROUTES[route](cfg, compiled_plans)
+    assert got, route
+    for plan in got:
+        assert _plan_shapes(plan) == [("t", "d", S.DATE)], route
+
+
+def test_routes_agree_on_the_serialized_shapes(
+    tmp_path: Path, compiled_plans: dict[str, list[Any]]
+) -> None:
+    from decoy_engine.plan import plan_to_yaml
+
+    cfg = _config(str(_csv(tmp_path)))
+    shapes = set()
+    for route in ROUTES.values():
+        compiled_plans["plan"].clear()
+        compiled_plans["native"].clear()
+        for plan in route(cfg, compiled_plans):
+            shapes.add(plan_to_yaml(plan).split("column_shapes:")[1].split("\n\n")[0])
+    assert len(shapes) == 1, sorted(ROUTES)
+
+
+def test_loader_table_is_resident_when_a_csv_descriptor_exists(tmp_path: Path) -> None:
+    """A typed table a loader supplies is resident, so a csv descriptor does not make it text."""
+    cfg = _config(str(_csv(tmp_path)))
+    plan = _facts(cfg, {}, loader={"t": DATES.schema}).plan
+    assert _plan_shapes(plan) == [("t", "d", S.DATE)]

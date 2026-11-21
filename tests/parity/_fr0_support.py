@@ -11,6 +11,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import _plan_entry
 from decoy_engine.generation._streamed import GenerationResult, run_generation
 from decoy_engine.plan import compile_plan
@@ -19,7 +20,7 @@ from tests.parity._f0_canonical import table_fingerprint
 
 
 def plan_of(cfg: dict[str, Any]) -> Any:
-    return compile_plan(cfg, fx._profile(), decoy_engine_version="fr0")
+    return compile_plan(cfg, fx._profile(), decoy_engine_version="fr0", sources=NO_SOURCES)
 
 
 def prepared_config(cfg: dict[str, Any]) -> dict[str, Any]:

@@ -20,6 +20,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_profile import first_chunk_profile
 from decoy_engine.execution.native import _chunked_entry, _dispatch
@@ -209,7 +210,9 @@ def _first_chunk() -> pa.Table:
 
 def _seed_for(config: dict[str, Any]) -> Any:
     profile = first_chunk_profile(_first_chunk(), table=TABLE, engine_version=ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     table_seed = next(ts for (name, ts) in plan.seed_envelope.per_table if name == TABLE)
     return profile, dict(table_seed.per_column)
 
@@ -299,7 +302,9 @@ def test_the_two_stage_b_consumers_agree_on_the_source_type(
     config = make_config([_nd(), passthrough("p")])
     table = _typed_source(typ)
     profile = first_chunk_profile(table, table=TABLE, engine_version=ENGINE_VERSION)
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version=ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+    )
     seeds = dict(next(ts for (n, ts) in plan.seed_envelope.per_table if n == TABLE).per_column)
     prepared = "c" in prepare_chunked_categoricals(seeds, table.schema)
     _run, ev, oracle_calls = _run_typed(typ, monkeypatch)

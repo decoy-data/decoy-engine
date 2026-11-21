@@ -42,6 +42,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import check_chunked_compatibility, concat_masked_chunks
 from decoy_engine.execution._chunked_bucket_perturb import (
     bucket_perturb_conditional_failures,
@@ -801,7 +802,9 @@ class TestAdmissionBoundary:
         cfg = _config(tmp_path, columns)
         table = pa.table({"aaa": pa.array(["x"]), "dcol": pa.array(["2024-01-15"])})
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg, graph = get_default_registry(), RelationshipGraph(edges=(), ordering=())
         reject_bucket_perturb_missing_namespace(plan, reg, graph, table="records")
         edited = _strip_namespace(plan, "records", "dcol")
@@ -964,7 +967,9 @@ class TestRegistryLoadBearing:
             }
         )
         profile = first_chunk_profile(table, table="records", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())
         assert bucket_perturb_source_columns(plan, reg, graph, table="records") == ["d"]
@@ -1018,7 +1023,9 @@ class TestRegistryLoadBearing:
         cfg = _validated_dump(cfg)
         profile = profile_source(cfg, seed=_SEED)
         plan = _strip_namespace(
-            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION), "b", "e"
+            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES),
+            "b",
+            "e",
         )
         reg = get_default_registry()
         graph = RelationshipGraph(edges=(), ordering=())

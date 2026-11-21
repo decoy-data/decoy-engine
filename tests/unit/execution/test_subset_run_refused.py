@@ -18,6 +18,7 @@ import pytest
 import decoy_engine
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution import run_job_with_governor, run_pipeline_isolated
 from decoy_engine.plan import compile_plan
@@ -176,7 +177,7 @@ def test_refusal_text_is_fixed(tmp_path: Path) -> None:
     texts = []
     for c in (cfg, renamed):
         with pytest.raises(PipelineValidationError) as ei:
-            compile_plan(c, profile_source(c), decoy_engine_version="t")
+            compile_plan(c, profile_source(c), decoy_engine_version="t", sources=NO_SOURCES)
         texts.append(str(ei.value))
         shown = str(ei.value) + repr(ei.value)
         for leak in ("customers", "orders", str(tmp_path)):
@@ -291,7 +292,7 @@ def test_native_or_oracle_chunked_refuses_at_call_without_pulling(tmp_path: Path
 def test_compile_plan_refuses_subset(tmp_path: Path) -> None:
     cfg = _dump(tmp_path, subset=True)
     with pytest.raises(PipelineValidationError) as ei:
-        compile_plan(cfg, profile_source(cfg), decoy_engine_version="t")
+        compile_plan(cfg, profile_source(cfg), decoy_engine_version="t", sources=NO_SOURCES)
     _assert_refusal(ei.value)
     est = decoy_engine.estimate_job(cfg, tmp_path)
     assert est.priceable is False
@@ -327,7 +328,7 @@ def test_no_subset_runs_unchanged(tmp_path: Path) -> None:
             )
         )
         assert rows == 100
-    plan = compile_plan(cfg, profile_source(cfg), decoy_engine_version="t")
+    plan = compile_plan(cfg, profile_source(cfg), decoy_engine_version="t", sources=NO_SOURCES)
     assert plan is not None
     out = run_pipeline_isolated(
         cfg,

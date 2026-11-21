@@ -22,6 +22,7 @@ import pytest
 
 from decoy_engine import run_pipeline, unmask_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import ExecutionError
 
 # A vault writer goes through the internal entry: the public one refuses it (B-6 B0).
@@ -429,7 +430,9 @@ class TestCompileChecks:
             table="accounts",
             engine_version=_ENGINE_VERSION,
         )
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         assert "vault_columns" in plan.plan_compile.checks_passed
 
     def test_pydantic_accepts_vault_field(self):

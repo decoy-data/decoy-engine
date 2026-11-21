@@ -15,6 +15,7 @@ import json
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.statistical import (
     StatisticalSpecError,
     load_spec,
@@ -742,7 +743,7 @@ class TestGenerateTablesIntegration:
         from decoy_engine.plan import PlanCompileError
 
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+            compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert exc.value.code == "generate_column_forward_reference"
 
 

@@ -21,6 +21,7 @@ import pytest
 
 from decoy_engine import reasons
 from decoy_engine.context import make_key_resolver
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._admission import classify_plan
 from decoy_engine.generation._plan_entry import generate_tables
@@ -80,7 +81,7 @@ def _config(
 
 
 def _plan(cfg: dict[str, Any]) -> Any:
-    return compile_plan(cfg, empty_profile(), decoy_engine_version="test")
+    return compile_plan(cfg, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _run(plan: Any, label: str | None = None) -> tuple[list[Any], list[Any]]:

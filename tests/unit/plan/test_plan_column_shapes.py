@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
 from decoy_engine.plan import PlanCompileError, compile_plan, plan_from_yaml, plan_to_yaml
 from decoy_engine.plan._compile import PLAN_VERSION
 from decoy_engine.profile._source import profile_source
@@ -22,7 +22,9 @@ S = ColumnShape
 def _compile(tmp_path: Path, columns: list[dict[str, Any]]) -> Any:
     src = write_csv(tmp_path / "s.csv", ["d", "n"], [["2024-01-15", "42"], ["2024-02-03", "7"]])
     cfg = validate(config(columns, source_path=src))
-    return compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t")
+    return compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
+    )
 
 
 def _shift(**pc: Any) -> dict[str, Any]:

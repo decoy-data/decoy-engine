@@ -15,6 +15,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import RowErrorsFailedError, ValidatorFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
 from decoy_engine.generation.pool import PoolCache
@@ -620,7 +621,9 @@ def test_veto_sets_report_exactly_their_columns(tmp_path: Path) -> None:
         }
     )
     cfg, _ = mt.build_job(tmp_path, {"t": (cols, src)})
-    plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="x")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=42), decoy_engine_version="x", sources=NO_SOURCES
+    )
     # Unkeyed shuffle draws from the mask key, so nothing is held whole as unseeded.
     assert pmt.unseeded_random_nodes(plan) == ()
 
@@ -686,7 +689,9 @@ def test_two_calls_of_every_repeatable_fixture_agree_and_unseeded_ones_differ(
         workdir = tmp_path / key.replace(":", "_")
         workdir.mkdir()
         cfg, _ = mt.build_job(workdir, {"t": (columns, table)})
-        plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="x")
+        plan = compile_plan(
+            cfg, profile_source(cfg, seed=42), decoy_engine_version="x", sources=NO_SOURCES
+        )
         reported = {col for _t, col, _s in pmt.unseeded_random_nodes(plan)}
         deferred = {col for _t, col, _s in pmt.position_keyed_deferred_nodes(plan)}
         assert not reported & deferred, "a column cannot be both fresh-generator and seeded"

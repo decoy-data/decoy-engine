@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from decoy_engine.config import Dismissal, PipelineConfig, PostScanConfig, PreScanConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.plan._serialize import plan_to_yaml
 from decoy_engine.profile._source import profile_source
@@ -67,7 +68,9 @@ def _raw(tmp_path: Path, **extra: Any) -> dict[str, Any]:
 
 def _compile(raw: dict[str, Any]) -> Any:
     cfg = PipelineConfig.model_validate(raw).model_dump()
-    return compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture")
+    return compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="legacy-fixture", sources=NO_SOURCES
+    )
 
 
 def _hash(tmp_path: Path, **extra: Any) -> str:

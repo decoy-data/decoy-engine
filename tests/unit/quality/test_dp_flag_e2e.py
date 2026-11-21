@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan._checks_dp import verify_dp_snapshots
@@ -251,7 +252,9 @@ class TestFlagCarrierGeneratesRealBoolEndToEnd:
         tokens = {e["value"] for e in snap["columns"]["is_active"]["stats"]["top_values"]}
         assert tokens == {"true", "false"}  # both categories survived thresholding
         path = _write(tmp_path, "flag_gen_both.json", snap)
-        plan = compile_plan(_cfg_for(path), _profile(), decoy_engine_version="test")
+        plan = compile_plan(
+            _cfg_for(path), _profile(), decoy_engine_version="test", sources=NO_SOURCES
+        )
         out = generate_tables(plan)
         values = out["t"]["is_active"].to_pylist()
         assert len(values) == 5
@@ -280,7 +283,9 @@ class TestFlagCarrierGeneratesRealBoolEndToEnd:
         tokens = {e["value"] for e in snap["columns"]["is_active"]["stats"]["top_values"]}
         assert tokens == {"true"}
         path = _write(tmp_path, "flag_gen_one.json", snap)
-        plan = compile_plan(_cfg_for(path), _profile(), decoy_engine_version="test")
+        plan = compile_plan(
+            _cfg_for(path), _profile(), decoy_engine_version="test", sources=NO_SOURCES
+        )
         out = generate_tables(plan)
         values = out["t"]["is_active"].to_pylist()
         assert len(values) == 5
@@ -313,7 +318,7 @@ class TestFlagCarrierGeneratesRealBoolEndToEnd:
             ],
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, _profile(), decoy_engine_version="test")
+            compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert exc.value.code == "statistical_flag_requires_dp_declaration"
 
     @pytest.mark.dp_certified
@@ -349,7 +354,7 @@ class TestFlagCarrierGeneratesRealBoolEndToEnd:
             ],
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, _profile(), decoy_engine_version="test")
+            compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert exc.value.code == "statistical_flag_requires_dp_declaration"
 
 

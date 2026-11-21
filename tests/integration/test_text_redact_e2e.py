@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import PandasExecutionAdapter
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
@@ -151,7 +152,7 @@ def _run_text_redact(provider_config: dict | None, notes: list[str]) -> list:
     }
     df = pd.DataFrame({"clinical_notes": notes})
     profile = _profile_one(df, "notes")
-    plan = compile_plan(config, profile, decoy_engine_version=_PLAN_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=_PLAN_VERSION, sources=NO_SOURCES)
     ns_registry = build_namespace_registry(config, profile)
     result = PandasExecutionAdapter().run(
         plan,

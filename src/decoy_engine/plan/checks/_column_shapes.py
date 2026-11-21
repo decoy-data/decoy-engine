@@ -9,7 +9,7 @@ taken before a format edit cannot override the config.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine._nested_json import nested_children
@@ -17,6 +17,7 @@ from decoy_engine.contracts.column_shape import (
     TEXT_SOURCE_FORMATS,
     ColumnShape,
     ColumnShapes,
+    SourceFacts,
     classify_column,
     declared_shape,
     source_format_for,
@@ -82,17 +83,16 @@ def build_column_shapes(
     config: Mapping[str, Any],
     *,
     profile: Profile | None = None,
-    source_schemas: Mapping[str, pa.Schema] | None = None,
-    resident_tables: Collection[str] = (),
+    sources: SourceFacts,
 ) -> ColumnShapes:
     """``(table, column) -> shape`` for every column under a shape-reading strategy.
 
-    ``resident_tables`` names the tables the caller supplied in memory: those are shaped by their
-    own schema, never by a config descriptor's file format."""
+    ``sources`` names the tables the caller supplied in memory: those are shaped by their own
+    schema, never by a config descriptor's file format."""
     out: dict[tuple[str, str], ColumnShape] = {}
     for table, col in shape_reading_columns(config):
         name = col["name"]
-        fmt = source_format_for(config.get("sources"), table, resident=resident_tables)
+        fmt = source_format_for(config.get("sources"), table, resident=sources.resident)
         if col.get("logical_type") is not None:
             shape = declared_shape(
                 logical_type=col["logical_type"], parse_format=col.get("parse_format")
@@ -100,8 +100,13 @@ def build_column_shapes(
         elif col.get("strategy") == "nested" or fmt in TEXT_SOURCE_FORMATS:
             shape = ColumnShape.TEXT
         else:
-            shape = _profiled(profile, table, name)
-            if shape is ColumnShape.UNKNOWN:
-                shape = _from_schema(source_schemas, table, name, fmt)
+            # A resident table's own schema outranks the profile, which may have read a
+            # descriptor file for the same table; any other table is read profile first.
+            observed = _profiled(profile, table, name)
+            from_schema = _from_schema(sources.schemas, table, name, fmt)
+            first, second = (
+                (from_schema, observed) if table in sources.resident else (observed, from_schema)
+            )
+            shape = second if first is ColumnShape.UNKNOWN else first
         out[(table, name)] = shape
     return dict(sorted(out.items()))

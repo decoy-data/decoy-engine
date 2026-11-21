@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._runner import WorkNode, build_work_list
 from decoy_engine.execution.native._requirements import (
     NodeRequirements,
@@ -202,7 +203,7 @@ def test_compiled_plan_nodes_all_resolve() -> None:
         ],
     }
     profile = _profile()
-    plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     for node in build_work_list(plan, get_default_registry()):
         req = requirements_for(node, plan=plan, profile=profile)
         assert isinstance(req, NodeRequirements)

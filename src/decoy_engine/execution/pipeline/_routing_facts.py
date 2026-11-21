@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine.config import classify_table_kinds
+from decoy_engine.contracts.column_shape import source_facts_of
 from decoy_engine.execution import _guards
 from decoy_engine.plan._seed import _normalize_job_seed_int
 from decoy_engine.profile import DeclarationRequest
@@ -102,8 +103,7 @@ def build_routing_facts(
         instance_default_locale=instance_default_locale,
         # A source-loader table has no descriptor and no profile entry: its schema is the only
         # place its column shapes come from.
-        source_schemas={**schemas, **(source_loader_schemas or {})},
-        resident_tables=caller_sources,
+        sources=source_facts_of(caller_sources, source_loader_schemas),
     )
     ns_registry = build_namespace_registry(config, profile)
     if profile.relationships:

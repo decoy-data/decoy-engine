@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._serialize import plan_from_yaml, plan_to_yaml
@@ -74,7 +75,7 @@ def _compiled_dp_plan(tmp_path, *, epsilon: float = 5.0, delta: float = 1e-6):
             }
         ],
     }
-    return compile_plan(cfg, _profile(), decoy_engine_version="test")
+    return compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _compiled_dp_plan_two_snapshots(tmp_path, *, epsilon: float = 2.0, delta: float = 1e-6):
@@ -97,7 +98,7 @@ def _compiled_dp_plan_two_snapshots(tmp_path, *, epsilon: float = 2.0, delta: fl
             }
         ],
     }
-    return compile_plan(cfg, _profile(), decoy_engine_version="test")
+    return compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 @pytest.mark.dp_certified
@@ -322,7 +323,7 @@ def test_plan_from_yaml_without_generation_block_round_trips_none(tmp_path):
     all on the wire (guide section 4.7); it must deserialize back to
     `generation=None`, not an empty/default GenerationPlan."""
     cfg = {"global_settings": {"seed": 1}, "tables": []}
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert plan.generation is None
 
     reloaded = plan_from_yaml(plan_to_yaml(plan))

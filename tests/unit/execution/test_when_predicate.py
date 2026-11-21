@@ -16,6 +16,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._strategies._redact import RedactHandler
 from decoy_engine.execution._when_gate import run_with_when_gate
@@ -297,5 +298,5 @@ class TestCompileTimeRejection:
             "namespaces": {},
         }
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(config, profile, decoy_engine_version="0.1.0")
+            compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert exc.value.code == "when_with_coherent_with_unsupported"

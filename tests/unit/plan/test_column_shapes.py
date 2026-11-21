@@ -7,7 +7,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape, SourceFacts
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
 
@@ -58,11 +58,11 @@ def _shift(name: str = "d", **extra: Any) -> dict[str, Any]:
 
 def test_only_columns_under_a_shape_reading_strategy_get_a_shape() -> None:
     cfg = _cfg(_shift(), {"name": "h", "strategy": "hash", "namespace": "n"})
-    assert set(build_column_shapes(cfg)) == {("t", "d")}
+    assert set(build_column_shapes(cfg, sources=NO_SOURCES)) == {("t", "d")}
 
 
 def test_config_only_with_no_facts_is_unknown() -> None:
-    assert build_column_shapes(_cfg(_shift())) == {("t", "d"): S.UNKNOWN}
+    assert build_column_shapes(_cfg(_shift()), sources=NO_SOURCES) == {("t", "d"): S.UNKNOWN}
 
 
 def test_config_facts_override_observed_shape() -> None:
@@ -73,19 +73,23 @@ def test_config_facts_override_observed_shape() -> None:
         "strategy": "nested",
         "provider_config": {"strategy": "date_shift", "target": "$.a"},
     }
-    got = build_column_shapes(_cfg(declared, nested), profile=_profile(d=S.TEXT, doc=S.DATE))
+    got = build_column_shapes(
+        _cfg(declared, nested), profile=_profile(d=S.TEXT, doc=S.DATE), sources=NO_SOURCES
+    )
     assert got == {("t", "d"): S.DATE, ("t", "doc"): S.TEXT}
 
 
 def test_text_format_beats_a_stale_profile() -> None:
-    got = build_column_shapes(_cfg(_shift(), fmt="csv"), profile=_profile(d=S.DATE))
+    got = build_column_shapes(
+        _cfg(_shift(), fmt="csv"), profile=_profile(d=S.DATE), sources=NO_SOURCES
+    )
     assert got == {("t", "d"): S.TEXT}
 
 
 def test_observed_shape_used_directly() -> None:
     # The profile's value is already a shape: it is not passed back through the Arrow classifier,
     # which would call it `other`.
-    got = build_column_shapes(_cfg(_shift()), profile=_profile(d=S.DATE))
+    got = build_column_shapes(_cfg(_shift()), profile=_profile(d=S.DATE), sources=NO_SOURCES)
     assert got == {("t", "d"): S.DATE}
 
 
@@ -93,20 +97,24 @@ def test_loader_table_shape_from_loader_schema() -> None:
     # A source-loader table has no descriptor and no profile entry.
     schemas = {"t": pa.schema([("d", pa.date32())])}
     got = build_column_shapes(
-        _cfg(_shift()), profile=_profile(table="other"), source_schemas=schemas
+        _cfg(_shift()), profile=_profile(table="other"), sources=SourceFacts(schemas=schemas)
     )
     assert got == {("t", "d"): S.DATE}
 
 
 def test_profile_unknown_falls_through_to_the_schema() -> None:
     schemas = {"t": pa.schema([("d", pa.timestamp("us"))])}
-    got = build_column_shapes(_cfg(_shift()), profile=_profile(d=S.UNKNOWN), source_schemas=schemas)
+    got = build_column_shapes(
+        _cfg(_shift()), profile=_profile(d=S.UNKNOWN), sources=SourceFacts(schemas=schemas)
+    )
     assert got == {("t", "d"): S.TIMESTAMP_NAIVE}
 
 
 def test_schema_without_the_column_is_unknown() -> None:
     schemas = {"t": pa.schema([("x", pa.date32())])}
-    assert build_column_shapes(_cfg(_shift()), source_schemas=schemas) == {("t", "d"): S.UNKNOWN}
+    assert build_column_shapes(_cfg(_shift()), sources=SourceFacts(schemas=schemas)) == {
+        ("t", "d"): S.UNKNOWN
+    }
 
 
 def test_result_is_sorted_by_table_then_column() -> None:
@@ -116,13 +124,19 @@ def test_result_is_sorted_by_table_then_column() -> None:
             {"name": "a", "columns": [_shift("m")]},
         ]
     }
-    assert list(build_column_shapes(cfg)) == [("a", "m"), ("b", "a"), ("b", "z")]
+    assert list(build_column_shapes(cfg, sources=NO_SOURCES)) == [
+        ("a", "m"),
+        ("b", "a"),
+        ("b", "z"),
+    ]
 
 
 def test_odd_config_shapes_are_skipped() -> None:
-    assert build_column_shapes({}) == {}
-    assert build_column_shapes({"tables": "x"}) == {}
+    assert build_column_shapes({}, sources=NO_SOURCES) == {}
+    assert build_column_shapes({"tables": "x"}, sources=NO_SOURCES) == {}
     assert (
-        build_column_shapes({"tables": [1, {"columns": [None]}, {"name": "t", "columns": [3]}]})
+        build_column_shapes(
+            {"tables": [1, {"columns": [None]}, {"name": "t", "columns": [3]}]}, sources=NO_SOURCES
+        )
         == {}
     )

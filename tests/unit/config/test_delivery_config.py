@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from decoy_engine.config import DeliveryConfig, PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan._compile import compile_plan
 from decoy_engine.profile._source import profile_source
 
@@ -30,7 +31,9 @@ def _hash(tmp_path: Path, **extra: Any) -> str:
     raw["sources"]["p"]["path"] = str(tmp_path / "p.csv")
     raw.update(extra)
     cfg = PipelineConfig.model_validate(raw).model_dump()
-    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
+    )
     return str(plan.pipeline_config_hash)
 
 

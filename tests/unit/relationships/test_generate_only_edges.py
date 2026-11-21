@@ -18,6 +18,7 @@ import pytest
 
 from decoy_engine import route_summary, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution.capacity import estimate_job_capacity
 from decoy_engine.plan import compile_plan
 from decoy_engine.profile import Profile, Relationship
@@ -106,7 +107,9 @@ def _registry(config: dict[str, Any]):
 
 def test_at_e1_1_compile_plan_accepts_a_generate_only_edge() -> None:
     config = _gen_config([_rel("patients", "visits")])
-    plan = compile_plan(_normalized(config), _profile(config), decoy_engine_version=ENGINE)
+    plan = compile_plan(
+        _normalized(config), _profile(config), decoy_engine_version=ENGINE, sources=NO_SOURCES
+    )
     assert len(plan.relationships) == 1
 
 
@@ -183,7 +186,9 @@ def test_at_e1_5_derived_name_is_private_and_keyed_by_parent_key() -> None:
     assert derived not in registry.declared()
     assert registry.for_column("patients", ("patient_id",)) is None
     assert registry.for_column("visits", ("patient_id",)) is None
-    plan = compile_plan(_normalized(config), _profile(config), decoy_engine_version=ENGINE)
+    plan = compile_plan(
+        _normalized(config), _profile(config), decoy_engine_version=ENGINE, sources=NO_SOURCES
+    )
     assert derived not in {b.namespace for b in plan.namespaces}
     assert derived not in repr(plan)
 

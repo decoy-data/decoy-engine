@@ -47,6 +47,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import run_mask_pipeline_chunked
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._pandas_adapter import PandasExecutionAdapter
 from decoy_engine.plan import PlanCompileError, compile_plan
@@ -233,7 +234,9 @@ class TestByteParityWithRemapOrphans:
             profile_seed=None,
         )
 
-        full_plan = compile_plan(config, full_profile, decoy_engine_version=_ENGINE)
+        full_plan = compile_plan(
+            config, full_profile, decoy_engine_version=_ENGINE, sources=NO_SOURCES
+        )
         ns_reg = build_namespace_registry(config, full_profile)
         policy_lookup = check_orphan_fk_policy_completeness(config, full_profile.relationships)
         real_graph = build_relationship_graph(
@@ -916,7 +919,9 @@ class TestByteParityNonDefaultNamespace:
             profile_seed=None,
         )
 
-        full_plan = compile_plan(config, full_profile, decoy_engine_version=_ENGINE)
+        full_plan = compile_plan(
+            config, full_profile, decoy_engine_version=_ENGINE, sources=NO_SOURCES
+        )
         ns_reg = build_namespace_registry(config, full_profile)
         policy_lookup = check_orphan_fk_policy_completeness(config, full_profile.relationships)
         real_graph = build_relationship_graph(
@@ -1293,7 +1298,7 @@ def _byte_parity_check(
     )
 
     config = _fk_config(parent_dtype=dtype_label, child_dtype=dtype_label)
-    full_plan = compile_plan(config, full_profile, decoy_engine_version=_ENGINE)
+    full_plan = compile_plan(config, full_profile, decoy_engine_version=_ENGINE, sources=NO_SOURCES)
     ns_reg = build_namespace_registry(config, full_profile)
     policy_lookup = check_orphan_fk_policy_completeness(config, full_profile.relationships)
     real_graph = build_relationship_graph(

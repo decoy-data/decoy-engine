@@ -55,6 +55,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.detectors import Span
 from decoy_engine.execution._chunked import check_chunked_compatibility, concat_masked_chunks
 from decoy_engine.execution._chunked_fk import CHUNK_SAFE_STRATEGIES, NAMESPACE_REQUIRING_STRATEGIES
@@ -1062,7 +1063,9 @@ class TestSourceDtypeGate:
         from decoy_engine.relationships import RelationshipGraph
 
         profile = first_chunk_profile(table_data, table=table, engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         return plan, get_default_registry(), RelationshipGraph(edges=(), ordering=())
 
     def test_reject_wrapper_returns_on_string_raises_on_int(self, tmp_path) -> None:

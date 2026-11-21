@@ -8,6 +8,7 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine.config._pipeline import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from tests.unit._dps_helpers import empty_profile
@@ -36,7 +37,9 @@ def validate(tables: list[dict[str, Any]]) -> PipelineConfig:
 
 
 def run(tables: list[dict[str, Any]], seed: int = 4242) -> dict[str, pa.Table]:
-    plan = compile_plan(cfg(tables, seed), empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        cfg(tables, seed), empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     return generate_tables(plan)
 
 

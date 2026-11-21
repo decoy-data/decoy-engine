@@ -25,7 +25,6 @@ constant (S3 stamped 1; the F-series corrections bumped it to 2).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +50,7 @@ from decoy_engine.config import (
 # deterministic_hash to keyed HMAC-SHA256 via _formula_hash_keyed. Bumping
 # requires a release-notes line per done-definition.md.
 from decoy_engine.config._subset_run import refuse_unapplied_subset
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks import (
@@ -114,7 +114,7 @@ from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
 if TYPE_CHECKING:
-    import pyarrow as pa
+    from decoy_engine.contracts.column_shape import SourceFacts
 
 
 @entry_point
@@ -127,13 +127,12 @@ def compile_plan(
     file_access: FileAccess | None = None,
     base_dir: str | Path | None = None,
     instance_default_locale: Any = DEFERRED,
-    source_schemas: Mapping[str, pa.Schema] | None = None,
-    resident_tables: Collection[str] = (),
+    sources: SourceFacts,
 ) -> Plan:
     """Compile (config, profile, engine_version) into a frozen Plan.
 
     Args:
-        source_schemas: Arrow schema by table name; it shapes a column the profile has no entry for.
+        sources: the tables the caller supplied (schema, resident); required, `NO_SOURCES` if none.
         instance_default_locale: the locale a faker column without `locale` will generate in,
             when the caller knows it (`None` is Faker's en_US). The default leaves those
             columns to the check `run_generation` repeats with the real locale.
@@ -248,10 +247,8 @@ def compile_plan(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    column_shapes = build_column_shapes(
-        config, profile=profile, source_schemas=source_schemas, resident_tables=resident_tables
-    )
-    check_required_strategy_settings(config, column_shapes)
+    column_shapes = build_column_shapes(config, profile=profile, sources=sources)
+    check_required_strategy_settings(config, sources=sources, shapes=column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # Row 29 (HC-7, 2026-07-17): clinical free-text advisory. WARN-ONLY --
@@ -566,7 +563,7 @@ def run_config_only_checks(
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    check_required_strategy_settings(config)
+    check_required_strategy_settings(config, sources=NO_SOURCES)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
     # F06: declared parsing/casting contracts. Reported only when a config declares any, so a

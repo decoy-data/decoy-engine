@@ -45,6 +45,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _pandas_adapter, run_pipeline
 from decoy_engine.execution._adapter import ExecutionResult
 from decoy_engine.execution._unified_slice import QUALITY_METRICS_KEY
@@ -553,7 +554,7 @@ def test_passthrough_input_and_output_schema_are_resident_not_profile(tmp_path: 
     (flag_col,) = [c for c in profile.tables[0].columns if c.name == "flag"]
     assert flag_col.dtype == "int64"  # the profile's own (unused) type
 
-    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION)
+    plan = compile_plan(config, profile, decoy_engine_version=ENGINE_VERSION, sources=NO_SOURCES)
     registry = get_default_registry()
     inputs = build_live_physical_plan_inputs(
         config=config,

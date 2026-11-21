@@ -109,17 +109,15 @@ class PipelineRunContext:
     sink: TransactionalSink | None
     source_loader: Callable[[str], pa.Table] | None
     vault_writer: Any
-    # MG-5: platform-injected token vault for the `tokenize` strategy. Threaded
-    # only to the full-frame adapter (run_pipeline forces full-frame for a
-    # tokenize job). None for every non-tokenize run.
+    # MG-5: platform-injected token vault for the `tokenize` strategy. Threaded only to the
+    # full-frame adapter (run_pipeline forces full-frame for a tokenize job); else None.
     token_vault_writer: Any
     derive_key: Any
     instance_default_locale: str | None
     provider_snapshot: Mapping[str, Callable[[Faker], Any]] | None
-    # Knobs.
+    # Knobs. `execution_mode="stream"` was translated to "auto" at the entry; `stream_required`
+    # is the one place the requirement survives (read by `decide_route` only).
     execution_mode: str
-    # `execution_mode="stream"` was translated to "auto" at the entry; this is the one place the
-    # requirement survives (read by `decide_route` only).
     stream_required: bool
     resolved_substrate: str
     fpe_chunk_count: int
@@ -254,12 +252,14 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
-    # Required strategy settings (a namespace, a date_shift format) are config-only too, so a
-    # column missing one is refused before the source is profiled or read, with the code
-    # `compile_plan` raises later.
+    # Required strategy settings (a namespace, a date_shift format) are config-only too: a column
+    # missing one is refused before the source is read, with the code `compile_plan` raises.
+    from decoy_engine.contracts.column_shape import source_facts_of as facts_of_tables
     from decoy_engine.plan.checks import check_required_strategy_settings
 
-    check_required_strategy_settings(config)
+    check_required_strategy_settings(
+        config, sources=facts_of_tables(sources, source_loader_schemas)
+    )
 
     # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
     # substrate or count knob fails at submit time with a typed error. Construction is cheap and

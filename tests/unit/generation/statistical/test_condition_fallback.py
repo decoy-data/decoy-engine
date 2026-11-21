@@ -18,6 +18,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.statistical import load_spec, sample_column
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
@@ -85,7 +86,7 @@ def _digest(tables: dict[str, Any]) -> str:
 
 
 def _generate(config: dict[str, Any], sink: Any = None) -> dict[str, Any]:
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     return generate_tables(plan, on_warning=sink)
 
 
