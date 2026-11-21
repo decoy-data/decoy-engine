@@ -56,7 +56,7 @@ def test_nested_child_needs_the_format() -> None:
     }
     with pytest.raises(PlanCompileError) as exc:
         check_required_strategy_settings(
-            {"tables": [{"name": "t", "columns": [entry]}]}, {}, sources=NO_SOURCES
+            {"tables": [{"name": "t", "columns": [entry]}]}, shapes={}, sources=NO_SOURCES
         )
     assert exc.value.code == CODE
 
@@ -71,11 +71,13 @@ def test_config_only_defers_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sr, "SHAPE_REQUIREMENTS_BY_STRATEGY", {"date_shift": admitting})
     check_required_strategy_settings(_cfg(), sources=NO_SOURCES)  # config-only: unknown is deferred
     check_required_strategy_settings(
-        _cfg(), {("t", "d"): S.DATE}, sources=NO_SOURCES
+        _cfg(), shapes={("t", "d"): S.DATE}, sources=NO_SOURCES
     )  # a typed date runs bare
     for refused in (S.UNKNOWN, S.TEXT, S.INTEGER):
         with pytest.raises(PlanCompileError) as exc:
-            check_required_strategy_settings(_cfg(), {("t", "d"): refused}, sources=NO_SOURCES)
+            check_required_strategy_settings(
+                _cfg(), shapes={("t", "d"): refused}, sources=NO_SOURCES
+            )
         assert exc.value.code == CODE
 
 

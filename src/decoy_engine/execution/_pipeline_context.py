@@ -252,15 +252,6 @@ def build_run_context(
             quarantine_runtime=quarantine_runtime,
         )
 
-    # Required strategy settings (a namespace, a date_shift format) are config-only too: a column
-    # missing one is refused before the source is read, with the code `compile_plan` raises.
-    from decoy_engine.contracts.column_shape import source_facts_of as facts_of_tables
-    from decoy_engine.plan.checks import check_required_strategy_settings
-
-    check_required_strategy_settings(
-        config, sources=facts_of_tables(sources, source_loader_schemas)
-    )
-
     # Adapter selection runs up front, before any profiling or plan compilation, so an invalid
     # substrate or count knob fails at submit time with a typed error. Construction is cheap and
     # side-effect free for both adapters, so pure-generate jobs (which never use it) lose nothing.
@@ -299,6 +290,15 @@ def build_run_context(
         from decoy_engine.execution._strategies._tokenize import require_derivation_scope
 
         require_derivation_scope(token_vault_writer)
+
+    # Required strategy settings (a namespace, a date_shift format) are config-only too: after the
+    # vault refusal and before the source is read, a missing one is refused as `compile_plan` does.
+    from decoy_engine.contracts.column_shape import source_facts_of as facts_of_tables
+    from decoy_engine.plan.checks import check_required_strategy_settings
+
+    check_required_strategy_settings(
+        config, sources=facts_of_tables(sources, source_loader_schemas)
+    )
 
     # None-normalize the skip list here (a mutable [] default would be shared across calls).
     skip = list(post_validation_skip) if post_validation_skip else []

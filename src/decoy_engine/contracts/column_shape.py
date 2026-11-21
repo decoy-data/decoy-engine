@@ -83,9 +83,10 @@ def build_source_facts(
     """The one builder of `SourceFacts`: tables the caller supplied in memory (``None`` when
     its schema is unknown, e.g. a chunk iterable with no chunks) and tables a source loader
     supplies with typed schemas. Both are resident."""
-    schemas = {n: s for n, s in caller.items() if s is not None}
-    schemas.update(loader or {})
-    return SourceFacts(schemas=schemas, resident=frozenset(caller) | frozenset(loader or ()))
+    known = {n: s for n, s in caller.items() if s is not None}
+    return SourceFacts(
+        schemas={**known, **(loader or {})}, resident=frozenset(caller) | frozenset(loader or ())
+    )
 
 
 def source_facts_of(

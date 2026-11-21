@@ -36,6 +36,7 @@ _CHILD = """
 import json, sys
 from decoy_engine.generation import generation_order
 from decoy_engine.generation._plan_entry import generate_tables_streamed
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from tests.unit._dps_helpers import empty_profile

@@ -49,6 +49,7 @@ def test_sources_is_a_required_keyword(fn: object) -> None:
 
 def test_every_call_site_passes_sources() -> None:
     assert _calls_without_sources(SRC) == []
+    assert _calls_without_sources(SRC.parents[1] / "scripts") == []
 
 
 def test_the_scan_flags_a_call_that_omits_it(tmp_path: Path) -> None:
