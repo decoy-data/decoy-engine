@@ -3,8 +3,10 @@
 # exhaustive = true: a new top-level package or module is red until it is placed here and in
 # the snapshot in tests/sentry/layout/test_import_layers.py. Each ignore line is a measured
 # back import that exists today; the list may only shrink (baseline import-layers.json).
-# Both sides of an ignore name a leaf module, never a package: import-linter exempts the whole
-# module edge, so an ignore on a package facade would let every later symbol through it.
+# In the tiers contract both sides of an ignore name a leaf module, never a package: import-linter
+# exempts the whole module edge, so an ignore on a package facade would let every later symbol
+# through it. The policy-direction contract at the end follows the same rule for the importer;
+# its imported side may be the forbidden package itself.
 
 [importlinter]
 root_package = decoy_engine
@@ -52,3 +54,55 @@ ignore_imports =
     decoy_engine.profiling.scan_set -> decoy_engine.execution._guards
     decoy_engine.telemetry._recorder -> decoy_engine.progress
     decoy_engine.telemetry._vocab -> decoy_engine.progress
+
+# Policy direction (R1, engine clean-architecture review 2026-11-21, "The layer sentry" rec. 3).
+# The tier order above is a measured order, so `connectors`, `io` and `fileaccess` sit below
+# `plan` and a new policy -> I/O import would pass it. This contract forbids those edges
+# outright. Every ignore is an edge that exists today (debt for QA and 1.x, not endorsed); the
+# list may only shrink. The importer is always a leaf module. The imported side is a package only
+# where the forbidden module is itself that package (`fileaccess`, `publication`).
+# Record: 10_Projects/decoy/records/2026-11-21-engine-clean-architecture-review.md.
+[importlinter:contract:policy-direction]
+name = policy packages do not import I/O or backends
+type = forbidden
+source_modules =
+    decoy_engine.plan
+    decoy_engine.config
+    decoy_engine.reasons
+    decoy_engine.contracts
+    decoy_engine.expressions
+    decoy_engine.relationships
+    decoy_engine.delivery
+    decoy_engine.determinism
+forbidden_modules =
+    decoy_engine.connectors
+    decoy_engine.io
+    decoy_engine.fileaccess
+    decoy_engine.publication
+    decoy_engine.vault
+    decoy_engine.unmask
+    decoy_engine.execution
+allow_indirect_imports = true
+ignore_imports =
+    # finding 1: strategy policy lives in execution
+    decoy_engine.plan._checks_bucketize -> decoy_engine.execution._strategies._bucketize
+    # finding 1: strategy policy lives in execution
+    decoy_engine.plan._checks_correctness -> decoy_engine.execution._errors
+    # finding 1: strategy policy lives in execution
+    decoy_engine.plan._checks_correctness -> decoy_engine.execution.out_of_core._mask
+    # finding 1: strategy policy lives in execution
+    decoy_engine.plan._checks_top_code -> decoy_engine.execution._strategies._top_code
+    # finding 1: strategy policy lives in execution
+    decoy_engine.plan._seed_envelope -> decoy_engine.execution._technique_class
+    # finding 8: plan compile reads files
+    decoy_engine.plan._compile -> decoy_engine.fileaccess
+    # finding 8: plan compile reads files
+    decoy_engine.plan._generation -> decoy_engine.fileaccess
+    # finding 8: plan compile reads files
+    decoy_engine.plan._serialize -> decoy_engine.fileaccess
+    # finding 8: plan compile reads files
+    decoy_engine.plan.checks._lookup_tables -> decoy_engine.fileaccess
+    # finding 8: plan compile reads files
+    decoy_engine.plan.validate._consolidator -> decoy_engine.fileaccess
+    # finding not numbered in the record; delivery resume reads publication
+    decoy_engine.delivery.resume._records -> decoy_engine.publication

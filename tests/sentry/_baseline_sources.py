@@ -7,6 +7,7 @@ generator share. Entries here are the X0a initial inventory; after that the ratc
 
 from __future__ import annotations
 
+import configparser
 import importlib.util
 import json
 import sys
@@ -106,10 +107,11 @@ def toml_keys(rel: str) -> Callable[[], set[str]]:
     return keys
 
 
-def import_layer_keys(rel: str, contract: str) -> Callable[[], set[str]]:
+def import_layer_keys(rel: str) -> Callable[[], set[str]]:
     """``<contract>::<importer> -> <imported>`` for each ignore line of an import-linter config.
 
-    Layer membership is not keyed here: it is the exact snapshot in ``test_import_layers.py``.
+    Each contract keeps its own namespace, so each ignore list shrinks on its own. Layer
+    membership is not keyed here: it is the exact snapshot in ``test_import_layers.py``.
     """
 
     def keys() -> set[str]:
@@ -120,8 +122,17 @@ def import_layer_keys(rel: str, contract: str) -> Callable[[], set[str]]:
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod  # dataclasses in the module look themselves up here
         spec.loader.exec_module(mod)
-        text = (ROOT / rel).read_text(encoding="utf-8")
-        return {f"{contract}::{key}" for key in mod.ignore_keys(text)}
+        parser = configparser.ConfigParser(strict=False, interpolation=None)
+        parser.read_string((ROOT / rel).read_text(encoding="utf-8"))
+        found: set[str] = set()
+        for section in parser.sections():
+            raw = parser.get(section, "ignore_imports", fallback="")
+            lines = "".join(f"    {ln}\n" for ln in raw.splitlines())
+            contract = section.removeprefix("importlinter:contract:")
+            found |= {
+                f"{contract}::{key}" for key in mod.ignore_keys(f"[c]\nignore_imports =\n{lines}")
+            }
+        return found
 
     return keys
 
@@ -247,7 +258,7 @@ SOURCES: tuple[Source, ...] = (
         "layout/_scoped_changes.py",
         in_code("layout/_scoped_changes.py", "SCOPED_EXCEPTIONS"),
     ),
-    Source("import-layers", ".importlinter", import_layer_keys(".importlinter", "layers")),
+    Source("import-layers", ".importlinter", import_layer_keys(".importlinter")),
     Source(
         "public-import-boundary",
         "test_public_import_boundary.py",
