@@ -176,10 +176,8 @@ def test_r6_mask_secret_file_errors() -> None:
 def test_r10_vault_read_errors() -> None:
     missing = _raises(lambda: load_vault("nope.dcyvault", b"12345678" * 4))
     assert isinstance(missing, VaultError)
-    assert _text(missing) == (
-        "[vault_unreadable] vault file 'nope.dcyvault' could not be read: "
-        "[Errno 2] No such file or directory: 'nope.dcyvault'"
-    )
+    # F09 E1: the OS error text (and its repeated path) is no longer appended.
+    assert _text(missing) == "[vault_unreadable] vault file 'nope.dcyvault' could not be read."
     Path("bad.dcyvault").write_bytes(b"junk")
     bad = _raises(lambda: load_vault("bad.dcyvault", b"12345678" * 4))
     assert (
