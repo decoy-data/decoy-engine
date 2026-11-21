@@ -1,7 +1,7 @@
 """ENGINE-THREADS-DEFAULT: a memory-capped isolated run keeps one thread when none is requested.
 
 The Rust shared pool is sized to the host's cores and its thread stacks count against RLIMIT_DATA.
-Kept apart from `test_native_threads_default.py`, which spawns an uncapped child.
+Kept apart from `test_default.py`, which spawns an uncapped child.
 """
 
 from __future__ import annotations

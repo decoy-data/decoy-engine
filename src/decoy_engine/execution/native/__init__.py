@@ -10,6 +10,7 @@ preserve exactly.
 
 from __future__ import annotations
 
+from decoy_engine.execution.native._chunked_entry import MAX_NATIVE_THREADS
 from decoy_engine.execution.native._dispatch import (
     NativeRouteEvidence,
     NodeRouteRecord,
@@ -18,6 +19,7 @@ from decoy_engine.execution.native._dispatch import (
 )
 
 __all__ = [
+    "MAX_NATIVE_THREADS",
     "NativeRouteEvidence",
     "NodeRouteRecord",
     "plan_native_route",

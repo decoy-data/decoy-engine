@@ -182,7 +182,7 @@ def native_threads_for_run(requested: int | None) -> RunThreads:
     """
     if requested is not None:
         return RunThreads(requested, "explicit")
-    from decoy_engine.execution.native._chunked_entry import MAX_NATIVE_THREADS
+    from decoy_engine.execution.native import MAX_NATIVE_THREADS
 
     try:
         usable = detect_usable_cpus()
@@ -195,9 +195,14 @@ def native_threads_for_run(requested: int | None) -> RunThreads:
 
 def _affinity_cpus() -> int:
     getaffinity = getattr(os, "sched_getaffinity", None)
-    if getaffinity is None:
-        return os.cpu_count() or 1
-    return len(getaffinity(0))
+    if getaffinity is not None:
+        return len(getaffinity(0))
+    # Python 3.13 on macOS and Windows: the process count honours `-X cpu_count` and
+    # PYTHON_CPU_COUNT, which the machine-wide `os.cpu_count()` ignores.
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    if callable(process_cpu_count):
+        return process_cpu_count() or 1
+    return os.cpu_count() or 1
 
 
 def _compute(fs_root: Path, affinity: int | None) -> int:

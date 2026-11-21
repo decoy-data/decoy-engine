@@ -113,7 +113,7 @@ def scrub(value: Any) -> Any:
 
 def _without_thread_record(metrics: dict[str, Any]) -> dict[str, Any]:
     """`metrics` minus `execution.native_threads` (ENGINE-THREADS-DEFAULT, pinned by
-    test_native_threads_default.py); the baselines predate it and run on one thread."""
+    native_threads/test_default.py); the baselines predate it and run on one thread."""
     execution = {k: v for k, v in metrics.get("execution", {}).items() if k != "native_threads"}
     return {**metrics, "execution": execution} if "execution" in metrics else metrics
 

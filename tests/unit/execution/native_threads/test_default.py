@@ -19,7 +19,7 @@ import pytest
 from decoy_engine import reasons
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.execution.native._chunked_entry import MAX_NATIVE_THREADS
+from decoy_engine.execution.native import MAX_NATIVE_THREADS
 from decoy_engine.execution.pipeline import _host
 from decoy_engine.profile._readers import LazySource
 from tests._declared_schema import declare_rest
@@ -328,14 +328,14 @@ print(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
 
 @pytest.mark.benchmark
-def test_out_of_core_rss_under_memory_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gate-time check: the default's peak RSS on the out-of-core route (256 MiB budget) is at
-    most 15% over the one-thread run, best of 3 each, on the same node."""
+def test_out_of_core_rss_overhead_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gate-time check: the default's peak RSS on the out-of-core route is at most 15% over the
+    one-thread run (median of 3 each, same node). It asserts that ratio, not an absolute limit."""
     import statistics
     import subprocess
     import sys
 
-    repo = Path(__file__).resolve().parents[3]
+    repo = Path(__file__).resolve().parents[4]
 
     def peak(mode: str) -> int:
         out = subprocess.run(  # noqa: S603
