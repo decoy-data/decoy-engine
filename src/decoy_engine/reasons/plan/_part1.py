@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "ALLOW_COLLISIONS_MODE_CONFLICT",
@@ -385,10 +384,10 @@ DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace.", since="1.26.0"
 )
 DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
-    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
+    "date_shift_requires_date_format", "Date shift requires date format.", since="1.32.0"
 )
 DATE_SHIFT_WINDOW_INVALID = _d(
-    "date_shift_window_invalid", "Date shift window invalid.", since=UNRELEASED
+    "date_shift_window_invalid", "Date shift window invalid.", since="1.32.0"
 )
 FPE_REQUIRES_NAMESPACE = _d("fpe_requires_namespace", "FPE requires namespace.", since="1.26.0")
 HASH_REQUIRES_NAMESPACE = _d("hash_requires_namespace", "Hash requires namespace.", since="1.26.0")

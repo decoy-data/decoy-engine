@@ -1,3 +1,0 @@
-### Added (publication stage liveness lock and marker, F26 E1, 2026-11-17)
-
-Every `publication` stage, on both POSIX policies, now holds `flock(LOCK_SH)` on its own directory from creation until it is bound, aborted or collected, and carries a `0600` `.decoy-publication-stage` marker (`decoy-publication-stage-v1:` plus the stage token). The marker stays in the bound unit as reserved metadata, outside the descriptor. A lock the filesystem refuses leaves the run unlocked with the unit unchanged; `EINTR` is retried. The descriptor helpers the stage, arena and later reclaim code share moved to a standard-library-only leaf, `fileaccess/_fdtree.py`, which imports without `fcntl`.

@@ -14,7 +14,7 @@ or work on the engine itself.
 
 ## Status
 
-The engine is at version 0.28.1. Each CLI release pins one exact engine version
+The engine is at version 0.28.2. Each CLI release pins one exact engine version
 (`decoy-engine==X.Y.Z`). The CLI 1.0.0 release is targeted for the end of December 2026. When it
 ships, the surfaces listed in [docs/frozen-surfaces.md](docs/frozen-surfaces.md) are frozen under
 the rules in [docs/compatibility-contract.md](docs/compatibility-contract.md). Until then they can
@@ -104,7 +104,7 @@ config = PipelineConfig.model_validate(config_dict).model_dump()
 sources = {"people": pacsv.read_csv("people.csv")}
 
 # 3. Run the pipeline: profile, compile, wire relationships, execute.
-result = run_pipeline(config, sources, engine_version="0.28.1")
+result = run_pipeline(config, sources, engine_version="0.28.2")
 
 # result.outputs["people"] is the masked pyarrow.Table.
 masked = result.outputs["people"]

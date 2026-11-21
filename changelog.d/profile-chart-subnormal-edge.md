@@ -1,3 +1,0 @@
-### Fixed (numeric profile chart on a subnormal edge, 24f-e2-fix, 2026-11-21)
-
-A numeric column whose range reaches a subnormal float (for example a maximum near 2e-313, or a column made only of values near 1e-316) made the profiler's 10-bin chart raise a `ValueError` from pandas or return no bins, so `distribution_snapshot_document` and `profile_columns` refused or mis-charted a legal column. The chart now falls back to the shared right-closed histogram (the same bins as `pd.cut`), which also charts `[-float_max, 0, float_max]` and edges near float max. Output for every other column is unchanged.

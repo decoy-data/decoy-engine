@@ -1,0 +1,1115 @@
+{
+  "entries": [
+    {
+      "code": "column_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Two columns in one table have the same name. List each column once.",
+      "symbol": "COLUMN_DUPLICATE"
+    },
+    {
+      "code": "generate_aggregate_input_not_numeric",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate per-parent aggregate reads a child column that is not numeric; give it a numeric output_type or aggregate a numeric column.",
+      "symbol": "GENERATE_AGGREGATE_INPUT_NOT_NUMERIC"
+    },
+    {
+      "code": "generate_aggregate_read_before_fill",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column reads a per-parent aggregate, which is filled only after every table exists.",
+      "symbol": "GENERATE_AGGREGATE_READ_BEFORE_FILL"
+    },
+    {
+      "code": "generate_fitted_reference_bounds_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
+      "symbol": "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT"
+    },
+    {
+      "code": "generate_parent_lookup_key_not_unique",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column reads a parent row through a column that is not a reference to a sequence key with no null_probability.",
+      "symbol": "GENERATE_PARENT_LOOKUP_KEY_NOT_UNIQUE"
+    },
+    {
+      "code": "generate_parent_lookup_self_reference",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column reads a parent row through a reference to its own table.",
+      "symbol": "GENERATE_PARENT_LOOKUP_SELF_REFERENCE"
+    },
+    {
+      "code": "generate_per_parent_bounds_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate reference column min_per_parent is greater than its max_per_parent.",
+      "symbol": "GENERATE_PER_PARENT_BOUNDS_CONFLICT"
+    },
+    {
+      "code": "generate_per_parent_infeasible",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+      "symbol": "GENERATE_PER_PARENT_INFEASIBLE"
+    },
+    {
+      "code": "generate_per_parent_null_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column null_probability cannot be combined with a per-parent option.",
+      "symbol": "GENERATE_PER_PARENT_NULL_CONFLICT"
+    },
+    {
+      "code": "generate_self_reference_key_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate self-reference column must name an earlier sequence column of its own table with no null_probability.",
+      "symbol": "GENERATE_SELF_REFERENCE_KEY_INVALID"
+    },
+    {
+      "code": "generate_self_reference_option_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate self-reference column takes distribution random and an optional max_per_parent only.",
+      "symbol": "GENERATE_SELF_REFERENCE_OPTION_UNSUPPORTED"
+    },
+    {
+      "code": "mask.text_mask_detector_unknown",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "A text_mask detector id is not one this field accepts.",
+      "symbol": "MASK_TEXT_MASK_DETECTOR_UNKNOWN"
+    },
+    {
+      "code": "mask.text_mask_strategy_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "A text_mask strategy cannot be applied to this detector.",
+      "symbol": "MASK_TEXT_MASK_STRATEGY_UNSUPPORTED"
+    },
+    {
+      "code": "table_duplicate",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "config",
+      "owner": "PipelineValidationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "configuration",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Two tables in one config have the same name. Declare each table once.",
+      "symbol": "TABLE_DUPLICATE"
+    },
+    {
+      "code": "date_shift_requires_date_format",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Date shift requires date format.",
+      "symbol": "DATE_SHIFT_REQUIRES_DATE_FORMAT"
+    },
+    {
+      "code": "date_shift_window_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Date shift window invalid.",
+      "symbol": "DATE_SHIFT_WINDOW_INVALID"
+    },
+    {
+      "code": "generate_faker_type_is_domain_provider",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column names a registry provider in faker_type; use type provider instead.",
+      "symbol": "GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER"
+    },
+    {
+      "code": "generate_provider_field_required",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column uses a composite provider without naming the field it takes.",
+      "symbol": "GENERATE_PROVIDER_FIELD_REQUIRED"
+    },
+    {
+      "code": "generate_provider_field_unexpected",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column sets field or group on a provider that has no fields.",
+      "symbol": "GENERATE_PROVIDER_FIELD_UNEXPECTED"
+    },
+    {
+      "code": "generate_provider_locale_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column asks for a locale the provider does not support.",
+      "symbol": "GENERATE_PROVIDER_LOCALE_UNSUPPORTED"
+    },
+    {
+      "code": "generate_provider_unknown",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column names a provider that is not in the registry.",
+      "symbol": "GENERATE_PROVIDER_UNKNOWN"
+    },
+    {
+      "code": "generate_provider_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PlanCompileError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column names a provider that generation cannot draw from.",
+      "symbol": "GENERATE_PROVIDER_UNSUPPORTED"
+    },
+    {
+      "code": "pinned_provider_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PinnedModeError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Provider columns are not available in pinned mode.",
+      "symbol": "PINNED_PROVIDER_UNSUPPORTED"
+    },
+    {
+      "code": "pinned_relational_option_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "plan",
+      "owner": "PinnedModeError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "configuration",
+          "phase": "compile",
+          "retry": "configuration_repair",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Pinned generation does not support this relational generate option.",
+      "symbol": "PINNED_RELATIONAL_OPTION_UNSUPPORTED"
+    },
+    {
+      "code": "numeric_bins_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "quality",
+      "owner": "DistributionSnapshotError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "verify",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Numeric bins invalid.",
+      "symbol": "NUMERIC_BINS_INVALID"
+    },
+    {
+      "code": "categorical_condition_column_unavailable",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate categorical column conditions on a column that has not been generated.",
+      "symbol": "CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE"
+    },
+    {
+      "code": "date_shift_requires_date_format",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "StrategyError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Date shift requires date format.",
+      "symbol": "DATE_SHIFT_REQUIRES_DATE_FORMAT"
+    },
+    {
+      "code": "generate_fitted_reference_bounds_conflict",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
+      "symbol": "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT"
+    },
+    {
+      "code": "generate_per_parent_infeasible",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+      "symbol": "GENERATE_PER_PARENT_INFEASIBLE"
+    },
+    {
+      "code": "generation_provider_failed",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "A provider column could not be generated.",
+      "symbol": "GENERATION_PROVIDER_FAILED"
+    },
+    {
+      "code": "parent_lookup_key_missing",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column reads a parent row, but a foreign key value has no parent row.",
+      "symbol": "PARENT_LOOKUP_KEY_MISSING"
+    },
+    {
+      "code": "parent_lookup_key_not_unique",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Generate column reads a parent row, but a parent key value occurs more than once.",
+      "symbol": "PARENT_LOOKUP_KEY_NOT_UNIQUE"
+    },
+    {
+      "code": "pinned_relational_option_unsupported",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Pinned generation does not support this relational generate option.",
+      "symbol": "PINNED_RELATIONAL_OPTION_UNSUPPORTED"
+    },
+    {
+      "code": "reference_bounds_unsatisfied",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Reference column per-parent bounds did not hold after the repair.",
+      "symbol": "REFERENCE_BOUNDS_UNSATISFIED"
+    },
+    {
+      "code": "reference_parent_pool_empty",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Reference column has rows to fill but its parent column has no keys.",
+      "symbol": "REFERENCE_PARENT_POOL_EMPTY"
+    },
+    {
+      "code": "reference_weights_length_mismatch",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "GenerationError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Reference column weights count does not match its parent key count.",
+      "symbol": "REFERENCE_WEIGHTS_LENGTH_MISMATCH"
+    },
+    {
+      "code": "windowed_date_anchor_invalid",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "WindowedDateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Windowed date anchor is not a date or datetime without a timezone.",
+      "symbol": "WINDOWED_DATE_ANCHOR_INVALID"
+    },
+    {
+      "code": "windowed_date_anchor_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "WindowedDateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Windowed date anchor is outside the supported date range.",
+      "symbol": "WINDOWED_DATE_ANCHOR_OUT_OF_RANGE"
+    },
+    {
+      "code": "windowed_date_offset_out_of_range",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "WindowedDateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Windowed date offset moves the date outside the supported date range.",
+      "symbol": "WINDOWED_DATE_OFFSET_OUT_OF_RANGE"
+    },
+    {
+      "code": "windowed_date_parent_anchor_null",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "failure",
+      "namespace": "runtime",
+      "owner": "WindowedDateError",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "execution",
+          "phase": "mask",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "generate",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "finalize",
+          "retry": "unknown",
+          "severity": "error"
+        },
+        {
+          "outcome": "execution",
+          "phase": "unknown",
+          "retry": "unknown",
+          "severity": "error"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Windowed date anchor is null on the parent row its foreign key points at.",
+      "symbol": "WINDOWED_DATE_PARENT_ANCHOR_NULL"
+    },
+    {
+      "code": "reference_parent_pool_empty",
+      "context": [],
+      "deprecated_in": null,
+      "kind": "warning",
+      "namespace": "warning",
+      "owner": "QualityWarning",
+      "replaced_by": null,
+      "rules": [
+        {
+          "outcome": "findings",
+          "phase": "mask",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "generate",
+          "retry": "never",
+          "severity": "warning"
+        },
+        {
+          "outcome": "findings",
+          "phase": "finalize",
+          "retry": "never",
+          "severity": "warning"
+        }
+      ],
+      "since": "1.32.0",
+      "summary": "Reference column is null because its parent column has no keys.",
+      "symbol": "REFERENCE_PARENT_POOL_EMPTY"
+    }
+  ],
+  "event_schema_version": 1,
+  "reason_schema_version": 1,
+  "registry_version": "1.32.0"
+}
