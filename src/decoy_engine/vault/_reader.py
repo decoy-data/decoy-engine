@@ -19,6 +19,7 @@ from decoy_engine.fileaccess import (
     FileRole,
 )
 from decoy_engine.internal.crypto import VAULT_KEY_CHECK_LABEL, key_check_value
+from decoy_engine.secret_providers import PreparedSecret, SecretClosedError
 from decoy_engine.vault._format import (
     _ANY_MAGIC,
     _HEADER,
@@ -256,7 +257,7 @@ def load_vault(
 @fileaccess.entry_point
 def open_vault(
     path: str | Path | None,
-    prepared: object,
+    prepared: PreparedSecret,
     *,
     vault: FileHandle | None = None,
     file_access: FileAccess | None = None,
@@ -265,9 +266,6 @@ def open_vault(
 
     The header and the map come from one read of the file.
     """
-    from decoy_engine.secret_providers import PreparedSecret
-    from decoy_engine.secret_providers._errors import SecretClosedError
-
     if not isinstance(prepared, PreparedSecret):
         raise TypeError("open_vault takes a PreparedSecret")
     if prepared.closed:

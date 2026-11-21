@@ -13,7 +13,7 @@ import hashlib
 import hmac
 import warnings
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Final
 
 
 def deterministic_hash(value: Any, seed: int = 0) -> str | None:
@@ -80,6 +80,8 @@ def hmac_seed(key: bytes, value: Any) -> int:
 RESUME_KEY_CHECK_LABEL = "decoy-resume-key-check/v1"
 VAULT_KEY_CHECK_LABEL = "decoy-vault-key-check/v1"
 _KEY_CHECK_HEX = 16
+# The shape of a key check value, derived from its length so a header or record declares no copy.
+KEY_CHECK_PATTERN: Final = rf"[0-9a-f]{{{_KEY_CHECK_HEX}}}"
 
 
 def key_check_value(key_source: Callable[[], bytes], label: str, context: str = "") -> str:

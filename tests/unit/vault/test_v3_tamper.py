@@ -81,6 +81,35 @@ def test_final_tag(tmp_path: Path) -> None:
     assert read(ok, tmp_path)[0] == {("ns", "m0"): "s0", ("ns", "m1"): "s1"}
 
 
+def test_a_non_message_tag_before_the_final_segment_is_tampered(tmp_path: Path) -> None:
+    """The tag check is per segment: a REKEY or PUSH segment ahead of a valid final one is refused
+    even when the count and the final tag are right (the one-segment cells above fail on the
+    missing final tag alone)."""
+    first, second = [("ns", "a", "1")], [("ns", "b", "2")]
+    for tag in ("rekey", "push"):
+        blob = forge([first, second], [tag, "final"])
+        assert _refuse(blob, tmp_path).code == "vault_tampered", tag
+
+
+def test_a_segment_repeating_a_row_is_tampered(tmp_path: Path) -> None:
+    """The writer folds duplicates, so a repeated row is corruption, not a short count."""
+    row = ("ns", "a", "1")
+    across = forge([[row], [row]], ["message", "final"], entry_count=1)
+    within = forge([[row, row]], ["final"], entry_count=1)
+    for name, blob in {"across segments": across, "within a segment": within}.items():
+        assert _refuse(blob, tmp_path).code == "vault_tampered", name
+
+
+def test_a_segment_over_segment_rows_is_tampered(tmp_path: Path) -> None:
+    rows = [("ns", "a", "1"), ("ns", "b", "2")]
+    blob = forge([rows], ["final"], segment_rows=1)
+    assert _refuse(blob, tmp_path).code == "vault_tampered"
+    assert read(forge([rows], ["final"], segment_rows=2), tmp_path)[0] == {
+        ("ns", "a"): "1",
+        ("ns", "b"): "2",
+    }
+
+
 def test_entry_count_mismatch(tmp_path: Path) -> None:
     rows = [[("ns", "a", "1"), ("ns", "b", "2")]]
     assert _refuse(forge(rows, ["final"], entry_count=3), tmp_path).code == "vault_tampered"

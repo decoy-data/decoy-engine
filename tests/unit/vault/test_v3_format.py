@@ -252,4 +252,65 @@ def test_refusal_codes_match_what_the_package_raises() -> None:
 def test_ad_is_the_hash_of_magic_and_header_frame() -> None:
     blob = written()
     header_end = len(_format._MAGIC) + 4 + int.from_bytes(blob[10:14], "big")
-    assert hashlib.sha256(blob[:header_end]).digest() is not None
+    expected = hashlib.sha256(blob[:header_end]).digest()
+    header, segments = split(blob)
+    # The first segment authenticates under exactly this digest and under no other.
+    for ad, ok in ((expected, True), (hashlib.sha256(blob[: header_end - 1]).digest(), False)):
+        state = _format._open_pull(
+            lambda: KEY, bytes.fromhex(header["vault_id"]), bytes.fromhex(header["stream_header"])
+        )
+        pulled = _format._pull_segment(state, segments[0], ad)
+        assert (pulled is not None) is ok
+
+
+_NO_NACL_SCRIPT = """
+import json
+import sys
+
+class _BlockNacl:
+    def find_spec(self, name, path=None, target=None):
+        if name == "nacl" or name.startswith("nacl."):
+            raise ModuleNotFoundError("No module named 'nacl' (blocked for test)")
+        return None
+
+sys.meta_path.insert(0, _BlockNacl())
+for mod in list(sys.modules):
+    if mod == "nacl" or mod.startswith("nacl."):
+        del sys.modules[mod]
+
+from decoy_engine.vault import VaultError, load_vault
+from tests.unit.vault._support import KEY, vault_writer
+
+codes = {}
+try:
+    load_vault(sys.argv[1], KEY)
+except VaultError as exc:
+    codes["load"] = [exc.code, "PyNaCl" in str(exc)]
+writer = vault_writer(KEY)
+writer.add([("ns", "m", "s")])
+try:
+    writer.serialize()
+except VaultError as exc:
+    codes["serialize"] = [exc.code, "PyNaCl" in str(exc)]
+print(json.dumps(codes))
+"""
+
+
+def test_missing_pynacl_refuses_load_and_serialize(tmp_path: Path) -> None:
+    """With `nacl` hidden, both directions raise `vault_crypto_not_installed` naming PyNaCl, and
+    neither gets as far as reading the file or writing a vault."""
+    import json
+    import subprocess
+
+    path = tmp_path / "v.vault"
+    path.write_bytes(written())
+    repo_root = Path(__file__).resolve().parents[3]
+    proc = subprocess.run(  # noqa: S603 -- args are test literals
+        [sys.executable, "-c", _NO_NACL_SCRIPT, str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=repo_root,
+    )
+    expected = [reasons.runtime.VAULT_CRYPTO_NOT_INSTALLED, True]
+    assert json.loads(proc.stdout.strip()) == {"load": expected, "serialize": expected}

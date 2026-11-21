@@ -33,8 +33,7 @@ from decoy_engine.keyprovider import (
     KeyedStrategyRequiresSecret,
     is_key_version_label,
 )
-from decoy_engine.secret_providers import PreparedSecret
-from decoy_engine.secret_providers._errors import SecretClosedError
+from decoy_engine.secret_providers import PreparedSecret, SecretClosedError
 
 if TYPE_CHECKING:
     from decoy_engine.keyprovider import KeyProvider
@@ -43,6 +42,7 @@ from decoy_engine.vault import _format
 from decoy_engine.vault._format import (
     _HEADER,
     _MAGIC,
+    _VAULT_ID_BYTES,
     VAULT_FORMAT_VERSION,
     VaultError,
     _check_key,
@@ -213,7 +213,7 @@ class VaultWriter:
         rows, ambiguous = self._fold()
         # The crypto import and the key floor come first: a missing PyNaCl fails before any work.
         _check_key(self._prepared.mask_key)
-        vault_id = os.urandom(32)
+        vault_id = os.urandom(_VAULT_ID_BYTES)
         state, stream_header = _open_stream(self._prepared.mask_key, vault_id)
         record = _HeaderRecord(
             format=VAULT_FORMAT_VERSION,
@@ -321,8 +321,12 @@ def vault_writer_for_config(
     compiler's rules, so a bad `global_settings.seed` fails the same way it does on a run.
     """
     from decoy_engine.plan._seed import _normalize_job_seed
-    from decoy_engine.secret_providers import AdmissionScope, admit_mask_key, prepare_legacy
-    from decoy_engine.secret_providers._requirements import MASK_ROOT
+    from decoy_engine.secret_providers import (
+        MASK_ROOT,
+        AdmissionScope,
+        admit_mask_key,
+        prepare_legacy,
+    )
 
     _normalize_job_seed(config)
     # F13: the secret is admitted through the shared preflight. A-4: the writer carries the

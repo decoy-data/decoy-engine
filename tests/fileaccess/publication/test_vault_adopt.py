@@ -496,27 +496,32 @@ _GOOD_HEADER = {
     "format": vault_module.VAULT_FORMAT_VERSION,
     "seed_protocol_version": SEED_PROTOCOL_VERSION,
 }
-_BAD_HEADERS = [
-    [1],
-    "x",
-    None,
-    7,
-    _GOOD_HEADER,  # the closed field set is missing the other seven
-    {**_GOOD_HEADER, "ambiguous_dropped": "5"},
-    {**_GOOD_HEADER, "ambiguous_dropped": 1.5},
-    {**_GOOD_HEADER, "ambiguous_dropped": None},
-    {**_GOOD_HEADER, "ambiguous_dropped": True},
-    {**_real_header(), "ambiguous_dropped": "5"},
-    {**_real_header(), "ambiguous_dropped": 1.5},
-    {**_real_header(), "ambiguous_dropped": None},
-    {**_real_header(), "ambiguous_dropped": True},
-]
+_BAD_HEADERS: dict[str, Any] = {
+    "list": [1],
+    "str": "x",
+    "none": None,
+    "int": 7,
+    "missing-seven-fields": _GOOD_HEADER,  # the closed field set is missing the other seven
+    "good-plus-str-dropped": {**_GOOD_HEADER, "ambiguous_dropped": "5"},
+    "good-plus-float-dropped": {**_GOOD_HEADER, "ambiguous_dropped": 1.5},
+    "good-plus-none-dropped": {**_GOOD_HEADER, "ambiguous_dropped": None},
+    "good-plus-bool-dropped": {**_GOOD_HEADER, "ambiguous_dropped": True},
+    "real-str-dropped": "str",
+    "real-float-dropped": 1.5,
+    "real-none-dropped": None,
+    "real-bool-dropped": True,
+}
 
 
-@pytest.mark.parametrize("header", _BAD_HEADERS, ids=repr)
-def test_a_malformed_vault_header_is_vault_unreadable_and_not_the_same_rows(header: Any) -> None:
+@pytest.mark.parametrize("name", list(_BAD_HEADERS))
+def test_a_malformed_vault_header_is_vault_unreadable_and_not_the_same_rows(name: str) -> None:
     """A non-dict header or a non-int `ambiguous_dropped` is `vault_unreadable` from `load_vault`
     (not an AttributeError, ValueError or TypeError), so `same_rows` answers False."""
+    header = _BAD_HEADERS[name]
+    if name.startswith("real-"):
+        # Built here, not at import: the real header holds random ids, which would give each
+        # xdist worker different test ids.
+        header = {**_real_header(), "ambiguous_dropped": header}
     blob = _vault_blob_with_header(header)
     with pytest.raises(VaultError) as caught:
         load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))

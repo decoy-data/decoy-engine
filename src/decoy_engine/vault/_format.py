@@ -31,6 +31,7 @@ from decoy_engine._canonical import (
 )
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION, derive
 from decoy_engine.errors import DecoyError
+from decoy_engine.internal.crypto import KEY_CHECK_PATTERN
 from decoy_engine.keyprovider import KEY_VERSION_PATTERN, is_key_version_label
 
 VAULT_FORMAT_VERSION = "decoy-vault/v3"
@@ -96,13 +97,7 @@ class _HeaderRecord:
     segment_rows: int
 
 
-def _fullmatch(pattern: str) -> Callable[[str], bool]:
-    compiled = re.compile(pattern)
-    # fullmatch, not a `$` anchor: `$` also matches before a trailing newline.
-    return lambda value: compiled.fullmatch(value) is not None
-
-
-_KEY_CHECK_PATTERN: Final = r"[0-9a-f]{16}"
+# `Pattern.fullmatch`, not a `$` anchor: `$` also matches before a trailing newline.
 _VAULT_ID_PATTERN: Final = r"[0-9a-f]{64}"
 _STREAM_HEADER_PATTERN: Final = r"[0-9a-f]{48}"
 
@@ -110,9 +105,12 @@ _HEADER_FIELDS: Final[tuple[tuple[str, Spec], ...]] = (
     ("format", ExactSpec(VAULT_FORMAT_VERSION)),
     ("seed_protocol_version", VersionSpec(SEED_PROTOCOL_VERSION)),
     ("key_version", ShapedSpec(KEY_VERSION_PATTERN, is_key_version_label)),
-    ("key_check", ShapedSpec(_KEY_CHECK_PATTERN, _fullmatch(_KEY_CHECK_PATTERN))),
-    ("vault_id", ShapedSpec(_VAULT_ID_PATTERN, _fullmatch(_VAULT_ID_PATTERN))),
-    ("stream_header", ShapedSpec(_STREAM_HEADER_PATTERN, _fullmatch(_STREAM_HEADER_PATTERN))),
+    ("key_check", ShapedSpec(KEY_CHECK_PATTERN, re.compile(KEY_CHECK_PATTERN).fullmatch)),
+    ("vault_id", ShapedSpec(_VAULT_ID_PATTERN, re.compile(_VAULT_ID_PATTERN).fullmatch)),
+    (
+        "stream_header",
+        ShapedSpec(_STREAM_HEADER_PATTERN, re.compile(_STREAM_HEADER_PATTERN).fullmatch),
+    ),
     ("ambiguous_dropped", CountSpec(_MAX_COUNT)),
     ("entry_count", CountSpec(_MAX_COUNT)),
     ("segment_rows", CountSpec(_SEGMENT_MAX_ROWS)),

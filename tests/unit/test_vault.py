@@ -394,7 +394,7 @@ class TestCompileChecks:
         assert exc.value.code == "vault_strategy_unmasked"
 
     def test_vault_requires_cryptography_when_missing(self, tmp_path, monkeypatch):
-        # F14a: a vault: true job must fail at compile when `cryptography` is
+        # F14a: a vault: true job must fail at compile when PyNaCl (`nacl`) is
         # absent, not after a multi-hour run at vault-write time. Simulate the
         # package being uninstalled by stubbing find_spec for it only.
         import importlib.util as _ilu
@@ -402,7 +402,7 @@ class TestCompileChecks:
         real_find_spec = _ilu.find_spec
 
         def fake_find_spec(name, *args, **kwargs):
-            if name == "cryptography":
+            if name == "nacl":
                 return None
             return real_find_spec(name, *args, **kwargs)
 

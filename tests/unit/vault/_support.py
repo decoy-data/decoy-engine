@@ -79,13 +79,14 @@ def forge(
     *,
     entry_count: int | None = None,
     key: bytes = KEY,
+    segment_rows: int | None = None,
 ) -> bytes:
     """An authenticated v3 file built through the format seam, so it can be inconsistent.
 
     `tags` is one of "message", "final", "push", "rekey" per segment.
     """
     total = sum(len(s) for s in segments) if entry_count is None else entry_count
-    return _forge([_format._encode_rows(rows) for rows in segments], tags, total, key)
+    return _forge([_format._encode_rows(rows) for rows in segments], tags, total, key, segment_rows)
 
 
 def forge_payloads(payloads: list[bytes], *, key: bytes = KEY, entry_count: int = 2) -> bytes:
@@ -94,7 +95,13 @@ def forge_payloads(payloads: list[bytes], *, key: bytes = KEY, entry_count: int 
     return _forge(payloads, tags, entry_count, key)
 
 
-def _forge(payloads: list[bytes], tags: list[str], entry_count: int, key: bytes) -> bytes:
+def _forge(
+    payloads: list[bytes],
+    tags: list[str],
+    entry_count: int,
+    key: bytes,
+    segment_rows: int | None = None,
+) -> bytes:
     from nacl import bindings
 
     vault_id = os.urandom(32)
@@ -108,7 +115,7 @@ def _forge(payloads: list[bytes], tags: list[str], entry_count: int, key: bytes)
         stream_header=stream_header.hex(),
         ambiguous_dropped=0,
         entry_count=entry_count,
-        segment_rows=_format._SEGMENT_ROWS,
+        segment_rows=_format._SEGMENT_ROWS if segment_rows is None else segment_rows,
     )
     header_frame = _format._frame(canonical_json_bytes(_format._HEADER.dump(record)))
     ad = hashlib.sha256(_format._MAGIC + header_frame).digest()
