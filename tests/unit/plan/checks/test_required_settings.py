@@ -27,7 +27,12 @@ GUARD_NAME = re.compile(
 )
 # A runtime guard with no descriptor needs a reason here. None today: every guard that matches
 # the pattern is reachable from a config column and has a mapping entry.
-EXCLUDED_GUARDS: dict[str, str] = {}
+EXCLUDED_GUARDS: dict[str, str] = {
+    reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT: (
+        "the run-time refusal comes first (COLUMN-SHAPE-RULE E0); the compile-time "
+        "requirement entry comes with E2, once detection is removed"
+    ),
+}
 
 # A deterministic column without a namespace is refused earlier by the namespace completeness
 # check, which keeps precedence over the descriptor.

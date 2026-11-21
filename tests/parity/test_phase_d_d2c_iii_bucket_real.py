@@ -93,8 +93,6 @@ def test_a_larger_random_column_matches_the_python_handler(
     for i in range(4000):
         if i % 19 == 0:
             cells.append(None)
-        elif i % 23 == 0:
-            cells.append(f"junk-{rng.randrange(99)}")
         else:
             cells.append((base + dt.timedelta(days=rng.randrange(0, 12000))).isoformat())
     shape = bucket_payload_shape({"d": (strs(cells), bucket_seed(bucket))})
@@ -102,22 +100,60 @@ def test_a_larger_random_column_matches_the_python_handler(
     assert kernel_rows
 
 
-def test_an_all_null_and_an_all_unparseable_column_match_the_python_handler(
-    kernel_rows: list[int],
-) -> None:
-    shape = bucket_payload_shape(
-        {
-            "z": (strs([None] * 7), bucket_seed("month")),
-            "u": (
-                strs(["nope", "", "2024-99-99", "x" * 30, "31/12/2024", None, "?"]),
-                bucket_seed("week"),
-            ),
-        }
-    )
+def test_an_all_null_column_matches_the_python_handler(kernel_rows: list[int]) -> None:
+    shape = bucket_payload_shape({"z": (strs([None] * 7), bucket_seed("month"))})
     oracle, seq = run_full(shape), run_seq(shape)
     _assert_strict(oracle, seq)
     assert kernel_rows == []
-    assert _backends(seq) == {"z": "none", "u": "none"}
+    assert _backends(seq) == {"z": "none"}
+
+
+def test_unparseable_cells_are_the_same_row_errors_on_both_routes(kernel_rows: list[int]) -> None:
+    """The sequential native route and the Python handler stop on the same cells with the
+    same value-free records. The native route reports them; it never writes the source text."""
+    from decoy_engine.errors import RowErrorsFailedError
+
+    cells = ["nope", "", "2024-99-99", "x" * 30, "31/12/2024", None, "?", "2024-03-05"]
+    shape = bucket_payload_shape({"u": (strs(cells), bucket_seed("week"))})
+    oracle = run_full(shape)  # the Python handler's records, before the pipeline decides
+    with pytest.raises(RowErrorsFailedError) as seq:
+        run_seq(shape)
+    assert seq.value.records == oracle.row_errors
+    assert {r.row_index for r in seq.value.records} == {0, 1, 2, 3, 4, 6}
+    assert {r.reason for r in seq.value.records} == {
+        "value is not a parseable date under bucket_perturb"
+    }
+    assert "nope" not in str(seq.value)
+
+
+def test_non_ascii_unparseable_cells_are_the_same_row_errors_on_both_routes(
+    kernel_rows: list[int],
+) -> None:
+    """The precomposed-versus-decomposed literal, bare accented text, CJK text and an empty cell
+    all fail the decomposed format. Both routes record the same value-free errors for them."""
+    from decoy_engine.errors import RowErrorsFailedError
+
+    fmt = f"%Y-%m-%d {DECOMPOSED}"
+    cells = [
+        f"2024-03-05 {DECOMPOSED}",
+        f"2024-03-06 {PRECOMPOSED}",
+        "日本",
+        DECOMPOSED,
+        PRECOMPOSED,
+        "",
+        None,
+        f"2022-05-05 {DECOMPOSED}",
+    ]
+    shape = bucket_payload_shape({"u": (strs(cells), bucket_seed("month", fmt))})
+    oracle = run_full(shape)
+    with pytest.raises(RowErrorsFailedError) as seq:
+        run_seq(shape)
+    assert seq.value.records == oracle.row_errors
+    assert {r.row_index for r in seq.value.records} >= {2, 3, 4, 5}
+    assert {r.reason for r in seq.value.records} == {
+        "value is not a parseable date under bucket_perturb"
+    }
+    assert "日本" not in str(seq.value)
 
 
 def test_a_near_boundary_date_declines_to_python_and_the_job_still_succeeds(
@@ -137,7 +173,7 @@ def test_a_near_boundary_date_declines_to_python_and_the_job_still_succeeds(
 def test_preserved_sentinels_survive_and_the_count_matches_the_python_handler(
     sentinel: str, kernel_rows: list[int]
 ) -> None:
-    cells = ["2024-03-05", "2262-04-10", "1677-09-22", None, "9999-12-31", "junk", "2023-07-19"]
+    cells = ["2024-03-05", "2262-04-10", "1677-09-22", None, sentinel, "2023-07-19"]
     seed = bucket_seed("month", extra=(("preserve_values", [sentinel]),))
     shape = bucket_payload_shape({"b": (strs(cells), seed)})
     oracle, seq = run_full(shape), run_seq(shape)
@@ -163,14 +199,9 @@ def test_a_decomposed_unicode_format_literal_and_non_ascii_rows_are_byte_identic
     fmt = f"%Y-%m-%d {DECOMPOSED}"
     cells = [
         f"2024-03-05 {DECOMPOSED}",
-        f"2024-03-06 {PRECOMPOSED}",  # precomposed literal where the format is decomposed
         f"2023-07-19 {DECOMPOSED}",
         f"2021-12-31 {DECOMPOSED}",
         f"2020-02-29 {DECOMPOSED}",
-        "日本",
-        DECOMPOSED,
-        PRECOMPOSED,
-        "",
         None,
         f"2022-05-05 {DECOMPOSED}",
         f"2022-05-05 {DECOMPOSED}",
@@ -189,8 +220,6 @@ def test_non_ascii_text_beside_a_preserved_sentinel_is_byte_identical(
     cells = [
         f"2024-03-05 {DECOMPOSED}",
         f"2023-07-19 {DECOMPOSED}",
-        "日本語",
-        f"2023-07-19 {PRECOMPOSED}",
         f"2021-01-01 {DECOMPOSED}",
     ]
     seed = bucket_seed("month", fmt, extra=(("preserve_values", ["2023-07-19"]),))
