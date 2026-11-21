@@ -68,6 +68,7 @@ def capture_physical_plan_inputs(
     out_of_core_reorder_threshold_rows: int | None = None,
     vault_writer: Any = None,
     base_dir: str | Path | None = None,
+    chunked_dispatcher_enabled: bool = True,
 ) -> PhysicalPlanInputs:
     """Build a `PhysicalPlanInputs` snapshot for `config`/`sources` by running
     the real preflight sequence. Argument defaults mirror `run_pipeline`'s own
@@ -269,4 +270,5 @@ def capture_physical_plan_inputs(
         out_of_core_facts=out_of_core_facts,
         native_companion_reason=native_companion_reason,
         engine_version=engine_version,
+        chunked_dispatcher_enabled=chunked_dispatcher_enabled,
     )

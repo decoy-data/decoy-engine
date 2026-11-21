@@ -144,6 +144,7 @@ def _lane_decision(ctx: PipelineRunContext, mask_tables: list[str], fk: bool) ->
         table_kinds=ctx.table_kinds,
         prepared_tables=ctx.prepared.prepared,
         stream=verdict,
+        dispatcher_enabled=ctx.chunked_dispatcher_enabled,
     )
     split = None
     if len(mask_tables) == 1:
