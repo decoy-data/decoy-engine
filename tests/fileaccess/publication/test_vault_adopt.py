@@ -25,6 +25,7 @@ import pytest
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine import vault as vault_module
+from decoy_engine._canonical import canonical_json_bytes
 from decoy_engine.determinism import SEED_PROTOCOL_VERSION
 from decoy_engine.publication import _vault_order
 from decoy_engine.vault import VaultCommit, VaultError, _format, load_vault
@@ -48,6 +49,7 @@ from tests.fileaccess.publication._vault_support import (
     vault_out,
     writer,
 )
+from tests.unit.vault._support import forge_payloads
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX durable vault")
 REL = f"vaults/{LEAF}"
@@ -474,12 +476,20 @@ def test_write_chain_fsync_eio_keeps_the_leaf_and_a_retry_is_vault_exists(
             os.close(root_fd)
 
 
-def _vault_blob_with_header(header: Any) -> bytes:
-    """A real vault whose unencrypted header is replaced by `header`."""
-    blob, _ = writer().serialize()
+def _vault_blob_with_header(header: Any, blob: bytes | None = None) -> bytes:
+    """A real vault whose header frame is replaced by `header` (a segment is left as written)."""
+    blob = writer().serialize()[0] if blob is None else blob
     magic = _format._MAGIC
-    _, rest = _format._read_frame(blob, len(magic))
-    return magic + _format._frame(json.dumps(header).encode()) + blob[rest:]
+    _, rest = _format._read_frame(blob, len(magic), 1 << 20)
+    return magic + _format._frame(canonical_json_bytes(header)) + blob[rest:]
+
+
+def _real_header() -> dict[str, Any]:
+    blob, _ = writer().serialize()
+    start = len(_format._MAGIC)
+    length = int.from_bytes(blob[start : start + 4], "big")
+    header: dict[str, Any] = json.loads(blob[start + 4 : start + 4 + length])
+    return header
 
 
 _GOOD_HEADER = {
@@ -491,10 +501,15 @@ _BAD_HEADERS = [
     "x",
     None,
     7,
+    _GOOD_HEADER,  # the closed field set is missing the other seven
     {**_GOOD_HEADER, "ambiguous_dropped": "5"},
     {**_GOOD_HEADER, "ambiguous_dropped": 1.5},
     {**_GOOD_HEADER, "ambiguous_dropped": None},
     {**_GOOD_HEADER, "ambiguous_dropped": True},
+    {**_real_header(), "ambiguous_dropped": "5"},
+    {**_real_header(), "ambiguous_dropped": 1.5},
+    {**_real_header(), "ambiguous_dropped": None},
+    {**_real_header(), "ambiguous_dropped": True},
 ]
 
 
@@ -509,10 +524,21 @@ def test_a_malformed_vault_header_is_vault_unreadable_and_not_the_same_rows(head
     assert _vault_order.same_rows(blob, writer()) is False
 
 
-def test_a_well_formed_replaced_header_still_reads_as_own() -> None:
-    """Non-vacuity for the forgery helper: with a valid header the same blob is the same rows."""
-    blob = _vault_blob_with_header({**_GOOD_HEADER, "ambiguous_dropped": 0})
-    assert _vault_order.same_rows(blob, writer()) is True
+def test_a_header_reframed_unchanged_still_reads_as_own() -> None:
+    """Non-vacuity for the forgery helper: the writer's own header, re-framed, is the same rows."""
+    blob, _ = writer().serialize()
+    start = len(_format._MAGIC)
+    length = int.from_bytes(blob[start : start + 4], "big")
+    reframed = _vault_blob_with_header(json.loads(blob[start + 4 : start + 4 + length]), blob)
+    assert _vault_order.same_rows(reframed, writer()) is True
+
+
+def test_a_header_edit_that_keeps_the_rules_is_tampered_and_not_the_same_rows() -> None:
+    blob = _vault_blob_with_header({**_real_header(), "ambiguous_dropped": 5})
+    with pytest.raises(VaultError) as caught:
+        load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
+    assert caught.value.code == reasons.runtime.VAULT_TAMPERED
+    assert _vault_order.same_rows(blob, writer()) is False
 
 
 @pytest.mark.parametrize("policy", POLICIES)
@@ -559,13 +585,8 @@ def test_adopt_refuses_a_character_device_leaf_before_reading(
 
 
 def _vault_blob_with_chunks(*payloads: bytes) -> bytes:
-    """A real header followed by one correctly encrypted frame per payload."""
-    blob, _ = writer().serialize()
-    magic = _format._MAGIC
-    _, rest = _format._read_frame(blob, len(magic))
-    fernet = writer()._fernet()
-    frames = b"".join(_format._frame(fernet.encrypt(p)) for p in payloads)
-    return blob[:rest] + frames
+    """An authenticated v3 file with one segment per payload (the last is the final one)."""
+    return forge_payloads(list(payloads), key=KEY)
 
 
 def _parquet(rows: Any, names: Any = ("namespace", "masked", "source")) -> bytes:
@@ -589,15 +610,13 @@ _DUPLICATE_VAULTS = {
 
 
 @pytest.mark.parametrize("name", list(_DUPLICATE_VAULTS))
-def test_a_vault_with_a_duplicate_key_is_unreadable_and_never_adopted(
-    base: Path, name: str
-) -> None:
+def test_a_vault_with_a_duplicate_key_is_tampered_and_never_adopted(base: Path, name: str) -> None:
     """The writer folds duplicates away, so a stored duplicate `(namespace, masked)` is corruption:
     it must not read as the writer's rows even when the last value equals the writer's."""
     blob = _vault_blob_with_chunks(*_DUPLICATE_VAULTS[name])
     with pytest.raises(VaultError) as caught:
         load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
-    assert caught.value.code == reasons.runtime.VAULT_UNREADABLE
+    assert caught.value.code == reasons.runtime.VAULT_TAMPERED
     assert "wrong" not in str(caught.value) and "s1" not in str(caught.value)
     assert _vault_order.same_rows(blob, writer()) is False
     (base / REL).write_bytes(blob)
@@ -642,10 +661,33 @@ _MALFORMED_PAYLOADS = {
 
 
 @pytest.mark.parametrize("name", list(_MALFORMED_PAYLOADS))
-def test_an_authenticated_malformed_payload_is_unreadable_not_a_crash(name: str) -> None:
+def test_an_authenticated_malformed_payload_is_tampered_not_a_crash(name: str) -> None:
     blob = _vault_blob_with_chunks(_MALFORMED_PAYLOADS[name])
     with pytest.raises(VaultError) as caught:
         load_vault(None, KEY, vault=_vault_order.BytesHandle(blob))
-    assert caught.value.code == reasons.runtime.VAULT_UNREADABLE
+    assert caught.value.code == reasons.runtime.VAULT_TAMPERED
     assert caught.value.__cause__ is None
     assert writer().reads_as_own(_vault_order.BytesHandle(blob)) is False
+
+
+@pytest.mark.parametrize("kind", ["retired_v2", "tampered_v3"])
+def test_adopt_refuses_a_v2_or_tampered_leaf_and_leaves_its_bytes(base: Path, kind: str) -> None:
+    if kind == "retired_v2":
+        blob = (
+            Path(__file__).parents[2]
+            / "unit"
+            / "vault"
+            / "fixtures"
+            / "decoy-vault-v2__retired.vault"
+        ).read_bytes()
+    else:
+        mutable = bytearray(writer().serialize()[0])
+        mutable[-1] ^= 0xFF
+        blob = bytes(mutable)
+    (base / REL).write_bytes(blob)
+    out, root_fd = vault_out("strict", base, REL)
+    try:
+        assert isinstance(_vault_order.adopt_vault(out, writer()), _vault_order.VaultConflict)
+    finally:
+        os.close(root_fd)
+    assert (base / REL).read_bytes() == blob
