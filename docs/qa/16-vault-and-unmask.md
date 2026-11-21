@@ -20,7 +20,7 @@ reversible.
   random id, so the vault plus the mask secret recovers every vaulted source value.
 - Any change to a v3 file (header, segment order, a dropped or cut segment) is refused as
   `vault_tampered`. A wrong secret, or an edited `key_check` or `vault_id`, gives
-  `vault_key_mismatch`. A `decoy-vault/v2` file gives `vault_format_unsupported`.
+  `vault_key_mismatch`. A `decoy-vault/v2` file still opens (read-only); a `decoy-vault/v1` file gives `vault_format_unsupported`.
 - A vault written under a different seed-protocol version is refused before decryption
   (`vault_protocol_version_mismatch`). A wrong key gives `vault_key_mismatch`.
 - `unmask_pipeline` takes the same config the mask run used. It reports a status per

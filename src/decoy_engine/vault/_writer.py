@@ -33,7 +33,12 @@ from decoy_engine.keyprovider import (
     KeyedStrategyRequiresSecret,
     is_key_version_label,
 )
-from decoy_engine.secret_providers import PreparedSecret, SecretClosedError
+from decoy_engine.secret_providers import (
+    MASK_ROOT_V1,
+    PreparedSecret,
+    SecretBuffer,
+    SecretClosedError,
+)
 
 if TYPE_CHECKING:
     from decoy_engine.keyprovider import KeyProvider
@@ -55,6 +60,8 @@ from decoy_engine.vault._format import (
 )
 
 _ISSUER = object()
+# The key version a bare `bytes` key records: the version every pre-v3 writer stamped.
+_LEGACY_KEY_VERSION = "v1"
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,23 @@ def issue_commit(blob: bytes, entry_count: int, *, adopted: bool) -> VaultCommit
     return VaultCommit(digest, len(blob), entry_count, adopted, _ISSUER)
 
 
+def _prepared_from_key(mask_key: bytes | bytearray) -> PreparedSecret:
+    """A `PreparedSecret` over a raw mask root, as the key-provider bridge builds one.
+
+    No length check here: the writer's floor refuses a short key as `weak_mask_secret`, the same
+    code and text as before v3.
+    """
+    try:
+        return PreparedSecret(
+            SecretBuffer.adopt(bytearray(mask_key)),
+            key_version=_LEGACY_KEY_VERSION,
+            requirement_ids=(MASK_ROOT_V1,),
+        )
+    except BaseException:
+        del mask_key  # a traceback keeps this frame: the key must not be among its locals
+        raise
+
+
 class VaultWriter:
     """Accumulate vault entries across chunks, encrypt per chunk at `write()`.
 
@@ -89,11 +113,26 @@ class VaultWriter:
     before encryption.
     """
 
-    def __init__(self, prepared: PreparedSecret, *, file_access: FileAccess | None = None) -> None:
+    def __init__(
+        self, prepared: PreparedSecret | bytes, *, file_access: FileAccess | None = None
+    ) -> None:
+        # `bytes` is the frozen pre-v3 form, `VaultWriter(mask_key)`. It is prepared the way a
+        # `PreparedSecret` is built, then follows the one path below, so both give the same vault.
+        lent = None
+        if isinstance(prepared, (bytes, bytearray)):
+            # Rebinding the name drops this frame's reference to the key bytes.
+            prepared = lent = _prepared_from_key(prepared)
+        try:
+            self._admit(prepared, file_access)
+        finally:
+            if lent is not None:
+                lent.close()
+
+    def _admit(self, prepared: PreparedSecret, file_access: FileAccess | None) -> None:
         # The writer owns a clone, so closing the caller's secret (the admission scope does)
         # does not stop a write that happens later. Every check below runs before the clone.
         if not isinstance(prepared, PreparedSecret):
-            raise TypeError("a VaultWriter is built from a PreparedSecret")
+            raise TypeError("a VaultWriter is built from a PreparedSecret or the mask key bytes")
         if prepared.closed:
             raise SecretClosedError
         if not is_key_version_label(prepared.key_version):
@@ -247,6 +286,8 @@ class VaultWriter:
         try:
             opened = open_vault(None, self._prepared, vault=handle)
         except VaultError:
+            return False
+        if opened.header.format != VAULT_FORMAT_VERSION:  # a v2 file reads, but is never adopted
             return False
         rows, own_ambiguous = self._fold()
         return opened.ambiguous_dropped == own_ambiguous and opened.mapping == {

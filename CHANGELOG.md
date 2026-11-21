@@ -9,6 +9,12 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+### Changed (vault format v3, F09 E1)
+
+New vaults are written as `decoy-vault/v3` (libsodium secretstream, authenticated header, a key per vault). A `decoy-vault/v2` vault still opens: the v2 reader is kept, read-only, beside v3, and the compat corpus holds both files. A v2 vault is never adopted as a current vault. `VaultWriter` now takes a `PreparedSecret` and still accepts the older `bytes` mask key; both give the same vault. The `bytes` form is not deprecated yet and has no removal date.
+
+A failed vault read now gives fixed error text and no longer repeats the file adapter's error message.
+
 ## [0.28.1] - 2026-11-19
 
 ### Breaking for consumers

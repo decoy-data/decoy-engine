@@ -38,8 +38,9 @@ header, or reordering, dropping, duplicating or truncating segments, is refused 
 `vault_tampered`. `key_check` is a key check value bound to `vault_id`: a wrong secret is
 `vault_key_mismatch` before any segment is decrypted. Each segment is serialized and encrypted
 independently (F13), so the full plaintext table is never held as one blob before encryption.
-There is no reader for `decoy-vault/v2`: a v2 file is refused with `vault_format_unsupported`
-and a re-mask remedy (owner decision, 2026-11-18).
+`decoy-vault/v2` (Fernet) stays readable through `_v2_reader.py`, chosen from the magic bytes in
+`_reader._open_vault`; nothing writes it. An older format (v1) is refused with
+`vault_format_unsupported` and a re-mask remedy.
 
 Determinism boundary. Vault CONTENTS are a pure function of (config, sources): entries are sorted
 before serialization. The vault FILE is not byte-reproducible because `vault_id` and the stream

@@ -20,6 +20,23 @@
       }
     },
     {
+      "tag": "decoy-vault/v2",
+      "kind": "vault",
+      "synthetic": true,
+      "produced_by_engine_version": "0.17.0",
+      "seed_protocol_version": 7,
+      "path": "decoy-vault-v2__synthetic.vault",
+      "mask_key_hex": "c0ffee0badc0de01c0ffee0badc0de02c0ffee0badc0de03c0ffee0badc0de04",
+      "entries_written": 5,
+      "expected_mapping": {
+        "person_identity\u001fJordan Avery": "Maria Gonzalez",
+        "person_identity\u001fRiley Chen": "David Okafor",
+        "member_id\u001fMBR-100001": "843-22-9981",
+        "member_id\u001fMBR-100002": "771-04-3325",
+        "email_pool\u001fuser01@example.net": "real.person@hospital.org"
+      }
+    },
+    {
       "tag": "distribution-snapshot/v1",
       "kind": "distribution_snapshot",
       "synthetic": true,

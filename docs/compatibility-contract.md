@@ -71,9 +71,9 @@ the run-entry vault key-match guard refuse a key that is not the 32-byte mask ro
 is admitted, for every config. Seed-keyed vaults written by older engines no longer open and are
 regenerated with their masked output under a secret; there is no migration. The section 3.2
 forever-readable freeze takes effect at the first real `decoy-vault/v2` vault, which after slice 0 can
-only be written under a secret of at least 32 bytes; from that vault on, the v2 reader, the
-32-byte vault key length and `VAULT_KEY_LABEL` are permanent, per this contract's own pre-GA to GA rule
-(section 1).
+only be written under a secret of at least 32 bytes; from that vault on, the v2 reader (kept, read-only,
+beside v3), the 32-byte vault key length and the vault key labels are permanent, per this contract's own
+pre-GA to GA rule (section 1).
 
 **Pre-GA correction (freeze batch O1, `when:` on integer columns, 2026-11-18).** Breaking, no shim: a
 `when:` predicate over an integer column compares exactly beyond 2**53, for a value or an integer
@@ -292,6 +292,7 @@ As of this writing the tags include:
 
 ```
 distribution-snapshot/v1   decoy-vault/v3        vault-key/v2
+decoy-vault/v2 (read-only) vault-key/v1 (read-only)
 ff1-key/v1                 quality-report/v1     synth-report/v1
 quality-diagnostic/v1      quality-fidelity/v1   quality-policy/v1
 quality-shape-fidelity/v1  post-scan-integrity/v3    name-hints/v1
@@ -489,22 +490,24 @@ vaults exist in the wild. The forever-readable rule begins at the first
 in-the-wild `decoy-vault/v2` vault. From that point forward, a v2 reader is
 permanent and any future format bump must add a v3 alongside a kept v2 reader.
 
-**Pre-GA hard cutover to v3 (F09 E1, owner decision 2026-11-18):** `decoy-vault/v3`
-(libsodium secretstream, an authenticated header, a key per vault) replaces `decoy-vault/v2`
-(Fernet) with no v2 reader. The owner approved the cut as the PO review that this section and the
-section 5 decision table ask for, because no real v2 vault exists outside Decoy's own machines. It
-differs from the B-6 cut (2026-11-13), which dropped seed-keyed vaults that the 32-byte key floor
-could no longer open; this cut drops secret-keyed v2 vaults that opened before. A v2 file now gives
-`vault_format_unsupported` with the re-mask remedy. The forever-readable rule begins at the first
-real `decoy-vault/v3` vault: from then on the v3 reader, `VAULT_KEY_LABEL` (`vault-key/v2`) and the
-key check label are permanent. Breaking, no shim: `VaultWriter` takes a `PreparedSecret`
-(`VaultWriter(prepared, *, file_access=None)`) and owns a clone, closed by `close()`.
+**Format bump to v3 (F09 E1, owner decision 2026-11-18):** `decoy-vault/v3` (libsodium
+secretstream, an authenticated header, a key per vault) is the current format and the only one
+written. `decoy-vault/v2` (Fernet) stays readable: `vault/_v2_reader.py` is the read-only v2 reader,
+and `_reader._open_vault` picks v2 or v3 from the magic bytes in one place. A v2 file opens under the
+same 32-byte key as before and is never adopted as a current vault (`reads_as_own` needs v3).
+`decoy-vault/v1` was already unsupported before this change and stays refused with
+`vault_format_unsupported`. Both the v2 reader and the v3 reader, `vault-key/v1` and `vault-key/v2`
+(`VAULT_KEY_LABEL`) and the key check label are permanent. `VaultWriter` takes a `PreparedSecret` or
+the older `bytes` mask key (`VaultWriter(prepared_or_key, *, file_access=None)`); both go through the
+same preparation and give the same vault, and the writer owns a clone, closed by `close()`. The
+`bytes` form is the frozen call and has no removal date.
 
 **GA-flip checklist (vault key floor, 2026-11-12).** The section 3.2 forever-readable freeze takes effect
 at the first real `decoy-vault/v2` vault, which after slice 0 can only be written under a secret of at
-least 32 bytes; from that vault on, the v2 reader, the 32-byte vault key length and `VAULT_KEY_LABEL` are
-permanent, per this contract's own pre-GA to GA rule (section 1). Before that vault, narrowing which keys
-open a v2 file was a legal pre-GA hard delete: seed-keyed vaults stopped opening and are regenerated.
+least 32 bytes; from that vault on, the v2 reader (kept, read-only, beside v3), the 32-byte vault key
+length and the vault key labels are permanent, per this contract's own pre-GA to GA rule (section 1).
+Before that vault, narrowing which keys open a v2 file was a legal pre-GA hard delete: seed-keyed
+vaults stopped opening and are regenerated.
 
 ### 3.3 The determinism guarantee (the silent one)
 
@@ -567,9 +570,9 @@ reason. There is no longer a "mask-only" envelope change; budget for the
 generation shift (and a corpus re-baseline) whenever you bump the version.
 A v5 vault over a synthetic column cannot be unmasked under v6.
 
-The vault format is now `decoy-vault/v2` (F13, 2026-06-26). The v2 file stamps
-`SEED_PROTOCOL_VERSION` in an unencrypted header; `load_vault` reads that header
-before any decryption attempt and raises a typed
+The vault format is now `decoy-vault/v3` (F09 E1); `decoy-vault/v2` (F13, 2026-06-26) is read-only
+and kept. Both files stamp `SEED_PROTOCOL_VERSION` in an unencrypted header; `load_vault` reads that
+header before any decryption attempt and raises a typed
 `VaultError(code="vault_protocol_version_mismatch")` on a mismatch, distinct
 from the wrong-seed `vault_key_mismatch`. Cross-version unmask is not supported
 and was not supported before F13; F13 makes the failure diagnosable rather than
@@ -1397,10 +1400,12 @@ turns into "I can add X alongside the old X" with five more minutes of thought.
   Golden tests regenerate artifacts with *current* code, so they do **not** catch
   *format* drift. The corpus freezes synthetic artifacts produced at a known
   engine version and verifies the *current* engine can read and round-trip every
-  one. It currently covers two read-back artifact kinds:
+  one. It currently covers two read-back artifact kinds, three artifacts:
 
-  - `decoy-vault/v2`: full `load_vault` round-trip plus a schema-tamper bite-test
-    (verifies the guard actually fires on a corrupted artifact).
+  - `decoy-vault/v3` (current) and `decoy-vault/v2` (read-only, kept): each a full
+    `load_vault` round-trip plus a tamper bite-test (verifies the guard actually fires on a
+    corrupted artifact). The v2 file is never deleted or regenerated; `regenerate.py` carries its
+    manifest entry forward.
   - `distribution-snapshot/v1`: full `load_spec` round-trip for each reader branch
     (numeric, categorical, conditioned-joint) plus a `schema_version` tamper
     bite-test.
@@ -1475,7 +1480,7 @@ acceptable cost.
 ## Pre-GA corpus action item
 
 The cross-version compatibility corpus (§6) exists and runs in CI, covering
-`decoy-vault/v3` and `distribution-snapshot/v1`. Before GA: capture a real
+`decoy-vault/v2`, `decoy-vault/v3` and `distribution-snapshot/v1`. Before GA: capture a real
 (`synthetic: false`) artifact of each read-back kind at the `0.2.0` cut and
 add it alongside the existing synthetic fixtures. The corpus cannot be
 retrofitted after users hold artifacts we no longer have fixtures for.

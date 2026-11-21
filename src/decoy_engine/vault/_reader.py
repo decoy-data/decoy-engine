@@ -39,6 +39,7 @@ from decoy_engine.vault._format import (
     _tampered,
     _unreadable,
 )
+from decoy_engine.vault._v2_reader import V2_FORMAT, V2_MAGIC, read_v2
 
 _SEED_PROTOCOL_VERSION_KEY = "seed_protocol_version"
 
@@ -105,6 +106,24 @@ def _pull_all(
     return mapping
 
 
+def _open_v2(blob: bytes, key_source: Callable[[], bytes], shown: str) -> OpenedVault:
+    """A `decoy-vault/v2` file, read under the same key floor as v3. It has no key check, no
+    vault id and no entry count; the header records what it can."""
+    mapping, ambiguous, chunk_rows = read_v2(blob, key_source, shown)
+    return OpenedVault(
+        mapping,
+        ambiguous,
+        VaultHeader(
+            format=V2_FORMAT,
+            key_version="v1",
+            vault_id="",
+            entry_count=len(mapping),
+            ambiguous_dropped=ambiguous,
+            segment_rows=chunk_rows,
+        ),
+    )
+
+
 def _open_vault(blob: bytes, key_source: Callable[[], bytes], shown: str) -> OpenedVault:
     """The one reader. Read order: magic, header frame, header rules, key check, then the stream.
 
@@ -112,6 +131,8 @@ def _open_vault(blob: bytes, key_source: Callable[[], bytes], shown: str) -> Ope
     check passes, any damage is "tampered". Every refusal is raised here, outside any handler, so
     it carries no cause or context.
     """
+    if blob.startswith(V2_MAGIC):  # the one dispatch on the magic: v2 is read-only and kept
+        return _open_v2(blob, key_source, shown)
     if not blob.startswith(_MAGIC):
         if _ANY_MAGIC.match(blob):
             raise VaultError(
@@ -201,18 +222,22 @@ def _read_and_open(
             FileRequest(FileRole.VAULT, "read", str(path), "vault")
         )
     shown = handle.display
+    unreadable = False
     try:
         blob = handle.read_all()
     except OSError as exc:
         if fileaccess.keeps_class(exc):
             raise
-        raise VaultError(
-            code=reasons.runtime.VAULT_UNREADABLE,
-            message=f"vault file {shown!r} could not be read: {exc}",
-        ) from exc
+        unreadable = True  # the raise is below, outside the handler: no cause or context
     finally:
         if vault is None:
             handle.close()
+    if unreadable:
+        # Fixed text: an adapter's OSError can carry a path, a value or URL credentials.
+        raise VaultError(
+            code=reasons.runtime.VAULT_UNREADABLE,
+            message=f"vault file {shown!r} could not be read.",
+        )
     return _open_vault(blob, key_source, shown)
 
 

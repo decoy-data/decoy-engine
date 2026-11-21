@@ -134,6 +134,13 @@ def _distribution_snapshot_artifact() -> dict:
     }
 
 
+def _frozen_vault_v2_artifact() -> dict:
+    """The v2 entry, carried forward as it is: no engine writes v2, so it cannot be minted again."""
+    old = json.loads((HERE / "manifest.json").read_text(encoding="utf-8"))["artifacts"]
+    (kept,) = [a for a in old if a["tag"] == "decoy-vault/v2"]
+    return kept
+
+
 def main() -> None:
     # NOTE: masked CSV/Parquet output is intentionally NOT frozen here -- the
     # engine never reads its own masked output back, so there is no decoy-owned
@@ -152,6 +159,7 @@ def main() -> None:
         ),
         "artifacts": [
             _vault_artifact(),
+            _frozen_vault_v2_artifact(),
             _distribution_snapshot_artifact(),
         ],
     }

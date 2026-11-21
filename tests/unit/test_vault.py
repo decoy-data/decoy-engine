@@ -639,10 +639,11 @@ class TestVaultKeyFloor:
         assert exc.value.code == "weak_mask_secret"
 
     def test_seed_keyed_vault_no_longer_opens_any_32_byte_key_CHARACTERIZATION(self) -> None:
-        # No key opens a seed-keyed file: it is a v2 file, and there is no v2 reader.
+        # No 32-byte key opens a seed-keyed file: it is a v2 file keyed on the 8-byte seed, so the
+        # v2 reader runs and its key does not decrypt.
         with pytest.raises(VaultError) as exc:
             load_vault(_FIXTURES / "seed_keyed_pre_floor.vault", _STRONG)
-        assert exc.value.code == "vault_format_unsupported"
+        assert exc.value.code == "vault_key_mismatch"
 
     def test_refusal_text_carries_no_key_marker_7_byte_key_FAIL_BEFORE(
         self, tmp_path: Path

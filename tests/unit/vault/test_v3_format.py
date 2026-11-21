@@ -114,14 +114,10 @@ def test_oversized_and_non_json_headers_are_unreadable(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("blob", "code"),
     [
-        (
-            FIXTURES.joinpath("decoy-vault-v2__retired.vault").read_bytes(),
-            "vault_format_unsupported",
-        ),
         (b"DCYVAULT4\n" + b"\x00" * 20, "vault_format_unsupported"),
         (b"DCYVAULT\n" + b"\x00" * 20, "vault_unreadable"),
     ],
-    ids=["retired-v2", "synthetic-v4", "no-number"],
+    ids=["synthetic-v4", "no-number"],
 )
 def test_other_magic_refused_with_remedy(blob: bytes, code: str, tmp_path: Path) -> None:
     with pytest.raises(VaultError) as info:
@@ -148,7 +144,7 @@ def test_per_vault_key(tmp_path: Path) -> None:
 
 def test_writer_takes_prepared_secret() -> None:
     with pytest.raises(TypeError):
-        VaultWriter(KEY)  # type: ignore[arg-type]
+        VaultWriter("not a key")  # type: ignore[arg-type]
     closed = prepared(KEY)
     closed.close()
     with pytest.raises(SecretClosedError):

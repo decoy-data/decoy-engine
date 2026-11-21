@@ -71,9 +71,10 @@ raises `vault_key_mismatch` before any segment is decrypted, and names the
 recorded `key_version`. Once the key is right, any damage raises `vault_tampered`
 and returns no rows.
 
-There is no reader for `decoy-vault/v2`. A v2 file is refused with
-`vault_format_unsupported`; re-run the mask with `--vault` under this version
-(owner decision 2026-11-18, recorded in the compatibility contract).
+A `decoy-vault/v2` file (Fernet) is still read, read-only: the reader picks v2 or v3 from the
+magic bytes, and a v2 vault opens under the same mask secret as before. Nothing writes v2, and a v2
+file is never adopted as a current vault. A `decoy-vault/v1` file is refused with
+`vault_format_unsupported`.
 
 The key check value reveals nothing about a strong secret, but a weak
 passphrase can be tested offline against it, as with the resume store's key
