@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal, NamedTuple
 
 from decoy_engine import reasons
-from decoy_engine._error_base import DecoyError
+from decoy_engine.config import classify_table_kinds
+from decoy_engine.errors import DecoyError
 from decoy_engine.run_result import Check, CheckCounts
 
 __all__ = [
@@ -104,8 +105,15 @@ class PreScanVerdict:
         )
 
 
-class PreScanWarning(UserWarning):
-    """The pre-scan flagged unmasked columns under `on_findings: warn`."""
+class PreScanWarning(DecoyError, UserWarning):  # noqa: N818 - the plan names it a warning
+    """The pre-scan flagged unmasked columns under `on_findings: warn`.
+
+    A `DecoyError` too, because the exception-taxonomy sentry bars an engine exception class
+    outside that base; callers filter it as a `UserWarning`. `code` is `pre_scan.uncovered_pii`."""
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.code: str = str(reasons.pre_scan.UNCOVERED_PII)
 
 
 class PreScanBlockedError(DecoyError, ValueError):
@@ -140,10 +148,6 @@ def _effective_detectors(policy: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(sorted({*(policy.get("detectors") or ()), "regex"}))
 
 
-def _is_mask_table(table: Mapping[str, Any]) -> bool:
-    return table.get("row_count") is None and not table.get("generate_columns")
-
-
 def _gated(rule: Mapping[str, Any]) -> bool:
     when = rule.get("when")
     return isinstance(when, str) and when.strip() != ""
@@ -173,8 +177,9 @@ def evaluate_pre_scan(config: Mapping[str, Any], core: Mapping[str, Any]) -> Pre
     findings: list[PreScanFinding] = []
     covered = 0
     scanned: list[str] = []
+    kinds = classify_table_kinds(dict(config))
     for table in config.get("tables") or ():
-        if not _is_mask_table(table):
+        if kinds.get(table["name"]) != "mask":
             continue
         name = table["name"]
         scan = core_tables.get(name)

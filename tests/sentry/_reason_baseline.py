@@ -33,6 +33,7 @@ FAMILY_NAMESPACE: dict[str, str] = {
     "BaselineBindingError": "pre_scan",
     "PreScanBlockedError": "pre_scan",
     "PreScanFailedError": "pre_scan",
+    "PreScanWarning": "pre_scan",
     "NamespaceConfigError": "config",
     "PlanCompileError": "plan",
     "PlanCheckError": "plan",

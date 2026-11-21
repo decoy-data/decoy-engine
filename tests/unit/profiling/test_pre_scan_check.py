@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pickle
+import warnings
 from typing import Any
 
 import pytest
@@ -272,4 +273,7 @@ def test_errors_pickle_and_keep_fixed_text() -> None:
 
 def test_warning_class_is_a_user_warning() -> None:
     assert issubclass(PreScanWarning, UserWarning)
+    assert PreScanWarning().code == str(reasons.pre_scan.UNCOVERED_PII)
+    with pytest.warns(PreScanWarning):
+        warnings.warn(PreScanWarning("x"), stacklevel=1)
     assert isinstance(evaluate_pre_scan(_config([]), _core(people=[_field("n")])), PreScanVerdict)
