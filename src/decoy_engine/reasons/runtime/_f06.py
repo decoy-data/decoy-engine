@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Phase, RetryClass
 
 __all__ = [
     "DECLARED_BOOLEAN_INVALID",

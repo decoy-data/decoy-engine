@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Severity
+from decoy_engine.reasons._types import UNRELEASED, Severity
 
 __all__ = ["INVALID", "LEGACY_WITHHELD"]
 

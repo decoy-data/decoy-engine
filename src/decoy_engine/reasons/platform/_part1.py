@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, Severity
+from decoy_engine.reasons._types import UNRELEASED, Kind, Outcome, Severity
 
 __all__ = [
     "ADMISSION_REJECTED",

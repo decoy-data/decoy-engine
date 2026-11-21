@@ -9,7 +9,14 @@ be removed after delivery is only a warning.
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, ReasonCode, RetryClass, Severity
+from decoy_engine.reasons._types import (
+    UNRELEASED,
+    Kind,
+    Outcome,
+    ReasonCode,
+    RetryClass,
+    Severity,
+)
 
 __all__ = [
     "RESUME_CHECKPOINT_INVALID",

@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, Phase, RetryClass, Severity
+from decoy_engine.reasons._types import (
+    UNRELEASED,
+    Kind,
+    Outcome,
+    Phase,
+    RetryClass,
+    Severity,
+)
 
 __all__ = [
     "MIXED_GENERATE_MASK_CHUNKED",

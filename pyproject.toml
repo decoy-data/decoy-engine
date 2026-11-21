@@ -486,6 +486,10 @@ ignore = [
     "RUF013", # implicit-Optional: cleanup as touched; high-volume
 ]
 [tool.ruff.lint.per-file-ignores]
+# Every reason spec module imports UNRELEASED even when no code in it is unreleased. The release
+# stamp used to delete the then-unused import, and a branch adding a new `since=UNRELEASED` code
+# then raised NameError after merging. tests/sentry/test_reason_unreleased_import.py enforces it.
+"src/decoy_engine/reasons/*/_*.py" = ["F401"]
 # Tests can use assert (S101) and have lower naming bars. Additional
 # test-only suppressions cover cosmetic pytest-style nits (PT018
 # assertion-too-complex, PT006 parametrize tuple-vs-list, PT012/PT019
