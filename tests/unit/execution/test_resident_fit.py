@@ -8,6 +8,7 @@ a probe.
 from __future__ import annotations
 
 import builtins
+import gc
 from collections.abc import Callable
 
 import pyarrow as pa
@@ -137,9 +138,21 @@ def test_bound_does_not_touch_io_host_memory_or_a_probe(monkeypatch: pytest.Monk
 
 
 def _held_bytes(build: Callable[[], pa.Table]) -> tuple[pa.Table, int]:
-    before = pa.total_allocated_bytes()
-    table = build()
-    return table, pa.total_allocated_bytes() - before
+    """Bytes the allocator holds for what `build` returns.
+
+    `pa.total_allocated_bytes()` is process-wide. A cyclic garbage pass that frees an earlier
+    test's arrays between the two reads makes the delta negative (seen as -128 on CI, where the
+    shard runs thousands of tests first). Collect first and keep the collector off while measuring,
+    so the delta is only what `build` allocated.
+    """
+    gc.collect()
+    gc.disable()
+    try:
+        before = pa.total_allocated_bytes()
+        table = build()
+        return table, pa.total_allocated_bytes() - before
+    finally:
+        gc.enable()
 
 
 def _buffers(array: pa.Array) -> list[pa.Buffer]:

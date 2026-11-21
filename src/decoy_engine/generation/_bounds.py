@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import arrow_column_bytes
+from decoy_engine.config import categorical_categories, reference_root
 from decoy_engine.generation._faker_pool import POOL_ELIGIBLE_LOCALE_PAIRS
 from decoy_engine.generation.kinds import (
     constant_payload_bound,
@@ -155,7 +156,8 @@ def sequence_payload_bound(col: dict[str, Any], rows: int) -> int:
 
 
 def categorical_payload_bound(col: dict[str, Any]) -> int | None:
-    cats = col.get("categories", ["Category A", "Category B"])
+    # A conditional column also draws every `by` entry's categories.
+    cats = categorical_categories(col)
     if not isinstance(cats, list) or not cats:
         return None
     if all(isinstance(c, str) for c in cats):
@@ -220,6 +222,18 @@ def compute_payload_bounds(
             result = (
                 None if parent is None or parent_col is None else bound(parent["name"], parent_col)
             )
+        elif kind == "inherit":
+            # The copy holds its parent column's values: the column `reference_root` reaches.
+            root = reference_root(tables, key)
+            parent_col = next(
+                (
+                    c
+                    for c in (tables.get(root[0]) or {}).get("generate_columns", [])
+                    if c["name"] == root[1]
+                ),
+                None,
+            )
+            result = None if root == key or parent_col is None else bound(root[0], parent_col)
         else:
             result = _legacy_payload_bound(col)
         if output_type_of(col) is not None:

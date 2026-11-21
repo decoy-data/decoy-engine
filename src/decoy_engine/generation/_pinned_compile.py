@@ -22,7 +22,11 @@ from typing import Any
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine._reference_date import normalize_reference_date
-from decoy_engine.config import is_self_reference
+from decoy_engine.config import (
+    categorical_categories,
+    is_per_parent_aggregate,
+    is_self_reference,
+)
 from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.generation._pinned_plan import (
@@ -70,6 +74,11 @@ REJECTED_TYPES = {
     "formula": (
         "pinned_formula_unsupported",
         "formula columns are not available in pinned mode",
+    ),
+    # Reads a parent row by lookup, which pinned execution does not do: the relational refusal.
+    "inherit": (
+        str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED),
+        "inherit columns are not available in pinned mode",
     ),
 }
 
@@ -136,9 +145,16 @@ def relational_option_unsupported(tname: str, col: dict[str, Any]) -> bool:
     """Whether ``col`` has a relational shape pinned mode cannot run: a pure test of the config.
 
     A self-reference reads its own table's rows; pinned execution draws a reference from a
-    finished parent table only. Compile and execute both ask this one question.
+    finished parent table only. A date anchored through ``anchor_via`` reads a parent row by
+    lookup, and a per-parent aggregate reads its child table after it is drawn; pinned
+    execution does neither. Compile and execute both ask this one question. An ``inherit``
+    column is refused by type (``REJECTED_TYPES``) with the same refusal.
     """
-    return is_self_reference(tname, col)
+    return (
+        is_self_reference(tname, col)
+        or col.get("anchor_via") is not None
+        or is_per_parent_aggregate(col)
+    )
 
 
 def _relational_refusal(tname: str, cname: str, at_execute: bool) -> DecoyError:
@@ -191,16 +207,20 @@ def reject_unpinnable(config: dict[str, Any], *, at_execute: bool = False) -> No
             )
         by_name = {c.get("name"): c for c in gcols}
         for col in gcols:
-            _reject_column(tname, col, by_name)
+            _reject_column(tname, col, by_name, at_execute)
             if relational_option_unsupported(tname, col):
                 raise _relational_refusal(tname, str(col.get("name")), at_execute)
 
 
-def _reject_column(tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]]) -> None:
+def _reject_column(
+    tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]], at_execute: bool
+) -> None:
     cname = str(col.get("name"))
     kind = col.get("type")
     if kind in REJECTED_TYPES:
         code, why = REJECTED_TYPES[kind]
+        if code == str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED):
+            raise _relational_refusal(tname, cname, at_execute)
         raise PinnedModeError(code=code, message=f"{_where(tname, cname)}: {why}")
     if kind not in PINNABLE_TYPES:
         raise PinnedModeError(
@@ -220,7 +240,7 @@ def _reject_column(tname: str, col: dict[str, Any], siblings: dict[Any, dict[str
     if kind == "windowed_date":
         anchor = siblings.get(col.get("anchor"))
         if anchor is not None and anchor.get("type") == "categorical":
-            for category in anchor.get("categories") or []:
+            for category in categorical_categories(anchor) or []:
                 if isinstance(category, str) and not anchor_is_absolute(category):
                     raise PinnedModeError(
                         code=reasons.plan.PINNED_WINDOWED_ANCHOR_NOT_ABSOLUTE,

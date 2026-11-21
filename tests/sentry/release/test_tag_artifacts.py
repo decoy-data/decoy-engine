@@ -194,6 +194,8 @@ PRODUCERS: dict[str, Producer] = {
     ),
     "post-scan-integrity/v2": _reader_v2,
     "flagged-redacted/v1": _redacted_v1,
+    "policy-expansion/v1": _const("decoy_engine.config.policy._expand", "POLICY_EXPANSION_SCHEMA"),
+    "secret-provider/v1": _const("decoy_engine.secret_providers", "API_VERSION"),
 }
 NO_WRITER = frozenset(
     {
@@ -207,6 +209,8 @@ NO_WRITER = frozenset(
         "canary-span-report/v1",
         "post-scan-integrity/v2",
         "flagged-redacted/v1",
+        "policy-expansion/v1",
+        "secret-provider/v1",
     }
 )
 

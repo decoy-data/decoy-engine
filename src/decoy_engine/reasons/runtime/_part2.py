@@ -14,6 +14,7 @@ __all__ = [
     "BUNDLE_MISSING_OUTPUT_COLUMNS",
     "CARDINALITY_TARGET_EXCEEDS_POOL",
     "CATEGORICAL_CATEGORIES_NOT_LIST",
+    "CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE",
     "CPU_DETECTION_FAILED",
     "DETERMINISTIC_MODE_UNSUPPORTED_CARDINALITY",
     "DETERMINISTIC_REQUIRES_SOURCE_AND_NAMESPACE",
@@ -77,6 +78,8 @@ __all__ = [
     "OUT_OF_CORE_TEXT_REDACT_UNPREPARED",
     "OUT_OF_CORE_VALIDATORS_NOT_ADMITTED",
     "OUT_OF_CORE_VAULT_CONFIG_REQUIRED",
+    "PARENT_LOOKUP_KEY_MISSING",
+    "PARENT_LOOKUP_KEY_NOT_UNIQUE",
     "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
     "PK_DUPLICATES",
     "POOL_CAPACITY_UNVERIFIABLE_NO_PROFILE",
@@ -117,6 +120,10 @@ __all__ = [
     "UNKNOWN_CARDINALITY_MODE",
     "UNSUPPORTED_STRATEGY",
     "VALUE_EXCEEDS_DECLARED_BOUND",
+    "WINDOWED_DATE_ANCHOR_INVALID",
+    "WINDOWED_DATE_ANCHOR_OUT_OF_RANGE",
+    "WINDOWED_DATE_OFFSET_OUT_OF_RANGE",
+    "WINDOWED_DATE_PARENT_ANCHOR_NULL",
 ]
 
 _d = _catalog.runtime("ExecutionError")
@@ -328,12 +335,17 @@ GENERATE_FORMULA_EVALUATION_FAILED = _d(
     since="1.26.0",
 )
 
-# Reference-draw refusals. A summary is the whole message beside the table and column names, so
-# none names a key, count, bound or weight. `pinned_relational_option_unsupported` is the
-# run-time twin of the `plan` code of the same name, with the same text: pinned execute raises
-# it for a plan that never went through pinned compile.
+# Reference-draw and conditional-categorical refusals. A summary is the whole message beside the
+# table and column names, so none names a key, count, bound, weight or parent value.
+# `pinned_relational_option_unsupported` is the run-time twin of the `plan` code of the same name,
+# with the same text: pinned execute raises it for a plan that never went through pinned compile.
 _d = _catalog.runtime("GenerationError")
 
+CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE = _d(
+    "categorical_condition_column_unavailable",
+    "Generate categorical column conditions on a column that has not been generated.",
+    since=UNRELEASED,
+)
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
     "generate_fitted_reference_bounds_conflict",
     "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
@@ -342,6 +354,16 @@ GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+    since=UNRELEASED,
+)
+PARENT_LOOKUP_KEY_MISSING = _d(
+    "parent_lookup_key_missing",
+    "Generate column reads a parent row, but a foreign key value has no parent row.",
+    since=UNRELEASED,
+)
+PARENT_LOOKUP_KEY_NOT_UNIQUE = _d(
+    "parent_lookup_key_not_unique",
+    "Generate column reads a parent row, but a parent key value occurs more than once.",
     since=UNRELEASED,
 )
 PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
@@ -362,6 +384,31 @@ REFERENCE_PARENT_POOL_EMPTY = _d(
 REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
     "reference_weights_length_mismatch",
     "Reference column weights count does not match its parent key count.",
+    since=UNRELEASED,
+)
+
+# Date-window refusals, raised where the anchor is parsed and shifted, for masked and generated
+# columns alike. A summary is the whole message: no cell value, type name or position.
+_d = _catalog.runtime("WindowedDateError")
+
+WINDOWED_DATE_ANCHOR_INVALID = _d(
+    "windowed_date_anchor_invalid",
+    "Windowed date anchor is not a date or datetime without a timezone.",
+    since=UNRELEASED,
+)
+WINDOWED_DATE_ANCHOR_OUT_OF_RANGE = _d(
+    "windowed_date_anchor_out_of_range",
+    "Windowed date anchor is outside the supported date range.",
+    since=UNRELEASED,
+)
+WINDOWED_DATE_OFFSET_OUT_OF_RANGE = _d(
+    "windowed_date_offset_out_of_range",
+    "Windowed date offset moves the date outside the supported date range.",
+    since=UNRELEASED,
+)
+WINDOWED_DATE_PARENT_ANCHOR_NULL = _d(
+    "windowed_date_parent_anchor_null",
+    "Windowed date anchor is null on the parent row its foreign key points at.",
     since=UNRELEASED,
 )
 
