@@ -25,14 +25,17 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess
+from decoy_engine.generation._numeric_typing import provider_text_columns
 from decoy_engine.generation._pinned_compile import refuse_live_tokens, reject_unpinnable
 from decoy_engine.generation._pinned_plan import (
     PinnedModeError,
     PinnedPlan,
+    reference_policy_entry,
     runtime_identity,
     validate_seed,
 )
 from decoy_engine.generation._statistical_column import arrow_table
+from decoy_engine.generation.pool import GenerationError
 from decoy_engine.generation.statistical import StatisticalSpec, spec_from_dict
 
 
@@ -90,6 +93,30 @@ def _scan_plan_for_tokens(plan: PinnedPlan) -> None:
     refuse_live_tokens(decoded, "plan")
 
 
+def _policies_well_formed(plan: PinnedPlan) -> bool:
+    """Whether every recorded reference policy would decode; a hand-built plan skipped the decoder."""
+    try:
+        for entry in plan.reference_policies:
+            reference_policy_entry(entry)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _refuse_malformed_policies(plan: PinnedPlan) -> None:
+    """Refuse a plan whose recorded reference policies would not decode, before anything reads it.
+
+    The policy decides what an empty parent does, so a field that was tampered with is refused
+    at the run with the relational refusal rather than read leniently. The message is the fixed
+    summary: a malformed entry has no trustworthy name to show.
+    """
+    if not _policies_well_formed(plan):
+        raise GenerationError(
+            code=reasons.runtime.PINNED_RELATIONAL_OPTION_UNSUPPORTED,
+            message=reasons.runtime.PINNED_RELATIONAL_OPTION_UNSUPPORTED.spec.summary,
+        )
+
+
 def _check_plan(plan: PinnedPlan) -> dict[tuple[str, str], StatisticalSpec]:
     """Re-check a plan that may have been deserialized or hand-built, then decode its specs."""
     if plan.runtime_identity != runtime_identity():
@@ -106,7 +133,8 @@ def _check_plan(plan: PinnedPlan) -> dict[tuple[str, str], StatisticalSpec]:
                 }
                 for t in plan.tables
             ]
-        }
+        },
+        at_execute=True,
     )
     for ti, t in enumerate(plan.tables):
         for ci, c in enumerate(t.columns):
@@ -179,6 +207,8 @@ def execute_pinned(
 
     import pandas as pd
 
+    # First: the token scan serializes the plan, which a policy field of the wrong type breaks.
+    _refuse_malformed_policies(plan)
     _scan_plan_for_tokens(plan)
     seed = validate_seed(seed)
     specs = _check_plan(plan)
@@ -197,6 +227,12 @@ def _run(
     by_name = {t.name: t for t in plan.tables}
     # Decided at compile time from the full config; a plan from before the field carries none.
     numeric = {(t, c): _NUMERIC_ARROW[dt] for t, c, dt in plan.numeric_types}
+    # The policy travels beside the column config, never inside it: seeds do not see it.
+    policies = {(t, c): policy for t, c, policy in plan.reference_policies}
+    configs = {t.name: [json.loads(c.config_json) for c in t.columns] for t in plan.tables}
+    text_columns = provider_text_columns(
+        {"tables": [{"name": n, "generate_columns": cols} for n, cols in configs.items()]}
+    )
     pools: dict[str, pa.Table] = {}
     for name in _order_tables(plan):
         table = by_name[name]
@@ -216,11 +252,13 @@ def _run(
                 reference_date=plan.reference_date,
                 pinned=True,
                 numeric_type=numeric.get((name, pcol.name)),
+                reference_policy=policies.get((name, pcol.name)),
             )
         pools[name] = arrow_table(
             data,
             table_name=name,
             statistical_specs=specs,
-            columns=[json.loads(c.config_json) for c in table.columns],
+            columns=configs[name],
+            text_columns=text_columns.get(name, ()),
         )
     return {name: pools[name] for name in sorted(pools)}

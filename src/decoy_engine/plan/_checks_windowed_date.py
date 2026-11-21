@@ -6,7 +6,9 @@ _checks.py module decomposes into per-strategy sub-modules as new strategies
 land; this is the SP-10c slice for windowed_date.
 
 This module exports exactly one function: ``check_windowed_date_refs``,
-which validates that windowed_date columns name an existing anchor column.
+which validates the distribution of every windowed_date column and that a
+mask-kind one names an existing anchor column. The anchor of a generate-kind
+column is resolved and checked by ``plan/checks/_generate_columns.py``.
 It is imported by plan/_compile.py alongside the other check functions from
 plan/_checks.py and sibling _checks_*.py modules.
 """
@@ -17,7 +19,10 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine.plan._errors import PlanCompileError
-from decoy_engine.transforms.windowed_date import WINDOWED_DATE_DISTRIBUTIONS
+from decoy_engine.transforms.windowed_date import (
+    WINDOWED_DATE_DISTRIBUTIONS,
+    validate_window_config,
+)
 
 
 def check_windowed_date_refs(config: dict[str, Any]) -> None:
@@ -32,13 +37,15 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
        is guaranteed to raise at execution time; surfacing it here gives a
        precise error before any run.
 
-    2. Missing anchor ref: the ``anchor`` key names a column not present in the
-       same table. A missing ref is guaranteed to raise KeyError at execution
-       time; rejecting here surfaces it with the exact missing name.
+    2. Missing anchor ref (mask-kind columns): the ``anchor`` key names a column
+       not present in the same table. A missing ref is guaranteed to raise
+       KeyError at execution time; rejecting here surfaces it with the exact
+       missing name.
 
-    Covers both mask-kind columns (strategy: windowed_date with
-    provider_config.anchor) and generate-kind columns (type: windowed_date
-    with anchor at the column level).
+    The distribution rule covers both mask-kind columns (strategy:
+    windowed_date with provider_config.anchor) and generate-kind columns
+    (type: windowed_date). A generate-kind anchor may live in a parent table
+    (``anchor_via``); the generate-input check owns where it must exist.
 
     Config-only (no profile, no source data): safe to run in both compile
     branches and in ``run_config_only_checks``. Validation never mutates
@@ -48,7 +55,8 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
         config: Raw pipeline config dict.
 
     Raises:
-        PlanCompileError: The anchor column ref is missing from the same table.
+        PlanCompileError: The anchor column ref is missing from the same table, or a mask
+            column's window is past the date range or inverted.
     """
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
@@ -99,6 +107,9 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
                         f"table. Available columns: {sorted(all_col_names)!r}."
                     ),
                 )
+            # The generate path runs the same parse, so a window past the date range, or an
+            # inverted one, is refused at compile time for mask columns too.
+            validate_window_config(pc)
 
         # Check generate-kind columns (type: windowed_date).
         for col_entry in table_entry.get("generate_columns") or []:
@@ -117,17 +128,5 @@ def check_windowed_date_refs(config: dict[str, Any]) -> None:
                         f"{table_name!r} has invalid distribution "
                         f"{distribution!r}. Allowed values: "
                         f"{sorted(WINDOWED_DATE_DISTRIBUTIONS)!r}."
-                    ),
-                )
-            anchor = col_entry.get("anchor")
-            if anchor and str(anchor) not in all_col_names:
-                raise PlanCompileError(
-                    code=reasons.plan.WINDOWED_DATE_MISSING_ANCHOR_REF,
-                    path=(f"tables.{table_name}.generate_columns.{col_name}.anchor"),
-                    message=(
-                        f"windowed_date column {col_name!r} in table "
-                        f"{table_name!r} references anchor column "
-                        f"{anchor!r} which is not defined in the same "
-                        f"table. Available columns: {sorted(all_col_names)!r}."
                     ),
                 )

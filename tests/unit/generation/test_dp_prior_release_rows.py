@@ -77,11 +77,38 @@ _V0_26_0_ROWS = (
     "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
     "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
 )
-# The two rows this release certifies: the dev/CI lock with the engine at 0.27.0, and the CLI
+# The two rows v0.27.0 certified: the dev/CI lock with the engine at 0.27.0, and the CLI
 # runtime profile on engine 0.27.0.
 _V0_27_0_ROWS = (
     "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
     "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
+)
+# The three rows v0.28.0 certified: the dev/CI lock with the engine at 0.28.0, the CLI
+# runtime profile on engine 0.28.0 (stamped from the 0.27.0 pin file, so without joserfc and
+# rfc8785), and row F (that profile with certifi 2026.10.18, cryptography
+# 50.0.0, pyasn1 0.6.5 and urllib3 2.8.0, roadmap row 24zc).
+_V0_28_0_ROWS = (
+    "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
+    "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+    "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
+)
+# The rows v0.28.1 certifies: the dev/CI lock with the engine at 0.28.1 (376aa2... before the
+# time-machine pin of the Faker output lock, 8e4bb9... with it), and the CLI runtime profile on
+# engine 0.28.1 (b61dcfd6... with the 70 pins an install really has, pynacl included; 00f45dee...
+# is the 69-pin profile stamped before PyNaCl became a base dependency). The dev row b2d12cff...
+# adds PyNaCl to the 0.28.1 lock.
+_V0_28_1_ROWS = (
+    "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
+    "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
+    "b2d12cff2b9b1cb32a7fdd14227befe5b7767a389de47a8d1b3ebd70822c9be1",
+    "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
+    "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
+)
+# The rows v0.28.2 certifies: the dev/CI lock with the engine at 0.28.2, and the 70-pin CLI
+# runtime profile (the 0.28.1 pin file, pynacl included) on engine 0.28.2.
+_V0_28_2_ROWS = (
+    "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
+    "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
 )
 _ALL_ROWS = (
     _V0_17_0_ROWS
@@ -96,6 +123,9 @@ _ALL_ROWS = (
     + _V0_25_0_ROWS
     + _V0_26_0_ROWS
     + _V0_27_0_ROWS
+    + _V0_28_0_ROWS
+    + _V0_28_1_ROWS
+    + _V0_28_2_ROWS
 )
 
 

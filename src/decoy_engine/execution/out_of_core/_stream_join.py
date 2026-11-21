@@ -43,6 +43,8 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._batch_join import (
     _cast_chunks,
@@ -144,6 +146,7 @@ class StreamFkJoiner:
         memory_limit: str | None = None,
         remap_seeds: tuple[ColumnSeed, ...] | None = None,
         job_seed: bytes | None = None,
+        text_widths: tuple[TextWidthState | None, ...] = (),
     ) -> None:
         try:
             if len(child_key_types) != len(edge.child_columns):
@@ -190,6 +193,7 @@ class StreamFkJoiner:
                 masked_types=masked_types,
                 child_key_types=child_key_types,
                 remap_seeds=remap_seeds,
+                text_widths=text_widths,
             )
             self._observed_types: tuple[set[pa.DataType], ...] = tuple(
                 set() for _ in edge.child_columns
@@ -303,8 +307,9 @@ class StreamFkJoiner:
         with self._child_keys.open_reader() as reader:
             conn.register("child_keys", reader)
             try:
-                count = conn.execute(
-                    f"""
+                count = fetch_scalar(
+                    conn.execute(
+                        f"""
                     SELECT count(*)
                     FROM child_keys c
                     LEFT JOIN parent_keys p
@@ -312,7 +317,8 @@ class StreamFkJoiner:
                     WHERE c.__decoy_fk_join_key IS NOT NULL
                       AND p.{_q(join_key)} IS NULL
                     """
-                ).fetchone()[0]
+                    )
+                )
             finally:
                 conn.unregister("child_keys")
         return int(count)

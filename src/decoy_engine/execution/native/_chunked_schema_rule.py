@@ -59,6 +59,7 @@ schema metadata.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any
 
@@ -66,8 +67,11 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._runner import group_by_sibling
+from decoy_engine.execution._strategies._redact import redact_with_is_string
 
 _STRING_OUTPUT_STRATEGIES = frozenset({"hash", "truncate", "redact"})
 
@@ -84,7 +88,7 @@ def _string_output_is_fixed(col: dict[str, Any]) -> bool:
     if col["strategy"] != "redact":
         return True
     cfg = col.get("provider_config") or {}
-    return isinstance(cfg.get("redact_with", "REDACTED"), str)
+    return redact_with_is_string(cfg)
 
 
 def text_redact_pinned_columns(configured: dict[str, dict[str, Any]]) -> frozenset[str]:
@@ -216,10 +220,8 @@ def group_key_pinned_columns(
     for name, col in configured.items():
         if col.get("strategy") != "group_key" or _has_when(col) or written is None:
             continue
-        provider_config = col.get("provider_config")
-        cfg = provider_config if isinstance(provider_config, dict) else {}
-        group_by = cfg.get("group_by")
-        if not isinstance(group_by, str) or group_by == name or group_by in written:
+        group_by = group_by_sibling(col.get("provider_config"))
+        if group_by is None or group_by == name or group_by in written:
             continue
         sibling = configured.get(group_by)
         if sibling is not None and (sibling.get("strategy") != "passthrough" or _has_when(sibling)):
@@ -228,6 +230,8 @@ def group_key_pinned_columns(
             continue
         if not group_key_sibling_type_admitted(first_schema.field(group_by).type):
             continue
+        provider_config = col.get("provider_config")
+        cfg = provider_config if isinstance(provider_config, dict) else {}
         if group_key_config_rejection(name, table, None, provider_config=cfg) is None:
             pinned.add(name)
     return frozenset(pinned)
@@ -240,6 +244,10 @@ class SchemaRule:
     # The first chunk's field (metadata and nullability included), reused for a
     # later null-typed chunk so both routes yield the same field on every chunk.
     passthrough_fields: dict[str, pa.Field]
+    # One width state per pass-through `large_string` column, shared by every chunk of the call:
+    # a chunk whose values fit 32-bit offsets leaves as `string`; a value that cannot fit
+    # promotes the column to `large_string` from then on.
+    text_widths: dict[str, TextWidthState] = dataclasses.field(default_factory=dict)
 
 
 def build_schema_rule(
@@ -319,6 +327,13 @@ def _safe_cast(column: Any, target: pa.DataType, *, table: str, name: str, chunk
         ) from exc
 
 
+def _narrow_passthrough(
+    rule: SchemaRule, name: str, column: pa.ChunkedArray, field: pa.Field
+) -> tuple[pa.ChunkedArray, pa.Field]:
+    state = rule.text_widths.setdefault(name, TextWidthState())
+    return state.observe_column(column), field.with_type(state.arrow_type)
+
+
 def normalize_chunk(
     rule: SchemaRule, produced: pa.Table, source: pa.Table, *, table: str, chunk_index: int
 ) -> pa.Table:
@@ -337,6 +352,8 @@ def normalize_chunk(
             if column.type != declared:
                 column = column.cast(declared)
             field = rule.passthrough_fields[name]
+            if pa.types.is_large_string(declared):
+                column, field = _narrow_passthrough(rule, name, column, field)
         elif name in rule.string_columns and column.type != pa.string():
             column = _safe_cast(
                 column, pa.string(), table=table, name=name, chunk_index=chunk_index

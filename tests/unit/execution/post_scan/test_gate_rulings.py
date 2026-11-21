@@ -15,7 +15,7 @@ from decoy_engine.execution.pipeline import _post_scan
 from decoy_engine.execution.pipeline._post_scan import PostScanGate
 from decoy_engine.verification.postmask import SCHEMA_VERSION, PostScanBlockedError
 from tests.unit.execution import _subset_run_support as subset_sup
-from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _run
+from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _fail_row, _run
 from tests.unit.execution.test_post_scan_integrity_in_run import _cfg
 
 REL = {
@@ -243,7 +243,7 @@ def test_a_run_that_changes_a_float_key_to_int_beside_a_generated_parent_is_meas
 def test_m1_integrity_withholds_a_run_on_a_failing_column_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    finding = {"table": "t", "column": "email", "detector_id": "email", "severity": "fail"}
+    finding = _fail_row("t", "email")
 
     def failing_suite(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"schema_version": SCHEMA_VERSION, "residual_pii": [finding]}

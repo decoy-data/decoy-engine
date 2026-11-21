@@ -24,6 +24,7 @@ import pyarrow as pa
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._column_access import SIBLING_REFERENCE_KEYS
 from decoy_engine.execution._operator_registry import OPERATORS
+from decoy_engine.execution._strategies._redact import redact_with_is_string
 from decoy_engine.execution.native._capabilities import (
     StrategyCapabilities,
     capabilities_for,
@@ -387,9 +388,6 @@ def _required_prepasses(
     node: Any, caps: StrategyCapabilities, cfg: dict[str, Any]
 ) -> tuple[str, ...]:
     passes: list[str] = []
-    # date_shift resolves its format from config or a whole-column detect scan.
-    if node.strategy == "date_shift" and not cfg.get("date_format"):
-        passes.append("format_detect")
     # A durable global row number is needed by permutations, per-group ordinals,
     # and per-row-index seeds (Task 0.1 non-partitionable / global-identity sites).
     if caps.needs_global_row_identity:
@@ -491,8 +489,7 @@ def redact_config_rejection(name: str, provider_config: dict[str, Any]) -> str |
     data-dependent instead of static, so it is rejected here before it can
     reach the native route.
     """
-    redact_with = provider_config.get("redact_with", "REDACTED")
-    if not isinstance(redact_with, str):
+    if not redact_with_is_string(provider_config):
         return f"redact_with_not_string:{name}"
     return None
 
@@ -575,9 +572,11 @@ def _fallback_policy(
 ) -> FallbackPolicy:
     # `required_prepasses` is intentionally NOT consulted here: a prepass (a
     # date-format detect, a global row number) does not disqualify a node from
-    # the native route, it is native work a later phase schedules. So a
-    # format-less date_shift is still "native" with a format_detect prepass. The
-    # phase that consumes prepasses owns any policy that reads them.
+    # the native route, it is native work a later phase schedules. A date_shift
+    # always carries its own format (plan compile requires it), so none needs a detect prepass;
+    # the rare top-level declared-casting column without one is declined by
+    # `date_shift_requires_date_format`. The phase that consumes prepasses owns any policy that
+    # reads them.
     native_ready = (
         caps.output_type_is_static
         and caps.is_row_local

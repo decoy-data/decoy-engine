@@ -96,13 +96,9 @@ def expected_outcome(case: Case) -> Expected:
     n = rows_of(case)
     if case.family == "single":
         # No relationships: layer 1 is always full_frame. Layer 2 chunks a single mask table
-        # whose rows reach the auto-chunk threshold, when auto_chunk is on, unless a column has
-        # a non-chunk-stable pandas round-trip dtype: an integer column that really holds a null
-        # (the planner's documented "integer with nulls" rejection).
-        has_int_null = case.int_kind == "int64_nullable" and n >= 1
-        return Expected(
-            route="full_frame", chunked=case.auto_chunk and n >= CHUNK_AT and not has_int_null
-        )
+        # whose rows reach the auto-chunk threshold, when auto_chunk is on. The passthrough
+        # integer column `n` is carried past pandas, so a null in it no longer blocks the lane.
+        return Expected(route="full_frame", chunked=case.auto_chunk and n >= CHUNK_AT)
     if case.family == "bounded_fk":
         # A pure-mask FK job every route supports: out_of_core at/above its threshold, else
         # sequential. Relationship jobs never chunk.
@@ -448,6 +444,7 @@ EXECUTION_KEYS = {
     "eviction",
     "outputs_streamed",
     "loaded_fully_in_memory",
+    "native_threads",  # ENGINE-THREADS-DEFAULT: the resolved count and where it came from
 }
 
 

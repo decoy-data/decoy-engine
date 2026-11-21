@@ -1,0 +1,31 @@
+# Seeded corpus for rule P5: a private open (create, mode 0600) carries NOFOLLOW, however spelled.
+import os
+
+from decoy_engine.fileaccess import _osflags
+
+_NAMED = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL
+
+
+def private_without_nofollow(path):
+    return os.open(path, _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL, 0o600)
+
+
+def private_with_nofollow(path):
+    return os.open(path, _osflags.WRONLY | _osflags.CREAT | _osflags.NOFOLLOW, 0o600)
+
+
+def private_os_spelling_without_nofollow(path):
+    return os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+
+
+def private_named_flags_without_nofollow(path):
+    return os.open(path, _NAMED, 0o600)
+
+
+def private_local_flags_without_nofollow(path):
+    flags = _osflags.RDWR | _osflags.CREAT
+    return os.open(path, flags, 0o600)
+
+
+def public_create(path):
+    return os.open(path, _osflags.WRONLY | _osflags.CREAT, 0o644)

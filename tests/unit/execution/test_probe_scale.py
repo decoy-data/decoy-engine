@@ -151,3 +151,185 @@ class TestDownscaleJob:
         job = downscale_job(config, None, 0.5, floor_rows=0)
         assert job.sources == {}
         assert job.row_counts == {}
+
+
+def _family(parent_rows: int, child_rows: int, parent_col: dict | None = None, **bounds) -> dict:
+    return {
+        "global_settings": {"seed": 3},
+        "tables": [
+            {
+                "name": "parents",
+                "row_count": parent_rows,
+                "generate_columns": [parent_col or {"name": "id", "type": "sequence", "start": 1}],
+            },
+            {
+                "name": "kids",
+                "row_count": child_rows,
+                "generate_columns": [
+                    {
+                        "name": "pid",
+                        "type": "reference",
+                        "reference_table": "parents",
+                        "reference_column": "id",
+                        **bounds,
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def _scaled_ref(config: dict, fraction: float, floor_rows: int = 0) -> dict:
+    return downscale_config(config, fraction, floor_rows=floor_rows)["tables"][1][
+        "generate_columns"
+    ][0]
+
+
+class TestDownscalePerParentBounds:
+    """GEN-REL AT-5: a bounded reference stays bounded, loosened to the scaled sizes."""
+
+    def test_bounds_that_still_fit_are_kept(self) -> None:
+        ref = _scaled_ref(_family(1000, 3000, min_per_parent=2, max_per_parent=4), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (2, 4)
+
+    def test_rounding_that_breaks_max_loosens_it_to_the_ceiling(self) -> None:
+        # 25 parents round to 2 and 50 children to 5: five rows need three per parent.
+        ref = _scaled_ref(_family(25, 50, min_per_parent=2, max_per_parent=2), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (2, 3)
+
+    def test_rounding_that_breaks_min_loosens_it_to_the_floor(self) -> None:
+        # 15 parents round to 2 and 30 children to 3: three rows give one per parent.
+        ref = _scaled_ref(_family(15, 30, min_per_parent=2), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (1, 2)
+
+    def test_a_single_bound_writes_both_scaled_fields(self) -> None:
+        ref = _scaled_ref(_family(1000, 3000, max_per_parent=4), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (0, 4)
+
+    @pytest.mark.parametrize(
+        "parent_col",
+        [
+            {"name": "id", "type": "categorical", "categories": ["a", "b", "c"]},
+            {"name": "id", "type": "sequence", "start": 1, "null_probability": 0.5},
+        ],
+        ids=["categorical", "nullable-sequence"],
+    )
+    def test_a_parent_with_unknown_distinct_keys_gets_the_widest_bounds(
+        self, parent_col: dict
+    ) -> None:
+        ref = _scaled_ref(_family(1000, 3000, parent_col, min_per_parent=2, max_per_parent=4), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (0, 300)
+
+    def test_an_empty_scaled_parent_leaves_the_bounds_alone(self) -> None:
+        ref = _scaled_ref(_family(0, 3000, min_per_parent=2, max_per_parent=4), 0.1)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (2, 4)
+        ref = _scaled_ref(_family(4, 3000, min_per_parent=2, max_per_parent=900), 0.01)
+        assert (ref["min_per_parent"], ref["max_per_parent"]) == (2, 900)
+
+    @pytest.mark.parametrize("bounds", [{}, {"min_per_parent": 0, "max_per_parent": 0}])
+    def test_a_reference_without_a_positive_bound_is_not_rewritten(self, bounds: dict) -> None:
+        config = _family(25, 50, **bounds)
+        ref = _scaled_ref(config, 0.1)
+        assert ref == config["tables"][1]["generate_columns"][0]
+
+    def test_the_ceiling_is_exact_above_float_precision(self) -> None:
+        rows = 2**60
+        ref = _scaled_ref(_family(3, rows, max_per_parent=1), 1.0)
+        assert ref["max_per_parent"] == (rows + 2) // 3
+        assert ref["max_per_parent"] * 3 >= rows
+
+    def test_the_probe_of_a_passing_config_runs_and_takes_the_same_route(self) -> None:
+        from decoy_engine.generation._admission import classify_plan
+        from tests.unit._dps_helpers import compile_and_generate
+
+        full = _family(25, 50, min_per_parent=2, max_per_parent=2)
+        probe = downscale_config(full, 0.1, floor_rows=0)
+        out = compile_and_generate(probe)
+        assert out["kids"].num_rows == 5 and out["kids"].column("pid").null_count == 0
+        for config in (full, probe):
+            verdict = classify_plan(config)
+            assert [d.reason for d in verdict.declines] == ["reference_cardinality_repair"]
+
+
+def _tree(rows: int, **options) -> dict:
+    return {
+        "version": 2,
+        "global_settings": {"seed": 3},
+        "sources": {},
+        "tables": [
+            {
+                "name": "employees",
+                "row_count": rows,
+                "generate_columns": [
+                    {"name": "id", "type": "sequence", "start": 1},
+                    {
+                        "name": "manager_id",
+                        "type": "reference",
+                        "reference_table": "employees",
+                        "reference_column": "id",
+                        **options,
+                    },
+                ],
+            }
+        ],
+        "targets": {"employees": {"type": "file", "format": "csv", "path": "o.csv"}},
+    }
+
+
+def _scaled_tree(config: dict, fraction: float, floor_rows: int = 0) -> dict:
+    return downscale_config(config, fraction, floor_rows=floor_rows)["tables"][0]
+
+
+class TestDownscaleRootCount:
+    """GEN-REL AT-5: an explicit `root_count` never exceeds the scaled row count."""
+
+    def test_a_root_count_above_the_scaled_rows_is_clamped_to_them(self) -> None:
+        scaled = _scaled_tree(_tree(1000, root_count=600), 0.5)
+        assert scaled["row_count"] == 500
+        assert scaled["generate_columns"][1]["root_count"] == 500
+
+    def test_a_root_count_that_still_fits_is_kept(self) -> None:
+        scaled = _scaled_tree(_tree(1000, root_count=40), 0.1)
+        assert (scaled["row_count"], scaled["generate_columns"][1]["root_count"]) == (100, 40)
+        scaled = _scaled_tree(_tree(1000, root_count=100), 0.1)
+        assert scaled["generate_columns"][1]["root_count"] == 100
+
+    def test_a_default_root_count_is_not_written(self) -> None:
+        config = _tree(1000)
+        scaled = _scaled_tree(config, 0.1)
+        assert scaled["generate_columns"][1] == config["tables"][0]["generate_columns"][1]
+
+    def test_a_zero_row_table_keeps_the_option(self) -> None:
+        scaled = _scaled_tree(_tree(0, root_count=7), 0.5)
+        assert (scaled["row_count"], scaled["generate_columns"][1]["root_count"]) == (0, 7)
+
+    def test_the_clamp_does_not_touch_the_original_config(self) -> None:
+        config = _tree(1000, root_count=600)
+        downscale_config(config, 0.5, floor_rows=0)
+        assert config["tables"][0]["generate_columns"][1]["root_count"] == 600
+
+    def test_a_reference_to_another_table_is_not_clamped(self) -> None:
+        ref = _scaled_ref(_family(1000, 3000, root_count=2500), 0.1)
+        assert ref["root_count"] == 2500
+
+    def test_a_capped_tree_keeps_its_cap_and_stays_valid(self) -> None:
+        from decoy_engine.config._pipeline import PipelineConfig
+
+        probe = downscale_config(_tree(1000, root_count=600, max_per_parent=2), 0.1, floor_rows=0)
+        column = probe["tables"][0]["generate_columns"][1]
+        assert (column["root_count"], column["max_per_parent"]) == (100, 2)
+        assert PipelineConfig.model_validate(probe)
+
+    def test_the_probe_of_a_valid_tree_validates_and_runs(self) -> None:
+        from decoy_engine.config._pipeline import PipelineConfig
+        from decoy_engine.generation._admission import classify_plan
+        from tests.unit._dps_helpers import compile_and_generate
+
+        full = _tree(1000, root_count=600)
+        probe = downscale_config(full, 0.1, floor_rows=0)
+        assert PipelineConfig.model_validate(full) and PipelineConfig.model_validate(probe)
+        out = compile_and_generate(probe)["employees"]
+        assert out.num_rows == 100 and out.column("manager_id").null_count == 100
+        for config in (full, probe):
+            verdict = classify_plan(config)
+            assert [d.reason for d in verdict.declines] == ["reference_to_own_table"]

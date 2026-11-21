@@ -43,7 +43,27 @@ from decoy_engine.config._generate_option_catalog import (
     generate_option_catalog,
 )
 from decoy_engine.config._generate_options import refuse_unlisted_generate_families
+from decoy_engine.config._generate_relational import (
+    GenerateInputRef,
+    aggregate_problems,
+    aggregate_via_target,
+    is_exact_sequence_key,
+    is_per_parent_aggregate,
+    is_self_reference,
+    iter_generate_input_refs,
+    parent_key_problem,
+    parent_lookup_problems,
+    per_parent_bounds,
+    per_parent_problems,
+    reference_root,
+    self_reference_problems,
+)
 from decoy_engine.config._generate_type_checks import (
+    categorical_arrow_type,
+    categorical_categories,
+    constant_arrow_type,
+    generated_arrow_type,
+    parametric_arrow_type,
     parse_output_type,
     refuse_fixed_width_output_types,
 )
@@ -87,7 +107,7 @@ from decoy_engine.config._relationships import (
     RelationshipEnd,
     relationship_shape_error,
 )
-from decoy_engine.config._scan_baseline import ScanBaselineConfig
+from decoy_engine.config._scan_baseline import OnDrift, ScanBaselineConfig
 from decoy_engine.config._sources import (
     FILE_SOURCE_PATH_FIELDS,
     SOURCE_LOCATOR_FIELDS,
@@ -103,7 +123,12 @@ from decoy_engine.config._subset import (
     SubsetPredicateConfig,
     SubsetSeedConfig,
 )
-from decoy_engine.config._tables import ColumnConfig, TableConfig, classify_table_kinds
+from decoy_engine.config._tables import (
+    ColumnConfig,
+    TableConfig,
+    classify_table_kinds,
+    generate_columns_of,
+)
 from decoy_engine.config._targets import (
     FileTarget,
     GCSTarget,
@@ -142,10 +167,12 @@ __all__ = [
     "FixedWidthLayout",
     "GCSSource",
     "GCSTarget",
+    "GenerateInputRef",
     "GenerateTypeOptions",
     "GlobalSettings",
     "LimitOp",
     "NamespaceConfig",
+    "OnDrift",
     "OrphanPolicyLiteral",
     "PipelineConfig",
     "PipelineConfigError",
@@ -165,16 +192,32 @@ __all__ = [
     "TableConfig",
     "TargetDescriptor",
     "TransformOp",
+    "aggregate_problems",
+    "aggregate_via_target",
+    "categorical_arrow_type",
+    "categorical_categories",
     "classify_table_kinds",
+    "constant_arrow_type",
     "declares_unique",
     "distinct_categories",
     "duplicate_target_groups",
+    "generate_columns_of",
     "generate_option_catalog",
+    "generated_arrow_type",
+    "is_exact_sequence_key",
+    "is_per_parent_aggregate",
+    "is_self_reference",
+    "iter_generate_input_refs",
     "override_sources",
+    "parametric_arrow_type",
+    "parent_key_problem",
+    "parent_lookup_problems",
     "parse_delivery_config",
     "parse_output_type",
     "parse_pipeline_config",
     "parse_relationship_config",
+    "per_parent_bounds",
+    "per_parent_problems",
     "post_scan_distribution_tolerance",
     "post_scan_gate_applies",
     "post_scan_integrity_requested",
@@ -184,9 +227,11 @@ __all__ = [
     "post_scan_resident_reason",
     "post_scan_sink_kind",
     "post_scan_sink_refusal",
+    "reference_root",
     "refuse_fixed_width_output_types",
     "refuse_namespace_placeholder",
     "refuse_unlisted_generate_families",
     "relationship_shape_error",
+    "self_reference_problems",
     "value_key",
 ]

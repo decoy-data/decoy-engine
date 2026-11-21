@@ -17,15 +17,16 @@ from scripts.release.frozen_map import rows
 import decoy_engine
 import decoy_engine.sdk
 from tests.sentry.layout import map_paths, section
+from tests.sentry.release import _census, _tags
 
 ROOT = Path(__file__).resolve().parents[3]
 MAP = ROOT / "docs" / "frozen-surfaces.md"
 CONTRACT = ROOT / "docs" / "compatibility-contract.md"
 TAGS_HEADING = "## Format tags (contract 3.1, 3.2)"
 NAMES_HEADING = "## Public names (contract 3.4)"
+EXPERIMENTAL_HEADING = "## Experimental surfaces (contract 3.6)"
 OTHER_HEADING = "## Other frozen surfaces"
 LIMITS_HEADING = "## Known limits"
-_TAG = re.compile(r"[a-z0-9-]+/v\d+")
 _SPAN = re.compile(r"`([^`]+)`")
 _LIMIT = re.compile(r"accepted-known-limit: ([^\s`]+)`")
 # Design note 1 sources with no list to read from code: each must keep its one row.
@@ -44,7 +45,7 @@ def contract_tags(contract: str) -> list[str]:
     block = section(contract, "### 3.1 Persisted artifact formats (the biggest surface)").split(
         "```"
     )[1]
-    return _TAG.findall(block)
+    return _tags.WHOLE.findall(block)
 
 
 def surface_counts(table: str) -> collections.Counter[str]:
@@ -53,6 +54,16 @@ def surface_counts(table: str) -> collections.Counter[str]:
 
 def public_names() -> set[str]:
     return set(decoy_engine.__all__) | {f"sdk.{name}" for name in decoy_engine.sdk.__all__}
+
+
+def registry_tiers() -> dict[tuple[str, str], str]:
+    exports, _ = _census.load([])
+    return _census.classify(exports)
+
+
+def experimental_names() -> set[str]:
+    """The registry's experimental set, spelled like the map (root bare, `sdk.` prefixed)."""
+    return _census.experimental_public_names(registry_tiers())
 
 
 def once_problems(expected: set[str], counts: collections.Counter[str]) -> list[str]:
@@ -73,8 +84,34 @@ def test_every_contract_tag_has_a_row() -> None:
 
 
 def test_every_public_name_has_a_row() -> None:
-    problems = once_problems(public_names(), surface_counts(section(_map(), NAMES_HEADING)))
+    """AT-X0c, frozen side: the registry's frozen set equals the frozen table, both ways.
+
+    The frozen set is the root and `sdk` names that are not experimental, plus one name per
+    frozen exception row. Experimental names have their own table.
+    """
+    tiers = registry_tiers()
+    expected = _census.frozen_public_names(tiers)
+    assert public_names() - experimental_names() <= expected, "a public name has no tier"
+    problems = once_problems(expected, surface_counts(section(_map(), NAMES_HEADING)))
     assert not problems, f"docs/frozen-surfaces.md public-name rows: {problems}"
+
+
+def test_the_experimental_table_equals_the_registry() -> None:
+    """AT-X0c: both ways; a name in the table only, or in the registry only, fails."""
+    names = experimental_names()
+    assert len(names) >= 20, "the experimental registry lost its names"
+    counts = surface_counts(section(_map(), EXPERIMENTAL_HEADING))
+    problems = once_problems(names, counts)
+    assert not problems, f"docs/frozen-surfaces.md experimental rows: {problems}"
+
+
+def test_contract_3_6_lists_the_registry_experimental_names() -> None:
+    """AT-X0d: the code block of section 3.6 names the same objects, one per line."""
+    text = section(CONTRACT.read_text(encoding="utf-8"), "### 3.6 Experimental surfaces")
+    block = text.split("```")[1].split("\n", 1)[1]
+    listed = {line.strip() for line in block.splitlines() if line.strip()}
+    registry = _census.experimental_names(registry_tiers())
+    assert listed == registry, f"contract 3.6 vs registry: {sorted(listed ^ registry)}"
 
 
 def row_problems(table: str, limits: set[str]) -> list[str]:
@@ -99,7 +136,7 @@ def _limits(text: str) -> set[str]:
 def test_every_row_names_owning_code_and_an_existing_test() -> None:
     text = _map()
     cited: set[str] = set()
-    for heading in (TAGS_HEADING, NAMES_HEADING, OTHER_HEADING):
+    for heading in (TAGS_HEADING, NAMES_HEADING, EXPERIMENTAL_HEADING, OTHER_HEADING):
         table = section(text, heading)
         assert rows(table), f"{heading} has no rows"
         problems = row_problems(table, _limits(text))
@@ -133,8 +170,8 @@ def test_row_problems_reports_each_bad_cell() -> None:
     table = (
         "| S | C | Code | Test |\n|---|---|---|---|\n"
         "| `a` | x | `pkg` | `tests/unit/test_public_api.py` |\n"
-        "| `b` | x | `src/decoy_engine/vault.py` | `tests/unit/` |\n"
-        "| `c` | x | `src/decoy_engine/vault.py` | `accepted-known-limit: KL-9` |\n"
+        "| `b` | x | `src/decoy_engine/unmask.py` | `tests/unit/` |\n"
+        "| `c` | x | `src/decoy_engine/unmask.py` | `accepted-known-limit: KL-9` |\n"
         "| `d` | x | `src/decoy_engine/gone.py` | `tests/unit/test_vault.py` |\n"
     )
     assert row_problems(table, {"KL-1"}) == [

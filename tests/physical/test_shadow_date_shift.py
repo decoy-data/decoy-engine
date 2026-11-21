@@ -73,6 +73,7 @@ from decoy_engine.execution.physical._snapshot import capture_physical_plan_inpu
 from decoy_engine.generation.pool import GenerationError
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.keyprovider import SecretKeyProvider
+from decoy_engine.plan import PlanCompileError
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.providers_v2 import get_default_registry
 from tests.physical import _shadow_helpers
@@ -872,13 +873,13 @@ def test_resolved_source_type_gates_the_native_route(
         assert reason in result.rejections, result.rejections
 
 
-def test_no_date_format_leaves_node_unbound(tmp_path: Path) -> None:
+def test_no_date_format_is_refused_at_compile(tmp_path: Path) -> None:
     source = pa.table({"c": pa.array(["2024-01-01"], type=pa.string())})
     write_read_only_fixture(tmp_path, source, "x")
     config = build_config(tmp_path, "t", tmp_path / "x.parquet", [_ds_column(date_format=None)])
-    _, plan = _compiled(config, source)
-    nodes = [n for t in plan.tables for n in t.nodes if n.strategy == "date_shift"]
-    assert nodes and all(n.execution is None for n in nodes)
+    with pytest.raises(PlanCompileError) as exc:
+        _compiled(config, source)
+    assert exc.value.code == "date_shift_requires_date_format"
 
 
 def _chunked_preflight(tmp_path: Path, source: pa.Table) -> Any:
@@ -920,11 +921,6 @@ def test_chunked_route_declines_a_large_string_date_shift_source(tmp_path: Path)
             "int_source",
             pa.table({"c": pa.array([20240101, 20231231], type=pa.int64())}),
             _ds_column(date_format="%Y%m%d"),
-        ),
-        (
-            "no_format",
-            pa.table({"c": pa.array(["2024-01-01", "2023-06-30"], type=pa.string())}),
-            _ds_column(date_format=None),
         ),
         (
             "tz_format",

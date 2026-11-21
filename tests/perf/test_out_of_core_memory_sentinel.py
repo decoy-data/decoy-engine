@@ -46,6 +46,8 @@ import sys
 
 import pytest
 
+from decoy_engine.execution._isolated_common import CAPPED_ENV
+
 pytestmark = pytest.mark.perf
 
 _PROBE = os.path.join(
@@ -119,7 +121,9 @@ def _probe(mode: str) -> dict:
         mode,
         "--json",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)  # noqa: S603
+    proc = subprocess.run(  # noqa: S603
+        cmd, capture_output=True, text=True, timeout=60, env={**os.environ, **CAPPED_ENV}
+    )
     assert proc.returncode == 0, f"probe subprocess failed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
@@ -183,10 +187,18 @@ def test_out_of_core_meaningfully_below_full_frame_at_scale():
         "--json",
     ]
     ooc_proc = subprocess.run(  # noqa: S603
-        [*cmd_base, "--mode", "out_of_core"], capture_output=True, text=True, timeout=600
+        [*cmd_base, "--mode", "out_of_core"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env={**os.environ, **CAPPED_ENV},
     )
     full_proc = subprocess.run(  # noqa: S603
-        [*cmd_base, "--mode", "full"], capture_output=True, text=True, timeout=600
+        [*cmd_base, "--mode", "full"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env={**os.environ, **CAPPED_ENV},
     )
     assert ooc_proc.returncode == 0, ooc_proc.stderr
     assert full_proc.returncode == 0, full_proc.stderr
@@ -226,7 +238,9 @@ def test_out_of_core_completes_where_in_memory_routes_oom():
         "--mem-cap-mb",
         str(_CAP_MEM_MB),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)  # noqa: S603
+    proc = subprocess.run(  # noqa: S603
+        cmd, capture_output=True, text=True, timeout=1800, env={**os.environ, **CAPPED_ENV}
+    )
     assert proc.stdout.strip(), f"capability driver produced no output: {proc.stderr}"
     rec = json.loads(proc.stdout.strip().splitlines()[-1])["capability"]
     outcomes = rec["outcomes"]

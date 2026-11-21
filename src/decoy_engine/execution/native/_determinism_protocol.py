@@ -104,9 +104,11 @@ GEN_KIND_TO_SITE: dict[str, str] = {
     "constant": DETERMINISTIC_NO_DRAW,
     "distribution": "gen.distribution",
     "lookup": "gen.lookup",
+    "inherit": DETERMINISTIC_NO_DRAW,  # copies the parent row's value through the foreign key
     "derived": DETERMINISTIC_NO_DRAW,
     "derived_aggregate": DETERMINISTIC_NO_DRAW,
     "group_key": "mask.group_key",  # group_key generation reuses the same derive()
+    "provider": "gen.derive_context",  # the column root; the draw reuses the pool, identifier and composite sites
     "faker": "gen.faker_per_row",
     "categorical": "gen.categorical",
     "reference": "gen.reference",

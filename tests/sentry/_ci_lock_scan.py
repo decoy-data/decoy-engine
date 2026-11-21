@@ -75,6 +75,8 @@ WRITE_ALLOWLIST: dict[tuple[str, str], frozenset[str]] = {
     ("benchmark.yml", ""): frozenset({"pull-requests"}),  # posts the regression comment
     ("docs.yml", "deploy"): frozenset({"pages", "id-token"}),  # Pages deploy, main push only
     ("native-companion-release.yml", "sign-publish"): frozenset({"contents"}),  # makes the release
+    # Posts the engine-gate/verdict commit status; dispatch only, owner-guarded (owner 2026-11-17).
+    ("gate-selfhosted.yml", "gate-verdict"): frozenset({"statuses"}),
 }
 # The one self-hosted job that may bootstrap without the lock-env action: the merge gate, which runs
 # on any decoy-gate runner (the Mac or the Linux GCP runner).
@@ -424,6 +426,45 @@ def _audit_legs(job: dict[str, Any], step: dict[str, Any], cmd: list[str]) -> li
     return findings
 
 
+def _one_bare_command(text: str) -> bool:
+    """True when a step's run text is exactly one command with no wrapper, pipe, `if` or `exit`."""
+    lines, cmds = code_lines(text), shell_commands(text)
+    bare = re.sub(r"\"[^\"]*\"|'[^']*'", "", lines[0]) if lines else ""
+    return not (
+        len(lines) != 1 or len(cmds) != 1 or re.search(r"[|;&!(]|^\s*(if|for|while|exit)\b", bare)
+    )
+
+
+def hiding_findings(job: dict[str, Any], target: int | None, noun: str, what: str) -> list[str]:
+    """How the named step of a required job could be hidden: `exit 0`, `set +e`, `continue-on-error`
+    at job or step level, a job or step `if`, or a wrapper (`||`, `;`, a pipe) around its command.
+
+    `target` is the step index of the check (None when it cannot be found), `noun` names it in
+    messages and `what` names what a hiding form would hide. Every step of the job is scanned for
+    `exit 0` and `set +e`. Shared by the pip-audit lane and the Faker output-lock lane."""
+    findings: list[str] = []
+    steps = job.get("steps") or []
+    for text in (_step_text(s) for s in steps):
+        code = "\n".join(code_lines(text))
+        if _EXIT_ZERO.search(code):
+            findings.append(f"a step exits 0 explicitly, which can hide {what}")
+        if _ERREXIT_OFF.search(code):
+            findings.append(f"a step turns off errexit (set +e), which can hide {what}")
+    for holder, label in [(job, "job")] + [(s, "step") for s in steps]:
+        if "continue-on-error" in holder and _hides_failure(holder["continue-on-error"]):
+            findings.append(f"continue-on-error at {label} level hides {what}")
+    if "if" in job:
+        findings.append(f"a job-level `if` can skip the {noun}")
+    if target is not None:
+        if "if" in steps[target]:
+            findings.append(f"a step-level `if` can skip the {noun}")
+        if not _one_bare_command(_step_text(steps[target])):
+            findings.append(
+                f"the {noun} step must be one bare command (no wrapper, pipe, `if`, `||`)"
+            )
+    return findings
+
+
 def audit_findings(job: dict[str, Any]) -> list[str]:
     """pip-audit reads an exported lock, with hashes, once per supported Python, and cannot be hidden.
 
@@ -442,35 +483,14 @@ def audit_findings(job: dict[str, Any]) -> list[str]:
         findings.append(
             f"want exactly one pip-audit step and command, got {len(audit_steps)}/{len(audits)}"
         )
-    for text in texts:
-        code = "\n".join(code_lines(text))
-        if _EXIT_ZERO.search(code):
-            findings.append("a step exits 0 explicitly, which can hide the audit result")
-        if _ERREXIT_OFF.search(code):
-            findings.append("a step turns off errexit (set +e), which can hide the audit result")
-    for holder, label in [(job, "job")] + [(s, "step") for s in steps]:
-        if "continue-on-error" in holder and _hides_failure(holder["continue-on-error"]):
-            findings.append(f"continue-on-error at {label} level hides the audit result")
-    if "if" in job:
-        findings.append("a job-level `if` can skip the audit")
-    if len(audit_steps) == 1:
-        step, lines = steps[audit_steps[0]], code_lines(texts[audit_steps[0]])
-        cmds = shell_commands(texts[audit_steps[0]])
-        bare = re.sub(r"\"[^\"]*\"|'[^']*'", "", lines[0]) if lines else ""
-        if "if" in step:
-            findings.append("a step-level `if` can skip the audit")
-        if (
-            len(lines) != 1
-            or len(cmds) != 1
-            or re.search(r"[|;&!(]|^\s*(if|for|while|exit)\b", bare)
-        ):
-            findings.append(
-                "the audit step must be one bare command (no wrapper, pipe, `if`, `||`)"
-            )
-        elif cmds[0][0] not in {"uvx", "pip-audit", "uv"}:
+    target = audit_steps[0] if len(audit_steps) == 1 else None
+    findings += hiding_findings(job, target, "audit", "the audit result")
+    if target is not None:
+        cmds = shell_commands(texts[target])
+        if _one_bare_command(texts[target]) and cmds[0][0] not in {"uvx", "pip-audit", "uv"}:
             findings.append("the audit command must start with uvx, uv or pip-audit")
         if len(cmds) == 1:
-            findings += _audit_legs(job, step, cmds[0])
+            findings += _audit_legs(job, steps[target], cmds[0])
     for c in audits:
         findings += _audit_command_findings(c)
     return sorted(set(findings))

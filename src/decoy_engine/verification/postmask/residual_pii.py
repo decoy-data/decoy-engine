@@ -228,6 +228,15 @@ def is_source_identity_finding(finding: ResidualPIIFinding) -> bool:
     return _identity_evidence(rate, gated=gated)
 
 
+def dismissible(finding: ResidualPIIFinding) -> bool:
+    """True when a `post_scan.dismissed` entry may lower this finding.
+
+    The one rule the scanner applies to a warning and the post-scan review checks before it writes
+    a dismissal: a warning, and not one raised from source-identity evidence.
+    """
+    return finding.severity == "warning" and not is_source_identity_finding(finding)
+
+
 def _source_identity(
     source_frames: dict[str, pd.DataFrame],
     table_name: str,
@@ -265,6 +274,14 @@ def _source_identity(
         return None
 
 
+# With no config entry for the table (no `--config`, or a table the config omits) the engine
+# cannot know whether the column was meant to be masked, so it says only what it knows.
+_UNCONFIGURED_CLAUSE = {
+    True: "was not configured to be masked",
+    False: "the config has no entry for its table, so its strategy is unknown",
+}
+
+
 def _escalate(
     *,
     configured: str | None,
@@ -273,6 +290,7 @@ def _escalate(
     src_distinct: int,
     detector_confidence: str,
     detector_id: str,
+    table_present: bool = True,
 ) -> tuple[Severity, str] | None:
     """Severity override from source-identity evidence, or None.
 
@@ -297,8 +315,8 @@ def _escalate(
         ):
             return (
                 "fail",
-                f"column matched {detector_id!r}, was not configured to be "
-                f"masked, and is positionally identical to source for "
+                f"column matched {detector_id!r}, {_UNCONFIGURED_CLAUSE[table_present]}, "
+                f"and is positionally identical to source for "
                 f"{identity_rate:.0%} of rows -- real values shipped to the "
                 "output unmasked.",
             )
@@ -403,7 +421,9 @@ def _grade_gated(
     )
 
 
-def _classify(detector_id: str, configured: str | None) -> tuple[Severity, str]:
+def _classify(
+    detector_id: str, configured: str | None, table_present: bool = True
+) -> tuple[Severity, str]:
     """Classify a detector hit + return (severity, human-readable message).
 
     Three buckets per the module docstring:
@@ -416,8 +436,8 @@ def _classify(detector_id: str, configured: str | None) -> tuple[Severity, str]:
     if configured is None:
         return (
             "warning",
-            f"column matched {detector_id!r} but was not configured to be "
-            "masked. Verify whether this column should be sensitive.",
+            f"column matched {detector_id!r} but {_UNCONFIGURED_CLAUSE[table_present]}. "
+            "Verify whether this column should be sensitive.",
         )
     if configured in _NO_OP_BY_DESIGN:
         # Dennis M12 fix: passthrough is an explicit operator decision
@@ -468,6 +488,13 @@ def residual_pii_findings(
     """`check_residual_pii` from column facts: `{table: {column: ColumnFacts}}` over the output,
     in column order. The decision tables are the ones the frame check uses."""
     strategy_by_col = {key: entry["strategy"] for key, entry in configured_columns(config).items()}
+    # Table presence comes from the config's table list, not from the (table, column) strategy
+    # lookup, so "table absent" and "table present, column absent" stay distinct.
+    config_tables = {
+        t["name"]
+        for t in config.get("tables") or []
+        if isinstance(t, Mapping) and isinstance(t.get("name"), str)
+    }
     findings: list[ResidualPIIFinding] = [
         ResidualPIIFinding(
             table=table,
@@ -485,7 +512,8 @@ def residual_pii_findings(
                 continue
             top = fact.detectors[0]
             configured = strategy_by_col.get((table_name, col_name))
-            severity, message = _classify(top.detector_id, configured)
+            table_present = table_name in config_tables
+            severity, message = _classify(top.detector_id, configured, table_present)
             # Identity needs comparable rows; none means no source column or a row-count mismatch.
             compared = fact.comparable_rows > 0 and configured not in _NO_OP_BY_DESIGN
             rate = fact.identical_rows / fact.comparable_rows if compared else None
@@ -515,6 +543,7 @@ def residual_pii_findings(
                     else fact.source_distinct,
                     detector_confidence=top.confidence,
                     detector_id=top.detector_id,
+                    table_present=table_present,
                 )
                 if override is not None and (
                     _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]

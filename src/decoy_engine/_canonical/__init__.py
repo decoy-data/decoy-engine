@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from decoy_engine._canonical._jcs import JcsError, jcs_bytes
 from decoy_engine._canonical._json import (
+    ALL_STRICT_JSON_TOKENS,
     MASK_CELL_BYTES,
     MASK_MAX_DEPTH,
+    PROFILE_JSON_TOKENS,
+    STRICT_JSON_TOKENS,
     CanonicalJsonError,
     CanonicalStringError,
     JsonNumber,
@@ -28,17 +32,22 @@ from decoy_engine._canonical._strict_spec import (
     Spec,
     SpecCheck,
     SpecRefusedError,
+    VersionSpec,
     attempt,
     parse_or_token,
 )
 
 __all__ = [
+    "ALL_STRICT_JSON_TOKENS",
     "MASK_CELL_BYTES",
     "MASK_MAX_DEPTH",
+    "PROFILE_JSON_TOKENS",
+    "STRICT_JSON_TOKENS",
     "CanonicalJsonError",
     "CanonicalStringError",
     "CountSpec",
     "ExactSpec",
+    "JcsError",
     "JsonNumber",
     "ListSpec",
     "NullableSpec",
@@ -50,8 +59,10 @@ __all__ = [
     "SpecCheck",
     "SpecRefusedError",
     "StrictJsonError",
+    "VersionSpec",
     "attempt",
     "canonical_json_bytes",
+    "jcs_bytes",
     "parse_or_token",
     "seed_fingerprint_bytes",
     "strict_json_loads",

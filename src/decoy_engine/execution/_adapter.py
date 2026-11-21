@@ -257,6 +257,11 @@ class StrategyContext:
     # value-keyed (not position-keyed) contract the other CHUNK_SAFE
     # strategies rely on.
     row_offset: int = 0
+    # (table, column) of every top-level date_shift column whose declared parse format supplies
+    # its date shape, so it needs no `provider_config.date_format`. Set from the plan by the
+    # routes that build a context; empty otherwise, which makes the date_shift handler refuse a
+    # missing format.
+    declared_date_columns: frozenset[tuple[str, str]] = frozenset()
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.

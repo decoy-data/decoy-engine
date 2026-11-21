@@ -176,6 +176,24 @@ MATRIX: tuple[MatrixRow, ...] = (
         "is covered by tests/unit/generation/kinds/test_gen_types_e3_lookup.py.",
     ),
     MatrixRow(
+        "inherit",
+        DEFERRED,
+        (),
+        ("inherit",),
+        "GEN-INHERIT E1: copies the parent row's value through the child's foreign key; no draw. "
+        "Resident only (the streamed route declines it and pinned refuses it), so no F0 fixture "
+        "pins it. Value equality is covered by tests/unit/generation/relational/test_inherit.py.",
+    ),
+    MatrixRow(
+        "provider",
+        DEFERRED,
+        (),
+        ("provider",),
+        "GEN-PROVIDERS E1: registry-backed provider draws (pool, keyed identifier, seeded batch); "
+        "resident only (the streamed route declines it), so no F0 fixture pins it. Value equality "
+        "and digests are in tests/unit/generation/kinds/test_provider.py.",
+    ),
+    MatrixRow(
         "conditional-sampling",
         SUPPORTED,
         ("conditional",),

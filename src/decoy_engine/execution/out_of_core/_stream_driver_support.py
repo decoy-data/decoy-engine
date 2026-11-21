@@ -18,11 +18,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
+from decoy_engine._arrow_types import TextWidthState, split_wide_batch
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution.out_of_core._compat import _column_seed
 from decoy_engine.execution.out_of_core._mask import masked_output_type, table_seed
+from decoy_engine.execution.out_of_core._source import LazySource
 from decoy_engine.relationships._graph import OrphanPolicy
+from decoy_engine.safe_output import attach_output_metadata
 from decoy_engine.transforms.code_set import (
     CodeSetConfig,
     describe_loaded_corpus,
@@ -30,7 +33,7 @@ from decoy_engine.transforms.code_set import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
 
     from decoy_engine.execution.out_of_core._relation import ParentKeyRelation
@@ -80,7 +83,9 @@ def _payload_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    # An FK column is replaced later by the join, so it is not carried either.
+    carried = [f.name for f in source_schema if f.name not in skip_columns and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 def _fixed_output_schema(
@@ -107,7 +112,8 @@ def _fixed_output_schema(
             fields.append(pa.field(field.name, masked_output_type(seeds[field.name], field.type)))
         else:
             fields.append(field)
-    return pa.schema(fields, metadata=source_schema.metadata)
+    carried = [f.name for f in source_schema if f.name not in fk_components and f.name not in seeds]
+    return attach_output_metadata(pa.schema(fields), source_schema.metadata, carried=carried)
 
 
 def _replace_fk_columns(
@@ -128,7 +134,11 @@ def _replace_fk_columns(
         idx = batch.schema.get_field_index(child_col)
         arrays[idx] = fk_array
         fields[idx] = pa.field(child_col, dtype)
-    return pa.record_batch(arrays, schema=pa.schema(fields, metadata=batch.schema.metadata))
+    carried = [n for n in batch.schema.names if n not in child_columns]
+    return pa.record_batch(
+        arrays,
+        schema=attach_output_metadata(pa.schema(fields), batch.schema.metadata, carried=carried),
+    )
 
 
 def _code_set_records_and_evidence_for_table(
@@ -186,6 +196,7 @@ def open_joiner(
     memory_limit: str | None,
     *,
     mask_key: bytes | None = None,
+    parent_widths: Mapping[str, TextWidthState] | None = None,
 ) -> _J:
     """Open one edge's FK joiner (`ChildFkBatchJoiner` or `StreamFkJoiner`, the two drivers'),
     after checking the child columns and, under REMAP, the parent seeds."""
@@ -216,10 +227,32 @@ def open_joiner(
             memory_limit=memory_limit,
             remap_seeds=remap_seeds,
             job_seed=mask_key if mask_key is not None else plan.seed_envelope.job_seed,
+            # The parent's width state per key column: a promoted parent keeps the FK type wide.
+            text_widths=tuple((parent_widths or {}).get(c) for c in edge.parent_columns),
         )
     except BaseException:
         del mask_key
         raise
+
+
+def iter_source_batches(
+    src: pa.Table | LazySource, batch_rows: int, *, fixed_schema: bool = False
+) -> Iterator[pa.RecordBatch]:
+    """The source as record batches of at most `batch_rows`.
+
+    Each is cut so its text fits 32-bit offsets, except for a sink that fixes its schema: it
+    keeps `large_string`, so the source batch boundaries (and the file's row groups) stay as is.
+    """
+    batches = (
+        src.iter_batches(batch_rows)
+        if isinstance(src, LazySource)
+        else src.to_batches(max_chunksize=batch_rows)
+    )
+    for batch in batches:
+        if fixed_schema:
+            yield batch
+        else:
+            yield from split_wide_batch(batch)
 
 
 __all__ = [

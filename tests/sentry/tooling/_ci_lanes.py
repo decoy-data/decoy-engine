@@ -47,7 +47,7 @@ CONCURRENCY = {
 # pytest options that take a value, so the value is not read as a test path.
 _VALUE_OPTS = {
     "-k", "-p", "-n", "-c", "-W", "--tb", "--junitxml", "--durations", "--ignore", "--ignore-glob",
-    "--deselect", "--maxfail", "--rootdir", "--basetemp", "--timeout", "--cov",
+    "--deselect", "--dist", "--maxfail", "--rootdir", "--basetemp", "--timeout", "--cov",
 }  # fmt: skip
 _ENV_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)
 _PYTHON = re.compile(r"python[0-9.]*")
@@ -238,22 +238,120 @@ def marker_findings(tree: Tree) -> list[str]:
         if has and m in unlaned:
             out.append(f"M3 marker {m!r} has a lane but is still in ci/unlaned.toml")
     out += _agreement_findings(
-        tree.gates, [ln for ln in all_lanes if ln[:2] == ("ci.yml", "regression-gate")]
+        tree, [ln for ln in all_lanes if ln[:2] == ("ci.yml", "regression-gate")]
     )
     return out
 
 
-def _agreement_findings(gates: str, gate_lanes: list[Lane]) -> list[str]:
-    """M5: gates.sh and the hosted full suite select the same tests."""
+SERIAL_STEP_IF = "${{ !cancelled() }}"
+# The one ignore the regression gate ships (the layers-gate job owns that test), and the only
+# options its passes may carry besides the ones that differ per pass (-m, xdist, --junitxml).
+# Anything else could drop tests from both passes at once, so it is a finding.
+GATE_IGNORE = "--ignore=tests/sentry/layout/test_import_layers.py"
+_GATE_OPT_PREFIXES = ("--tb=", "--durations=")
+
+
+def _gate_passes(tree: Tree) -> list[tuple[dict[str, Any], list[str]]]:
+    """(step, pytest args) of each pytest step of the ci.yml regression-gate job."""
+    out = []
+    for step in tree.workflows["ci.yml"]["jobs"]["regression-gate"].get("steps", []):
+        for cmd in commands(step.get("run", "")):
+            args = _pytest_args(cmd)
+            if args is not None:
+                out.append((step, args))
+    return out
+
+
+def _has_xdist(args: list[str]) -> bool:
+    """Any spelling of -n, --numprocesses, --dist, or loading xdist through -p."""
+    for i, a in enumerate(args):
+        if a.startswith(("--numprocesses", "--dist")):
+            return True
+        if a.startswith("-n") and not a.startswith("--"):
+            return True
+        if a == "-p" and i + 1 < len(args) and "xdist" in args[i + 1]:
+            return True
+        if a.startswith("-p") and not a.startswith("--") and "xdist" in a:
+            return True
+    return False
+
+
+def _has_workers(args: list[str]) -> bool:
+    """The pass sets a worker count: -n, -nN, -n=N, --numprocesses N or --numprocesses=N."""
+    return any(
+        (a.startswith("-n") and not a.startswith("--")) or a.startswith("--numprocesses")
+        for a in args
+    )
+
+
+def _rest(args: list[str]) -> list[str]:
+    """The args without -m, xdist and --junitxml (and their values); `--opt value` is joined."""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        bare = a in ("-m", "-n", "--numprocesses", "--dist", "--junitxml")
+        if a in ("--ignore", "--tb", "--durations") and i + 1 < len(args):
+            out.append(f"{a}={args[i + 1]}")
+            i += 2
+        elif bare:
+            i += 2
+        elif a.startswith(("--junitxml=", "--numprocesses=", "--dist=")) or (
+            a.startswith(("-m", "-n")) and not a.startswith("--")
+        ):
+            i += 1
+        else:
+            out.append(a)
+            i += 1
+    return out
+
+
+def _options_ok(rest: list[str]) -> bool:
+    """Exactly the whole suite, the one shipped ignore, and report options: nothing selects."""
+    return (
+        rest.count("tests") == 1
+        and rest.count(GATE_IGNORE) == 1
+        and all(a in ("tests", GATE_IGNORE) or a.startswith(_GATE_OPT_PREFIXES) for a in rest)
+    )
+
+
+def _agreement_findings(tree: Tree, gate_lanes: list[Lane]) -> list[str]:
+    """M5: gates.sh and the hosted full suite select the same tests.
+
+    One whole-suite lane with the gates.sh expression, or the two-pass split gates.sh itself
+    runs: a parallel pass (`not serial`, the only one with xdist) and a serial pass (`serial`,
+    no xdist, `if: !cancelled()`), both over the whole suite with the same paths and options.
+    """
     try:
-        pinned = parse_marker_expr(gates)
+        pinned = parse_marker_expr(tree.gates)
     except ValueError as e:
         return [f"M5 {e}"]
-    if len(gate_lanes) != 1 or " ".join((gate_lanes[0].expr or "").split()) != " ".join(
-        pinned.split()
-    ):
-        return ["M5 gates.sh PYTEST_ARGS and the ci.yml regression-gate -m expression differ"]
-    return []
+    bad = ["M5 gates.sh PYTEST_ARGS and the ci.yml regression-gate -m expression differ"]
+
+    def norm(e: str | None) -> str:
+        return " ".join((e or "").split())
+
+    want = norm(pinned)
+    if any(not ln.whole_suite for ln in gate_lanes):
+        return bad
+    passes = _gate_passes(tree)
+    if len(passes) != len(gate_lanes) or not all(_options_ok(_rest(a)) for _, a in passes):
+        return bad
+    if len(gate_lanes) == 1:
+        return [] if norm(gate_lanes[0].expr) == want and not _has_xdist(passes[0][1]) else bad
+    if len(gate_lanes) != 2:
+        return bad
+    by_expr = {norm(ln.expr): i for i, ln in enumerate(gate_lanes)}
+    if set(by_expr) != {f"{want} and not serial", f"{want} and serial"}:
+        return bad
+    par, ser = passes[by_expr[f"{want} and not serial"]], passes[by_expr[f"{want} and serial"]]
+    ok = (
+        _has_workers(par[1])
+        and not _has_xdist(ser[1])
+        and "if" not in par[0]
+        and str(ser[0].get("if", "")).strip() == SERIAL_STEP_IF
+        and _rest(par[1]) == _rest(ser[1])
+    )
+    return [] if ok else bad
 
 
 def _closed(doc: dict[str, Any], label: str, tables: dict[str, dict[str, type]]) -> list[str]:
@@ -295,6 +393,8 @@ def registry_findings(tree: Tree) -> list[str]:
         {
             "merge": {"workflow": str, "jobs": list},
             "merge_exempt": {"workflow": str, "job": str, "reason": str},
+            "aggregator": {"workflow": str, "job": str, "judges": list, "reason": str},
+            "merge_status": {"context": str, "reason": str},
             "dedicated_marker": {"name": str, "reason": str},
         },
     )
@@ -302,6 +402,10 @@ def registry_findings(tree: Tree) -> list[str]:
         return out  # the rules below assume well-formed entries
     merge = {e["workflow"]: list(e["jobs"]) for e in tree.required.get("merge", [])}
     exempt = {(e["workflow"], e["job"]) for e in tree.required.get("merge_exempt", [])}
+    aggregators = {(e["workflow"], e["job"]): e for e in tree.required.get("aggregator", [])}
+    for wf, key in aggregators:
+        if key not in merge.get(wf, []):
+            out.append(f"R2 {wf}:{key}: aggregator is not a merge job")
     for wf, jobs in merge.items():
         doc = tree.workflows.get(wf)
         if doc is None:
@@ -310,7 +414,9 @@ def registry_findings(tree: Tree) -> list[str]:
         if "pull_request" not in workflow_events(doc):
             out.append(f"R2 {wf}: merge workflow has no pull_request trigger")
         for key in jobs:
-            out += _merge_job_findings(wf, key, doc["jobs"].get(key), jobs)
+            out += _merge_job_findings(
+                wf, key, doc["jobs"].get(key), jobs, aggregators.get((wf, key)), exempt
+            )
     out += _context_findings(tree.workflows, merge)
     for wf, doc in tree.workflows.items():
         events = workflow_events(doc)
@@ -355,18 +461,42 @@ def _context_findings(
 
 
 def _merge_job_findings(
-    wf: str, key: str, job: dict[str, Any] | None, tier: list[str]
+    wf: str,
+    key: str,
+    job: dict[str, Any] | None,
+    tier: list[str],
+    aggregator: dict[str, Any] | None = None,
+    exempt: set[tuple[str, str]] | frozenset[tuple[str, str]] = frozenset(),
 ) -> list[str]:
+    """R2 for one merge job. Only a registered aggregator may (and must) carry `if: always()` and
+    may need the exempt jobs it judges; it must run the judge script on `toJSON(needs)`."""
     if job is None:
         return [f"R2 {wf}:{key}: merge job does not exist"]
     needs = job.get("needs", [])
     needs = [needs] if isinstance(needs, str) else needs
+    judged = set(aggregator["judges"]) if aggregator else set()
+    if aggregator:
+        if_ok = str(job.get("if", "")).strip() == "always()"
+    else:
+        if_ok = "if" not in job
     checks = {
-        "has an `if` (a skipped job reports success)": "if" in job,
-        "needs a job outside the merge tier": bool(set(needs) - set(tier)),
+        "has an `if` (a skipped job reports success)": not if_ok,
+        "needs a job outside the merge tier": bool(set(needs) - set(tier) - judged),
         "is self-hosted": "self-hosted" in str(job.get("runs-on", "")),
     }
-    return [f"R2 {wf}:{key}: merge job {why}" for why, bad in checks.items() if bad]
+    out = [f"R2 {wf}:{key}: merge job {why}" for why, bad in checks.items() if bad]
+    for name in sorted(judged):
+        if (wf, name) not in exempt:
+            out.append(f"R2 {wf}:{key}: judged job {name!r} is not in merge_exempt")
+        if name not in needs:
+            out.append(f"R2 {wf}:{key}: needs no judged job {name!r}")
+    if aggregator and not any(
+        "scripts/dev/native_scope.py judge" in str(step.get("run", ""))
+        and "toJSON(needs)" in str(step)
+        for step in job.get("steps", [])
+    ):
+        out.append(f"R2 {wf}:{key}: no step runs native_scope.py judge on toJSON(needs)")
+    return out
 
 
 def trigger_findings(tree: Tree) -> list[str]:

@@ -290,7 +290,7 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
         call_shape="per-detected-span date offset",
         consumes_variable_draws=False,
         identity="source_value",
-        null_draw_behavior="unparseable spans returned unchanged; no draw",
+        null_draw_behavior="unparseable spans become the redaction token; no draw",
         partitionable=True,
         config_fingerprint_source="namespace_registry(namespace)+detector+min/max_days",
         provider_version=_V6,
@@ -340,28 +340,35 @@ MASK_DRAW_SITES: tuple[DrawSite, ...] = (
             "deterministic-no-draw sibling generator in the same module."
         ),
     ),
-    # -- Masking: per-row numpy seeded by row index --------------------------
+    # -- Masking: keyed index draws on the global row number -----------------
     DrawSite(
         draw_site_id="mask.windowed_date",
-        family="numpy_pcg64",
-        call_site="transforms/windowed_date.py::apply_windowed_date",
+        family="source_keyed_hmac",
+        call_site="transforms/windowed_date.py::_draw_offsets",
         entropy_root="mask_key",
-        seed_derivation='int.from_bytes(derive(seed, namespace, i.to_bytes(8, "big"))[:8], "big")',
-        api_operation="numpy.random.default_rng(row_seed).integers, fresh Generator per row",
-        call_shape="row_rng.integers(min_days, max_days + 1)  # 1 draw (uniform) or 2 (early/late)",
+        seed_derivation=(
+            "derive_index(seed, namespace, encode_int(2 * r + k), pool_size=span + 1)  "
+            "# r = global row number, k = draw 0 or 1; one batch call per draw"
+        ),
+        api_operation="derive_index_batch (compiled, else the reference kernel) -> index in [0, span]",
+        call_shape=(
+            "min_days + idx(k=0)  # uniform; min/max of idx(k=0), idx(k=1) offsets for early/late; "
+            "no call when span == 0"
+        ),
         consumes_variable_draws=True,
         identity="row_index",
         null_draw_behavior="every row draws; anchor is required per row",
         partitionable=True,
         config_fingerprint_source="namespace_registry(namespace)+anchor+min/max_days+distribution",
-        provider_version=f"{_V6}; numpy NEP-19 PCG64",
+        provider_version=f"{_V6}; windowed_date keyed index draws (2026-11-20)",
         notes=(
-            "Per-row seed keys on the enumerate() index i, NOT the source value. "
-            "Partitionable ONLY if the native executor preserves the same global row "
-            "index i under partitioning; if i resets per batch the sequence diverges. "
-            "Task 0.3 must pin i to a global row number. Out-of-core mirror at "
-            "execution/out_of_core/_mask_group_c.py already feeds row_index into the "
-            "derive_index seed."
+            "Keyed on the GLOBAL row number r only, so any split of the rows reproduces the "
+            "column. The draw index is part of the source (2r + k), never of the namespace, and "
+            "the map is injective. r must be in [0, 2**62) so 2r + 1 fits int64. Replaced a "
+            "per-row numpy Generator seeded from derive(seed, namespace, r.to_bytes(8)); output "
+            "changed once pre-GA with SEED_PROTOCOL_VERSION unchanged (see the compatibility "
+            "contract). Out-of-core mirror at execution/out_of_core/_mask_group_c.py already "
+            "feeds row_index into the derive_index seed."
         ),
         uncertain=True,
         mirror_call_sites=("execution/out_of_core/_mask_group_c.py::group_c_array",),

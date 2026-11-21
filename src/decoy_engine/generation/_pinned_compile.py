@@ -22,6 +22,12 @@ from typing import Any
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine._reference_date import normalize_reference_date
+from decoy_engine.config import (
+    categorical_categories,
+    is_per_parent_aggregate,
+    is_self_reference,
+)
+from decoy_engine.errors import DecoyError
 from decoy_engine.fileaccess import FileAccess
 from decoy_engine.generation._pinned_plan import (
     PINNED_PLAN_SCHEMA,
@@ -32,6 +38,7 @@ from decoy_engine.generation._pinned_plan import (
     PinnedTable,
     runtime_identity,
 )
+from decoy_engine.generation.pool import GenerationError
 
 # Fail-closed allowlist: a generator type enters pinned mode only by being listed here after its
 # purity is reviewed. The sentry test keeps this and REJECTED_TYPES in step with the config Literal.
@@ -60,9 +67,18 @@ REJECTED_TYPES = {
         "pinned_faker_unsupported",
         "faker columns are not available in pinned mode",
     ),
+    "provider": (
+        str(reasons.plan.PINNED_PROVIDER_UNSUPPORTED),
+        "provider columns are not available in pinned mode",
+    ),
     "formula": (
         "pinned_formula_unsupported",
         "formula columns are not available in pinned mode",
+    ),
+    # Reads a parent row by lookup, which pinned execution does not do: the relational refusal.
+    "inherit": (
+        str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED),
+        "inherit columns are not available in pinned mode",
     ),
 }
 
@@ -125,8 +141,47 @@ def _where(table: str, column: str) -> str:
     return f"table {table!r} column {column!r}"
 
 
-def reject_unpinnable(config: dict[str, Any]) -> None:
-    """Raise ``PinnedModeError`` for any construct pinned mode refuses. Reads config only."""
+def relational_option_unsupported(tname: str, col: dict[str, Any]) -> bool:
+    """Whether ``col`` has a relational shape pinned mode cannot run: a pure test of the config.
+
+    A self-reference reads its own table's rows; pinned execution draws a reference from a
+    finished parent table only. A date anchored through ``anchor_via`` reads a parent row by
+    lookup, and a per-parent aggregate reads its child table after it is drawn; pinned
+    execution does neither. Compile and execute both ask this one question. An ``inherit``
+    column is refused by type (``REJECTED_TYPES``) with the same refusal.
+    """
+    return (
+        is_self_reference(tname, col)
+        or col.get("anchor_via") is not None
+        or is_per_parent_aggregate(col)
+    )
+
+
+def _relational_refusal(tname: str, cname: str, at_execute: bool) -> DecoyError:
+    """The one builder of the relational refusal: the fixed summary plus the two names.
+
+    Compile raises the plan code as ``PinnedModeError``. Execution is the generate phase, so a
+    plan that skipped compile gets the run-time twin, raised as ``GenerationError`` like every
+    other run-time generation refusal.
+    """
+    where = f" Table {tname!r}, column {cname!r}."
+    if at_execute:
+        return GenerationError(
+            code=reasons.runtime.PINNED_RELATIONAL_OPTION_UNSUPPORTED,
+            message=f"{reasons.runtime.PINNED_RELATIONAL_OPTION_UNSUPPORTED.spec.summary}{where}",
+        )
+    return PinnedModeError(
+        code=reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED,
+        message=f"{reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED.spec.summary}{where}",
+    )
+
+
+def reject_unpinnable(config: dict[str, Any], *, at_execute: bool = False) -> None:
+    """Raise a coded refusal for any construct pinned mode refuses. Reads config only.
+
+    ``at_execute`` is set when execute re-checks a plan: it selects the run-time twin of the
+    relational refusal and changes nothing else.
+    """
     tables = config.get("tables")
     if not isinstance(tables, list) or not tables:
         raise PinnedModeError(
@@ -152,14 +207,20 @@ def reject_unpinnable(config: dict[str, Any]) -> None:
             )
         by_name = {c.get("name"): c for c in gcols}
         for col in gcols:
-            _reject_column(tname, col, by_name)
+            _reject_column(tname, col, by_name, at_execute)
+            if relational_option_unsupported(tname, col):
+                raise _relational_refusal(tname, str(col.get("name")), at_execute)
 
 
-def _reject_column(tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]]) -> None:
+def _reject_column(
+    tname: str, col: dict[str, Any], siblings: dict[Any, dict[str, Any]], at_execute: bool
+) -> None:
     cname = str(col.get("name"))
     kind = col.get("type")
     if kind in REJECTED_TYPES:
         code, why = REJECTED_TYPES[kind]
+        if code == str(reasons.plan.PINNED_RELATIONAL_OPTION_UNSUPPORTED):
+            raise _relational_refusal(tname, cname, at_execute)
         raise PinnedModeError(code=code, message=f"{_where(tname, cname)}: {why}")
     if kind not in PINNABLE_TYPES:
         raise PinnedModeError(
@@ -179,7 +240,7 @@ def _reject_column(tname: str, col: dict[str, Any], siblings: dict[Any, dict[str
     if kind == "windowed_date":
         anchor = siblings.get(col.get("anchor"))
         if anchor is not None and anchor.get("type") == "categorical":
-            for category in anchor.get("categories") or []:
+            for category in categorical_categories(anchor) or []:
                 if isinstance(category, str) and not anchor_is_absolute(category):
                     raise PinnedModeError(
                         code=reasons.plan.PINNED_WINDOWED_ANCHOR_NOT_ABSOLUTE,
@@ -339,6 +400,11 @@ def compile_pinned_plan_with_generation(
     from decoy_engine.generation._numeric_typing import numeric_plan
 
     numeric = tuple(sorted((t, c, str(dt)) for (t, c), dt in numeric_plan(resolved).items()))
+    # The plan keeps no relationships either, so the policy an empty parent follows is carried
+    # as its own field, read from the resolved config by the one relationship normalizer.
+    from decoy_engine.generation.relational import reference_policies
+
+    policies = tuple(sorted((t, c, p) for (t, c), p in reference_policies(resolved).items()))
     pinned = PinnedPlan(
         schema_version=PINNED_PLAN_SCHEMA,
         reference_date=reference,
@@ -346,5 +412,6 @@ def compile_pinned_plan_with_generation(
         tables=tuple(tables),
         statistical=tuple(sorted(statistical, key=lambda s: (s.table, s.column))),
         numeric_types=numeric,
+        reference_policies=policies,
     )
     return PinnedCompilation(pinned=pinned, generation=gen)

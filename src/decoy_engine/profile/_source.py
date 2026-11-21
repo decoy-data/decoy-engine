@@ -48,6 +48,7 @@ from decoy_engine.profile._readers import (
     ParquetFileSource,
     ProfileSource,
     build_declared_source,
+    has_row_beyond,
 )
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._types import Profile, Relationship, TableProfile
@@ -197,6 +198,20 @@ def profile_source(
 # ---------------------------------------------------------------------
 
 
+def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
+    """The Arrow schema, for a source that can hold list, struct or map columns.
+
+    Only Parquet and resident tables can; reading a CSV or fixed-width schema infers types
+    from the file, which the bounded profile avoids."""
+    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
+
+    if isinstance(
+        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
+    ):
+        return reader.schema()
+    return None
+
+
 def _profile_one_source(
     reader: ProfileSource,
     *,
@@ -227,6 +242,7 @@ def _profile_one_source(
             fk_specs=fk_specs,
             sample_rows=sample_rows,
             rng=rng,
+            arrow_schema=_nested_capable_schema(reader),
         )
 
     if sample_rows is None:
@@ -246,13 +262,24 @@ def _profile_one_source(
         effective_sample_rows = sample_rows
 
     row_count = reader.row_count()
+    # The profiled frame is parsed from exactly the cap, so no later row can change a
+    # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
+    # when the cap is filled a second read asks for one row more. That frame is only
+    # counted, never profiled. An exact count already says the source is larger.
     sample_df = reader.sample_frame(effective_sample_rows)
+    proven_total = len(sample_df)
+    if (
+        not row_count.exact
+        and proven_total == effective_sample_rows
+        and has_row_beyond(reader.sample_frame, effective_sample_rows)
+    ):
+        proven_total = effective_sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
-    effective_total = max(row_count.value, len(sample_df))
+    effective_total = max(row_count.value, proven_total)
     table = walk_dataframe(
         sample_df,
         table_name=table_name,
@@ -261,6 +288,7 @@ def _profile_one_source(
         sample_rows=effective_sample_rows,
         rng=rng,
         total_row_count=effective_total,
+        arrow_schema=_nested_capable_schema(reader),
     )
     return replace(table, row_count_exact=row_count.exact)
 

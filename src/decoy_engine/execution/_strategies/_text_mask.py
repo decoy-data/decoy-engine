@@ -32,20 +32,21 @@ Config keys accepted via ``plan.provider_config``:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import (
     StrategyContext,
     StrategyOption,
     option,
     provider_config_to_dict,
 )
-from decoy_engine.execution._errors import StrategyError
+from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
 from decoy_engine.execution._strategies._ner_config import (
     NER_WIZARD_OPTIONS,
     enforce_ner_model_version,
@@ -54,6 +55,35 @@ from decoy_engine.execution._strategies._ner_config import (
 from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.plan._types import ColumnSeed
 from decoy_engine.transforms.text_mask import mask_cell
+
+# The note every route attaches to the sub-floor warning.
+_SUB_FLOOR_NOTE = (
+    "these spans' domain was below the FF1 minimum admissible "
+    "domain, or failed checksum validation, and could not be "
+    "FF1-encrypted; they were handled under the configured "
+    "sub_floor_span policy instead (non-reversible)."
+)
+
+
+def text_mask_sub_floor_warning(
+    notices: Mapping[str, int], *, policy: str | None, column: str
+) -> QualityWarning:
+    """The one aggregate `text_mask_sub_floor_span_handled` warning for `notices`.
+
+    Every route builds it here: `TextMaskHandler.run`, the native unified and chunked routes and
+    the out-of-core runners, so the warnings cannot drift. `by_detector` is `name=count` pairs
+    joined with ", " in name order, because `detail` holds scalars only."""
+    return QualityWarning(
+        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
+        provider="text_mask",
+        column=column,
+        detail={
+            "policy": policy,
+            "by_detector": ", ".join(f"{name}={count}" for name, count in sorted(notices.items())),
+            "total": sum(notices.values()),
+            "note": _SUB_FLOOR_NOTE,
+        },
+    )
 
 
 class TextMaskHandler:
@@ -160,6 +190,7 @@ class TextMaskHandler:
         null_mask = col.isna().to_list()
         col_values = col.to_list()
 
+        unsupported = False
         try:
             if ner_model is None:
                 for pos, value in enumerate(col_values):
@@ -215,6 +246,10 @@ class TextMaskHandler:
                             sub_floor_span_policy=sub_floor_span_policy,
                             sub_floor_notices=sub_floor_notices,
                         )
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             raise StrategyError(
                 code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
@@ -224,6 +259,9 @@ class TextMaskHandler:
                     "silently choose a sub_floor_span fallback."
                 ),
             ) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
 
         df[column] = pd.Series(col_values, index=df.index, dtype=object)
 
@@ -235,21 +273,8 @@ class TextMaskHandler:
             # channel counterpart, mirroring how the fpe strategy aggregates
             # `fpe_partial_plaintext_disclosure`).
             warnings.append(
-                QualityWarning(
-                    code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-                    provider="text_mask",
-                    column=column,
-                    detail={
-                        "policy": sub_floor_span_policy,
-                        "by_detector": dict(sub_floor_notices),
-                        "total": sum(sub_floor_notices.values()),
-                        "note": (
-                            "these spans' domain was below the FF1 minimum admissible "
-                            "domain, or failed checksum validation, and could not be "
-                            "FF1-encrypted; they were handled under the configured "
-                            "sub_floor_span policy instead (non-reversible)."
-                        ),
-                    },
+                text_mask_sub_floor_warning(
+                    sub_floor_notices, policy=sub_floor_span_policy, column=column
                 )
             )
         return df, warnings

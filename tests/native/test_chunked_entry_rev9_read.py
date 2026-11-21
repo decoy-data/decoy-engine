@@ -360,7 +360,12 @@ def _sibling_cases() -> dict[str, tuple[list[dict[str, Any]], list[pa.Table], st
                 "name": "dob",
                 "strategy": "date_shift",
                 "namespace": "dob_ns",
-                "provider_config": {"min_days": -30, "max_days": 30, "group_by": "g"},
+                "provider_config": {
+                    "min_days": -30,
+                    "max_days": 30,
+                    "group_by": "g",
+                    "date_format": "%Y-%m-%d",
+                },
             },
         ],
         [pa.table({"g": ids, "dob": dates})],
@@ -503,7 +508,11 @@ def test_read_set_ignores_names_that_are_not_column_references() -> None:
 
 _READERS = {
     "date_shift_group_by": (
-        {"name": "d", "strategy": "date_shift", "provider_config": {"group_by": "g"}},
+        {
+            "name": "d",
+            "strategy": "date_shift",
+            "provider_config": {"group_by": "g", "date_format": "%Y-%m-%d"},
+        },
         {"g"},
     ),
     "grouped_series_group_and_order": (

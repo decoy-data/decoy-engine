@@ -75,6 +75,7 @@ from decoy_engine.plan._checks_correctness import (
 from decoy_engine.plan._checks_date_shift import (
     check_date_preserve_values,
     check_date_shift_group_by_refs,
+    check_date_shift_window,
 )
 from decoy_engine.plan._checks_declared_casting import compile_declared_casting_contract
 from decoy_engine.plan._checks_dp import check_dp_generate_contract
@@ -105,6 +106,7 @@ from decoy_engine.plan.checks import (
 )
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
 from decoy_engine.plan.checks._nested_rules import check_nested_rules
+from decoy_engine.plan.checks._text_mask_strategy import check_text_mask_strategies
 from decoy_engine.profile._hash import profile_hash
 from decoy_engine.profile._types import Profile
 
@@ -205,6 +207,7 @@ def compile_plan(
     # spacy extra + model on THIS host. Config + installed packages only;
     # both branches + run_config_only_checks.
     check_text_mask_ner_available(config)
+    check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
     # Row 14 (deferred follow-up 1, 2026-06-12): vault: true needs a
     # namespace and a one-way strategy. Config-only; both branches +
     # run_config_only_checks.
@@ -224,6 +227,7 @@ def compile_plan(
     # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
     # shape). Config-only; runs inside the date_shift_group_by_refs slot.
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit
     # compile-time manifest warnings for every active group. Config-only; runs
     # in both branches and in run_config_only_checks.
@@ -344,6 +348,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
+            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
+            "text_mask_strategies",
         )
         checks_skipped: tuple[str, ...] = (
             "basic_uniqueness_pre_flight",
@@ -424,6 +430,8 @@ def compile_plan(
             "faker_requires_provider",
             # Row 29 (HC-7): clinical free-text advisory (warn-only).
             "freetext_advisory",
+            # E-F0: text_mask detector ids and strategy pairs, tail-appended.
+            "text_mask_strategies",
         )
         checks_skipped = ()
 
@@ -527,6 +535,7 @@ def run_config_only_checks(
     # Row 30 (TX-2, 2026-07-20): text_mask `ner` opt-in needs the same
     # spacy + model check. Config-only.
     check_text_mask_ner_available(config)
+    check_text_mask_strategies(config)  # E-F0: detector ids and strategy pairs text_mask can run
     # Row 14 (vault): vault: true needs a namespace + a one-way strategy.
     check_vault_columns(config)
     # Row 15 (SP-04): reject unknown or structurally unsupported FPE checksum schemes.
@@ -537,6 +546,7 @@ def run_config_only_checks(
     # (entity-anchor) column ref. Config-only.
     check_date_shift_group_by_refs(config)
     check_date_preserve_values(config)
+    check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
     check_fpe_join_groups(config)
@@ -599,6 +609,7 @@ def run_config_only_checks(
         # Row 26 (DE-03 sibling): faker-without-provider rejection.
         "faker_requires_provider",
         *declared,
+        "text_mask_strategies",  # E-F0, tail-appended
     )
 
 
@@ -632,7 +643,7 @@ def _hash_config(config: dict[str, Any]) -> str:
     The `sources`, `targets`, `pre_scan`, `name` and `scan_baseline` keys are explicitly excluded: `sources`,
     `targets` and `name` are data binding (where bytes come from, where they go, what the pipeline
     is called), `pre_scan` only suggests and `scan_baseline` is a pointer, so none is
-    masking semantics. The one exception is `scan_baseline.on_drift`, hashed when set (below). A user swapping a local file source for an S3 source does not change which
+    masking semantics. The one exception is `scan_baseline.on_drift` (with its `sha256`), hashed when set (below). A user swapping a local file source for an S3 source does not change which
     columns mask how; the pipeline_config_hash must stay byte-identical across that swap so audit
     + reproducibility tooling can match the two runs as semantically equivalent. `post_scan`
     stays in: under `ner_findings: fail` its `dismissed` list decides what blocks.
@@ -644,11 +655,14 @@ def _hash_config(config: dict[str, Any]) -> str:
     and every other site that hashes the config.
     """
     semantic_config = {k: v for k, v in config.items() if k not in _UNHASHED_BLOCKS}
-    # `scan_baseline.on_drift` decides whether a run is refused, so it is hashed when set. The
-    # pointer (`path`, `schema`) stays out.
+    # `scan_baseline.on_drift` and the digest that pins the baseline decide which drift refuses a
+    # run, so they are hashed when `on_drift` is set. The pointer (`path`, `schema`) stays out.
     baseline = config.get("scan_baseline")
     if isinstance(baseline, dict) and baseline.get("on_drift") is not None:
-        semantic_config["scan_baseline"] = {"on_drift": baseline["on_drift"]}
+        hashed = {"on_drift": baseline["on_drift"]}
+        if baseline.get("sha256") is not None:
+            hashed["sha256"] = baseline["sha256"]
+        semantic_config["scan_baseline"] = hashed
     global_settings = semantic_config.get("global_settings")
     if isinstance(global_settings, dict) and any(
         key in global_settings for key in _NON_SEMANTIC_GLOBAL_SETTINGS

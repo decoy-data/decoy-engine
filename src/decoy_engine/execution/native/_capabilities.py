@@ -203,9 +203,9 @@ _MASK: dict[str, _Ortho] = {
         True,
         row_error_modes=("format_error",),
         notes=(
-            "Output is always a formatted date string (static type). Without an "
-            "explicit date_format the NODE needs a format_detect prepass "
-            "(resolved in _requirements.py), not a change to the static type."
+            "Output is always a formatted date string (static type). The format "
+            "comes from provider_config.date_format, which plan compile requires; "
+            "no node needs a detect prepass."
         ),
     ),
     "bucket_perturb": _Ortho(True, False, False, False, True),
@@ -440,6 +440,31 @@ _GEN_ONLY: dict[str, _Ortho] = {
         notes=(
             "One python Random choices call over the pinned lookup list; the value type comes "
             "from the file. Resident route only, non-partitionable like categorical generation."
+        ),
+    ),
+    "inherit": _Ortho(
+        False,
+        False,
+        True,
+        False,
+        False,
+        gen=True,
+        notes=(
+            "Copies the value of the parent row the child's foreign key names; no draw. Reads "
+            "the whole finished parent table, typed as the parent column. Resident route only."
+        ),
+    ),
+    "provider": _Ortho(
+        False,
+        True,
+        True,
+        True,
+        False,
+        gen=True,
+        notes=(
+            "Registry provider. Three branches: a keyed identifier draw per row ordinal, a pooled "
+            "Faker sample, and a seeded Faker batch. Classified conservatively as python-only "
+            "because the whole-column branches are not partitionable."
         ),
     ),
     "distribution": _Ortho(

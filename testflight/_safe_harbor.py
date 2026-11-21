@@ -20,7 +20,7 @@ TH-2.3 / P1-6 hardens two things:
   - Independent suppression count. Cross-checks the actual output values
     (counting the literal "" suppression marker geo_generalize writes --
     decoy_engine.transforms.geo_generalize._SUPPRESS_VALUE) against BOTH the
-    planted count and the engine's own self-reported cascade_decisions
+    planted count and the engine's own self-reported rows_suppressed
     detail, rather than trusting the self-reported detail alone (the engine
     grading its own homework).
 """
@@ -70,7 +70,7 @@ def check_safe_harbor(
       literal value geo_generalize writes for a suppressed row) in the
       output column equals planted_restricted_zip3_count.
     - Cross-check that independent count against the engine's own
-      geo_generalize_cascade QualityWarning detail (cascade_decisions); a
+      geo_generalize_cascade QualityWarning detail (rows_suppressed); a
       disagreement between the two means the engine's bookkeeping does not
       match its own output data.
     - Assert expected_suppressions matches both counts.
@@ -108,7 +108,7 @@ def check_safe_harbor(
         )
 
         # 2. Independent suppression count computed from the actual output
-        #    data, NOT the engine's self-reported cascade_decisions detail.
+        #    data, NOT the engine's self-reported rows_suppressed detail.
         independent_suppressed = sum(1 for v in out_values if isinstance(v, str) and v == "")
         assert independent_suppressed == sh.planted_restricted_zip3_count, (
             f"[{job_name}] safe_harbor: {sh.table}.{sh.column}: "
@@ -126,14 +126,13 @@ def check_safe_harbor(
             f"Expected at least {sh.planted_restricted_zip3_count} suppressed rows. "
             f"Available warnings: {[w.code for w in result.warnings]}"
         )
-        cascade_decisions: dict[str, str] = col_warnings[0].detail.get("cascade_decisions", {})
-        self_reported_suppressed = sum(1 for v in cascade_decisions.values() if v == "suppressed")
+        self_reported_suppressed = int(col_warnings[0].detail.get("rows_suppressed", 0))
 
         assert self_reported_suppressed == independent_suppressed, (
             f"[{job_name}] safe_harbor: {sh.table}.{sh.column}: "
             f"engine self-reported suppressed_count={self_reported_suppressed} != "
             f"independent output-value count={independent_suppressed}. "
-            f"The cascade_decisions detail disagrees with the actual output data "
+            f"The rows_suppressed detail disagrees with the actual output data "
             f"(TH-2.3: the engine's own bookkeeping is not trusted alone)."
         )
         assert self_reported_suppressed == sh.expected_suppressions, (

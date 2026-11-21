@@ -83,9 +83,13 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine.detection.detectors import Span
-from decoy_engine.errors import FpeUnencryptableError
+from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._errors import ExecutionError, StrategyError
+from decoy_engine.execution._errors import (
+    ExecutionError,
+    StrategyError,
+    text_mask_unsupported_pair_error,
+)
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
 from decoy_engine.execution._strategies._ner_config import (
     enforce_ner_model_version,
@@ -93,7 +97,6 @@ from decoy_engine.execution._strategies._ner_config import (
 )
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
-from decoy_engine.generation.pool._events import QualityWarning
 from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
@@ -120,34 +123,6 @@ if TYPE_CHECKING:
 # `_compat.py`; code_set and bucket_perturb are admitted only for the config
 # shapes the kernel reproduces byte-for-byte (see module docstring + `_compat`).
 GROUP_C_STRATEGIES = frozenset({"text_mask", "code_set", "bucket_perturb"})
-
-
-def text_mask_sub_floor_warning(
-    column: str, policy: str | None, by_detector: dict[str, int]
-) -> QualityWarning:
-    """The aggregate `text_mask_sub_floor_span_handled` QualityWarning
-    (round-2 MEDIUM-1), shared so the out-of-core runners
-    (`_runner.run_fk_out_of_core`, `_stream_driver.stream_table`) emit the
-    IDENTICAL shape the full-frame handler
-    (`_strategies/_text_mask.TextMaskHandler.run`) does, from the SAME
-    accumulated `sub_floor_notices` dict `_text_mask_array` threads through
-    `mask_cell` for every batch of a table."""
-    return QualityWarning(
-        code=reasons.warning.TEXT_MASK_SUB_FLOOR_SPAN_HANDLED,
-        provider="text_mask",
-        column=column,
-        detail={
-            "policy": policy,
-            "by_detector": dict(by_detector),
-            "total": sum(by_detector.values()),
-            "note": (
-                "these spans' domain was below the FF1 minimum admissible "
-                "domain, or failed checksum validation, and could not be "
-                "FF1-encrypted; they were handled under the configured "
-                "sub_floor_span policy instead (non-reversible)."
-            ),
-        },
-    )
 
 
 def group_c_array(
@@ -225,7 +200,7 @@ def _text_mask_array(
     resolution (detectors, per_detector_strategy, unmatched_span_policy, token,
     min_days/max_days, sub_floor_span, TX-2 `ner`), same non-string -> str
     coercion, and the same reused `mask_cell` primitive. An unparseable date
-    still passes through unchanged; an fpe span whose domain FF1 cannot cover
+    span becomes the redaction token; an fpe span whose domain FF1 cannot cover
     (or whose checksum fails validation) now fails closed via
     `FpeUnencryptableError` when no `sub_floor_span` policy is configured
     (Task 5.2 plan P3-final removed the old catch-all token fallback), so this
@@ -289,6 +264,7 @@ def _text_mask_array(
 
             ner_spans_by_pos = iter_ner_spans_batch(texts, model=ner_model, entities=ner_entities)
 
+        unsupported = False
         try:
             for i, pos in enumerate(non_null_positions):
                 out[pos] = mask_cell(
@@ -303,6 +279,10 @@ def _text_mask_array(
                     sub_floor_span_policy=sub_floor_span_policy,
                     sub_floor_notices=sub_floor_notices,
                 )
+        except PipelineValidationError as exc:
+            if exc.code != reasons.config.MASK_TEXT_MASK_STRATEGY_UNSUPPORTED:
+                raise
+            unsupported = True
         except FpeUnencryptableError as exc:
             # Matches the full-frame handler's fail-closed mapping
             # (`_strategies/_text_mask.TextMaskHandler.run`) so a consumer keying
@@ -315,6 +295,9 @@ def _text_mask_array(
                     "silently choose a sub_floor_span fallback."
                 ),
             ) from exc
+        if unsupported:
+            # Raised after the catch closed, so no cause or context carries the span.
+            raise text_mask_unsupported_pair_error(column)
         return pa.array(out, type=pa.string())
     except BaseException:
         del job_seed

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
@@ -14,6 +14,7 @@ __all__ = [
     "BUNDLE_MISSING_OUTPUT_COLUMNS",
     "CARDINALITY_TARGET_EXCEEDS_POOL",
     "CATEGORICAL_CATEGORIES_NOT_LIST",
+    "CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE",
     "CPU_DETECTION_FAILED",
     "DETERMINISTIC_MODE_UNSUPPORTED_CARDINALITY",
     "DETERMINISTIC_REQUIRES_SOURCE_AND_NAMESPACE",
@@ -25,7 +26,9 @@ __all__ = [
     "FPE__CHECKSUM_INVALID_SOURCE",
     "FPE__UNENCRYPTABLE_DOMAIN",
     "FPE__UNENCRYPTABLE_LENGTH",
+    "GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT",
     "GENERATE_FORMULA_EVALUATION_FAILED",
+    "GENERATE_PER_PARENT_INFEASIBLE",
     "GENERATION_BUDGET_EXCEEDED",
     "GENERATION_COLUMN_UNBOUNDED",
     "GENERATION_NOT_CLASS_A",
@@ -75,6 +78,9 @@ __all__ = [
     "OUT_OF_CORE_TEXT_REDACT_UNPREPARED",
     "OUT_OF_CORE_VALIDATORS_NOT_ADMITTED",
     "OUT_OF_CORE_VAULT_CONFIG_REQUIRED",
+    "PARENT_LOOKUP_KEY_MISSING",
+    "PARENT_LOOKUP_KEY_NOT_UNIQUE",
+    "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
     "PK_DUPLICATES",
     "POOL_CAPACITY_UNVERIFIABLE_NO_PROFILE",
     "POOL_EXCEEDS_CACHE_BUDGET",
@@ -85,6 +91,9 @@ __all__ = [
     "RAW_HEX_BATCH_LENGTH_MISMATCH",
     "RAW_HEX_BATCH_TYPE_MISMATCH",
     "RAW_HEX_BATCH_UNEXPECTED_NULL",
+    "REFERENCE_BOUNDS_UNSATISFIED",
+    "REFERENCE_PARENT_POOL_EMPTY",
+    "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_CYCLE",
     "ROW_EXCEEDS_MAX_ROW_BYTES",
     "RUN_SINGLE_REQUIRES_TABLE",
@@ -111,6 +120,10 @@ __all__ = [
     "UNKNOWN_CARDINALITY_MODE",
     "UNSUPPORTED_STRATEGY",
     "VALUE_EXCEEDS_DECLARED_BOUND",
+    "WINDOWED_DATE_ANCHOR_INVALID",
+    "WINDOWED_DATE_ANCHOR_OUT_OF_RANGE",
+    "WINDOWED_DATE_OFFSET_OUT_OF_RANGE",
+    "WINDOWED_DATE_PARENT_ANCHOR_NULL",
 ]
 
 _d = _catalog.runtime("ExecutionError")
@@ -322,6 +335,83 @@ GENERATE_FORMULA_EVALUATION_FAILED = _d(
     since="1.26.0",
 )
 
+# Reference-draw and conditional-categorical refusals. A summary is the whole message beside the
+# table and column names, so none names a key, count, bound, weight or parent value.
+# `pinned_relational_option_unsupported` is the run-time twin of the `plan` code of the same name,
+# with the same text: pinned execute raises it for a plan that never went through pinned compile.
+_d = _catalog.runtime("GenerationError")
+
+CATEGORICAL_CONDITION_COLUMN_UNAVAILABLE = _d(
+    "categorical_condition_column_unavailable",
+    "Generate categorical column conditions on a column that has not been generated.",
+    since="1.32.0",
+)
+GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
+    "generate_fitted_reference_bounds_conflict",
+    "Generate reference column per-parent bounds cannot be combined with distribution fitted.",
+    since="1.32.0",
+)
+GENERATE_PER_PARENT_INFEASIBLE = _d(
+    "generate_per_parent_infeasible",
+    "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+    since="1.32.0",
+)
+PARENT_LOOKUP_KEY_MISSING = _d(
+    "parent_lookup_key_missing",
+    "Generate column reads a parent row, but a foreign key value has no parent row.",
+    since="1.32.0",
+)
+PARENT_LOOKUP_KEY_NOT_UNIQUE = _d(
+    "parent_lookup_key_not_unique",
+    "Generate column reads a parent row, but a parent key value occurs more than once.",
+    since="1.32.0",
+)
+PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
+    "pinned_relational_option_unsupported",
+    "Pinned generation does not support this relational generate option.",
+    since="1.32.0",
+)
+REFERENCE_BOUNDS_UNSATISFIED = _d(
+    "reference_bounds_unsatisfied",
+    "Reference column per-parent bounds did not hold after the repair.",
+    since="1.32.0",
+)
+REFERENCE_PARENT_POOL_EMPTY = _d(
+    "reference_parent_pool_empty",
+    "Reference column has rows to fill but its parent column has no keys.",
+    since="1.32.0",
+)
+REFERENCE_WEIGHTS_LENGTH_MISMATCH = _d(
+    "reference_weights_length_mismatch",
+    "Reference column weights count does not match its parent key count.",
+    since="1.32.0",
+)
+
+# Date-window refusals, raised where the anchor is parsed and shifted, for masked and generated
+# columns alike. A summary is the whole message: no cell value, type name or position.
+_d = _catalog.runtime("WindowedDateError")
+
+WINDOWED_DATE_ANCHOR_INVALID = _d(
+    "windowed_date_anchor_invalid",
+    "Windowed date anchor is not a date or datetime without a timezone.",
+    since="1.32.0",
+)
+WINDOWED_DATE_ANCHOR_OUT_OF_RANGE = _d(
+    "windowed_date_anchor_out_of_range",
+    "Windowed date anchor is outside the supported date range.",
+    since="1.32.0",
+)
+WINDOWED_DATE_OFFSET_OUT_OF_RANGE = _d(
+    "windowed_date_offset_out_of_range",
+    "Windowed date offset moves the date outside the supported date range.",
+    since="1.32.0",
+)
+WINDOWED_DATE_PARENT_ANCHOR_NULL = _d(
+    "windowed_date_parent_anchor_null",
+    "Windowed date anchor is null on the parent row its foreign key points at.",
+    since="1.32.0",
+)
+
 _d = _catalog.runtime("GenerationUnboundedError")
 
 GENERATION_COLUMN_UNBOUNDED = _d("generation_column_unbounded", "Generation column unbounded.")
@@ -380,7 +470,7 @@ KEY_VERSION_INVALID = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.CONFIGURATION,
     retry=RetryClass.CONFIGURATION_REPAIR,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("MissingMaskSecret")
@@ -446,7 +536,7 @@ PROBE_FAILED = _d(
     phases=(Phase.RESOLVE,),
     outcome=Outcome.EXECUTION,
     retry=RetryClass.UNKNOWN,
-    since=UNRELEASED,
+    since="1.30.0",
 )
 
 _d = _catalog.runtime("RowExceedsMaxRowBytes")

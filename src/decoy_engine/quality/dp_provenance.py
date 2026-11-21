@@ -251,7 +251,6 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # google-cloud-storage does not survive the profile without it.) See
 # ``assert_lock_matches_installed`` for the guard that proves
 # the installed set is exactly the lock's marker-selected pins.
-#
 # CI ADDS THE OTHER ROWS. The dependency-matrix workflow
 # (``.github/workflows/dps-dependency-matrix.yml``) runs on exact-pinned CPython
 # patches (3.10.x / 3.11.x / 3.12.x), computes the fingerprint per row, and
@@ -267,23 +266,24 @@ CERTIFIED_PLATFORM = PlatformTriple(
 # certified ones (opendp/dp-accounting/numpy/scipy/pandas/pyarrow, per the
 # annotation below) so the DP behaviour is the tested behaviour; the CLI's extra
 # packages (typer/rich/...) are off the DP code path. Membership, not equality:
-# a distinct profile that pins the same proof-critical set earns its own row
-# rather than forcing an isolated fit environment (ROADMAP item 2 / phase 9,
-# CLI host wiring).
+# a distinct profile with the same proof-critical set earns its own row rather
+# than forcing an isolated fit environment (ROADMAP item 2 / phase 9, CLI host wiring).
 _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
     (CERTIFIED_PLATFORM, "3.10.20.final"): frozenset(
         {
             # decoy-engine dev/CI profile: `uv sync --frozen --extra dev --extra lint --extra vault
             # --extra cloud` on Python 3.10.20 (the dps-dependency-matrix install). Each re-pin is
             # checked with a fresh sync (installed_distribution_set + compute_lock_fingerprint); a
-            # release stamp moves only the hashed engine version, and from 0.18.0 every prior row
-            # stays so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd...; CI-E1s (0.18.0)
-            # with certifi, cryptography, pyasn1, urllib3 and werkzeug put back reproduces
-            # 31ecf945.... 7d1c1a2a... is the 0.19.0 lock (77 dists; b9b42047... with the engine
-            # moved); 78af2b5a... adds pytest-xdist and execnet (79, ENGINE-PAR P2); 5253dc79...
-            # adds pytest-timeout (80). A lock change needs its own row (test_dp_lock_row.py) and a
-            # regenerated NOTICE. Rows from SCAN-ML M2 (classifier stack in base deps) on are one
-            # per engine release, newest first.
+            # release stamp moves only the hashed engine version; from 0.18.0 every prior row stays
+            # so old snapshots compile. Engine 0.4.0 reproduces 6c0b2bbd..., 0.18.0 reproduces 31ecf945...;
+            # 7d1c1a2a... is the 0.19.0 lock (77), 78af2b5a... adds xdist, 5253dc79... timeout, then PyNaCl.
+            "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
+            "376aa20958b1df452478752ec08a5634adfafc4b80fcaeef01c69869b1aad87d",
+            "8e4bb9802809c624b81bac40e84ecd660c6e54e39fb2b80a6920789128d89d6e",
+            "b2d12cff2b9b1cb32a7fdd14227befe5b7767a389de47a8d1b3ebd70822c9be1",
+            "0a373cf26022ec43eb0cb60f89026d9e5878471110b7263f5c28d4bde2fc4897",
+            "0e2e91aab6ea145c7531ff0068f05097068c8e56c0ba9a69cfcc1fd4a5d5e6bd",
+            "decae234fdd19a744ec2eea4da4b42c906359400b6eda07e475cfcc321a92f5c",
             "9dba072fe68a9047392848f3a0eaac3dedcdf496beda7965c10059b868a9fc00",
             "883833b50ebe1262aff8afcfb4c92a577b18541c03636185b903748ec83351b3",
             "f921d069fb3cd5baebc6940de37076103ba6a663c977db346c81fd6cdcbfc326",
@@ -299,15 +299,15 @@ _CERTIFIED_STACKS: dict[tuple[PlatformTriple, str], frozenset[str]] = {
             "b9b42047dc09ce89593e0be2dc6f7125a91af661bbb644b3a27342c84fd44ab0",
             "31ecf94503eff107631191426072eee757af72a2229ab594d2fc2e8e6bfac7b1",
             "5a76ea92769d62cb0124d89d24c2ec0e4116828e34e0611d80bf5e36edef1a23",
-            # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure,
-            # no dev tooling. The third-party set is pinned in the CLI repo's
-            # requirements-certified.txt (proof-critical libraries at the annotated versions,
-            # packaging==26.2). To reproduce: `--no-dev` install it into a 3.10.20 venv and run the
-            # CLI repo's scripts/cert_smoke.py (recomputes this fingerprint over the running set,
-            # then runs fit -> dps-marginal/v3 -> generate). Engine-only bumps from 0.6.0 change
-            # just decoy-engine's version; 0.6.0 (and 0.5.0) were installed in a real 3.10.20 venv,
-            # later rows are computed from the pins. All stay, one per engine release, newest first;
-            # SCAN-ML M2 1db3e3da... (67 pins) and the older d5898d1f... follow them.
+            "502037cad62e1e645a666eb088b0bc9f69fec82d2ac980b0c2d52a2cc707a7f1",
+            # decoy-cli pristine RUNTIME profile: engine + CLI (typer/rich/duckdb) + the DP closure, no dev
+            # tooling, pinned in the CLI repo's requirements-certified.txt (reproduce: `--no-dev` install on
+            # 3.10.20, then cert_smoke.py). All stay, newest first; 0.28.0 lacks joserfc, 00f45dee... pynacl.
+            "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
+            "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
+            "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
+            "e7b15fa4f275ef7f7d981a6a84298015423182848ca29bfb11995fdcae3fc092",
+            "c479d1def48ac303249d4917cc1baf49fa640adad05824d3512329d93be4420e",
             "789b1eae03d7cd382f34e704aa510d1b9559178223f4d170fffd20f724de2e9f",
             "dceac0cd1161a28d6c2c949cf88531d08ad5348c0d460f9bc44f83d02818dee3",
             "c80550ef3c56387ba81dd1a9ff709cb24a7ee7b55d607a01a43613a8a550045a",

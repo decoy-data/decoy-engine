@@ -188,12 +188,60 @@ def passthrough_columns(
     ]
 
 
+def untouched_columns(nodes: Iterable[Any], names: Sequence[str], registry: Any) -> frozenset[str]:
+    """The columns of a table no work node changes. The node-side twin of
+    `passthrough_columns` for the full-frame and sequential adapters, which hold work nodes
+    rather than the config: it asks the same `handler_written_columns` registry about an entry
+    rebuilt from each node's plan slice, so a column a handler writes beyond the node's own
+    (a composite's canonical outputs) is touched here as it is there. A passthrough node, `when:`
+    or not, leaves its column as the source held it; every other node masks its own columns."""
+    from decoy_engine.execution._adapter import provider_config_to_dict
+    from decoy_engine.plan._types import ColumnSeed
+
+    entries: list[dict[str, Any]] = []
+    masked: set[str] = set()
+    for node in nodes:
+        seed = node.plan_slice
+        if not isinstance(seed, ColumnSeed):  # a composite FK group: every column is masked
+            masked |= set(node.columns)
+            continue
+        entries.append(
+            {
+                "name": node.columns[0] if node.columns else None,
+                "strategy": seed.strategy,
+                "provider": seed.provider,
+                "provider_config": provider_config_to_dict(seed.provider_config),
+                "coherent_with": list(seed.coherent_with),
+                "when": seed.when,
+            }
+        )
+        if node.kind != "scalar" or node.strategy != "passthrough":
+            masked |= set(node.columns)
+    written = handler_written_columns(entries, registry)
+    if written is None:  # a handler writes columns no declaration can name: nothing is untouched
+        return frozenset()
+    return frozenset(names) - written - masked
+
+
 def _table_columns(config: Mapping[str, Any], table: str) -> list[dict[str, Any]]:
     table_cfg = next(
         (t for t in config.get("tables") or [] if isinstance(t, dict) and t.get("name") == table),
         {},
     )
     return [c for c in table_cfg.get("columns") or [] if isinstance(c, dict)]
+
+
+def carried_columns(
+    config: Mapping[str, Any], *, table: str, names: Sequence[str], registry: Any
+) -> frozenset[str]:
+    """The columns of `table` the stock adapter never converts to pandas: the passthrough
+    columns minus the read set. The planner's dtype gate and `plan_carry` both call this,
+    so the auto route and the lane cannot disagree on which columns are carried."""
+    if repeated_names(names):
+        # Carrying addresses columns by name; with duplicates it carries nothing.
+        return frozenset()
+    passthrough = passthrough_columns(config, table=table, names=names, registry=registry)
+    return frozenset(passthrough) - read_set(_table_columns(config, table), passthrough, registry)
 
 
 def plan_carry(
@@ -208,41 +256,29 @@ def plan_carry(
         # Carrying addresses columns by name. With duplicate names it carries nothing,
         # so the profile walk raises its own duplicate-name refusal, as on the oracle.
         return CarryPlan(stock=False, carried=frozenset(), read=tuple(sorted(passthrough)))
-    read = read_set(_table_columns(config, table), passthrough, registry)
-    return CarryPlan(stock=True, carried=frozenset(passthrough) - read, read=tuple(sorted(read)))
+    carried = carried_columns(config, table=table, names=first_schema.names, registry=registry)
+    return CarryPlan(stock=True, carried=carried, read=tuple(sorted(set(passthrough) - carried)))
 
 
 def adapter_fk_safe_columns(plan: Any, registry: Any, graph: Any, table: str) -> set[str]:
     """The columns the stock adapter ingests losslessly (the set it passes to
-    `to_pandas_fk_safe`), so a diagnosis converts a column exactly as the adapter did."""
-    from decoy_engine.execution._fk_keys import fk_columns_for_table
-    from decoy_engine.execution._runner import (
-        date_shift_group_columns,
-        group_key_group_by_columns,
-        top_code_columns,
-    )
+    `to_pandas_fk_safe`), so a diagnosis, the native `when:` mask and the Faker null mask convert a
+    column exactly as the adapter did. It is `lossless_int_columns` itself, never a second union; a
+    null-free `when:`-read integer is included too (a superset the adapter narrows by its data)."""
+    from decoy_engine.execution._fk_keys import lossless_int_columns
 
-    # joint_mask key_by source columns are deliberately NOT unioned here. The stock adapter
-    # now ingests them losslessly via source_anchor_columns, but joint_mask is not chunk
-    # admitted (hash/redact/truncate/passthrough only) and is not native eligible
-    # (output_type_is_static is False), so a chunked or native diagnosis never sees a
-    # joint_mask key_by column on this path. If joint_mask ever becomes chunk or native
-    # eligible, union joint_mask_key_by_columns here to keep this mirror exact.
-    return (
-        set(fk_columns_for_table(graph.edges, table))
-        | date_shift_group_columns(plan, registry).get(table, set())
-        | top_code_columns(plan, registry).get(table, set())
-        | group_key_group_by_columns(plan, registry).get(table, set())
-    )
+    return lossless_int_columns(plan, registry, graph).for_table(table)
 
 
 __all__ = [
     "PASSTHROUGH_UNREPRESENTABLE_CODE",
     "CarryPlan",
     "adapter_fk_safe_columns",
+    "carried_columns",
     "has_when",
     "is_stock_adapter",
     "passthrough_columns",
     "plan_carry",
     "read_set",
+    "untouched_columns",
 ]

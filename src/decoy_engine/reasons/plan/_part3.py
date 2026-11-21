@@ -10,6 +10,7 @@ __all__ = [
     "GENERATE_CATEGORIES_MIXED",
     "GENERATE_COLUMN_FORWARD_REFERENCE",
     "GENERATE_FAKER_KWARGS_UNKNOWN",
+    "GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER",
     "GENERATE_FAKER_TYPE_UNKNOWN",
     "GENERATE_FORMULA_NAME_UNKNOWN",
     "GENERATE_FORMULA_NUMBER_USED_AS_TEXT",
@@ -18,6 +19,11 @@ __all__ = [
     "GENERATE_FORMULA_TEMPLATE_SYNTAX",
     "GENERATE_LOCALE_UNKNOWN",
     "GENERATE_OPTION_INVALID",
+    "GENERATE_PROVIDER_FIELD_REQUIRED",
+    "GENERATE_PROVIDER_FIELD_UNEXPECTED",
+    "GENERATE_PROVIDER_LOCALE_UNSUPPORTED",
+    "GENERATE_PROVIDER_UNKNOWN",
+    "GENERATE_PROVIDER_UNSUPPORTED",
     "GROUPED_SERIES_GROUP_BY_EQUALS_ORDER_BY",
     "LOOKUP_COLUMN_MISSING",
     "LOOKUP_FILE_EMPTY",
@@ -29,6 +35,8 @@ __all__ = [
     "LOOKUP_TOO_MANY_ENTRIES",
     "LOOKUP_WEIGHT_INVALID",
     "PINNED_LOOKUP_UNSUPPORTED",
+    "PINNED_PROVIDER_UNSUPPORTED",
+    "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
     "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_PARENT_NOT_UNIQUE",
     "SORT_UNSUPPORTED_TYPE",
@@ -149,6 +157,36 @@ GENERATE_LOCALE_UNKNOWN = _d(
     "Generate column locale is not a known Faker locale.",
     since="1.13.0",
 )
+GENERATE_FAKER_TYPE_IS_DOMAIN_PROVIDER = _d(
+    "generate_faker_type_is_domain_provider",
+    "Generate column names a registry provider in faker_type; use type provider instead.",
+    since="1.32.0",
+)
+GENERATE_PROVIDER_FIELD_REQUIRED = _d(
+    "generate_provider_field_required",
+    "Generate column uses a composite provider without naming the field it takes.",
+    since="1.32.0",
+)
+GENERATE_PROVIDER_FIELD_UNEXPECTED = _d(
+    "generate_provider_field_unexpected",
+    "Generate column sets field or group on a provider that has no fields.",
+    since="1.32.0",
+)
+GENERATE_PROVIDER_LOCALE_UNSUPPORTED = _d(
+    "generate_provider_locale_unsupported",
+    "Generate column asks for a locale the provider does not support.",
+    since="1.32.0",
+)
+GENERATE_PROVIDER_UNKNOWN = _d(
+    "generate_provider_unknown",
+    "Generate column names a provider that is not in the registry.",
+    since="1.32.0",
+)
+GENERATE_PROVIDER_UNSUPPORTED = _d(
+    "generate_provider_unsupported",
+    "Generate column names a provider that generation cannot draw from.",
+    since="1.32.0",
+)
 GENERATE_OPTION_INVALID = _d(
     "generate_option_invalid",
     "Generate column option is not valid for its column type.",
@@ -224,4 +262,16 @@ PINNED_LOOKUP_UNSUPPORTED = _d(
     "pinned_lookup_unsupported",
     "Lookup columns are not available in pinned mode.",
     since="1.25.0",
+)
+PINNED_PROVIDER_UNSUPPORTED = _d(
+    "pinned_provider_unsupported",
+    "Provider columns are not available in pinned mode.",
+    since="1.32.0",
+)
+# A summary is the whole message beside the table and column names. The run-time twin in the
+# `runtime` namespace carries the same text for a plan that never went through pinned compile.
+PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
+    "pinned_relational_option_unsupported",
+    "Pinned generation does not support this relational generate option.",
+    since="1.32.0",
 )

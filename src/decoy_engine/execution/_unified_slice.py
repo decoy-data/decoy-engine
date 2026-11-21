@@ -152,6 +152,7 @@ def _execute_admitted(
     execution_plan_decision: ExecutionPlan | None,
     pool_cache: PoolCache,
     native_threads: int,
+    chunked_dispatcher_enabled: bool,
 ) -> ExecutionResult | None:
     """Everything past the cheap admission gate: build the LIVE (D4)
     `PhysicalPlanInputs`, compile the real physical plan, run the remaining
@@ -210,6 +211,7 @@ def _execute_admitted(
             out_of_core_reorder_threshold_rows=out_of_core_reorder_threshold_rows,
             out_of_core_budget_bytes=out_of_core_budget_bytes,
             engine_version=engine_version,
+            chunked_dispatcher_enabled=chunked_dispatcher_enabled,
         )
         physical_plan = compile_physical_plan(inputs)
 
@@ -457,4 +459,5 @@ def maybe_run_unified_slice(
         execution_plan_decision=decision.execution_plan_decision,
         pool_cache=pool_cache,
         native_threads=ctx.native_threads,
+        chunked_dispatcher_enabled=ctx.chunked_dispatcher_enabled,
     )

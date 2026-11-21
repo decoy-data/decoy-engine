@@ -36,9 +36,10 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Literal, TypeVar
 
-from decoy_engine.fileaccess import _openat2
+from decoy_engine.fileaccess import _fdtree, _openat2, _osflags
 from decoy_engine.fileaccess._component import validate_component, validate_publication_leaf
 from decoy_engine.fileaccess._errors import deny
+from decoy_engine.fileaccess._fdtree import _DIR_FLAGS, _close, _rmtree_fd
 from decoy_engine.fileaccess._types import FileAccessUnavailable, FileRequest, StageLabel
 
 # The only names a caller can influence: a closed label picks a prefix, never a path.
@@ -72,8 +73,8 @@ T = TypeVar("T")
 # Denial key for a bad name given straight to a creator; it names the capability, never the name.
 _CREATOR_KEY = "fileaccess.stage"
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+_NOFOLLOW_CLOEXEC = _osflags.NOFOLLOW | _osflags.CLOEXEC
+_FILE_CREATE = _osflags.WRONLY | _osflags.CREAT | _osflags.EXCL | _NOFOLLOW_CLOEXEC
 
 
 def _call(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -94,7 +95,7 @@ def _born_mode(parent_fd: int, name: str) -> int:
     repair falls back to owner-only (narrower, never wider)."""
     if sys.platform != "linux":
         return stat.S_IFDIR | 0o700
-    fd = _call(os.open, name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent_fd)
+    fd = _call(os.open, name, _osflags.PATH | _NOFOLLOW_CLOEXEC, dir_fd=parent_fd)
     try:
         born = os.fstat(fd).st_mode
     finally:
@@ -218,23 +219,23 @@ def _dup(held_fd: int) -> int:
     return os.dup(held_fd)
 
 
-def _close(fd: int) -> None:
-    with contextlib.suppress(OSError):
-        os.close(fd)
-
-
-def _rmtree_fd(dir_fd: int) -> None:
-    """Remove everything beneath `dir_fd` without following any link."""
-    for entry in list(os.scandir(dir_fd)):
-        if entry.is_dir(follow_symlinks=False):
-            child = os.open(entry.name, _DIR_FLAGS, dir_fd=dir_fd)
-            try:
-                _rmtree_fd(child)
-            finally:
-                _close(child)
-            os.rmdir(entry.name, dir_fd=dir_fd)
-        else:
-            os.unlink(entry.name, dir_fd=dir_fd)
+def _mark_publication_stage(parent_fd: int, name: str, stage_fd: int) -> None:
+    """Lock stage `name` until `stage_fd` closes, write and prove its marker; on failure remove it."""
+    try:
+        _fdtree.hold_stage_lock(stage_fd)
+        token, marker = name.removeprefix(STAGE_PREFIX["publication"]), -1
+        try:
+            marker = create_private_at(stage_fd, _fdtree.STAGE_MARKER)
+            _fdtree._write_marker(marker, _fdtree.STAGE_MAGIC, token)
+        finally:
+            _close(marker)
+        if _fdtree.prove_stage(stage_fd) != token:
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            _rmtree_fd(stage_fd)
+            os.rmdir(name, dir_fd=parent_fd)
+        raise
 
 
 class _State:
@@ -265,9 +266,9 @@ def _discard(state: _State) -> None:
             if state.stage_fd >= 0:
                 with contextlib.suppress(OSError):
                     _rmtree_fd(state.stage_fd)
-                _close(state.stage_fd)
             with contextlib.suppress(OSError):
                 os.rmdir(state.stage_name, dir_fd=state.parent_fd)
+            _close(state.stage_fd)  # after the rmdir: the liveness lock outlives the name
         else:
             with contextlib.suppress(OSError):
                 os.unlink(state.stage_name, dir_fd=state.parent_fd)
@@ -304,9 +305,7 @@ class _StageDir:
 
     def open_file(self, component: str) -> int:
         self._check(component)
-        return _call(
-            os.open, component, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self._fd
-        )
+        return _call(os.open, component, _osflags.RDONLY | _NOFOLLOW_CLOEXEC, dir_fd=self._fd)
 
     def create_dir(self, component: str) -> _StageDir:
         self._check(component)
@@ -373,8 +372,10 @@ class RootedOutputTxn(_StageDir):
                 state.chain_fds.append(_dup(fd))
             if kind == "dir":
                 state.stage_fd = make_stage_dir_at(state.parent_fd, name)
+            if label == "publication":
+                _mark_publication_stage(state.parent_fd, name, state.stage_fd)
         except BaseException:
-            _close_all([*state.chain_fds, state.parent_fd])
+            _close_all([*state.chain_fds, state.stage_fd, state.parent_fd])
             raise
         self._private = label in PRIVATE_LABELS
         super().__init__(state.stage_fd, display, state, 0o600 if self._private else 0o666)
@@ -483,7 +484,7 @@ class RootedOutputDir:
                 if create:
                     child = make_parent_dir_at(fd, part)
                 else:
-                    child = _openat2._confined_open(fd, part, os.O_RDONLY | os.O_DIRECTORY)
+                    child = _openat2._confined_open(fd, part, _osflags.RDONLY | _osflags.DIRECTORY)
                 if chain is None:
                     _close(fd)
                 else:
@@ -566,7 +567,9 @@ class RootedOutputDir:
         parent = child = -1
         try:
             parent = self._open_parent(create=False)
-            child = _openat2._confined_open(parent, self._leaf, os.O_RDONLY | os.O_DIRECTORY)
+            child = _openat2._confined_open(
+                parent, self._leaf, _osflags.RDONLY | _osflags.DIRECTORY
+            )
         except FileNotFoundError:
             return True
         except OSError:

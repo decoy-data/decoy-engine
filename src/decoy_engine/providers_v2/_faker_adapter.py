@@ -252,7 +252,7 @@ def register_faker_provider_v2(
     name: str,
     fn: Callable[[Any], Any],
 ) -> None:
-    """[V2] Register a custom faker-backed provider against the V2 adapter.
+    """Experimental: [V2] register a custom faker-backed provider against the V2 adapter.
 
     Distinct from V1's `register_faker_provider` on `decoy_engine.providers`;
     the V1 table stays in place per the B1 PO call. V2 callers (S5 pool

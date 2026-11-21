@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 
 from decoy_engine.fileaccess._errors import guarded, guarded_iter
 from decoy_engine.fileaccess._types import FileHandle, StageDir
+from decoy_engine.safe_output import output_schema, output_table
 
 
 def _strict(handle: FileHandle) -> bool:
@@ -108,6 +109,18 @@ def parquet_writer(txn: StageDir, component: str, schema: pa.Schema, **kwargs: A
         fh.close()
         raise
     return _FileBacked(writer, fh, txn.display, txn.strict)
+
+
+def write_output_table(table: pa.Table, txn: StageDir, component: str) -> None:
+    """Write a published output table: `output_table` first, so the file carries no source
+    key/value metadata (`safe_output`). The one engine entry for a whole published table."""
+    write_table(output_table(table), txn, component)
+
+
+def output_parquet_writer(txn: StageDir, component: str, schema: pa.Schema) -> _FileBacked:
+    """A published output writer built from `output_schema`, before the file is created. The
+    footer holds the writer's schema, so batches that carry metadata cannot add to it."""
+    return parquet_writer(txn, component, output_schema(schema))
 
 
 def ipc_new_file(txn: StageDir, component: str, schema: pa.Schema) -> _FileBacked:
