@@ -169,7 +169,6 @@ _SPECS = (
         unified_resident_types=_STRING_ONLY,
         # The oracle assigns an object column, so an empty or all-null result is Arrow null.
         full_frame_assembly="null_on_empty",
-        routed_diagnostics=frozenset({"reduce_row_error:format_error"}),
     ),
     OperatorSpec(
         strategy="text_mask",
@@ -235,6 +234,7 @@ _SPECS = (
         # Differs from the tokenizing operators only on an empty column: it passes its
         # source object series through, which becomes an Arrow null column.
         full_frame_assembly="null_on_empty",
+        routed_diagnostics=frozenset({"reduce_row_error:format_error"}),
     ),
     OperatorSpec(
         strategy="group_key",
