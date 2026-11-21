@@ -6,6 +6,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import generate_tables
 from decoy_engine.plan import compile_plan
 from tests.unit._dps_helpers import empty_profile
@@ -47,7 +48,7 @@ def one(col: dict[str, Any], rows: int = 20, seed: int = SEED) -> dict[str, Any]
 
 
 def generate(config: dict[str, Any]) -> dict[str, pa.Table]:
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")
+    plan = compile_plan(config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
     return generate_tables(plan)
 
 

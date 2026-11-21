@@ -563,7 +563,9 @@ def _mixed_shape(order: list[str]) -> Shape:
         "f": (strs(["1234567890"] * 7), fpe_seed()),
         "c": (strs(SRC), cat_seed()),
         "b": (
-            strs(["2024-03-05", None, "junk", "2021-11-14", "2020-02-29", "", "2023-07-19"]),
+            strs(
+                ["2024-03-05", None, "2022-02-02", "2021-11-14", "2020-02-29", None, "2023-07-19"]
+            ),
             bucket_seed("month"),
         ),
         "d": (strs(PARSEABLE), date_shift_seed()),

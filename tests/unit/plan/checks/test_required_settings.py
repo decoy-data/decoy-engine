@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _strategies
 from decoy_engine.plan import PlanCompileError, compile_plan, run_config_only_checks
 from decoy_engine.plan.checks import (
@@ -26,7 +27,12 @@ GUARD_NAME = re.compile(
 )
 # A runtime guard with no descriptor needs a reason here. None today: every guard that matches
 # the pattern is reachable from a config column and has a mapping entry.
-EXCLUDED_GUARDS: dict[str, str] = {}
+EXCLUDED_GUARDS: dict[str, str] = {
+    reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT: (
+        "the run-time refusal comes first (COLUMN-SHAPE-RULE E0); the compile-time "
+        "requirement entry comes with E2, once detection is removed"
+    ),
+}
 
 # A deterministic column without a namespace is refused earlier by the namespace completeness
 # check, which keeps precedence over the descriptor.
@@ -72,7 +78,7 @@ def _both_entry_points(config: dict[str, Any], profile: Profile) -> list[PlanCom
     errors = []
     for call in (
         lambda: run_config_only_checks(config),
-        lambda: compile_plan(config, profile, decoy_engine_version="0.1.0"),
+        lambda: compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES),
     ):
         with pytest.raises(PlanCompileError) as exc:
             call()
@@ -98,7 +104,7 @@ def test_every_mapping_row_is_refused_at_both_entry_points_and_projected(
         for req in requirements:
             config = _without(strategy, req.path)
             with pytest.raises(PlanCompileError) as direct:
-                check_required_strategy_settings(config)
+                check_required_strategy_settings(config, sources=NO_SOURCES)
             assert direct.value.code == req.code
             assert direct.value.path.endswith("." + ".".join(req.path))
             for error in _both_entry_points(config, simple_profile):
@@ -107,25 +113,25 @@ def test_every_mapping_row_is_refused_at_both_entry_points_and_projected(
 
 def test_satisfied_columns_pass() -> None:
     for strategy, column in SATISFIED.items():
-        check_required_strategy_settings(_config(strategy, **column))
+        check_required_strategy_settings(_config(strategy, **column), sources=NO_SOURCES)
 
 
 @pytest.mark.parametrize("value", [None, "", "  ", 0, 5, {}, [], False])
 def test_missing_means_absent_none_empty_string_or_empty_collection(value: Any) -> None:
     config = _config("hash", namespace=value)
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert exc.value.code == "hash_requires_namespace"
 
 
 def test_nested_names_the_setting_that_is_missing() -> None:
     config = _config("nested", provider_config={"strategy": "redact", "target": ""})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert exc.value.code == "nested_target_unset"
     config = _config("nested", provider_config={"target": "$.a"})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert exc.value.code == "nested_strategy_unset"
 
 
@@ -144,7 +150,7 @@ def test_nested_names_the_setting_that_is_missing() -> None:
 def test_conditional_requirement_needs_the_exact_type_and_value(
     strategy: str, column: dict[str, Any]
 ) -> None:
-    check_required_strategy_settings(_config(strategy, **column))
+    check_required_strategy_settings(_config(strategy, **column), sources=NO_SOURCES)
 
 
 @pytest.mark.parametrize(
@@ -158,15 +164,17 @@ def test_conditional_requirement_applies_when_the_condition_holds(
     strategy: str, column: dict[str, Any], code: str
 ) -> None:
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(_config(strategy, **column))
+        check_required_strategy_settings(_config(strategy, **column), sources=NO_SOURCES)
     assert exc.value.code == code
 
 
 def test_unrelated_strategies_and_odd_shapes_are_skipped() -> None:
-    check_required_strategy_settings({})
-    check_required_strategy_settings({"tables": "x"})
-    check_required_strategy_settings({"tables": [1, {"columns": [None, {"strategy": ["hash"]}]}]})
-    check_required_strategy_settings(_config("passthrough"))
+    check_required_strategy_settings({}, sources=NO_SOURCES)
+    check_required_strategy_settings({"tables": "x"}, sources=NO_SOURCES)
+    check_required_strategy_settings(
+        {"tables": [1, {"columns": [None, {"strategy": ["hash"]}]}]}, sources=NO_SOURCES
+    )
+    check_required_strategy_settings(_config("passthrough"), sources=NO_SOURCES)
 
 
 def test_first_missing_setting_wins_in_config_order() -> None:
@@ -182,7 +190,7 @@ def test_first_missing_setting_wins_in_config_order() -> None:
         ]
     }
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert exc.value.code == "hash_requires_namespace"
 
 
@@ -204,7 +212,7 @@ def test_descriptors_hold_fixed_registered_values_only() -> None:
 def test_the_refusal_does_not_echo_config_values() -> None:
     config = _config("hash", namespace="", provider_config={"note": "SECRET-VALUE"})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert "SECRET-VALUE" not in str(exc.value)
     assert exc.value.__cause__ is None and exc.value.__context__ is None
 
@@ -252,27 +260,29 @@ def _group(**member: Any) -> dict[str, Any]:
 
 
 def test_a_coherent_with_member_gets_its_namespace_from_the_group() -> None:
-    check_required_strategy_settings(_group())
-    check_required_strategy_settings(_group(namespace="explicit"))
+    check_required_strategy_settings(_group(), sources=NO_SOURCES)
+    check_required_strategy_settings(_group(namespace="explicit"), sources=NO_SOURCES)
 
 
 def test_the_shipped_example_passes() -> None:
     import yaml
 
     path = Path(__file__).resolve().parents[4] / "examples" / "complex_healthcare_claims.yaml"
-    check_required_strategy_settings(yaml.safe_load(path.read_text(encoding="utf-8")))
+    check_required_strategy_settings(
+        yaml.safe_load(path.read_text(encoding="utf-8")), sources=NO_SOURCES
+    )
 
 
 def test_a_column_with_no_explicit_and_no_derived_namespace_is_refused() -> None:
     config = _config("fpe", provider_config={"charset": "digits"})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(config)
+        check_required_strategy_settings(config, sources=NO_SOURCES)
     assert exc.value.code == "fpe_requires_namespace"
     # A neighbour's coherent_with does not bind a column that is not in the group.
     group = _group()
     group["tables"][0]["columns"].append({"name": "other", "strategy": "fpe"})
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(group)
+        check_required_strategy_settings(group, sources=NO_SOURCES)
     assert exc.value.path == "tables.members.columns.other.namespace"
 
 
@@ -295,7 +305,7 @@ def test_a_referenced_member_is_bound_by_the_group_and_passes() -> None:
     from decoy_engine.relationships import build_namespace_registry, composite_bindings
 
     config = _one_sided_group()
-    check_required_strategy_settings(config)
+    check_required_strategy_settings(config, sources=NO_SOURCES)
     bound, members = composite_bindings(config)
     assert ("members", "zip") in members
     assert bound == {("members", ("city", "zip")): "composite/members/city__zip"}

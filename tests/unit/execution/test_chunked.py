@@ -25,6 +25,7 @@ import pytest
 
 from decoy_engine import run_mask_pipeline_chunked
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.plan import PlanCompileError
 from tests._column_shapes import INT_DECL
@@ -546,7 +547,9 @@ class TestConditionalStrategies:
         cfg = _config(tmp_path, _SAFE_COLUMNS)
         source_tbl = pa.Table.from_pandas(df, preserve_index=False)
         profile = first_chunk_profile(source_tbl, table="accounts", engine_version=_ENGINE_VERSION)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_ENGINE_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         registry = get_default_registry()
         ns_registry = build_namespace_registry(cfg, profile)
         graph = RelationshipGraph(edges=(), ordering=())

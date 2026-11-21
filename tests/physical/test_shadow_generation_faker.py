@@ -33,6 +33,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution.physical._compiler import compile_physical_plan
 from decoy_engine.execution.physical._plan import PhysicalPlan, SynthesisStage
@@ -105,7 +106,7 @@ def _empty_profile() -> Profile:
 
 
 def _compiled_plan(config: dict[str, Any]) -> Plan:
-    return compile_plan(config, _empty_profile(), decoy_engine_version="test")
+    return compile_plan(config, _empty_profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
 
 def _generate_table_names(config: dict[str, Any]) -> tuple[str, ...]:

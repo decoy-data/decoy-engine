@@ -1591,6 +1591,15 @@
           "default": "en_core_web_sm",
           "title": "Ner Model",
           "type": "string"
+        },
+        "on_findings": {
+          "default": "warn",
+          "enum": [
+            "warn",
+            "fail"
+          ],
+          "title": "On Findings",
+          "type": "string"
         }
       },
       "title": "PreScanConfig",

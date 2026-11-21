@@ -14,6 +14,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.contracts import distribution_behavior as contract
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.contracts.distribution_behavior import (
     NULLS_NOT_PRESERVED,
     distribution_behavior_for,
@@ -247,7 +248,9 @@ def _run(columns: list[dict[str, Any]], values: list[Any]) -> list[Any]:
         "tables": [{"name": "t", "columns": columns}],
     }
     profile = first_chunk_profile(source, table="t", engine_version="di-1a")
-    plan = compile_plan(config, profile, decoy_engine_version="di-1a", no_profile=True)
+    plan = compile_plan(
+        config, profile, decoy_engine_version="di-1a", no_profile=True, sources=NO_SOURCES
+    )
     result = PandasExecutionAdapter().run(
         plan,
         {"t": source},

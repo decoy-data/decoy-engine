@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from decoy_engine.contracts import strategy_requirements as sr
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import NO_SOURCES, ColumnShape
 from decoy_engine.plan import PlanCompileError, run_config_only_checks
 from decoy_engine.plan.checks import check_required_strategy_settings
 
@@ -27,16 +27,18 @@ def _cfg(**col: Any) -> dict[str, Any]:
 @pytest.mark.parametrize("shape", list(S))
 def test_date_shift_rule_unchanged_on_every_shape(shape: ColumnShape) -> None:
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings(_cfg(), {("t", "d"): shape})
+        check_required_strategy_settings(_cfg(), shapes={("t", "d"): shape}, sources=NO_SOURCES)
     assert exc.value.code == CODE
     check_required_strategy_settings(
-        _cfg(provider_config={"date_format": "%Y-%m-%d"}), {("t", "d"): shape}
+        _cfg(provider_config={"date_format": "%Y-%m-%d"}),
+        shapes={("t", "d"): shape},
+        sources=NO_SOURCES,
     )
 
 
 def test_declared_date_still_counts() -> None:
     cfg = _cfg(logical_type="date", parse_format={"id": "date/iso8601/v1"})
-    check_required_strategy_settings(cfg, {("t", "d"): S.DATE})
+    check_required_strategy_settings(cfg, shapes={("t", "d"): S.DATE}, sources=NO_SOURCES)
 
 
 def test_config_only_refuses_unknown_while_every_shape_needs_the_format() -> None:
@@ -53,7 +55,9 @@ def test_nested_child_needs_the_format() -> None:
         "provider_config": {"strategy": "date_shift", "target": "$.a"},
     }
     with pytest.raises(PlanCompileError) as exc:
-        check_required_strategy_settings({"tables": [{"name": "t", "columns": [entry]}]}, {})
+        check_required_strategy_settings(
+            {"tables": [{"name": "t", "columns": [entry]}]}, shapes={}, sources=NO_SOURCES
+        )
     assert exc.value.code == CODE
 
 
@@ -65,11 +69,15 @@ def test_config_only_defers_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
         base.family, base.requirement, frozenset(S) - {S.DATE}, declared_counts=True
     )
     monkeypatch.setattr(sr, "SHAPE_REQUIREMENTS_BY_STRATEGY", {"date_shift": admitting})
-    check_required_strategy_settings(_cfg())  # config-only: unknown is deferred
-    check_required_strategy_settings(_cfg(), {("t", "d"): S.DATE})  # a typed date runs bare
+    check_required_strategy_settings(_cfg(), sources=NO_SOURCES)  # config-only: unknown is deferred
+    check_required_strategy_settings(
+        _cfg(), shapes={("t", "d"): S.DATE}, sources=NO_SOURCES
+    )  # a typed date runs bare
     for refused in (S.UNKNOWN, S.TEXT, S.INTEGER):
         with pytest.raises(PlanCompileError) as exc:
-            check_required_strategy_settings(_cfg(), {("t", "d"): refused})
+            check_required_strategy_settings(
+                _cfg(), shapes={("t", "d"): refused}, sources=NO_SOURCES
+            )
         assert exc.value.code == CODE
 
 

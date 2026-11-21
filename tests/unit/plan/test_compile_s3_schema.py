@@ -19,6 +19,7 @@ from datetime import datetime
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.determinism import IdentityDomain, derive, derive_value
 from decoy_engine.plan import (
     ColumnSeed,
@@ -118,7 +119,9 @@ class TestSeedProtocolVersionStamp:
     `seed_protocol_version == 7`."""
 
     def test_plan_stamps_current_version(self) -> None:
-        plan = compile_plan(_minimal_config(), _minimal_profile(), decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            _minimal_config(), _minimal_profile(), decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.seed_protocol_version == 7
 
 
@@ -126,14 +129,19 @@ class TestJobSeedBytesShape:
     """B2 + H1: SeedEnvelope.job_seed is bytes (length 8), not int."""
 
     def test_job_seed_is_bytes(self) -> None:
-        plan = compile_plan(_minimal_config(), _minimal_profile(), decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            _minimal_config(), _minimal_profile(), decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert isinstance(plan.seed_envelope.job_seed, bytes)
         assert len(plan.seed_envelope.job_seed) == 8
 
     def test_job_seed_value_matches_config_int(self) -> None:
         """Config seed=42 normalizes to (42).to_bytes(8, 'big')."""
         plan = compile_plan(
-            _minimal_config(seed=42), _minimal_profile(), decoy_engine_version="0.1.0"
+            _minimal_config(seed=42),
+            _minimal_profile(),
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan.seed_envelope.job_seed == (42).to_bytes(8, "big")
 
@@ -149,7 +157,9 @@ class TestJobSeedBytesShape:
                 }
             ]
         }
-        plan = compile_plan(config, _minimal_profile(), decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, _minimal_profile(), decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.seed_envelope.job_seed == b"\x00" * 8
 
 
@@ -158,14 +168,22 @@ class TestSeedOverflow:
 
     def test_negative_seed_raises_overflow(self) -> None:
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(_minimal_config(seed=-1), _minimal_profile(), decoy_engine_version="0.1.0")
+            compile_plan(
+                _minimal_config(seed=-1),
+                _minimal_profile(),
+                decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
+            )
         assert excinfo.value.code == "seed_overflow"
         assert excinfo.value.path == "global_settings.seed"
 
     def test_too_large_seed_raises_overflow(self) -> None:
         with pytest.raises(PlanCompileError) as excinfo:
             compile_plan(
-                _minimal_config(seed=1 << 64), _minimal_profile(), decoy_engine_version="0.1.0"
+                _minimal_config(seed=1 << 64),
+                _minimal_profile(),
+                decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "seed_overflow"
 
@@ -222,7 +240,10 @@ class TestEndToEndDeriveWithPlanJobSeed:
 
     def test_derive_value_consumes_plan_job_seed_directly(self) -> None:
         plan = compile_plan(
-            _minimal_config(seed=42), _minimal_profile(), decoy_engine_version="0.1.0"
+            _minimal_config(seed=42),
+            _minimal_profile(),
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         # No int->bytes conversion here; the plan ships bytes.
         result = derive_value(

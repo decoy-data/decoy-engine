@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 
 from decoy_engine import run_config_only_checks
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.statistical import load_spec
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan._checks_dp import check_dp_generate_contract, verify_dp_snapshots
@@ -250,7 +251,7 @@ class TestDpCategoricalNowSupported:
                 {"name": "state", "type": "statistical", "snapshot_file": path},
             ]
         )
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert plan.generation is not None
         assert plan.generation.dp_verification is not None
         assert plan.generation.dp_verification.epsilon_total <= 5.0
@@ -981,7 +982,7 @@ class TestConsumeOnlyContract:
         cfg = _dp_cfg(
             table_columns=[{"name": "state", "type": "statistical", "snapshot_file": path}]
         )
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         from decoy_engine.generation.synthesize import generate_tables
 
         out = generate_tables(plan)
@@ -1038,7 +1039,7 @@ class TestConsumeOnlyContract:
             epsilon=8.0,
             delta=1e-6,
         )
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
 
         # The TOCTOU swap: overwrite the SAME path compile_plan just read,
         # with the disjoint-alphabet artifact's exact bytes.
@@ -1107,7 +1108,7 @@ class TestGenerateTablesRejectsRawConfig:
         # A Plan compiled from a config with no generate_columns at all has
         # no GenerationPlan to generate from.
         cfg = {"global_settings": {"seed": 1}, "tables": [{"name": "t", "row_count": 3}]}
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert plan.generation is None
         from decoy_engine.generation.synthesize import generate_tables
 
@@ -1143,7 +1144,7 @@ class TestDpDeclaredWithNoStatisticalColumns:
         cfg = _dp_cfg(
             table_columns=[{"name": "state", "type": "statistical", "snapshot_file": path}]
         )
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert plan.generation is not None
         assert plan.generation.dp_verification is not None  # the honest compile
 
@@ -1168,7 +1169,7 @@ class TestDpDeclaredWithNoStatisticalColumns:
                 }
             ],
         }
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+        plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
         assert plan.generation is not None
         assert plan.generation.dp_verification is None  # nothing to verify -- no raise for that
 
@@ -1299,7 +1300,9 @@ class TestFlagGenerateWiredAtPhase6:
                 }
             ],
         }
-        plan = compile_plan(cfg, _profile(), decoy_engine_version="test")  # must not raise
+        plan = compile_plan(
+            cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES
+        )  # must not raise
         out = generate_tables(plan)
         values = out["t"]["flag"].to_pylist()
         assert len(values) == 5

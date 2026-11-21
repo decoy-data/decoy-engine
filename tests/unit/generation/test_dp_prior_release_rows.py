@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import compile_plan
 from decoy_engine.quality import dp_provenance as prov
 from tests.unit.generation.test_generate_dp_contract import (
@@ -134,7 +135,7 @@ def test_a_snapshot_recording_a_released_row_compiles(tmp_path, fingerprint: str
     artifact = _numeric_dp_artifact(epsilon_total=0.5)
     artifact["dp"]["provenance"]["fingerprint"] = fingerprint
     cfg, _ = _cfg_with_artifact(tmp_path, artifact)
-    plan = compile_plan(cfg, _profile(), decoy_engine_version="test")
+    plan = compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert plan is not None
 
 

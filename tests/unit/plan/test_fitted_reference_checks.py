@@ -21,6 +21,7 @@ import pytest
 import yaml
 
 from decoy_engine import run_config_only_checks
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import (
     PlanCompileError,
     _checks_dp,
@@ -119,7 +120,7 @@ def test_compile_plan_refuses_before_snapshot_verification(monkeypatch: pytest.M
     monkeypatch.setattr(_compile, "check_dp_generate_contract", spy)
     monkeypatch.setattr(_generation, "verify_dp_snapshots", no_verify)
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(_config("fitted"), _profile(), decoy_engine_version="test")
+        compile_plan(_config("fitted"), _profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert exc.value.code == CODE
     assert calls == ["contract"]
 
@@ -142,11 +143,16 @@ def test_config_only_checks_refuse(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_compile_and_config_only_pass_with_random() -> None:
     cfg = _config("random")
     run_config_only_checks(cfg)
-    assert compile_plan(cfg, _profile(), decoy_engine_version="test").generation is not None
+    assert (
+        compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES).generation
+        is not None
+    )
 
 
 def _serialized_with(distribution: str) -> str:
-    plan = compile_plan(_config("random"), _profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        _config("random"), _profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     data = yaml.safe_load(plan_to_yaml(plan))
     config = json.loads(data["generation"]["config_json"])
     child = next(t for t in config["tables"] if t["name"] == "child")
@@ -231,7 +237,7 @@ def test_compile_plan_refuses_before_any_snapshot_read(
     cfg = _config_with_snapshot(_snapshot_path(kind, tmp_path))
     _forbid_read(monkeypatch)
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(cfg, _profile(), decoy_engine_version="test")
+        compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
     assert exc.value.code == CODE
 
 
@@ -306,7 +312,7 @@ def _fitted_config(snapshot_file: str | None, **extra: Any) -> dict[str, Any]:
 
 def _refusal(cfg: dict[str, Any]) -> PlanCompileError:
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(cfg, _profile(), decoy_engine_version="test")
+        compile_plan(cfg, _profile(), decoy_engine_version="test", sources=NO_SOURCES)
     with pytest.raises(PlanCompileError) as exc_cfg:
         run_config_only_checks(cfg)
     assert exc_cfg.value.code == exc.value.code
@@ -316,7 +322,9 @@ def _refusal(cfg: dict[str, Any]) -> PlanCompileError:
 def test_valid_fitted_reference_compiles_and_pins_the_snapshot(tmp_path: Path) -> None:
     path = _write(tmp_path, _fitted_snapshot())
     run_config_only_checks(_fitted_config(path))
-    plan = compile_plan(_fitted_config(path), _profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        _fitted_config(path), _profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     assert plan.generation is not None
     assert [s.source_path for s in plan.generation.snapshots] == [path]
     assert plan.generation.statistical_specs == ()
@@ -394,7 +402,9 @@ def test_non_fitted_reference_is_not_checked() -> None:
 
 def _plan_yaml(tmp_path: Path) -> dict[str, Any]:
     path = _write(tmp_path, _fitted_snapshot())
-    plan = compile_plan(_fitted_config(path), _profile(), decoy_engine_version="test")
+    plan = compile_plan(
+        _fitted_config(path), _profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )
     return yaml.safe_load(plan_to_yaml(plan))
 
 

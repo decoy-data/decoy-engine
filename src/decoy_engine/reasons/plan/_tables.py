@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from decoy_engine.reasons import plan
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 from decoy_engine.reasons._types import ReasonCode
 
 __all__ = ["GROUPED_SERIES_MISSING_REF_BY_KEY"]

@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import run_config_only_checks
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation import synthesize
 from decoy_engine.generators.columns import ColumnGenerator
 from decoy_engine.internal.faker_setup import register_faker_provider, unregister_faker_provider
@@ -31,7 +32,9 @@ def cfg(cols: list[dict[str, Any]], n: int = 5) -> dict[str, Any]:
 def _compile(config: dict[str, Any], **kwargs: Any) -> Any:
     """Compile as `decoy run` does: the platform default locale is known (None is en_US)."""
     kwargs.setdefault("instance_default_locale", None)
-    return compile_plan(config, empty_profile(), decoy_engine_version="test", **kwargs)
+    return compile_plan(
+        config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES, **kwargs
+    )
 
 
 def _sites() -> list[Any]:
@@ -145,7 +148,9 @@ def dept(**extra: Any) -> dict[str, Any]:
 
 
 def _generate(config: dict[str, Any], **kwargs: Any) -> list[Any]:
-    plan = compile_plan(config, empty_profile(), decoy_engine_version="test")  # default deferred
+    plan = compile_plan(
+        config, empty_profile(), decoy_engine_version="test", sources=NO_SOURCES
+    )  # default deferred
     return synthesize.generate_tables(plan, **kwargs)["t"].column("d").to_pylist()
 
 

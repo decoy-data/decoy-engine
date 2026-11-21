@@ -39,6 +39,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError, RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
 from decoy_engine.kernel import _scalar
@@ -741,7 +742,7 @@ class TestFailClosed:
         monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
         cfg, sources = _composite_job_config(tmp_path)
         profile = profile_source(cfg, seed=_normalize_job_seed_int(cfg))
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         decision = classify_job(
             cfg,
             plan=plan,
@@ -765,7 +766,7 @@ class TestFailClosed:
         monkeypatch.delenv("DECOY_SUBSTRATE", raising=False)
         cfg, _sources = _single_column_job(tmp_path, "hash")
         profile = profile_source(cfg, seed=_normalize_job_seed_int(cfg))
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         decision = classify_job(
             cfg,
             plan=plan,
@@ -796,7 +797,7 @@ def _classify(cfg, sources, *, substrate="pandas"):
     from decoy_engine.relationships import RelationshipGraph
 
     profile = profile_source(cfg, seed=_normalize_job_seed_int(cfg))
-    plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+    plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
     return classify_job(
         cfg,
         plan=plan,

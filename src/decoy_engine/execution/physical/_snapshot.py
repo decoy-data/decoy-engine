@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine.config import post_scan_sink_kind
+from decoy_engine.contracts.column_shape import build_source_facts
 from decoy_engine.execution import _pipeline_finalize
 from decoy_engine.execution._planner import (
     AUTO_CHUNK_THRESHOLD_ROWS_DEFAULT,
@@ -170,8 +171,7 @@ def capture_physical_plan_inputs(
         profile,
         decoy_engine_version=engine_version,
         base_dir=base_dir,
-        source_schemas={**caller_schemas, **(source_loader_schemas or {})},
-        resident_tables=caller_sources,
+        sources=build_source_facts(caller=caller_schemas, loader=source_loader_schemas),
     )
 
     ns_registry = build_namespace_registry(config, profile)

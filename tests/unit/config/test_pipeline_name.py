@@ -14,6 +14,7 @@ from pydantic import ValidationError
 import decoy_engine
 from decoy_engine import reasons
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 BASELINE = json.loads((FIXTURES / "f06" / "legacy-compat-baseline.json").read_text())
@@ -146,7 +147,9 @@ def test_name_does_not_change_the_plan_hash(tmp_path: Path) -> None:
         raw = _raw(**extra)
         raw["sources"]["p"]["path"] = str(tmp_path / "p.csv")
         cfg = PipelineConfig.model_validate(raw).model_dump()
-        plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t")
+        plan = compile_plan(
+            cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
+        )
         return str(plan.pipeline_config_hash)
 
     assert _hash() == _hash(name="orders") == _hash(name="sales")

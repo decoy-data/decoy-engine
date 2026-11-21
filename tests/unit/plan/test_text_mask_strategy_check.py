@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.detection.detectors import _SPAN_DETECTORS, Span
 from decoy_engine.detection.ner import NER_ENTITY_MAP
 from decoy_engine.errors import ConfigError
@@ -64,10 +65,12 @@ def test_a1a_compile_plan_refuses_the_same_pair(
 ) -> None:
     cfg = _config({"per_detector_strategy": {detector: strategy}})
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     assert exc.value.code == _UNSUPPORTED
     with pytest.raises(PlanCompileError) as exc2:
-        compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", no_profile=True)
+        compile_plan(
+            cfg, simple_profile, decoy_engine_version="0.1.0", no_profile=True, sources=NO_SOURCES
+        )
     assert exc2.value.code == _UNSUPPORTED
 
 
@@ -119,7 +122,7 @@ def test_absent_or_empty_selectors_still_compile(pc: dict[str, Any]) -> None:
 def test_a1c_compile_plan_refuses_unknown_detector(simple_profile: Profile) -> None:
     cfg = _config({"detectors": ["emial"]})
     with pytest.raises(PlanCompileError) as exc:
-        compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0")
+        compile_plan(cfg, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     assert exc.value.code == _UNKNOWN
 
 
@@ -214,7 +217,9 @@ def test_checks_passed_lists_the_new_check(simple_config: dict, simple_profile: 
             "provider_config": {"per_detector_strategy": {"ssn": "fpe"}},
         }
     ]
-    plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(
+        simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+    )
     assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
     assert run_config_only_checks(simple_config)[-1] == "text_mask_strategies"
 

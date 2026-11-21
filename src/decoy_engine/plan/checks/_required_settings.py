@@ -17,7 +17,7 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes
+from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes, SourceFacts
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
@@ -168,20 +168,20 @@ def _missing_requirements(
 
 
 def check_required_strategy_settings(
-    config: dict[str, Any], shapes: ColumnShapes | None = None
+    config: dict[str, Any], *, sources: SourceFacts, shapes: ColumnShapes | None = None
 ) -> None:
     """Refuse the first column that leaves out a setting its strategy requires.
 
     Runs in both compile entry points. Tables and columns are walked in config order and each
     strategy's descriptors in declaration order. ``shapes`` is what compile resolved from the
     profile and the source schemas. Without it this is the config-only pass: shapes come from the
-    config alone, and a column that could still turn out typed is not refused.
+    config and ``sources`` alone, and a column that could still turn out typed is not refused.
 
     Raises:
         PlanCompileError: the code of the missing setting's descriptor.
     """
     config_only = shapes is None
-    resolved = build_column_shapes(config) if shapes is None else shapes
+    resolved = build_column_shapes(config, sources=sources) if shapes is None else shapes
     tables = config.get("tables")
     # A coherent_with member's namespace comes from its group's binding, so the column need not
     # declare one. The registry owns that rule; ask it instead of restating it.

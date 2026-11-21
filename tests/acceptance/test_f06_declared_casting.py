@@ -14,6 +14,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from tests.acceptance._f06_support import (
     INT64,
     ISO_DATE,
@@ -771,7 +772,9 @@ def test_b7_legacy_plan_yaml_differs_only_by_the_documented_version_line(tmp_pat
 
     src = write_csv(tmp_path / "s.csv", ["age"], [["42"], ["7"]])
     cfg = validate(config([column("age", "redact")], source_path=src))
-    plan = compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES
+    )
     text = plan_to_yaml(plan)
     assert "plan_version: 5" in text
     assert "declared_casting" not in text  # an empty payload is omitted
@@ -785,8 +788,8 @@ def test_b7_f06_plan_round_trips_and_is_deterministic(tmp_path: Path) -> None:
     src = write_csv(tmp_path / "s.csv", ["id", "start"], [["1", "2026-02-01"]])
     cfg = validate(_people(tmp_path, "null"))
     profile = profile_source(cfg, seed=7)
-    a = compile_plan(cfg, profile, decoy_engine_version="t")
-    b = compile_plan(copy.deepcopy(cfg), profile, decoy_engine_version="t")
+    a = compile_plan(cfg, profile, decoy_engine_version="t", sources=NO_SOURCES)
+    b = compile_plan(copy.deepcopy(cfg), profile, decoy_engine_version="t", sources=NO_SOURCES)
     assert plan_to_yaml(a) == plan_to_yaml(b)
     again = plan_from_yaml(plan_to_yaml(a))
     assert again.declared_casting == a.declared_casting and a.declared_casting
@@ -800,7 +803,9 @@ def test_b7_unknown_format_in_a_serialized_plan_never_executes(tmp_path: Path) -
     from decoy_engine.profile._source import profile_source
 
     cfg = validate(_people(tmp_path, "null"))
-    text = plan_to_yaml(compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t"))
+    text = plan_to_yaml(
+        compile_plan(cfg, profile_source(cfg, seed=7), decoy_engine_version="t", sources=NO_SOURCES)
+    )
     tampered = text.replace("date/iso8601/v1", "date/iso8601/v9", 1)
     with pytest.raises(Exception) as exc:
         plan_from_yaml(tampered)
@@ -867,6 +872,9 @@ def test_b7_legacy_config_and_plan_match_the_baseline_fixture(tmp_path: Path) ->
 
     with pytest.raises(PlanCompileError) as refused_plan:
         compile_plan(
-            run_cfg, profile_source(run_cfg, seed=7), decoy_engine_version="legacy-fixture"
+            run_cfg,
+            profile_source(run_cfg, seed=7),
+            decoy_engine_version="legacy-fixture",
+            sources=NO_SOURCES,
         )
     assert refused_plan.value.code == "column_shape_required"

@@ -41,6 +41,7 @@ oracle at admission (`date_shift_config_rejection`).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -49,7 +50,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from decoy_engine import reasons
+from decoy_engine.execution._operator_registry import OPERATORS
+from decoy_engine.execution._row_errors import RowError
 from decoy_engine.generation.pool import GenerationError
+from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as _BUCKET_REASON
 from decoy_engine.transforms.date_shift import order_window
 
 if TYPE_CHECKING:
@@ -58,6 +62,28 @@ if TYPE_CHECKING:
 # The oracle's `reason` string for a parse failure, reproduced verbatim so the
 # native and oracle `RowError` records compare equal.
 FORMAT_ERROR_REASON = "value is not a parseable date under date_shift"
+
+BUCKET_PERTURB_OPERATOR_ID = OPERATORS["bucket_perturb"].operator_id
+DATE_SHIFT_OPERATOR_ID = OPERATORS["date_shift"].operator_id
+
+
+def format_error_reason(operator_id: str) -> str:
+    """The one choice of `format_error` reason text: bucket_perturb's, else date_shift's."""
+    return _BUCKET_REASON if operator_id == BUCKET_PERTURB_OPERATOR_ID else FORMAT_ERROR_REASON
+
+
+def format_error_row_errors(
+    column: str, positions: Iterable[int], operator_id: str
+) -> list[RowError]:
+    """The one builder of `format_error` RowErrors for the native routes (sequential, chunked).
+
+    One RowError per unparseable cell position, the reason picked by `format_error_reason`. No
+    cell value is part of a record."""
+    reason = format_error_reason(operator_id)
+    return [
+        RowError(column=column, row_index=int(pos), trigger="format_error", reason=reason)
+        for pos in positions
+    ]
 
 
 def resolve_shift_range(min_days: int, max_days: int) -> tuple[int, int]:
@@ -219,7 +245,11 @@ def native_date_shift(
 
 
 __all__ = [
+    "BUCKET_PERTURB_OPERATOR_ID",
+    "DATE_SHIFT_OPERATOR_ID",
     "FORMAT_ERROR_REASON",
+    "format_error_reason",
+    "format_error_row_errors",
     "native_date_shift",
     "resolve_shift_range",
 ]

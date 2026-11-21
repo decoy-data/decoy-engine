@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.plan.validate import PlanCheckError, PlanValidationResult, validate_plan
 from decoy_engine.profile import ColumnProfile, Profile, TableProfile
@@ -66,12 +67,14 @@ class TestValidatePlanDelegate:
         config, profile = _valid_config(), _profile()
         result = validate_plan(config, profile, decoy_engine_version=_VERSION)
         assert result.ok is True
-        assert result.plan == compile_plan(config, profile, decoy_engine_version=_VERSION)
+        assert result.plan == compile_plan(
+            config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES
+        )
 
     def test_checks_rollup_matches_compile_plan(self) -> None:
         config, profile = _valid_config(), _profile()
         result = validate_plan(config, profile, decoy_engine_version=_VERSION)
-        plan = compile_plan(config, profile, decoy_engine_version=_VERSION)
+        plan = compile_plan(config, profile, decoy_engine_version=_VERSION, sources=NO_SOURCES)
         assert result.checks_passed == plan.plan_compile.checks_passed
         assert result.checks_skipped == plan.plan_compile.checks_skipped
         assert result.warnings == plan.plan_compile.warnings
@@ -79,7 +82,9 @@ class TestValidatePlanDelegate:
     def test_no_profile_skips_profile_checks_like_compile_plan(self) -> None:
         config, profile = _valid_config(), _profile()
         result = validate_plan(config, profile, decoy_engine_version=_VERSION, no_profile=True)
-        plan = compile_plan(config, profile, decoy_engine_version=_VERSION, no_profile=True)
+        plan = compile_plan(
+            config, profile, decoy_engine_version=_VERSION, no_profile=True, sources=NO_SOURCES
+        )
         assert result.ok is True
         assert result.checks_skipped == plan.plan_compile.checks_skipped
         # --no-profile skips at least one profile-dependent check.
@@ -96,7 +101,7 @@ class TestValidatePlanFailurePaths:
         assert result.plan is None
         # compile_plan would have RAISED on the same input.
         with pytest.raises(PlanCompileError):
-            compile_plan(config, _profile(), decoy_engine_version=_VERSION)
+            compile_plan(config, _profile(), decoy_engine_version=_VERSION, sources=NO_SOURCES)
 
     def test_pool_capacity_error_caught(self) -> None:
         # A UNIQUE column under --no-profile cannot prove uniqueness (no distinct

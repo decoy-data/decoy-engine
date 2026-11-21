@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.plan import Plan, compile_plan
 from decoy_engine.profile import Profile
 
@@ -133,7 +134,9 @@ class TestChecksPassedShape:
     def test_checks_passed_matches_expected_tuple(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.plan_compile.checks_passed == EXPECTED_S2_CHECKS_PASSED
 
     def test_checks_passed_contains_exactly_thirty_four_entries(
@@ -152,7 +155,9 @@ class TestChecksPassedShape:
         # row 25 (Sprint 2 honesty pack: fpe_charset_config),
         # row 26 (DE-03: faker_requires_provider), row 29 (HC-7:
         # freetext_advisory), row 30 (TX-2: text_mask_ner_available).
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert len(plan.plan_compile.checks_passed) == 34
 
     def test_orphan_fk_policy_completeness_at_documented_position(
@@ -175,7 +180,9 @@ class TestChecksPassedShape:
         (text_mask_ner_available) right after text_redact_ner_available.
         DPS-3 (2026-07-20) adds row 31 (dp_generate_contract) right after
         non_poolable_provider_with_pool_backend, ahead of statistical_columns."""
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.plan_compile.checks_passed[-30] == "composite_columns_length_match"
         assert plan.plan_compile.checks_passed[-29] == "orphan_fk_policy_completeness"
         assert plan.plan_compile.checks_passed[-28] == "pool_capacity_pre_flight"
@@ -209,7 +216,9 @@ class TestChecksPassedShape:
         assert plan.plan_compile.checks_passed[-1] == "text_mask_strategies"
 
     def test_s1_check_order_preserved(self, simple_config: dict, simple_profile: Profile) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         # S1's order: namespace_ambiguity, unknown_provider, fk_plan_ordering,
         # basic_uniqueness_pre_flight, composite_columns_length_match.
         assert plan.plan_compile.checks_passed[:5] == EXPECTED_S2_CHECKS_PASSED[:5]
@@ -222,7 +231,9 @@ class TestRelationshipsBlockShape:
     def test_relationships_block_has_one_entry_per_parent(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert len(plan.relationships) == 1
         rel = plan.relationships[0]
         assert rel.parent.table == "customers"
@@ -234,13 +245,17 @@ class TestRelationshipsBlockShape:
     def test_relationship_carries_orphan_policy(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.relationships[0].orphan_policy == "fail"
 
     def test_relationship_carries_namespace(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert plan.relationships[0].namespace == "customer_identity"
 
 
@@ -250,14 +265,18 @@ class TestNamespacesBlockShape:
     def test_namespaces_block_contains_config_declared_namespaces(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         ns_names = {ns.namespace for ns in plan.namespaces}
         assert "customer_identity" in ns_names
 
     def test_namespace_block_carries_declared_by_entries(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         ns = next(n for n in plan.namespaces if n.namespace == "customer_identity")
         declared_tables = {table for (table, _) in ns.declared_by}
         assert "customers" in declared_tables
@@ -268,13 +287,17 @@ class TestOrderingBlockShape:
     def test_ordering_contains_parent_and_child_nodes(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         nodes = [(o.table, o.columns) for o in plan.ordering]
         assert ("customers", ("customer_id",)) in nodes
         assert ("orders", ("customer_id",)) in nodes
 
     def test_parent_orders_before_child(self, simple_config: dict, simple_profile: Profile) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         nodes = [(o.table, o.columns) for o in plan.ordering]
         parent_pos = nodes.index(("customers", ("customer_id",)))
         child_pos = nodes.index(("orders", ("customer_id",)))
@@ -319,7 +342,9 @@ class TestSeedEnvelopeNamespaceEquivalence:
                 }
             ],
         }
-        plan = compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         per_table = dict(plan.seed_envelope.per_table)
         per_column = dict(per_table["customers"].per_column)
         assert per_column["name"].namespace == "logins"
@@ -346,7 +371,9 @@ class TestSeedEnvelopeNamespaceEquivalence:
                 }
             ],
         }
-        plan = compile_plan(config, composite_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            config, composite_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         per_table = dict(plan.seed_envelope.per_table)
         per_group = dict(per_table["claims"].per_group)
         canonical_key = "effective_date__member_id__plan_id"
@@ -360,16 +387,24 @@ class TestS2Determinism:
     def test_two_compiles_produce_equal_relationship_graphs(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-        p2 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
+        p2 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.relationships == p2.relationships
         assert p1.ordering == p2.ordering
 
     def test_two_compiles_produce_equal_namespace_registries(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
-        p2 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
+        p2 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.namespaces == p2.namespaces
 
 
@@ -395,8 +430,15 @@ class TestHashConfigExcludesSourcesAndTargets:
         config_with_s3_source["sources"] = [
             {"name": "src", "type": "s3", "bucket": "b", "key": "in.csv"}
         ]
-        p1 = compile_plan(config_with_file_source, simple_profile, decoy_engine_version="0.1.0")
-        p2 = compile_plan(config_with_s3_source, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            config_with_file_source,
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
+        )
+        p2 = compile_plan(
+            config_with_s3_source, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.pipeline_config_hash == p2.pipeline_config_hash
 
     def test_swapping_target_binding_preserves_pipeline_config_hash(
@@ -410,18 +452,29 @@ class TestHashConfigExcludesSourcesAndTargets:
         config_with_s3_target["targets"] = [
             {"name": "tgt", "type": "s3", "bucket": "b", "key": "out.csv"}
         ]
-        p1 = compile_plan(config_with_file_target, simple_profile, decoy_engine_version="0.1.0")
-        p2 = compile_plan(config_with_s3_target, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            config_with_file_target,
+            simple_profile,
+            decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
+        )
+        p2 = compile_plan(
+            config_with_s3_target, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.pipeline_config_hash == p2.pipeline_config_hash
 
     def test_changing_masking_semantics_does_change_hash(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
         """Sanity check: hash IS sensitive to masking-semantics changes."""
-        p1 = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         modified = dict(simple_config)
         modified["global_settings"] = {"seed": 999}  # different seed
-        p2 = compile_plan(modified, simple_profile, decoy_engine_version="0.1.0")
+        p2 = compile_plan(
+            modified, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.pipeline_config_hash != p2.pipeline_config_hash
 
     def test_categorical_retention_warn_threshold_does_not_perturb_hash(
@@ -433,14 +486,18 @@ class TestHashConfigExcludesSourcesAndTargets:
         it to a non-default value must produce the SAME
         pipeline_config_hash."""
         default_config = dict(simple_config)
-        p1 = compile_plan(default_config, simple_profile, decoy_engine_version="0.1.0")
+        p1 = compile_plan(
+            default_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
 
         with_threshold = dict(simple_config)
         with_threshold["global_settings"] = {
             **simple_config["global_settings"],
             "categorical_retention_warn_threshold": 0.42,
         }
-        p2 = compile_plan(with_threshold, simple_profile, decoy_engine_version="0.1.0")
+        p2 = compile_plan(
+            with_threshold, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert p1.pipeline_config_hash == p2.pipeline_config_hash
 
     def test_hash_config_pinned_to_expected_digest(self) -> None:
@@ -467,7 +524,9 @@ class TestS2WiringInvariants:
     def test_compile_plan_returns_a_plan(
         self, simple_config: dict, simple_profile: Profile
     ) -> None:
-        plan = compile_plan(simple_config, simple_profile, decoy_engine_version="0.1.0")
+        plan = compile_plan(
+            simple_config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES
+        )
         assert isinstance(plan, Plan)
 
     def test_namespace_ambiguity_still_raises_via_registry_path(
@@ -492,7 +551,7 @@ class TestS2WiringInvariants:
             ],
         }
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(config, simple_profile, decoy_engine_version="0.1.0")
+            compile_plan(config, simple_profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert excinfo.value.code == "namespace_ambiguity"
 
     def test_fk_cycle_still_raises_via_graph_path(self) -> None:
@@ -544,7 +603,7 @@ class TestS2WiringInvariants:
             ],
         }
         with pytest.raises(PlanCompileError) as excinfo:
-            compile_plan(config, profile, decoy_engine_version="0.1.0")
+            compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
         assert excinfo.value.code == "fk_cycle"
 
 

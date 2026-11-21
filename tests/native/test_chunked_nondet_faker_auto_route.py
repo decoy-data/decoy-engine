@@ -19,6 +19,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import run_pipeline
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from tests.native._chunked_entry_support import (
     ENGINE_VERSION,
     NEEDS_COMPANION,
@@ -185,5 +186,7 @@ def _job_seed(cfg: dict[str, Any]) -> bytes:
     from decoy_engine.plan import compile_plan
     from decoy_engine.profile import profile_source
 
-    plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version=ENGINE_VERSION)
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=42), decoy_engine_version=ENGINE_VERSION, sources=NO_SOURCES
+    )
     return plan.seed_envelope.job_seed

@@ -29,6 +29,7 @@ import decoy_engine.generation.pool as poolmod
 import decoy_engine.release as release
 from decoy_engine import run_mask_pipeline_chunked
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._chunked import (
     _conditional_admission_failures,
@@ -481,7 +482,9 @@ class TestWarmFakerPools:
         cfg = _config(tmp_path, columns)
         tbl = pa.Table.from_pandas(pd.DataFrame(data), preserve_index=False)
         profile = first_chunk_profile(tbl, table="accounts", engine_version=_EV)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_EV, no_profile=True)
+        plan = compile_plan(
+            cfg, profile, decoy_engine_version=_EV, no_profile=True, sources=NO_SOURCES
+        )
         registry = get_default_registry()
         ns_registry = build_namespace_registry(cfg, profile)
         return plan, tbl, registry, ns_registry

@@ -15,11 +15,13 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import RowErrorsFailedError, ValidatorFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
 from decoy_engine.generation.pool import PoolCache
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _multi_table_support as mt
+from tests.unit.vault._support import vault_writer
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -433,7 +435,7 @@ def test_vault_writer_keyed_differently_is_rejected_before_any_table_masks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from decoy_engine.keyprovider import SecretKeyProvider
-    from decoy_engine.vault import VaultError, VaultWriter
+    from decoy_engine.vault import VaultError
 
     cfg, sources = mt.build_job(
         tmp_path,
@@ -451,7 +453,7 @@ def test_vault_writer_keyed_differently_is_rejected_before_any_table_masks(
             run_pipeline(
                 cfg,
                 sources=sources,
-                vault_writer=VaultWriter(b"\x42" * 32),
+                vault_writer=vault_writer(b"\x42" * 32),
                 key_provider=SecretKeyProvider(secret=bytes(range(32)), key_version="v1"),
                 **mt.kw(**extra),
             )
@@ -620,7 +622,9 @@ def test_veto_sets_report_exactly_their_columns(tmp_path: Path) -> None:
         }
     )
     cfg, _ = mt.build_job(tmp_path, {"t": (cols, src)})
-    plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="x")
+    plan = compile_plan(
+        cfg, profile_source(cfg, seed=42), decoy_engine_version="x", sources=NO_SOURCES
+    )
     # Unkeyed shuffle draws from the mask key, so nothing is held whole as unseeded.
     assert pmt.unseeded_random_nodes(plan) == ()
 
@@ -686,7 +690,9 @@ def test_two_calls_of_every_repeatable_fixture_agree_and_unseeded_ones_differ(
         workdir = tmp_path / key.replace(":", "_")
         workdir.mkdir()
         cfg, _ = mt.build_job(workdir, {"t": (columns, table)})
-        plan = compile_plan(cfg, profile_source(cfg, seed=42), decoy_engine_version="x")
+        plan = compile_plan(
+            cfg, profile_source(cfg, seed=42), decoy_engine_version="x", sources=NO_SOURCES
+        )
         reported = {col for _t, col, _s in pmt.unseeded_random_nodes(plan)}
         deferred = {col for _t, col, _s in pmt.position_keyed_deferred_nodes(plan)}
         assert not reported & deferred, "a column cannot be both fresh-generator and seeded"

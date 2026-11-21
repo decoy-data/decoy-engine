@@ -20,6 +20,7 @@ from datetime import datetime
 import pyarrow as pa
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution._strategies import SCALAR_HANDLERS
 from decoy_engine.execution.native._capabilities import _CAPS, capabilities_for
 from decoy_engine.execution.native._plan import (
@@ -256,7 +257,7 @@ def test_eligibility_agrees_with_compiler_on_config_gates(column: dict, dtype: s
     cfg = _config(column)
     profile = _profile("c", dtype)
     try:
-        plan = compile_native_plan(cfg, profile, engine_version="0.1.0")
+        plan = compile_native_plan(cfg, profile, engine_version="0.1.0", sources=NO_SOURCES)
     except PlanCompileError:
         # An invalid truncate config never reaches a NativeExecutionPlan at
         # all: compile_plan's own check_truncate_config raises first (the
@@ -416,7 +417,9 @@ def test_output_schema_for_excludes_table_with_any_non_native_node() -> None:
     # indeterminate node (formula) must have no merged schema at all: the
     # whole table falls back to the oracle, not a schema missing one field.
     cfg = _config(_hash_col(), _FORMULA_COL)
-    plan = compile_native_plan(cfg, _profile("c", "object"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        cfg, _profile("c", "object"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     assert plan.output_schema_for("t") is None
 
 
@@ -432,7 +435,9 @@ def test_compile_native_plan_node_fields_match_the_underlying_work_node() -> Non
     # ever raising, since every kind placeholder is itself a valid
     # capabilities key).
     cfg = _config(_hash_col())
-    plan = compile_native_plan(cfg, _profile("c", "object"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        cfg, _profile("c", "object"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     assert plan.nodes and len(plan.nodes) == len(plan.work_nodes)
     for node, wn in zip(plan.nodes, plan.work_nodes, strict=True):
         assert node.columns == wn.columns
@@ -447,7 +452,9 @@ def test_passthrough_output_schema_preserves_input_arrow_type() -> None:
     # argument or an inverted membership check has nothing to catch it
     # except an exact type assertion against a non-string profile dtype.
     cfg = _config({"name": "c", "strategy": "passthrough"})
-    plan = compile_native_plan(cfg, _profile("c", "int64"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        cfg, _profile("c", "int64"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     schema = plan.output_schema_for("t")
     assert schema is not None
     assert schema.names == ["c"]
@@ -459,7 +466,9 @@ def test_hash_output_schema_is_string_typed_with_exact_field_name() -> None:
     # regardless of the input type. Every existing test only checks
     # `isinstance(schema, pa.Schema)`, which cannot catch a wrong field name
     # or a dropped/renamed positional argument to `pa.field`.
-    plan = compile_native_plan(_config(_hash_col()), _profile("c", "int64"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        _config(_hash_col()), _profile("c", "int64"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     schema = plan.output_schema_for("t")
     assert schema is not None
     assert schema.names == ["c"]
@@ -546,7 +555,7 @@ def test_output_schema_for_skips_nodes_on_a_different_table() -> None:
         profiled_at=datetime(2026, 8, 30, 0, 0, 0),
         decoy_engine_version="0.1.0",
     )
-    plan = compile_native_plan(cfg, profile, engine_version="0.1.0")
+    plan = compile_native_plan(cfg, profile, engine_version="0.1.0", sources=NO_SOURCES)
     schema = plan.output_schema_for("t")
     assert schema is not None
     assert schema.names == ["c"]  # must NOT include "other"'s "d"
@@ -565,7 +574,9 @@ def test_capability_friendly_kernel_less_strategy_is_exactly_python_only() -> No
         "provider_config": {"width": 10},
         **INT_DECL,
     }
-    plan = compile_native_plan(_config(col), _profile("c", "object"), engine_version="0.1.0")
+    plan = compile_native_plan(
+        _config(col), _profile("c", "object"), engine_version="0.1.0", sources=NO_SOURCES
+    )
     assert plan.nodes[0].fallback_policy == "python_only"
 
 
@@ -575,7 +586,7 @@ def test_output_type_indeterminate_node_fallback_policy_is_exactly_python_only()
     # typo'd "python_only" literal in `_fallback_policy`'s return has
     # nothing to catch it.
     plan = compile_native_plan(
-        _config(_FORMULA_COL), _profile("f", "object"), engine_version="0.1.0"
+        _config(_FORMULA_COL), _profile("f", "object"), engine_version="0.1.0", sources=NO_SOURCES
     )
     assert plan.nodes[0].fallback_policy == "python_only"
 

@@ -27,7 +27,7 @@ from decoy_engine.execution.out_of_core._mask_group_b import categorical_array
 from decoy_engine.keyprovider import SecretKeyProvider
 from tests.parity import _strict_compare as sc
 from tests.parity._d1a_hash_data import (
-    JOB_SEED,
+    MASK_KEY,
     SECRET,
     chain_graph,
     chain_plan,
@@ -111,7 +111,7 @@ def test_native_output_is_the_pinned_baseline_and_is_consumed(
     assert all("reason" not in e for e in disposition.values())
 
 
-def _reference(values: pa.Array, seed: Any, key: bytes = JOB_SEED) -> list[str | None]:
+def _reference(values: pa.Array, seed: Any, key: bytes = MASK_KEY) -> list[str | None]:
     cfg = dict(seed.provider_config)
     return categorical_array(
         values, job_seed=key, namespace=seed.namespace, deterministic=True, cfg=cfg

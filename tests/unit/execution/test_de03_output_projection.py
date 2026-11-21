@@ -35,6 +35,7 @@ import pytest
 
 from decoy_engine import release, run_pipeline
 from decoy_engine.config import PipelineConfig
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution import ExecutionError, PandasExecutionAdapter
 from decoy_engine.execution._output_projection import (
@@ -449,7 +450,7 @@ class TestFakerRequiresProvider:
         cfg = _config(tmp_path, [{"name": "email", "strategy": "faker"}])
         profile = profile_source(cfg, seed=0)
         with pytest.raises(PlanCompileError) as exc:
-            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+            compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         assert exc.value.code == "faker_requires_provider"
 
     def test_faker_with_provider_compiles(self, tmp_path) -> None:
@@ -459,5 +460,5 @@ class TestFakerRequiresProvider:
             [{"name": "email", "strategy": "faker", "provider": "person_email"}],
         )
         profile = profile_source(cfg, seed=0)
-        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION)
+        plan = compile_plan(cfg, profile, decoy_engine_version=_ENGINE_VERSION, sources=NO_SOURCES)
         assert "faker_requires_provider" in plan.plan_compile.checks_passed

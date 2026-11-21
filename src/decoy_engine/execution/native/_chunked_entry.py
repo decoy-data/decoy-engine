@@ -81,7 +81,11 @@ from decoy_engine.execution.native._dispatch import (
     plan_native_route,
 )
 from decoy_engine.execution.native._faker_null_mask import plan_faker_null_masks
-from decoy_engine.execution.native._operator_params import TextMaskParams, resolve_params_by_column
+from decoy_engine.execution.native._operator_params import (
+    BucketPerturbParams,
+    TextMaskParams,
+    resolve_params_by_column,
+)
 from decoy_engine.execution.native._route_decline_codes import (
     RouteDeclineCode,
     table_decline,
@@ -345,7 +349,15 @@ def _native_route(
                     table, masked.column_names, plan, state.projection_policy
                 ),
             )
-            row_errors = format_error_records(table, format_errors)
+            row_errors = format_error_records(
+                table,
+                format_errors,
+                {
+                    c
+                    for c in format_errors
+                    if isinstance(params_by_column.get(c), BucketPerturbParams)
+                },
+            )
             if row_errors:
                 # The oracle leg's rule: a per-row error cannot be routed on the chunked path, and
                 # yielding the chunk would leave the raw value in the output. Record the failing

@@ -7,6 +7,7 @@ dynamic string ever reaches the registry. ``_wire.py`` maps each to its frozen w
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 
 __all__ = [
     "CATALOG_BOM",

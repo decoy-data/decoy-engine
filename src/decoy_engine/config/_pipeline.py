@@ -125,8 +125,9 @@ class PipelineConfig(BaseModel):
     relationships: list[RelationshipConfig] = Field(default_factory=list)
     targets: dict[str, TargetDescriptor] = Field(min_length=1)
     namespaces: dict[str, NamespaceConfig] = Field(default_factory=dict)
-    # Pre-scan detector choice (regex always; classifier and ner opt in). Equal to the default
-    # it stays out of dumps and hashes, so a legacy config is unchanged.
+    # Pre-scan detector choice (regex always; classifier and ner opt in). Writing the block turns
+    # the run-start pre-scan on; an unwritten block stays out of dumps, so a legacy config is
+    # unchanged.
     pre_scan: PreScanConfig = Field(default_factory=PreScanConfig)
     # Post-scan controls. `post_scan.integrity` runs the post-mask integrity suite
     # (report-only) over the finished output; omitted -> disabled.
@@ -176,8 +177,8 @@ class PipelineConfig(BaseModel):
             data.pop("protected_quarantine", None)
         if data.get("scan_baseline") is None:
             data.pop("scan_baseline", None)
-        # By value, not by what was written: a pre_scan equal to the default is the legacy shape.
-        if self.pre_scan == PreScanConfig():
+        # By presence: writing the block turns the run-start pre-scan on, so a written default stays.
+        if "pre_scan" not in self.model_fields_set:
             data.pop("pre_scan", None)
         if self.delivery == DeliveryConfig():
             data.pop("delivery", None)

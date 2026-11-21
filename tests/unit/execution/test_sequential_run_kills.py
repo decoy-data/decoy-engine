@@ -28,6 +28,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, PandasExecutionAdapter
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
@@ -69,7 +70,7 @@ def compile_job(config: dict[str, Any]):
     declare_rest(config)
     job_seed = _normalize_job_seed_int(config)
     profile = profile_source(config, seed=job_seed)
-    plan = compile_plan(config, profile, decoy_engine_version="0.1.0")
+    plan = compile_plan(config, profile, decoy_engine_version="0.1.0", sources=NO_SOURCES)
     ns = build_namespace_registry(config, profile)
     if profile.relationships:
         lookup = check_orphan_fk_policy_completeness(config, profile.relationships)

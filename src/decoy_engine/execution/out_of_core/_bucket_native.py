@@ -244,7 +244,7 @@ def native_bucket_perturb_array(
     There is no fallback: a kernel fault or an out-of-range date propagates and aborts the run,
     so a column never ends up half native and half Python. An empty or entirely null slice is
     answered here without a kernel call, as the null-typed array the pandas path yields for it;
-    an all-unparseable slice passes its text through and stays a string array.
+    an all-unparseable slice refuses (there is no row-error channel on this route).
 
     With `preserve`, the sentinel rows are found first and the range guard sees only the rest, so
     a sentinel next to the pandas bounds does not abort the run; those rows then bypass the
@@ -268,7 +268,7 @@ def native_bucket_perturb_array(
             guarded = array
         _guard_native_range(guarded, bucket, date_format, column)
         derive_calls: list[int] = []
-        out = native_bucket_perturb(
+        out, unparseable = native_bucket_perturb(
             array,
             bucket=bucket,
             date_format=date_format,
@@ -280,6 +280,16 @@ def native_bucket_perturb_array(
             preserved=preserved,
         )
         native.decision.native_calls += sum(derive_calls)
+        if unparseable:
+            # The out-of-core route has no row-error channel, so a cell that does not parse
+            # cannot be reported; refuse rather than write its source value to the output.
+            raise ExecutionError(
+                code=reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
+                message=(
+                    f"bucket_perturb: {len(unparseable)} non-null value(s) do not parse under "
+                    "date_format and this route has no row error channel."
+                ),
+            )
         return out
     except BaseException:
         del mask_key

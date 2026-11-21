@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pytest
 
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.pool import PoolCapacityError
 from decoy_engine.plan import PlanCompileError, compile_plan
 from decoy_engine.profile import (
@@ -186,6 +187,7 @@ class TestPoolCapacityPreFlight:
                 _config("unique", pool_size=10),
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -198,6 +200,7 @@ class TestPoolCapacityPreFlight:
             _config("unique", pool_size=600),
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan is not None
 
@@ -211,6 +214,7 @@ class TestPoolCapacityPreFlight:
                 _config("unique", pool_size=200),
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -227,6 +231,7 @@ class TestPoolCapacityPreFlight:
                 config,
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -238,6 +243,7 @@ class TestPoolCapacityPreFlight:
                 config,
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -250,6 +256,7 @@ class TestPoolCapacityPreFlight:
             config,
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan is not None
         assert any("pool_capacity_deferred" in w for w in plan.plan_compile.warnings)
@@ -262,6 +269,7 @@ class TestPoolCapacityPreFlight:
                 _config("match_source_cardinality", pool_size=10),
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -272,6 +280,7 @@ class TestPoolCapacityPreFlight:
             _config("reuse", pool_size=10),
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan is not None
 
@@ -284,6 +293,7 @@ class TestPoolCapacityPreFlight:
             _config("unique", pool_size=100),
             _profile_email_counts(row_count=500, null_count=400, distinct_count=100),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan is not None
 
@@ -294,6 +304,7 @@ class TestPoolCapacityPreFlight:
                 _config("unique", pool_size=99),
                 _profile_email_counts(row_count=500, null_count=400, distinct_count=100),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_too_small_for_source"
 
@@ -306,6 +317,7 @@ class TestPoolCapacityPreFlight:
             _config("unique", pool_size=100),
             _profile_email_counts(row_count=100, null_count=0, distinct_count=None),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan is not None
 
@@ -344,6 +356,7 @@ class TestR6PlanCompileSchema:
                 config,
                 _profile_with_distinct("customers", "email", 10),
                 decoy_engine_version="0.1.0",
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "plan_schema_deterministic_map_renamed"
         # Migration instructions in the message.
@@ -358,6 +371,7 @@ class TestR6PlanCompileSchema:
             config,
             _profile_with_distinct("customers", "email", 10),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         per_table = dict(plan.seed_envelope.per_table)
         per_column = dict(per_table["customers"].per_column)
@@ -372,6 +386,7 @@ class TestR6PlanCompileSchema:
             config,
             _profile_with_distinct("customers", "email", 10),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         per_table = dict(plan.seed_envelope.per_table)
         per_column = dict(per_table["customers"].per_column)
@@ -392,6 +407,7 @@ class TestNoProfileMode:
                 _profile_with_distinct("customers", "email", 50),
                 decoy_engine_version="0.1.0",
                 no_profile=True,
+                sources=NO_SOURCES,
             )
         assert excinfo.value.code == "pool_capacity_unverifiable_no_profile"
 
@@ -402,6 +418,7 @@ class TestNoProfileMode:
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
             no_profile=True,
+            sources=NO_SOURCES,
         )
         assert "pool_capacity_pre_flight" in plan.plan_compile.checks_skipped
         assert "basic_uniqueness_pre_flight" in plan.plan_compile.checks_skipped
@@ -415,6 +432,7 @@ class TestNoProfileMode:
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
             no_profile=True,
+            sources=NO_SOURCES,
         )
         assert plan.plan_compile.checks_skipped == (
             "basic_uniqueness_pre_flight",
@@ -433,5 +451,6 @@ class TestNoProfileMode:
             _config("reuse", pool_size=100),
             _profile_with_distinct("customers", "email", 50),
             decoy_engine_version="0.1.0",
+            sources=NO_SOURCES,
         )
         assert plan.plan_compile.checks_skipped == ()

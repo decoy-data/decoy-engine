@@ -140,7 +140,7 @@ def check_plan_version(data: dict[str, Any]) -> None:
             code=reasons.plan.PLAN_VERSION_UNSUPPORTED,
             path="<plan_version>",
             message=(
-                f"this plan was written by a newer engine (plan_version {version}); "
+                "this plan was written by a newer engine; "
                 "upgrade decoy-engine or compile the plan again."
             ),
         )
@@ -148,8 +148,5 @@ def check_plan_version(data: dict[str, Any]) -> None:
         raise PlanCompileError(
             code=reasons.plan.PLAN_RECOMPILE_REQUIRED,
             path="<plan_version>",
-            message=(
-                f"this plan was written by an older engine (plan_version {version}); "
-                "compile it again from its config."
-            ),
+            message=("this plan was written by an older engine; compile it again from its config."),
         )
