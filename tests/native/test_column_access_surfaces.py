@@ -259,7 +259,7 @@ _PINNED_RUN_CALLS = frozenset(
         "lossless.for_table",
         "lossless_int_columns",
         "order_work",
-        "table_from_pandas_keeping_maps",
+        "table_from_pandas_keeping_source_types",
         "untouched_columns",
         "apply_degenerate_faker_pin",
         "parent_cols.get",

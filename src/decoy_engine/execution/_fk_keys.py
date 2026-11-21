@@ -482,33 +482,51 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
-def table_from_pandas_keeping_maps(
+def _rebuilds_with_source_type(arrow_type: pa.DataType) -> bool:
+    """The nested types a Parquet source can hold and `pa.array(..., type=...)` rebuilds exactly
+    from pandas cells. List views and unions are left out: Parquet cannot store them."""
+    return bool(
+        pa.types.is_list(arrow_type)
+        or pa.types.is_large_list(arrow_type)
+        or pa.types.is_fixed_size_list(arrow_type)
+        or pa.types.is_struct(arrow_type)
+        or pa.types.is_map(arrow_type)
+    )
+
+
+def table_from_pandas_keeping_source_types(
     frame: pd.DataFrame, schema: pa.Schema | None, untouched: Collection[str]
 ) -> pa.Table:
-    """`pa.Table.from_pandas(frame)` that gives every untouched map column the source held its
-    map type back. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot
-    infer a type from; the declared type rebuilds it exactly. `schema` is the source table's and
+    """`pa.Table.from_pandas(frame)` that gives every untouched nested column (list, large list,
+    fixed-size list, struct, map) the source's field type back. pandas holds those cells as
+    dicts, arrays or tuple lists, so inference loses the type (int32 fields widen, an all-null
+    column becomes `null`) or cannot infer it at all (map). `schema` is the source table's and
     `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
-    map column holds the strategy's own values and converts as it always did, like every other
-    column."""
-    maps = (
-        [
-            f
-            for f in schema
-            if pa.types.is_map(f.type) and f.name in frame.columns and f.name in untouched
-        ]
+    column holds the strategy's own values and converts as it always did."""
+    rebuilt = (
+        sorted(
+            (
+                f
+                for f in schema
+                if _rebuilds_with_source_type(f.type)
+                and f.name in frame.columns
+                and f.name in untouched
+            ),
+            key=lambda f: frame.columns.get_loc(f.name),
+        )
         if schema is not None
         else []
     )
-    if not maps:
+    if not rebuilt:
         return pa.Table.from_pandas(frame, preserve_index=False)
-    table = pa.Table.from_pandas(frame.drop(columns=[f.name for f in maps]), preserve_index=False)
-    for field in sorted(maps, key=lambda f: frame.columns.get_loc(f.name)):
-        table = table.add_column(
-            frame.columns.get_loc(field.name),
-            field.name,
-            pa.array(frame[field.name], type=field.type, from_pandas=True),
-        )
+    arrays = {f.name: pa.array(frame[f.name], type=f.type, from_pandas=True) for f in rebuilt}
+    rest = frame.drop(columns=list(arrays))
+    if rest.shape[1] == 0:
+        # from_pandas of an empty-column frame has zero rows, so the frame's own count is kept here.
+        return pa.table(arrays)
+    table = pa.Table.from_pandas(rest, preserve_index=False)
+    for name, array in arrays.items():
+        table = table.add_column(frame.columns.get_loc(name), name, array)
     return table
 
 
@@ -525,6 +543,6 @@ __all__ = [
     "lossless_fk_int_values",
     "lossless_int_columns",
     "lossless_int_columns_from_config",
-    "table_from_pandas_keeping_maps",
+    "table_from_pandas_keeping_source_types",
     "to_pandas_fk_safe",
 ]

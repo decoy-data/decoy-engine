@@ -41,6 +41,7 @@ def walk_one_table(table: pa.Table, *, table_name: str) -> Any:
 
     return walk_dataframe(
         table.to_pandas(),
+        arrow_schema=table.schema,
         table_name=table_name,
         declared_pk_cols=frozenset(),
         fk_specs={},
