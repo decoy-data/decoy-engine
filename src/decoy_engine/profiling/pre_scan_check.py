@@ -153,6 +153,16 @@ def _gated(rule: Mapping[str, Any]) -> bool:
     return isinstance(when, str) and when.strip() != ""
 
 
+def _dropped(table: Mapping[str, Any]) -> frozenset[str]:
+    """Names a `drop_column` transform removes; they are not in the output, so not a finding."""
+    return frozenset(
+        name
+        for op in table.get("transforms") or ()
+        if op.get("op") == "drop_column"
+        for name in op.get("columns") or ()
+    )
+
+
 def _flag_sources(field: Mapping[str, Any], detectors: tuple[str, ...]) -> tuple[str, ...]:
     found: set[str] = set()
     if field.get("pii_candidate") is True:
@@ -170,8 +180,10 @@ def evaluate_pre_scan(config: Mapping[str, Any], core: Mapping[str, Any]) -> Pre
     `pre_scan.on_findings` picks the status of an uncovered result: `warn` (the default) gives
     `warned`, `fail` gives `failed`. Nothing uncovered gives `passed`.
     """
-    policy = config.get("pre_scan")
-    policy = policy if isinstance(policy, Mapping) else {}
+    policy = config.get("pre_scan", {})
+    if not isinstance(policy, Mapping):
+        # A policy read as empty would turn `fail` into `warn`, so a bad shape is refused.
+        raise TypeError("pre_scan must be a mapping")
     detectors = _effective_detectors(policy)
     core_tables = {t["name"]: t for t in core.get("tables") or ()}
     findings: list[PreScanFinding] = []
@@ -188,9 +200,10 @@ def evaluate_pre_scan(config: Mapping[str, Any], core: Mapping[str, Any]) -> Pre
             continue
         scanned.append(name)
         rules = {c["name"]: c for c in table.get("columns") or ()}
+        dropped = _dropped(table)
         for field in scan.get("fields") or ():
             sources = _flag_sources(field, detectors)
-            if not sources:
+            if not sources or field["name"] in dropped:
                 continue
             rule = rules.get(field["name"])
             if rule is None or rule.get("strategy") == _PASSTHROUGH:

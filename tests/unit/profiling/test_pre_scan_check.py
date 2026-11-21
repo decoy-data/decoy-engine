@@ -250,6 +250,25 @@ def test_e2_t10_pure_generate_config_passes_with_no_tables() -> None:
     assert verdict.tables_scanned == ()
 
 
+def test_dropped_flagged_column_is_not_a_finding() -> None:
+    config = _config([], on_findings="fail")
+    config["tables"][0]["transforms"] = [{"op": "drop_column", "columns": ["ssn"]}]
+    core = _core(people=[_field("ssn", pii=True)])
+    passed = evaluate_pre_scan(config, core)
+    assert (passed.status, passed.findings, passed.covered) == ("passed", (), 0)
+    other = evaluate_pre_scan(
+        config, _core(people=[_field("ssn", pii=True), _field("email", pii=True)])
+    )
+    assert [f.column for f in other.findings] == ["email"]
+    assert other.status == "failed"
+
+
+def test_non_mapping_pre_scan_is_refused_not_read_as_warn() -> None:
+    config = {"pre_scan": "fail", "tables": [{"name": "people", "columns": []}]}
+    with pytest.raises(TypeError):
+        evaluate_pre_scan(config, _core(people=[_field("e", pii=True)]))
+
+
 def test_e2_t9_adapter_rows_give_pre_scan_codes() -> None:
     verdict = evaluate_pre_scan(
         _config([], on_findings="fail"), _core(people=[_field("e", pii=True)])
@@ -258,6 +277,8 @@ def test_e2_t9_adapter_rows_give_pre_scan_codes() -> None:
     failed = reason_from_exception(PreScanFailedError())
     assert (blocked.namespace, blocked.code) == ("pre_scan", "uncovered_pii_blocked")
     assert (failed.namespace, failed.code) == ("pre_scan", "profile_failed")
+    warned = reason_from_exception(PreScanWarning())
+    assert (warned.namespace, warned.code) == ("pre_scan", "uncovered_pii")
 
 
 def test_errors_pickle_and_keep_fixed_text() -> None:
