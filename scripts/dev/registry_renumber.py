@@ -210,6 +210,10 @@ def clear_pending_summaries(text: str) -> str:
     return PENDING_SUMMARIES.sub(r"\g<1>frozenset()", text)
 
 
+# The re-export form keeps the unused-import rule on (tests/sentry/release/test_reason_unreleased_import.py).
+UNRELEASED_BINDING = "UNRELEASED as UNRELEASED"
+
+
 def add_unreleased_import(text: str) -> str:
     """``text`` importing UNRELEASED from the sibling ``_types`` module, isort-ordered."""
     if re.search(rf"^{re.escape(TYPES_IMPORT)}(\(?[^)]*)?\bUNRELEASED\b", text, re.M):
@@ -219,16 +223,16 @@ def add_unreleased_import(text: str) -> str:
         if not line.startswith(TYPES_IMPORT):
             continue
         if line.endswith("("):
-            lines.insert(n + 1, "    UNRELEASED,")
+            lines.insert(n + 1, f"    {UNRELEASED_BINDING},")
         else:
-            names = ["UNRELEASED", *line[len(TYPES_IMPORT) :].split(", ")]
+            names = [UNRELEASED_BINDING, *line[len(TYPES_IMPORT) :].split(", ")]
             one = TYPES_IMPORT + ", ".join(names)
             many = TYPES_IMPORT + "(\n" + "".join(f"    {x},\n" for x in names) + ")"
             lines[n] = one if len(one) <= 100 else many
         return "\n".join(lines)
     if CATALOG_ANCHOR not in lines:
         return text
-    lines.insert(lines.index(CATALOG_ANCHOR) + 1, f"{TYPES_IMPORT}UNRELEASED")
+    lines.insert(lines.index(CATALOG_ANCHOR) + 1, f"{TYPES_IMPORT}{UNRELEASED_BINDING}")
     return "\n".join(lines)
 
 
