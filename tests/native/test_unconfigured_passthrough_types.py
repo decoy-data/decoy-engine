@@ -403,7 +403,7 @@ def test_resident_all_nested_table_keeps_rows(columns: tuple[str, ...]) -> None:
 def _storable(arr: pa.Array) -> bool:
     try:
         pq.write_table(pa.table({"x": arr}), io.BytesIO())
-    except (pa.ArrowNotImplementedError, pa.ArrowInvalid):
+    except pa.ArrowNotImplementedError:
         return False
     return True
 
@@ -417,24 +417,23 @@ _NESTED_PARAMS = [(n, null) for n, null in _PARAMS if pa.types.is_nested(CATALOG
     ids=[f"{n}-{'null' if z else 'nonull'}" for n, z in _NESTED_PARAMS],
 )
 def test_catalogue_nested_types_are_placed(name: str, null: bool) -> None:
-    """AT-2d: a nested type Parquet can store is rebuilt exactly; one it cannot is outside the
-    predicate. The fixed-size list with a null cell fails on main before the rebuild (plan section
-    4; pyarrow cannot even write it) and is asserted to, so a later fix shows here."""
+    """AT-2d: a nested type Parquet can store is rebuilt exactly; a type it cannot store is
+    outside the predicate. A fixed-size list with a null cell is a type Parquet stores but this
+    cell it cannot: pyarrow's writer raises `ArrowNotImplementedError` before any engine code
+    runs (plan section 4), so a source file cannot hold it."""
     arr = CATALOGUE[name](null)
     if not _storable(CATALOGUE[name](False)):
         assert not _rebuilds_with_source_type(arr.type)
         return
     assert _rebuilds_with_source_type(arr.type)
-    src = pa.table({"s": pa.array(["a", "b", "c", "d", "e"]), "x": arr})
+    if not _storable(arr):
+        with pytest.raises(pa.ArrowNotImplementedError):
+            pq.write_table(pa.table({"x": arr}), io.BytesIO())
+        return
+    src = pa.table({"email": pa.array(["a", "b", "c", "d", "e"]), "x": arr})
     resident = functools.partial(_resident, src)
     oracle = functools.partial(_oracle, src, 2)
 
-    if name == "fixed_size_list" and null:
-        with pytest.raises((pa.ArrowInvalid, pa.ArrowNotImplementedError)):
-            resident()
-        with pytest.raises((pa.ArrowInvalid, pa.ArrowNotImplementedError)):
-            oracle()
-        return
     for run in (resident, oracle):
         out = run()
         assert out.schema.field("x").type == src.schema.field("x").type

@@ -107,6 +107,7 @@ from decoy_engine.plan.checks import (
     DEFERRED,
     check_generate_columns,
     check_required_strategy_settings,
+    column_shape_warnings,
 )
 from decoy_engine.plan.checks._column_shapes import build_column_shapes
 from decoy_engine.plan.checks._config_json import canonical_config_bytes
@@ -221,9 +222,10 @@ def compile_plan(
     # Row 27 (HC-3a, 2026-07-17): reject date_shift columns whose group_by (entity-anchor)
     # column is missing. Config-only; both branches + run_config_only_checks.
     check_date_shift_group_by_refs(config)
-    # D1c: preserve_values on date_shift / bucket_perturb (literals, format, group_by, FK
-    # shape). Config-only; runs inside the date_shift_group_by_refs slot.
-    check_date_preserve_values(config)
+    # D1c: preserve_values on date_shift / bucket_perturb. It reads the shapes: a typed date
+    # needs no date_format for its sentinels.
+    column_shapes = build_column_shapes(config, profile=profile, sources=sources)
+    check_date_preserve_values(config, column_shapes)
     check_date_shift_window(config)
     # Row 21 (SP-46, 2026-06-29): validate fpe_join_group declarations and emit compile-time
     # manifest warnings for every active group. Config-only; both branches + run_config_only_checks.
@@ -241,13 +243,10 @@ def compile_plan(
     # run_config_only_checks.
     check_top_code_config(config)
     check_bucket_perturb_config(config)
-    # Rows 24-26: categorical categories, fpe charset and faker provider (silent-passthrough
-    # leaks), then the required strategy settings. Config-only; both branches and
-    # run_config_only_checks.
+    # Rows 24-26 (silent-passthrough leaks), then the required strategy settings.
     check_categorical_categories(config)
     check_fpe_charset_config(config)
     check_faker_requires_provider(config)
-    column_shapes = build_column_shapes(config, profile=profile, sources=sources)
     check_required_strategy_settings(config, sources=sources, shapes=column_shapes)
     refuse_unlisted_generate_families(config)
     refuse_fixed_width_output_types(config)
@@ -258,6 +257,7 @@ def compile_plan(
     # it cannot live in run_config_only_checks (config-only by contract);
     # it degrades to name-hint-only when a column has no profile entry.
     freetext_advisory_warnings = check_freetext_advisory(config, profile)
+    freetext_advisory_warnings += column_shape_warnings(config, column_shapes)
     check_composite_columns_length_match(profile)
     # MG-3 / M3 (2026-05-31): reject when + coherent_with combo early,
     # before composite-wiring checks. A column carrying both fields is
@@ -544,7 +544,7 @@ def run_config_only_checks(
     # Row 27 (HC-3a): reject date_shift columns with a missing group_by
     # (entity-anchor) column ref. Config-only.
     check_date_shift_group_by_refs(config)
-    check_date_preserve_values(config)
+    check_date_preserve_values(config, build_column_shapes(config, sources=NO_SOURCES))
     check_date_shift_window(config)
     # Row 21 (SP-46 / fpe_join_group): validate fpe_join_group declarations.
     # Warnings are discarded here (config-only callers do not build a Plan).
