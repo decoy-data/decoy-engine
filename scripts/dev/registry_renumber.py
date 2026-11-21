@@ -189,14 +189,13 @@ def _literal_spans(text: str) -> list[tuple[int, int]]:
     ]
 
 
-def _unreleased_names(text: str) -> int:
-    toks = tokenize.generate_tokens(io.StringIO(text).readline)
-    return sum(1 for t in toks if t.type == tokenize.NAME and t.string == "UNRELEASED")
-
-
 def stamp_source(text: str, version: str) -> str:
     """``text`` with each ``since=UNRELEASED`` / ``deprecated_in=UNRELEASED`` argument set to
-    ``version``; strings and comments are untouched, and an UNRELEASED import nothing uses goes."""
+    ``version``; strings and comments are untouched. The UNRELEASED import stays even when nothing
+    uses it: a branch that adds a new ``since=UNRELEASED`` code merges clean against a main whose
+    stamp removed the import, then raises NameError at load. Every reason module binds it as the
+    re-export ``UNRELEASED as UNRELEASED`` (so F401 stays on), enforced by
+    tests/sentry/release/test_reason_unreleased_import.py."""
     if "=UNRELEASED" not in text:
         return text
     spans = _literal_spans(text)
@@ -204,16 +203,15 @@ def stamp_source(text: str, version: str) -> str:
     def sub(m: re.Match[str]) -> str:
         return m[0] if any(a <= m.start() < b for a, b in spans) else f'{m[1]}="{version}"'
 
-    out = PENDING_ARG.sub(sub, text)
-    if out == text or _unreleased_names(out) != 1:
-        return out
-    out = out.replace(f"{TYPES_IMPORT}UNRELEASED\n", "", 1).replace("\n    UNRELEASED,\n", "\n", 1)
-    one_line = rf"^({re.escape(TYPES_IMPORT)}.*?)(?:\bUNRELEASED, |, UNRELEASED\b)"
-    return re.sub(one_line, r"\1", out, count=1, flags=re.M)
+    return PENDING_ARG.sub(sub, text)
 
 
 def clear_pending_summaries(text: str) -> str:
     return PENDING_SUMMARIES.sub(r"\g<1>frozenset()", text)
+
+
+# The re-export form keeps the unused-import rule on (tests/sentry/release/test_reason_unreleased_import.py).
+UNRELEASED_BINDING = "UNRELEASED as UNRELEASED"
 
 
 def add_unreleased_import(text: str) -> str:
@@ -225,16 +223,16 @@ def add_unreleased_import(text: str) -> str:
         if not line.startswith(TYPES_IMPORT):
             continue
         if line.endswith("("):
-            lines.insert(n + 1, "    UNRELEASED,")
+            lines.insert(n + 1, f"    {UNRELEASED_BINDING},")
         else:
-            names = ["UNRELEASED", *line[len(TYPES_IMPORT) :].split(", ")]
+            names = [UNRELEASED_BINDING, *line[len(TYPES_IMPORT) :].split(", ")]
             one = TYPES_IMPORT + ", ".join(names)
             many = TYPES_IMPORT + "(\n" + "".join(f"    {x},\n" for x in names) + ")"
             lines[n] = one if len(one) <= 100 else many
         return "\n".join(lines)
     if CATALOG_ANCHOR not in lines:
         return text
-    lines.insert(lines.index(CATALOG_ANCHOR) + 1, f"{TYPES_IMPORT}UNRELEASED")
+    lines.insert(lines.index(CATALOG_ANCHOR) + 1, f"{TYPES_IMPORT}{UNRELEASED_BINDING}")
     return "\n".join(lines)
 
 
