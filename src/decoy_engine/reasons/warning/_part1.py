@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED
 
 __all__ = [
     "CARDINALITY_COLLISIONS",
@@ -80,7 +79,7 @@ POST_SCAN_OUTPUT_UNREADABLE = _d(
 REFERENCE_PARENT_POOL_EMPTY = _d(
     "reference_parent_pool_empty",
     "Reference column is null because its parent column has no keys.",
-    since=UNRELEASED,
+    since="1.32.0",
 )
 # SCAN-CHECKS: `--evidence-out` asked to hash the pipeline's scan baseline and the file is gone. The
 # run continues and the manifest records the path with a null fingerprint. Fixed, value-free text.

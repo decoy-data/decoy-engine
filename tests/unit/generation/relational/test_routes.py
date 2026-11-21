@@ -435,11 +435,9 @@ def test_at13_a_weights_length_mismatch_refuses_at_run(route: str, tmp_path: Pat
 
 
 @pytest.mark.parametrize(("namespace", "code"), NEW_CODES)
-def test_at14_new_codes_are_registered_unreleased_in_the_right_catalog(
-    namespace: str, code: str
-) -> None:
+def test_at14_new_codes_are_registered_in_the_right_catalog(namespace: str, code: str) -> None:
     spec = reasons.get(namespace, code)
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.32.0"
     phases = {rule.phase for rule in spec.rules}
     if namespace == "config":
         assert phases == {reasons.Phase.CONFIGURATION}
@@ -511,11 +509,11 @@ def _tree_config(rows: int = 30, **options: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(("namespace", "code", "owner"), TREE_CODES)
-def test_at14_self_reference_codes_are_registered_unreleased_in_the_right_catalog(
+def test_at14_self_reference_codes_are_registered_in_the_right_catalog(
     namespace: str, code: str, owner: str
 ) -> None:
     spec = reasons.get(namespace, code)
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.32.0"
     assert spec.owner == owner and spec.kind is reasons.Kind.FAILURE
     phases = {rule.phase for rule in spec.rules}
     if namespace == "config":
@@ -955,11 +953,11 @@ def test_at11c_a_repeated_parent_key_is_the_lookups_refusal() -> None:
 
 
 @pytest.mark.parametrize(("namespace", "code", "owner"), DATE_CODES)
-def test_at14_date_codes_are_registered_unreleased_in_the_right_catalog(
+def test_at14_date_codes_are_registered_in_the_right_catalog(
     namespace: str, code: str, owner: str
 ) -> None:
     spec = reasons.get(namespace, code)
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.32.0"
     assert spec.owner == owner and spec.kind is reasons.Kind.FAILURE
     phases = {rule.phase for rule in spec.rules}
     if namespace == "config":
@@ -1112,9 +1110,9 @@ def test_at10_pinned_execute_refuses_a_per_parent_aggregate_before_any_draw(
     )
 
 
-def test_at14_the_read_before_fill_code_is_registered_unreleased_in_the_config_catalog() -> None:
+def test_at14_the_read_before_fill_code_is_registered_in_the_config_catalog() -> None:
     spec = reasons.get("config", "generate_aggregate_read_before_fill")
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.32.0"
     assert spec.owner == "PipelineValidationError" and spec.kind is reasons.Kind.FAILURE
     assert {rule.phase for rule in spec.rules} == {reasons.Phase.CONFIGURATION}
     assert not any(ch.isdigit() for ch in spec.summary)

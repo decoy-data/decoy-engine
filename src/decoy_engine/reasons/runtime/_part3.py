@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import Outcome, Phase, RetryClass
 
 __all__ = [
     "CATEGORICAL_POSITION_OUT_OF_DOMAIN",
@@ -135,7 +135,7 @@ DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING = _d(
 )
 DATE_SHIFT_INVALID_CONFIG = _d("date_shift_invalid_config", "Date shift invalid config.")
 DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
-    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
+    "date_shift_requires_date_format", "Date shift requires date format.", since="1.32.0"
 )
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace."
@@ -431,5 +431,5 @@ _d = _catalog.runtime("GenerationError")
 GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
-    since=UNRELEASED,
+    since="1.32.0",
 )

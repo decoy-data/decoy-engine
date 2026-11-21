@@ -9,6 +9,364 @@ the exact engine it was tested with (`decoy-engine==X.Y.Z`).
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-11-21
+
+### Breaking for consumers
+
+- a plain `decoy fit` snapshot writes one numeric histogram bin when it releases an `exact_values` or `quantile_grid` block; otherwise it widens to the finest 1, 2, 5 step at which every non-empty bin holds 10 rows. It can therefore have fewer bins than `numeric_bins`. `numeric_bins` outside 1 to 1000 is refused with `quality.numeric_bins_invalid` by every snapshot writer, and above 1000 by the DP fit.
+- a `date_shift` column without `provider_config.date_format` is refused at plan compile (`date_shift_requires_date_format`). Add the column's format, for example `%Y-%m-%d`. The engine no longer guesses the format from a sample. Top-level date_shift columns whose own format comes from a declared-casting contract are not affected; nested date_shift children do not inherit that exemption. Starter configs write a detected variant only when every detector hit parses with it under the runtime parser; otherwise they fall back to redact. The starter now offers the same guarded date_shift choice for eu_date that the platform descriptor already carries.
+- date_shift output changes. It now honours `jitter_days: N` as the window `[-N, N]`; before, it was ignored and shifts used -365 to 365. `jitter_days` together with `min_days` or `max_days` is refused. Affected: the shipped disguises (ccpa, cpni, default, ferpa, gdpr, glba, hipaa, pc, pci, sox) when a client applies them; the recommendations default for iso_date, us_date and eu_date (`jitter_days: 15`); platform fixtures that use `jitter_days` (`fixtures/build_hr.py`, `build_logistics.py`, `build_retail.py`, `build_energy.py`, `build_mortgage_credit.py`, `build_insurance.py`). Configs that set `min_days` and `max_days` keep today's `int()` coercion and resulting window. New refusals are a `jitter_days` combined with either bound, a non-integer or negative `jitter_days`, and any int-coerced bound outside [-106751, 106751]. No min_days or max_days value that today's handler successfully coerces is refused for its type.
+- a `when:` predicate that reads a column named `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` or `endswith` is refused with `when_outside_closed_grammar`; rename the column.
+- a generated `reference` column with infeasible or conflicting per-parent bounds, `null_probability` beside a bound, mismatched `weighted` weights, or an empty parent under `orphan_policy: fail` is now refused instead of generated; a bounded reference whose repair runs produces different values once.
+- a `text_mask` config that names a detector id the engine does not know, or a detector and strategy pair it cannot run (for example `date_shift` or `faker` on `email`, `fpe` on `email`), now fails at compile and in `decoy validate` instead of running
+- CUSIP `generate_random` now refuses locales other than `en_CA` and `en_US`. Pass one of those two locales.
+- a config that lists the same column name twice in one table's `columns` is now refused when it is validated. Before, the later entry won on every lane, so `[{name: s, strategy: redact}, {name: s, strategy: passthrough}]` shipped `s` unmasked and the redact entry was dropped without a message. Names are compared exactly, the same rule the source-schema checks use. The same name in two different tables is still allowed. The same leak through a table declared twice (`tables: [{name: t, columns: [s redact]}, {name: t, columns: [s passthrough]}]`) is closed too: a repeated table name is refused at `tables[i].name`. No shipped example, template or fixture config listed a column twice.
+- a column that reads a `formula` column with `references` while it is drawn (a `condition_on`, a `derived` expression, a `group_by` or an `anchor`) is now refused with `plan/generate_column_forward_reference`. Before, it read nulls. Move the reading column after the formula's inputs or drop the read.
+
+### Changed (interior numeric bin floor and numeric_bins ceiling, 24F-E2, 2026-11-20)
+
+A plain numeric histogram no longer holds a bin of 1 to 9 rows, because the grid is one uniform global recoding level and no edge follows where rows sit. The old promise of at least `numeric_bins` bins is withdrawn: `numeric_bins` sets the finest step the search may use. The float-max fallback now writes one bin. `compute_distribution_snapshot` checks `numeric_bins` first (new `MAX_NUMERIC_BINS` and `check_numeric_bins`, new reason `quality/numeric_bins_invalid`, pending). `fit_dp_snapshot` refuses `numeric_bins` over 1000 with `dp_numeric_bins_invalid`, and its message now reads `from 2 to 1000`. `contingency_top_k` and `numeric_bins` accept numpy integers. Raw (`include_values=True`) and DP output are unchanged for valid values. Schema and policy tags stay `distribution-snapshot/v2` and `flagged-redacted/v2`. Accepted residual: the chosen level shows that the next finer step failed (plan section 2). Swapping the K-1 extreme cells changes no bin edge or count within one branch; a swap can still flip a column between the shape and no-shape branch.
+
+A numeric histogram that numpy refuses for the range (narrow column near 1e15, cells at +-1e308) now writes the most bins numpy accepts instead of raising.
+
+### Changed (gate verdict status and macOS path scope, fix24-e5, 2026-11-17)
+
+CI only. A `gate-selfhosted.yml` dispatch now posts the commit status `engine-gate/verdict`, and
+`required_checks.py verify --tier merge` requires it on the PR head. The macOS wheel legs in
+`native-companion.yml` run only when a PR touches the native companion; the new check
+`companion-wheel-macos-ok` stands in for the three per-leg checks.
+
+### Changed (date_shift format required, DATE-SHIFT-FORMAT, 2026-11-20)
+
+Refusal added, see the first line. The plan compile check reads the requirement from the strategy requirements registry and also walks `nested` children. `DetectorMatch` and `FieldStats` gain `format_pattern_complete`. The strategy catalog now marks the `date_shift` option `date_format` as required. New reasons, pending: `plan/date_shift_requires_date_format` and `runtime/date_shift_requires_date_format`. Required-setting refusals (a namespace, a date_shift format) now come before the other run preflight checks and before any source read.
+
+### Changed (date_shift reads one window resolver, DATE-SHIFT-JITTER, 2026-11-19)
+
+Output-changing for every config that sets `jitter_days`, see the first line. The date_shift handler, the native operator parameters, the native admission and the plan compile check all read the window through `shift_window` and `shift_window_problem` in `transforms/date_shift.py`. New reason, pending: `plan/date_shift_window_invalid`. A sentry fails on a new route that reads `min_days`, `max_days` or `jitter_days` itself.
+
+### Changed (fidelity policy marks value-replacing columns as intended, DI-CLOSE-E2, 2026-11-20)
+
+`apply_quality_policy` no longer fails a correct mask in `fail` mode on a column whose strategy replaces values by design (`hash`, `fpe`, `tokenize`, `group_key`, `faker`, `grouped_series`, `redact`, `text_redact`; the set derives from the distribution-behavior table). The default 0.05 minimums for `hash`, `faker` and `redact` are removed; an explicit column threshold or `strategy_expectations` entry still sets a minimum. The `quality-policy/v1` result gains `intended_columns` and `intended_joints`, and `pairwise_skipped` (`all_joints_intended`) when a pairwise minimum is skipped because every joint is intended; a pairwise minimum otherwise ignores joints that name an intended column. Aggregates and the grade are unchanged. New public helper `decoy_engine.quality.mean_comparable_similarity`. `report integrity` without a config entry for the table says the config has no entry for its table, with unchanged severity.
+
+### Added (publication stage liveness lock and marker, F26 E1, 2026-11-17)
+
+Every `publication` stage, on both POSIX policies, now holds `flock(LOCK_SH)` on its own directory from creation until it is bound, aborted or collected, and carries a `0600` `.decoy-publication-stage` marker (`decoy-publication-stage-v1:` plus the stage token). The marker stays in the bound unit as reserved metadata, outside the descriptor. A lock the filesystem refuses leaves the run unlocked with the unit unchanged; `EINTR` is retried. The descriptor helpers the stage, arena and later reclaim code share moved to a standard-library-only leaf, `fileaccess/_fdtree.py`, which imports without `fcntl`.
+
+### Added (dead publication stage preview, F26 E2a, 2026-11-17)
+
+`decoy_engine.fileaccess.reclaim_stages(directory, apply=False, min_age_s=3600)` judges the `._decoy_publication_pending_*` and `._decoy_publication_reclaim_*` entries directly in one directory, changes nothing, and returns a `ReclaimReport`: one count per `ReclaimOutcome` (`eligible`, `live`, `young`, `foreign`, `unproven`, `kept`, `lock_unavailable`, and `removed`/`failed` for the removal arm still to come) plus `scope_unavailable`. An entry is `eligible` only as an owned `0700` directory, matched by inode without following a link, with a valid stage marker carrying its own token, older than the grace over its whole tree, and exclusively lockable, all checked again after the lock. Ambient policy only; win32 returns an empty report. `apply=True` raises `NotImplementedError` in this release.
+
+### Changed (`when:` reserves nine more names, FREEZE-S5, 2026-11-20)
+
+`RESERVED_NAMES` gains `null`, `true`, `false`, `between`, `like`, `ilike`, `matches`, `startswith` and `endswith`, so the grammar can grow these words later without another breaking change. Matching is exact and case-sensitive: a column named `NULL` or `Between` is still a column. An exact snapshot test pins the set, and a sentry fails when a keyword is added to `when_grammar.lark` and not reserved.
+
+### Added (tag census and 19 frozen format tags, FREEZE-S7a, 2026-11-20)
+
+Contract 3.1 now lists 19 more tags that the engine already persisted or exported: `decoy-publication/v1`, `immutable_directory/v1`, `publication/v1`, `checkpoint-index/v1`, `pinned-plan/v1`, `decoy-safe-output/v1`, `decoy-quarantine/v1`, `decoy-support-bundle/v1`, `decoy-reasons/v1`, `decoy-model-pack/v1`, `dps-marginal/v3`, `post-scan-integrity/v2`, `canary-span-report/v1`, `flagged-redacted/v1`, `phase-result/v1`, `phase-event/v1`, `decoy.evidence.statement/v1`, `decoy.trust-policy/v1` and `decoy.required-catalog/v1`. Contract 3.3 lists ten derivation labels, and `decoy_engine.contracts.stability` holds the same set plus one internal tag. A test fails on any new `"<name>/vN"` literal in engine source until it is classified. Nothing about written bytes changes.
+
+### Added (public renames table, FREEZE-S7c, 2026-11-20)
+
+Contract section 1 now holds one table of public renames since the 0.11.0 taxonomy split: old name, new name, kind, engine version. It covers the detection symbols, the 0.17.0 config and wire names, the route reason codes and the custom provider folder variable. A test checks the table shape and that each new symbol imports and each old one does not. No code changes.
+
+### Added (public code set catalog, GEN-CATALOG GC3-E, 2026-11-17)
+
+`decoy_engine.code_set_catalog()` returns each shipped code set name with its one-line description, in name order. Callers can list the shipped code sets without a hand-kept list. No behavior changes.
+
+### Added (GEN-PROVIDERS, E1, 2026-11-17)
+
+A generate column can now use `type: provider` with `provider: <name>`. The name is any scalar provider that masking can use: the nine synthetic identifiers (`synthetic_ssn`, `synthetic_ein`, `synthetic_npi`, `synthetic_ndc`, `synthetic_mrn`, `synthetic_pan`, `synthetic_icd10`, `synthetic_iban`, `synthetic_cusip`) and the Faker-backed names such as `person_phone`. Values come from the same adapters that masking uses, so an NPI or PAN has its check digit. An optional `locale` must be one the provider declares. `decoy validate` refuses an unknown provider, an unsupported locale and a composite provider. The composite providers need a later release. A provider column runs on the resident route, is refused in pinned mode, and does not take `unique`.
+
+A `faker` column whose `faker_type` is a registry name now gets `generate_faker_type_is_domain_provider`, which points to `type: provider`.
+
+#### Identifier locale scope
+
+Each synthetic identifier now reads one locale constant for both its capability row and its generator. SSN, EIN, NPI and NDC stay `en_US` only. CUSIP declares `en_CA` and `en_US` and now refuses any other locale in `generate_random`. IBAN, PAN, ICD-10 and MRN declare every engine locale, because their output does not depend on it.
+
+New reason codes (all unreleased): `plan/generate_provider_unknown`, `plan/generate_provider_unsupported`, `plan/generate_provider_field_required`, `plan/generate_provider_field_unexpected`, `plan/generate_provider_locale_unsupported`, `plan/generate_faker_type_is_domain_provider`, `plan/pinned_provider_unsupported` and `runtime/generation_provider_failed`. The registry version and manifests change at the release.
+
+The support bundle `StrategyKind` enum gains `provider`, so a bundle can name a provider generate column.
+
+A `provider` column always yields text, even for providers whose adapter returns an int or a date, so formulas and derived columns see the type the plan reports.
+
+### Changed (per-parent bounds are exact and an empty parent follows its orphan policy, GEN-REL E1, 2026-11-12)
+
+A generated `reference` column now gets the parent and child shape its config asks for or is
+refused with a coded reason.
+
+- `min_per_parent` and `max_per_parent` are exact. The repair no longer lets a parent pass
+  `max_per_parent` on a feasible request, and an infeasible request is refused instead of
+  repaired on a best-effort basis. Validate refuses `min` above `max`
+  (`config/generate_per_parent_bounds_conflict`), a bound beside `null_probability`
+  (`config/generate_per_parent_null_conflict`), a bound beside `distribution: fitted`
+  (`config/generate_fitted_reference_bounds_conflict`) and a maximum the parent `row_count`
+  cannot carry (`config/generate_per_parent_infeasible`). The run re-checks both bounds on the
+  real distinct parent keys (`runtime/generate_per_parent_infeasible`), refuses a bound on a
+  fitted column that skipped validation (`runtime/generate_fitted_reference_bounds_conflict`)
+  and checks the repaired counts (`runtime/reference_bounds_unsatisfied`).
+- An empty parent with child rows follows the `orphan_policy` of the relationship that covers
+  the column: `fail` stops the run (`runtime/reference_parent_pool_empty`), `warn` keeps the null
+  column and raises one warning (`warning/reference_parent_pool_empty`), and `preserve`, `remap`
+  or no relationship keep the null column silently, as before. A fitted column keeps its
+  existing refusal under every policy.
+- `distribution: weighted` with a weights list that does not match the real parent key count is
+  refused at run (`runtime/reference_weights_length_mismatch`) instead of falling back to
+  uniform draws.
+- The rules are one check on the in-memory, streamed, whole-table and pinned routes. A pinned
+  plan gains the optional `reference_policies` field; a plan without it reads as before, and a
+  plan with a covering relationship gets a new fingerprint while its generated values stay the
+  same.
+- Relationship policy errors (`orphan_fk_policy_invalid`, `orphan_fk_policy_duplicate`,
+  `orphan_policy_conflict`) name the tables and columns only; a submitted policy value is no
+  longer echoed. `decoy_engine.relationships` exports `normalize_orphan_policy_lookup`.
+- A capacity probe keeps per-parent bounds and loosens them to its scaled row counts.
+
+Output changes once, before GA, for a bounded reference whose repair fill runs, on the v2 route
+and the V1 `ColumnGenerator` route. Every other config keeps its bytes.
+
+### Fixed (importing the ML stack helper no longer loads lightgbm, MLSTACK-LAZY, 2026-11-20)
+
+`model_pack/_mlstack.py` bound `LGBMClassifier` at import time. A test that stubbed `lightgbm` without that class made the import fail, so four model-status tests passed or failed by worker order. The class now comes from `lgbm_classifier()`, which imports the stack on first call. The sklearn-before-lightgbm order for Windows is unchanged.
+
+### Fixed (Source metadata no longer rides on in-memory output tables, OUTPUT-METADATA-LEAK E2, 2026-11-20)
+
+The out-of-core builders, the resident transform route and the faker degenerate pin used to copy the source file's schema metadata into the tables they return. Each now builds its schema without metadata and attaches only the sanitized pandas blob, so a returned table carries no source schema key and no pandas `attributes`. A sentry fails any new place that hands source metadata to a schema.
+
+### Fixed (text_mask detector and strategy pairs, E-F0, 2026-11-16)
+
+`per_detector_strategy: {ssn: date_shift}` (and `email: date_shift`) wrote the real SSN or email into the output, because `date_shift` returned a span unchanged when it did not parse as a date. `fpe` on any detector ran a digits cipher whatever the span held, `faker` on a detector with no Faker method wrote a person name, and an unknown strategy name fell to the redact token. An unknown id in `detectors:` or in `per_detector_strategy` was skipped silently. A new compile check, `text_mask_strategies`, refuses all of these with two new reasons, `config/mask.text_mask_detector_unknown` and `config/mask.text_mask_strategy_unsupported`; the name of the detector and strategy is in the message, never a cell value. `detectors:` accepts only the built-in span detector ids; `per_detector_strategy` keys also accept the NER and library ids (`person_name`, `location`, `iso_date` and the rest of `DETECTOR_DEFAULTS`). `docs/strategies.md` lists the supported pairs. A date span that does not parse (a library `extra_spans` span such as `2024-02-30`) now becomes the token instead of its real text. A direct `mask_cell` call with an unsupported pair raises `PipelineValidationError` tagged `config/mask.text_mask_strategy_unsupported`; the full-frame handler reports it as a value-free `StrategyError` with code `unsupported_strategy`. The compiled plan YAML gains a final `checks_passed` item, `text_mask_strategies`, for every config.
+
+A library caller of `mask_cell` that passes `extra_spans` with a custom detector id now gets the unsupported-pair refusal instead of the redact token. This fails closed, and no engine caller does this.
+
+### Fixed (numeric profile chart on a subnormal edge, 24f-e2-fix, 2026-11-21)
+
+A numeric column whose range reaches a subnormal float (for example a maximum near 2e-313, or a column made only of values near 1e-316) made the profiler's 10-bin chart raise a `ValueError` from pandas or return no bins, so `distribution_snapshot_document` and `profile_columns` refused or mis-charted a legal column. The chart now falls back to the shared right-closed histogram (the same bins as `pd.cut`), which also charts `[-float_max, 0, float_max]` and edges near float max. Output for every other column is unchanged.
+
+### Changed (engine thread default, ENGINE-THREADS-DEFAULT, 2026-11-20)
+
+`run_pipeline` uses the usable CPU cores for native kernels by default instead of one thread. Pass `native_threads=1` for the old behavior. Output is the same on every route. The run record gains `quality_metrics["execution"]["native_threads"]`, a mapping with `count` (the requested value; the kernels apply at most 4) and `source` (`explicit`, `auto` or `auto_fallback`). A memory-capped `run_pipeline_isolated` call and a `run_job_with_governor` job that omit `native_threads` use one thread.
+
+### Added (inherit generate type, GEN-INHERIT E1, 2026-11-14)
+
+A generated child column can now copy a column of the parent row its foreign key points at, so a
+denormalized attribute agrees with its parent on every row.
+
+- New generate type `inherit` with the required options `via` (an earlier `reference` column of
+  the table) and `column` (a column of that reference's parent table). Each row gets the parent
+  row's value; a null foreign key or a null parent value gives a null, and nothing is drawn.
+  `null_probability` applies after the copy. A column of the child, or of any other table, with
+  the same name as `column` is never read. Copies chain across tables, and a conditional
+  `categorical` can condition on an inherited column.
+- The column has the parent column's Arrow type, nulls and declared `output_type` included, even
+  when every copied value is null. `inherit` takes no `output_type` and no `unique`
+  (`config/generate_unique_unsupported`).
+- Refusals reuse the existing codes: a `via` that is not a `reference`, or whose parent key is not
+  a `sequence` column with no `null_probability`, is `config/generate_parent_lookup_key_not_unique`;
+  a `via` referencing its own table is `config/generate_parent_lookup_self_reference`; a `via`
+  declared later or a `column` missing from the parent table is
+  `plan/generate_column_forward_reference`; a `column` naming a per-parent aggregate is
+  `config/generate_aggregate_read_before_fill`; a foreign key value with no parent row is
+  `runtime/parent_lookup_key_missing`. Pinned compile refuses the type with
+  `plan/pinned_relational_option_unsupported` and pinned execute with
+  `runtime/pinned_relational_option_unsupported`. Streaming admission declines it, so the run
+  stays on the whole-table route. No reason code is added.
+- Numeric typing judges the copy with the column it copies: a child `formula` reading the copy as
+  text keeps the parent column text in both tables. A per-parent aggregate over an inherited
+  column is judged by the column it copies.
+- The support bundle's `StrategyKind` gains `inherit`, so a bundle can name the type.
+
+### Added (conditional categorical, GEN-INHERIT E2, 2026-11-13)
+
+A generated `categorical` column can now declare its category mix per value of an earlier column,
+with no fitted snapshot.
+
+- New options `condition_on` and `by`, given together. `condition_on` names an earlier column of
+  the table; `by` maps a value of it to an entry with `weights` (for the top-level `categories`)
+  or with its own `categories` and optional `weights`. Each row draws from the entry its parent
+  value selects; the parent is matched by its text (`str`), the rule a fitted `condition_on`
+  uses, so `1`, `true` and a null parent match the keys `"1"`, `"True"` and `"None"`.
+- A row whose parent value has no entry draws from the top-level `categories` and `weights`. The
+  whole-table route reports it once per column with `warning/generation_condition_parent_unseen`,
+  `provider: categorical`, with the same value-free detail keys as a fitted `condition_on`.
+  Pinned mode draws the same rows without a warning. The streaming route declines the column and
+  the run stays on the whole-table route.
+- Config checks: a `by` key must be a quoted string (a YAML number or bool key is
+  `config/generate_option_type`, located by position and with a hint to quote it); an entry key
+  other than `categories` and `weights` is `config/generate_option_unknown`; an entry with
+  neither, a non-list or empty `categories`, or a `by` that is not a mapping is
+  `config/generate_option_type`; entry weights follow the `weights` rule against the entry's own
+  categories, else the top-level ones (`config/generate_weights_invalid`); either key without the
+  other is missing; `unique: true` with `condition_on` is `config/generate_unique_conflict`.
+  Locations never name a `by` key. A later or missing `condition_on` column is
+  `plan/generate_column_forward_reference`, and the top-level and entry categories together must
+  fit one Arrow type (`plan/generate_categories_mixed`).
+- A `formula` with `references` is filled after every other column of its table is drawn, so a
+  column of another type that reads it while it is drawn (a `condition_on`, fitted or
+  conditional, a `derived` expression, a `group_by` or an `anchor`) is now refused with
+  `plan/generate_column_forward_reference`, as a read of a later column is, instead of reading
+  nulls. A formula reading it, and any column reading a formula without `references`, is
+  unchanged.
+- New `runtime/categorical_condition_column_unavailable`: a conditional column whose
+  `condition_on` column is absent from the generated data (a config that skipped the checks)
+  is refused on the whole-table and pinned routes, instead of sending every row to the fallback
+  mix.
+- The column consumes one draw per row from its one seeded stream, as a plain column does; its
+  seed hashes `condition_on` and `by`. Its type is that of every category it can draw. The
+  parent column is read as text by numeric typing, so a `sequence` parent stays text, as under a
+  fitted `condition_on`. A pinned `windowed_date` anchored on a conditional column checks the
+  entry categories too. The streaming width bound and the memory estimate price the column by
+  the widest category it can draw, entry categories included.
+- `decoy_engine.config` exports `categorical_categories`.
+
+Every `categorical` column without `condition_on` keeps its bytes and its type.
+
+### Added (parent-anchored dates and coded date failures, GEN-REL E3a, 2026-11-12)
+
+A generated `windowed_date` column can now be anchored to a date of its parent row.
+
+- New option `anchor_via` names an earlier `reference` column of the same table; `anchor` is
+  then a column of the table that reference points at. Each child date is the parent row's
+  anchor plus the usual `min_days` to `max_days` offset. A same-named column of the child table
+  is never read. A null foreign key gives a null date. The same seed gives the same dates.
+- The lookup column must be a `reference` to another table whose key is a `sequence` column
+  with no `null_probability` (`config/generate_parent_lookup_key_not_unique`); a reference to
+  the column's own table is refused (`config/generate_parent_lookup_self_reference`).
+- At run time a foreign key with no parent row is refused
+  (`runtime/parent_lookup_key_missing`), as is a parent key that occurs twice
+  (`runtime/parent_lookup_key_not_unique`); both are `GenerationError`. A parent row whose
+  anchor is null is refused, not nulled (`runtime/windowed_date_parent_anchor_null`).
+- Every `windowed_date` failure, generated or masked, now has a registered code and a fixed
+  message with no row position, type name or cell value: `runtime/windowed_date_anchor_invalid`,
+  `runtime/windowed_date_anchor_out_of_range` and `runtime/windowed_date_offset_out_of_range`.
+  `WindowedDateError` carries the code and is reported under it instead of as an unexpected
+  error; the two range failures are subclasses of it.
+- A generated `windowed_date` column whose `anchor` is missing is now refused at plan compile
+  with `generate_column_forward_reference`, the same code as an anchor generated later.
+  `windowed_date_missing_anchor_ref` remains the refusal of a masked column.
+- An `anchor_via` column runs in memory on the whole-table route. Streaming admission declines
+  it, and pinned mode refuses it with the existing `pinned_relational_option_unsupported` codes
+  at compile and at execute.
+- Which column each generate option reads is now declared once in the option registry and
+  resolved by `decoy_engine.config.iter_generate_input_refs`. The plan check, numeric typing and
+  the reproducibility report use those resolved inputs, so an input in a parent table is
+  judged against the parent column: an unrelated numeric child column of the same name keeps
+  its numeric type, and a child date is not reported reproducible when its parent anchor or its
+  foreign key is not. A `derived` expression's inputs are the columns it reads; a column name
+  that only appears inside a string literal is no longer counted as an input.
+- `decoy_engine.config` exports `GenerateInputRef`, `iter_generate_input_refs`,
+  `parent_key_problem` and `parent_lookup_problems`. An input read through a foreign key
+  carries its parent table and the parent key column (`GenerateInputRef.source_key`).
+- `decoy_engine.expressions.column_refs` returns the column names a compiled expression reads.
+  The derived-column plan check, the generate-input resolver and numeric typing all use it; the
+  private `transforms.derived._get_column_refs` is removed.
+
+Every config without `anchor_via` keeps its bytes.
+
+### Added (per-parent aggregates, GEN-REL E3b, 2026-11-12)
+
+A generated `derived_aggregate` column can now aggregate each parent row's own children.
+
+- New options `from_table` and `via`: `from_table` names a child table and `via` the child's
+  `reference` column back to this table; `column` is then a column of the child. Each parent
+  row gets `op` (`sum`, `count`, `mean`, `min` or `max`) over the children whose foreign key
+  names it, as SQL `GROUP BY` over the child with a `LEFT JOIN` from the parent. A same-named
+  column of the parent table is never read. Null values are skipped and a child with a null
+  foreign key belongs to no parent.
+- A parent with no children gets 0 for `sum` and `count` and a null for `mean`, `min` and `max`,
+  never NaN. The column is filled after every table exists and the returned parent table holds
+  the filled values; a declared `output_type` applies to them. Without one the Arrow type
+  follows the op and the child column, even when no parent has children: `count` is `int64`,
+  `mean` `float64`, and `sum`, `min` and `max` take the child column's type.
+- `via` must be a `reference` to this table whose key is an earlier `sequence` column with no
+  `null_probability` (`config/generate_parent_lookup_key_not_unique`); a `via` through a
+  self-reference is refused (`config/generate_parent_lookup_self_reference`). `via` without
+  `from_table` is an unknown option, and `from_table` without `via` is missing.
+  `null_probability` on the aggregate is refused (`config/generate_per_parent_null_conflict`).
+- The child column must hold numbers as numeric typing types it for an aggregate: a declared
+  numeric `output_type` (`int` or `decimal(n)`), else a `distribution`, or a `categorical` or
+  `constant` of numbers, or a `reference` copying one. Any other child column is refused at
+  validate, before any data is read (`config/generate_aggregate_input_not_numeric`), including
+  a `sequence` or `faker` integer column, which an aggregate reads as text, and a column whose
+  values the config does not type (`derived`, `formula`, `lookup`) without a numeric
+  `output_type`. The message names the child table, the column and the aggregate.
+- Any column input, child `anchor` or `reference` that names a per-parent aggregate is refused
+  at validate (`config/generate_aggregate_read_before_fill`): it would read the column before it
+  is filled.
+- A per-parent aggregate runs in memory on the whole-table route, as every `derived_aggregate`
+  does. Pinned mode refuses it with the existing `pinned_relational_option_unsupported` codes at
+  compile and at execute.
+- The option registry declares `derived_aggregate.column` and `derived_aggregate.via` as inputs
+  of the `from_table` table, read after it is filled. Numeric typing and the reproducibility
+  report read the child's column and foreign key: an unrelated numeric parent column of the
+  same name keeps its numeric type, and the aggregate is not reported reproducible when its
+  child column or foreign key is not.
+- A generated `derived_aggregate` whose `column` is missing is now refused at plan compile with
+  `generate_column_forward_reference`, the same code as an input generated later.
+  `derived_aggregate_missing_column_ref` remains the refusal of a masked column.
+- `decoy_engine.config` exports `aggregate_problems`, `aggregate_via_target` and
+  `is_per_parent_aggregate`.
+
+Every config without `from_table` keeps its bytes.
+
+### Fixed (tag census gaps, FREEZE-S7a, 2026-11-20)
+
+The tag census now also finds a constant that starts with a tag and then a non-letter, such as a bytes label or the leading part of an f-string. That found two derivation labels it missed: `decoy-publication-result/v1` (the stored result digest) and `fpe-sub-floor-synthetic/v1` (the HMAC input for synthetic masked bytes). Both are now in contract 3.3 and `DERIVATION_LABELS`. `policy-expansion/v1` and `secret-provider/v1` are format tags, so they moved from the derivation labels to contract 3.1 and the frozen-surface map. Nothing about written bytes changes.
+
+### Added (self-reference trees for generated reference columns, GEN-REL E2, 2026-11-12)
+
+A generated `reference` column may now name its own table, so manager and employee or
+category trees can be generated.
+
+- The draw is a random recursive tree: the first `root_count` rows (default 1) are roots with a
+  null value, and every later row takes the key of an earlier row. Every chain ends at a root,
+  so there is no cycle. An optional `max_per_parent` caps the children of each key. The same
+  seed gives the same tree.
+- The key must be an earlier `sequence` column of the same table with no `null_probability`
+  and no `output_type` (`config/generate_self_reference_key_invalid`): the tree copies the
+  key's drawn values, so a cast key would match none of them. Only `distribution: random` and
+  `max_per_parent` are accepted: `sequential`, `weighted`, `fitted`, a positive
+  `min_per_parent`, `null_probability`, `unique` and `unique_together` membership are refused
+  (`config/generate_self_reference_option_unsupported`). `root_count` outside 1 to the table's
+  `row_count` is refused with the existing `generate_option_range`, and `root_count` on a
+  reference to another table with the existing `generate_option_unknown`; a table with
+  `row_count: 0` ignores it.
+- Only the self-edge is exempt from the reference-cycle check. Two tables that reference each
+  other are still refused.
+- A self-reference runs in memory on the whole-table route. Pinned compile refuses it
+  (`plan/pinned_relational_option_unsupported`, a `PinnedModeError`), and pinned execute
+  refuses it again for a plan that did not come from pinned compile
+  (`runtime/pinned_relational_option_unsupported`, a `GenerationError`).
+- Pinned execute now refuses a recorded `reference_policies` field of the wrong type or with an
+  unknown policy with `runtime/pinned_relational_option_unsupported` (a `GenerationError`)
+  instead of `pinned_plan_malformed`. Decoding a serialized plan with such a field still
+  refuses with `pinned_plan_malformed`.
+- A capacity probe holds an explicit `root_count` to its scaled row count.
+- `decoy_engine.config` exports `is_self_reference`, `self_reference_problems` and
+  `is_exact_sequence_key`, the one test for a key column whose every row is a distinct value.
+
+Every config without a self-reference keeps its bytes.
+
+### Changed (large non-FK tables carry passthrough columns exactly, NONFK-OOM, 2026-11-20)
+
+Under `auto`, a large non-FK table whose only non-chunk-stable columns are passthrough columns
+that nothing reads now takes the chunked lane. Those columns come back as the source column,
+type and values exact: integers with nulls above 2^53 stay `int64`, `decimal128(p, s)` keeps its
+declared precision, dictionary columns keep their index width, and binary, list and struct
+columns pass through unchanged. A map column keeps its map type: the chunked lane carries it, and the full-frame
+and sequential adapters rebuild it from the source's declared type instead of failing on it. The
+full-frame route is otherwise unchanged, so the output type of the other columns now depends on
+table size. With
+`chunked_dispatcher_enabled=False` the legacy lane converts every column to pandas, so no column
+is exempt and the table runs full-frame as before.
+
+A source with a list, struct or map column no longer raises an uncoded `TypeError` at profile
+time. The column's `distinct_count` is `None`.
+
+### Fixed (one duplicate-name check for mask and generate columns, DUP-COLS, 2026-11-20)
+
+The `TableConfig` validator that refused repeated generate columns now covers `columns` too, with one scan for both. The generate case keeps `config/generate_column_duplicate`. New reason, pending: `config/column_duplicate`, reported at `tables[i].columns[j].name` for the second and each later repeat.
+
+New reason, pending: `config/table_duplicate`, reported at `tables[i].name` for the second and each later declaration of one table name.
+
 ## [0.28.1] - 2026-11-19
 
 ### Breaking for consumers

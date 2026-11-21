@@ -104,6 +104,12 @@ _V0_28_1_ROWS = (
     "b61dcfd6431f18667d85921b8aa71a78ccc92ebff0dfd46c76b8e04c4bd17c02",
     "00f45dee9db696a2951d0a66e4fb67e7918008682dfb00d966ef2faebc804d5c",
 )
+# The rows v0.28.2 certifies: the dev/CI lock with the engine at 0.28.2, and the 70-pin CLI
+# runtime profile (the 0.28.1 pin file, pynacl included) on engine 0.28.2.
+_V0_28_2_ROWS = (
+    "de716a40f24aec0d103467665b0a2cd4a9eaa4682e581c2907a7e732218363e2",
+    "44aaa90fef509a80a7c3def099592c6c4326d47d8bbf79d9043171f8e3a61ba9",
+)
 _ALL_ROWS = (
     _V0_17_0_ROWS
     + _V0_18_0_ROWS
@@ -119,6 +125,7 @@ _ALL_ROWS = (
     + _V0_27_0_ROWS
     + _V0_28_0_ROWS
     + _V0_28_1_ROWS
+    + _V0_28_2_ROWS
 )
 
 
