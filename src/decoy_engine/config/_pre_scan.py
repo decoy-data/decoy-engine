@@ -69,15 +69,15 @@ def pre_scan_requested(config: Mapping[str, Any]) -> bool:
     return isinstance(config.get("pre_scan"), Mapping)
 
 
-def pre_scan_hash_input(block: Mapping[str, Any] | PreScanConfig | None) -> dict[str, Any] | None:
-    """What the plan hash takes from a `pre_scan` block, or `None` when it takes nothing.
+def hash_input_of(scan: PreScanConfig | None) -> dict[str, Any] | None:
+    """What the plan hash takes from a parsed `pre_scan` block, or `None` when it takes nothing.
 
     Only `on_findings: fail` counts: under `fail` the detectors and the model decide whether a run
     blocks. Values come from `PreScanConfig` itself, so a changed default moves the hash input
-    with it. `ner_model` is included only when `ner` runs."""
-    if block is None:
+    with it. `ner_model` is included only when `ner` runs. The block is parsed by
+    `_parse.pre_scan_hash_input`, the one validation route."""
+    if scan is None:
         return None
-    scan = block if isinstance(block, PreScanConfig) else PreScanConfig.model_validate(dict(block))
     if scan.on_findings != "fail":
         return None
     hashed: dict[str, Any] = {"on_findings": "fail", "detectors": list(scan.detectors)}
