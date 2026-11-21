@@ -21,7 +21,10 @@ Determinism: uses ``decoy_engine.determinism.derive`` (S3 / HKDF-SHA256)
   which follows the same keying contract as date_shift and hash strategies.
   Same (job_seed, namespace, value) -> same bucket offset across all runs.
 
-Null and unparseable values are passed through unchanged (same contract as date_shift).
+Null values stay null. A non-null value that does not parse under the format is a row
+error (same contract as date_shift): the caller passes a ``format_errors`` list and the
+transform appends the position; the cell is left as it was in the frame and the run's
+row-error policy decides fail or quarantine. With no format at all the transform refuses.
 
 Pattern: ISO 8601 calendar period partitioning (ISO 8601, https://www.iso.org/iso-8601-date-and-time-format.html).
   Time-bucket perturbation follows the general principle of k-anonymity temporal
@@ -33,16 +36,19 @@ from __future__ import annotations
 
 import calendar
 import datetime
-import logging
 from typing import Any
 
 import pandas as pd
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.determinism import derive
 from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.transforms.date_preserve import preserve_config_problem
 
-_LOG = logging.getLogger(__name__)
+# The row error's reason, shared by the pandas handler and every native route so their
+# records compare equal. It never carries a cell value.
+FORMAT_ERROR_REASON = "value is not a parseable date under bucket_perturb"
 
 # Supported bucket names and their corresponding date-truncation strategies.
 _VALID_BUCKETS = frozenset({"week", "month", "quarter"})
@@ -140,21 +146,32 @@ def apply_bucket_perturb(
     job_seed: bytes,
     namespace: str,
     date_format: str | None,
+    format_errors: list[int] | None = None,
 ) -> pd.Series:
     """Apply bucket_perturb to a pandas Series of date strings.
 
     Each value is parsed, snapped to a deterministic position within its time bucket,
-    and reformatted. Null and unparseable values are passed through unchanged.
+    and reformatted. Nulls stay null. A non-null value that does not parse has its
+    position appended to ``format_errors``; it is never perturbed and never silently kept.
 
     Args:
         series: Input pandas Series of date strings.
         bucket: Time bucket name: ``"week"``, ``"month"``, or ``"quarter"``.
         job_seed: 32-byte job seed bytes (from the plan's SeedEnvelope).
         namespace: Column namespace for derive() isolation. Required.
-        date_format: strptime/strftime format string. Detected from data if None.
+        date_format: strptime/strftime format string. Detected from data if None;
+            when detection finds none the call raises.
+        format_errors: Receives the 0-based positions of non-null values that did not
+            parse. When None and any value fails to parse, the call raises, so a route
+            with no row-error channel cannot lose them.
 
     Returns:
         A new pandas Series with perturbed dates (same format as input).
+
+    Raises:
+        ExecutionError: No format resolved (``bucket_perturb_requires_date_format``), or a
+            value failed to parse with nowhere to report it
+            (``bucket_perturb_unparseable_no_row_channel``). Neither message holds a value.
     """
     try:
         from decoy_engine.transforms.date_shift import _detect_format
@@ -164,10 +181,13 @@ def apply_bucket_perturb(
 
         fmt = date_format or _detect_format(series)
         if fmt is None:
-            _LOG.warning(
-                "bucket_perturb: could not detect date format; column values passed through unchanged."
+            raise ExecutionError(
+                code=reasons.runtime.BUCKET_PERTURB_REQUIRES_DATE_FORMAT,
+                message=(
+                    "bucket_perturb needs provider_config.date_format, "
+                    "the strftime format of its dates."
+                ),
             )
-            return series.copy()
 
         parsed = pd.to_datetime(series, format=fmt, errors="coerce")
         null_mask = series.isna()
@@ -176,9 +196,21 @@ def apply_bucket_perturb(
         str_values = series.astype(str)
         result = series.astype(object).copy()
 
+        failed = [int(i) for i in parse_failed.to_numpy().nonzero()[0]]
+        if failed:
+            if format_errors is None:
+                raise ExecutionError(
+                    code=reasons.runtime.BUCKET_PERTURB_UNPARSEABLE_NO_ROW_CHANNEL,
+                    message=(
+                        f"bucket_perturb: {len(failed)} non-null value(s) do not parse under "
+                        "date_format and this route has no row error channel."
+                    ),
+                )
+            format_errors.extend(failed)
+
         for i in range(len(series)):
             if null_mask.iloc[i] or parse_failed.iloc[i]:
-                continue  # preserve null / unparseable values
+                continue  # null stays null; a failed parse is reported above, never perturbed
             orig_date = parsed.iloc[i].date()
             value_str = str_values.iloc[i]
             perturbed = _perturb_date(orig_date, bucket, job_seed, namespace, value_str)

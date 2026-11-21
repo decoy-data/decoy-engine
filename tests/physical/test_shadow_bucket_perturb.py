@@ -125,8 +125,6 @@ _RICH = [
     "2024-09-30",
     "2024-02-29",  # duplicate
     None,
-    "not-a-date",
-    "café",  # unicode parse-fail passes through unchanged
     "2020-02-29",
     "2000-02-29",
     "1999-11-15",
@@ -136,13 +134,11 @@ _SHAPES: list[tuple[str, list]] = [
     ("rich_leap_boundary", _RICH),
     ("populated", ["2024-05-15", "2023-08-20", "2021-01-10", "2024-11-30"]),
     ("nulls_only", [None, None, None]),
-    ("parse_fails_only", ["x", "yy", "zzz"]),
-    ("mixed", ["2024-02-15", None, "bad", "2023-11-30"]),
-    ("dup_unicode", ["2024-01-01", "2024-01-01", "日付", None]),
+    ("mixed", ["2024-02-15", None, "2023-11-30"]),
+    ("dup_nulls", ["2024-01-01", "2024-01-01", None, None]),
     ("single", ["2024-07-04"]),
     ("empty", []),
     ("all_null", [None, None]),
-    ("all_parse_fail", ["nope", "xxx"]),
 ]
 
 
@@ -190,7 +186,7 @@ def test_native_kernel_matches_oracle_transform(bucket: str, fmt: str) -> None:
     base = [pd.Timestamp(d).strftime(fmt) for d in _ALL_MONTH_LENGTHS]
     values = [*base, base[0], None, "not-a-date", "", "café"]
     array = pa.array(values, type=pa.string())
-    native = native_bucket_perturb(
+    native, native_errors = native_bucket_perturb(
         array,
         bucket=bucket,
         date_format=fmt,
@@ -198,10 +194,12 @@ def test_native_kernel_matches_oracle_transform(bucket: str, fmt: str) -> None:
         namespace="diff_ns",
         index_kernel=kernel,
     )
+    oracle_errors: list[int] = []
     oracle = apply_bucket_perturb(
-        pd.Series(values, dtype=object), bucket, _MASK_KEY, "diff_ns", fmt
+        pd.Series(values, dtype=object), bucket, _MASK_KEY, "diff_ns", fmt, oracle_errors
     )
     assert native.to_pylist() == list(oracle)
+    assert list(native_errors) == oracle_errors  # the same cells are reported on both backends
 
 
 @_NEEDS_COMPANION
@@ -229,7 +227,7 @@ def test_native_kernel_parse_strictness_matches_oracle() -> None:
         "2024-01-01",
     ]
     for bucket in _BUCKETS:
-        native = native_bucket_perturb(
+        native, native_errors = native_bucket_perturb(
             pa.array(corpus, type=pa.string()),
             bucket=bucket,
             date_format="%Y-%m-%d",
@@ -237,10 +235,17 @@ def test_native_kernel_parse_strictness_matches_oracle() -> None:
             namespace="strict_ns",
             index_kernel=kernel,
         )
+        oracle_errors: list[int] = []
         oracle = apply_bucket_perturb(
-            pd.Series(corpus, dtype=object), bucket, _MASK_KEY, "strict_ns", "%Y-%m-%d"
+            pd.Series(corpus, dtype=object),
+            bucket,
+            _MASK_KEY,
+            "strict_ns",
+            "%Y-%m-%d",
+            oracle_errors,
         )
         assert native.to_pylist() == list(oracle), bucket
+        assert list(native_errors) == oracle_errors, bucket
 
 
 # ── derive_index_batch(pool_size=size) == oracle offset differential ──
@@ -311,7 +316,7 @@ _KAT_EXPECTED = {
 @pytest.mark.parametrize("bucket", _BUCKETS)
 def test_kat_vector(bucket: str) -> None:
     kernel = load_compiled_index_kernel()
-    native = native_bucket_perturb(
+    native, _ = native_bucket_perturb(
         pa.array(_KAT_CORPUS, type=pa.string()),
         bucket=bucket,
         date_format="%Y-%m-%d",
@@ -327,7 +332,9 @@ def test_kat_vector(bucket: str) -> None:
 
 @_NEEDS_COMPANION
 def test_full_frame_executes_native_bucket_perturb(tmp_path: Path) -> None:
-    source = pa.table({"c": pa.array(["2024-02-15", "2023-11-30", None, "bad"], type=pa.string())})
+    source = pa.table(
+        {"c": pa.array(["2024-02-15", "2023-11-30", None, "2022-08-08"], type=pa.string())}
+    )
     write_read_only_fixture(tmp_path, source, "bp")
     config = build_config(tmp_path, "t", tmp_path / "bp.parquet", [_bp_column()])
     run = run_shadow_and_oracle(config, "t", source, key_provider=_kp())
@@ -448,9 +455,9 @@ def test_literal_double_percent_z_is_not_timezone_declined(tmp_path: Path) -> No
 def test_timezone_format_parity_declines_to_oracle(tmp_path: Path, fmt: str) -> None:
     """At the production boundary a tz format DECLINES: both arms take the legacy
     oracle and agree byte-for-byte (value + type), no native activation."""
-    source = pa.table(
-        {"c": pa.array(["2024-02-29+0000", "2023-06-15+0000", None, "bad"], type=pa.string())}
-    )
+    suffix = "+0000" if fmt.endswith("%z") else " UTC"
+    cells = [f"2024-02-29{suffix}", f"2023-06-15{suffix}", None, f"2022-01-01{suffix}"]
+    source = pa.table({"c": pa.array(cells, type=pa.string())})
     off, on = _run_both(tmp_path, source, [_bp_column(date_format=fmt)])
     ot, nt = off.outputs["t"], on.outputs["t"]
     assert ot.column("c").to_pylist() == nt.column("c").to_pylist()
@@ -592,7 +599,11 @@ def test_unified_slice_empty_column_is_null_on_both_arms(tmp_path: Path) -> None
 
 def test_unified_slice_parquet_round_trip(tmp_path: Path) -> None:
     source = pa.table(
-        {"c": pa.array(["2024-02-29", "2023-02-28", None, "bad", "2024-12-31"], type=pa.string())}
+        {
+            "c": pa.array(
+                ["2024-02-29", "2023-02-28", None, "2022-06-06", "2024-12-31"], type=pa.string()
+            )
+        }
     )
     off, on = _run_both(tmp_path, source, [_bp_column(bucket="quarter")])
     off_path, on_path = tmp_path / "off.parquet", tmp_path / "on.parquet"
@@ -605,11 +616,42 @@ def test_unified_slice_parquet_round_trip(tmp_path: Path) -> None:
 
 def test_non_string_source_declines_to_oracle(tmp_path: Path) -> None:
     """A non-string bucket_perturb SOURCE is outside the native operator's
-    admitted resident type, so both arms take the legacy route and agree (no
-    activation)."""
+    admitted resident type, so the arm takes the legacy route; ints that are not
+    dates under the format end in row errors."""
     source = pa.table({"c": pa.array([20240101, 20231231, 20240229], type=pa.int64())})
-    off, on = _run_both(tmp_path, source, [_bp_column()])
-    ot, nt = off.outputs["t"], on.outputs["t"]
-    assert ot.column("c").to_pylist() == nt.column("c").to_pylist()
-    assert ot.schema.field("c").type == nt.schema.field("c").type
-    assert QUALITY_METRICS_KEY not in on.quality_metrics
+    # The ints are not dates under the default format, so each arm ends in row errors and
+    # neither writes the source numbers out as if they were masked.
+    from decoy_engine.errors import RowErrorsFailedError
+
+    with pytest.raises(RowErrorsFailedError):
+        _run_both(tmp_path, source, [_bp_column()])
+
+
+@pytest.mark.parametrize("bucket", _BUCKETS)
+@pytest.mark.parametrize(
+    "values",
+    [["x", "yy", "zzz"], ["2024-02-15", None, "bad", "2023-11-30"], ["nope", "xxx"], ["日付"]],
+    ids=["parse_fails_only", "mixed", "all_parse_fail", "unicode"],
+)
+def test_unparseable_cells_fail_on_both_arms(tmp_path: Path, bucket: str, values: list) -> None:
+    """A cell that does not parse is a format_error row error. With no quarantine configured
+    the run fails on the legacy arm and on the unified-slice arm alike; neither writes the
+    source text to the output."""
+    from decoy_engine.errors import RowErrorsFailedError
+
+    source = pa.table({"c": pa.array(values, type=pa.string())})
+    write_read_only_fixture(tmp_path, source, "fx")
+    config = build_config(tmp_path, "t", tmp_path / "fx.parquet", [_bp_column(bucket=bucket)])
+    for enabled in (False, True):
+        with pytest.raises(RowErrorsFailedError) as caught:
+            run_pipeline(
+                config,
+                {"t": pq.read_table(tmp_path / "fx.parquet")},
+                engine_version=ENGINE_VERSION,
+                key_provider=_kp(),
+                unified_slice_enabled=enabled,
+            )
+        assert {r.trigger for r in caught.value.records} == {"format_error"}
+        assert {r.reason for r in caught.value.records} == {
+            "value is not a parseable date under bucket_perturb"
+        }

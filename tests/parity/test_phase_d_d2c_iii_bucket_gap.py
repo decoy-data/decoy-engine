@@ -219,6 +219,7 @@ def _ctx(table: str = "t") -> StrategyContext:
     ctx = object.__new__(StrategyContext)
     object.__setattr__(ctx, "current_table", table)
     object.__setattr__(ctx, "nested_outer_column", "")
+    object.__setattr__(ctx, "row_errors", [])
     return ctx
 
 

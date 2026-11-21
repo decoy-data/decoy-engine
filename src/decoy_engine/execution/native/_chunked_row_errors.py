@@ -13,23 +13,28 @@ offset (`_row_errors.drain_row_errors`), so adding it here would make the legs d
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from decoy_engine.execution._row_errors import RowErrorRecord
 from decoy_engine.execution.native._date_shift_ext import FORMAT_ERROR_REASON
+from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as BUCKET_FORMAT_ERROR_REASON
 
 
 def format_error_records(
-    table: str, positions_by_column: Mapping[str, tuple[int, ...]]
+    table: str,
+    positions_by_column: Mapping[str, tuple[int, ...]],
+    bucket_columns: Collection[str] = (),
 ) -> tuple[RowErrorRecord, ...]:
-    """One `format_error` record per chunk-local position, columns in oracle work order."""
+    """One `format_error` record per chunk-local position, columns in oracle work order.
+
+    A column in `bucket_columns` carries bucket_perturb's reason text, the rest date_shift's."""
     return tuple(
         RowErrorRecord(
             table=table,
             column=column,
             row_index=position,
             trigger="format_error",
-            reason=FORMAT_ERROR_REASON,
+            reason=BUCKET_FORMAT_ERROR_REASON if column in bucket_columns else FORMAT_ERROR_REASON,
         )
         for column in sorted(positions_by_column)
         for position in positions_by_column[column]

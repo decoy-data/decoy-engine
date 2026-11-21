@@ -74,6 +74,7 @@ from decoy_engine.execution.out_of_core._hash_native import (
     decline_reason,
     native_hash_array,
 )
+from decoy_engine.transforms.bucket_perturb import FORMAT_ERROR_REASON as BUCKET_FORMAT_ERROR_REASON
 
 if TYPE_CHECKING:
     from decoy_engine.generation.pool import ValuePool
@@ -371,19 +372,18 @@ def _bucket_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str
 
 
 def _bucket_apply(bound: BoundIndexKernel, values: pa.Array, call: BucketCall) -> NativeResult:
-    return NativeResult(
-        native_bucket_perturb(
-            values,
-            bucket=call.bucket,
-            date_format=call.date_format,
-            mask_key=call.mask_key,
-            namespace=call.namespace,
-            index_kernel=bound.kernel,
-            native_threads=bound.native_threads,
-            derive_calls=call.derive_calls,
-            preserved=call.preserved,
-        )
+    out, positions = native_bucket_perturb(
+        values,
+        bucket=call.bucket,
+        date_format=call.date_format,
+        mask_key=call.mask_key,
+        namespace=call.namespace,
+        index_kernel=bound.kernel,
+        native_threads=bound.native_threads,
+        derive_calls=call.derive_calls,
+        preserved=call.preserved,
     )
+    return NativeResult(out, positions)
 
 
 def _date_shift_admit(column: str, input_type: pa.DataType, seed: ColumnSeed) -> str | None:
@@ -484,14 +484,18 @@ def text_redact_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
     )
 
 
-def date_shift_row_errors(column: str, positions: tuple[int, ...]) -> list[RowError]:
+def date_shift_row_errors(
+    column: str, positions: tuple[int, ...], reason: str = FORMAT_ERROR_REASON
+) -> list[RowError]:
     """One `format_error` RowError per unparseable cell, as the Python handler records them."""
     return [
-        RowError(
-            column=column, row_index=int(pos), trigger="format_error", reason=FORMAT_ERROR_REASON
-        )
+        RowError(column=column, row_index=int(pos), trigger="format_error", reason=reason)
         for pos in positions
     ]
+
+
+def bucket_row_errors(column: str, positions: tuple[int, ...]) -> list[RowError]:
+    return date_shift_row_errors(column, positions, BUCKET_FORMAT_ERROR_REASON)
 
 
 def _date_shift_apply_unused(bound: Any, values: pa.Array, call: Any) -> NativeResult:
@@ -584,6 +588,7 @@ __all__ = [
     "NativeResult",
     "TextRedactCall",
     "bucket_perturb_op",
+    "bucket_row_errors",
     "categorical_op",
     "date_shift_op",
     "date_shift_row_errors",
