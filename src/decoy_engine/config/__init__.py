@@ -100,7 +100,11 @@ from decoy_engine.config._post_scan import (
     post_scan_sink_kind,
     post_scan_sink_refusal,
 )
-from decoy_engine.config._pre_scan import PreScanConfig, pre_scan_requested
+from decoy_engine.config._pre_scan import (
+    PreScanConfig,
+    pre_scan_hash_input,
+    pre_scan_requested,
+)
 from decoy_engine.config._relationships import (
     OrphanPolicyLiteral,
     RelationshipConfig,
@@ -227,6 +231,7 @@ __all__ = [
     "post_scan_resident_reason",
     "post_scan_sink_kind",
     "post_scan_sink_refusal",
+    "pre_scan_hash_input",
     "pre_scan_requested",
     "reference_root",
     "refuse_fixed_width_output_types",

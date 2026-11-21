@@ -8,6 +8,7 @@ it is deprecated, never deleted, and points at the live reason that replaces it.
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
 from decoy_engine.reasons._types import Kind, Outcome, Severity
 
 __all__ = [
