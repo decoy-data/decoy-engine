@@ -329,9 +329,8 @@ def _load_sources(data_dir: Path) -> dict[str, pa.Table]:
 
 
 def _compiled_plan(config: dict[str, Any], key_provider: Any) -> tuple[Any, bytes, Any, Any]:
-    """Compile (plan, mask_key, namespace_registry, relationship_graph),
-    the same four objects `run_pipeline` builds, so a staged prefix's
-    `pool_build`/`selection` work matches production exactly."""
+    """Compile the four objects `run_pipeline` builds (plan, mask_key, namespace_registry,
+    relationship_graph), so a staged prefix's `pool_build`/`selection` work matches production."""
     from decoy_engine.contracts.column_shape import NO_SOURCES
     from decoy_engine.keyprovider import require_mask_key
     from decoy_engine.plan import compile_plan
@@ -339,13 +338,11 @@ def _compiled_plan(config: dict[str, Any], key_provider: Any) -> tuple[Any, byte
     from decoy_engine.profile import profile_source
     from decoy_engine.relationships import RelationshipGraph, build_namespace_registry
 
-    job_seed_int = _normalize_job_seed_int(config)
-    profile = profile_source(config, seed=job_seed_int)
+    profile = profile_source(config, seed=_normalize_job_seed_int(config))
     plan = compile_plan(
         config, profile, decoy_engine_version="phase3-c1-baseline", sources=NO_SOURCES
     )
-    # The caller passes an in-memory provider (SecretKeyProvider); the resolver that used to
-    # wrap it is gone.
+    # The caller passes an in-memory SecretKeyProvider; no resolver wraps it any more.
     mask_key = require_mask_key(plan, key_provider)
     ns_registry = build_namespace_registry(config, profile)
     graph = RelationshipGraph(edges=(), ordering=())
