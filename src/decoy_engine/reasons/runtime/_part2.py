@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Outcome, Phase, RetryClass
+from decoy_engine.reasons._types import UNRELEASED, Outcome, Phase, RetryClass
 
 __all__ = [
     "BAD_SECRET_REF",
