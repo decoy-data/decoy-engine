@@ -290,7 +290,7 @@ date (`date`) or a zoned timestamp (`timestamp_tz`) with no `date_format`, and w
 A `date_format` on such a column is accepted and not used (compile warning `plan/column_shape_format_unused`),
 and `preserve_values` needs no format there. A `timestamp_naive`, integer, float, decimal, boolean or other
 column is refused at compile with `plan/column_shape_mismatch` (a naive timestamp failed at run time with
-`timezone_naive_datetime` before). The digest input of a typed date is its ISO text, so one namespace gives one
+`timezone_naive_datetime` before, and an integer column such as `20240115` with a `date_format` was parsed as a date). The digest input of a typed date is its ISO text, so one namespace gives one
 offset across a CSV table and a Parquet table. A text column keeps `date_shift_requires_date_format`. The config-only
 pass (`decoy validate`) defers a column whose type it cannot see, so a missing `date_format` on a Parquet
 pipeline is refused at compile instead; a CSV or fixed-width column is still refused config-only. Declared (F06)
