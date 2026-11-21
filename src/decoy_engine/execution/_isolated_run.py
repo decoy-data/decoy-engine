@@ -219,6 +219,10 @@ def run_pipeline_isolated(
     _reject_unserializable_kwargs(run_pipeline_kwargs)
     if mem_cap_bytes is not None and rlimit_kind not in RLIMIT_KINDS:
         raise ValueError(f"rlimit_kind={rlimit_kind!r} is not one of {sorted(RLIMIT_KINDS)}")
+    if mem_cap_bytes is not None:
+        # The Rust shared pool is sized to the host's cores and its thread stacks count against the
+        # data limit, so a capped run keeps one thread unless the caller asks for more.
+        run_pipeline_kwargs.setdefault("native_threads", 1)
     if request is not None:
         check_request(request)
     already_isolated = isolate and inside_isolated_worker()

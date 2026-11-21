@@ -111,6 +111,12 @@ def _non_routed_runs(tmp_path: Path) -> dict[str, tuple[dict[str, Any], dict[str
     return cases
 
 
+def _without_thread_record(result: Any) -> dict[str, Any]:
+    metrics = dict(result.quality_metrics)
+    metrics["execution"] = {k: v for k, v in metrics["execution"].items() if k != "native_threads"}
+    return metrics
+
+
 def test_non_routed_jobs_have_equal_quality_metrics_for_any_valid_knobs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -124,7 +130,8 @@ def test_non_routed_jobs_have_equal_quality_metrics_for_any_valid_knobs(
             {"native_threads": 1024, "chunked_dispatcher_enabled": True},
         ):
             other = run_pipeline(cfg, sources=sources, **kwargs, **knobs)
-            assert other.quality_metrics == baseline.quality_metrics, (name, knobs)
+            # The thread record names the count the run used; it is the one field a knob moves.
+            assert _without_thread_record(other) == _without_thread_record(baseline), (name, knobs)
             for table in baseline.outputs:
                 assert other.outputs[table].equals(baseline.outputs[table], check_metadata=True)
 
@@ -653,12 +660,17 @@ def test_the_upper_bound_is_b1s_constant_and_1024_is_accepted(tmp_path: Path) ->
     assert raised.value.code == "invalid_execution_knob"
 
 
-def test_native_threads_defaults_to_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_native_threads_defaults_to_the_usable_cores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decoy_engine.execution.pipeline import _host
+
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 3)  # ENGINE-THREADS-DEFAULT
     cfg, src = _native_job(tmp_path)
     spies = support.spy_lanes(monkeypatch)
     result = support.run_default(cfg, src)
-    assert [kw["native_threads"] for _a, kw in spies["entry.run_mask_chunked"]] == [1]
-    assert result.quality_metrics["auto_chunk"]["native_threads"] == 1
+    assert [kw["native_threads"] for _a, kw in spies["entry.run_mask_chunked"]] == [3]
+    assert result.quality_metrics["auto_chunk"]["native_threads"] == 3
 
 
 def test_native_threads_reaches_the_dispatcher_lane_only(

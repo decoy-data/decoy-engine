@@ -37,7 +37,13 @@ from decoy_engine.execution.native._index_ext import (
     load_compiled_index_kernel,
     reference_index_derivation,
 )
-from decoy_engine.generation.pool import CardinalityMode, PoolBuilder, PoolSampler, ValuePool
+from decoy_engine.generation.pool import (
+    CardinalityMode,
+    PoolBuilder,
+    PoolSampler,
+    ValuePool,
+    _sampler,
+)
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._identity import resolve_faker_pool_identity
 from decoy_engine.plan._types import ColumnSeed, SeedEnvelope, TableSeed
@@ -196,7 +202,7 @@ class TestFormulaKat:
         assert _run([f"a{i}" for i in range(12)]) == _run([f"zzz-{i * 7}" for i in range(12)])
 
     def test_reference_path_equals_the_formula(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(fp, "_compiled_index_kernel", lambda: None)
+        monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: None)
         pool = _pool(_seed())
         assert _run(["x"] * 12) == [pool.values[i] for i in KAT_DEFAULT]
 
@@ -206,7 +212,7 @@ class TestFormulaKat:
     ) -> None:
         pool = _pool(_seed())
         compiled = _run(["x"] * 300)
-        monkeypatch.setattr(fp, "_compiled_index_kernel", lambda: None)
+        monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: None)
         reference = _run(["x"] * 300)
         assert compiled == reference == _expected(pool, "faker-nd/1:t/1:c", range(300))
 
@@ -883,7 +889,7 @@ class TestOffsetsAndFrames:
         assert out == [pool.values[i] for i in KAT_PEOPLE_1000]
 
     def test_nonzero_offset_on_the_reference_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(fp, "_compiled_index_kernel", lambda: None)
+        monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: None)
         pool = _pool(_seed())
         assert _run(["x"] * 8, ctx=_ctx(row_offset=1000)) == [
             pool.values[i] for i in KAT_DEFAULT_1000
@@ -969,7 +975,7 @@ class TestOffsetsAndFrames:
                 type(self).calls += 1
                 return inner.derive_index_batch(*args, **kwargs)
 
-        monkeypatch.setattr(fp, "_compiled_index_kernel", lambda: _Spy())
+        monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: _Spy())
         pool = _pool(_seed())
         out = _run(["x"] * 25)
         assert _Spy.calls == 1  # one batch call for the whole column, not per row
@@ -987,8 +993,8 @@ class TestOffsetsAndFrames:
                 type(self).calls += 1
                 return inner.derive_index_batch(*args, **kwargs)
 
-        monkeypatch.setattr(fp, "_compiled_index_kernel", lambda: None)
-        monkeypatch.setattr(fp, "_reference_index_kernel", lambda: _Spy())
+        monkeypatch.setattr(_sampler, "compiled_index_kernel", lambda: None)
+        monkeypatch.setattr(_sampler, "reference_index_kernel", lambda: _Spy())
         _run(["x"] * 25)
         assert _Spy.calls == 1
 

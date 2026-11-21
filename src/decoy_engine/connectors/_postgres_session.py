@@ -22,6 +22,7 @@ from typing import Any, Final, Protocol
 from pydantic import SecretStr
 
 from decoy_engine import reasons
+from decoy_engine._duckdb_read import fetch_row
 from decoy_engine.fileaccess import open_protected_dir
 from decoy_engine.sdk import PermanentError
 
@@ -222,9 +223,11 @@ def load_postgres_extension(
     row: Any = None
     try:
         conn.execute("LOAD postgres")
-        row = conn.execute(
-            "SELECT loaded, install_path FROM duckdb_extensions() WHERE extension_name = 'postgres_scanner'"
-        ).fetchone()
+        row = fetch_row(
+            conn.execute(
+                "SELECT loaded, install_path FROM duckdb_extensions() WHERE extension_name = 'postgres_scanner'"
+            )
+        )
     except Exception as exc:
         cause_type = type(exc).__name__
     if cause_type:

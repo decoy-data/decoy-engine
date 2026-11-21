@@ -28,6 +28,8 @@ approved_growth = [
   { key = "decoy_engine/generation/kinds/_provider.py::_draw::build_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
   { key = "decoy_engine/generation/kinds/_provider.py::_draw::selection_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
   { key = "decoy_engine/generation/kinds/_provider.py::_draw_keyed::value_seed", decision = "owner 2026-11-20 GEN-PROVIDERS E1 named provider seeds" },
+  { key = "decoy_engine/generation/pool/_sampler.py::derive_validated_indices::mask_key", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 shared batch-draw helper replaces WindowedDateProvider.row_seed_int" },
+  { key = "decoy_engine/transforms/windowed_date.py::_draw_offsets::seed", decision = "owner 2026-11-21 GEN-WINDOWED-BATCH S2 batched offset draw split from apply_windowed_date" },
 ]
 
 [[sentry]]
@@ -81,6 +83,10 @@ baseline = "tests/sentry/baselines/wave-b-string-target-exempt.json"
 [[sentry]]
 id = "wave-b-e0-test-files"
 baseline = "tests/sentry/baselines/wave-b-e0-test-files.json"
+
+[[sentry]]
+id = "handler-row-guard-exempt"
+baseline = "tests/sentry/baselines/handler-row-guard-exempt.json"
 
 [[sentry]]
 id = "private-file-sinks"

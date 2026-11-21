@@ -25,7 +25,9 @@ pytestmark = pytest.mark.benchmark
 
 ROWS = 200_000
 TIMED_CALLS = 7
-TARGET_US_PER_ROW = 45.0  # S1 target; the pre-change figure is about 132
+# S2 targets: at most 10 us/row with the native companion, 20 without it (S1 was 45).
+TARGET_US_PER_ROW_COMPANION = 10.0
+TARGET_US_PER_ROW_REFERENCE = 20.0
 SEED = b"\x01\x02\x03\x04\x05\x06\x07\x08"
 
 
@@ -50,6 +52,8 @@ def _digest(out: list[str | None]) -> str:
 
 
 def worker(dist: str, shape: str) -> dict[str, object]:
+    import importlib.util
+
     import pandas as pd
 
     from decoy_engine.transforms.windowed_date import WindowedDateConfig, apply_windowed_date
@@ -76,6 +80,7 @@ def worker(dist: str, shape: str) -> dict[str, object]:
         "max_us": ordered[-1],
         "iqr_us": q[2] - q[0],
         "samples_us": samples,
+        "companion": importlib.util.find_spec("decoy_engine_native") is not None,
         "output_digest": digest,
         "base_digest": _digest(reference_apply_windowed_date(cfg, df, SEED, "windowed_date/bench")),
     }
@@ -95,9 +100,10 @@ def test_windowed_date_us_per_row(dist: str, shape: str) -> None:
     out_dir = os.environ.get("DECOY_BENCH_OUT")
     if out_dir:
         Path(out_dir, f"windowed_date_{dist}_{shape}.json").write_text(json.dumps(result))
-    # The timed output is byte-identical to the verbatim base loop on the same input.
+    # The timed output equals the oracle's (one `derive_index` per draw) on the same input.
     assert result["output_digest"] == result["base_digest"], result
-    assert result["median_us"] <= TARGET_US_PER_ROW, result
+    target = TARGET_US_PER_ROW_COMPANION if result["companion"] else TARGET_US_PER_ROW_REFERENCE
+    assert result["median_us"] <= target, result
 
 
 if __name__ == "__main__":

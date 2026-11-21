@@ -479,9 +479,8 @@ def _isolated_kwargs_with_budget(
     default, matching every other knob in this module's "additive, opt-in"
     discipline.
     """
-    if "out_of_core_budget_bytes" in isolated_kwargs:
-        return isolated_kwargs
-    return {**isolated_kwargs, "out_of_core_budget_bytes": budget_bytes}
+    # A governed job shares the host with other slots, so it keeps one native thread unless asked.
+    return {"out_of_core_budget_bytes": budget_bytes, "native_threads": 1, **isolated_kwargs}
 
 
 def _validate_call(

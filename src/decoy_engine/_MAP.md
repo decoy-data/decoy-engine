@@ -14,6 +14,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
 | `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form); `_strict_spec.py` holds the strict persisted-reader specs the publication descriptor and the resume records share |
 | `_capacity/` | `unique_capacity_ok`, the one UNIQUE domain-versus-rows rule config and generation both read |
+| `_duckdb_read/` | The one reader of a single DuckDB row (`fetch_row`, `fetch_scalar`); drains the result so DuckDB 2.x can register again |
 | `_nested_json/` | Nested JSON cell foundation: `nested_children` (`_rules.py`), the one reader of a nested column's child strategy and config, used by the plan checks, the secret requirements, column access, the multi-table runner and the nested handler |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
 | `publication/` | F22 output publication: the `decoy-publication/v1` descriptor codec and `result_id` (`_descriptor.py`), request and receipt types (`_types.py`), judge and bind (`_publish.py`), the sink state table (`_sink_state.py`); vault ordering arrives in a later slice |

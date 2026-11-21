@@ -32,6 +32,96 @@ _KEY_CHARS = 60
 
 # (release, the entry's first 60 normalized characters) -> why it is not a separate break.
 TRIAGED: dict[tuple[str, str], str] = {
+    ("0.28.2", "A numeric column whose range reaches a subnormal float (for "): (
+        "a fix: the profiler charted these columns with an error before, and now returns bins"
+    ),
+    ("0.28.2", "- Refusals reuse the existing codes: a `via` that is not a `"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A `formula` with `references` is filled after every other "): (
+        "the new Breaking bullet on a column reading a formula with `references` covers it"
+    ),
+    ("0.28.2", "- New `runtime/categorical_condition_column_unavailable`: a "): (
+        "a guard for a config that skipped the checks; no validated config reaches it"
+    ),
+    ("0.28.2", "- The lookup column must be a `reference` to another table w"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- At run time a foreign key with no parent row is refused (`"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A generated `windowed_date` column whose `anchor` is missi"): (
+        "the same config was already refused; only the code and the stage (plan compile) change"
+    ),
+    ("0.28.2", "- An `anchor_via` column runs in memory on the whole-table r"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- `via` must be a `reference` to this table whose key is an "): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- The child column must hold numbers as numeric typing types"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Any column input, child `anchor` or `reference` that names"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A per-parent aggregate runs in memory on the whole-table r"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A generated `derived_aggregate` whose `column` is missing "): (
+        "the same config was already refused; only the code and the stage (plan compile) change"
+    ),
+    ("0.28.2", "- The key must be an earlier `sequence` column of the same t"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Only the self-edge is exempt from the reference-cycle chec"): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- A self-reference runs in memory on the whole-table route. "): (
+        "new generate type or option; the refusals named are its own and no existing config meets them"
+    ),
+    ("0.28.2", "- Pinned execute now refuses a recorded `reference_policies`"): (
+        "the same plan was already refused; only the reason code changes, and decoding still gives pinned_plan_malformed"
+    ),
+    ("0.28.2", "A source with a list, struct or map column no longer raises "): (
+        "a fix: the profile call raised before and now returns a document"
+    ),
+    ("0.28.2", "The `TableConfig` validator that refused repeated generate c"): (
+        "the Breaking bullet on a repeated column name covers it"
+    ),
+    ("0.28.2", "A generate column can now use `type: provider` with `provide"): (
+        "new generate type; the refusals named are its own new codes and no existing config meets them"
+    ),
+    ("0.28.2", "Each synthetic identifier now reads one locale constant for "): (
+        "the Breaking bullet on CUSIP `generate_random` locales covers it"
+    ),
+    ("0.28.2", "`per_detector_strategy: {ssn: date_shift}` (and `email: date"): (
+        "the Breaking bullet on text_mask detector and strategy pairs covers it"
+    ),
+    ("0.28.2", "`decoy_engine.fileaccess.reclaim_stages(directory, apply=Fal"): (
+        "new function; the refusals named are its own and nothing calls it yet"
+    ),
+    ("0.28.2", "A plain numeric histogram no longer holds a bin of 1 to 9 ro"): (
+        "the Breaking bullet on the plain `decoy fit` histogram bins covers it"
+    ),
+    ("0.28.2", "A numeric histogram that numpy refuses for the range (narrow"): (
+        "a fix that removes a raise; no run that passed before is refused"
+    ),
+    ("0.28.2", "Every `publication` stage, on both POSIX policies, now holds"): (
+        "additive lock and marker; no run that passed before is refused"
+    ),
+    ("0.28.2", "A generated `reference` column now gets the parent and child"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `min_per_parent` and `max_per_parent` are exact. The repai"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- An empty parent with child rows follows the `orphan_policy"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
+    ("0.28.2", "- `distribution: weighted` with a weights list that does not"): (
+        "the Breaking bullet on per-parent bounds covers it"
+    ),
     ("0.28.1", "`decoy_engine.validation.finding_review` adds `finding_edits"): (
         "new experimental names; the refusals named are their own and no 1.0 command calls them"
     ),

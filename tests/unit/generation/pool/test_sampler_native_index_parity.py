@@ -492,7 +492,7 @@ def test_compiled_equals_reference_equals_legacy_scalar(label: str, source: pd.S
 
     # Force the reference path (companion ABSENT).
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(sampler_mod, "_compiled_index_kernel", lambda: None)
+        mp.setattr(sampler_mod, "compiled_index_kernel", lambda: None)
         got_ref = PoolSampler().sample(
             _POOL,
             n,
@@ -504,7 +504,7 @@ def test_compiled_equals_reference_equals_legacy_scalar(label: str, source: pd.S
         )
     # Force the compiled path (companion PRESENT).
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(sampler_mod, "_compiled_index_kernel", lambda: _COMPILED)
+        mp.setattr(sampler_mod, "compiled_index_kernel", lambda: _COMPILED)
         got_comp = PoolSampler().sample(
             _POOL,
             n,
@@ -550,7 +550,7 @@ def test_validation_injection_scalar(result: Any, expected_code: str) -> None:
 
     source = pd.Series(["a", "b", "c"], dtype=object)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(sampler_mod, "_compiled_index_kernel", lambda: _StubKernel(result))
+        mp.setattr(sampler_mod, "compiled_index_kernel", lambda: _StubKernel(result))
         with pytest.raises(GenerationError) as exc:
             PoolSampler().sample(
                 _POOL,
@@ -571,7 +571,7 @@ def test_validation_injection_bundle_out_of_bounds() -> None:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             sampler_mod,
-            "_compiled_index_kernel",
+            "compiled_index_kernel",
             lambda: _StubKernel(pa.array([0, 999], type=pa.uint64())),
         )
         with pytest.raises(GenerationError) as exc:

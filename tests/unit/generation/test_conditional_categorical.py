@@ -349,9 +349,9 @@ def test_at15_pinned_refuses_a_missing_conditioning_column() -> None:
     _unavailable(exc.value)
 
 
-def test_at15_the_code_is_registered_unreleased_in_the_runtime_catalog() -> None:
+def test_at15_the_code_is_registered_in_the_runtime_catalog() -> None:
     spec = reasons.get("runtime", UNAVAILABLE)
-    assert spec.since == reasons.UNRELEASED
+    assert spec.since == "1.32.0"
     assert spec.owner == "GenerationError" and spec.kind is reasons.Kind.FAILURE
     assert "statistical" not in spec.summary
 

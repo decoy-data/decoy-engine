@@ -17,6 +17,7 @@ import pytest
 
 from decoy_engine.errors import RowErrorsFailedError
 from decoy_engine.execution import ExecutionError, run_pipeline
+from decoy_engine.execution.pipeline import _host
 from tests.unit.execution import _auto_chunk_support as support
 from tests.unit.execution import _multi_table_support as mt
 
@@ -141,11 +142,15 @@ def test_evidence_under_non_default_auto_chunk_knobs(tmp_path: Path) -> None:
     _check_evidence(got, chunk=mt.CHUNK, threshold=mt.THRESHOLD, threads=2, rows=N)
 
 
-def test_evidence_under_default_auto_chunk_knobs(tmp_path: Path) -> None:
+def test_evidence_under_default_auto_chunk_knobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Both stamp paths of `stamp_execution_metrics`: with every auto-chunk knob at its
     default, a split call still stamps the block (a plain full-frame call stamps nothing)."""
     rows = 100_000
     cfg, sources = _evidence_job(tmp_path, rows)
+    # One usable CPU: the default thread count follows the host (ENGINE-THREADS-DEFAULT).
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 1)
     got = run_pipeline(cfg, sources=sources, engine_version=mt.ENGINE_VERSION)
     _check_evidence(got, chunk=50_000, threshold=100_000, threads=1, rows=rows)
 

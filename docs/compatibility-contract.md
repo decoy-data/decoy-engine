@@ -537,7 +537,7 @@ output bytes or a stored digest with no error, so each is part of the determinis
 `decoy_engine.contracts.stability.DERIVATION_LABELS`, and the census fails on a tag that is neither here, in
 3.1, a declared-casting format id (`docs/declared-casting.md`) nor internal. The 14 declared-casting ids (`string/exact/v1`,
 `cobol/comp-3/v1` and the rest) name a format a user declares in config; the F06 parse and output registries own them.
-`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too.
+`fpe-key/v1` is a retired label: no live code uses it, and `ff1-key/v1` replaced it. `ff1-key/v1` is the one label that 3.1 lists too. `vault-key/v1` (`derive(mask_key, "vault", b"vault-key/v1")`) is also a derivation label, but only 3.1 lists it, so it is not in the block below.
 
 ```
 canary-span-normalization/v1           decoy-engine/determinism/v1   decoy-engine/keyprovider/v1
@@ -735,6 +735,22 @@ quote the value as a string. `subset_request_from_config` refuses NaN, Infinity 
 surrogate the same way, but keeps a naive timestamp literal, the only spelling a zone-less
 timestamp column accepts; the subset request fingerprint writes it as tagged wall-clock text.
 No `SEED_PROTOCOL_VERSION` change.
+
+**2026-11-20, windowed_date offsets (pre-GA break, GEN-WINDOWED-BATCH S2).** `windowed_date`
+(mask and generate) now draws each row's offset from the pool sampler's index kernel, in one
+batch per column, instead of a numpy Generator built per row. For global row number `r` and draw
+`k` the offset is `min_days + derive_index(seed, namespace, int(2 * r + k), pool_size=span + 1)`
+(`k = 0`; `early` and `late` also draw `k = 1` and take the minimum or maximum). The draw index
+is part of the source, not of the namespace. Output dates change for the same seed, with no shim
+and no flag: regenerate stored `windowed_date` output. The window, null-anchor, determinism and
+partitioning guarantees are unchanged. Global row numbers must now be below `2**62` (before:
+below `2**64`); a negative or larger row number raises `windowed_date_row_number_out_of_range`.
+A window with `min_days` or `max_days` more than 106751 days from zero is refused at parse with
+`plan/windowed_date_window_out_of_range`.
+The draw-site entry `mask.windowed_date` moves to family `source_keyed_hmac` and the catalogue
+pin, provider golden and `TestWindowedDateGolden` are re-baselined with it.
+`SEED_PROTOCOL_VERSION` stays 7: a bump would rekey every keyed column and vault before GA, and
+only this site moves.
 
 ### 3.4 The public API + CLI contract
 
@@ -995,7 +1011,7 @@ No `SEED_PROTOCOL_VERSION` change.
   auto-chunk planner keeps such a table chunked only when every column the predicate reads is a
   `string`. The unified full-frame route and out-of-core still decline `when:`.
   `run_pipeline` gains two keyword-only arguments (2026-10-01): `native_threads: int = 1`
-  (1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
+  (the default moved on 2026-11-20 to `None`, see the ENGINE-THREADS-DEFAULT entry below; 1 to 1024; the kernel thread budget of the auto-chunk dispatcher lane, no output
   byte depends on it) and `chunked_dispatcher_enabled: bool = True` (the kill switch that
   restores the previous auto-chunk lane). This is an owner-approved pre-GA
   output-contract cutover: on the auto-chunk route masked values are route-neutral
@@ -1122,6 +1138,22 @@ No `SEED_PROTOCOL_VERSION` change.
   validation/usage, 2 deprecated-shim, 3 runtime).
 - **Config:** the `pipeline.yaml` schema. An old config must keep validating and
   running, or be deprecated through §4.4.
+
+  Pre-GA default change (ENGINE-THREADS-DEFAULT, 2026-11-20).
+  `run_pipeline(..., native_threads: int | None = None)`: `None` uses the usable cores
+  (`detect_usable_cpus`, capped at 1024; 1 if detection fails). Explicit values are unchanged and
+  never fall back. Output data does not depend on the thread count. Default runs now read lazy
+  Parquet sources with Arrow threads and record `native_thread_clamp` under `auto_chunk`. Every
+  run records `quality_metrics["execution"]["native_threads"] = {"count": int, "source": str}`,
+  where `source` is one of `explicit`, `auto` or `auto_fallback` (a closed set). `count` is the
+  requested value; the native kernels apply at most their own knee (4 threads), which
+  `auto_chunk["native_thread_clamp"]` reports. `run_pipeline_isolated` with a `mem_cap_bytes`
+  and no `native_threads` forwards `native_threads=1`, because the Rust shared pool is sized to
+  the host's cores and its thread stacks count against RLIMIT_DATA. `run_job_with_governor` with
+  no `native_threads` also forwards 1, because a governed job shares the host with other slots.
+  Both runs record source `explicit`. The thread count now
+  differs by host for library callers, as it already does for the CLI. Re-pin checklist: the
+  platform passes its own thread grant; check any platform call that omits `native_threads`.
 
 `run_pipeline` gained `token_vault_writer` on 2026-10-26 (B-6 tokenization
 write-seam). It is keyword-only, defaults to `None`, and is additive under §4.1:

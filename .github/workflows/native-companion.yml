@@ -320,6 +320,10 @@ jobs:
       # builds but fails to load would otherwise leave this job green with nothing run.
       - name: Assert the companion loads
         run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
+      # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
+      # route, and the gap9 grant wiring; the per-route cells skip without the companion.
+      - name: Thread default and grant parity (companion-present case)
+        run: pytest tests/unit/execution/native_threads tests/parity/test_gap9_native_thread_grant.py -v --tb=short
       - name: Native ABI test (companion-present case)
         run: pytest tests/native/test_native_ext_abi.py -v --tb=short
       - name: Compiled-kernel-vs-live-reference parity harness

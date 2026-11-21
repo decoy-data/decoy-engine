@@ -71,6 +71,7 @@ from decoy_engine._arrow_types import TextWidthState
 from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import group_by_sibling
+from decoy_engine.execution._strategies._redact import redact_with_is_string
 
 _STRING_OUTPUT_STRATEGIES = frozenset({"hash", "truncate", "redact"})
 
@@ -87,7 +88,7 @@ def _string_output_is_fixed(col: dict[str, Any]) -> bool:
     if col["strategy"] != "redact":
         return True
     cfg = col.get("provider_config") or {}
-    return isinstance(cfg.get("redact_with", "REDACTED"), str)
+    return redact_with_is_string(cfg)
 
 
 def text_redact_pinned_columns(configured: dict[str, dict[str, Any]]) -> frozenset[str]:

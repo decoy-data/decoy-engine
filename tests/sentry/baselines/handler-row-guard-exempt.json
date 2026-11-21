@@ -1,0 +1,12 @@
+{
+ "sentry_id": "handler-row-guard-exempt",
+ "created_in": "HANDLER-ROW-COUNT",
+ "entries": {
+  "_strategies/_orphan.py": {
+   "reason": "orphan-REMAP lookup runs on a private scratch frame"
+  },
+  "_strategies/nested/_handler.py": {
+   "reason": "child cell runs on a scratch frame the caller rebuilds"
+  }
+ }
+}

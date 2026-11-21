@@ -138,6 +138,9 @@ _PINNED_DISPATCH_CALLS = frozenset(
         "self._handlers.get",
         "isinstance",
         "run_with_when_gate",
+        # HANDLER-ROW-COUNT: compares the row index of the composite output with its input;
+        # it reads no column values, so it is not a new column-access surface.
+        "require_same_rows",
     }
 )
 _PINNED_NODE_KINDS = frozenset({"scalar", "composite", "composite_fk_group"})

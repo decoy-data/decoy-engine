@@ -244,8 +244,12 @@ def _production_callers(target: str) -> list[str]:
     ]
 
 
-def test_g3_read_set_has_one_production_caller() -> None:
-    assert _production_callers("read_set") == ["_chunked_carry.py:carried_columns"]
+def test_g3_read_set_has_two_production_callers() -> None:
+    # The carried exemption and the masked-column admission share the one read rule.
+    assert _production_callers("read_set") == [
+        "_chunked_carry.py:carried_columns",
+        "_source_dtype_gate.py:admitted_masked_columns",
+    ]
 
 
 def test_g3_carried_columns_has_exactly_two_production_callers() -> None:
@@ -268,6 +272,106 @@ def test_g3_the_scanner_resolves_aliases_and_module_level_calls() -> None:
         "def h():\n    return other()\n"
     )
     assert _scan(src, "x.py", "read_set") == ["x.py:<module>", "x.py:f", "x.py:g"]
+
+
+# -- part (b1): masked columns of admitted types (AT-B1 to AT-B3, G-1 masked rows) --------------
+
+_CLASS_TYPES = {
+    "int_with_nulls": ["int64_nulls", "uint64"],
+    "decimal": ["decimal128"],
+    "binary": ["binary", "large_binary", "fixed_size_binary"],
+}
+
+
+def _masked_entry(strategy: str, name: str = "p") -> dict[str, Any]:
+    if strategy == "hash":
+        return support.hash_col(name)
+    if strategy == "redact":
+        return support.redact_col(name)
+    if strategy == "faker":
+        return support.faker_col(name)
+    return {"name": name, "strategy": strategy}
+
+
+def _masked_cells() -> list[tuple[str, str, str]]:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    return [
+        (strategy, t, lay)
+        for strategy, classes in CHUNK_STABLE_MASKED_SOURCE_TYPES.items()
+        for cls in sorted(classes)
+        for t in _CLASS_TYPES[cls]
+        for lay in LAYOUTS
+    ]
+
+
+MASKED = _masked_cells()
+
+
+@pytest.mark.parametrize(("strategy", "type_class", "layout"), MASKED)
+def test_at_b1_admitted_masked_pair_is_chunked_and_equals_the_oracle(
+    tmp_path: Path, strategy: str, type_class: str, layout: str
+) -> None:
+    table = source_table(type_class, layout)
+    cfg = _cfg(tmp_path, table, _masked_entry(strategy))
+    got = _run(table, cfg)
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "chunked", block["reason"]
+    base = _oracle(table, cfg).outputs[support.TABLE]
+    out = got.outputs[support.TABLE]
+    assert out.schema.field("p").type == base.schema.field("p").type
+    assert out.column("p").to_pylist() == base.column("p").to_pylist()
+
+
+def test_g1_every_table_pair_has_a_cell() -> None:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    cells = {(s, t) for s, t, _ in MASKED}
+    for strategy, classes in CHUNK_STABLE_MASKED_SOURCE_TYPES.items():
+        for cls in classes:
+            assert all((strategy, t) in cells for t in _CLASS_TYPES[cls])
+
+
+def test_at_b2_a_pair_outside_the_table_stays_full_frame(tmp_path: Path) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    non_deterministic = {**support.faker_col("p"), "deterministic": False}
+    got = _run(table, _cfg(tmp_path, table, non_deterministic))
+    block = got.quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_b2_the_table_does_not_name_numeric_strategies() -> None:
+    from decoy_engine.execution.chunked._source_dtype_gate import CHUNK_STABLE_MASKED_SOURCE_TYPES
+
+    assert set(CHUNK_STABLE_MASKED_SOURCE_TYPES) == {"hash", "redact", "faker"}
+
+
+def test_at_b3_a_masked_column_read_by_another_entry_stays_full_frame(tmp_path: Path) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(
+        tmp_path,
+        table,
+        support.hash_col("p"),
+        s_entry={**support.redact_col("s"), "when": "p != 1"},
+    )
+    block = _run(table, cfg).quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame"
+    assert "p (integer with nulls)" in block["reason"]
+
+
+def test_at_b3_a_hash_with_its_own_when_is_not_admitted() -> None:
+    from decoy_engine.execution import _chunked_input as ci
+    from decoy_engine.execution.chunked._source_dtype_gate import admitted_masked_columns
+    from decoy_engine.providers_v2 import get_default_registry
+
+    table = source_table("int64_nulls", "later_mixed")
+    facts = ci.facts_for(None, table, "t")
+    registry = get_default_registry()
+    plain = [support.redact_col("s"), support.hash_col("p")]
+    gated = [support.redact_col("s"), {**support.hash_col("p"), "when": "p > 3"}]
+    assert admitted_masked_columns(facts, plain, registry) == {"p"}
+    assert admitted_masked_columns(facts, gated, registry) == frozenset()
 
 
 # -- kill switch, physical plan, stream and lazy legs (Dennis r1 on #725) -----------------------
@@ -508,6 +612,17 @@ def test_a_stream_fk_job_carries_a_passthrough_column_exactly(tmp_path: Path) ->
     got = pq.read_table(target / "orders.parquet")
     assert got.schema.field("x").type == pa.int64()
     assert got.column("x").to_pylist() == orders.column("x").to_pylist()
+
+
+@pytest.mark.parametrize("strategy", ["hash", "redact", "faker"])
+def test_an_admitted_masked_pair_runs_full_frame_on_the_kill_switch_lane(
+    tmp_path: Path, strategy: str
+) -> None:
+    table = source_table("int64_nulls", "later_mixed")
+    cfg = _cfg(tmp_path, table, _masked_entry(strategy))
+    block = support.run_legacy(cfg, table).quality_metrics["auto_chunk"]
+    assert block["mode"] == "full_frame", block
+    assert "p (integer with nulls)" in block["reason"]
 
 
 # -- a masked map column converts as any masked column does (Codex final on #725) ---------------

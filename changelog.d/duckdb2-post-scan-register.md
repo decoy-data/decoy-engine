@@ -1,0 +1,3 @@
+### Fixed (post-scan relationship check on DuckDB 2.x, DUCKDB2-REGISTER, 2026-11-20)
+
+The post-scan relationship check no longer fails on DuckDB 2.x. A one-row count left its result unfinished, and DuckDB 2.x then refused the next `register()` on that connection (`ResourceInUseException`), so every run with a declared relationship ended in `check_error`. The same read pattern in the out-of-core joiners and the Postgres connector now drains its result too, through `fetch_row` and `fetch_scalar` in `decoy_engine/_duckdb_read`. A sentry fails on a new `fetchone` or `fetchmany` in a module that uses DuckDB. No output change on DuckDB 1.x.
