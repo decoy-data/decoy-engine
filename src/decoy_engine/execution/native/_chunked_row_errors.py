@@ -18,6 +18,7 @@ from collections.abc import Collection, Mapping
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.execution.native._date_shift_ext import (
     BUCKET_PERTURB_OPERATOR_ID,
+    DATE_SHIFT_OPERATOR_ID,
     format_error_reason,
 )
 
@@ -37,7 +38,7 @@ def format_error_records(
             row_index=position,
             trigger="format_error",
             reason=format_error_reason(
-                BUCKET_PERTURB_OPERATOR_ID if column in bucket_columns else "native_date_shift"
+                BUCKET_PERTURB_OPERATOR_ID if column in bucket_columns else DATE_SHIFT_OPERATOR_ID
             ),
         )
         for column in sorted(positions_by_column)

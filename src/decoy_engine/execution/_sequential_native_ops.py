@@ -43,7 +43,10 @@ from decoy_engine.execution._row_errors import RowError
 from decoy_engine.execution.native._bucket_perturb_ext import native_bucket_perturb
 from decoy_engine.execution.native._categorical_ext import native_categorical
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
-from decoy_engine.execution.native._date_shift_ext import format_error_reason
+from decoy_engine.execution.native._date_shift_ext import (
+    DATE_SHIFT_OPERATOR_ID,
+    format_error_reason,
+)
 from decoy_engine.execution.native._fpe_route import fpe_fail_closed_error, fpe_residual_warnings
 from decoy_engine.execution.native._kernels_scalar import native_text_redact
 from decoy_engine.execution.native._operator_config_rejections import (
@@ -484,7 +487,7 @@ def text_redact_op(load_kernel: Callable[[int | None], Any]) -> NativeOp:
 
 
 def date_shift_row_errors(
-    column: str, positions: tuple[int, ...], operator_id: str = "native_date_shift"
+    column: str, positions: tuple[int, ...], operator_id: str = DATE_SHIFT_OPERATOR_ID
 ) -> list[RowError]:
     """One `format_error` RowError per unparseable cell, as the Python handler records them."""
     reason = format_error_reason(operator_id)

@@ -320,9 +320,9 @@ provider_config:
 - `date_format` is required when `preserve_values` is set. The sentinel is matched
   by calendar date, so `01/01/2099` under `%d/%m/%Y` matches `2099-01-01` and a
   time of day is ignored. `%f`, `%Z`, `ISO8601` and `mixed` are rejected with it.
-- `9999-12-31` is matched explicitly. Without the option it passes through only
-  because pandas cannot represent it and the operator leaves unparseable values
-  alone. A date such as `2099-01-01` is in range, so without the option it is
+- `9999-12-31` is matched explicitly. Without the option, pandas cannot represent
+  it, so `date_shift` leaves it unchanged and `bucket_perturb` reports a row error
+  for it. A date such as `2099-01-01` is in range, so without the option it is
   perturbed.
 - A string source is emitted byte for byte. A typed date or timestamp source is
   rendered from its calendar date with `date_format`, so the output column stays
