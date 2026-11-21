@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from decoy_engine.config import per_parent_bounds
+from decoy_engine.config import categorical_arrow_type, is_self_reference, per_parent_bounds
 from decoy_engine.generation._numeric_typing import numeric_plan
 from decoy_engine.generation.kinds import (
     constant_arrow_type,
@@ -69,10 +69,8 @@ ADMISSION_MATRIX: dict[str, tuple[bool, str]] = {
         "naive timestamp); null anchor -> null, invalid anchor -> WindowedDateError",
     ),
     "group_key": (False, "group-scoped keys; needs a bounded two-pass design"),
+    "inherit": (False, "reads a parent row by FK; no cross-table row seam"),
 }
-
-_INT64_MIN = -(2**63)
-_INT64_MAX = 2**63 - 1
 
 
 @dataclass(frozen=True)
@@ -113,27 +111,6 @@ class PlanAdmission:
     def generated_types(self, table: str) -> list[pa.DataType | None]:
         """Per column of `table`, the type the generator draws (before any `output_type` cast)."""
         return [c.generated_type for c in self.columns if c.table == table]
-
-
-def _categorical_type(col: dict[str, Any]) -> tuple[pa.DataType | None, str]:
-    cats = col.get("categories", ["Category A", "Category B"])
-    if not isinstance(cats, list) or not cats:
-        return None, "categories_not_a_nonempty_list"
-    weights = col.get("weights")
-    if weights is not None and (not isinstance(weights, list) or len(weights) != len(cats)):
-        return None, "weights_do_not_match_categories"
-    kinds = {type(c) for c in cats}
-    if kinds == {str}:
-        return pa.string(), "eligible"
-    if kinds == {bool}:
-        return pa.bool_(), "eligible"
-    if kinds == {int}:
-        if all(_INT64_MIN <= c <= _INT64_MAX for c in cats):
-            return pa.int64(), "eligible"
-        return None, "int_category_outside_int64"
-    if kinds == {float}:
-        return pa.float64(), "eligible"
-    return None, "mixed_or_unsupported_category_types"
 
 
 def faker_is_built_in(
@@ -231,7 +208,8 @@ def classify_plan(
         )
         if parent is None or parent_col is None or not isinstance(parent_name, str):
             return decline(table, col, "reference_parent_unresolved")
-        if parent_name == table:
+        # A tree over the table's own rows reads rows a batch has not finished, so it runs whole.
+        if is_self_reference(table, col):
             return decline(table, col, "reference_to_own_table")
         parent_adm = classify(parent_name, parent_col)
         if not parent_adm.eligible or parent_adm.arrow_type is None:
@@ -239,6 +217,9 @@ def classify_plan(
         return admit(table, col, parent_adm.arrow_type)
 
     def classify_windowed_date(table: str, col: dict[str, Any]) -> ColumnAdmission:
+        # The anchor is a parent row's column, reached by a lookup no batch can do.
+        if col.get("anchor_via") is not None:
+            return decline(table, col, "windowed_date_anchor_via")
         cols = tables[table]["generate_columns"]
         names = [c["name"] for c in cols]
         anchor_name = col.get("anchor")
@@ -274,8 +255,11 @@ def classify_plan(
             result = decline(table, col, f"family_declined:{kind}")
         elif kind == "sequence":
             result = admit(table, col, numeric.get((table, col["name"])) or pa.string())
+        elif kind == "categorical" and col.get("condition_on") is not None:
+            # Reads a sibling row by row, and the batch core has no sibling-input seam yet.
+            result = decline(table, col, "categorical_condition_on")
         elif kind == "categorical":
-            arrow_type, reason = _categorical_type(col)
+            arrow_type, reason = categorical_arrow_type(col)
             result = admit(table, col, arrow_type) if arrow_type else decline(table, col, reason)
         elif kind == "constant":
             result = admit(table, col, constant_arrow_type(col))

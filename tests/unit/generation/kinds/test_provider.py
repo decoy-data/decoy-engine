@@ -23,6 +23,7 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.config import iter_generate_input_refs
 from decoy_engine.config._generate_option_catalog import generate_option_catalog
 from decoy_engine.config._generate_options import GENERATE_OPTIONS
 from decoy_engine.config._tables import GENERATE_TYPES
@@ -31,7 +32,6 @@ from decoy_engine.execution.native._capabilities import capabilities_for
 from decoy_engine.execution.native._determinism_protocol import GEN_KIND_TO_SITE
 from decoy_engine.generation import synthesize
 from decoy_engine.generation._admission import ADMISSION_MATRIX, classify_plan
-from decoy_engine.generation._numeric_typing import READER_KEYS
 from decoy_engine.generation._pinned_compile import REJECTED_TYPES
 from decoy_engine.generation.composite import CompositeError
 from decoy_engine.generation.kinds import provider_generate
@@ -96,7 +96,8 @@ def test_the_type_is_present_in_every_registry_that_lists_generate_types() -> No
     assert tuple(opts.required) == ("provider",)
     assert ADMISSION_MATRIX["provider"][0] is False
     assert "provider" in REJECTED_TYPES
-    assert READER_KEYS["provider"] == ()
+    # A provider reads no sibling column, so the one input resolver yields no edge for it.
+    assert iter_generate_input_refs({"name": "t"}, {"name": "c", "type": "provider"}) == ()
     assert GEN_KIND_TO_SITE["provider"] == "gen.derive_context"
     caps = capabilities_for("provider")
     assert not caps.is_row_local and caps.is_order_sensitive and caps.is_global
@@ -108,7 +109,7 @@ def test_the_proof_manifest_and_matrix_list_the_type() -> None:
     root = Path(__file__).resolve().parents[4]
     manifest = json.loads((root / "docs" / "proof-manifest.json").read_text())
     assert "provider" in manifest["generation_strategies"]
-    assert manifest["surface"]["generate"] == 15
+    assert manifest["surface"]["generate"] == 16  # GEN-INHERIT E1 adds the sixteenth
     assert "`provider`" in (root / "docs" / "capability-matrix.md").read_text()
 
 

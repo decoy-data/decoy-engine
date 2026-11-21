@@ -482,6 +482,36 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
     )
 
 
+def table_from_pandas_keeping_maps(
+    frame: pd.DataFrame, schema: pa.Schema | None, untouched: Collection[str]
+) -> pa.Table:
+    """`pa.Table.from_pandas(frame)` that gives every untouched map column the source held its
+    map type back. pandas holds a map cell as a list of key/value tuples, which pyarrow cannot
+    infer a type from; the declared type rebuilds it exactly. `schema` is the source table's and
+    `untouched` the columns no strategy changed (`_chunked_carry.untouched_columns`): a masked
+    map column holds the strategy's own values and converts as it always did, like every other
+    column."""
+    maps = (
+        [
+            f
+            for f in schema
+            if pa.types.is_map(f.type) and f.name in frame.columns and f.name in untouched
+        ]
+        if schema is not None
+        else []
+    )
+    if not maps:
+        return pa.Table.from_pandas(frame, preserve_index=False)
+    table = pa.Table.from_pandas(frame.drop(columns=[f.name for f in maps]), preserve_index=False)
+    for field in sorted(maps, key=lambda f: frame.columns.get_loc(f.name)):
+        table = table.add_column(
+            frame.columns.get_loc(field.name),
+            field.name,
+            pa.array(frame[field.name], type=field.type, from_pandas=True),
+        )
+    return table
+
+
 __all__ = [
     "FK_KEY_DTYPE_UNSUPPORTED_CODE",
     "NULL_FK_KEY",
@@ -495,5 +525,6 @@ __all__ = [
     "lossless_fk_int_values",
     "lossless_int_columns",
     "lossless_int_columns_from_config",
+    "table_from_pandas_keeping_maps",
     "to_pandas_fk_safe",
 ]

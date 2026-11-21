@@ -166,15 +166,17 @@ def _fk_job(
         parent, child = parent.slice(0, rows), child.slice(0, rows)
     cfg = fk_config(tmp_path, parent, child)
     if declared:
-        cfg["tables"][1]["columns"].append(
-            {
-                "name": "start",
-                "strategy": "passthrough",
-                "logical_type": "date",
-                "parse_format": ISO_DATE,
-                "error_policy": "null",
-            }
-        )
+        # fk_config already declared `start` as plain passthrough (it is in the source);
+        # replace that entry with the typed one instead of listing the column twice.
+        typed = {
+            "name": "start",
+            "strategy": "passthrough",
+            "logical_type": "date",
+            "parse_format": ISO_DATE,
+            "error_policy": "null",
+        }
+        columns = cfg["tables"][1]["columns"]
+        columns[:] = [typed if c["name"] == "start" else c for c in columns]
         cfg = validated(cfg)
     paths = {n: Path(cfg["sources"][n]["path"]) for n in ("parent", "child")}
     # fk_config wrote metadata-free sources; rewrite them with the canaries.

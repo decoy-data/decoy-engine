@@ -69,7 +69,11 @@ def test_the_clamp_is_computed_by_the_one_helper() -> None:
     assert lane.native_thread_clamp is _host.native_thread_clamp
 
 
-def test_the_default_thread_request_stamps_no_clamp(tmp_path: Path) -> None:
+def test_the_default_thread_request_stamps_no_clamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One usable CPU resolves the default to one thread, which cannot be clamped.
+    monkeypatch.setattr(_host, "detect_usable_cpus", lambda **_: 1)
     cfg, src = _hash_redact_job(tmp_path)
     block = support.run_default(cfg, src).quality_metrics["auto_chunk"]
     assert "native_thread_clamp" not in block

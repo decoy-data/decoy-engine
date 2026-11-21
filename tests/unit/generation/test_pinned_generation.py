@@ -456,8 +456,10 @@ def test_ordinary_generation_is_untouched_by_pinned_mode(snap: str) -> None:
     assert a["zeta_customers"].equals(b["zeta_customers"])
 
     cols[2]["categories"] = ["2024-01-15", "now"]
-    with pytest.raises(WindowedDateError):
+    with pytest.raises(WindowedDateError) as exc:
         compile_and_generate(copy.deepcopy(cfg))
+    assert exc.value.code == "windowed_date_anchor_invalid"
+    assert exc.value.__cause__ is None and exc.value.__context__ is None
 
 
 GOLDEN_ORDINARY_NULL_STATISTICAL = (
@@ -504,7 +506,7 @@ def test_pinnable_allowlist_covers_every_config_type() -> None:
     known = set(typing.get_args(GenerateColumnConfig.model_fields["type"].annotation))
     unclassified = known - set(PINNABLE_TYPES) - set(REJECTED_TYPES)
     assert not unclassified, f"classify for pinned mode: {sorted(unclassified)}"
-    assert set(REJECTED_TYPES) == {"faker", "formula", "lookup", "provider"}
+    assert set(REJECTED_TYPES) == {"faker", "formula", "lookup", "inherit", "provider"}
 
 
 def test_unlisted_type_is_refused_at_compile_and_execute(snap: str) -> None:
@@ -796,22 +798,50 @@ def test_serialized_reference_policies_decode_strictly(stored: Any) -> None:
     assert exc.value.__cause__ is None
 
 
-@pytest.mark.parametrize("entry", [("kids", "pid", "abandon-leaky"), ("kids", "pid", 7), ("kids",)])
-def test_hand_built_plan_with_a_bad_policy_is_refused_before_any_draw(
-    entry: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _no_draw(monkeypatch: pytest.MonkeyPatch) -> None:
     from decoy_engine.generation import synthesize
 
     def boom(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("a column was drawn from a plan with a malformed policy")
+        raise AssertionError("a column was drawn from a plan execute must refuse")
 
     monkeypatch.setattr(synthesize, "_generate_column", boom)
+
+
+def _assert_runtime_relational_refusal(exc: pytest.ExceptionInfo[Any]) -> None:
+    from decoy_engine import reasons
+
+    assert exc.value.code == reasons.runtime.PINNED_RELATIONAL_OPTION_UNSUPPORTED
+    assert exc.value.code.namespace == "runtime"
+    assert exc.value.__cause__ is None and exc.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "policies",
+    [
+        (("kids", "pid", "abandon-leaky"),),
+        (("kids", "pid", 7),),
+        (("kids",),),
+        (7,),
+        ("fail",),
+        (("kids", "pid", "fail"), ("kids", "pid", "FAIL")),
+        "fail",
+        7,
+        None,
+    ],
+)
+def test_hand_built_plan_with_a_bad_policy_is_refused_before_any_draw(
+    policies: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tampered policy field gets the run-time refusal, whatever its wrong shape is."""
+    _no_draw(monkeypatch)
     plan = compile_pinned_plan(_family_config("fail"), REF)
-    bad = dataclasses.replace(plan, reference_policies=(entry,))
-    with pytest.raises(PinnedModeError) as exc:
+    bad = dataclasses.replace(plan, reference_policies=policies)
+    from decoy_engine.generation.pool import GenerationError
+
+    with pytest.raises(GenerationError) as exc:
         execute_pinned(bad, 1)
-    assert exc.value.code == "pinned_plan_malformed"
-    assert "leaky" not in str(exc.value)
+    _assert_runtime_relational_refusal(exc)
+    assert "leaky" not in str(exc.value) and "7" not in str(exc.value)
 
 
 def test_pinned_execute_honors_fail_for_an_empty_parent() -> None:

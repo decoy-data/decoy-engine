@@ -43,9 +43,14 @@ N = 12
 # name -> (columns, data, expected fragment of the chunked rejection or None when none is named)
 GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | None]] = {
     "int_with_nulls": (
-        [support.pass_col("x")],
+        [support.redact_col("x")],
         {"x": pa.array(_nulls(N), pa.int64())},
         "x (integer with nulls)",
+    ),
+    "carried_int_with_nulls": (
+        [support.pass_col("x")],
+        {"x": pa.array(_nulls(N), pa.int64())},
+        None,
     ),
     "int_null_free": ([support.pass_col("x")], {"x": pa.array(range(N), pa.int64())}, None),
     "bucketize_with_nulls": (
@@ -57,14 +62,24 @@ GATE_CASES: dict[str, tuple[list[dict[str, Any]], dict[str, pa.Array], str | Non
         "is not numeric",
     ),
     "decimal_column": (
-        [support.pass_col("x")],
+        [support.redact_col("x")],
         {"x": pa.array([decimal.Decimal(i) for i in range(N)], pa.decimal128(10, 2))},
         "non-chunk-stable pandas round-trip dtypes",
     ),
     "dictionary_column": (
-        [support.pass_col("x")],
+        [support.redact_col("x")],
         {"x": pa.array([f"c{i % 3}" for i in range(N)]).dictionary_encode()},
         "non-chunk-stable pandas round-trip dtypes",
+    ),
+    "carried_decimal_column": (
+        [support.pass_col("x")],
+        {"x": pa.array([decimal.Decimal(i) for i in range(N)], pa.decimal128(10, 2))},
+        None,
+    ),
+    "carried_dictionary_column": (
+        [support.pass_col("x")],
+        {"x": pa.array([f"c{i % 3}" for i in range(N)]).dictionary_encode()},
+        None,
     ),
     "group_key_on_int_group": (
         [
@@ -193,7 +208,9 @@ def test_a_lazy_source_without_statistics_and_no_gated_column_still_routes_chunk
 def test_an_integer_column_without_footer_statistics_declines_and_runs_full_frame(
     tmp_path: Path,
 ) -> None:
-    columns = [support.redact_col("r"), support.pass_col("x")]
+    # `x` is read by a `when:` predicate, so it goes through pandas and its null count is read;
+    # a plain passthrough `x` is carried and needs no count (test_nonfk_dtype_matrix).
+    columns = [{**support.redact_col("r"), "when": "x >= 0"}, support.pass_col("x")]
     data = {
         "r": pa.array([f"s{i}" for i in range(N)]),
         "x": pa.array(range(N), pa.int64()),

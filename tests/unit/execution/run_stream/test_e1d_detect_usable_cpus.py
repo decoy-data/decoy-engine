@@ -335,3 +335,22 @@ def test_cgroup_membership_parsing_has_one_owner() -> None:
     assert _budget.parse_membership is _cgroup.parse_membership
     assert _host.parse_membership is _cgroup.parse_membership
     assert not hasattr(_host, "_parse_mountinfo") and not hasattr(_host, "_Mount")
+
+
+def test_no_affinity_call_prefers_process_cpu_count_over_machine_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Python 3.13 on macOS or Windows: the process count (2) wins over the machine count (8)."""
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 2, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    assert detect_usable_cpus(fs_root=tmp_path) == 2
+
+
+def test_no_affinity_and_no_process_count_uses_machine_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.delattr(os, "process_cpu_count", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    assert detect_usable_cpus(fs_root=tmp_path) == 8

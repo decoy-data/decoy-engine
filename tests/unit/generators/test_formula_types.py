@@ -84,6 +84,16 @@ _EXAMPLES: dict[str, list[dict[str, Any]]] = {
         {"name": "col", "type": "distribution", "family": "uniform", "low": 10, "high": 100}
     ],
     "provider": [{"name": "col", "type": "provider", "provider": "random_int_range"}],
+    "inherit": [
+        {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "id"},
+        {"name": "col", "type": "inherit", "via": "pid", "column": "n"},
+    ],
+}
+# The parent table an example reads through a foreign key.
+_EXAMPLE_TABLES: dict[str, list[dict[str, Any]]] = {
+    "inherit": [
+        {"name": "p", "row_count": 4, "generate_columns": [seq("id"), seq("n", start=100)]}
+    ],
 }
 _EXTRA_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "faker_float": [{"name": "col", "type": "faker", "faker_type": "pyfloat"}],
@@ -162,7 +172,7 @@ _CELLS = [
 
 @pytest.mark.parametrize(("name", "null_p"), _CELLS)
 def test_formula_reads_the_source_column_type(name: str, null_p: float) -> None:
-    _check_fidelity({**_EXAMPLES, **_EXTRA_EXAMPLES}[name], null_p)
+    _check_fidelity({**_EXAMPLES, **_EXTRA_EXAMPLES}[name], null_p, _EXAMPLE_TABLES.get(name))
 
 
 @pytest.mark.parametrize("null_p", [0.0, 0.5])

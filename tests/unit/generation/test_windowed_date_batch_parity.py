@@ -2,7 +2,8 @@
 
 The oracle and the corpus live in `_windowed_date_corpus.py`. The digest below was recorded from
 origin/main 75fba3d855d71e3980a62afc3ce7f1187b72073d before any fast-path code existed. A failure in
-this file is a stop, never an edit to the digest or the corpus.
+this file is a stop, never an edit to the digest or the corpus. Re-pinned once for the reason-coded
+errors (3a5aadc3c): the hash covers error class names and messages, and only those changed.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from tests.unit.generation._windowed_date_corpus import (
     reference_apply_windowed_date,
 )
 
-BASE_DIGEST = "efd24e5746f20b24f5ced9a4656a2d4125f363e05742b641d60c4091fdae6d7b"
+BASE_DIGEST = "479293ba184baae74a89343b5c293b57faceff4173fd2b9255708df0930f8b6e"
 
 CASES = build_cases()
 CASE_IDS = [c.name for c in CASES]

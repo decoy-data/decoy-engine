@@ -18,7 +18,7 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from decoy_engine import reasons
@@ -262,7 +262,16 @@ def _columns(draw: Any) -> list[float]:
     return [float(c) for c in draw(st.lists(_FINITE, min_size=2 * K, max_size=120))]
 
 
+# A subnormal max made the profiler's own 10-bin chart raise (pd.cut rounds the edge to NaN), so the
+# whole snapshot refused a legal column. Found by this property, 2026-11-21.
+_SUBNORMAL_MAX = [2.2250738585e-313] * 2 + [0.0] * 17 + [-1.0]
+
+_SUBNORMAL_ONLY = [-3.58244534e-316, -2e-316, -1e-316, 0.0, 1e-316, 2.43941943e-316] * 32
+
+
 @_SEEDED
+@example(cells=_SUBNORMAL_MAX, n=1)
+@example(cells=_SUBNORMAL_ONLY, n=10)
 @given(cells=_columns(), n=st.integers(1, 1000))
 def test_property_every_plain_histogram_is_floored_recounted_and_tail_stable(
     cells: list[float], n: int
@@ -289,6 +298,14 @@ def test_property_every_plain_histogram_is_floored_recounted_and_tail_stable(
     same_branch = any(s in _stats(swapped, "x") for s in _SHAPES) == bool(shapes)
     if edges != [-1.5, 1.5] and same_branch:
         assert _keys(doc, "x") == _keys(swapped, "x")
+
+
+def test_a_subnormal_maximum_still_profiles_and_floors() -> None:
+    arr = np.asarray(_SUBNORMAL_MAX)
+    stats = _stats(_doc(pd.DataFrame({"x": arr}), numeric_bins=10), "x")
+    assert sum(stats["bin_counts"]) == arr.size
+    assert not _has_small_bin(stats["bin_counts"])
+    assert _recount(arr, stats) == stats["bin_counts"]
 
 
 @pytest.mark.parametrize("size", [20, 21])

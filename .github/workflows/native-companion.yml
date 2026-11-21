@@ -320,6 +320,10 @@ jobs:
       # builds but fails to load would otherwise leave this job green with nothing run.
       - name: Assert the companion loads
         run: python -c "from decoy_engine.execution.native._companion_status import native_companion_status as s; st = s(); print(st); assert st.ok, st"
+      # ENGINE-THREADS-DEFAULT: default thread count against one thread, byte-equal on every
+      # route, and the gap9 grant wiring; the per-route cells skip without the companion.
+      - name: Thread default and grant parity (companion-present case)
+        run: pytest tests/unit/execution/native_threads tests/parity/test_gap9_native_thread_grant.py -v --tb=short
       - name: Native ABI test (companion-present case)
         run: pytest tests/native/test_native_ext_abi.py -v --tb=short
       - name: Compiled-kernel-vs-live-reference parity harness
@@ -382,6 +386,10 @@ jobs:
       # every case is companion-gated and skips elsewhere, so this is the one job that runs them.
       - name: date_shift chunked native lane (companion-present case)
         run: pytest tests/native/test_chunked_date_shift_parity.py tests/native/test_chunked_date_shift_admission.py tests/native/test_chunked_date_shift_types_errors.py tests/native/test_date_shift_jitter_chunked.py -v --tb=short
+      # NONFK-OOM part (a): the carried-passthrough dtype matrix routes a non-FK table through
+      # `run_mask_chunked`, whose native lane runs only with the companion installed.
+      - name: Non-FK carried passthrough dtype matrix (companion-present case)
+        run: pytest tests/parity/test_nonfk_dtype_matrix.py -v --tb=short
       # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
       # it, so this is the one job that can prove the chunked route leaks no source metadata.
       # A skip here would hide that, so the step fails on any SKIPPED line and on an empty

@@ -36,6 +36,7 @@ __all__ = [
     "LOOKUP_WEIGHT_INVALID",
     "PINNED_LOOKUP_UNSUPPORTED",
     "PINNED_PROVIDER_UNSUPPORTED",
+    "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
     "REFERENCE_WEIGHTS_LENGTH_MISMATCH",
     "RELATIONSHIP_PARENT_NOT_UNIQUE",
     "SORT_UNSUPPORTED_TYPE",
@@ -266,4 +267,11 @@ PINNED_PROVIDER_UNSUPPORTED = _d(
     "pinned_provider_unsupported",
     "Provider columns are not available in pinned mode.",
     since="1.32.0",
+)
+# A summary is the whole message beside the table and column names. The run-time twin in the
+# `runtime` namespace carries the same text for a plan that never went through pinned compile.
+PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
+    "pinned_relational_option_unsupported",
+    "Pinned generation does not support this relational generate option.",
+    since=UNRELEASED,
 )

@@ -256,7 +256,8 @@ _PINNED_RUN_CALLS = frozenset(
         "lossless.for_table",
         "lossless_int_columns",
         "order_work",
-        "pa.Table.from_pandas",
+        "table_from_pandas_keeping_maps",
+        "untouched_columns",
         "apply_degenerate_faker_pin",
         "parent_cols.get",
         "parent_cols.setdefault",
@@ -652,6 +653,35 @@ def test_g4_frame_setup_columns_are_declared_reads_or_own_columns(case: str) -> 
     declared, everything = _declared(columns)
     own = {c["name"] for c in columns}
     assert everything or setup <= declared | own, (case, sorted(setup - declared - own))
+
+
+# ---------------------------------------------------------------------------
+# One definition of "untouched": the node-side set agrees with the registry's
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", sorted(_corpus()))
+def test_untouched_columns_agree_with_the_column_access_registry(case: str) -> None:
+    """`untouched_columns` (the adapters, from work nodes) and `passthrough_columns` (the
+    planner and the lane, from config entries) must name the same columns. The registry side is
+    `handler_written_columns` plus the own column of every non-passthrough entry; any column a
+    handler writes or a strategy masks is touched, everything else is untouched."""
+    from decoy_engine.execution._chunked_carry import passthrough_columns, untouched_columns
+    from decoy_engine.execution._column_access import handler_written_columns
+
+    columns, data, _required = _corpus()[case]
+    names = list(data)
+    plan = _compile(columns, data)
+    nodes = [n for n in build_work_list(plan, REG) if n.table == "t"]
+    written = handler_written_columns(columns, REG)
+    if written is None:
+        pytest.skip("a declaration writes unknown columns; no registry set to compare")
+    own_masked = {c["name"] for c in columns if c.get("strategy") != "passthrough"}
+    expected = frozenset(names) - written - own_masked
+    assert untouched_columns(nodes, names, REG) == expected, case
+    # The lane's carry candidates are untouched columns that no `when:` entry guards.
+    cfg = {"tables": [{"name": "t", "columns": columns}]}
+    assert set(passthrough_columns(cfg, table="t", names=names, registry=REG)) <= expected
 
 
 # ---------------------------------------------------------------------------

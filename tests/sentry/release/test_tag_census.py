@@ -83,7 +83,7 @@ def test_contract_3_1_lists_no_internal_tag_and_no_label() -> None:
 
 def test_contract_3_1_reads_the_code_block_and_three_named_prose_tags() -> None:
     contract = _tags.CONTRACT.read_text(encoding="utf-8")
-    block = set(_tags.BARE.findall(_tags.contract_3_1_block(contract)))
+    block = set(_tags.WHOLE.findall(_tags.contract_3_1_block(contract)))
     assert _tags.contract_3_1_tags(contract) == block | _tags.PROSE_ONLY_3_1
     assert not block & _tags.PROSE_ONLY_3_1, "an allowlisted tag moved into the block: drop it"
     # Other tags in the prose do not count: this made-up section lists one tag in the block only.
