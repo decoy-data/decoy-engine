@@ -48,6 +48,7 @@ READER_FILES = (
     "generation/kinds/_provider.py",
     "plan/checks/_generate_providers.py",
     "generation/_referenced_formula.py",
+    "generation/relational/_self_reference.py",
     "generators/columns.py",
     "generators/derivation.py",
     "generators/_formula.py",

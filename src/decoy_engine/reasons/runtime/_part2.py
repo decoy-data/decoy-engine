@@ -77,6 +77,7 @@ __all__ = [
     "OUT_OF_CORE_TEXT_REDACT_UNPREPARED",
     "OUT_OF_CORE_VALIDATORS_NOT_ADMITTED",
     "OUT_OF_CORE_VAULT_CONFIG_REQUIRED",
+    "PINNED_RELATIONAL_OPTION_UNSUPPORTED",
     "PK_DUPLICATES",
     "POOL_CAPACITY_UNVERIFIABLE_NO_PROFILE",
     "POOL_EXCEEDS_CACHE_BUDGET",
@@ -328,7 +329,9 @@ GENERATE_FORMULA_EVALUATION_FAILED = _d(
 )
 
 # Reference-draw refusals. A summary is the whole message beside the table and column names, so
-# none names a key, count, bound or weight.
+# none names a key, count, bound or weight. `pinned_relational_option_unsupported` is the
+# run-time twin of the `plan` code of the same name, with the same text: pinned execute raises
+# it for a plan that never went through pinned compile.
 _d = _catalog.runtime("GenerationError")
 
 GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
@@ -339,6 +342,11 @@ GENERATE_FITTED_REFERENCE_BOUNDS_CONFLICT = _d(
 GENERATE_PER_PARENT_INFEASIBLE = _d(
     "generate_per_parent_infeasible",
     "Generate reference column per-parent bounds cannot hold for its parent keys and row count.",
+    since=UNRELEASED,
+)
+PINNED_RELATIONAL_OPTION_UNSUPPORTED = _d(
+    "pinned_relational_option_unsupported",
+    "Pinned generation does not support this relational generate option.",
     since=UNRELEASED,
 )
 REFERENCE_BOUNDS_UNSATISFIED = _d(

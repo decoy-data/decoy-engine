@@ -132,9 +132,25 @@ def _int_nulls_case() -> Case:
         {"val": pa.array([f"v{i}" for i in range(N)]), "amount": pa.array(vals, pa.int64())}
     )
     return Case(
-        [support.hash_col("val", "t_ns"), support.pass_col("amount")],
+        [
+            {**support.hash_col("val", "t_ns"), "when": "amount > 3"},
+            support.pass_col("amount"),
+        ],
         table,
         expect_dispatched=False,
+    )
+
+
+def _carried_int_nulls_case() -> Case:
+    vals: list[Any] = list(range(N))
+    vals[7] = None
+    table = pa.table(
+        {"val": pa.array([f"v{i}" for i in range(N)]), "amount": pa.array(vals, pa.int64())}
+    )
+    return Case(
+        [support.hash_col("val", "t_ns"), support.pass_col("amount")],
+        table,
+        expect_dispatched=True,
     )
 
 
@@ -212,6 +228,7 @@ CASES: dict[str, Callable[[], Case]] = {
     "composite_bundle": _composite_case,
     "fpe_join_group": _fpe_join_group_case,
     "int_with_nulls": _int_nulls_case,
+    "carried_int_with_nulls": _carried_int_nulls_case,
     "bucketize_null_bearing": _bucketize_nulls_case,
     "below_threshold": lambda: _sized(mt.THRESHOLD - 1),
     "at_threshold": lambda: _sized(mt.THRESHOLD),

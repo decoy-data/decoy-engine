@@ -386,6 +386,10 @@ jobs:
       # every case is companion-gated and skips elsewhere, so this is the one job that runs them.
       - name: date_shift chunked native lane (companion-present case)
         run: pytest tests/native/test_chunked_date_shift_parity.py tests/native/test_chunked_date_shift_admission.py tests/native/test_chunked_date_shift_types_errors.py tests/native/test_date_shift_jitter_chunked.py -v --tb=short
+      # NONFK-OOM part (a): the carried-passthrough dtype matrix routes a non-FK table through
+      # `run_mask_chunked`, whose native lane runs only with the companion installed.
+      - name: Non-FK carried passthrough dtype matrix (companion-present case)
+        run: pytest tests/parity/test_nonfk_dtype_matrix.py -v --tb=short
       # OUTPUT-METADATA-LEAK: the auto-chunk canary cell needs the companion and skips without
       # it, so this is the one job that can prove the chunked route leaks no source metadata.
       # A skip here would hide that, so the step fails on any SKIPPED line and on an empty

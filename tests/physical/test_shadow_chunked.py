@@ -240,12 +240,12 @@ def test_chunked_degenerate_all_null_column_parity(tmp_path: Path) -> None:
 
 def test_chunk_boundary_dtype_instability_declines_chunked_driver(tmp_path: Path) -> None:
     idx = list(range(_N_ROWS))
-    amounts: list[int | None] = list(idx)
-    amounts[7] = None  # one null is enough to trip the int+null widening gate
+    # A masked dictionary column goes through pandas, and its type is not chunk-stable. (A
+    # passthrough column nothing reads is carried exactly and no longer trips the gate.)
     source = pa.table(
         {
             "tr_phone": pa.array([f"512{i % 9000:04d}" for i in idx], type=pa.string()),
-            "pt_amount": pa.array(amounts, type=pa.int64()),
+            "pt_amount": pa.array([f"c{i % 5}" for i in idx]).dictionary_encode(),
         }
     )
     columns = [
@@ -254,7 +254,11 @@ def test_chunk_boundary_dtype_instability_declines_chunked_driver(tmp_path: Path
             "strategy": "truncate",
             "provider_config": {"length": 3, "keep": "head"},
         },
-        {"name": "pt_amount", "strategy": "passthrough"},
+        {
+            "name": "pt_amount",
+            "strategy": "truncate",
+            "provider_config": {"length": 3, "keep": "head"},
+        },
     ]
 
     run = _run_chunked(tmp_path, "dtype_unstable", source, columns)
