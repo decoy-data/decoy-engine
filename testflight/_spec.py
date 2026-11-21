@@ -354,6 +354,27 @@ class JointMaskConsistencySpec(BaseModel):
     reference: str
 
 
+class InheritedColumnSpec(BaseModel):
+    """Correctness expectation for an `inherit` generate column.
+
+    ``column`` in ``table`` copies ``parent_column`` of the ``parent_table`` row whose
+    ``parent_key`` equals the child's ``via`` value; a null ``via`` gives a null copy.
+    ``min_null_keys`` and ``min_distinct_values`` are anti-vacuity floors: the fixture must
+    hold at least that many null-key rows and distinct copied values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: str
+    column: str
+    via: str
+    parent_table: str
+    parent_key: str
+    parent_column: str
+    min_null_keys: int = Field(ge=0, default=1)
+    min_distinct_values: int = Field(ge=1, default=2)
+
+
 class MaskedCorrelationSpec(BaseModel):
     """Relabel-invariant association check for a value-changing masked column pair.
 
@@ -474,6 +495,10 @@ class InvariantSpec(BaseModel):
     # Declared per joint_mask group; the runner checks every output row against the
     # set of valid tuples from the shipped reference table.
     joint_mask_consistency: list[JointMaskConsistencySpec] = Field(default_factory=list)
+
+    # `inherit` generate columns: each child value equals its parent row's value through the
+    # foreign key, and a null key gives a null.
+    inherited_columns: list[InheritedColumnSpec] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

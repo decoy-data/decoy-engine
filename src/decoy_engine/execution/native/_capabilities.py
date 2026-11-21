@@ -442,6 +442,18 @@ _GEN_ONLY: dict[str, _Ortho] = {
             "from the file. Resident route only, non-partitionable like categorical generation."
         ),
     ),
+    "inherit": _Ortho(
+        False,
+        False,
+        True,
+        False,
+        False,
+        gen=True,
+        notes=(
+            "Copies the value of the parent row the child's foreign key names; no draw. Reads "
+            "the whole finished parent table, typed as the parent column. Resident route only."
+        ),
+    ),
     "provider": _Ortho(
         False,
         True,

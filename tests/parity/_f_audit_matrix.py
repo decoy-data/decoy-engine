@@ -155,7 +155,7 @@ def compute_of(p: Probe) -> str:
         return WINDOWED_SHIFT
     if p.kind == "formula":
         return FORMULA
-    if p.kind in {"derived", "derived_aggregate"}:
+    if p.kind in {"derived", "derived_aggregate", "inherit"}:
         return NO_SELECTION
     return LEGACY_SYNTHESIZE
 
@@ -175,6 +175,11 @@ def witness_of(p: Probe) -> tuple[str, str]:
         return (
             EXCLUDED,
             "legacy-only and file-backed; value equality is the GEN-TYPES E3 lookup tests",
+        )
+    if p.kind == "inherit":
+        return (
+            EXCLUDED,
+            "legacy-only copy of a parent row; value equality is the GEN-INHERIT E1 tests",
         )
     if p.kind == "windowed_date" and not p.anchor_ok:
         return EXCLUDED, "legacy windowed_date is unobserved; proven by route and reason"
@@ -410,6 +415,12 @@ ROWS: Final[tuple[AuditRow, ...]] = (
         Probe("lookup"),
         lambda p: _legacy_kind(p, "lookup"),
         "family declined (file-backed list pinned in the plan); one random.Random.choices call",
+    ),
+    _row(
+        "inherit",
+        Probe("inherit"),
+        lambda p: _legacy_kind(p, "inherit"),
+        "family declined (reads a parent row by foreign key); no draw",
     ),
     _row(
         "provider",

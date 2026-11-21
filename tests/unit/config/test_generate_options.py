@@ -38,6 +38,7 @@ MINIMAL: dict[str, dict[str, Any]] = {
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"codeset": "icd10"},
     "provider": {"provider": "synthetic_npi"},
+    "inherit": {"via": "r", "column": "id"},
 }
 
 
@@ -560,3 +561,454 @@ def test_schema_requires_the_keys_checked_at_plan_compile() -> None:
     for type_, spec in GENERATE_OPTIONS.items():
         assert _branch(type_)["required"] == [*spec.required, *spec.plan_required]
     assert {"op", "column"} <= set(_branch("derived_aggregate")["required"])
+
+
+# ---- generate inputs: the one descriptor per option and its resolver ----------------------------
+
+REF_KINDS = {
+    "column",
+    "column_list",
+    "expression",
+    "column_via_reference",
+    "column_in_named_table",
+}
+REF_PHASES = {"inline", "post_fill"}
+
+
+def _edges(table: dict[str, Any], column: dict[str, Any]) -> list[tuple[Any, ...]]:
+    from decoy_engine.config import iter_generate_input_refs
+
+    return [
+        (e.option, e.source_table, e.source_column, e.must_be_earlier, e.phase)
+        for e in iter_generate_input_refs(table, column)
+    ]
+
+
+def _kids(*columns: dict[str, Any]) -> dict[str, Any]:
+    fk = {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "id"}
+    return {"name": "t", "row_count": 5, "generate_columns": [fk, *columns]}
+
+
+def test_every_input_descriptor_is_from_the_closed_vocabulary() -> None:
+    from decoy_engine.config._generate_options import OptionSpec
+
+    assert (OptionSpec().ref_kind, OptionSpec().ref_context_key, OptionSpec().ref_phase) == (
+        None,
+        None,
+        "inline",
+    )
+    for type_, spec in GENERATE_OPTIONS.items():
+        for key, option in spec.keys.items():
+            where = f"{type_}.{key}"
+            assert option.ref_kind is None or option.ref_kind in REF_KINDS, where
+            assert option.ref_phase in REF_PHASES, where
+            if option.ref_context_key is not None:
+                assert option.ref_kind in {"column_via_reference", "column_in_named_table"}, where
+                assert option.ref_context_key in spec.keys, where
+            if option.ref_kind in {"column_via_reference", "column_in_named_table"}:
+                assert option.ref_context_key is not None, where
+
+
+def test_the_registered_inputs_are_exactly_these() -> None:
+    registered = {
+        f"{type_}.{key}": (option.ref_kind, option.ref_context_key, option.ref_phase)
+        for type_, spec in GENERATE_OPTIONS.items()
+        for key, option in spec.keys.items()
+        if option.ref_kind is not None
+    }
+    assert registered == {
+        "categorical.condition_on": ("column", None, "inline"),
+        "statistical.condition_on": ("column", None, "inline"),
+        "derived.expression": ("expression", None, "inline"),
+        "derived_aggregate.column": ("column_in_named_table", "from_table", "post_fill"),
+        "derived_aggregate.via": ("column_in_named_table", "from_table", "post_fill"),
+        "grouped_series.group_by": ("column", None, "inline"),
+        "grouped_series.order_by": ("column", None, "inline"),
+        "windowed_date.anchor": ("column_via_reference", "anchor_via", "inline"),
+        "windowed_date.anchor_via": ("column", None, "inline"),
+        "group_key.group_by": ("column", None, "inline"),
+        "formula.references": ("column_list", None, "post_fill"),
+        "inherit.via": ("column", None, "inline"),
+        "inherit.column": ("column_via_reference", "via", "inline"),
+    }
+
+
+def test_a_same_table_input_is_an_earlier_column_of_its_own_table() -> None:
+    table = _kids()
+    column = {"name": "g", "type": "grouped_series", "group_by": "a", "order_by": "b"}
+    assert _edges(table, column) == [
+        ("group_by", "t", "a", True, "inline"),
+        ("order_by", "t", "b", True, "inline"),
+    ]
+    from decoy_engine.config import iter_generate_input_refs
+
+    edge = iter_generate_input_refs(table, column)[0]
+    assert (edge.consumer_table, edge.consumer_column) == ("t", "g")
+
+
+def test_an_expression_input_is_each_column_it_reads() -> None:
+    column = {"name": "d", "type": "derived", "expression": 'concat(a, "b") if c > 1 else a'}
+    assert sorted(_edges(_kids(), column)) == [
+        ("expression", "t", "a", True, "inline"),
+        ("expression", "t", "c", True, "inline"),
+    ]
+    broken = {"name": "d", "type": "derived", "expression": "a +* ("}
+    assert _edges(_kids(), broken) == []
+
+
+def test_formula_references_are_read_after_the_table_is_filled() -> None:
+    column = {"name": "f", "type": "formula", "formula": "a + b", "references": ["a", "b", 3]}
+    assert _edges(_kids(), column) == [
+        ("references", "t", "a", False, "post_fill"),
+        ("references", "t", "b", False, "post_fill"),
+    ]
+
+
+def test_an_anchor_without_anchor_via_is_a_same_table_input() -> None:
+    column = {"name": "v", "type": "windowed_date", "anchor": "born", "max_days": 3}
+    assert _edges(_kids(), column) == [("anchor", "t", "born", True, "inline")]
+
+
+def test_an_anchor_with_anchor_via_is_a_column_of_the_referenced_table() -> None:
+    column = {
+        "name": "v",
+        "type": "windowed_date",
+        "anchor": "born",
+        "anchor_via": "pid",
+        "max_days": 3,
+    }
+    assert _edges(_kids(column), column) == [
+        ("anchor", "p", "born", False, "inline"),
+        ("anchor_via", "t", "pid", True, "inline"),
+    ]
+    # A same-named sibling changes nothing: the anchor is still the parent's column.
+    born = {"name": "born", "type": "sequence", "start": 1}
+    assert _edges(_kids(born, column), column)[0] == ("anchor", "p", "born", False, "inline")
+
+
+@pytest.mark.parametrize(
+    "via_column",
+    [
+        None,
+        {"name": "pid", "type": "sequence", "start": 1},
+        {"name": "pid", "type": "reference", "reference_table": 7, "reference_column": "id"},
+    ],
+    ids=["absent", "not-a-reference", "no-table-name"],
+)
+def test_an_anchor_whose_lookup_column_leads_nowhere_has_no_source_table(via_column: Any) -> None:
+    """A missing lookup column is the `anchor_via` edge's problem. One that exists but is not a
+    reference to a table gives the anchor an empty source table, which no plan check accepts."""
+    column = {
+        "name": "v",
+        "type": "windowed_date",
+        "anchor": "born",
+        "anchor_via": "pid",
+        "max_days": 3,
+    }
+    table = {"name": "t", "generate_columns": [*([via_column] if via_column else []), column]}
+    via_edge = ("anchor_via", "t", "pid", True, "inline")
+    if via_column is None:
+        assert _edges(table, column) == [via_edge]
+    else:
+        assert _edges(table, column) == [("anchor", "", "born", False, "inline"), via_edge]
+
+
+def _keyed(table: dict[str, Any], column: dict[str, Any]) -> list[tuple[str, str, str]]:
+    from decoy_engine.config import iter_generate_input_refs
+
+    return [
+        (e.option, e.source_table, e.source_key) for e in iter_generate_input_refs(table, column)
+    ]
+
+
+def test_an_input_read_through_a_foreign_key_carries_the_parent_key() -> None:
+    """The edge is the one answer to "which parent row": its table and the key the row is
+    found by, so no consumer follows the lookup column again."""
+    fk = {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "pkey"}
+    column = {
+        "name": "v",
+        "type": "windowed_date",
+        "anchor": "born",
+        "anchor_via": "pid",
+        "max_days": 3,
+    }
+    table = {"name": "t", "generate_columns": [fk, column]}
+    assert _keyed(table, column) == [("anchor", "p", "pkey"), ("anchor_via", "t", "")]
+    same_table = {"name": "v", "type": "windowed_date", "anchor": "born", "max_days": 3}
+    assert _keyed(_kids(), same_table) == [("anchor", "t", "")]
+
+
+@pytest.mark.parametrize(
+    "via_column",
+    [
+        {"name": "pid", "type": "sequence", "start": 1},
+        {"name": "pid", "type": "reference", "reference_table": 7, "reference_column": "id"},
+        {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": 7},
+    ],
+    ids=["not-a-reference", "no-table-name", "no-key-name"],
+)
+def test_a_lookup_column_that_names_no_key_gives_an_empty_key(via_column: Any) -> None:
+    column = {"name": "v", "type": "windowed_date", "anchor": "born", "anchor_via": "pid"}
+    table = {"name": "t", "generate_columns": [via_column, column]}
+    anchor = _keyed(table, column)[0]
+    assert anchor[0] == "anchor" and anchor[2] == ""
+
+
+def test_an_input_in_a_named_table_has_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from decoy_engine.config import _generate_options as options
+
+    spec = options.TypeOptions(
+        {
+            "from": options.OptionSpec(),
+            "column": options.OptionSpec(
+                ref_kind="column_in_named_table", ref_context_key="from", ref_phase="post_fill"
+            ),
+        }
+    )
+    monkeypatch.setitem(options.GENERATE_OPTIONS, "probe", spec)  # type: ignore[index]
+    column = {"name": "total", "type": "probe", "column": "amount", "from": "lines"}
+    assert _keyed(_kids(), column) == [("column", "lines", "")]
+
+
+def test_an_input_in_a_named_table_resolves_to_that_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The descriptor a per-parent aggregate registers: `column` lives in the table `from` names."""
+    from decoy_engine.config import _generate_options as options
+
+    spec = options.TypeOptions(
+        {
+            "from": options.OptionSpec(),
+            "column": options.OptionSpec(
+                ref_kind="column_in_named_table", ref_context_key="from", ref_phase="post_fill"
+            ),
+        }
+    )
+    monkeypatch.setitem(options.GENERATE_OPTIONS, "probe", spec)  # type: ignore[index]
+    column = {"name": "total", "type": "probe", "column": "amount", "from": "lines"}
+    assert _edges(_kids(), column) == [("column", "lines", "amount", False, "post_fill")]
+    # Without its companion key the option keeps the same-table, earlier, inline rule.
+    assert _edges(_kids(), {**column, "from": None}) == [("column", "t", "amount", True, "inline")]
+    assert _edges(_kids(), {**column, "from": 5}) == []
+
+
+def test_a_per_parent_aggregate_reads_its_child_table_after_it_is_filled() -> None:
+    total = {"name": "total", "type": "derived_aggregate", "op": "sum", "column": "amount"}
+    per_parent = {**total, "from_table": "lines", "via": "oid"}
+    assert _edges(_kids(), per_parent) == [
+        ("column", "lines", "amount", False, "post_fill"),
+        ("via", "lines", "oid", False, "post_fill"),
+    ]
+    # A same-named column of the aggregate's own table changes nothing.
+    amount = {"name": "amount", "type": "sequence", "start": 1}
+    assert _edges(_kids(amount), per_parent)[0] == ("column", "lines", "amount", False, "post_fill")
+    # Without `from_table` the aggregate reads an earlier column of its own table, as before.
+    assert _edges(_kids(), total) == [("column", "t", "amount", True, "inline")]
+
+
+def _per_parent_config(**options: Any) -> dict[str, Any]:
+    """`p` holds the aggregate over `t`, whose `pid` references `p.id`."""
+    config = _config(
+        {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "id"},
+        {"name": "amount", "type": "categorical", "categories": [1, 2]},
+    )
+    total = {"name": "total", "type": "derived_aggregate", "op": "sum", "column": "amount"}
+    config["tables"][1]["generate_columns"].append({**total, **options})
+    return config
+
+
+def test_from_table_and_via_are_derived_aggregate_options() -> None:
+    PipelineConfig.model_validate(_per_parent_config(from_table="t", via="pid"))
+    for key, value in (("from_table", 7), ("via", ["pid"])):
+        options = {"from_table": "t", "via": "pid", key: value}
+        with pytest.raises(ValidationError) as info:
+            PipelineConfig.model_validate(_per_parent_config(**options))
+        errs = info.value.errors(include_url=False)
+        assert [(e["type"], tuple(e["loc"])) for e in errs] == [
+            ("generate_option_type", ("tables", 1, "generate_columns", 1, key))
+        ]
+    for key in ("from_table", "via"):
+        errs = _errors(_col("sequence", **{key: "t"}))
+        assert [_spot(e) for e in errs] == [("generate_option_unknown", (key,))]
+
+
+def test_a_column_with_no_registered_input_or_an_unknown_type_has_no_edges() -> None:
+    assert _edges(_kids(), {"name": "s", "type": "sequence", "start": 1}) == []
+    assert _edges(_kids(), {"name": "x", "type": "not_a_type", "anchor": "a"}) == []
+    assert _edges(_kids(), {"name": "v", "type": "windowed_date", "anchor": 5}) == []
+    lookup = {"name": "code", "type": "lookup", "codeset": "icd10", "value_column": "pid"}
+    assert _edges(_kids(), lookup) == []
+
+
+def test_the_resolver_is_exported_and_reads_only() -> None:
+    from decoy_engine import config as config_api
+
+    assert {"GenerateInputRef", "iter_generate_input_refs"} <= set(config_api.__all__)
+    column = {"name": "v", "type": "windowed_date", "anchor": "born", "anchor_via": "pid"}
+    table = _kids(column)
+    before = copy.deepcopy(table)
+    edges = config_api.iter_generate_input_refs(table, column)
+    assert isinstance(edges, tuple) and table == before
+    assert all(isinstance(e, config_api.GenerateInputRef) for e in edges)
+    with pytest.raises(AttributeError):
+        edges[0].source_table = "other"  # type: ignore[misc]
+
+
+def test_anchor_via_is_a_windowed_date_option() -> None:
+    column = _col("windowed_date", anchor_via="pid")
+    fk = {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "id"}
+    born = {"name": "a", "type": "categorical", "categories": ["2001-02-03"]}
+    config = _config(fk, column)
+    config["tables"][1]["generate_columns"].append(born)
+    PipelineConfig.model_validate(config)
+    errs = _errors(fk, _col("windowed_date", anchor_via=7))
+    assert [(e["type"], tuple(e["loc"])) for e in errs] == [
+        ("generate_option_type", ("tables", 0, "generate_columns", 1, "anchor_via"))
+    ]
+
+
+# GEN-INHERIT E2, AT-2: `condition_on` and `by` on a categorical column ----------------------
+
+MISSING = "missing"
+UNIQUE_CONFLICT = str(reasons.config.GENERATE_UNIQUE_CONFLICT)
+
+
+def _conditional(**extra: Any) -> dict[str, Any]:
+    by = {"north": {"weights": [2, 1]}, "south": {"categories": ["x", "y", "z"]}}
+    return {**_col("categorical", condition_on="region", by=by), **extra}
+
+
+def _region() -> dict[str, Any]:
+    return {"name": "region", "type": "categorical", "categories": ["north", "south"]}
+
+
+def _spots(col: dict[str, Any]) -> list[tuple[str, tuple[Any, ...]]]:
+    return [_spot(e) for e in _errors(_region(), col)]
+
+
+def test_condition_on_and_by_are_categorical_options() -> None:
+    keys = GENERATE_OPTIONS["categorical"].keys
+    assert {"condition_on", "by"} <= set(keys)
+    assert keys["condition_on"].ref_kind == "column" and keys["by"].ref_kind is None
+    PipelineConfig.model_validate(_config(_region(), _conditional()))
+
+
+@pytest.mark.parametrize(("given", "absent"), [("by", "condition_on"), ("condition_on", "by")])
+def test_by_and_condition_on_are_given_together(given: str, absent: str) -> None:
+    col = _conditional()
+    del col[absent]
+    assert _spots(col) == [(MISSING, (absent,))]
+    assert [_spot(e)[1] for e in _errors(_region(), {**col, absent: None})] == [(absent,)]
+
+
+def test_by_must_be_a_mapping() -> None:
+    assert _spots(_conditional(by=["north"])) == [(TYPE, ("by",))]
+    assert _spots(_conditional(by=None)) == [(TYPE, ("by",))]
+
+
+@pytest.mark.parametrize("key", [7731, 1.5, True, False, None])
+def test_a_key_that_is_not_text_is_refused_at_its_position_only(key: Any) -> None:
+    by = {"north": {"weights": [1, 1]}, key: {"weights": [1, 1]}}
+    errs = _errors(_region(), _conditional(by=by))
+    assert [_spot(e) for e in errs] == [(TYPE, ("by", 1))]
+    for text in (errs[0]["msg"], repr(errs)):
+        assert "7731" not in text and "1.5" not in text
+
+
+def test_a_bool_key_message_says_to_quote_it_as_its_text() -> None:
+    errs = _errors(_region(), _conditional(by={True: {"weights": [1, 1]}}))
+    assert '"True"' in errs[0]["msg"] and '"False"' in errs[0]["msg"]
+    assert errs[0]["msg"].startswith(reasons.lookup(TYPE)[0].summary)
+
+
+@pytest.mark.parametrize(
+    ("entry", "where"),
+    [
+        ({"weights": [1, 1], "bogus": 1}, (UNKNOWN_KEY, ("by", 0, "bogus"))),
+        ({"condition_on": "x", "weights": [1, 1]}, (UNKNOWN_KEY, ("by", 0, "condition_on"))),
+        ({}, (TYPE, ("by", 0))),
+        ("north", (TYPE, ("by", 0))),
+        (None, (TYPE, ("by", 0))),
+        ({"categories": "xy"}, (TYPE, ("by", 0, "categories"))),
+        ({"categories": []}, (TYPE, ("by", 0, "categories"))),
+        ({"categories": None}, (TYPE, ("by", 0, "categories"))),
+        ({"weights": None}, (TYPE, ("by", 0, "weights"))),
+        ({"weights": [1]}, (WEIGHTS, ("by", 0, "weights"))),
+        ({"weights": [1, -1]}, (WEIGHTS, ("by", 0, "weights", 1))),
+        ({"weights": [0, 0]}, (WEIGHTS, ("by", 0, "weights"))),
+        ({"weights": [1, True]}, (WEIGHTS, ("by", 0, "weights", 1))),
+        ({"categories": ["x", "y", "z"], "weights": [1, 1]}, (WEIGHTS, ("by", 0, "weights"))),
+    ],
+)
+def test_a_bad_entry_is_refused_at_its_nested_location(entry: Any, where: Any) -> None:
+    assert _spots(_conditional(by={"north": entry})) == [where]
+
+
+def test_entry_weights_pair_with_the_entry_categories_else_the_top_level_ones() -> None:
+    ok = {
+        "north": {"weights": [1, 3]},
+        "south": {"categories": ["x", "y", "z"], "weights": [1, 2, 3]},
+    }
+    PipelineConfig.model_validate(_config(_region(), _conditional(by=ok)))
+    assert _spots(_conditional(by={"north": {"weights": [1, 2, 3]}})) == [
+        (WEIGHTS, ("by", 0, "weights"))
+    ]
+
+
+def test_a_by_key_is_never_echoed() -> None:
+    by = {CANARY: {"weights": [1, 1], "bogus": 1}, "south": {"weights": [CANARY]}}
+    errs = _errors(_region(), _conditional(by=by))
+    assert {_spot(e) for e in errs} == {
+        (UNKNOWN_KEY, ("by", 0, "bogus")),
+        (WEIGHTS, ("by", 1, "weights", 0)),
+    }
+    for text in (repr(errs), *(e["msg"] for e in errs)):
+        assert CANARY not in text
+
+
+def test_unique_with_condition_on_is_a_conflict() -> None:
+    col = _conditional(unique=True)
+    assert (UNIQUE_CONFLICT, ("condition_on",)) in _spots(col)
+
+
+# GEN-INHERIT E1 AT-2: `inherit` -----------------------------------------------------------------
+
+UNIQUE_UNSUPPORTED = str(reasons.config.GENERATE_UNIQUE_UNSUPPORTED)
+
+
+def _fk() -> dict[str, Any]:
+    return {"name": "r", "type": "reference", "reference_table": "p", "reference_column": "id"}
+
+
+def _inherit(**extra: Any) -> dict[str, Any]:
+    return {"name": "c", "type": "inherit", "via": "r", "column": "id", **extra}
+
+
+def test_inherit_takes_via_and_column() -> None:
+    spec = GENERATE_OPTIONS["inherit"]
+    assert set(spec.keys) == {"via", "column"}
+    assert spec.required == ("via", "column")
+    PipelineConfig.model_validate(_config(_fk(), _inherit(null_probability=0.2)))
+
+
+@pytest.mark.parametrize("key", ["via", "column"])
+def test_inherit_needs_via_and_column(key: str) -> None:
+    col = _inherit()
+    del col[key]
+    assert [(e["type"], tuple(e["loc"])) for e in _errors(_fk(), col)] == [
+        (MISSING, ("tables", 0, "generate_columns", 1, key))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extra", "code", "where"),
+    [
+        ({"via": 3}, TYPE, ("via",)),
+        ({"column": ["id"]}, TYPE, ("column",)),
+        ({"output_type": "int"}, UNKNOWN_KEY, ("output_type",)),
+        ({"weights": [1]}, UNKNOWN_KEY, ("weights",)),
+        ({"unique": True}, UNIQUE_UNSUPPORTED, ("unique",)),
+    ],
+)
+def test_an_inherit_option_refusal_names_its_key(
+    extra: dict[str, Any], code: str, where: tuple[str, ...]
+) -> None:
+    assert [_spot(e) for e in _errors(_fk(), _inherit(**extra))] == [(code, where)]

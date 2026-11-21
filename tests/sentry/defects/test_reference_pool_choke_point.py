@@ -325,3 +325,40 @@ def test_keyed_containers_are_accepted() -> None:
         "    return Counter(value_key(v) for v in values), tally\n"
     )
     assert relational_problems(ok) == []
+
+
+# ---- GEN-INHERIT AT-12: a copied parent value is found by the one parent lookup -----------------
+
+INHERIT_FILE = "generation/relational/_inherit.py"
+AGGREGATE_FILE = "generation/relational/_aggregate.py"
+LOOKUP_FILE = "generation/relational/_parent_lookup.py"
+INLINE_INDEX = (
+    "    row_of = {k: i for i, k in "
+    "enumerate(pools[source.source_table].column(source.source_key).to_pylist())}\n"
+)
+
+
+def _pool_key_maps(source: str) -> list[int]:
+    # The scan GEN-REL's input-edge sentry runs over every generation module: dict or index
+    # construction keyed by a `pools[...]` column, so a pandas groupby or reindex is not one.
+    from tests.sentry.defects.test_generate_input_edges import pool_key_maps
+
+    return pool_key_maps(source)
+
+
+def test_inherit_copies_through_the_parent_lookup_and_builds_no_index() -> None:
+    inherit = _read(INHERIT_FILE)
+    assert calls_of(inherit, "lookup_parent_values") == ["inherit_values"]
+    assert _pool_key_maps(inherit) == []
+    # E3b's aggregate post-pass groups and reindexes a finished child: it stays green.
+    assert _pool_key_maps(_read(AGGREGATE_FILE)) == []
+    assert _pool_key_maps(_read(LOOKUP_FILE)), "the scan must see the real lookup"
+
+
+def test_seeded_an_inline_dict_lookup_in_inherit_is_seen() -> None:
+    seeded = _swap(
+        _read(INHERIT_FILE),
+        "    return lookup_parent_values(",
+        INLINE_INDEX + "    return lookup_parent_values(",
+    )
+    assert _pool_key_maps(seeded)
