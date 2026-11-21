@@ -743,8 +743,13 @@ def test_b6_output_failure_counts_as_output_quarantine(tmp_path: Path) -> None:
 
 def test_b7_plan_version_is_5_and_v2_plans_need_recompile() -> None:
     from decoy_engine.plan._compile import PLAN_VERSION
+    from decoy_engine.plan._errors import PlanCompileError
+    from decoy_engine.plan._serialize import plan_from_yaml
 
     assert PLAN_VERSION == 5
+    with pytest.raises(PlanCompileError) as refused:
+        plan_from_yaml("plan_version: 2\n")
+    assert refused.value.code == "plan_recompile_required"
 
 
 def test_b7_legacy_run_outputs_are_unchanged(tmp_path: Path) -> None:

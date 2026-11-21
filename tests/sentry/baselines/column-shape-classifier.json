@@ -10,6 +10,12 @@
   },
   "declared_shape::plan/checks/_column_shapes.py": {
    "reason": "maps an F06 declaration to its shape"
+  },
+  "observed_shape::profile/_walk.py": {
+   "reason": "the walk records each column's shape"
+  },
+  "observed_shape::execution/_chunked_profile.py": {
+   "reason": "the Arrow twin of the walk records the same shape"
   }
  }
 }
