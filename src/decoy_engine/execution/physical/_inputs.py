@@ -220,6 +220,9 @@ class PhysicalPlanInputs:
     out_of_core_facts: OutOfCoreRoutingFacts
     native_companion_reason: str
     engine_version: str
+    # The kill switch. Off, the chunked lane converts every column to pandas, so the planner
+    # exempts no carried column; the compiler's classification must read the same flag.
+    chunked_dispatcher_enabled: bool = True
 
     @property
     def has_mask_table(self) -> bool:
@@ -341,6 +344,7 @@ def compute_plan_hash(inputs: PhysicalPlanInputs) -> str:
         inputs.native_companion_reason,
         *((facts.lazy_transform_bearing,) if facts.lazy_transform_bearing else ()),
         *(("fk_ooc_dtype_hazard",) if facts.fk_ooc_dtype_hazard else ()),
+        *(() if inputs.chunked_dispatcher_enabled else ("chunked_dispatcher_off",)),
     )
     digest = hashlib.sha256()
     for part in parts:

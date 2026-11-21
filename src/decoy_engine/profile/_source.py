@@ -198,6 +198,20 @@ def profile_source(
 # ---------------------------------------------------------------------
 
 
+def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
+    """The Arrow schema, for a source that can hold list, struct or map columns.
+
+    Only Parquet and resident tables can; reading a CSV or fixed-width schema infers types
+    from the file, which the bounded profile avoids."""
+    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
+
+    if isinstance(
+        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
+    ):
+        return reader.schema()
+    return None
+
+
 def _profile_one_source(
     reader: ProfileSource,
     *,
@@ -228,6 +242,7 @@ def _profile_one_source(
             fk_specs=fk_specs,
             sample_rows=sample_rows,
             rng=rng,
+            arrow_schema=_nested_capable_schema(reader),
         )
 
     if sample_rows is None:
@@ -273,6 +288,7 @@ def _profile_one_source(
         sample_rows=effective_sample_rows,
         rng=rng,
         total_row_count=effective_total,
+        arrow_schema=_nested_capable_schema(reader),
     )
     return replace(table, row_count_exact=row_count.exact)
 

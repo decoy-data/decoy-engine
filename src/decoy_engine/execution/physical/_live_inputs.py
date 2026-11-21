@@ -68,6 +68,7 @@ def build_live_physical_plan_inputs(
     out_of_core_reorder_threshold_rows: int | None,
     out_of_core_budget_bytes: int | None,
     engine_version: str,
+    chunked_dispatcher_enabled: bool = True,
 ) -> PhysicalPlanInputs:
     """Task 4.5 D4: build a `PhysicalPlanInputs` from `run_pipeline`'s OWN
     already-produced `profile` / `plan` / route facts, for the unified
@@ -171,4 +172,5 @@ def build_live_physical_plan_inputs(
         out_of_core_facts=out_of_core_facts,
         native_companion_reason=native_companion_status().reason,
         engine_version=engine_version,
+        chunked_dispatcher_enabled=chunked_dispatcher_enabled,
     )
