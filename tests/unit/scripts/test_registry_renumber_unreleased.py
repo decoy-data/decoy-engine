@@ -82,7 +82,8 @@ def test_to_unreleased_converts_an_identity_addition_branch(repo):  # AT-10
     assert res.returncode == 0, out(res)
     cat = (repo / CONF2).read_text()
     assert (
-        "since=UNRELEASED)" in cat and "from decoy_engine.reasons._types import UNRELEASED\n" in cat
+        "since=UNRELEASED)" in cat
+        and "from decoy_engine.reasons._types import UNRELEASED as UNRELEASED\n" in cat
     )
     assert v not in cat and 'since="unreleased"' not in cat and "since='unreleased'" not in cat
     data = (repo / "tests/unit/test_probe_a.py").read_text()

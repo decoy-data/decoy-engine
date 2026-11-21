@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from decoy_engine.reasons import _catalog
-from decoy_engine.reasons._types import Kind, Outcome, RetryClass, Severity
+from decoy_engine.reasons._types import UNRELEASED as UNRELEASED
+from decoy_engine.reasons._types import (
+    Kind,
+    Outcome,
+    RetryClass,
+    Severity,
+)
 
 __all__ = [
     "DELIVERY_DEPENDENT_DROPPED",
