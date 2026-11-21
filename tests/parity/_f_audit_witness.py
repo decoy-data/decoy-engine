@@ -252,8 +252,8 @@ class DeterministicIndexSpy:
         spy = self
         real_indices = _sampler._derive_pool_indices
         real_det = PoolSampler._deterministic
-        real_compiled = _sampler._compiled_index_kernel
-        real_reference = _sampler._reference_index_kernel
+        real_compiled = _sampler.compiled_index_kernel
+        real_reference = _sampler.reference_index_kernel
 
         def indices(*a: Any, **kw: Any) -> Any:
             spy._hit("index_entries")
@@ -284,8 +284,8 @@ class DeterministicIndexSpy:
 
         mp.setattr(_sampler, "_derive_pool_indices", indices)
         mp.setattr(PoolSampler, "_deterministic", deterministic)
-        mp.setattr(_sampler, "_compiled_index_kernel", compiled)
-        mp.setattr(_sampler, "_reference_index_kernel", reference)
+        mp.setattr(_sampler, "compiled_index_kernel", compiled)
+        mp.setattr(_sampler, "reference_index_kernel", reference)
         return self
 
     def _count_compiled(self) -> None:

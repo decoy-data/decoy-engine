@@ -721,6 +721,22 @@ surrogate the same way, but keeps a naive timestamp literal, the only spelling a
 timestamp column accepts; the subset request fingerprint writes it as tagged wall-clock text.
 No `SEED_PROTOCOL_VERSION` change.
 
+**2026-11-20, windowed_date offsets (pre-GA break, GEN-WINDOWED-BATCH S2).** `windowed_date`
+(mask and generate) now draws each row's offset from the pool sampler's index kernel, in one
+batch per column, instead of a numpy Generator built per row. For global row number `r` and draw
+`k` the offset is `min_days + derive_index(seed, namespace, int(2 * r + k), pool_size=span + 1)`
+(`k = 0`; `early` and `late` also draw `k = 1` and take the minimum or maximum). The draw index
+is part of the source, not of the namespace. Output dates change for the same seed, with no shim
+and no flag: regenerate stored `windowed_date` output. The window, null-anchor, determinism and
+partitioning guarantees are unchanged. Global row numbers must now be below `2**62` (before:
+below `2**64`); a negative or larger row number raises `windowed_date_row_number_out_of_range`.
+A window with `min_days` or `max_days` more than 106751 days from zero is refused at parse with
+`plan/windowed_date_window_out_of_range`.
+The draw-site entry `mask.windowed_date` moves to family `source_keyed_hmac` and the catalogue
+pin, provider golden and `TestWindowedDateGolden` are re-baselined with it.
+`SEED_PROTOCOL_VERSION` stays 7: a bump would rekey every keyed column and vault before GA, and
+only this site moves.
+
 ### 3.4 The public API + CLI contract
 
 - **Pass-through text width (O3, 2026-11):** a pass-through `large_string` column leaves

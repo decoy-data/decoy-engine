@@ -102,6 +102,7 @@ __all__ = [
     "WHEN_PREDICATE_OUTSIDE_NATIVE_SUBSET",
     "WHEN_PREDICATE_READS_MASKED_COLUMN",
     "WINDOWED_DATE_POSITION_OUT_OF_DOMAIN",
+    "WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE",
 ]
 
 _d = _catalog.runtime("StrategyError")
@@ -135,7 +136,7 @@ DATE_SHIFT_GROUP_ANCHOR_SNAPSHOT_MISSING = _d(
 )
 DATE_SHIFT_INVALID_CONFIG = _d("date_shift_invalid_config", "Date shift invalid config.")
 DATE_SHIFT_REQUIRES_DATE_FORMAT = _d(
-    "date_shift_requires_date_format", "Date shift requires date format.", since=UNRELEASED
+    "date_shift_requires_date_format", "Date shift requires date format.", since="1.32.0"
 )
 DATE_SHIFT_REQUIRES_NAMESPACE = _d(
     "date_shift_requires_namespace", "Date shift requires namespace."
@@ -425,11 +426,22 @@ SPOOL_DISK_FULL = _d(
     since="1.30.0",
 )
 
+_d = _catalog.runtime("WindowedDateRowNumberError")
+
+# The draw keys on `2 * row + draw`, so a row number must leave room for the odd draw in int64.
+# `windowed_date_position_out_of_domain` (the wider 0 to 2**64 - 1 position domain of the mask
+# route) is a different check: this one guards the draw's own domain.
+WINDOWED_DATE_ROW_NUMBER_OUT_OF_RANGE = _d(
+    "windowed_date_row_number_out_of_range",
+    "A windowed_date global row number is below 0 or at or above 2**62.",
+    since=UNRELEASED,
+)
+
 _d = _catalog.runtime("GenerationError")
 
 # The one fixed-text translation of an adapter or pool failure on a provider column.
 GENERATION_PROVIDER_FAILED = _d(
     "generation_provider_failed",
     "A provider column could not be generated.",
-    since=UNRELEASED,
+    since="1.32.0",
 )

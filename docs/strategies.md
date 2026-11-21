@@ -1291,10 +1291,11 @@ stops the run. The error names the row position and never the value. No row is
 clamped. The column is refused when the run has no mask secret.
 
 Refusals at compile time: `windowed_date_anchor_missing`,
-`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`,
+`windowed_date_max_days_missing`, `windowed_date_min_exceeds_max`, `windowed_date_window_out_of_range`,
 `windowed_date_distribution_invalid` and `windowed_date_missing_anchor_ref`.
 At run time `windowed_date_position_out_of_domain` refuses a row position it
-cannot encode.
+cannot encode, and `windowed_date_row_number_out_of_range` refuses a global row number below 0 or at
+or above 2**62 (the offset draw keys on `2 * row + draw`).
 
 ### passthrough and structural handlers
 
