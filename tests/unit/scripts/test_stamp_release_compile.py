@@ -536,7 +536,7 @@ def test_at8_an_identity_release_stamps_every_pending_code_at_the_next_minor(
     )
     text = (r.path / CONFIG2).read_text(encoding="utf-8")
     assert text.count(f'since="{v.next}")') == 2 and "since=UNRELEASED)" not in text
-    assert "import UNRELEASED" not in text and PENDING_DOC in text
+    assert "import UNRELEASED" in text and PENDING_DOC in text
     log = (r.path / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## [0.29.0] - 2026-11-12" in log and "`config/probe_one`" in log
     assert not (r.path / "changelog.d" / "probe.md").exists()
@@ -670,19 +670,13 @@ def test_at8_a_failure_while_applying_restores_every_owned_path(
 
 
 @pytest.mark.parametrize(
-    ("names", "left"),
-    [
-        ("UNRELEASED, Kind", "Kind"),
-        ("KINDS, UNRELEASED", "KINDS"),
-        ("A, UNRELEASED, Kind", "A, Kind"),
-    ],
+    "names",
+    ["UNRELEASED, Kind", "KINDS, UNRELEASED", "A, UNRELEASED, Kind", "UNRELEASED"],
 )
-def test_stamping_drops_the_unused_unreleased_import_wherever_it_sits(
-    names: str, left: str
-) -> None:
+def test_stamping_keeps_the_unreleased_import_wherever_it_sits(names: str) -> None:
     head = "from decoy_engine.reasons._types import "
     src = f'{head}{names}\n\nX = _d("x", "X.", since=UNRELEASED)\n'
     assert (
         sr._tools()[2].stamp_source(src, "9.9.0")
-        == f'{head}{left}\n\nX = _d("x", "X.", since="9.9.0")\n'
+        == f'{head}{names}\n\nX = _d("x", "X.", since="9.9.0")\n'
     )
