@@ -17,7 +17,6 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine._arrow_types import is_text
-from decoy_engine.contracts.column_shape import is_nested_type
 
 # Typed as Any: the compute kernels are registered at runtime, so stubs miss them.
 pc: Any = importlib.import_module("pyarrow.compute")
@@ -42,19 +41,14 @@ def walk_one_table(table: pa.Table, *, table_name: str, source_format: str | Non
 
     from decoy_engine.profile._walk import walk_dataframe
 
-    # Nested columns stay out of the schema so the walk still refuses them here, as the public
-    # oracle always has (a list, struct or map cell is unhashable to pandas); only the shape of
-    # the other columns comes from the schema.
-    flat = pa.schema([f for f in table.schema if not is_nested_type(f.type)])
     return walk_dataframe(
         table.to_pandas(),
-        arrow_schema=table.schema,
         table_name=table_name,
         declared_pk_cols=frozenset(),
         fk_specs={},
         sample_rows=None,
         rng=random.Random(0),
-        arrow_schema=flat,
+        arrow_schema=table.schema,
         source_format=source_format,
     )
 
