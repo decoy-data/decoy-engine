@@ -83,6 +83,7 @@ _EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "distribution": [
         {"name": "col", "type": "distribution", "family": "uniform", "low": 10, "high": 100}
     ],
+    "provider": [{"name": "col", "type": "provider", "provider": "random_int_range"}],
     "inherit": [
         {"name": "pid", "type": "reference", "reference_table": "p", "reference_column": "id"},
         {"name": "col", "type": "inherit", "via": "pid", "column": "n"},
@@ -98,6 +99,10 @@ _EXTRA_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "faker_float": [{"name": "col", "type": "faker", "faker_type": "pyfloat"}],
     "categorical_float": [{"name": "col", "type": "categorical", "categories": [1.5, 2.5]}],
     "categorical_text": [{"name": "col", "type": "categorical", "categories": ["u", "v"]}],
+    # Registry providers return an int or a date from some adapters; the draw module makes every
+    # value text, so a formula reads text whichever provider the column names.
+    "provider_date": [{"name": "col", "type": "provider", "provider": "person_dob"}],
+    "provider_identifier": [{"name": "col", "type": "provider", "provider": "synthetic_npi"}],
     "grouped_series": [
         {"name": "grp", "type": "categorical", "categories": ["g1", "g2"]},
         seq("ord"),
@@ -128,6 +133,20 @@ def test_every_generate_type_has_an_example_or_a_reason() -> None:
     types = set(get_args(GenerateColumnConfig.model_fields["type"].annotation))
     covered = set(_EXAMPLES) | {"grouped_series"} | set(_EXEMPT)
     assert types <= covered, sorted(types - covered)
+
+
+def test_a_provider_column_is_planned_as_text_and_a_text_formula_runs_on_it() -> None:
+    cols = [
+        {"name": "x", "type": "provider", "provider": "random_int_range", "null_probability": 0.3},
+        fml("y", "'ORD-' + x", ["x"]),
+    ]
+    table = compile_and_generate(cfg(cols, rows=40))["t"]
+    assert table.schema.field("x").type == pa.string()
+    xs = table.column("x").to_pylist()
+    assert None in xs
+    # strategies.md formula row rules: a missing cell in a non-number reference binds as "".
+    for x, y in zip(xs, table.column("y").to_pylist(), strict=True):
+        assert y == "ORD-" + (x or "")
 
 
 def _check_fidelity(cols: list[dict[str, Any]], null_p: float, tables: list[dict] | None = None):
@@ -370,3 +389,45 @@ def test_co_reader_float_faker_formula_equals_twice_the_output_text() -> None:
     assert table.schema.field("amount").type == pa.string()
     texts, m = table.column("amount").to_pylist(), table.column("m").to_pylist()
     assert m == [float(t) * 2 for t in texts]
+
+
+def _provider_tables(rows: int, null_p: float) -> dict:
+    parent = {
+        "name": "p",
+        "row_count": rows,
+        "generate_columns": [
+            {
+                "name": "id",
+                "type": "provider",
+                "provider": "random_int_range",
+                "null_probability": null_p,
+            }
+        ],
+    }
+    child = {
+        "name": "t",
+        "row_count": rows,
+        "generate_columns": [
+            {
+                "name": "ref",
+                "type": "reference",
+                "reference_table": "p",
+                "reference_column": "id",
+            }
+        ],
+    }
+    return {
+        "version": 2,
+        "global_settings": {"seed": 1},
+        "sources": {},
+        "tables": [parent, child],
+    }
+
+
+@pytest.mark.parametrize(("rows", "null_p"), [(0, 0.0), (5, 1.0)])
+def test_provider_and_reference_to_provider_stay_text_with_no_values(
+    rows: int, null_p: float
+) -> None:
+    tables = compile_and_generate(_provider_tables(rows, null_p))
+    assert tables["p"].schema.field("id").type == pa.string()
+    assert tables["t"].schema.field("ref").type == pa.string()

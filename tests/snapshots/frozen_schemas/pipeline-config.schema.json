@@ -1246,6 +1246,38 @@
           "if": {
             "properties": {
               "type": {
+                "const": "provider"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "determinism": {},
+              "field": {},
+              "group": {},
+              "locale": {},
+              "name": {},
+              "null_probability": {},
+              "pooled": {
+                "type": "null"
+              },
+              "provider": {},
+              "type": {},
+              "unique": {}
+            },
+            "required": [
+              "provider"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "distribution"
               }
             },
@@ -1330,6 +1362,7 @@
             "constant",
             "distribution",
             "lookup",
+            "provider",
             "inherit"
           ],
           "title": "Type",

@@ -346,10 +346,11 @@ def generated_arrow_type(col: Mapping[str, Any]) -> pa.DataType | None:
     """The type of the values a generator makes for a column numeric typing keeps as text.
 
     `sequence` and `faker` render text; numeric typing types them as numbers only while every
-    reader is numeric-safe. None for a type whose values the config does not fix.
+    reader is numeric-safe. A `provider` column is always text: its draw module turns every
+    value into text. None for a type whose values the config does not fix.
     """
     kind = col.get("type")
-    if kind in ("sequence", "faker"):
+    if kind in ("sequence", "faker", "provider"):
         return pa.string()
     if kind == "categorical":
         return categorical_arrow_type(col)[0]

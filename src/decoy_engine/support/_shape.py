@@ -151,6 +151,7 @@ class StrategyKind(str, Enum):
     LOOKUP = "lookup"
     NESTED = "nested"
     PASSTHROUGH = "passthrough"
+    PROVIDER = "provider"
     REDACT = "redact"
     REFERENCE = "reference"
     SEQUENCE = "sequence"

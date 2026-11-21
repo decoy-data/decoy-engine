@@ -280,6 +280,12 @@ def cfg_inherit() -> dict[str, Any]:
     return fx.config([_t("par", 10, parent), _t("kids", 30, kids)])
 
 
+def cfg_provider() -> dict[str, Any]:
+    return fx.config(
+        [_t("t", 30, [{"name": "x", "type": "provider", "provider": "synthetic_npi"}])]
+    )
+
+
 def cfg_fresh() -> dict[str, Any]:
     cols = [
         {"name": "cat", "type": "categorical", "categories": ["a", "b"], "determinism": "fresh"}
@@ -694,6 +700,7 @@ def legacy_cells(unmarked_windowed: Callable[..., list[Any]]) -> tuple[Cell, ...
         Cell("group-key", fx.cfg_grouped_windowed, {}, admission_key=("gw", "gkey")),
         Cell("lookup", cfg_lookup, {}, admission_key=("t", "x")),
         Cell("inherit", cfg_inherit, {}, admission_key=("kids", "copied")),
+        Cell("provider", cfg_provider, {}, admission_key=("t", "x")),
         Cell(
             "determinism-fresh",
             cfg_fresh,

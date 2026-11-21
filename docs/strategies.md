@@ -1491,6 +1491,7 @@ take it.
 | `distribution` | `family` | `low`, `high`, `min`, `max`, `output_type` | `low`, `high` if `family: uniform` |
 | `lookup` | | `file`, `codeset`, `value_column`, `weight_column`, `output_type` | |
 | `inherit` | `via`, `column` | | |
+| `provider` | `provider` | `locale`, `field`, `group` | |
 
 `derived_aggregate` is the one type whose required keys are checked at plan compile, not at
 config parse: its transform refuses a missing `op` or `column` with `derived_aggregate_op_missing`
@@ -2168,6 +2169,34 @@ and `lookup_not_pinned`), never a cell value or a path.
 
 These two top-level blocks run after all column passes complete. They operate on
 the assembled output tables, not on individual columns mid-run.
+
+### provider
+
+Draws each row from a scalar provider in the masking provider registry, by the same name and
+through the same adapter. Every value is text, including the providers that return a number or
+a date (`random_int_range`, `person_dob`), so a formula or derived column reads it as text.
+
+```yaml
+- name: npi
+  type: provider
+  provider: synthetic_npi   # any scalar registry name, such as person_phone or synthetic_iban
+  locale: en_US             # optional; must be a locale the provider declares
+```
+
+- `provider`: a registry name. The nine synthetic identifiers keep their check digits. An unknown
+  name is refused at `decoy validate` with `generate_provider_unknown`; `composite_custom` and the
+  composite providers are refused (`generate_provider_unsupported`,
+  `generate_provider_field_required`) until a later release.
+- `locale`: refused with `generate_provider_locale_unsupported` unless the provider declares it.
+  With no `locale`, the instance default applies and is checked before any draw. SSN, EIN, NPI
+  and NDC declare `en_US` only; CUSIP declares `en_CA` and `en_US`.
+- `field` and `group` are refused on a scalar provider (`generate_provider_field_unexpected`).
+- `unique` is refused. A provider column runs on the resident route only and is refused in
+  pinned mode (`pinned_provider_unsupported`). Values repeat when the provider's domain is small.
+- A `faker` column with a registry name in `faker_type` is refused with
+  `generate_faker_type_is_domain_provider`, which points here.
+- A failure inside a draw is reported as `generation_provider_failed` with the table and column
+  only, never the provider text.
 
 ### validators:
 

@@ -31,6 +31,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import require_locale
 
 # Default segment layout: (labeler_digits, product_digits, package_digits).
 _DEFAULT_LAYOUT: tuple[int, int, int] = (5, 4, 2)
@@ -91,12 +92,11 @@ class NdcValidator:
         return _is_valid_ndc(value)
 
 
+_SUPPORTED_LOCALES = ("en_US",)
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
-    if locale != "en_US":
-        raise ProviderError(
-            code=reasons.provider.UNSUPPORTED_LOCALE,
-            message=f"NDC is US-only; got locale={locale!r}.",
-        )
+    require_locale("NDC", locale, _SUPPORTED_LOCALES)
     layout = _DEFAULT_LAYOUT
     labeler_d, product_d, package_d = layout
     labeler = int(rng.integers(0, 10**labeler_d))
@@ -166,7 +166,7 @@ class NdcAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_NDC_REGEX,
             blocklist_validators=("fda_ndc_segment_format",),

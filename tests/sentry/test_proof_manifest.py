@@ -66,8 +66,9 @@ def test_surface_counts_match_capability_matrix():
     # GEN-TYPES E1 (2026-11-10): constant -> 12 + 1 = 13 (distribution was already listed as a
     # legacy ColumnGenerator key).
     # GEN-TYPES E3 (2026-11-12): lookup -> 13 + 1 = 14.
-    # GEN-INHERIT E1 (2026-11-14): inherit -> 14 + 1 = 15.
-    assert surface["generate"] == 15
+    # GEN-PROVIDERS E1 (2026-11-17): provider -> 14 + 1 = 15.
+    # GEN-INHERIT E1 (2026-11-14): inherit -> 15 + 1 = 16 once both are on main.
+    assert surface["generate"] == 16
     assert surface["providers"] == 34
 
 

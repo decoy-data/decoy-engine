@@ -166,9 +166,10 @@ _ENTRY_DIGESTS = [
 
 _MAP_DIGESTS = {
     "MASK_STRATEGY_TO_SITE": "e42b340fc017f0608c08ec988fb697bb52c84f5cbb657dfa99b9531cd56681e9",
-    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution) and E3 (lookup).
-    # Re-pinned for GEN-INHERIT E1: inherit maps to DETERMINISTIC_NO_DRAW.
-    "GEN_KIND_TO_SITE": "b3836a41a6d697e958f7db7c7509aa0968f6b98335ba4c0144d56290899709cc",
+    # GEN_KIND_TO_SITE re-pinned for GEN-TYPES E1 (constant, distribution), E3 (lookup),
+    # GEN-PROVIDERS E1 (provider, mapped to the existing gen.derive_context) and GEN-INHERIT E1
+    # (inherit, mapped to DETERMINISTIC_NO_DRAW).
+    "GEN_KIND_TO_SITE": "44971684eca62ff4ae73fdac34c988332d12ad8689da63de4974c0cf7fe19bc0",
     "PROVIDER_IDENTIFIER_SITES": "19593ad7e4ac52025cdc024aa16bdb04ab776755b83e6f7c0e546210b6fc7cd6",
     "FAMILIES": "cbbf3f70f90b3995c7bb16f11bf1560ce135af11761cc6444aa41feaf659e811",
     "ENTROPY_ROOTS": "4f3fdb974258ed94e92188bd4dd456363696dba2d2a4a90a4f744c53879949f8",

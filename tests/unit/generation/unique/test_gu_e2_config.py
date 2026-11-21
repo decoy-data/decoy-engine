@@ -32,9 +32,10 @@ VALID = {
     "constant": {"value": 1},
     "distribution": {"family": "uniform", "low": 0, "high": 3},
     "lookup": {"file": "x.csv"},
+    "provider": {"provider": "synthetic_npi"},
     "inherit": {"via": "a", "column": "b"},
 }
-OTHER_TEN = sorted(VALID)
+OTHER_ELEVEN = sorted(VALID)
 
 
 def _col(type_: str, **extra):
@@ -42,21 +43,21 @@ def _col(type_: str, **extra):
 
 
 class TestAT13UnsupportedTypes:
-    def test_the_other_ten_types_are_exactly_the_registry_remainder(self):
-        assert set(OTHER_TEN) == GENERATE_TYPES - {
+    def test_the_other_eleven_types_are_exactly_the_registry_remainder(self):
+        assert set(OTHER_ELEVEN) == GENERATE_TYPES - {
             "sequence",
             "categorical",
             "faker",
             "reference",
         }
 
-    @pytest.mark.parametrize("type_", OTHER_TEN)
+    @pytest.mark.parametrize("type_", OTHER_ELEVEN)
     def test_unique_true_is_refused_by_name(self, type_):
         with pytest.raises(ValidationError) as exc:
             _col(type_, unique=True)
         assert UNSUPPORTED in error_types(exc)
 
-    @pytest.mark.parametrize("type_", OTHER_TEN)
+    @pytest.mark.parametrize("type_", OTHER_ELEVEN)
     def test_unique_false_is_accepted_and_changes_nothing(self, type_):
         assert _col(type_, unique=False).type == type_
 

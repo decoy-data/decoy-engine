@@ -47,6 +47,7 @@ from decoy_engine.generation.pool._canonicalize import _canonicalize_source
 from decoy_engine.providers_v2._adapter import CapabilityMatrix, ProviderSpec
 from decoy_engine.providers_v2._errors import ProviderError
 from decoy_engine.providers_v2.identifiers._errors import IdentifierError
+from decoy_engine.providers_v2.identifiers._locale import require_locale
 
 # Body alphabet: 0-9, A-Z, *, @, # per CGS spec.
 _CUSIP_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ*@#"
@@ -148,7 +149,11 @@ class CusipValidator:
         return _is_valid_cusip(value)
 
 
+_SUPPORTED_LOCALES = ("en_CA", "en_US")
+
+
 def generate_random(rng: np.random.Generator, locale: str = "en_US") -> str:
+    require_locale("CUSIP", locale, _SUPPORTED_LOCALES)
     base = len(_CUSIP_ALPHABET)
     # 39**8 = 5.3e12; well within int64. Sample one char at a time
     # for clarity (Python int math anyway).
@@ -217,7 +222,7 @@ class CusipAdapter:
             preserves_source_cardinality=True,
             participates_in_fk_pk=True,
             poolable=False,
-            supported_locales=("en_US",),
+            supported_locales=_SUPPORTED_LOCALES,
             supports_coherent_link=False,
             format_regex=_CUSIP_REGEX,
             blocklist_validators=("cusip_modified_luhn",),

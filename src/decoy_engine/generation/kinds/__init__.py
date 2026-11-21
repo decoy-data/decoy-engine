@@ -44,6 +44,11 @@ from decoy_engine.generation.kinds._parametric import (
     parametric_payload_bound,
     parametric_values,
 )
+from decoy_engine.generation.kinds._provider import (
+    draw_path,
+    provider_column_values,
+    provider_generate,
+)
 
 __all__ = [
     "MAX_LOOKUP_ENTRIES",
@@ -60,6 +65,7 @@ __all__ = [
     "constant_arrow_type",
     "constant_payload_bound",
     "constant_values",
+    "draw_path",
     "lookup_digests",
     "lookup_file_format",
     "lookup_values",
@@ -71,5 +77,7 @@ __all__ = [
     "parametric_payload_bound",
     "parametric_values",
     "parse_lookup_bytes",
+    "provider_column_values",
+    "provider_generate",
     "to_lexeme",
 ]

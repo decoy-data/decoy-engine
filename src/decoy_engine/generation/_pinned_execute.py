@@ -25,6 +25,7 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess, reasons
 from decoy_engine.fileaccess import FileAccess
+from decoy_engine.generation._numeric_typing import provider_text_columns
 from decoy_engine.generation._pinned_compile import refuse_live_tokens, reject_unpinnable
 from decoy_engine.generation._pinned_plan import (
     PinnedModeError,
@@ -228,6 +229,10 @@ def _run(
     numeric = {(t, c): _NUMERIC_ARROW[dt] for t, c, dt in plan.numeric_types}
     # The policy travels beside the column config, never inside it: seeds do not see it.
     policies = {(t, c): policy for t, c, policy in plan.reference_policies}
+    configs = {t.name: [json.loads(c.config_json) for c in t.columns] for t in plan.tables}
+    text_columns = provider_text_columns(
+        {"tables": [{"name": n, "generate_columns": cols} for n, cols in configs.items()]}
+    )
     pools: dict[str, pa.Table] = {}
     for name in _order_tables(plan):
         table = by_name[name]
@@ -253,6 +258,7 @@ def _run(
             data,
             table_name=name,
             statistical_specs=specs,
-            columns=[json.loads(c.config_json) for c in table.columns],
+            columns=configs[name],
+            text_columns=text_columns.get(name, ()),
         )
     return {name: pools[name] for name in sorted(pools)}

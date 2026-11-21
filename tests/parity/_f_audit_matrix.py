@@ -166,6 +166,11 @@ def witness_of(p: Probe) -> tuple[str, str]:
         return EXCLUDED, "unobserved kind on the legacy path; proven by route and reason"
     if p.kind in {"constant", "distribution"}:
         return EXCLUDED, "no selection event to mark; value equality is the GEN-TYPES route tests"
+    if p.kind == "provider":
+        return (
+            EXCLUDED,
+            "legacy-only; value equality is the GEN-PROVIDERS provider tests",
+        )
     if p.kind == "lookup":
         return (
             EXCLUDED,
@@ -416,6 +421,12 @@ ROWS: Final[tuple[AuditRow, ...]] = (
         Probe("inherit"),
         lambda p: _legacy_kind(p, "inherit"),
         "family declined (reads a parent row by foreign key); no draw",
+    ),
+    _row(
+        "provider",
+        Probe("provider"),
+        lambda p: _legacy_kind(p, "provider"),
+        "family declined (registry provider draw: pooled, keyed or seeded batch)",
     ),
     _row(
         "determinism-fresh",

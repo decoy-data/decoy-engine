@@ -295,6 +295,7 @@ class GenerateColumnConfig(BaseModel):
         "constant",
         "distribution",
         "lookup",
+        "provider",
         "inherit",
     ]
 
