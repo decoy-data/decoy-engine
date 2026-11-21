@@ -288,7 +288,9 @@ from before this slice ignores `column_shapes` and the profile's `shape`.
 
 **Pre-GA correction (COLUMN-SHAPE E1b, 2026-11-21).** `date_shift` reads a source column that is natively a
 date (`date`) or a zoned timestamp (`timestamp_tz`) with no `date_format`, and writes the same Arrow type back
-(a zoned timestamp keeps its unit, zone and time of day and moves by whole days). A typed date was text before.
+(a zoned timestamp keeps its unit and zone and moves by whole calendar days in its own zone, so its
+wall-clock time holds across a DST change; a typed date shifts as a calendar date with no pandas date range
+limit, and a `date64` source stays `date64`). A typed date was text before.
 A `date_format` on such a column is accepted and not used (compile warning `plan/column_shape_format_unused`),
 and `preserve_values` needs no format there. A `timestamp_naive`, integer, float, decimal, boolean or other
 column is refused at compile with `plan/column_shape_mismatch` (a naive timestamp failed at run time with

@@ -247,7 +247,7 @@ _PINNED_RUN_CALLS = frozenset(
         "TimingCollector",
         "build_work_list",
         "declared_date_shift_columns",
-        "typed_date_columns",
+        "native_date_columns",
         "ctx.code_set_corpora_metrics",
         "ctx.date_preserve_metrics",
         "source_anchor_columns",

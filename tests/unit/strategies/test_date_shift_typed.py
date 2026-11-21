@@ -20,8 +20,8 @@ import pytest
 
 from decoy_engine import reasons, run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.config import PipelineConfig
-from decoy_engine.contracts.column_shape import ColumnShape
-from decoy_engine.declared_casting._boundary import typed_date_columns
+from decoy_engine.contracts.column_shape import ColumnShape, source_facts_of
+from decoy_engine.declared_casting._boundary import native_date_columns
 from decoy_engine.execution._adapter import StrategyContext
 from decoy_engine.execution._errors import StrategyError
 from decoy_engine.execution._pipeline import run_pipeline
@@ -135,11 +135,11 @@ def test_parquet_date32_runs_without_format(tmp_path: Path, route: str) -> None:
     assert out.column("p").to_pylist() == list(range(len(DATES)))
 
 
-def test_sequential_route_runs_typed_without_format(tmp_path: Path) -> None:
-    """A parent/child job takes the sequential route; the typed child column needs no format."""
+def run_sequential_typed(tmp_path: Path, typ: pa.DataType) -> pa.Table:
+    """Run a parent/child job on the sequential route; the child holds a typed date column."""
     refs = [f"r{i}" for i in range(len(DATES))]
     parent = pa.table({"id": pa.array(refs)})
-    child = pa.table({"ref": pa.array(refs), "d": pa.array(DATES, pa.date32())})
+    child = pa.table({"ref": pa.array(refs), "d": pa.array(DATES, typ)})
     raw = {
         "version": 2,
         "global_settings": {"seed": 7, "post_validation": False},
@@ -184,7 +184,12 @@ def test_sequential_route_runs_typed_without_format(tmp_path: Path) -> None:
         execution_mode="sequential",
         key_provider=key_provider(),
     )
-    out = result.outputs["t"]
+    return result.outputs["t"]
+
+
+def test_sequential_route_runs_typed_without_format(tmp_path: Path) -> None:
+    """A parent/child job takes the sequential route; the typed child column needs no format."""
+    out = run_sequential_typed(tmp_path, pa.date32())
     assert out.schema.field("d").type == pa.date32()
     _assert_shifted(DATES, out.column("d").to_pylist())
 
@@ -309,7 +314,9 @@ def test_integer_column_refused(
 
 def _compile(cfg: dict[str, Any], table: pa.Table, name: str = "t") -> Any:
     profile = profile_source(cfg, seed=7, supplied_sources={name: table})
-    return compile_plan(cfg, profile, decoy_engine_version="e1b")
+    return compile_plan(
+        cfg, profile, decoy_engine_version="e1b", sources=source_facts_of({name: table})
+    )
 
 
 def test_date_format_on_typed_date_warns_and_is_unused(tmp_path: Path) -> None:
@@ -395,14 +402,14 @@ def _seed() -> ColumnSeed:
     )
 
 
-def _ctx(typed: frozenset[tuple[str, str]]) -> StrategyContext:
+def _ctx(native: dict[tuple[str, str], ColumnShape]) -> StrategyContext:
     ctx = StrategyContext(
         registry=None,  # type: ignore[arg-type]
         pool_cache=PoolCache(),
         relationship_graph=RelationshipGraph(edges=(), ordering=()),
         namespace_registry=NamespaceRegistry(bindings=()),
         job_seed=(0x42).to_bytes(8, "big"),
-        typed_date_columns=typed,
+        native_date_columns=native,
     )
     object.__setattr__(ctx, "current_table", "t")
     return ctx
@@ -412,26 +419,26 @@ def test_handler_backstop_keys_on_plan() -> None:
     """Only a plan-listed typed column skips the format; the data never decides."""
     handler = DateShiftStrategyHandler()
     dates = pd.DataFrame({"d": pd.Series([dt.date(2024, 1, 15)], dtype=object)})
-    out, _ = handler.run(dates.copy(), "d", _seed(), _ctx(frozenset({("t", "d")})))
+    out, _ = handler.run(dates.copy(), "d", _seed(), _ctx({("t", "d"): ColumnShape.DATE}))
     assert isinstance(out["d"].iloc[0], dt.date)
     with pytest.raises(StrategyError) as exc:  # the same column, its plan entry removed
-        handler.run(dates.copy(), "d", _seed(), _ctx(frozenset()))
+        handler.run(dates.copy(), "d", _seed(), _ctx({}))
     assert exc.value.code == reasons.runtime.DATE_SHIFT_REQUIRES_DATE_FORMAT
     text = pd.DataFrame({"d": ["2024-01-15"]})
     with pytest.raises(StrategyError) as exc2:  # text with no format and no plan entry
-        handler.run(text, "d", _seed(), _ctx(frozenset()))
+        handler.run(text, "d", _seed(), _ctx({}))
     assert exc2.value.code == reasons.runtime.DATE_SHIFT_REQUIRES_DATE_FORMAT
 
 
-def test_typed_date_columns_come_from_the_plan_shapes(tmp_path: Path) -> None:
+def test_native_date_columns_come_from_the_plan_shapes(tmp_path: Path) -> None:
     table = _table(DATES, pa.date32())
     plan = _compile(_cfg(tmp_path, table), table)
-    assert typed_date_columns(plan) == frozenset({("t", "d")})
+    assert native_date_columns(plan) == {("t", "d"): ColumnShape.DATE}
     text = _table([d.isoformat() if d else None for d in DATES], pa.string())
     text_plan = _compile(_cfg(tmp_path, text, provider_config={"date_format": "%Y-%m-%d"}), text)
-    assert typed_date_columns(text_plan) == frozenset()
+    assert native_date_columns(text_plan) == {}
     stripped = dataclasses.replace(plan, column_shapes=())
-    assert typed_date_columns(stripped) == frozenset()
+    assert native_date_columns(stripped) == {}
     assert {s.shape for s in plan.column_shapes} == {ColumnShape.DATE}
 
 

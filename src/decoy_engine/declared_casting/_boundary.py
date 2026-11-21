@@ -26,7 +26,7 @@ from decoy_engine import reasons
 from decoy_engine.contracts import (
     declared_casting as C,  # noqa: N812 -- short alias for the contract namespace
 )
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.declared_casting import _catalog
 from decoy_engine.declared_casting import (
@@ -182,19 +182,17 @@ def declared_date_shift_columns(plan: Any) -> frozenset[tuple[str, str]]:
     )
 
 
-def typed_date_columns(plan: Any) -> frozenset[tuple[str, str]]:
-    """(table, column) of each column the plan proves is a date or a zoned timestamp.
+def native_date_columns(plan: Any) -> Mapping[tuple[str, str], ColumnShape]:
+    """(table, column) -> shape of each column the plan lists as a native date or zoned timestamp.
 
-    The declared date columns plus every column the plan lists with a native `date` or
-    `timestamp_tz` shape. The one list the runtime backstop reads: a column the plan does not list
-    is never typed here, whatever its data looks like.
+    The one list the runtime backstop reads: a column the plan does not list is never typed
+    here, whatever its data looks like. Declared date columns are not in it (they keep text).
     """
-    native = (
-        (s.table, s.column)
+    return {
+        (s.table, s.column): s.shape
         for s in getattr(plan, "column_shapes", None) or ()
-        if s.shape in (ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ)
-    )
-    return declared_date_shift_columns(plan) | frozenset(native)
+        if s.shape in TYPED_DATE_SHAPES
+    }
 
 
 @dataclass

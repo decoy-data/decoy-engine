@@ -41,7 +41,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 
 PRESERVE_KEY = "preserve_values"
 
@@ -53,11 +53,6 @@ _LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}")
 # sentinel. `ISO8601` and `mixed` are pandas-only `format=` values.
 _UNSUPPORTED_DIRECTIVES = frozenset("fZ")
 _PANDAS_ONLY_FORMATS = frozenset({"ISO8601", "mixed"})
-
-# A natively typed column needs no rendering format: its sentinels keep their source values and a
-# `date_format` is not used. An `unknown` column may still be one, so a missing format is not
-# refused here; the required-settings check refuses it later when it turns out to be text.
-_TYPED_SHAPES = frozenset({ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ})
 
 
 def _directives(date_format: str) -> Iterator[str]:
@@ -110,9 +105,11 @@ def preserve_config_problem(cfg: Mapping[str, Any], shape: ColumnShape | None = 
                 "Write each sentinel as a real calendar date such as 9999-12-31."
             )
     date_format = cfg.get("date_format")
-    if shape in _TYPED_SHAPES or (
-        shape is ColumnShape.UNKNOWN and not isinstance(date_format, str)
-    ):
+    if date_format is not None and not isinstance(date_format, str):
+        return f"date_format must be text, got {type(date_format).__name__}."
+    # A native date needs no rendering format: its sentinels keep their source values. An
+    # `unknown` column may still be one, so a missing format waits for the required-settings check.
+    if shape in TYPED_DATE_SHAPES or (shape is ColumnShape.UNKNOWN and date_format is None):
         return None
     if not isinstance(date_format, str) or date_format == "":
         return (
@@ -226,22 +223,24 @@ class PreserveSet:
         return value.strftime(date_format)
 
 
-def preserve_set_from_config(cfg: Mapping[str, Any], *, typed: bool = False) -> PreserveSet | None:
+def preserve_set_from_config(
+    cfg: Mapping[str, Any], *, shape: ColumnShape | None = None
+) -> PreserveSet | None:
     """The column's ``PreserveSet``, or None when ``preserve_values`` is unset or empty.
 
-    ``typed`` says the plan proves the column natively typed: its sentinels then keep their source
-    values and any ``date_format`` is not used.
+    ``shape`` is the column's plan-proven native shape, if any: the sentinels of a date or a
+    zoned timestamp keep their source values and any ``date_format`` is not used.
 
     Raises:
         ValueError: the config is invalid (see ``preserve_config_problem``).
     """
-    problem = preserve_config_problem(cfg, ColumnShape.DATE if typed else None)
+    problem = preserve_config_problem(cfg, shape)
     if problem is not None:
         raise ValueError(problem)
     if not _is_set(cfg.get(PRESERVE_KEY)):
         return None
     dates = frozenset(d for d in (_parse_literal(e) for e in cfg[PRESERVE_KEY]) if d is not None)
-    return PreserveSet(dates, None if typed else str(cfg["date_format"]))
+    return PreserveSet(dates, None if shape in TYPED_DATE_SHAPES else str(cfg["date_format"]))
 
 
 def apply_excluding_preserved(

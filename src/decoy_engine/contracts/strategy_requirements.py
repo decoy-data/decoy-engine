@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.contracts.column_shape import TYPED_DATE_SHAPES, ColumnShape
 
 __all__ = [
     "REQUIREMENTS_BY_STRATEGY",
@@ -139,9 +139,7 @@ SHAPE_REQUIREMENTS_BY_STRATEGY: Mapping[str, ShapeRequirement] = MappingProxyTyp
             _DATE_SHIFT_FORMAT,
             frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN}),
             declared_counts=True,
-            admitted=frozenset(
-                {ColumnShape.TEXT, ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ, ColumnShape.UNKNOWN}
-            ),
+            admitted=frozenset({ColumnShape.TEXT, ColumnShape.UNKNOWN}) | TYPED_DATE_SHAPES,
             default_hint=_DATE_SHIFT_HINT,
             hints=MappingProxyType(
                 {

@@ -17,7 +17,12 @@ from typing import Any
 
 from decoy_engine import reasons
 from decoy_engine._nested_json import nested_children
-from decoy_engine.contracts.column_shape import ColumnShape, ColumnShapes, SourceFacts
+from decoy_engine.contracts.column_shape import (
+    TYPED_DATE_SHAPES,
+    ColumnShape,
+    ColumnShapes,
+    SourceFacts,
+)
 from decoy_engine.contracts.declared_casting import date_shift_owns_declared_format
 from decoy_engine.contracts.strategy_requirements import (
     REQUIREMENTS_BY_STRATEGY,
@@ -66,6 +71,9 @@ def _shape_satisfied(
     shaped = shape_requirement_for(strategy, req)
     if shaped is None:
         return False
+    given = lookup_path(col, req.path)
+    if given is not None and not isinstance(given, str):
+        return False  # a non-string setting is refused whatever the shape, never ignored
     if shaped.declared_counts and _declared_date_format(col):
         return True
     return not shape_declaration_needed(shaped, shape, config_only=config_only)
@@ -103,7 +111,7 @@ def column_shape_warnings(config: dict[str, Any], shapes: ColumnShapes) -> tuple
             continue
         shape = shapes.get((table, col["name"]), ColumnShape.UNKNOWN)
         fmt = lookup_path(col, shaped.requirement.path)
-        if shape in (ColumnShape.DATE, ColumnShape.TIMESTAMP_TZ) and not requirement_missing(fmt):
+        if shape in TYPED_DATE_SHAPES and not requirement_missing(fmt):
             out.append(
                 f"{reasons.plan.COLUMN_SHAPE_FORMAT_UNUSED}: column {col['name']!r} in table "
                 f"{table!r}: date_format is not used: the source column is already a date."

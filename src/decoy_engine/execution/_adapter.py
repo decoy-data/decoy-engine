@@ -24,6 +24,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.execution._errors import ExecutionError, StrategyError
 from decoy_engine.execution._row_errors import RowError, RowErrorRecord
 from decoy_engine.generation.pool._events import QualityWarning
@@ -257,10 +258,10 @@ class StrategyContext:
     # its date shape. It keeps the legacy text output. Set from the plan by the routes that build
     # a context; empty otherwise.
     declared_date_columns: frozenset[tuple[str, str]] = frozenset()
-    # (table, column) of every column the plan proves is a date or a zoned timestamp, declared or
-    # native, so it needs no `provider_config.date_format`. Empty otherwise, which makes the
-    # date_shift handler refuse a missing format.
-    typed_date_columns: frozenset[tuple[str, str]] = frozenset()
+    # (table, column) -> shape of every column the plan proves is a native date or zoned
+    # timestamp, so it needs no `provider_config.date_format`. Empty otherwise, which makes the
+    # date_shift handler refuse a missing format. Declared columns are not in it.
+    native_date_columns: Mapping[tuple[str, str], ColumnShape] = field(default_factory=dict)
     # Integer Faker sources that pandas widened to float64, as their original Arrow
     # columns keyed (table, column), so deterministic keying sees exact integers. The
     # adapter fills it per table or chunk and releases it with that frame.

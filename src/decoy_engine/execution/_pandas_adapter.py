@@ -37,7 +37,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.declared_casting._boundary import declared_date_shift_columns, typed_date_columns
+from decoy_engine.declared_casting._boundary import declared_date_shift_columns, native_date_columns
 from decoy_engine.execution._adapter import (
     ExecutionAdapter,
     ExecutionResult,
@@ -233,7 +233,7 @@ class PandasExecutionAdapter:
             code_set_records=dict(code_set_records) if code_set_records else {},
             vault_writer=token_vault_writer,
             declared_date_columns=declared_date_shift_columns(plan),
-            typed_date_columns=typed_date_columns(plan),
+            native_date_columns=native_date_columns(plan),
         )
 
         ordered = order_work(build_work_list(plan, registry), relationship_graph)
@@ -321,6 +321,7 @@ class PandasExecutionAdapter:
                     f,
                     sources[t].schema,
                     untouched_columns((n for n in ordered if n.table == t), f.columns, registry),
+                    [c for (table, c) in ctx.native_date_columns if table == t],
                 )
                 for t, f in frames.items()
             },

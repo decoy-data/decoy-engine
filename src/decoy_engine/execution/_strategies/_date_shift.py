@@ -70,6 +70,7 @@ import numpy as np
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.contracts.strategy_requirements import requirement_missing
 from decoy_engine.determinism._derive import DeriveContext
 from decoy_engine.execution._adapter import (
@@ -87,42 +88,40 @@ from decoy_engine.transforms.date_preserve import preserve_set_from_config
 from decoy_engine.transforms.date_shift import shift_window
 
 
-def _is_typed(column: str, ctx: StrategyContext) -> bool:
-    """Whether the plan proves this top-level column is a date or a zoned timestamp.
+def _native_shape(column: str, ctx: StrategyContext) -> ColumnShape | None:
+    """The date or zoned-timestamp shape the plan lists for this top-level column, else None.
 
     It keys on where the column sits in the plan (the table and column in
-    ``ctx.typed_date_columns`` or the declared ones, and not running as a nested child), never on the data, so a typed
-    column holding date objects and a text column are told apart by the plan alone.
+    ``ctx.native_date_columns``, and not running as a nested child), never on the data, so a typed
+    column holding date objects and a text column are told apart by the plan alone. Such a column
+    keeps its source type on the way out; a declared date column keeps its legacy text output.
     """
-    key = (ctx.current_table, column)
-    return not ctx.nested_outer_column and (
-        key in ctx.typed_date_columns or key in ctx.declared_date_columns
-    )
+    if ctx.nested_outer_column:
+        return None
+    return ctx.native_date_columns.get((ctx.current_table, column))
 
 
-def _writes_typed(column: str, ctx: StrategyContext) -> bool:
-    """Whether the column is natively typed, so the output keeps the source type.
-
-    A declared date column is typed too, but it keeps its legacy text output.
-    """
-    return _is_typed(column, ctx) and (ctx.current_table, column) not in ctx.declared_date_columns
+def _is_declared(column: str, ctx: StrategyContext) -> bool:
+    return not ctx.nested_outer_column and (ctx.current_table, column) in ctx.declared_date_columns
 
 
-def _required_format(cfg: Mapping[str, Any], column: str, ctx: StrategyContext) -> str | None:
-    """The column's `date_format`, or None when the plan proves it typed and nothing needs parsing.
+def _required_format(
+    cfg: Mapping[str, Any], column: str, ctx: StrategyContext, shape: ColumnShape | None
+) -> str | None:
+    """The column's `date_format`, or None when the plan proves it a date and nothing needs parsing.
 
     Plan compile refuses a missing format before any read, so this is the backstop for a caller
-    that reaches the handler without compile. A natively typed column never uses a `date_format`,
-    even one set by hand: the strategy reads the typed value and writes the same type back. A
-    declared date column takes its shape from its declared parse format. It does not detect a
-    format from the cells.
+    that reaches the handler without compile. A native date or zoned timestamp never uses a
+    `date_format`, even one set by hand: the strategy reads the typed value and writes the same
+    type back. A declared date column takes its shape from its declared parse format. It does not
+    detect a format from the cells.
     """
-    if _writes_typed(column, ctx):
+    if shape is not None:
         return None
     fmt = cfg.get("date_format")
     if not requirement_missing(fmt):
         return str(fmt)
-    if _is_typed(column, ctx):
+    if _is_declared(column, ctx):
         return None
     raise StrategyError(
         code=reasons.runtime.DATE_SHIFT_REQUIRES_DATE_FORMAT,
@@ -168,8 +167,9 @@ class DateShiftStrategyHandler:
         cfg = provider_config_to_dict(plan.provider_config)
         min_days, max_days = shift_window(cfg)
         range_size = max_days - min_days + 1
+        shape = _native_shape(column, ctx)
         try:
-            preserve = preserve_set_from_config(cfg, typed=_writes_typed(column, ctx))
+            preserve = preserve_set_from_config(cfg, shape=shape)
         except ValueError as exc:
             raise StrategyError(
                 code=reasons.runtime.DATE_SHIFT_INVALID_CONFIG,
@@ -191,8 +191,7 @@ class DateShiftStrategyHandler:
         source_dtype = col.dtype
         if pd.api.types.is_extension_array_dtype(col.dtype):
             col = col.astype(object)
-        fmt = _required_format(cfg, column, ctx)
-        typed = _writes_typed(column, ctx)
+        fmt = _required_format(cfg, column, ctx, shape)
 
         # HC-3(a): group_by anchors the digest input to a sibling entity
         # column read from the PRE-MASK snapshot in ctx, not the live frame
@@ -244,7 +243,9 @@ class DateShiftStrategyHandler:
         # group_by is not native, but admission declines it, so the seam books the row and
         # returns None (reporting the honest python_scalar backend) rather than being gated out.
         seq = getattr(ctx, "seq_native", None)
-        if seq is not None and not typed:  # the native kernel reads text under a format only
+        # Admission declines a non-string source (`date_shift_source_not_string`), but a typed column
+        # must not even reach the seam: it has no format for the kernel and would be booked native.
+        if seq is not None and shape is None:
             native_out = seq.date_shift_column(
                 ctx,
                 df,
@@ -263,7 +264,7 @@ class DateShiftStrategyHandler:
         preserved = preserve.mask(col) if preserve is not None else None
         if preserve is None or preserved is None or not preserved.any():
             out, error_rows = _shift_rows(
-                col, fmt, anchor_col, ctx, plan.namespace, min_days, range_size, typed
+                col, fmt, anchor_col, ctx, plan.namespace, min_days, range_size, shape
             )
         else:
             # Sentinel rows never reach parsing, derivation or the whole-column strftime: the
@@ -273,7 +274,7 @@ class DateShiftStrategyHandler:
             error_rows = np.empty(0, dtype=np.intp)
             if rest.size:
                 sub_out, sub_errors = _shift_rows(
-                    col.iloc[rest], fmt, None, ctx, plan.namespace, min_days, range_size, typed
+                    col.iloc[rest], fmt, None, ctx, plan.namespace, min_days, range_size, shape
                 )
                 for position, value in zip(rest, sub_out, strict=True):
                     cells[position] = value
@@ -293,7 +294,7 @@ class DateShiftStrategyHandler:
                     reason="value is not a parseable date under date_shift",
                 )
             )
-        if typed and isinstance(source_dtype, pd.DatetimeTZDtype):
+        if shape is ColumnShape.TIMESTAMP_TZ and isinstance(source_dtype, pd.DatetimeTZDtype):
             # Keep the source unit and zone: a list of timestamps would be inferred as ns.
             df[column] = pd.Series(out, index=col.index, dtype=source_dtype)
         else:
@@ -301,37 +302,24 @@ class DateShiftStrategyHandler:
         return df, []
 
 
-def _shift_rows(
-    col: pd.Series,
-    fmt: str | None,
+def _offsets(
+    values: list[Any],
+    usable_idx: np.ndarray[Any, Any],
     anchor_col: pd.Series | None,
     ctx: StrategyContext,
     namespace: str,
     min_days: int,
     range_size: int,
-    typed: bool = False,
-) -> tuple[list[Any], np.ndarray[Any, Any]]:
-    """Shift every parseable date of ``col``; return ``(cells, format_error_positions)``.
+) -> list[int]:
+    """The keyed day offset of every row (0 for a row not in ``usable_idx``).
 
-    Positions are within ``col``, so a caller that passed a subset rebases them. A ``typed``
-    column writes dates back as dates (a zoned timestamp as a timestamp), never as text.
+    The digest input is each usable row's own value, or its group anchor when ``group_by`` is set.
     """
-    parsed = pd.to_datetime(col, format=fmt, errors="coerce")
-    zoned = isinstance(parsed.dtype, pd.DatetimeTZDtype)
-    unusable = parsed.isna().to_numpy()  # null source OR unparseable date
-    source_null = col.isna().to_numpy()
-
     # Canonical anchor bytes for usable rows only, in row order, so the
     # batched derivation sees the same sources the old per-row loop did.
-    # `list(col)` (not `col.iloc[i]`) keeps the iteration scalars the old
-    # loop used, e.g. a Python int rather than numpy.int64 for numeric dtypes.
-    values = list(col)
-    usable_idx = np.flatnonzero(~unusable)
     sources: list[bytes] = []
     for i in usable_idx:
         value = values[i]
-        if typed and not zoned and isinstance(value, datetime.datetime):
-            value = value.date()  # a naive timestamp has no digest; its calendar date does
         if anchor_col is not None:
             group_value = anchor_col.iloc[i]
             if pd.isna(group_value):
@@ -364,10 +352,102 @@ def _shift_rows(
         )
         for i, d in zip(usable_idx, digests, strict=True):
             shifts[i] = min_days + (int.from_bytes(d[:8], "big") % range_size)
+    return shifts
 
-    shifted = parsed + pd.to_timedelta(shifts, unit="D")
-    if typed:
-        formatted = shifted if zoned else shifted.dt.date
+
+def _shift_zoned(parsed: pd.Series, shifts: list[int]) -> pd.Series:
+    """Move each zoned timestamp by whole calendar days in its own zone, keeping the wall clock.
+
+    Same rule as PostgreSQL ``timestamptz + interval '1 day'`` and Java ``ZonedDateTime.plusDays``:
+    add the days to the local time, then re-attach the zone. A fixed 24 hour step would move the
+    time of day across a DST change. A local time that does not exist moves forward; one that
+    occurs twice keeps the source row's DST flag.
+    """
+    tz = parsed.dt.tz
+    local = parsed.dt.tz_localize(None) + pd.to_timedelta(shifts, unit="D")
+    out = local.dt.tz_localize(tz, ambiguous="NaT", nonexistent="shift_forward")
+    twice = out.isna() & local.notna()
+    if twice.any():
+        flags = [bool(parsed.iloc[i].dst()) for i in np.flatnonzero(twice.to_numpy())]
+        fixed = local[twice].dt.tz_localize(
+            tz, ambiguous=np.array(flags), nonexistent="shift_forward"
+        )
+        out = out.where(~twice, fixed)
+    return out
+
+
+def _shift_dates(
+    col: pd.Series,
+    anchor_col: pd.Series | None,
+    ctx: StrategyContext,
+    namespace: str,
+    min_days: int,
+    range_size: int,
+) -> tuple[list[Any], np.ndarray[Any, Any]]:
+    """The typed-date path: ``datetime.date`` plus a timedelta, with no pandas nanosecond bounds.
+
+    A date near 0001 or 9999 shifts like any other. A cell that is not a date, or whose shifted
+    date leaves the supported years, is a row error and keeps its source value.
+    """
+    cells = list(col)
+    source_null = col.isna().to_numpy()
+    values: list[Any] = [None] * len(cells)
+    usable = np.zeros(len(cells), dtype=bool)
+    for i, cell in enumerate(cells):
+        if source_null[i]:
+            continue
+        if isinstance(cell, datetime.datetime):
+            cell = cell.date()  # a naive timestamp has no digest; its calendar date does
+        if isinstance(cell, datetime.date):
+            values[i] = cell
+            usable[i] = True
+    usable_idx = np.flatnonzero(usable)
+    shifts = _offsets(values, usable_idx, anchor_col, ctx, namespace, min_days, range_size)
+    failed = ~usable & ~source_null
+    for i in usable_idx:
+        try:
+            cells[i] = values[i] + datetime.timedelta(days=shifts[i])
+        except OverflowError:
+            failed[i] = True
+    return cells, np.flatnonzero(failed)
+
+
+def _shift_rows(
+    col: pd.Series,
+    fmt: str | None,
+    anchor_col: pd.Series | None,
+    ctx: StrategyContext,
+    namespace: str,
+    min_days: int,
+    range_size: int,
+    shape: ColumnShape | None = None,
+) -> tuple[list[Any], np.ndarray[Any, Any]]:
+    """Shift every parseable date of ``col``; return ``(cells, format_error_positions)``.
+
+    Positions are within ``col``, so a caller that passed a subset rebases them. A column whose
+    plan ``shape`` is native writes dates back as dates (a zoned timestamp as a timestamp), never
+    as text.
+    """
+    if shape is ColumnShape.DATE:
+        return _shift_dates(col, anchor_col, ctx, namespace, min_days, range_size)
+    parsed = pd.to_datetime(col, format=fmt, errors="coerce")
+    zoned = isinstance(parsed.dtype, pd.DatetimeTZDtype)
+    unusable = parsed.isna().to_numpy()  # null source OR unparseable date
+    source_null = col.isna().to_numpy()
+
+    # `list(col)` (not `col.iloc[i]`) keeps the iteration scalars the old
+    # loop used, e.g. a Python int rather than numpy.int64 for numeric dtypes.
+    values = list(col)
+    shifts = _offsets(
+        values, np.flatnonzero(~unusable), anchor_col, ctx, namespace, min_days, range_size
+    )
+
+    if zoned:
+        shifted = _shift_zoned(parsed, shifts)
+    else:
+        shifted = parsed + pd.to_timedelta(shifts, unit="D")
+    if shape is ColumnShape.TIMESTAMP_TZ:
+        formatted = shifted
     else:
         formatted = shifted.dt.strftime(fmt) if fmt else shifted.astype(str)
 

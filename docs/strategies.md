@@ -213,9 +213,15 @@ output as it came in. Needs a namespace.
   without one is refused at plan compile (`date_shift_requires_date_format`), and nothing guesses
   it from the cells. A source column that is already a date (Parquet, DuckDB, a database or an
   Arrow table) or a zoned timestamp needs none. The column's type comes from the source schema,
-  and the output keeps it: a date stays a date, and a zoned timestamp keeps its unit, its zone and
-  its time of day, moving by whole days. A `date_format` set on such a column is not used, and
-  compile adds the warning `column_shape_format_unused`. A timestamp with no time zone is refused
+  and the output keeps it: a date stays a date (a `date64` source stays `date64`, and an all-null
+  chunk keeps the source type), and a zoned timestamp keeps its unit and its zone. A zoned
+  timestamp moves by whole calendar days in its own zone, so its wall-clock time holds across a
+  DST change, as with PostgreSQL `timestamptz + interval '1 day'`. A local time that does not
+  exist moves forward, and one that occurs twice keeps the source row's DST flag. A typed date
+  shifts as a calendar date, so `0001` and `9999` dates shift like any other; a date that would
+  leave years 1 to 9999 is a row error. A `date_format` set on such a column is not used, and
+  compile adds the warning `column_shape_format_unused`. A `date_format` that is not text is
+  refused on every column. A timestamp with no time zone is refused
   at compile (`column_shape_mismatch`); cast it to a date or a zoned timestamp, or write it as
   text with a `date_format`. So is any other type (a number, a boolean, a decimal). A CSV or
   fixed-width column is always text. A top-level column whose own declared parse format supplies
