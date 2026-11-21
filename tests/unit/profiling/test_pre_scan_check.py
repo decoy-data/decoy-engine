@@ -263,6 +263,21 @@ def test_dropped_flagged_column_is_not_a_finding() -> None:
     assert other.status == "failed"
 
 
+def test_drop_then_derive_same_name_is_present_and_checked() -> None:
+    config = _config([], on_findings="fail")
+    config["tables"][0]["transforms"] = [
+        {"op": "drop_column", "columns": ["ssn"]},
+        {"op": "derive", "column": "ssn", "expression": "email"},
+    ]
+    verdict = evaluate_pre_scan(config, _core(people=[_field("ssn", pii=True)]))
+    assert [f.column for f in verdict.findings] == ["ssn"]
+    config["tables"][0]["transforms"].reverse()
+    config["tables"][0]["transforms"][0] = {"op": "derive", "column": "x", "expression": "email"}
+    config["tables"][0]["transforms"][1] = {"op": "drop_column", "columns": ["ssn"]}
+    gone = evaluate_pre_scan(config, _core(people=[_field("ssn", pii=True)]))
+    assert gone.findings == ()
+
+
 def test_non_mapping_pre_scan_is_refused_not_read_as_warn() -> None:
     config = {"pre_scan": "fail", "tables": [{"name": "people", "columns": []}]}
     with pytest.raises(TypeError):

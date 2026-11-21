@@ -37,7 +37,8 @@ transformation primitives in the standards' taxonomy.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -125,3 +126,25 @@ TransformOp = Annotated[
     FilterOp | SortOp | LimitOp | DedupeOp | DeriveOp | DropColumnOp,
     Field(discriminator="op"),
 ]
+
+
+SOURCE_ORIGIN = "source"
+DERIVED_ORIGIN = "derived"
+
+
+def final_bindings(
+    frame_columns: Sequence[Any], ops: Sequence[TransformOp]
+) -> list[tuple[str, str]]:
+    """`(name, origin)` per output column after the ordered ops.
+
+    The one transform-lineage rule: a dropped-then-derived name is a new `derived` binding,
+    never the old source column.
+    """
+    bindings = [(str(c), SOURCE_ORIGIN) for c in frame_columns]
+    for op in ops:
+        if isinstance(op, DropColumnOp):
+            dropped = set(op.columns)
+            bindings = [b for b in bindings if b[0] not in dropped]
+        elif isinstance(op, DeriveOp):
+            bindings.append((op.column, DERIVED_ORIGIN))
+    return bindings

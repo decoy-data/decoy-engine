@@ -19,8 +19,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal, NamedTuple
 
+from pydantic import TypeAdapter
+
 from decoy_engine import reasons
 from decoy_engine.config import classify_table_kinds
+from decoy_engine.config._transforms import TransformOp, final_bindings
 from decoy_engine.errors import DecoyError
 from decoy_engine.run_result import Check, CheckCounts
 
@@ -33,6 +36,7 @@ __all__ = [
     "evaluate_pre_scan",
 ]
 
+_OPS: Final = TypeAdapter(list[TransformOp])
 PreScanStatus = Literal["passed", "warned", "failed"]
 
 # The catalog name of the unmasked strategy (`support._shape.StrategyKind.PASSTHROUGH`). `support`
@@ -153,14 +157,11 @@ def _gated(rule: Mapping[str, Any]) -> bool:
     return isinstance(when, str) and when.strip() != ""
 
 
-def _dropped(table: Mapping[str, Any]) -> frozenset[str]:
-    """Names a `drop_column` transform removes; they are not in the output, so not a finding."""
-    return frozenset(
-        name
-        for op in table.get("transforms") or ()
-        if op.get("op") == "drop_column"
-        for name in op.get("columns") or ()
-    )
+def _output_names(table: Mapping[str, Any], scan: Mapping[str, Any]) -> frozenset[str]:
+    """Column names in the table output: the scanned source names after the ordered transforms."""
+    ops = _OPS.validate_python(table.get("transforms") or [])
+    source = [f["name"] for f in scan.get("fields") or ()]
+    return frozenset(name for name, _ in final_bindings(source, ops))
 
 
 def _flag_sources(field: Mapping[str, Any], detectors: tuple[str, ...]) -> tuple[str, ...]:
@@ -200,10 +201,10 @@ def evaluate_pre_scan(config: Mapping[str, Any], core: Mapping[str, Any]) -> Pre
             continue
         scanned.append(name)
         rules = {c["name"]: c for c in table.get("columns") or ()}
-        dropped = _dropped(table)
+        output = _output_names(table, scan)
         for field in scan.get("fields") or ():
             sources = _flag_sources(field, detectors)
-            if not sources or field["name"] in dropped:
+            if not sources or field["name"] not in output:
                 continue
             rule = rules.get(field["name"])
             if rule is None or rule.get("strategy") == _PASSTHROUGH:
