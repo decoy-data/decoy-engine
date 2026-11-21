@@ -262,10 +262,9 @@ def _pool_duplicate_counts(config: dict[str, Any], key_provider: Any) -> dict[st
     plan = compile_plan(
         config, profile, decoy_engine_version="phase3-c1-native-bench", sources=NO_SOURCES
     )
-    from decoy_engine.keyprovider import require_mask_key, resolve_key_provider
+    from decoy_engine.keyprovider import require_mask_key
 
-    resolved = resolve_key_provider(plan=plan, key_provider=key_provider, mask_secret_ref=None)
-    require_mask_key(plan, resolved)  # validated for parity with the oracle path; unused here
+    require_mask_key(plan, key_provider)  # validated for parity with the oracle path; unused here
 
     from decoy_engine.providers_v2 import get_default_registry
 

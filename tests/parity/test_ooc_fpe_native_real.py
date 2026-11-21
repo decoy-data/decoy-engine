@@ -22,7 +22,7 @@ from decoy_engine.execution.out_of_core._mask_group_b import fpe_array
 from decoy_engine.keyprovider import SecretKeyProvider
 from tests.parity import _strict_compare as sc
 from tests.parity._d1a_hash_data import (
-    JOB_SEED,
+    MASK_KEY,
     SECRET,
     chain_graph,
     chain_plan,
@@ -58,7 +58,7 @@ def _payload(values: list[Any] = SOURCE) -> pa.Table:
     return pa.table({"a": pa.array(values, pa.string())})
 
 
-def _reference(values: list[Any], seed: Any, key: bytes = JOB_SEED) -> list[str | None]:
+def _reference(values: list[Any], seed: Any, key: bytes = MASK_KEY) -> list[str | None]:
     return fpe_array(
         pa.array(values, pa.string()),
         job_seed=key,

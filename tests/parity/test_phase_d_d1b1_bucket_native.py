@@ -35,7 +35,7 @@ from decoy_engine.execution.out_of_core._mask import mask_batch
 from decoy_engine.transforms.bucket_perturb import apply_bucket_perturb
 from tests.parity import _strict_compare as sc
 from tests.parity._d1a_hash_data import (
-    JOB_SEED,
+    MASK_KEY,
     chain_graph,
     chain_plan,
     chain_sources,
@@ -135,7 +135,7 @@ def test_per_batch_shape_matches_the_pinned_output(
 
 def _reference(values: pa.Array, bucket: str, fmt: str, namespace: str = _NS) -> list[Any]:
     out = apply_bucket_perturb(
-        values.to_pandas(), bucket=bucket, job_seed=JOB_SEED, namespace=namespace, date_format=fmt
+        values.to_pandas(), bucket=bucket, job_seed=MASK_KEY, namespace=namespace, date_format=fmt
     )
     return pa.array(out, from_pandas=True).to_pylist()
 
@@ -249,7 +249,7 @@ def _one(value: str, bucket: str, fmt: str = STAMP) -> tuple[str, Any]:
         got = native_bucket_perturb_array(
             arr,
             native=_native_handle(),
-            mask_key=JOB_SEED,
+            mask_key=MASK_KEY,
             namespace=_NS,
             bucket=bucket,
             date_format=fmt,
@@ -268,7 +268,7 @@ def test_the_raw_operator_wraps_or_fails_at_the_lower_bound_which_is_why_the_gua
             arr,
             bucket="week",
             date_format=STAMP,
-            mask_key=JOB_SEED,
+            mask_key=MASK_KEY,
             namespace=_NS,
             index_kernel=kernel,
         )[0].to_pylist()
