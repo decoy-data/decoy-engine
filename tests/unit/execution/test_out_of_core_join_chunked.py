@@ -136,6 +136,9 @@ def test_mask_child_fk_streams_child_keys_and_join_result(tmp_path, monkeypatch)
         def fetchone(self):
             return self._inner.fetchone()
 
+        def fetchall(self):
+            return self._inner.fetchall()
+
     class _SpyConn:
         def __init__(self, inner) -> None:
             self._inner = inner

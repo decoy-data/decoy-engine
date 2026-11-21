@@ -17,6 +17,7 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import exact_key_cast
+from decoy_engine._duckdb_read import fetch_scalar
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._fk_keys import (
     FK_KEY_DTYPE_UNSUPPORTED_CODE,
@@ -107,8 +108,9 @@ def mask_child_fk(
         if edge.orphan_policy is OrphanPolicy.FAIL:
             # Streaming anti-join reducer: the total orphan count is the only
             # thing resident, and it raises before any output is produced.
-            fail_count = conn.execute(
-                f"""
+            fail_count = fetch_scalar(
+                conn.execute(
+                    f"""
                 SELECT count(*)
                 FROM child_keys c
                 LEFT JOIN parent_keys p
@@ -116,7 +118,8 @@ def mask_child_fk(
                 WHERE c.__decoy_fk_join_key IS NOT NULL
                   AND p.{_q(parent_relation.join_key_column)} IS NULL
                 """
-            ).fetchone()[0]
+                )
+            )
             if fail_count:
                 raise orphan_fk_violation_error(edge, fail_count)
         select_list = [f"c.{_q('__decoy_row_nr')}", f"c.{_q('__decoy_fk_join_key')}"]
