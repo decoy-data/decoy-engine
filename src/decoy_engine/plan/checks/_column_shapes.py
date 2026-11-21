@@ -9,7 +9,7 @@ taken before a format edit cannot override the config.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine._nested_json import nested_children
@@ -19,6 +19,7 @@ from decoy_engine.contracts.column_shape import (
     ColumnShapes,
     classify_column,
     declared_shape,
+    source_format_for,
 )
 from decoy_engine.contracts.strategy_requirements import SHAPE_REQUIREMENTS_BY_STRATEGY
 
@@ -54,12 +55,6 @@ def shape_reading_columns(config: Mapping[str, Any]) -> Iterator[tuple[str, Mapp
                 yield table["name"], col
 
 
-def _source_format(config: Mapping[str, Any], table: str) -> str | None:
-    descriptor = (config.get("sources") or {}).get(table)
-    fmt = descriptor.get("format") if isinstance(descriptor, Mapping) else None
-    return fmt if isinstance(fmt, str) else None
-
-
 def _profiled(profile: Profile | None, table: str, column: str) -> ColumnShape:
     if profile is None:
         return ColumnShape.UNKNOWN
@@ -88,12 +83,16 @@ def build_column_shapes(
     *,
     profile: Profile | None = None,
     source_schemas: Mapping[str, pa.Schema] | None = None,
+    resident_tables: Collection[str] = (),
 ) -> ColumnShapes:
-    """``(table, column) -> shape`` for every column under a shape-reading strategy."""
+    """``(table, column) -> shape`` for every column under a shape-reading strategy.
+
+    ``resident_tables`` names the tables the caller supplied in memory: those are shaped by their
+    own schema, never by a config descriptor's file format."""
     out: dict[tuple[str, str], ColumnShape] = {}
     for table, col in shape_reading_columns(config):
         name = col["name"]
-        fmt = _source_format(config, table)
+        fmt = source_format_for(config.get("sources"), table, resident=resident_tables)
         if col.get("logical_type") is not None:
             shape = declared_shape(
                 logical_type=col["logical_type"], parse_format=col.get("parse_format")

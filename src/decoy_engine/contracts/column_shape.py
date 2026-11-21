@@ -10,7 +10,7 @@ loaded. This module imports ``pyarrow`` and ``_arrow_types`` only.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from enum import Enum
 from typing import Any
 
@@ -26,6 +26,7 @@ __all__ = [
     "classify_column",
     "declared_shape",
     "is_bounded_decimal",
+    "source_format_for",
 ]
 
 # IEEE 754 binary64 carries 15 significant decimal digits exactly (DBL_DIG).
@@ -34,6 +35,24 @@ EXACT_FLOAT_DECIMAL_DIGITS = 15
 # Source formats whose reader gives text whatever it inferred: a CSV cell is untyped on every
 # reader, so a column from one of these formats is text until a declaration says otherwise.
 TEXT_SOURCE_FORMATS = frozenset({"csv", "fixed_width"})
+
+
+# The source kind of a table the caller supplied in memory: it has no file format, so its
+# columns are shaped by the table's own schema.
+RESIDENT_SOURCE_FORMAT = "table"
+
+
+def source_format_for(
+    descriptors: Mapping[str, Any] | None, table: str, *, resident: Collection[str] = ()
+) -> str | None:
+    """The source format that shapes ``table``: ``table`` for a caller-supplied resident table,
+    else the config descriptor's ``format``. The one place this is decided, so every route
+    (plan check, profile walk, chunked entries) classifies a table the same way."""
+    if table in resident:
+        return RESIDENT_SOURCE_FORMAT
+    descriptor = (descriptors or {}).get(table)
+    fmt = descriptor.get("format") if isinstance(descriptor, Mapping) else None
+    return fmt if isinstance(fmt, str) else None
 
 
 class ColumnShape(str, Enum):

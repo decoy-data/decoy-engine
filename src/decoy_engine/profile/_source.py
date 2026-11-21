@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from decoy_engine._lexeme import profile_descriptors
+from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
@@ -178,8 +179,7 @@ def profile_source(
             reader = ParquetFileSource.from_lazy(given)
         else:
             reader = ResidentTableSource(given)
-        # A resident caller table has no file format: its source kind is `table`.
-        fmt = sources[table_name].get("format") if given is None else "table"
+        fmt = source_format_for(sources, table_name, resident=supplied)
         tables.append(_profile_one_source(reader, residency=residency, source_format=fmt, **walk))
 
     return Profile(
