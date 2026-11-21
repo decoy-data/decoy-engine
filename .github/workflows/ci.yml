@@ -443,6 +443,7 @@ jobs:
           tests/unit/execution/test_ooc_spill_reader_lifecycle.py
           tests/unit/execution/test_slim_sort_reorder_acceptance.py
           tests/connectors/test_postgres_session.py
+          tests/connectors/test_postgres_duckdb_drain.py
           tests/connectors/test_postgres_snapshot.py
           --tb=short -p no:cacheprovider
 
