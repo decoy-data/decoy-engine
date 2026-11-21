@@ -139,3 +139,46 @@ def test_refusal_errors_take_registered_codes_only() -> None:
     receipt = _receipt("refused", "publication_target_occupied")
     with pytest.raises(ValueError):
         publication.PublicationRefused("publication_not_a_code", receipt)  # type: ignore[arg-type]
+
+
+def _reserved_cases() -> list[str]:
+    from decoy_engine.fileaccess import RESERVED_MEMBER_NAMES
+
+    # The two names are pinned as literals too, so dropping one from the set turns a case red.
+    out: list[str] = []
+    pinned = {"_decoy_publication.json", ".decoy-publication-stage"}
+    for name in sorted(RESERVED_MEMBER_NAMES | pinned):
+        out += [name, name.upper(), name.title()]
+    return out
+
+
+@pytest.mark.parametrize("name", _reserved_cases())
+def test_check_request_refuses_every_reserved_name(name: str) -> None:
+    from decoy_engine.publication import PublicationRequest
+    from decoy_engine.publication._publish import check_request
+
+    with pytest.raises(ValueError, match="^invalid tables$"):
+        check_request(PublicationRequest("op-1"), ["ok", name])
+
+
+def test_the_reserved_set_holds_the_stage_marker_and_the_descriptor() -> None:
+    from decoy_engine.fileaccess import RESERVED_MEMBER_NAMES, STAGE_MARKER
+    from decoy_engine.publication import DESCRIPTOR_NAME
+
+    assert {STAGE_MARKER, DESCRIPTOR_NAME} == RESERVED_MEMBER_NAMES
+
+
+@pytest.mark.parametrize("tables", [["a", "a"], ["a", 1], [b"a"], [None]])
+def test_check_request_still_refuses_duplicates_and_non_str(tables: list[object]) -> None:
+    from decoy_engine.publication import PublicationRequest
+    from decoy_engine.publication._publish import check_request
+
+    with pytest.raises(ValueError, match="^invalid tables$"):
+        check_request(PublicationRequest("op-1"), tables)  # type: ignore[arg-type]
+
+
+def test_check_request_accepts_ordinary_names() -> None:
+    from decoy_engine.publication import PublicationRequest
+    from decoy_engine.publication._publish import check_request
+
+    assert check_request(PublicationRequest("op-1"), ["a", "B"]) == ["a", "B"]

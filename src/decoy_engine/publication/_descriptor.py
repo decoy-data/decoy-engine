@@ -45,7 +45,7 @@ from decoy_engine._canonical import (
     canonical_json_bytes,
     parse_or_token,
 )
-from decoy_engine.fileaccess import is_valid_component
+from decoy_engine.fileaccess import DESCRIPTOR_NAME, is_valid_component
 from decoy_engine.publication._types import (
     MAX_COUNT,
     OPERATION_ID_PATTERN,
@@ -82,7 +82,6 @@ __all__ = [
 ]
 
 SCHEMA: Final = "decoy-publication/v1"
-DESCRIPTOR_NAME: Final = "_decoy_publication.json"
 MAX_DESCRIPTOR_BYTES: Final = 1 << 20
 RESULT_DOMAIN: Final = b"decoy-publication-result/v1\x00"
 REFUSAL_PREFIX: Final = "descriptor_refused:"
