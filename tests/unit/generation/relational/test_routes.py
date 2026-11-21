@@ -136,11 +136,14 @@ def _neighbor_configs() -> dict[str, tuple[dict[str, Any], str]]:
 
 
 # Canonical table digests recorded on the slice base, before any source change.
+# Re-baselined 2026-11-20 for GEN-WINDOWED-BATCH S2: `same_table_date_and_scalar_aggregate` has a
+# windowed_date column, whose output moves under the dated compatibility-contract entry. Resident
+# and pinned still agree. Every other digest is unchanged.
 _SHARED_DIGESTS = {
     "policy_fail_non_empty": "d33e78d9eac10cbb0e60b3bf2e9327f2b67798c3a0ac8d1208820f60ad4e030c",
     "policy_warn_non_empty": "d33e78d9eac10cbb0e60b3bf2e9327f2b67798c3a0ac8d1208820f60ad4e030c",
     "same_table_date_and_scalar_aggregate": (
-        "c7db0dff6e991f44f12291f466ed833777cf3eabe7b102c3dafdf1779dd37673"
+        "47564c7432d2fd927f52d403121212b9c8c95c1d70a07896d0675fb4290baa3f"
     ),
     "unbounded_random": "d33e78d9eac10cbb0e60b3bf2e9327f2b67798c3a0ac8d1208820f60ad4e030c",
     "unbounded_sequential": "4ae83d29dc8c28f3a39cea7e3f09559f4202c2338c141fa92b687fe7a2e66a65",
